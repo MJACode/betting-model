@@ -50,22 +50,30 @@ export function ByomSideFields({
   onPrimetime,
 }: {
   market: ByomGameMarket;
-  side: 'home' | 'away' | null;
+  side: 'home' | 'away' | 'over' | 'under' | null;
   role: 'favorite' | 'underdog' | 'pickem' | null;
   primetime: boolean | null;
-  onSide: (side: 'home' | 'away' | null) => void;
+  onSide: (side: 'home' | 'away' | 'over' | 'under' | null) => void;
   onRole: (role: 'favorite' | 'underdog' | 'pickem' | null) => void;
   onPrimetime: (primetime: boolean | null) => void;
 }) {
   return (
     <View>
       {market === 'totals' ? (
-        <Text style={styles.totals}>Over and under are both in this model.</Text>
+        <ByomChoiceGroup
+          label="Side"
+          value={side === 'over' || side === 'under' ? side : ''}
+          onChange={(value) => onSide(value === 'over' || value === 'under' ? value : null)}
+          options={[
+            { value: 'over', label: 'Over' },
+            { value: 'under', label: 'Under' },
+          ]}
+        />
       ) : (
         <>
           <ByomChoiceGroup
             label="Team"
-            value={side ?? 'any'}
+            value={side === 'home' || side === 'away' ? side : 'any'}
             onChange={(value) => onSide(value === 'any' ? null : value)}
             options={[
               { value: 'any', label: 'Any' },
@@ -132,10 +140,5 @@ const styles = StyleSheet.create({
   marketTextOn: {
     color: colors.tint,
     fontWeight: font.weight.semibold,
-  },
-  totals: {
-    fontSize: font.size.body,
-    color: colors.textPrimary,
-    marginBottom: spacing.lg,
   },
 });

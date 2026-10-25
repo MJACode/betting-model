@@ -135,6 +135,33 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
                   '{"Side":"home","role":"favorite"}'::jsonb,
                   2026)
             """)
+        with pytest.raises(psycopg2.errors.RaiseException, match="Choose a team"):
+            cur.execute("""
+                SELECT model_id FROM byom_save_model(
+                  'ml any', '{"markets":["h2h"]}'::jsonb, 2026)
+            """)
+        with pytest.raises(psycopg2.errors.RaiseException, match="Choose a team"):
+            cur.execute("""
+                SELECT model_id FROM byom_save_model(
+                  'spread any', '{"markets":["spreads"]}'::jsonb, 2026)
+            """)
+        with pytest.raises(psycopg2.errors.RaiseException, match="Choose over or under"):
+            cur.execute("""
+                SELECT model_id FROM byom_save_model(
+                  'both totals', '{"markets":["totals"]}'::jsonb, 2026)
+            """)
+        cur.execute("""
+            SELECT model_id FROM byom_save_model(
+              'dogs', '{"markets":["h2h"],"role":"underdog"}'::jsonb, 2026)
+        """)
+        cur.fetchone()
+        cur.execute("""
+            SELECT model_id FROM byom_save_model(
+              'overs', '{"markets":["totals"],"side":"over"}'::jsonb, 2026)
+        """)
+        cur.fetchone()
+        cur.execute("SELECT filters->>'side' FROM byom_models WHERE name = 'overs'")
+        assert cur.fetchone()[0] == 'over'
 
         cur.execute("""
             SELECT model_id, season, bets, wins, losses
@@ -161,6 +188,10 @@ def test_scratch_save_is_per_user_capped_and_snapshots_the_backtest():
             SELECT season FROM byom_save_model('home fav', '{}'::jsonb, NULL)
         """)
         assert cur.fetchone()[0] == current_nfl_season()
+        cur.execute("SELECT model_id FROM byom_models WHERE name IN ('dogs', 'overs')")
+        for (extra_id,) in cur.fetchall():
+            cur.execute("SELECT byom_delete_model(%s)", (extra_id,))
+            cur.fetchone()
         cur.execute("""
             SELECT jsonb_array_length(snapshots)
               FROM byom_list_models()

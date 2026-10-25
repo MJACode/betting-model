@@ -35,7 +35,10 @@ import {
   isWholeSeason,
   marketLabel,
   otherModelWithName,
+  saveBlockReason,
+  sideBlockFromError,
   showsUnits,
+  sideForMarket,
   type ByomGameMarket,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -52,7 +55,7 @@ export function ByomEditScreen() {
   const [name, setName] = useState('');
   const [seeded, setSeeded] = useState(false);
   const [market, setMarket] = useState<ByomGameMarket | null>(null);
-  const [side, setSide] = useState<'home' | 'away' | null>(null);
+  const [side, setSide] = useState<'home' | 'away' | 'over' | 'under' | null>(null);
   const [role, setRole] = useState<'favorite' | 'underdog' | 'pickem' | null>(null);
   const [primetime, setPrimetime] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -72,17 +75,36 @@ export function ByomEditScreen() {
   const edited = market == null
     ? null
     : filtersForDraft({ market, side, role, primetime }, model?.filters ?? {});
-  const previewFilters: ByomFilters | null = edited
-    ?? (model != null && !isWholeSeason(model.filters) ? model.filters : null);
+  const loadedDraft = model == null ? null : draftFromFilters(model.filters);
+  const formDraft = market == null ? null : { market, side, role, primetime };
+  const activeDraft = seeded ? formDraft : loadedDraft;
+  const sideReason = activeDraft == null ? null : saveBlockReason(activeDraft);
+  const previewFilters: ByomFilters | null = sideReason != null
+    ? null
+    : edited ?? (model != null && !isWholeSeason(model.filters) ? model.filters : null);
   const preview = useByomRecord(scope, previewFilters);
   const unitsVisible = previewFilters != null && showsUnits(previewFilters);
+  const previewWaiting = sideReason == null
+    && previewFilters != null
+    && preview.record == null
+    && preview.error == null;
   const trimmed = name.trim();
-  const saveDisabled = saving || model == null || trimmed.length < 1 || trimmed.length > 80;
+  const saveDisabled = saving
+    || model == null
+    || sideReason != null
+    || trimmed.length < 1
+    || trimmed.length > 80;
 
   // A new name is a new row. Save it first. Delete the old id only when
   // that save wrote a different row. A cap failure leaves the original.
+  const chooseMarket = (next: ByomGameMarket) => {
+    setMarket(next);
+    setSide((current) => sideForMarket(next, current));
+    if (next === 'totals') setRole(null);
+  };
+
   const save = async (replaceExisting = false) => {
-    if (model == null || saveDisabled) return;
+    if (model == null || saveDisabled || sideReason != null) return;
     setSaving(true);
     setSaveMessage(null);
     const filters = edited ?? model.filters;
@@ -128,11 +150,13 @@ export function ByomEditScreen() {
     } catch (e: unknown) {
       if (isAbortError(e)) return;
       const raw = errorText(e);
-      setSaveMessage(renaming && /cap is 25/.test(raw)
-        ? 'You have 25 models. Delete one before renaming.'
-        : /cap is 25/.test(raw)
-          ? 'You can save 25 models.'
-          : `Couldn’t save this model. ${friendlyCause(e)}`);
+      const blocked = sideBlockFromError(raw);
+      setSaveMessage(blocked
+        ?? (renaming && /cap is 25/.test(raw)
+          ? 'You have 25 models. Delete one before renaming.'
+          : /cap is 25/.test(raw)
+            ? 'You can save 25 models.'
+            : `Couldn’t save this model. ${friendlyCause(e)}`));
     } finally {
       setSaving(false);
     }
@@ -186,7 +210,7 @@ export function ByomEditScreen() {
           {market == null ? (
             <Text style={styles.current}>{marketLabel(model.filters)}</Text>
           ) : null}
-          <ByomMarketField market={market} onChange={setMarket} />
+          <ByomMarketField market={market} onChange={chooseMarket} />
           {market != null ? (
             <ByomSideFields
               market={market}
@@ -198,22 +222,29 @@ export function ByomEditScreen() {
               onPrimetime={setPrimetime}
             />
           ) : null}
-          <ByomSeasonToggle />
-          <ByomPreviewCard
-            record={preview.record}
-            loading={previewFilters != null && preview.loading}
-            error={previewFilters != null ? preview.error : null}
-            onRetry={() => void preview.reload()}
-            showsUnits={unitsVisible}
-            emptyLabel={previewFilters == null ? '—' : 'No games match'}
-          />
-          <ByomUnitsNote />
+          {sideReason == null ? (
+            <>
+              <ByomSeasonToggle />
+              <ByomPreviewCard
+                record={preview.record}
+                loading={preview.loading || previewWaiting}
+                error={previewFilters != null ? preview.error : null}
+                onRetry={() => void preview.reload()}
+                showsUnits={unitsVisible}
+                emptyLabel={previewFilters == null ? '—' : 'No games match'}
+              />
+              <ByomUnitsNote />
+            </>
+          ) : null}
         </>
       )}
       <BetslipBarSpacer />
     </ScrollView>
     {formReady ? (
       <>
+        {sideReason ? (
+          <Text style={styles.saveMessage} accessibilityLiveRegion="polite">{sideReason}</Text>
+        ) : null}
         {saveMessage ? <Text style={styles.saveMessage}>{saveMessage}</Text> : null}
         <View style={styles.footer}>
           <Pressable
@@ -221,6 +252,7 @@ export function ByomEditScreen() {
             disabled={saveDisabled}
             accessibilityRole="button"
             accessibilityLabel="Save model"
+            accessibilityHint={sideReason ?? undefined}
             accessibilityState={{ disabled: saveDisabled }}
             style={[styles.primary, saveDisabled && styles.primaryDisabled]}
           >

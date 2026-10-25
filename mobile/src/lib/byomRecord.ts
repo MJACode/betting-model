@@ -23,10 +23,44 @@ export type ByomGameMarket = 'h2h' | 'spreads' | 'totals';
 
 export interface ByomDraft {
   market: ByomGameMarket;
-  side: 'home' | 'away' | null;
+  /** Home or away on a moneyline or spread. Over or under on a total. */
+  side: 'home' | 'away' | 'over' | 'under' | null;
   role: 'favorite' | 'underdog' | 'pickem' | null;
   /** null is any game. true is primetime only. false is the other kickoffs. */
   primetime: boolean | null;
+}
+
+/** Matt, 2026-10-24: require a side or a favorite/underdog choice. */
+export const TEAM_OR_ROLE_REQUIRED = 'Choose a team, or a favorite or underdog.';
+export const TOTAL_SIDE_REQUIRED = 'Choose over or under.';
+
+/** The side values that belong on this market. Anything else is no choice. */
+export function sideForMarket(
+  market: ByomGameMarket,
+  side: ByomDraft['side'],
+): ByomDraft['side'] {
+  if (market === 'totals') {
+    return side === 'over' || side === 'under' ? side : null;
+  }
+  return side === 'home' || side === 'away' ? side : null;
+}
+
+/**
+ * Moneyline and spread need a team or a favorite, underdog, or pick'em.
+ * A total needs over or under. Team Any with a favorite or underdog set
+ * is allowed. A missing choice is not both sides.
+ */
+export function saveBlockReason(draft: ByomDraft): string | null {
+  if (draft.market === 'totals') {
+    if (draft.side !== 'over' && draft.side !== 'under') return TOTAL_SIDE_REQUIRED;
+    return null;
+  }
+  const team = draft.side === 'home' || draft.side === 'away';
+  const role = draft.role === 'favorite'
+    || draft.role === 'underdog'
+    || draft.role === 'pickem';
+  if (!team && !role) return TEAM_OR_ROLE_REQUIRED;
+  return null;
 }
 
 export interface ByomCountedRow {
@@ -174,18 +208,11 @@ export function formatByomRecord(record: ByomRecord): string {
 
 export function filtersForDraft(draft: ByomDraft, base: ByomFilters = {}): ByomFilters {
   const next: ByomFilters = { ...base, markets: [draft.market] };
-  if (draft.market === 'totals') {
-    delete next.side;
-    delete next.role;
-  } else if (draft.side) {
-    next.side = draft.side;
-  } else {
-    delete next.side;
-  }
-  if (draft.market !== 'totals') {
-    if (draft.role) next.role = draft.role;
-    else delete next.role;
-  }
+  const side = sideForMarket(draft.market, draft.side);
+  if (side) next.side = side;
+  else delete next.side;
+  if (draft.market === 'totals' || !draft.role) delete next.role;
+  else next.role = draft.role;
   if (draft.primetime == null) delete next.primetime;
   else next.primetime = draft.primetime;
   return byomFilters(next);
@@ -197,10 +224,25 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
   const parsed = byomFilters(filters);
   return {
     market,
-    side: market === 'totals' ? null : (parsed.side ?? null),
+    side: sideForMarket(market, parsed.side ?? null),
     role: market === 'totals' ? null : (parsed.role ?? null),
     primetime: parsed.primetime ?? null,
   };
+}
+
+/** Refuses a single game market that still has no side. Other filters pass through. */
+export function assertByomSide(filters: ByomFilters | null | undefined): void {
+  const draft = draftFromFilters(filters);
+  if (draft == null) return;
+  const reason = saveBlockReason(draft);
+  if (reason != null) throw new Error(reason);
+}
+
+/** The side sentence inside a save error, when the save was refused for that. */
+export function sideBlockFromError(raw: string): string | null {
+  if (raw.includes(TEAM_OR_ROLE_REQUIRED)) return TEAM_OR_ROLE_REQUIRED;
+  if (raw.includes(TOTAL_SIDE_REQUIRED)) return TOTAL_SIDE_REQUIRED;
+  return null;
 }
 
 /**
@@ -222,7 +264,11 @@ export function otherModelWithName<T extends { model_id: string; name: string }>
 
 export function suggestedName(draft: ByomDraft): string {
   if (draft.market === 'totals') {
-    return draft.primetime === true ? 'Primetime over/under' : 'Over/under';
+    const totalSide = sideForMarket('totals', draft.side);
+    if (draft.primetime === true && totalSide == null) return 'Primetime over/under';
+    const label = totalSide === 'over' ? 'Over' : totalSide === 'under' ? 'Under' : 'Over/under';
+    if (draft.primetime === true) return `Primetime ${label.toLowerCase()}`;
+    return label;
   }
   const bits: string[] = [];
   if (draft.primetime === true) bits.push('Primetime');

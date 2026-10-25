@@ -133,7 +133,8 @@ writer. The builder reads one game at a time.
 values are locals. `season` NULL is the current NFL season only: the
 year the season starts, in `America/New_York`, and January through
 August stay on the previous year's label. A caller can pass an older
-season. Filters are side (home/away), role (favorite/underdog/pickem),
+season. Filters are side (home/away on a moneyline or spread, over/under
+on a total), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
 is left out. There is no spread-size, price, or line filter. Each
 market row counts wins, losses, pushes, and ties, plus `units` and
@@ -151,8 +152,9 @@ record and out of `skipped`. Graded prop legs have
 no price column, so they stay in the win-loss counts, add 0 to units,
 and are not skipped. Unknown filter keys are rejected. The field names `market`, `bets`, `wins`,
 `losses`, `pushes`, and `ties` are unchanged.
-Game markets include both sides. Prop markets include the over and the
-under. An empty filter object is the whole season. It is not a model
+Moneyline and spread legs are home and away. Total legs are over and
+under, and a side filter keeps that one leg. Prop markets include the
+over and the under. An empty filter object is the whole season. It is not a model
 record, and the UI must not present that unfiltered result as one.
 The in-function 3s timeout does not apply. Postgres arms
 `statement_timeout` when the top-level statement starts, so the
@@ -162,9 +164,12 @@ anon 3s, authenticated 8s. The season cutoff is the same rule as
 label is the previous year.
 `data/migrations/byom_backtest_rpc_2026_10_16.sql` is registered.
 `byom_dk_start_price_2026_10_23.sql` is already applied and is not
-edited. `byom_dk_price_fallback_2026_10_23.sql` replaces the function
-body when Matt applies it by hand, and leaves `byom_backtest_v1` in
-the body so the registered file's skip still holds. The function is in
+edited. That applied body still labels a total leg with a null side.
+`byom_dk_price_fallback_2026_10_23.sql` replaces the function
+body when Matt applies it by hand, labels those legs over and under,
+and leaves `byom_backtest_v1` in
+the body so the registered file's skip still holds. Until that apply,
+a saved over or under matches no total leg. The function is in
 `RPC_ANON_CALLABLE`. It reads the facts tables, not `picks`.
 
 
@@ -226,7 +231,11 @@ lists that user’s NFL rows from `byom_list_models`. Rank and the builder previ
 call `byom_backtest` (`fetchByomScopedBacktest`): this season is one
 call with season null, and all seasons is one call per season from
 2020 through the current NFL season. The create flow is three steps
-(bet type, side, name). Editing a saved model is one screen. A rename
+(bet type, side, name). Save stays off until a moneyline or spread has a
+team or a favorite, underdog, or pick’em, and until an over/under is
+Over or Under. Team Any with a favorite or underdog set can be saved.
+A missing side is not stored as both sides. The preview does not grade
+that missing choice. Editing a saved model is one screen. A rename
 saves the new name first and removes the old row only when that save
 wrote a different id. At 25 models a new name is refused and the
 original stays. A name that already belongs to another model asks,

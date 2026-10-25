@@ -163,6 +163,18 @@ def test_scratch_backtest_defaults_to_the_current_season_and_filters():
         assert totals[1] == 1
         assert totals[2] == 1
         cur.execute("""
+            SELECT bets, wins, losses
+              FROM byom_backtest(2026, '{"markets":["totals"],"side":"over"}'::jsonb)
+        """)
+        over = cur.fetchone()
+        assert over == (1, 0, 1)
+        cur.execute("""
+            SELECT bets, wins, losses
+              FROM byom_backtest(2026, '{"markets":["totals"],"side":"under"}'::jsonb)
+        """)
+        under = cur.fetchone()
+        assert under == (1, 1, 0)
+        cur.execute("""
             SELECT coalesce(sum(bets), 0)
               FROM byom_backtest(2026, '{"markets":["h2h"]}'::jsonb)
         """)

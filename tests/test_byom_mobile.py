@@ -154,9 +154,10 @@ def test_byom_record_rank_roi_and_filters(tmp_path):
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
 import {
-  byomRoi, byomWinRate, currentNflSeason, draftFromFilters, filtersForDraft,
-  formatByomRecord, isWholeSeason, marketLabel, nflSeasonList, rankByUnits,
-  otherModelWithName, recordFromRows, showsUnits, suggestedName,
+  assertByomSide, byomRoi, byomWinRate, currentNflSeason, draftFromFilters,
+  filtersForDraft, formatByomRecord, isWholeSeason, marketLabel, nflSeasonList,
+  otherModelWithName, rankByUnits, recordFromRows, saveBlockReason, showsUnits,
+  sideForMarket, suggestedName,
 } from './byomRecord.ts';
 
 const summed = recordFromRows([
@@ -237,6 +238,66 @@ if (suggestedName({ market: 'h2h', side: null, role: null, primetime: null }) !=
 if (suggestedName({ market: 'totals', side: null, role: null, primetime: true }) !== 'Primetime over/under') {
   throw new Error('total name');
 }
+if (suggestedName({ market: 'totals', side: 'over', role: null, primetime: null }) !== 'Over') {
+  throw new Error('over name');
+}
+if (suggestedName({ market: 'totals', side: 'under', role: null, primetime: true }) !== 'Primetime under') {
+  throw new Error('under name');
+}
+const over = filtersForDraft(
+  { market: 'totals', side: 'over', role: 'favorite', primetime: null },
+);
+if (over.side !== 'over' || over.role) throw new Error('over kept ' + JSON.stringify(over));
+const under = filtersForDraft(
+  { market: 'totals', side: 'under', role: null, primetime: false },
+);
+if (under.side !== 'under' || under.primetime !== false) throw new Error('under kept');
+const backOver = draftFromFilters(over);
+if (!backOver || backOver.market !== 'totals' || backOver.side !== 'over' || backOver.role) {
+  throw new Error('back over ' + JSON.stringify(backOver));
+}
+if (sideForMarket('totals', 'home') !== null || sideForMarket('spreads', 'over') !== null) {
+  throw new Error('side for market');
+}
+if (sideForMarket('h2h', 'away') !== 'away' || sideForMarket('totals', 'under') !== 'under') {
+  throw new Error('side kept');
+}
+const block = (market, side, role) => saveBlockReason({ market, side, role, primetime: null });
+if (!block('h2h', null, null) || !block('h2h', null, null).includes('team')) throw new Error('ml any');
+if (!block('spreads', null, null) || !block('spreads', null, null).includes('team')) {
+  throw new Error('spread any');
+}
+if (!block('totals', null, null) || !block('totals', null, null).includes('over or under')) {
+  throw new Error('total none');
+}
+if (block('totals', 'home', 'favorite') == null) throw new Error('total home is not a side');
+if (block('h2h', 'over', null) == null) throw new Error('ml over is not a team');
+if (block('h2h', null, 'favorite') != null) throw new Error('fav should save');
+if (block('spreads', null, 'underdog') != null) throw new Error('dog should save');
+if (block('h2h', null, 'pickem') != null) throw new Error('pickem should save');
+if (block('spreads', 'away', null) != null) throw new Error('away should save');
+if (block('h2h', 'home', null) != null) throw new Error('home should save');
+if (block('totals', 'over', null) != null) throw new Error('over should save');
+if (block('totals', 'under', null) != null) throw new Error('under should save');
+const mustThrow = (filters, needle) => {
+  let message = '';
+  try { assertByomSide(filters); }
+  catch (e) { message = String(e); }
+  if (!message.includes(needle)) throw new Error(JSON.stringify(filters) + ' -> ' + message);
+};
+mustThrow({ markets: ['h2h'] }, 'team');
+mustThrow({ markets: ['spreads'] }, 'team');
+mustThrow({ markets: ['totals'] }, 'over or under');
+mustThrow({ markets: ['totals'], side: 'home' }, 'over or under');
+mustThrow({ markets: ['h2h'], side: 'over' }, 'team');
+assertByomSide({ markets: ['h2h'], role: 'favorite' });
+assertByomSide({ markets: ['spreads'], side: 'away' });
+assertByomSide({ markets: ['h2h'], side: 'home', role: 'underdog' });
+assertByomSide({ markets: ['totals'], side: 'over' });
+assertByomSide({ markets: ['totals'], side: 'under' });
+assertByomSide({});
+assertByomSide({ markets: ['player_pass_yds'] });
+assertByomSide({ markets: ['h2h', 'spreads'] });
 
 const ranked = rankByUnits([
   { id: 'c', name: 'Zero', bets: 0, units: 0, showsUnits: true },
@@ -297,3 +358,35 @@ def test_a_rename_saves_the_new_name_before_it_removes_the_old_row():
     assert "failed: true" in leaderboard
     byom = (ROOT / "mobile/src/lib/byom.ts").read_text(encoding="utf-8")
     assert "export async function pool" in byom
+
+
+def test_save_requires_a_side_or_a_favorite():
+    """Team Any with no favorite or underdog cannot save. A total with
+    no over or under cannot save. Either choice on a side market can.
+    """
+    record = (ROOT / "mobile/src/lib/byomRecord.ts").read_text(encoding="utf-8")
+    assert "Choose a team, or a favorite or underdog." in record
+    assert "Choose over or under." in record
+    builder = (ROOT / "mobile/src/screens/ByomBuilderScreen.tsx").read_text(encoding="utf-8")
+    edit = (ROOT / "mobile/src/screens/ByomEditScreen.tsx").read_text(encoding="utf-8")
+    fields = (ROOT / "mobile/src/components/byom/ByomFields.tsx").read_text(encoding="utf-8")
+    for src in (builder, edit):
+        assert "saveBlockReason" in src
+        assert "sideReason != null" in src
+        assert "{sideReason}" in src
+    assert "Over and under are both" not in fields
+    assert "When is kickoff?" not in builder
+    assert "{ value: 'over', label: 'Over' }" in fields
+    assert "{ value: 'under', label: 'Under' }" in fields
+    byom = (ROOT / "mobile/src/lib/byom.ts").read_text(encoding="utf-8")
+    assert byom.index("assertByomSide(parsed)") < byom.index("supabase.rpc('byom_save_model'")
+    saved = (ROOT / "data/migrations/byom_saved_models_2026_10_16.sql").read_text(encoding="utf-8")
+    assert "Choose a team, or a favorite or underdog." in saved
+    assert "Choose over or under." in saved
+    original = (ROOT / "data/migrations/byom_backtest_rpc_2026_10_16.sql").read_text(encoding="utf-8")
+    fallback = (ROOT / "data/migrations/byom_dk_price_fallback_2026_10_23.sql").read_text(encoding="utf-8")
+    for text in (original, fallback):
+        assert "'over'::text" in text
+        assert "'under'::text" in text
+    applied = (ROOT / "data/migrations/byom_dk_start_price_2026_10_23.sql").read_text(encoding="utf-8")
+    assert "'over'::text" not in applied
