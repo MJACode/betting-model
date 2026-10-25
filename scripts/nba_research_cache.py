@@ -79,12 +79,16 @@ def cache_lines(conn, games: pd.DataFrame) -> None:
     # pulled_at (one transaction writes both). docs/nba_models_2026.md §6.5.
     parts = [_frame(conn, """
         SELECT (snapshot_date || 'T' || lpad(hour_utc::text, 2, '0') || ':00:00+00')::timestamptz
-                   AS requested_at, pulled_at, rows, 'hourly' AS why
+                   AS requested_at, pulled_at, rows, 'hourly' AS why, NULL::text AS snapshot_ts
           FROM odds_history_pulls WHERE sport = 'NBA'
     """)]
     if _table_exists(conn, "odds_history_fetches"):
+        # snapshot_ts: the feed's own time for the slate it returned (the body's
+        # `timestamp`), the latest 5-minute snapshot at or before requested_at --
+        # about 4.4 minutes earlier for a request on the 5-minute mark
+        # (docs/nba_models_2026.md 11.5). The hourly ledger never stored it.
         parts.append(_frame(conn, """
-            SELECT requested_at, pulled_at, rows, why
+            SELECT requested_at, pulled_at, rows, why, snapshot_ts::text AS snapshot_ts
               FROM odds_history_fetches WHERE sport = 'NBA'
         """))
     led = pd.concat(parts, ignore_index=True)

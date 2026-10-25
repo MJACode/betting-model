@@ -1966,3 +1966,372 @@ bets.
 
 **Closed for 2026-27: team first-quarter and first-half shares, and an early-season start for
 the two live models.** Nothing here is built.
+
+
+## 10. Sixth search: alternate lines (pre-registered 2026-10-21, before any alternate price was graded)
+
+mike, 2026-10-21: *"I don't understand how all strategies keep failing … I want a deeper version
+of this task, not a bigger one"*, then *"move forward I want the game market models"*. A
+professional judges an NBA model by whether it beats the closing line, and looks for the books
+that are slow or formulaic rather than for a better team rating. Section 10.1 records three
+free checks that say where the market is NOT slow; 10.2 registers the one new raw material
+those checks leave: every book's alternate ladder.
+
+**Written before any alternate rung was graded against a result. Nothing below changes after a
+result is seen; a later change gets its own dated line and reason.**
+
+### 10.1 Three free checks (2026-10-21; prices only, no game score read except where named)
+
+1. **Closing-line value of every earlier cell** (read from the stored cell files, no new grade):
+   the median bet's value at Pinnacle's no-vig close.
+   - The model families lose value by the close at every decision time: ratings × minutes (F1)
+     −2.4% median over 144 cells, best −0.7%; absences (F5) −2.8%; shooting luck (F4) −2.5%;
+     the market-anchored model (P1) −1.8%.
+   - A bigger player-and-minutes model on the same inputs would be a bigger F1. Its morning
+     picks already move against it, so the market already holds what it knows.
+   - The only positive values come from comparing soft books with Pinnacle at the same
+     moment (P2 moneylines, best cell +4.7%; F2 underdogs +1.9%). Those are mostly underdogs
+     priced with the proportional no-vig method, which flatters a longshot.
+2. **How fast the spread prices an official injury-report change** (2021-22 → 2023-24,
+   34,849 report-to-report changes; the implied move is 2.26 points per 48 expected minutes
+   lost, §4.1). Of the 3,108 changes worth 0.25 points or more:
+   - 22% of the eventual move is in the line before the report's printed time;
+   - 86% by the first stored price 30 minutes after it;
+   - the rest of the way to the close is 7–10% of the implied move.
+   The market finishes inside 30 minutes. Whether a book is slow inside those 30 minutes needs
+   prices every 5 minutes (the feed's spacing). About 600 report times a season carry a change
+   of 0.5 points or more; 7 extra prices around each at 30 credits is about 126,000 credits a
+   season. Not bought yet.
+3. **Does the line price who will play?** Each Questionable, Doubtful or Probable player at the
+   morning price and at 3–6 hours before tip, against whether he played (box score), with his
+   own earlier listings as a prior:
+   - The prior predicts well: Questionable players with a prior of 0.3 or less played 4% of
+     the time, 0.9 or more 81%.
+   - The line already uses it. The slope of the line's move to the close on the prior's
+     predicted move is 0.06 (interval −0.33 to +0.40) in the morning and 0.23 (0.03 to 0.43)
+     3–6 hours out, on a typical predicted move of 0.18 points: about 0.04 points. Not
+     bettable.
+
+Scripts: `%TEMP%/nba_game_edge/deep/` on the build machine (`clv_table.py`, `news_mech.py`,
+`q_mech.py`).
+
+### 10.2 The hypothesis
+
+Soft books hang 20 to 60 alternate rungs per game on spreads, totals and team totals, priced
+from their main number by their own curve. Pinnacle hangs about 11, within 2 to 3 points of its
+main number. The NBA's results around a sharp main number have a measured shape (4,770 games
+of results around Pinnacle's close before 2024-25: spread SD 13.3, total SD 18.1). Where a
+book's curve is thinner or fatter than that shape, a rung far from the main number is
+mispriced. One probe game (2025-01-15, NYK @ PHI, prices only) showed rungs 5–6% above a fair
+price at three books, all on the favourite laying 13–16 points. One game is not evidence; it is
+why the purchase is worth making.
+
+### 10.3 Data (all into Supabase first)
+
+- Every book's `alternate_spreads`, `alternate_totals` and `alternate_team_totals`, one
+  purchase per regular-season game 60 minutes before tip, 2023-24 → 2025-26 (the feed holds
+  these from 2023-05-03). `odds`, `source = 'odds_api_nba_alt_history'`, one row per rung:
+  `spread_home` is the HOME number, team totals filed as `alternate_team_totals_home` /
+  `_away`. Writer: `data/ingestors/nba_odds_history.py --alternates`. Protected from the
+  prune by name (`data/prune_odds.PROTECTED_SOURCES`).
+- Cost, measured: 30 credits a game at ten books plus 1 a date. Pilot 2025-01-15: 11 games,
+  331 credits, 6,727 rungs stored. The three seasons: about 111,000 credits.
+
+### 10.4 Rules every cell is graded under
+
+1. **Decision:** the alternate purchase (60 minutes before tip, its own stamp). One decision
+   per game per cell.
+2. **Fair line:** Pinnacle's main number in the same purchase, with its proportional no-vig
+   price. For spreads and totals that is Pinnacle's alternate rung with prices closest to even.
+   For team totals it is Pinnacle's team total in the derivative purchase (§8) at the same
+   lead, stamped within 10 minutes of the alternate purchase. The centre is solved through the
+   empirical distribution of results around Pinnacle's close on the seasons before the graded
+   one (`H.close_dist`); for team totals, results around Pinnacle's team-total number at the
+   derivative purchase on earlier seasons once they hold 300 or more games, else P2's
+   stand-in (§8.2). A game with no Pinnacle main for the market gets no bet.
+3. **Deciding books:** `config.BEST_LINE_BOOKMAKERS`; Pinnacle and Bovada are never bet.
+4. **A rung is eligible when:**
+   - its two prices are coherent (implied sum 1.00–1.15);
+   - it is at least 1.5 points from that book's own main rung (its rung closest to even), so the
+     search is about alternates, not mains, which §6 and §8 already graded;
+   - that book's main rung is within 1.0 point of Pinnacle's main number (a ladder that has not
+     moved with the market is not bet);
+   - the side's price is between −200 and +400. Rungs above +400 are graded as a control,
+     never a candidate.
+5. **Choice:** the eligible rung with the highest EV on the cell's side, one per game (team
+   totals: per team). Ties go to the book order in `BEST_LINE_BOOKMAKERS`.
+6. **Units and settlement:** the harness's. One unit to win, risk capped at 3; a push returns
+   the stake and leaves the denominator. Spreads and totals settle on the final score,
+   overtime counted; team totals on that team's final score, overtime counted.
+7. **Seasons:** 2023-24, 2024-25 and 2025-26, pooled. Nothing is fitted on alternate prices,
+   so every season is graded.
+
+### 10.5 The cells (30)
+
+| Family | Sides | EV cuts | Cells |
+|---|---|---|---|
+| A1 alternate spreads | home, away | 0.02, 0.04, 0.06, 0.08, 0.10 | 10 |
+| A2 alternate totals | over, under | same | 10 |
+| A3 alternate team totals (both teams; each bet keeps its market) | over, under | same | 10 |
+
+**Bands** (bar 5): [0, 0.02), [0.02, 0.04), [0.04, 0.06), [0.06, 0.08), [0.08, 0.10),
+[0.10, ∞).
+
+**Controls, graded and reported, never candidates:** the same 30 with rungs above +400 only;
+the main rung only (the earlier searches' bet, for comparison).
+
+### 10.6 The bars
+
+§9.1's house standard, unchanged: 200 or more bets pooled; the whole-day bootstrap 95% interval
+above zero; seasons mostly positive; beats the blind bet on its side; every band from the band
+below the cut to the top positive; beats the 95th percentile of 200 placebo shuffles.
+
+- **Blind bet:** the same side at the best deciding price at each book's main rung, every game
+  in the cell's population.
+- **Placebo:** Pinnacle's centre shuffled between games on the same date in the same market;
+  prices and rungs stay.
+- **Reported, never bars:** closing-line value (EV at Pinnacle's main no-vig close through the
+  same distribution); DraftKings alone; without the single best book; prices −200 to +150
+  against +150 to +400; rung distance 1.5–4, 4–8 and 8+ points.
+- **Expected passes by chance:** 30 × 0.025 ≈ 0.75 cells clear bar 2 alone, before correlation.
+- **A pass is built live** (§2: every model is real money), with its own EV floor at the passing
+  cut and the price range it lays stated before it ships.
+
+### 10.7 Two changes after two checks, before any rung was graded (2026-10-21)
+
+**1. Each ladder keeps its own update time, and a stale ladder is not bet (10.3, 10.4).**
+- Checked on the probe purchase (2025-01-15, NYK @ PHI): every book's alternate markets were
+  updated 0 to 35 seconds before the purchase, Pinnacle's 4.5 minutes before. Not stale here.
+- But the first version of the writer stored one time per purchase, so a stale ladder could not
+  be seen. The writer now stores each market's own update time as the rung's `snapshot_at`,
+  as the main-line archive stores each book's.
+- The lab's decision time for a game is its newest stamp (the purchase). A ladder stamped more
+  than 15 minutes before it is not eligible and does not give Pinnacle's main number.
+- The 11 pilot games were bought again under the new writer after their first rows
+  were deleted (331 credits), so every stored rung carries its market's time.
+
+**2. Spreads are priced through the shape of games with a line of the same size (10.4.2).**
+- Checked on results around Pinnacle's close, 2020-21 → 2025-26, before any alternate rung was
+  graded. With the residual signed toward the favourite:
+
+  | Closing line | Games before 2023-24 | Mean | Favourite by 12+ more | Underdog by 12+ more |
+  |---|---|---|---|---|
+  | 5 or less | 1,749 | −0.5 | 15.6% | 18.4% |
+  | 5 to 10 | 1,355 | −0.4 | 15.1% | 19.1% |
+  | more than 10 | 436 | +0.9 | 19.0% | 15.4% |
+
+  2023-24 on reads the same way (more than 10: 18.7% against 13.9%, 820 games).
+- One shape for every game makes a far underdog rung look too likely in a big-line game and too
+  unlikely in a close one. Books price alternate ladders off curves that move with the line, so a
+  "mispricing" found with a single shape could be the lab's own error.
+- So spreads are priced through the shape of results for games whose closing line was the same
+  size (5 or less, 5 to 10, more than 10 points), from the seasons before the graded one, signed
+  toward the favourite and mirrored when the away team is favoured. A level line uses the pooled
+  shape. Closing-line value is priced the same way.
+- Full-game totals keep one shape. Split by the size of the total, the spread of results moves
+  by at most 1.7 points (SD 17.0 to 18.7) and the 12-point tails by at most 2.6 points; split by
+  the size of the spread, the 15-point tails stay within 18.5% to 22.3%.
+- **Team totals are split the same way as spreads, by the game's line and by favourite or
+  underdog** (each team's score around the team total Pinnacle's full-game close implies,
+  2020-21 → 2025-26). A team favoured by more than 10 ran 15 or more under its number in 6.5% of
+  1,256 games and 15 or more over in 10.2%; a team in a game of 5 or less, 8.9% both ways. One
+  shape would make a big favourite's far under look too likely, which is where the pilot night's
+  best team-total rungs sat. So a team total is priced through the shape of teams in the same
+  role in games with a line of the same size, from the seasons before the graded one, centred on
+  Pinnacle's own team-total price. The game's line is Pinnacle's main spread in the same
+  alternate purchase; with none, or a level line, the pooled shape of 10.4.2 is used.
+- Both checks are synthetic-tested: the lab drops a ladder 30 minutes older than its purchase,
+  and it fails when the favourite's shape is mirrored the wrong way.
+
+## 11. Seventh search: the minutes after an injury report (pre-registered 2026-10-24, before any of its prices were bought)
+
+mike, 2026-10-24: *"Buy alts and do #2 as well. Go"*. Section 10.1's second check found that
+NBA lines finish 86% of an injury report's move within 30 minutes of it, and that the hourly
+archive cannot see inside those 30 minutes. This search buys the slate every 5 minutes around
+each report change and asks two questions a professional asks: is any book still at the old
+price after Pinnacle has moved, and has anyone moved at all in the first minutes?
+
+**Written before any 5-minute price was bought. Nothing below changes after a result is seen;
+a later change gets its own dated line and reason.**
+
+### 11.1 Data
+
+- **Events.** A change between two consecutive submitted injury reports of one team for one
+  game. Expected minutes = the sum over listed players of P(plays) × his minutes per game as of
+  the game (Out 0, Doubtful 0.1, Questionable 0.5, Probable 0.95, Available or unlisted 1; his
+  last 10 played games, else last season). The implied change in the HOME margin is 2.26 points
+  per 48 minutes (§4.1), both teams at that report summed: `s`. An event is a report with
+  |s| ≥ 0.5 printed at least 30 minutes before tip. 2024-25: 821 events at 648 report times;
+  2025-26: 1,092 at 904.
+- **Prices.** The whole slate (h2h, spreads, totals; ten books with Pinnacle) at R−5, R, R+5,
+  …, R+25 minutes around each event's printed time R, on the feed's 5-minute grid, less the
+  instants already held: 9,820 instants, 294,600 credits at 30 each. Plan:
+  `jobs/nba_news_windows_2025_2026.json` (`scripts/nba_news_window_plan.py`). Buyer:
+  `data/ingestors/nba_odds_history.py --instants`, ledgered in `odds_history_fetches` with
+  `why = 'news_window'`, so the harness reads them like every other fetch. Run on the worker as
+  the declared job `nba-news-windows-2025-2026`.
+- **Seasons graded:** 2024-25 and 2025-26, pooled. The slope in N2 below was measured on
+  2021-22 → 2023-24 (10.1), so nothing is chosen on the graded seasons.
+
+### 11.2 Rules every cell is graded under
+
+1. **Decision times** (a cell axis): t = R+5, R+10, R+15. R+5 assumes a live system reads the
+   report within 5 minutes of its printed time; when each file became downloadable is unknown
+   (§6.1), so the later times show how fast any edge decays.
+2. **Quotes.** A book's quote at a fetch is the one that fetch returned for it. A deciding
+   quote must be stamped within 5 minutes of t (the feed refreshes a book's stamp on every
+   poll, §6.1), so "the book has not moved" means the feed saw it unmoved, not that the feed
+   stopped looking.
+3. **Fair price.** Pinnacle's no-vig price at its own number. Spreads go through the shape for
+   games with a line of the same size (10.7), totals through the pooled shape, moneylines
+   directly. A game with no Pinnacle quote at the fetch has no bet.
+4. **Deciding books** `config.BEST_LINE_BOOKMAKERS`, price −200 or better; units, pushes and
+   settlement are the harness's (§6.2). One bet per game, market and cell (the first event of
+   the game that qualifies).
+
+### 11.3 The families and their cells (26)
+
+- **N1, the stale book.** At t, Pinnacle's fair centre has moved since R−5 by at least
+  1 point (spreads, totals) or 0.02 in win chance (moneylines), and a deciding book's quote at t
+  is identical (number and both prices) to its quote at R−5. Bet that book toward Pinnacle's
+  move, priced at Pinnacle's centre at t. Markets spreads, totals, moneyline × t (3) × EV ≥ 0.02,
+  0.04: **18 cells.** The side is per game (toward the move); bar 4 reads the real sides.
+- **N2, nobody has moved.** At t, Pinnacle's centre has moved less than a quarter of |s| since
+  R−5 (spreads) or less than 0.01 in win chance (moneylines). The fair centre is Pinnacle's at
+  R−5 plus 0.47 × s: the share of the implied move the market made from the hour before a report
+  to the close in 2021-22 → 2023-24 (10.1: 0.375 in the window, 0.097 after). Bet the side the
+  news favours at the best deciding price. Spreads, moneyline × t = R+5, R+10 × EV ≥ 0.02,
+  0.04: **8 cells.**
+
+**Bands** (bar 5): [0, 0.02), [0.02, 0.04), [0.04, ∞).
+
+**Controls, graded and reported, never candidates:**
+- **N1 quiet:** the N1 rule at the same offsets around report times where neither team's
+  expected minutes changed by 0.5 points' worth. If stale books pay as well without news, the
+  news is not the reason.
+- **N1 hourly:** the N1 rule on the hourly archive alone (t = the first fetch at least 30
+  minutes after R), the resolution every earlier search had.
+
+### 11.4 The bars
+
+§9.1's house standard, unchanged (200 bets pooled, 95% interval above zero, seasons mostly
+positive, beats the blind bet on its side, bands, 200 placebo runs).
+
+- **Placebo (N1):** the direction of Pinnacle's move is shuffled between events on the same
+  date in the same market; prices stay. **(N2):** `s` is shuffled between events on the same
+  date.
+- **Reported, never bars:** closing-line value at Pinnacle's last pre-tip no-vig price; the
+  same cells at DraftKings alone; how much of Pinnacle's move happened between R−5 and R (news
+  out before the printed time); the median minutes a stale book took to move.
+- **Expected passes by chance:** 26 × 0.025 ≈ 0.65 before correlation.
+- **What a pass needs before it is live:** a live poller that reads the official report within
+  minutes of each slot and prices the slate immediately. A pass at R+5 that fails at R+10 is
+  reported as needing that speed; it is not shipped on a slower clock.
+
+### 11.5 Changes after an independent review of sections 10 and 11, before any price was graded or the purchases ran (2026-10-24)
+
+Four reviewers read the two labs, the two purchases and these sections, and two more checked
+each finding (`%TEMP%/nba_game_edge/deep/`; workflow `nba-purchase-and-lab-review`). Fourteen
+findings held. Every change below was made before any alternate rung or 5-minute price was
+graded, and before either purchase ran.
+
+**The alternate-lines search (section 10)**
+
+1. **A book's main number is its main-market quote, not a rung of its ladder.** DraftKings and
+   Hard Rock leave the main number out of their alternate ladders. On the pilot night the
+   ladder's "closest to even" rung differed from the book's real main on 40 of 40 DraftKings
+   ladders and 20 of 20 Hard Rock ones. That dropped 4 DraftKings ladders sitting at Pinnacle's
+   number and admitted rungs only 1 point from the real main. The main is now the full-game
+   spread or total the hourly archive shows at or before the decision (within 60 minutes),
+   and the derivative purchase's team total within 10 minutes. A book with no main quote is
+   not bet. The blind bet and the main-rung control use the same quote.
+2. **The placebo swaps the result shape, not only the centre.** Section 10.2's idea is that a
+   book's curve is the wrong shape. Swapping centres between games keeps that kind of
+   mispricing, so a real edge could fail the bar. Each placebo run now gives every game a shape
+   drawn at random from that season's shapes for its market, and re-solves the centre from
+   Pinnacle's real price under it:
+   - spreads: the six line-size and favourite shapes;
+   - team totals: the six;
+   - totals: the pooled shape, its mirror image, and a normal of the same SD.
+
+   The centre-swap placebo is reported beside it (50 runs), never judged.
+3. **Closing-line value here is not an independent check.** It prices the bet at Pinnacle's
+   main close through the same shape that chose it. So it measures the lab's own disagreement
+   plus Pinnacle's main-line move, not whether the rung beat its own close. It stays reported,
+   and it is never cited as beating the closing line. Results and the bars decide.
+4. **Bar 5 reads every band.** The pass/fail script read five bands; the 0.02 cells carry six,
+   so the top band [0.10, ∞) was never judged. It now reads every band a row carries
+   (`scripts/nba_game2_verdict.band_slots`).
+5. **The 5-minute news prices stay out of this grade.** The harness leaves them out unless a
+   lab asks (`H.load(include_news_windows=True)`, which only section 11's lab passes). So
+   section 10's close and shapes do not depend on when the cache is refreshed.
+
+**The injury-news search (section 11)**
+
+6. **What "R+5" means.** The feed returns the latest 5-minute snapshot at or before a request,
+   and its snapshots sit 38–39 seconds past each mark (measured on 13 requests, 2022-11 to
+   2026-02). A request at R+5 returns R+0:38. So the plan now asks one minute past each mark,
+   and "R+5" is the snapshot at about R+5:38. Each fetch's own snapshot time (the purchase
+   stores it) dates the window, and "fresh" means a book stamped within 5 minutes of that
+   time, not of the request.
+7. **Minutes per game are the last 10 games played, as 11.1 says.** The first plan averaged
+   the last 10 box-score rows, games missed included. Replanned: 1,917 events (820 in 2024-25,
+   1,097 in 2025-26), 8,776 requests, **263,280 credits**. The approved figure was about
+   252,000; the plan before these fixes said 294,600. Re-measured with the corrected minutes,
+   N2's slope is unchanged: 0.375 in the window and 0.096 after, 0.47.
+8. **The N1 placebo is a null.** Shuffling only the bet's side and pricing it at Pinnacle's
+   real centre made every placebo a subset of the real bets, so no edge could pass. Now each
+   event's move direction is shuffled between events on the same date, market and offset, and
+   the fair centre moves with it (centre at R−5 plus the shuffled direction × the move's own
+   size). A synthetic check now asserts a planted edge clears the placebo's 95th percentile.
+9. **The blind bet** is the house standard's: the best fresh deciding offer on each side under
+   Pinnacle's centre at t, on games with a Pinnacle quote. It had ranked offers by raw price.
+10. **The quiet control** keeps report times where NEITHER team changed by 0.5 points' worth;
+    it had used the net of both teams.
+11. **The registered reports are computed.** These are the share of Pinnacle's move already in
+    the snapshot at R, the median minutes a stale book took to move, and closing-line value for
+    moneylines (the no-vig close win chance), which had none.
+12. **Both purchases retry.** A rate-limit or server answer is retried, and every game or
+    instant that still got none is bought once more at the end of the run.
+
+### 11.6 A second review of the fixes, before any price was graded or the purchases ran (2026-10-24)
+
+Two reviewers re-read the fixes above, and two more checked each finding (workflow
+`nba-fix-rereview`). Four findings held; all are fixed.
+
+1. **Minutes per game are taken as of the game date.** The first fix still read a listed
+   player's minutes from his last box-score row, so a player ruled out on a date with no row
+   lost his latest games. A player with no game yet this season read as 0 minutes instead of
+   last season's average: 30 players who averaged 28 or more minutes the season before. Now it
+   is the mean of his last 10 games played strictly before the date, else last season's. The
+   plan was rebuilt: **1,927 events (824 in 2024-25, 1,103 in 2025-26), 8,810 requests,
+   264,300 credits**, under the job's 270,000 ceiling. N2's slope, re-measured on 2021-22 →
+   2023-24 with the plan's own event definition: 0.373 in the window plus 0.095 after, still
+   0.47 (86% of the move done by the first price 30 minutes after a report).
+2. **A window is dated by the snapshot the feed returned**, read from the stored snapshot
+   time. If the feed answers a request with an older snapshot (one missing), that fetch is
+   filed where its snapshot belongs. The count of such fetches is printed with the grade.
+3. **The alternate lab no longer crashes on its first bet.** Its rung-distance report merged a
+   column the bets already carried. The synthetic check now builds one family's cells end to
+   end on placed bets.
+4. **A night whose game list got no answer is listed again at the end of the run**, and its
+   games bought, under the same ceiling and floor.
+
+**What 11.5's first change leaves out (measured 2026-10-24 on the stored derivative purchase).**
+A book's alternate team totals can be bet only where that book also quotes a main team total.
+Share of games with one, 2023-24 / 2024-25 / 2025-26:
+
+| Book | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|
+| BetRivers | 87% | 100% | 100% |
+| DraftKings | 90% | 100% | 99% |
+| FanDuel | 80% | 99% | 100% |
+| Caesars | 60% | 93% | 99% |
+| BetMGM | 51% | 0% | 0% |
+| Hard Rock | 14% | 0% | 0% |
+| betPARX | 0% | 0% | 100% |
+| Fanatics | 0% | 0% | 0% |
+
+So the team-total cells (A3) mostly test BetRivers, DraftKings, FanDuel and Caesars. BetMGM's,
+Hard Rock's and Fanatics' alternate team totals are mostly out of scope. A thin A3 result means
+those books were not tested, not that their ladders hold nothing.

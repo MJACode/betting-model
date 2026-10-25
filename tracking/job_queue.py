@@ -479,6 +479,54 @@ def _validate_nhl_odds_history(args: dict) -> dict:
     return {"max_credits": cap}
 
 
+# The NBA purchases mike approved on 2026-10-24 ("Buy alts and do #2 as well. Go"):
+# docs/nba_models_2026.md sections 10 and 11. Each mode buys one fixed scope and
+# its ceiling cannot exceed what was stated for it -- alternate ladders on every
+# 2023-24 .. 2025-26 game (measured 30 credits a game, ~111,000), and the slate
+# every 5 minutes around 2024-25 and 2025-26 injury-report changes (the plan file
+# names 8,810 requests, 264,300 credits, docs/nba_models_2026.md 11.6). Both buyers
+# skip what is stored, and retry an unanswered call once at the end, so a
+# re-queue after a worker restart buys nothing twice. The floor keeps the live
+# feeds funded to the monthly reset (September 2026 ran the balance to 0).
+NBA_ODDS_HISTORY_MODES = {
+    "alternates": {"cap": 130_000, "seasons": (2024, 2026), "argv": ["--alternates"]},
+    "news_windows": {"cap": 270_000, "seasons": (2025, 2026),
+                     "argv": ["--instants", "jobs/nba_news_windows_2025_2026.json",
+                              "--why", "news_window"]},
+}
+NBA_ODDS_HISTORY_MIN_FLOOR = 500_000
+
+
+def _job_nba_odds_history(**kw):
+    """One of the two NBA purchases (NBA_ODDS_HISTORY_MODES), through
+    data.ingestors.nba_odds_history's own credit meter (ceiling and floor)."""
+    mode = NBA_ODDS_HISTORY_MODES[kw["mode"]]
+    argv = list(mode["argv"])
+    if kw["mode"] == "news_windows":
+        argv[1] = str(Path(__file__).resolve().parent.parent / argv[1])
+    first, last = mode["seasons"]
+    argv += ["--seasons", str(first), str(last), "--apply",
+             "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
+    return _run_script_main("data.ingestors.nba_odds_history", argv)[-4000:]
+
+
+def _validate_nba_odds_history(args: dict) -> dict:
+    extra = sorted(set(args) - {"mode", "max_credits", "floor"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes mode, max_credits and floor")
+    mode = args.get("mode")
+    if mode not in NBA_ODDS_HISTORY_MODES:
+        raise ValueError(f"mode must be one of {sorted(NBA_ODDS_HISTORY_MODES)}, got {mode!r}")
+    cap = int(args.get("max_credits") or 0)
+    top = NBA_ODDS_HISTORY_MODES[mode]["cap"]
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for {mode} must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NBA_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NBA_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {"mode": mode, "max_credits": cap, "floor": floor}
+
+
 # Keys this job will read. Anything else — including max_credits, credit_cap,
 # reserve_days — is a malformed request and fails in the validator, before the
 # module is imported and before any Odds API call. Michael, 2026-10-03: there
@@ -2001,6 +2049,8 @@ JOBS = {
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "nhl_odds_history": (_job_nhl_odds_history, _validate_nhl_odds_history),
+    # NBA alternate ladders and the injury-news windows (mike, 2026-10-24).
+    "nba_odds_history": (_job_nba_odds_history, _validate_nba_odds_history),
     # Derivative totals (team, alternate, first period). No credit ceiling:
     # Michael, 2026-10-03. Dry run is apply=false. See
     # _job_nhl_derivative_odds_history.

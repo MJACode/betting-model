@@ -224,7 +224,8 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # pinnacle / bovada / fanduel at 1.00 rows per (game, market) for May 2024.
 # Nothing protected them because nothing named them. Now something does.
 #
-# Three LADDER sources join it (2026-10-19). The keepers below are one row per
+# Three LADDER sources join it (2026-10-19), and the paid NBA alternate ladders
+# (nba_odds_history.ALT_SOURCE) on 2026-10-21. The keepers below are one row per
 # (game, market, book) with no line, so a market a book quotes at many lines
 # in one fetch (team totals, alternate totals, half and quarter lines) would be
 # thinned to one or two arbitrary rungs per game: the paid NBA derivative and
@@ -237,6 +238,7 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # the pruner does not import the purchase modules.
 PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nba_derivative_history",
+                     "odds_api_nba_alt_history",
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live")
 

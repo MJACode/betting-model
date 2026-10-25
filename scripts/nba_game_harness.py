@@ -283,8 +283,20 @@ def frame_quotes(o: pd.DataFrame, extra=()) -> pd.DataFrame:
     return o[QUOTE_COLS + list(extra)].reset_index(drop=True)
 
 
-def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
+NEWS_WINDOW_WHY = "news_window"
+
+
+def load(cache: Path = CACHE, seasons=None, require_seasons=None,
+         include_news_windows: bool = False) -> Data:
     """Games, full-game quotes and the fetches that bought them.
+
+    `include_news_windows`: the seventh search's 5-minute purchase around
+    injury-report changes (ledger why = NEWS_WINDOW_WHY, docs/nba_models_2026.md
+    section 11) buys the whole slate at times no other search planned on. Left
+    in, it would become many games' close and decision fetch, so a grade would
+    depend on when the cache was refreshed. It is left OUT unless asked for:
+    its ledger rows and the quotes they bought (created_at = pulled_at) are
+    dropped before any quote is placed in a fetch.
 
     `require_seasons`: a graded run names the seasons it needs; the load
     refuses when any of them has a price on fewer than 90% of its games, or
@@ -299,6 +311,12 @@ def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
     o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
     o = o.merge(g[["game_id", "season", "game_date", "tip"]], on="game_id")
     led = pd.read_parquet(cache / "nba_fetch_ledger.parquet")
+    if not include_news_windows and "why" in led:
+        news = led["why"].astype(str) == NEWS_WINDOW_WHY
+        if news.any():
+            pulled = set(pd.to_datetime(led.loc[news, "pulled_at"], utc=True))
+            o = o[~pd.to_datetime(o["created_at"], utc=True, format="mixed").isin(pulled)]
+            led = led[~news]
     o, notes = attach_fetch(o, led)
     o = frame_quotes(o)
     f = o[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"]).copy()
