@@ -281,6 +281,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # Men's college basketball identity: the ESPN team registry, the ESPN
+    # event <-> game_id map the odds join reads, and the venues. Created on
+    # demand by data/ingestors/ncaab_teams.ensure_tables; never read by the app.
+    "ncaab_events",
+    "ncaab_teams",
+    "ncaab_venues",
     # The league's NBA injury report archive and its pull ledger. Created on
     # demand by data/ingestors/nba_injury_report.py; model input, never read
     # by the app.
