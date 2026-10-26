@@ -527,6 +527,112 @@ def _validate_nba_odds_history(args: dict) -> dict:
     return {"mode": mode, "max_credits": cap, "floor": floor}
 
 
+# The NCAAB purchases mike approved on 2026-10-26 ("3 approved"): game lines on
+# every 2020-21 .. 2025-26 game (~375,000 credits planned at 30 a snapshot), and
+# first-half + team-total lines on every 2023-24 .. 2025-26 game at the close
+# and at the open (up to ~1,380,000 together, at most 40 a game). Each mode buys
+# one fixed scope under a ceiling it cannot exceed; `probe` makes one measured
+# call of each kind and writes nothing. The buyer resumes on its own ledgers,
+# so a re-queue after a floor stop or a worker restart buys nothing twice. The
+# floor keeps the live feeds funded (September 2026 ran the balance to 0).
+NCAAB_ODDS_HISTORY_MODES = {
+    "lines": {"cap": 420_000, "seasons": (2021, 2026), "argv": ["--lines"]},
+    "deriv_close": {"cap": 800_000, "seasons": (2024, 2026),
+                    "argv": ["--derivatives", "close"]},
+    "deriv_open": {"cap": 800_000, "seasons": (2024, 2026),
+                   "argv": ["--derivatives", "open"]},
+    "probe": {"cap": 200, "seasons": (2026, 2026), "argv": ["--probe"]},
+}
+NCAAB_ODDS_HISTORY_MIN_FLOOR = 500_000
+
+
+def _job_ncaab_odds_history(**kw):
+    """One of the NCAAB purchases (NCAAB_ODDS_HISTORY_MODES), through
+    data.ingestors.ncaab_odds_history's own credit meter (ceiling and floor).
+    The buyer raises before any paid call when the ESPN schedule is not yet
+    stored for a season, so the purchase can never outrun the backfill."""
+    mode = NCAAB_ODDS_HISTORY_MODES[kw["mode"]]
+    first, last = mode["seasons"]
+    argv = list(mode["argv"]) + ["--seasons", str(first), str(last), "--apply",
+                                 "--max-credits", str(kw["max_credits"]),
+                                 "--floor", str(kw["floor"])]
+    return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
+
+
+def _validate_ncaab_odds_history(args: dict) -> dict:
+    extra = sorted(set(args) - {"mode", "max_credits", "floor"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes mode, max_credits and floor")
+    mode = args.get("mode")
+    if mode not in NCAAB_ODDS_HISTORY_MODES:
+        raise ValueError(f"mode must be one of {sorted(NCAAB_ODDS_HISTORY_MODES)}, got {mode!r}")
+    cap = int(args.get("max_credits") or 0)
+    top = NCAAB_ODDS_HISTORY_MODES[mode]["cap"]
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for {mode} must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {"mode": mode, "max_credits": cap, "floor": floor}
+
+
+# The free NCAAB feed check (scripts/ncaab_feed_probe.py). Its only paid calls
+# are the per-event market lists, 1 credit each, at most 10.
+_NCAAB_FEED_PROBE_MAX_EVENTS = 10
+_NCAAB_FEED_PROBE_STDOUT_CAP = 200_000
+
+
+def _job_ncaab_feed_probe(**kw):
+    """The feed probe's printout, its compact summary first (the job card shows
+    the first 900 characters of the result)."""
+    from scripts.ncaab_feed_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.ncaab_feed_probe",
+                            ["--market-events", str(kw["market_events"])]).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)",
+            "stdout": text[-_NCAAB_FEED_PROBE_STDOUT_CAP:],
+            "truncated": len(text) > _NCAAB_FEED_PROBE_STDOUT_CAP}
+
+
+def _validate_ncaab_feed_probe(args: dict) -> dict:
+    extra = sorted(set(args) - {"market_events"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes market_events")
+    raw = args.get("market_events", 5)
+    if isinstance(raw, bool):
+        raise ValueError("market_events must be a whole number")
+    n = int(raw)
+    if not 0 <= n <= _NCAAB_FEED_PROBE_MAX_EVENTS:
+        raise ValueError(f"market_events must be 0..{_NCAAB_FEED_PROBE_MAX_EVENTS}, got {n}")
+    return {"market_events": n}
+
+
+# The ESPN NCAAB schedule and results backfill (data/ingestors/ncaab_espn_ingestor.py,
+# free). Idempotent: it upserts ESPN's own rows. The span cap is 2,400 days so
+# the declared 2020-11-01 .. 2027-04-10 safety net (2,351 days, six and a half
+# seasons) fits in one job; a typo'd decade does not.
+_NCAAB_BACKFILL_MAX_DAYS = 2_400
+
+
+def _job_ncaab_schedule_backfill(**kw):
+    return _run_script_main("data.ingestors.ncaab_espn_ingestor",
+                            ["--backfill", kw["first"], kw["last"]])[-4000:]
+
+
+def _validate_ncaab_schedule_backfill(args: dict) -> dict:
+    extra = sorted(set(args) - {"first", "last"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes first and last")
+    first, last = str(args.get("first") or ""), str(args.get("last") or "")
+    d0 = datetime.strptime(first, "%Y-%m-%d")      # raises ValueError if malformed
+    d1 = datetime.strptime(last, "%Y-%m-%d")
+    if d1 < d0:
+        raise ValueError(f"last {last} is before first {first}")
+    if (d1 - d0).days > _NCAAB_BACKFILL_MAX_DAYS:
+        raise ValueError(f"span {(d1 - d0).days} days exceeds {_NCAAB_BACKFILL_MAX_DAYS:,}")
+    return {"first": first, "last": last}
+
+
 # Keys this job will read. Anything else — including max_credits, credit_cap,
 # reserve_days — is a malformed request and fails in the validator, before the
 # module is imported and before any Odds API call. Michael, 2026-10-03: there
@@ -2051,6 +2157,14 @@ JOBS = {
     "nhl_odds_history": (_job_nhl_odds_history, _validate_nhl_odds_history),
     # NBA alternate ladders and the injury-news windows (mike, 2026-10-24).
     "nba_odds_history": (_job_nba_odds_history, _validate_nba_odds_history),
+    # NCAAB game lines, first-half and team-total history, and the probe
+    # (mike, 2026-10-26). See NCAAB_ODDS_HISTORY_MODES.
+    "ncaab_odds_history": (_job_ncaab_odds_history, _validate_ncaab_odds_history),
+    # Free NCAAB feed and College Basketball Data check (at most 10 credits).
+    "ncaab_feed_probe": (_job_ncaab_feed_probe, _validate_ncaab_feed_probe),
+    # ESPN NCAAB schedule and results backfill. Free, idempotent.
+    "ncaab_schedule_backfill": (_job_ncaab_schedule_backfill,
+                                _validate_ncaab_schedule_backfill),
     # Derivative totals (team, alternate, first period). No credit ceiling:
     # Michael, 2026-10-03. Dry run is apply=false. See
     # _job_nhl_derivative_odds_history.

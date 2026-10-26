@@ -1,0 +1,674 @@
+"""data/ingestors/ncaab_odds_history: what the NCAAB price purchase asks for and keeps.
+
+mike approved it on 2026-10-26 ("3 approved"): game lines 2020-21..2025-26 and
+first-half + team-total lines 2023-24..2025-26 at the close and the open, about
+1.75M credits together. These pin what decides the spend (the snapshot plan,
+the precondition, the ledger resume, the floor), what keeps paid data from
+being lost (unmatched events stored, flipped events stored in ESPN's
+orientation), and the worker jobs that run it.
+"""
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+import tracking.job_queue as jq
+from data.ingestors import nba_odds_history
+from data.ingestors import ncaab_odds_history as h
+from data.ingestors import odds_ingestor as oi
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _t(s: str) -> datetime:
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+# ── a small world: three teams, two ESPN games ──────────────────────────────
+
+REGISTRY = [
+    {"espn_id": 150, "school": "Duke", "slug": "duke", "mascot": "Blue Devils",
+     "display_name": "Duke Blue Devils", "short_name": "Duke", "abbreviation": "DUKE",
+     "is_d1": True, "alt": []},
+    {"espn_id": 96, "school": "Kentucky", "slug": "kentucky", "mascot": "Wildcats",
+     "display_name": "Kentucky Wildcats", "short_name": "Kentucky", "abbreviation": "UK",
+     "is_d1": True, "alt": []},
+    {"espn_id": 2306, "school": "Kansas State", "slug": "kansas-state", "mascot": "Wildcats",
+     "display_name": "Kansas State Wildcats", "short_name": "Kansas St", "abbreviation": "KSU",
+     "is_d1": True, "alt": []},
+]
+# ESPN's orientation: Kentucky is HOME against Duke (a neutral-site game the
+# feed lists the other way round), Kansas State home against Duke two days on.
+UK_DUKE = {"game_id": "NCAAB_2025-11-18_duke_kentucky", "game_date": "2025-11-18",
+           "commence_time": "2025-11-19T00:30Z", "home_espn_id": 96, "away_espn_id": 150}
+KSU_DUKE = {"game_id": "NCAAB_2025-11-20_duke_kansas-state", "game_date": "2025-11-20",
+            "commence_time": "2025-11-20T17:00Z", "home_espn_id": 2306, "away_espn_id": 150}
+GAMES = [UK_DUKE, KSU_DUKE]
+
+
+def _event(eid, home, away, tip, home_pt=-4.5, book="fanduel", last_update=None):
+    mk = {"last_update": last_update} if last_update else {}
+    return {"id": eid, "commence_time": tip, "home_team": home, "away_team": away,
+            "bookmakers": [{"key": book, "markets": [
+                {"key": "h2h", **mk, "outcomes": [{"name": home, "price": -190},
+                                                  {"name": away, "price": 160}]},
+                {"key": "spreads", **mk, "outcomes": [
+                    {"name": home, "price": -108, "point": home_pt},
+                    {"name": away, "price": -112, "point": -home_pt}]},
+                {"key": "totals", **mk, "outcomes": [
+                    {"name": "Over", "price": -110, "point": 149.5},
+                    {"name": "Under", "price": -110, "point": 149.5}]}]}]}
+
+
+def contract_process_events(events, sport, snapshot_type, snapshot_at,
+                            include_3way=False, resolve_game_id=None):
+    """_process_events as the NCAAB contract specifies it (the other piece's
+    change): the resolver's (game_id, flipped) is used as given, a flipped
+    event is parsed with its names swapped, and no DraftKings gate."""
+    rows = []
+    for ev in events:
+        hit = resolve_game_id(ev.get("home_team", ""), ev.get("away_team", ""),
+                              ev.get("commence_time", ""))
+        if not hit:
+            continue
+        gid, flipped = hit
+        home = ev["away_team"] if flipped else ev["home_team"]
+        for b in ev.get("bookmakers", []):
+            for m in b.get("markets", []):
+                row = dict.fromkeys(nba_odds_history._ODDS_KEYS)
+                row.update({"game_id": gid, "sport": sport, "bookmaker": b["key"],
+                            "snapshot_type": snapshot_type, "market": m["key"],
+                            "snapshot_at": m.get("last_update", snapshot_at)})
+                if m["key"] == "h2h":
+                    row.update(oi._parse_outcomes(m["outcomes"], sport, home))
+                elif m["key"] == "spreads":
+                    row.update(oi._parse_spread_outcomes(m["outcomes"], home))
+                else:
+                    row.update(oi._parse_total_outcomes(m["outcomes"]))
+                rows.append(row)
+    return [], rows
+
+
+class FakeConn:
+    """Records every statement; answers SELECTs from `answers` by substring."""
+
+    def __init__(self, answers: dict | None = None, held: bool = False):
+        self.sql: list[tuple[str, object]] = []
+        self.many: list[tuple[str, list]] = []
+        self.commits = 0
+        self.answers = answers or {}
+        self.held = held
+        self._last = ""
+
+    def execute(self, sql, params=None):
+        q = " ".join(sql.split())
+        self.sql.append((q, params))
+        self._last = q
+        for needle, ans in self.answers.items():
+            if needle in q and isinstance(ans, Exception):
+                raise ans
+        return self
+
+    def executemany(self, sql, rows):
+        self.many.append((" ".join(sql.split()), list(rows)))
+
+    def fetchone(self):
+        return (1,) if self.held and "odds_history_pulls" in self._last else None
+
+    def fetchall(self):
+        for needle, ans in self.answers.items():
+            if needle in self._last:
+                return ans
+        return []
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class Resp:
+    def __init__(self, status=200, body=None, last="30", remaining="2000000"):
+        self.status_code, self._body = status, body if body is not None else {}
+        self.headers = {"x-requests-last": last, "x-requests-remaining": remaining}
+
+    def json(self):
+        return self._body
+
+
+class FakeMeter(nba_odds_history.Meter):
+    """The real Meter's accounting, with the HTTP call replaced."""
+
+    def __init__(self, answer, ceiling=10_000, floor=0):
+        super().__init__(ceiling, floor)
+        self.answer, self.calls = answer, []
+
+    def get(self, url, params):
+        self.calls.append((url, dict(params)))
+        r = self.answer(url, params)
+        self.spent += int(r.headers.get("x-requests-last") or 0)
+        self.remaining = int(r.headers.get("x-requests-remaining"))
+        return r
+
+
+# ── the snapshot plan ────────────────────────────────────────────────────────
+
+def test_each_game_date_gets_its_opener_its_morning_and_an_hour_before_every_tip():
+    games = [{"game_date": "2026-01-17", "commence_time": "2026-01-17T17:00Z"},   # noon ET
+             {"game_date": "2026-01-17", "commence_time": "2026-01-17T19:04Z"},
+             {"game_date": "2026-01-17", "commence_time": "2026-01-17T19:05Z"},
+             {"game_date": "2026-01-17", "commence_time": "2026-01-18T03:30Z"}]   # 10:30 PT
+    got = h.line_snapshots(games)
+    assert got == sorted(set(got), reverse=True)                 # each once, newest first
+    assert set(got) == {_t("2026-01-16T22:00Z"),                  # the evening-before opener
+                        _t("2026-01-17T15:00Z"),                  # the morning
+                        _t("2026-01-17T16:00Z"),                  # 17:00 tip -> 60 min out
+                        _t("2026-01-17T18:00Z"),                  # 19:04 tip -> 64 min out
+                        _t("2026-01-17T19:00Z"),                  # 19:05 tip -> 5 min out
+                        _t("2026-01-18T03:00Z")}                  # the late West tip
+    for g in games:                                               # 5..65 minutes before each tip
+        tip = _t(g["commence_time"])
+        assert any(300 <= (tip - w).total_seconds() <= 3900 for w in got)
+
+
+def test_dates_that_share_an_hour_share_the_snapshot():
+    # a 22:05Z tip on D-1 asks for D-1 22Z, which is D's opener too
+    games = [{"game_date": "2026-01-16", "commence_time": "2026-01-16T22:05Z"},
+             {"game_date": "2026-01-17", "commence_time": "2026-01-17T22:05Z"}]
+    got = h.line_snapshots(games)
+    assert got.count(_t("2026-01-16T22:00Z")) == 1
+    assert len(got) == len(set(got)) == 5        # 3 + 3 less the shared 2026-01-16 22Z
+    assert set(got) == {_t("2026-01-15T22:00Z"), _t("2026-01-16T15:00Z"), _t("2026-01-16T22:00Z"),
+                        _t("2026-01-17T15:00Z"), _t("2026-01-17T22:00Z")}
+
+
+def test_a_game_with_no_stored_tip_gets_the_opener_and_the_morning_only():
+    assert h.line_snapshots([{"game_date": "2026-03-01", "commence_time": None}]) == [
+        _t("2026-03-01T15:00Z"), _t("2026-02-28T22:00Z")]
+
+
+# ── the precondition ─────────────────────────────────────────────────────────
+
+def test_the_purchase_refuses_a_season_whose_schedule_is_not_stored():
+    conn = FakeConn({"FROM games": [(2025, 6100), (2026, 1200)],
+                     "FROM ncaab_events": [(2025, 6300), (2026, 6400)]})
+    with pytest.raises(h.PreconditionError, match="2026: 1,200 scored games"):
+        h.check_precondition(conn, [2025, 2026])
+
+
+def test_the_purchase_refuses_a_season_with_scores_but_no_event_map():
+    conn = FakeConn({"FROM games": [(2025, 6100)], "FROM ncaab_events": []})
+    with pytest.raises(h.PreconditionError, match="0 ncaab_events rows"):
+        h.check_precondition(conn, [2025])
+
+
+def test_an_unreadable_schedule_raises_rather_than_warns():
+    conn = FakeConn({"FROM ncaab_events": RuntimeError('relation "ncaab_events" does not exist')})
+    with pytest.raises(h.PreconditionError, match="unreadable"):
+        h.check_precondition(conn, [2025])
+
+
+def test_a_stored_schedule_passes_and_is_reported():
+    conn = FakeConn({"FROM games": [(2021, 4285)], "FROM ncaab_events": [(2021, 5282)]})
+    assert h.check_precondition(conn, [2021]) == {2021: (4285, 5282)}
+
+
+def test_the_lines_purchase_checks_before_it_touches_the_feed(monkeypatch):
+    monkeypatch.setattr(h, "check_precondition",
+                        lambda conn, seasons: (_ for _ in ()).throw(h.PreconditionError("no")))
+    meter = FakeMeter(lambda u, p: pytest.fail("a paid call before the precondition"))
+    with pytest.raises(h.PreconditionError):
+        h.buy_lines(FakeConn(), meter, 2021, 2026)
+    with pytest.raises(h.PreconditionError):
+        h.buy_derivatives(FakeConn(), meter, 2024, 2026, "close")
+    assert meter.calls == []
+
+
+# ── the _process_events contract, checked for free before paying ─────────────
+
+def test_the_contract_check_passes_a_function_that_honours_it(monkeypatch):
+    monkeypatch.setattr(h, "_process_events", contract_process_events)
+    h.check_process_events_contract()
+
+
+def _tuple_as_id(events, sport, st, snap, include_3way=False, resolve_game_id=None):
+    _, rows = contract_process_events(events, sport, st, snap,
+                                      resolve_game_id=lambda *a: (resolve_game_id(*a)[0], False))
+    for r in rows:
+        r["game_id"] = resolve_game_id("", "", "")        # today's `game_id = resolved`
+    return [], rows
+
+
+def _no_flip(events, sport, st, snap, include_3way=False, resolve_game_id=None):
+    return contract_process_events(events, sport, st, snap,
+                                   resolve_game_id=lambda *a: (resolve_game_id(*a)[0], False))
+
+
+def _dk_gated(events, sport, st, snap, include_3way=False, resolve_game_id=None):
+    kept = [e for e in events if any(b["key"] == "draftkings" for b in e["bookmakers"])]
+    return contract_process_events(kept, sport, st, snap, resolve_game_id=resolve_game_id)
+
+
+@pytest.mark.parametrize("broken,why", [(_tuple_as_id, "game_id"), (_no_flip, "flipped"),
+                                        (_dk_gated, "DraftKings")])
+def test_the_contract_check_refuses_each_way_of_breaking_it(monkeypatch, broken, why):
+    monkeypatch.setattr(h, "_process_events", broken)
+    with pytest.raises(h.ContractError, match=why):
+        h.check_process_events_contract()
+
+
+def test_the_real_process_events_honours_the_ncaab_contract():
+    """CROSS-PIECE. Fails until the change teaching odds_ingestor._process_events
+    the (game_id, flipped) resolver and the NCAAB DraftKings exemption lands;
+    the lines purchase refuses to spend until it passes."""
+    h.check_process_events_contract()
+
+
+# ── buying one snapshot ──────────────────────────────────────────────────────
+
+def _snapshot(monkeypatch, events, when="2025-11-19T00:00:00Z", held=False):
+    inserted = []
+    monkeypatch.setattr(h, "_process_events", contract_process_events)
+    monkeypatch.setattr(h, "_insert_odds", lambda conn, rows: inserted.extend(rows))
+    conn = FakeConn(held=held)
+    meter = FakeMeter(lambda u, p: Resp(body={"timestamp": "2025-11-18T23:55:38Z",
+                                              "data": events}))
+    stats = defaultdict(int)
+    tips = {g["game_id"]: g["commence_time"] for g in GAMES}
+    ok = h._buy_snapshot(conn, meter, tips, h.EventResolver(REGISTRY, GAMES), _t(when), stats)
+    return ok, conn, meter, stats, inserted
+
+
+def test_a_flipped_event_is_stored_at_espn_s_home_number(monkeypatch):
+    # The feed calls Duke home; ESPN has Kentucky home. Duke -4.5 is Kentucky +4.5.
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T00:30:00Z")
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [ev])
+    assert ok and stats["odds_rows"] == 3 and stats.get("unmatched_events", 0) == 0
+    by = {r["market"]: r for r in rows}
+    assert {r["game_id"] for r in rows} == {UK_DUKE["game_id"]}
+    assert by["spreads"]["spread_home"] == 4.5 and by["spreads"]["home_price"] == -112
+    assert (by["h2h"]["home_price"], by["h2h"]["away_price"]) == (160, -190)
+    assert all(r["source"] == oi.HISTORICAL_ODDS_SOURCE for r in rows)
+    url, params = meter.calls[0]
+    assert url.endswith("/basketball_ncaab/odds") and params["date"] == "2025-11-19T00:00:00Z"
+    assert params["markets"] == "h2h,spreads,totals" and params["bookmakers"] == h.BOOKS
+
+
+def test_an_event_that_resolves_onto_no_game_is_stored_raw_not_dropped(monkeypatch):
+    lost = _event("e9", "Mystery Moose", "Duke Blue Devils", "2025-11-19T00:30:00Z")
+    good = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T00:30:00Z")
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [lost, good])
+    assert ok and stats["unmatched_events"] == 1 and stats["odds_rows"] == 3
+    (sql, stored), = [(q, r) for q, r in conn.many if "ncaab_odds_unmatched" in q]
+    snap, eid, home, away, tip, payload, source = stored[0]
+    assert (eid, home, away, source) == ("e9", "Mystery Moose", "Duke Blue Devils",
+                                         oi.HISTORICAL_ODDS_SOURCE)
+    assert snap == "2025-11-18T23:55:38Z" and json.loads(payload) == lost
+    # written in the same transaction as the ledger row, which commits last
+    ledger = [i for i, (q, _) in enumerate(conn.sql) if q.startswith("INSERT INTO odds_history_pulls")]
+    assert ledger and conn.commits == 1
+    resolver_report = h.EventResolver(REGISTRY, GAMES)
+    resolver_report.split([lost])
+    assert "Mystery Moose (1)" in resolver_report.report()
+
+
+def test_a_price_after_espn_s_tip_is_labelled_in_play(monkeypatch):
+    # The feed's own start says 01:30Z, ESPN says 00:30Z: ESPN's schedule decides.
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T01:30:00Z",
+                last_update="2025-11-19T00:45:00Z")
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [ev], when="2025-11-19T01:00:00Z")
+    assert stats["marked_in_play"] == 3 and {r["snapshot_type"] for r in rows} == {"in_play"}
+
+
+def test_a_ledgered_snapshot_is_never_bought_again(monkeypatch):
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [], held=True)
+    assert ok and meter.calls == [] and stats["skipped_held"] == 1
+    q, params = conn.sql[0]
+    assert "odds_history_pulls" in q and params == ("NCAAB", "2025-11-19", 0)
+
+
+def test_the_floor_stops_the_snapshot_before_the_call(monkeypatch):
+    monkeypatch.setattr(h, "_process_events", contract_process_events)
+    meter = FakeMeter(lambda u, p: pytest.fail("bought below the floor"), floor=500_000)
+    meter.remaining = 500_020
+    stats = defaultdict(int)
+    assert h._buy_snapshot(FakeConn(), meter, {}, h.EventResolver(REGISTRY, GAMES),
+                           _t("2025-11-19T00:00:00Z"), stats) is False
+    assert "floor" in stats["stopped"] and meter.calls == []
+
+
+def test_the_lines_purchase_resumes_from_the_ledger_newest_first(monkeypatch):
+    monkeypatch.setattr(h, "check_precondition", lambda conn, seasons: {})
+    monkeypatch.setattr(h, "check_process_events_contract", lambda: None)
+    monkeypatch.setattr(h, "_ensure_tables", lambda conn: None)
+    monkeypatch.setattr(h, "_season_games", lambda conn, a, b: [UK_DUKE])
+    monkeypatch.setattr(h, "_held_hours", lambda conn: {("2025-11-18", 15), ("2025-11-17", 22)})
+    monkeypatch.setattr(h, "_resolver", lambda conn, games: h.EventResolver(REGISTRY, games))
+    bought = []
+    monkeypatch.setattr(h, "_buy_snapshot",
+                        lambda conn, meter, tips, resolver, when, stats: bought.append(when) or True)
+    h.buy_lines(FakeConn(), FakeMeter(lambda u, p: Resp()), 2026, 2026)
+    # the plan is D-1 22Z, D 15Z and the 00Z hour before the 00:30Z tip; two are held
+    assert bought == [_t("2025-11-19T00:00Z")]
+
+
+# ── first half and team totals ───────────────────────────────────────────────
+
+BOOK = [
+    {"key": "h2h_h1", "outcomes": [{"name": "Duke Blue Devils", "price": -150},
+                                   {"name": "Kentucky Wildcats", "price": 125}]},
+    {"key": "spreads_h1", "outcomes": [{"name": "Duke Blue Devils", "price": -110, "point": -2.5},
+                                       {"name": "Kentucky Wildcats", "price": -110, "point": 2.5}]},
+    {"key": "totals_h1", "outcomes": [{"name": "Over", "price": -115, "point": 70.5},
+                                      {"name": "Under", "price": -105, "point": 70.5}]},
+    {"key": "team_totals", "outcomes": [
+        {"name": "Over", "description": "Duke Blue Devils", "price": -120, "point": 77.5},
+        {"name": "Under", "description": "Duke Blue Devils", "price": -100, "point": 77.5},
+        {"name": "Over", "description": "Kentucky Wildcats", "price": -105, "point": 73.5},
+        {"name": "Under", "description": "Kentucky Wildcats", "price": -115, "point": 73.5},
+        {"name": "Over", "description": "Kansas State Wildcats", "price": -110, "point": 66.5}]},
+]
+
+
+def test_derivative_markets_parse_into_the_odds_shape():
+    rows = {r["market"]: r for r in h.parse_derivatives(BOOK, "Duke Blue Devils", "Kentucky Wildcats")}
+    assert (rows["h2h_h1"]["home_price"], rows["h2h_h1"]["away_price"]) == (-150, 125)
+    assert rows["spreads_h1"]["spread_home"] == -2.5
+    assert (rows["totals_h1"]["total_line"], rows["totals_h1"]["over_price"]) == (70.5, -115)
+    assert (rows["team_totals_home"]["total_line"], rows["team_totals_home"]["over_price"],
+            rows["team_totals_home"]["under_price"]) == (77.5, -120, -100)
+    assert (rows["team_totals_away"]["total_line"], rows["team_totals_away"]["under_price"]) == (73.5, -115)
+    # a team not in the game is never filed under either side
+    assert sum(1 for r in h.parse_derivatives(BOOK, "Duke Blue Devils", "Kentucky Wildcats")
+               if r["market"].startswith("team_totals")) == 2
+
+
+def test_a_flipped_event_s_derivatives_land_in_espn_s_orientation():
+    # ESPN has Kentucky home: the caller passes the feed's away name as home
+    rows = {r["market"]: r for r in h.parse_derivatives(BOOK, "Kentucky Wildcats", "Duke Blue Devils")}
+    assert rows["spreads_h1"]["spread_home"] == 2.5 and rows["spreads_h1"]["home_price"] == -110
+    assert (rows["h2h_h1"]["home_price"], rows["h2h_h1"]["away_price"]) == (125, -150)
+    assert rows["team_totals_home"]["total_line"] == 73.5      # Kentucky
+    assert rows["team_totals_away"]["total_line"] == 77.5      # Duke
+
+
+def test_a_half_line_with_one_side_missing_is_not_stored():
+    book = [{"key": "h2h_h1", "outcomes": [{"name": "Duke Blue Devils", "price": -150}]},
+            {"key": "spreads_h1", "outcomes": [{"name": "Somebody", "price": -110, "point": 1.5}]}]
+    assert h.parse_derivatives(book, "Duke Blue Devils", "Kentucky Wildcats") == []
+
+
+@pytest.mark.parametrize("tip,mode,want", [
+    ("2026-01-18T00:07:00Z", "close", "2026-01-17T23:55:00Z"),   # tip - 10, down to 5
+    ("2026-01-17T17:00:00Z", "close", "2026-01-17T16:50:00Z"),
+    ("2026-01-18T00:00:00Z", "open", "2026-01-17T04:00:00Z"),    # 7pm ET: tip - 20 h is later
+    ("2026-01-17T17:00:00Z", "open", "2026-01-16T22:00:00Z"),    # noon ET: D-1 22Z is later
+    (None, "open", "2026-01-16T22:00:00Z"),
+])
+def test_the_derivative_snapshot_instant(tip, mode, want):
+    assert h.deriv_instant(_t(tip) if tip else None, "2026-01-17", mode) == _t(want)
+
+
+def test_a_game_with_no_tip_has_no_close():
+    assert h.deriv_instant(None, "2026-01-17", "close") is None
+
+
+def test_the_two_derivative_purchases_resume_separately():
+    assert h.NCAAB_DERIV_CLOSE_SOURCE == "odds_api_ncaab_derivative_close"
+    assert h.NCAAB_DERIV_OPEN_SOURCE == "odds_api_ncaab_derivative_open"
+    assert h.DERIV_SOURCES == {"close": h.NCAAB_DERIV_CLOSE_SOURCE, "open": h.NCAAB_DERIV_OPEN_SOURCE}
+
+
+def _deriv_world(monkeypatch, done=frozenset()):
+    monkeypatch.setattr(h, "check_precondition", lambda conn, seasons: {})
+    monkeypatch.setattr(h, "_season_games", lambda conn, a, b: list(GAMES))
+    monkeypatch.setattr(h, "_deriv_done", lambda conn, ids, source: set(done))
+    monkeypatch.setattr(h, "_resolver", lambda conn, games: h.EventResolver(REGISTRY, games))
+    inserted = []
+    monkeypatch.setattr(h, "_insert_odds", lambda conn, rows: inserted.extend(rows))
+    listing = [
+        # Kentucky-Duke, listed with Duke home: flipped
+        {"id": "e1", "commence_time": "2025-11-19T00:30:00Z", "home_team": "Duke Blue Devils",
+         "away_team": "Kentucky Wildcats"},
+        {"id": "e2", "commence_time": "2025-11-20T17:00:00Z", "home_team": "Kansas State Wildcats",
+         "away_team": "Duke Blue Devils"},
+        {"id": "e9", "commence_time": "2025-11-19T01:00:00Z", "home_team": "Mystery Moose",
+         "away_team": "Duke Blue Devils"},
+    ]
+
+    def answer(url, params):
+        if url.endswith("/events"):
+            return Resp(body={"data": listing}, last="1")
+        return Resp(body={"timestamp": params["date"], "data": {"bookmakers": [
+            {"key": "fanduel", "markets": BOOK}]}}, last="40")
+    return inserted, answer
+
+
+def test_derivatives_are_bought_once_a_game_at_the_close_in_espn_s_orientation(monkeypatch):
+    inserted, answer = _deriv_world(monkeypatch)
+    meter = FakeMeter(answer, ceiling=10_000, floor=0)
+    out = h.buy_derivatives(FakeConn(), meter, 2026, 2026, "close")
+    odds_calls = [(u, p) for u, p in meter.calls if "/events/" in u]
+    assert {u.rsplit("/", 2)[-2] for u, _ in odds_calls} == {"e1", "e2"}    # never the unmatched one
+    dates = {u.rsplit("/", 2)[-2]: p["date"] for u, p in odds_calls}
+    assert dates == {"e1": "2025-11-19T00:20:00Z", "e2": "2025-11-20T16:50:00Z"}
+    assert all(p["markets"] == "h2h_h1,spreads_h1,totals_h1,team_totals" for _, p in odds_calls)
+    uk = {r["market"]: r for r in inserted if r["game_id"] == UK_DUKE["game_id"]}
+    assert uk["spreads_h1"]["spread_home"] == 2.5                 # Kentucky, ESPN's home
+    assert uk["team_totals_home"]["total_line"] == 73.5
+    assert all(r["source"] == h.NCAAB_DERIV_CLOSE_SOURCE and r["sport"] == "NCAAB" for r in inserted)
+    assert out["events"] == 2 and out["flipped"] == 1 and out["left_unbought"] == 0
+
+
+def test_a_game_already_stored_under_the_source_is_not_bought_again(monkeypatch):
+    inserted, answer = _deriv_world(monkeypatch, done={UK_DUKE["game_id"]})
+    meter = FakeMeter(answer)
+    h.buy_derivatives(FakeConn(), meter, 2026, 2026, "open")
+    bought = [u.rsplit("/", 2)[-2] for u, _ in meter.calls if "/events/" in u]
+    assert bought == ["e2"]
+    assert {r["source"] for r in inserted} == {h.NCAAB_DERIV_OPEN_SOURCE}
+
+
+def test_the_derivative_purchase_stops_at_the_floor(monkeypatch):
+    inserted, answer = _deriv_world(monkeypatch)
+
+    def near_the_floor(url, params):
+        r = answer(url, params)
+        r.headers["x-requests-remaining"] = "500030"    # after the list: one game (40) won't fit
+        return r
+    meter = FakeMeter(near_the_floor, floor=500_000)
+    meter.remaining = 500_045                           # the list and one game (41) fit
+    out = h.buy_derivatives(FakeConn(), meter, 2026, 2026, "close")
+    assert "floor" in out["stopped"] and inserted == []
+    assert [u.rsplit("/", 1)[-1] for u, _ in meter.calls] == ["events"]   # listed, nothing bought
+    assert out["left_unbought"] == 2                    # both listed games still owed
+
+
+def test_the_derivative_purchase_does_not_list_a_date_it_cannot_buy_from(monkeypatch):
+    inserted, answer = _deriv_world(monkeypatch)
+    meter = FakeMeter(answer, floor=500_000)
+    meter.remaining = 500_040                           # 1 + 40 would cross the floor
+    out = h.buy_derivatives(FakeConn(), meter, 2026, 2026, "close")
+    assert "floor" in out["stopped"] and meter.calls == []
+
+
+# ── the meter is the NBA purchase's, reused ──────────────────────────────────
+
+def test_the_meter_is_shared_and_stops_before_the_floor_and_the_ceiling():
+    assert h.Meter is nba_odds_history.Meter and h._write_with_retry is nba_odds_history._write_with_retry
+    m = h.Meter(ceiling=1_000, floor=500_000)
+    assert m.stop_reason(30) is None
+    m.remaining = 500_020
+    assert "floor" in m.stop_reason(30)
+    m.remaining, m.spent = 3_000_000, 980
+    assert "ceiling" in m.stop_reason(30)
+
+
+# ── the unmatched store ──────────────────────────────────────────────────────
+
+def test_the_unmatched_store_is_a_locked_down_worker_only_table():
+    from data.anon_readable import WORKER_ONLY_TABLES
+    assert "CREATE TABLE IF NOT EXISTS ncaab_odds_unmatched" in h.UNMATCHED_DDL
+    assert "PRIMARY KEY (event_id, snapshot_at, source)" in h.UNMATCHED_DDL
+    assert h.UNMATCHED_TABLE in WORKER_ONLY_TABLES
+
+
+def test_the_tables_are_created_only_when_the_catalog_says_so(monkeypatch):
+    seen = []
+    monkeypatch.setattr(h, "schema_is_current", lambda conn, table, **kw: seen.append((table, kw)) or True)
+    conn = FakeConn()
+    h._ensure_tables(conn)
+    assert conn.sql == [] and conn.commits == 0
+    assert {t for t, _ in seen} == {"odds_history_pulls", "ncaab_odds_unmatched"}
+    assert all(kw["rls"] is True and kw["revoked_from"] for _, kw in seen)
+
+
+# ── the command line, as the worker job runs it ──────────────────────────────
+
+def _cli(monkeypatch):
+    called = []
+    monkeypatch.setattr(h, "get_connection", lambda: FakeConn())
+    monkeypatch.setattr(h, "persist_quota", lambda conn: called.append(("quota",)))
+    monkeypatch.setattr(h, "buy_lines",
+                        lambda conn, m, a, b: called.append(("lines", a, b, m.ceiling, m.floor)) or {})
+    monkeypatch.setattr(h, "buy_derivatives",
+                        lambda conn, m, a, b, mode: called.append((mode, a, b, m.ceiling, m.floor)) or {})
+    monkeypatch.setattr(h, "probe", lambda conn, m, season: called.append(("probe", season, m.ceiling)) or {})
+    return called
+
+
+@pytest.mark.parametrize("mode,want", [
+    ("lines", ("lines", 2021, 2026, 420_000, 500_000)),
+    ("deriv_close", ("close", 2024, 2026, 800_000, 500_000)),
+    ("deriv_open", ("open", 2024, 2026, 800_000, 500_000)),
+    ("probe", ("probe", 2026, 200)),
+])
+def test_every_job_mode_runs_the_buyer_through_its_own_argv(monkeypatch, mode, want):
+    called = _cli(monkeypatch)
+    cap = jq.NCAAB_ODDS_HISTORY_MODES[mode]["cap"]
+    jq._job_ncaab_odds_history(**jq._validate_ncaab_odds_history(
+        {"mode": mode, "max_credits": cap, "floor": 500_000}))
+    assert called == [want, ("quota",)]
+
+
+@pytest.mark.parametrize("argv", [
+    ["--lines", "--seasons", "2021", "2026", "--apply", "--max-credits", "1000"],          # no floor
+    ["--lines", "--seasons", "2021", "2026", "--apply", "--floor", "500000"],             # no ceiling
+    ["--lines", "--seasons", "2021", "2026", "--apply", "--max-credits", "1000", "--floor", "499999"],
+    ["--lines", "--probe", "--seasons", "2026", "2026"],                                  # two at once
+    ["--derivatives", "both", "--seasons", "2024", "2026"],
+    ["--lines", "--seasons", "2026", "2021"],
+])
+def test_a_command_line_that_could_overspend_is_refused(monkeypatch, argv):
+    called = _cli(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["ncaab_odds_history"] + argv)
+    with pytest.raises(SystemExit):
+        h.main()
+    assert not [c for c in called if c[0] != "quota"]
+
+
+def test_without_apply_it_prints_the_plan_and_spends_nothing(monkeypatch, capsys):
+    called = _cli(monkeypatch)
+    monkeypatch.setattr(h, "check_precondition", lambda conn, seasons: {2026: (6000, 6100)})
+    monkeypatch.setattr(h, "plan_lines", lambda conn, a, b: (GAMES, [_t("2025-11-19T00:00Z")] * 3,
+                                                             [_t("2025-11-19T00:00Z")] * 2))
+    monkeypatch.setattr("sys.argv", ["x", "--lines", "--seasons", "2026", "2026"])
+    h.main()
+    assert "2 to buy (~60 credits)" in capsys.readouterr().out
+    assert [c for c in called if c[0] != "quota"] == []
+
+
+# ── the worker jobs ──────────────────────────────────────────────────────────
+
+def test_the_jobs_are_on_the_allowlist_and_run_repo_modules():
+    import inspect
+    for name, fn, val in (("ncaab_odds_history", jq._job_ncaab_odds_history,
+                           jq._validate_ncaab_odds_history),
+                          ("ncaab_schedule_backfill", jq._job_ncaab_schedule_backfill,
+                           jq._validate_ncaab_schedule_backfill),
+                          ("ncaab_feed_probe", jq._job_ncaab_feed_probe, jq._validate_ncaab_feed_probe)):
+        assert jq.JOBS[name] == (fn, val)
+        src = inspect.getsource(fn)
+        assert "_run_script_main" in src and "subprocess" not in src
+
+
+@pytest.mark.parametrize("args", [
+    {"mode": "lines", "max_credits": 420_001, "floor": 500_000},       # above the approved scope
+    {"mode": "deriv_close", "max_credits": 800_001, "floor": 500_000},
+    {"mode": "deriv_open", "max_credits": 800_001, "floor": 500_000},
+    {"mode": "probe", "max_credits": 201, "floor": 500_000},
+    {"mode": "lines", "max_credits": 0, "floor": 500_000},
+    {"mode": "lines", "max_credits": 100_000, "floor": 499_999},       # would let the feeds run dry
+    {"mode": "lines", "max_credits": 100_000},
+    {"mode": "props", "max_credits": 100_000, "floor": 500_000},       # not an approved purchase
+    {"mode": "lines", "max_credits": 100_000, "floor": 500_000, "seasons": [2015, 2026]},
+])
+def test_an_ncaab_purchase_outside_the_approved_scope_is_refused(args):
+    with pytest.raises(ValueError):
+        jq._validate_ncaab_odds_history(args)
+
+
+def test_the_approved_scopes_and_floor():
+    modes = jq.NCAAB_ODDS_HISTORY_MODES
+    assert {m: (v["cap"], v["seasons"]) for m, v in modes.items()} == {
+        "lines": (420_000, (2021, 2026)), "deriv_close": (800_000, (2024, 2026)),
+        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026))}
+    assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 500_000
+    # the probe mode may carry the same floor as the purchases
+    assert jq._validate_ncaab_odds_history({"mode": "probe", "max_credits": 200, "floor": 500_000})
+
+
+@pytest.mark.parametrize("args", [
+    {"first": "2020-11-01"},
+    {"first": "2021-04-10", "last": "2020-11-01"},
+    {"first": "2010-11-01", "last": "2027-04-10"},                     # a typo'd decade
+    {"first": "2020-11-01", "last": "2027-4-10x"},
+    {"first": "2020-11-01", "last": "2021-04-10", "apply": True},
+])
+def test_a_malformed_schedule_backfill_is_refused(args):
+    with pytest.raises(ValueError):
+        jq._validate_ncaab_schedule_backfill(args)
+
+
+def test_the_schedule_backfill_runs_the_espn_ingestor_with_its_cli(monkeypatch):
+    seen = []
+    monkeypatch.setattr(jq, "_run_script_main", lambda mod, argv: seen.append((mod, argv)) or "ok")
+    jq._job_ncaab_schedule_backfill(**jq._validate_ncaab_schedule_backfill(
+        {"first": "2020-11-01", "last": "2027-04-10"}))
+    assert seen == [("data.ingestors.ncaab_espn_ingestor", ["--backfill", "2020-11-01", "2027-04-10"])]
+
+
+DECLARED = ["ncaab-feed-probe-2026-10-26", "ncaab-schedule-backfill-2020-2027",
+            "ncaab-history-probe-2026-10-26", "ncaab-history-lines-2021-2026",
+            "ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r2",
+            "ncaab-history-deriv-open-2024-2026"]
+
+
+def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
+    entries = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
+    keys = [e["key"] for e in entries]
+    at = [keys.index(k) for k in DECLARED]
+    assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
+    by = {e["key"]: e for e in entries}
+    for k in DECLARED:
+        e = by[k]
+        assert e["requested_by"] == "mike" and e.get("enabled", True) is True
+        assert "3 approved" in e["note"]
+        jq.JOBS[e["job_type"]][1](e["args"])
+    assert by["ncaab-feed-probe-2026-10-26"]["args"] == {"market_events": 5}
+    assert by["ncaab-schedule-backfill-2020-2027"]["args"] == {"first": "2020-11-01", "last": "2027-04-10"}
+    buys = [by[k]["args"] for k in DECLARED[2:]]
+    assert [a["mode"] for a in buys] == ["probe", "lines", "deriv_close", "deriv_close", "deriv_open"]
+    assert all(a["floor"] >= 500_000 for a in buys)
+    assert by["ncaab-history-deriv-close-2024-2026-r2"]["run_after"] == "2026-11-02T00:30:00+00:00"
+    assert by["ncaab-history-deriv-open-2024-2026"]["run_after"] == "2026-11-02T01:00:00+00:00"
+    assert (by["ncaab-history-deriv-close-2024-2026-r2"]["args"]
+            == by["ncaab-history-deriv-close-2024-2026"]["args"])
