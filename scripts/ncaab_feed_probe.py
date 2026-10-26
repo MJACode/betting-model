@@ -34,7 +34,8 @@ import requests
 
 import config
 from data.ingestors.ncaab_teams import (ODDS_API_SPORT_KEY, eastern_game_date,
-                                        load_registry, make_resolver, resolve_team_name)
+                                        load_registry, make_resolver, reset_registry_cache,
+                                        resolve_team_name)
 from data.ingestors.odds_quota import persist_quota, record_quota_headers
 
 ODDS = "https://api.the-odds-api.com/v4"
@@ -84,6 +85,21 @@ def _hdr(r, name: str) -> str:
     return (r.headers.get(name) if r is not None else None) or "?"
 
 
+def _free_verdict(*billed: str) -> str:
+    """"ok" when every free call read x-requests-last 0, "NOT ZERO" when any
+    billed, "NOT READ" when a header is missing (a failed call or no header is
+    not evidence of a charge, and not evidence it was free either)."""
+    vals = []
+    for b in billed:
+        try:
+            vals.append(float(b))
+        except (TypeError, ValueError):
+            vals.append(None)
+    if any(v is not None and v > 0 for v in vals):
+        return "NOT ZERO"
+    return "ok" if all(v == 0 for v in vals) else "NOT READ"
+
+
 # ── (a) and (b): The Odds API ────────────────────────────────────────────────
 
 def probe_odds(conn, rep: Report, market_events: int) -> None:
@@ -113,7 +129,7 @@ def probe_odds(conn, rep: Report, market_events: int) -> None:
     rep.line(f"odds /events: HTTP {getattr(r, 'status_code', err)}, x-requests-last "
              f"{events_last}, remaining {remaining}; {len(events)} events, earliest "
              f"{tips[0] if tips else 'none'}, latest {tips[-1] if tips else 'none'}")
-    free = "ok" if sports_last in ("0", "0.0") and events_last in ("0", "0.0") else "NOT ZERO"
+    free = _free_verdict(sports_last, events_last)
     rep.sum(f"odds: {ODDS_API_SPORT_KEY} active={active}; {len(events)} events, earliest "
             f"{tips[0] if tips else 'none'}; x-requests-last sports={sports_last} "
             f"events={events_last} ({free}); remaining {remaining}")
@@ -131,6 +147,19 @@ def _resolve_report(conn, rep: Report, events: list[dict], tips: list[str]) -> N
         rep.line("names: no database connection here, registry not read")
         rep.sum("names: not checked (no database connection)")
         return
+    # The worker runs every job in one process and load_registry caches what it
+    # read first, an empty list included. This probe is declared to run BEFORE
+    # the ESPN backfill creates ncaab_teams, so it reads fresh and leaves no
+    # cache behind: an empty one would make every later NCAAB job in the same
+    # process resolve nothing (2026-10-26 review).
+    reset_registry_cache()
+    try:
+        _resolve_names(conn, rep, events, tips)
+    finally:
+        reset_registry_cache()
+
+
+def _resolve_names(conn, rep: Report, events: list[dict], tips: list[str]) -> None:
     registry = load_registry(conn)
     names = sorted({n for e in events for n in (e.get("home_team"), e.get("away_team")) if n})
     unresolved = [n for n in names if resolve_team_name(n, registry) is None]

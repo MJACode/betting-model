@@ -630,7 +630,8 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
         raise ValueError(f"last {last} is before first {first}")
     if (d1 - d0).days > _NCAAB_BACKFILL_MAX_DAYS:
         raise ValueError(f"span {(d1 - d0).days} days exceeds {_NCAAB_BACKFILL_MAX_DAYS:,}")
-    return {"first": first, "last": last}
+    # strptime takes "2027-4-10"; the ingestor is handed the ISO form it parses.
+    return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
 
 
 # Keys this job will read. Anything else — including max_credits, credit_cap,

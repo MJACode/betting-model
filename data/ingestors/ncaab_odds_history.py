@@ -82,7 +82,8 @@ from data.ddl_guard import schema_is_current
 from data.db import get_connection
 from data.ingestors.nba_odds_history import _ODDS_KEYS, Meter, _write_with_retry
 from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window,
-                                        load_registry, match_event, resolve_team_name)
+                                        load_registry, match_event, reset_registry_cache,
+                                        resolve_team_name)
 from data.ingestors.odds_ingestor import (HISTORICAL_ODDS_SOURCE, PULL_LEDGER_DDL,
                                           _insert_odds, _mark_in_play, _parse_outcomes,
                                           _parse_spread_outcomes, _parse_total_outcomes,
@@ -270,6 +271,12 @@ _UNMATCHED_INSERT = """
 
 # ── resolving the feed's events onto ESPN's games ────────────────────────────
 
+def _event_key(ev: dict) -> tuple[str, str, str]:
+    """(home, away, commence) as the feed sent them: the resolver's arguments."""
+    return (ev.get("home_team") or "", ev.get("away_team") or "",
+            ev.get("commence_time") or "")
+
+
 class EventResolver:
     """ncaab_teams.match_event over a whole season, fast, and counting what misses.
 
@@ -307,8 +314,7 @@ class EventResolver:
         """Resolve every event once: ({(home, away, commence): hit}, unmatched events)."""
         hits, unmatched = {}, []
         for ev in events:
-            key = (ev.get("home_team") or "", ev.get("away_team") or "",
-                   ev.get("commence_time") or "")
+            key = _event_key(ev)
             hit = self(*key)
             hits[key] = hit
             if hit is not None:
@@ -339,8 +345,20 @@ def _season_games(conn, first: int, last: int) -> list[dict]:
     return load_games_window(conn, lo, hi)
 
 
+def _fresh_registry(conn) -> list[dict]:
+    """ncaab_teams read now, not the process's cached copy.
+
+    The worker runs every job in ONE process, and ncaab_teams.load_registry
+    caches whatever it read first, an empty list included. The declared feed
+    probe runs before the ESPN backfill creates the table, so without this the
+    purchases queued behind the backfill would read that empty cache and
+    refuse to start (2026-10-26 review)."""
+    reset_registry_cache()
+    return load_registry(conn)
+
+
 def _resolver(conn, games: list[dict]) -> EventResolver:
-    registry = load_registry(conn)
+    registry = _fresh_registry(conn)
     if not registry:
         raise PreconditionError("ncaab_teams is empty, so no feed name can resolve; "
                                 "run the ESPN backfill first")
@@ -406,21 +424,38 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
     hits, unmatched = resolver.split(events)
     # The contract: _process_events takes (game_id, flipped) and swaps the
     # names itself before parsing (proved by check_process_events_contract).
+    # It gets the resolver ITSELF, not a lookup of split()'s answers keyed on
+    # the exact strings: a lookup misses if the parser passes the start in any
+    # other form, and that event would then be neither stored nor kept raw.
     _, odds_rows = _process_events(events, SPORT, "open", snapshot_at,
-                                   resolve_game_id=lambda h, a, c: hits.get((h or "", a or "", c or "")))
+                                   resolve_game_id=resolver)
     for row in odds_rows:
         row["source"] = HISTORICAL_ODDS_SOURCE
+    # The backstop for the same loss: an event that DID resolve and carried
+    # prices but produced no row (a filter inside the parser, which this
+    # module does not own) is kept raw beside the unmatched ones, because the
+    # ledger row below means this snapshot is never bought again.
+    kept = {o["game_id"] for o in odds_rows}
+    dropped = [ev for ev in events
+               if (hit := hits.get(_event_key(ev))) and hit[0] not in kept
+               and any(b.get("markets") for b in ev.get("bookmakers") or [])]
+    if dropped:
+        logger.warning(f"lines {snapshot_at}: {len(dropped)} resolved event(s) produced no "
+                       f"odds row; kept raw in {UNMATCHED_TABLE}")
     # With a resolver _process_events emits no game rows, so the in-play
     # relabel takes each game's tip from ESPN's schedule (the feed's own start
     # where ESPN has none). Without this a 22Z price on a 19Z tip is stored
-    # as pre-game: the section 7 leak.
+    # as pre-game: the section 7 leak. Both are read as aware UTC first, so a
+    # stored tip without an offset cannot raise mid-purchase in the compare.
     fed = {hit[0]: c for (h, a, c), hit in hits.items() if hit}
-    starts = [{"game_id": gid, "commence_time": tips.get(gid) or fed.get(gid)}
-              for gid in {o["game_id"] for o in odds_rows}]
+    starts = []
+    for gid in kept:
+        tip = _utc(tips.get(gid)) or _utc(fed.get(gid))
+        starts.append({"game_id": gid, "commence_time": tip.isoformat() if tip else None})
     stats["marked_in_play"] += _mark_in_play(starts, odds_rows)
     lost = [(stamp, str(ev.get("id")), ev.get("home_team"), ev.get("away_team"),
              ev.get("commence_time"), json.dumps(ev), HISTORICAL_ODDS_SOURCE)
-            for ev in unmatched]
+            for ev in unmatched + dropped]
 
     def _write():
         if odds_rows:
@@ -440,7 +475,8 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
         return True
     stats["calls"] += 1
     stats["odds_rows"] += len(odds_rows)
-    stats["unmatched_events"] += len(lost)
+    stats["unmatched_events"] += len(unmatched)
+    stats["dropped_by_parser"] += len(dropped)
     if stats["calls"] % 50 == 0:
         logger.info(f"lines {snapshot_at}: {stats['calls']} calls, {stats['odds_rows']:,} rows, "
                     f"spent {meter.spent:,}, balance {meter.remaining}")
@@ -605,8 +641,7 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
         hits, _ = resolver.split(events)
         out = []
         for ev in events:
-            hit = hits.get((ev.get("home_team") or "", ev.get("away_team") or "",
-                            ev.get("commence_time") or ""))
+            hit = hits.get(_event_key(ev))
             if hit and hit[0] in pending:
                 out.append((ev, pending.pop(hit[0]), hit[1]))
         return out
@@ -657,6 +692,13 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
         return True
 
     def run_date(d: str) -> bool:
+        # The check sits HERE, not only in the first loop, so the second pass
+        # over unanswered dates cannot list one (1 credit) under the floor.
+        why = meter.stop_reason(LIST_COST + DERIV_EVENT_COST)
+        if why:
+            totals["stopped"] = why
+            logger.warning(f"derivatives {mode} stopping before listing {d}: {why}")
+            return False
         evs = listed(d)
         if evs is None:
             unlisted.append(d)
@@ -677,10 +719,6 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
     for d in sorted(by_date, reverse=True):
         if not any(g["game_id"] in pending for g in by_date[d]):
             continue                         # every game already bought off another date's list
-        if meter.stop_reason(LIST_COST + DERIV_EVENT_COST):
-            totals["stopped"] = meter.stop_reason(LIST_COST + DERIV_EVENT_COST)
-            stopped = True
-            break
         if not run_date(d):
             stopped = True
             break
@@ -691,6 +729,8 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
         # every game that got none, under the same meter and floor
         totals["dates_unlisted"] = len(unlisted)
         for d in list(unlisted):
+            if not any(g["game_id"] in pending for g in by_date[d]):
+                continue                     # bought off another date's list meanwhile
             if not run_date(d):
                 stopped = True
                 break
@@ -739,7 +779,7 @@ def probe(conn, meter: Meter, season: int) -> dict:
     print(f"probe: _process_events contract {out['contract']}")
     d = _busiest_date(conn, season)
     try:
-        resolver = EventResolver(load_registry(conn), _season_games(conn, season, season))
+        resolver = EventResolver(_fresh_registry(conn), _season_games(conn, season, season))
     except Exception:                                           # noqa: BLE001
         resolver = EventResolver([], [])
 

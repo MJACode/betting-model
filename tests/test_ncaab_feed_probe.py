@@ -163,6 +163,42 @@ def test_more_than_ten_market_events_is_refused(world, monkeypatch):
             fp.main(["--market-events", n])
 
 
+def test_a_missing_billing_header_is_not_read_as_free_or_as_billed():
+    assert fp._free_verdict("0", "0.0") == "ok"
+    assert fp._free_verdict("0", "1") == "NOT ZERO"
+    assert fp._free_verdict("?", "0") == "NOT READ"
+
+
+class _RegistryConn:
+    """Answers the ncaab_teams read the way the real table would."""
+    ROWS = [(150, "Duke", "duke", "Blue Devils", "Duke Blue Devils", "Duke", "DUKE", True, ""),
+            (96, "Kentucky", "kentucky", "Wildcats", "Kentucky Wildcats", "Kentucky", "UK", True, "")]
+
+    def execute(self, sql, params=None):
+        self._rows = self.ROWS if "FROM ncaab_teams" in sql else []
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+    def rollback(self):
+        pass
+
+
+def test_the_probe_reads_the_registry_fresh_and_leaves_no_cache(monkeypatch, capsys):
+    """REVIEW 2026-10-26. The worker runs every job in one process and
+    ncaab_teams.load_registry caches what it read first, an empty list too.
+    This probe is declared BEFORE the ESPN backfill creates ncaab_teams: a
+    cache it left behind would make every later NCAAB job resolve nothing."""
+    from data.ingestors import ncaab_teams as nt
+    monkeypatch.setattr(nt, "_TEAM_CACHE", [])            # stale, from before the table existed
+    monkeypatch.setattr(fp, "make_resolver", lambda *a, **k: None)
+    rep = fp.Report(())
+    fp._resolve_report(_RegistryConn(), rep, EVENTS, sorted(e["commence_time"] for e in EVENTS))
+    assert "registry 2 teams, 1 unresolved: ['Mystery Moose']" in capsys.readouterr().out
+    assert nt._TEAM_CACHE is None
+
+
 def test_the_redaction_covers_any_text():
     rep = fp.Report((ODDS_KEY, "", CFBD_KEY))
     assert rep.clean(f"x?apiKey={ODDS_KEY}&b={CFBD_KEY}") == "x?apiKey=***&b=***"

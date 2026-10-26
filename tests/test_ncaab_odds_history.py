@@ -221,6 +221,41 @@ def test_a_stored_schedule_passes_and_is_reported():
     assert h.check_precondition(conn, [2021]) == {2021: (4285, 5282)}
 
 
+def test_the_precondition_counts_only_scored_ncaab_games_of_the_asked_seasons():
+    """The spec's bar is scored rows: an unplayed schedule would pass a bare count."""
+    conn = FakeConn({"FROM games": [(2021, 4285)], "FROM ncaab_events": [(2021, 5282)]})
+    h.check_precondition(conn, [2021])
+    (q, params), = [(q, p) for q, p in conn.sql if "FROM games" in q]
+    assert "sport = 'NCAAB'" in q and "home_score IS NOT NULL" in q and "season = ANY(%s)" in q
+    assert params == ([2021],)
+    (q, params), = [(q, p) for q, p in conn.sql if "FROM ncaab_events" in q]
+    assert "season = ANY(%s)" in q and params == ([2021],)
+
+
+class RegistryConn(FakeConn):
+    """Answers the ncaab_teams read the way the real table would."""
+    ROWS = [(150, "Duke", "duke", "Blue Devils", "Duke Blue Devils", "Duke", "DUKE", True, ""),
+            (96, "Kentucky", "kentucky", "Wildcats", "Kentucky Wildcats", "Kentucky", "UK", True, "")]
+
+    def __init__(self):
+        super().__init__({"FROM ncaab_teams": self.ROWS})
+
+
+def test_a_purchase_reads_the_registry_fresh_not_an_empty_cache(monkeypatch):
+    """REVIEW 2026-10-26. The worker runs every job in one process and
+    ncaab_teams.load_registry caches what it read first, an empty list too.
+    The declared feed probe runs before the ESPN backfill creates the table, so
+    a cached [] would make the lines purchase behind the backfill refuse three
+    times and end failed."""
+    from data.ingestors import ncaab_teams as nt
+    monkeypatch.setattr(nt, "_TEAM_CACHE", [])            # what the earlier probe left
+    resolver = h._resolver(RegistryConn(), GAMES)
+    assert {t["espn_id"] for t in resolver.registry} == {150, 96}
+    monkeypatch.setattr(nt, "_TEAM_CACHE", [])
+    with pytest.raises(h.PreconditionError, match="ncaab_teams is empty"):
+        h._resolver(FakeConn(), GAMES)                    # a genuinely empty table still refuses
+
+
 def test_the_lines_purchase_checks_before_it_touches_the_feed(monkeypatch):
     monkeypatch.setattr(h, "check_precondition",
                         lambda conn, seasons: (_ for _ in ()).throw(h.PreconditionError("no")))
@@ -274,17 +309,75 @@ def test_the_real_process_events_honours_the_ncaab_contract():
 
 # ── buying one snapshot ──────────────────────────────────────────────────────
 
-def _snapshot(monkeypatch, events, when="2025-11-19T00:00:00Z", held=False):
+def _snapshot(monkeypatch, events, when="2025-11-19T00:00:00Z", held=False,
+              process=contract_process_events, tips=None):
     inserted = []
-    monkeypatch.setattr(h, "_process_events", contract_process_events)
+    monkeypatch.setattr(h, "_process_events", process)
     monkeypatch.setattr(h, "_insert_odds", lambda conn, rows: inserted.extend(rows))
     conn = FakeConn(held=held)
     meter = FakeMeter(lambda u, p: Resp(body={"timestamp": "2025-11-18T23:55:38Z",
                                               "data": events}))
     stats = defaultdict(int)
-    tips = {g["game_id"]: g["commence_time"] for g in GAMES}
+    if tips is None:
+        tips = {g["game_id"]: g["commence_time"] for g in GAMES}
     ok = h._buy_snapshot(conn, meter, tips, h.EventResolver(REGISTRY, GAMES), _t(when), stats)
     return ok, conn, meter, stats, inserted
+
+
+def _raw_kept(conn) -> list[tuple]:
+    return [row for q, rows in conn.many if "ncaab_odds_unmatched" in q for row in rows]
+
+
+def test_the_parser_gets_the_resolver_itself_not_a_lookup_of_exact_strings(monkeypatch):
+    """REVIEW 2026-10-26. The parser is another piece's code; if it hands the
+    resolver the start in any other form than the feed's string, a lookup keyed
+    on that string misses and the event is neither stored nor kept raw, in a
+    snapshot the ledger then marks bought for good."""
+    def reformatting(events, sport, st, snap, include_3way=False, resolve_game_id=None):
+        def as_offset(h_, a_, c_):
+            return resolve_game_id(h_, a_, c_.replace("Z", "+00:00"))
+        return contract_process_events(events, sport, st, snap, resolve_game_id=as_offset)
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T00:30:00Z")
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [ev], process=reformatting)
+    assert ok and stats["odds_rows"] == 3
+    assert {r["game_id"] for r in rows} == {UK_DUKE["game_id"]}
+
+
+def test_a_resolved_event_the_parser_drops_is_kept_raw_not_lost(monkeypatch):
+    """REVIEW 2026-10-26. A resolved event that carried prices and produced no
+    row (any filter inside the parser) is kept raw: the snapshot is ledgered
+    and never bought again, so dropping it would lose paid data."""
+    def drops_everything(events, sport, st, snap, include_3way=False, resolve_game_id=None):
+        for ev in events:
+            resolve_game_id(ev["home_team"], ev["away_team"], ev["commence_time"])
+        return [], []
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T00:30:00Z")
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [ev], process=drops_everything)
+    assert ok and rows == [] and stats["dropped_by_parser"] == 1
+    assert stats.get("unmatched_events", 0) == 0          # it DID resolve
+    (stored,) = _raw_kept(conn)
+    assert stored[1] == "e1" and json.loads(stored[5]) == ev
+    assert any(q.startswith("INSERT INTO odds_history_pulls") for q, _ in conn.sql)
+
+
+def test_a_resolved_event_with_no_prices_is_not_kept_raw(monkeypatch):
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T00:30:00Z")
+    ev["bookmakers"] = []
+    ok, conn, meter, stats, rows = _snapshot(monkeypatch, [ev])
+    assert ok and _raw_kept(conn) == [] and stats.get("dropped_by_parser", 0) == 0
+
+
+def test_a_stored_tip_without_an_offset_is_read_as_utc_not_a_crash(monkeypatch):
+    """REVIEW 2026-10-26. ESPN's tip is stored by another piece; one without an
+    offset met an aware snapshot stamp in _mark_in_play and raised TypeError
+    AFTER the paid call, so the snapshot was never ledgered and every retry
+    paid for it again."""
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T01:30:00Z",
+                last_update="2025-11-19T00:45:00Z")
+    ok, conn, meter, stats, rows = _snapshot(
+        monkeypatch, [ev], when="2025-11-19T01:00:00Z",
+        tips={UK_DUKE["game_id"]: "2025-11-19T00:30:00"})
+    assert ok and stats["marked_in_play"] == 3
 
 
 def test_a_flipped_event_is_stored_at_espn_s_home_number(monkeypatch):
@@ -421,6 +514,27 @@ def test_a_game_with_no_tip_has_no_close():
     assert h.deriv_instant(None, "2026-01-17", "close") is None
 
 
+@pytest.mark.parametrize("tips,want", [
+    (["2026-01-18T00:00:00Z"], "2026-01-17T17:00:00Z"),          # noon ET (EST) when tips are later
+    ([None], "2026-01-17T17:00:00Z"),
+    (["2026-01-17T16:30:00Z", "2026-01-18T00:00:00Z"], "2026-01-17T15:30:00Z"),  # 11:30 ET tip
+])
+def test_a_date_is_listed_at_noon_et_or_an_hour_before_its_first_tip(tips, want):
+    """A pre-noon tip is under way at noon and may no longer be listed."""
+    got = h._list_instant("2026-01-17", [_t(t) if t else None for t in tips])
+    assert got == _t(want)
+
+
+def test_the_derivative_done_check_reads_its_own_source_exactly():
+    """close and open resume separately, so the check is `source = %s`, never
+    a prefix match that would count one purchase as the other."""
+    conn = FakeConn({"FROM odds": [("g1",)]})
+    assert h._deriv_done(conn, ["g1", "g2"], h.NCAAB_DERIV_OPEN_SOURCE) == {"g1"}
+    (q, params), = conn.sql
+    assert "source = %s" in q and "LIKE" not in q
+    assert params == (["g1", "g2"], h.NCAAB_DERIV_OPEN_SOURCE)
+
+
 def test_the_two_derivative_purchases_resume_separately():
     assert h.NCAAB_DERIV_CLOSE_SOURCE == "odds_api_ncaab_derivative_close"
     assert h.NCAAB_DERIV_OPEN_SOURCE == "odds_api_ncaab_derivative_open"
@@ -466,6 +580,8 @@ def test_derivatives_are_bought_once_a_game_at_the_close_in_espn_s_orientation(m
     assert uk["team_totals_home"]["total_line"] == 73.5
     assert all(r["source"] == h.NCAAB_DERIV_CLOSE_SOURCE and r["sport"] == "NCAAB" for r in inserted)
     assert out["events"] == 2 and out["flipped"] == 1 and out["left_unbought"] == 0
+    # newest date first, listed an hour before its noon-ET tip; both games come off it
+    assert [p["date"] for u, p in meter.calls if u.endswith("/events")] == ["2025-11-20T16:00:00Z"]
 
 
 def test_a_game_already_stored_under_the_source_is_not_bought_again(monkeypatch):
@@ -498,6 +614,63 @@ def test_the_derivative_purchase_does_not_list_a_date_it_cannot_buy_from(monkeyp
     meter.remaining = 500_040                           # 1 + 40 would cross the floor
     out = h.buy_derivatives(FakeConn(), meter, 2026, 2026, "close")
     assert "floor" in out["stopped"] and meter.calls == []
+
+
+def test_the_second_pass_does_not_list_a_date_under_the_floor(monkeypatch):
+    """REVIEW 2026-10-26. A date whose list got no answer is listed again at
+    the end; that second list call is held to the floor like the first."""
+    inserted, answer = _deriv_world(monkeypatch, done={KSU_DUKE["game_id"]})
+
+    def unanswered_then_low(url, params):
+        return Resp(status=503, body={}, last="0", remaining="500030")
+    meter = FakeMeter(unanswered_then_low, floor=500_000)
+    meter.remaining = 600_000
+    out = h.buy_derivatives(FakeConn(), meter, 2026, 2026, "close")
+    assert [u.rsplit("/", 1)[-1] for u, _ in meter.calls] == ["events"]   # never listed again
+    assert "floor" in out["stopped"] and out["left_unbought"] == 1
+
+
+# ── the probe ────────────────────────────────────────────────────────────────
+
+def test_the_probe_makes_one_measured_call_of_each_kind_and_writes_nothing(monkeypatch, capsys):
+    """Job ncaab-history-probe-2026-10-26 spends real credits on the worker:
+    one bulk snapshot, one event list, one game's derivatives, each printed
+    with what the feed billed for it, and not one row written. A contract the
+    parser does not meet yet is reported and does not stop the measurement."""
+    monkeypatch.setattr(h, "check_process_events_contract",
+                        lambda: (_ for _ in ()).throw(h.ContractError("not yet")))
+    monkeypatch.setattr(h, "_fresh_registry", lambda conn: REGISTRY)
+    jan = {"game_id": "NCAAB_2026-01-17_duke_kentucky", "game_date": "2026-01-17",
+           "commence_time": "2026-01-18T00:30Z", "home_espn_id": 96, "away_espn_id": 150}
+    monkeypatch.setattr(h, "_season_games", lambda conn, a, b: [jan])
+    monkeypatch.setattr(h, "_insert_odds", lambda conn, rows: pytest.fail("the probe wrote odds"))
+    bulk_ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2026-01-18T00:30:00Z")
+    listing = [{"id": "early", "commence_time": "2026-01-17T16:00:00Z", "home_team": "A",
+                "away_team": "B"},
+               {"id": "e7", "commence_time": "2026-01-18T00:30:00Z",
+                "home_team": "Duke Blue Devils", "away_team": "Kentucky Wildcats"}]
+
+    def answer(url, params):
+        if "/events/" in url:
+            return Resp(body={"data": {"bookmakers": [{"key": "fanduel", "markets": BOOK}]}},
+                        last="40")
+        if url.endswith("/events"):
+            return Resp(body={"data": listing}, last="1")
+        return Resp(body={"data": [bulk_ev]}, last="30")
+    meter = FakeMeter(answer, ceiling=200, floor=500_000)
+    conn = FakeConn()
+    out = h.probe(conn, meter, 2026)
+    kinds = ["derivatives" if "/events/" in u else u.rsplit("/", 1)[-1] for u, _ in meter.calls]
+    assert kinds == ["odds", "events", "derivatives"]
+    assert "/events/e7/odds" in meter.calls[2][0]                 # the first game still to tip
+    assert meter.calls[2][1]["date"] == "2026-01-18T00:20:00Z"   # its close
+    assert conn.many == [] and not [q for q, _ in conn.sql if q.lstrip().upper().startswith(
+        ("INSERT", "UPDATE", "DELETE", "CREATE"))]
+    printed = capsys.readouterr().out
+    for billed in ("x-requests-last 30", "x-requests-last 1", "x-requests-last 40"):
+        assert f"MEASURED {billed}" in printed
+    assert "NOT MET" in out["contract"] and out["bulk"]["resolved"] == 1
+    assert "MEASURED 71 credits in total" in printed
 
 
 # ── the meter is the NBA purchase's, reused ──────────────────────────────────
@@ -644,6 +817,12 @@ def test_the_schedule_backfill_runs_the_espn_ingestor_with_its_cli(monkeypatch):
     jq._job_ncaab_schedule_backfill(**jq._validate_ncaab_schedule_backfill(
         {"first": "2020-11-01", "last": "2027-04-10"}))
     assert seen == [("data.ingestors.ncaab_espn_ingestor", ["--backfill", "2020-11-01", "2027-04-10"])]
+
+
+def test_the_schedule_backfill_hands_the_ingestor_iso_dates():
+    """strptime accepts "2027-4-10"; the ingestor gets the ISO form."""
+    assert jq._validate_ncaab_schedule_backfill({"first": "2020-11-1", "last": "2027-4-10"}) == {
+        "first": "2020-11-01", "last": "2027-04-10"}
 
 
 DECLARED = ["ncaab-feed-probe-2026-10-26", "ncaab-schedule-backfill-2020-2027",
