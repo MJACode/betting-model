@@ -406,8 +406,8 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
 - Edge: always expressed as decimal (0.05 = 5%), not percentage
 - `home_win = 1` means home team won the full game
 - `home_win_reg = 1` means home team won in regulation (NHL only)
-- **Season labels differ by sport.** MLB and WNBA = year of play. NHL, NBA and
-  NCAAF = ENDING year (NBA 2025 = the 2024-25 season). NBA/NHL seasons straddle
+- **Season labels differ by sport.** MLB and WNBA = year of play. NHL, NBA,
+  NCAAB and NCAAF = ENDING year (NBA 2025 = the 2024-25 season). NBA/NHL seasons straddle
   two calendar years, so the season is threaded explicitly, never derived from a
   game's date.
 - **Team ids are 3-letter abbrevs except NCAAF**, which uses the CFBD school name
@@ -629,7 +629,7 @@ to be known BEFORE deciding which file to open.
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
 
-**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
+**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —
 carries that sport's models, data sources, load-bearing conventions, pipeline
 steps and first-time setup.
