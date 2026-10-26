@@ -835,6 +835,51 @@ def step_ncaaf_results(run_date: str) -> bool:
         return False
 
 
+def step_ncaab_schedule(run_date: str) -> bool:
+    """
+    The NCAAB schedule from ESPN: the Division I team list, then today and
+    the next 14 ET dates (data/ingestors/ncaab_espn_ingestor.py). ESPN's
+    schedule owns every NCAAB games row and the odds feed only resolves onto
+    them, so a game this step has not written has no odds and no pick. Runs
+    BEFORE ncaab-results and the odds step. False when any day or the team
+    list failed, so pipeline_runs names it.
+    """
+    try:
+        from data.ingestors.ncaab_espn_ingestor import run_schedule_refresh
+        t = run_schedule_refresh(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAAB schedule (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAAB schedule (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAB schedule failed: {exc}")
+        return False
+
+
+def step_ncaab_results(run_date: str) -> bool:
+    """
+    NCAAB final scores from ESPN (data/ingestors/ncaab_espn_ingestor.py).
+    Must run BEFORE settlement: NCAAB game picks settle off games scores.
+    Self-limiting: no ESPN call unless a started NCAAB game in the last 14
+    days still lacks a score. A stored score is never overwritten. False when
+    a date failed to fetch or write, so the pass records it.
+    """
+    try:
+        from data.ingestors.ncaab_espn_ingestor import run_results
+        t = run_results(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAAB results (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAAB results (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAB results failed: {exc}")
+        return False
+
+
 def step_ncaaf_weather(run_date: str) -> bool:
     """
     Forecast weather for upcoming NCAAF games (next 7 days) into game_weather.
@@ -2001,6 +2046,18 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["ncaaf_results"] = step_ncaaf_results(run_date)
     time.sleep(1)
 
+    # ── Step 0g1/0g2: NCAAB schedule, then finals, via ESPN (pre-settle) ─────
+    # ESPN's schedule owns every NCAAB games row (data/ingestors/ncaab_teams.py);
+    # the schedule step writes today..+14 days, the results step the finals of
+    # any started game still unscored. Both before settle, so last night's
+    # NCAAB picks grade in this run.
+    logger.info("Step 0g1: Refreshing the NCAAB schedule from ESPN...")
+    results["ncaab_schedule"] = step_ncaab_schedule(run_date)
+    time.sleep(1)
+    logger.info("Step 0g2: Ingesting NCAAB finals from ESPN (pre-settle)...")
+    results["ncaab_results"] = step_ncaab_results(run_date)
+    time.sleep(1)
+
     # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
     # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
     # fill it (4b the leaderboard columns, 4c the modelling columns; they parse
@@ -2446,6 +2503,7 @@ Examples:
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
+                                 "ncaab-results", "ncaab-schedule",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -2543,6 +2601,8 @@ Examples:
             "ncaaf-results": lambda: step_ncaaf_results(run_date),
             "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),
             "ncaaf-weather": lambda: step_ncaaf_weather(run_date),
+            "ncaab-results": lambda: step_ncaab_results(run_date),
+            "ncaab-schedule": lambda: step_ncaab_schedule(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),
