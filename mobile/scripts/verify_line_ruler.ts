@@ -39,6 +39,10 @@ import {
   pointInBubble,
   previewTypedLine,
   programmaticPick,
+  compactRulerHeight,
+  MARKER_HIT_H,
+  markerBoxInGesture,
+  markerHitOverhang,
   rulerChromeHeight,
   rulerHi,
   rulerScaleFor,
@@ -369,10 +373,11 @@ for (const def of STAT_CATALOG) {
       !screen.includes('Below one stop is refused'),
   );
   check(
-    'the bubble is the field and the separate pencil button is gone',
+    'the marker is the field and the separate pencil button is gone',
     !screen.includes('typeLineBtn') &&
+      !screen.includes('name="pencil"') &&
       screen.includes('styles.thresholdBubble') &&
-      screen.includes('name="pencil"') &&
+      screen.includes('styles.thresholdMark') &&
       screen.includes('borderColor: colors.tint') &&
       screen.includes('minWidth: THRESHOLD_BUBBLE_W') &&
       screen.includes('minHeight: THRESHOLD_BUBBLE_H') &&
@@ -519,6 +524,12 @@ for (const def of STAT_CATALOG) {
   const box = { x: 40, y: 20, width: 64, height: 44 };
   check('a point inside the bubble hits', pointInBubble(50, 30, box));
   check('a point outside the bubble misses', !pointInBubble(10, 30, box));
+  // Compact marker is 22pt. The finger target grows to 44pt tall, centered
+  // on the drawn pill. Width stays the pill's.
+  const short = { x: 40, y: 20, width: 22, height: 22 };
+  check('a 22pt marker still hits 11pt above its top', pointInBubble(50, 10, short));
+  check('a 22pt marker misses a point beside it', !pointInBubble(10, 30, short));
+  check('a 22pt marker misses a point 23pt above its top', !pointInBubble(50, 20 - 23, short));
   check(
     'the bubble name is the face and the stat',
     thresholdBubbleLabel('225', 'Pass Yards') === 'Threshold 225 Pass Yards',
@@ -534,6 +545,54 @@ for (const def of STAT_CATALOG) {
   check('landscape scrolls the line control', thresholdControlsScroll(1, 844, 390));
   check('portrait at 1x does not', !thresholdControlsScroll(1, 390, 844));
   check('the bubble has room to grow at 2x', rulerChromeHeight(2) > rulerChromeHeight(1));
+  check(
+    'the resting ruler is the short compact strip',
+    compactRulerHeight(1) === 28 && compactRulerHeight(1) < rulerChromeHeight(1),
+  );
+  // The 44pt box used to exist only inside pointInBubble. The gesture view
+  // was the 28pt strip, so a tap in that grown box never arrived. The wings
+  // are the band past the strip, and they are only as wide as the pill.
+  const atRest = compactRulerHeight(1);
+  const at13 = compactRulerHeight(1.3);
+  check(
+    'the resting marker target is 44pt and the strip stays short',
+    MARKER_HIT_H === 44 &&
+      markerHitOverhang(atRest) === 8 &&
+      atRest + 2 * markerHitOverhang(atRest) === MARKER_HIT_H &&
+      markerHitOverhang(at13) === 4.5 &&
+      at13 + 2 * markerHitOverhang(at13) === MARKER_HIT_H &&
+      markerHitOverhang(rulerChromeHeight(1)) === 0,
+  );
+  const shifted = markerBoxInGesture({ x: 40, y: 3, width: 22, height: 22 }, markerHitOverhang(atRest));
+  check('a tap in the top wing hits the marker', pointInBubble(51, 1, shifted));
+  check('a tap in the bottom wing hits the marker', pointInBubble(51, 43, shifted));
+  check('a neighbouring tick misses the marker', !pointInBubble(39, 20, shifted));
+  check('a point beside the wing misses', !pointInBubble(39, 1, shifted));
+  const screen = readFileSync(join(import.meta.dirname, '../src/screens/StatsScreen.tsx'), 'utf-8');
+  check(
+    'the screen hangs that 44pt box off the short strip, wings only as wide as the marker',
+    screen.includes('fieldOpen ? 0 : markerHitOverhang(visualH)') &&
+      screen.includes('height: hitH') &&
+      screen.includes('width: bubbleFrame.width') &&
+      screen.includes('left: bubbleFrame.x') &&
+      screen.includes('markerBoxInGesture') &&
+      screen.includes('pointerEvents="box-none"'),
+  );
+  check(
+    'the bottom wing does not pull the next row up, and a drag on the wing does not open the field',
+    !screen.includes('marginBottom: -rulerChrome.overhang') &&
+      screen.includes('THRESHOLD_TAP_MAX_DIST * THRESHOLD_TAP_MAX_DIST') &&
+      screen.includes('onResponderRelease={onWingRelease}') &&
+      screen.includes('left: bubbleFrame.x') &&
+      screen.includes('width: bubbleFrame.width') &&
+      screen.includes('draft != null || editingRef.current'),
+  );
+  check(
+    'Filters is a word again, and Teams or an empty board mounts the book line',
+    screen.includes('styles.filterBtnText}>Filters</Text>') &&
+      screen.includes('showHeaderBookLine') &&
+      (screen.match(/<SportsbookIndicator\b/g) ?? []).length >= 3,
+  );
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

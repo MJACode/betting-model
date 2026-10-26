@@ -311,9 +311,37 @@ export function previewTypedLine(
   return Math.min(ceil, Math.max(floor, parsed));
 }
 
+/** Finger target for the compact marker. The strip itself stays short. */
+export const MARKER_HIT_H = 44;
+
+/**
+ * How far a 44pt marker target hangs past the short strip, each side.
+ * Zero once the strip is already at least 44pt (the typing field).
+ */
+export function markerHitOverhang(visualH: number, hitH = MARKER_HIT_H): number {
+  if (!Number.isFinite(visualH) || visualH <= 0) return 0;
+  const target = Number.isFinite(hitH) && hitH > 0 ? hitH : MARKER_HIT_H;
+  return Math.max(0, (target - visualH) / 2);
+}
+
+/**
+ * Marker layout measured inside the visual strip, shifted into the gesture
+ * view. The strip sits `overhang` below that view's top; the wings occupy
+ * the overhang and are only as wide as the pill.
+ */
+export function markerBoxInGesture(box: BubbleBox, overhang: number): BubbleBox {
+  const shift = Number.isFinite(overhang) ? overhang : 0;
+  return { x: box.x, y: box.y + shift, width: box.width, height: box.height };
+}
+
 export function pointInBubble(x: number, y: number, box: BubbleBox): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+  // The compact marker draws at 22pt inside a 28pt strip. The finger target
+  // is at least 44pt tall, grown equally above and below the drawn pill.
+  // Width stays the pill's, so a tap on a neighbouring tick still moves the line.
+  const height = Math.max(box.height, MARKER_HIT_H);
+  const top = box.y - (height - box.height) / 2;
+  return x >= box.x && x <= box.x + box.width && y >= top && y <= top + height;
 }
 
 /** VoiceOver name for the bubble. The stat label is the unit ("Pass Yards").
@@ -356,4 +384,18 @@ export function rulerChromeHeight(fontScale: number): number {
   const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
   const bubble = Math.max(THRESHOLD_BUBBLE_H, Math.round(THRESHOLD_BUBBLE_H * Math.min(scale, 2)));
   return Math.max(72, 26 + bubble);
+}
+
+/**
+ * Resting height of the Stats compact ruler (Compact B).
+ *
+ * The selected face sits on a marker over the ticks. The 44pt typing field
+ * still uses `rulerChromeHeight` once that marker opens. Capped under the
+ * old bubble so the resting row stays short even as text grows; 2× text
+ * scrolls the control (`thresholdControlsScroll`).
+ */
+export function compactRulerHeight(fontScale: number): number {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  const mark = Math.round(22 * Math.min(scale, 1.6));
+  return Math.max(28, mark + 6);
 }

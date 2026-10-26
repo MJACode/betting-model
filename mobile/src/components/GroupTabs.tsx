@@ -41,6 +41,9 @@ export function SegmentTabs<T extends string>({
    *  segments (QB / RB / WR/TE / DEF / Teams) share one screen width
    *  (Designer: "don't truncate"). */
   fit = false,
+  /** Stats Compact B: a shorter position row. Slop grows so the target
+   *  stays 44pt while the bar itself loses a few points. */
+  tight = false,
 }: {
   items: readonly T[];
   active: T;
@@ -50,6 +53,7 @@ export function SegmentTabs<T extends string>({
   compact?: boolean;
   accessibilityLabelFor?: (item: T) => string;
   fit?: boolean;
+  tight?: boolean;
 }) {
   if (items.length < 2) return null;
   return (
@@ -70,12 +74,19 @@ export function SegmentTabs<T extends string>({
             accessibilityState={{ selected: isActive }}
             // The tabs are 33-38pt tall, under the 44pt HIG floor, and adding
             // height is the one thing this screen cannot spend (UX review,
-            // 2026-09-12). hitSlop makes the target up instead.
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            // 2026-09-12). hitSlop makes the target up instead. 8pt (was 6)
+            // covers the Compact B position row, which drops 2pt of padding.
+            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
             style={[
               styles.tab,
+              // flex: 1 lives on its own style. A compact tab must not carry
+              // it: the shorthand cannot be unset by a later key, and on web
+              // `flex: 0` is `0 1 0%`, which laid each label out at the 16pt
+              // of horizontal padding (Expo web, 390×1).
+              !compact && styles.tabGrow,
               second && styles.tabSecond,
               compact && styles.tabCompact,
+              tight && styles.tabTight,
               isActive && (second || compact ? styles.tabActiveSecond : styles.tabActive),
             ]}
           >
@@ -86,7 +97,9 @@ export function SegmentTabs<T extends string>({
                 compact && styles.textCompact,
                 isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
               ]}
-              numberOfLines={1}
+              // Full-width rows clip to one line. Compact does not: a 0 min
+              // width let the words paint outside a padding-only box.
+              numberOfLines={compact ? undefined : 1}
               adjustsFontSizeToFit={fit}
               minimumFontScale={fit ? 0.75 : undefined}
               // Segmented-control labels cap at 2x, as iOS caps its native
@@ -145,13 +158,21 @@ const styles = StyleSheet.create({
   rowCompact: {
     backgroundColor: 'transparent',
     borderTopWidth: 0,
+    // Size to the two labels. flex-basis auto, and do not shrink: the
+    // window scroller beside this row is the one that yields.
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
+    alignSelf: 'flex-start',
   },
   tab: {
-    flex: 1,
     alignItems: 'center',
     paddingVertical: spacing.sm,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
+  },
+  tabGrow: {
+    flex: 1,
   },
   // The second level is not just smaller: a 1px rule against the first level's
   // 2px, and the active label in textPrimary rather than tint. Two 2px tint
@@ -162,14 +183,20 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderBottomWidth: 1,
   },
+  // Compact B position row. 6pt instead of spacing.sm (8). The extra slop
+  // on the Pressable keeps the 44pt target.
+  tabTight: {
+    paddingVertical: 6,
+  },
   // No flex: the inline control sizes to its two labels and leaves the rest of
   // the row to the chips it shares it with.
   tabCompact: {
-    // flex: 0, not `undefined` — RN flattens style arrays key by key, so an
-    // undefined value is not a reliable way to unset the `flex: 1` above it.
-    // 0 is flexGrow 0 / flexShrink 0 / flexBasis auto, which is what "size to
-    // your label" means here.
-    flex: 0,
+    // Longhands. The flex shorthand for zero is grow 0, shrink 1, basis 0%
+    // on web, so the tab's border box was the horizontal padding (16pt) and
+    // "Hit Rates" painted over "Averages" and the chip beside it.
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
     paddingVertical: 6,
     paddingHorizontal: spacing.sm,
     // 1px, and the active label in textPrimary rather than tint (see
@@ -199,6 +226,9 @@ const styles = StyleSheet.create({
   },
   textCompact: {
     fontSize: font.size.footnote,
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
   },
   textActiveSecond: {
     color: colors.textPrimary,

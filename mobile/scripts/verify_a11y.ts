@@ -81,7 +81,7 @@ const ALLOWLIST: { file: string; snippet: RegExp; rule: 'label' | 'size' | 'geom
     snippet: /accessibilityRole="tab"/,
     rule: 'geometry',
     reason:
-      'Sport chips: the slop is TOGGLE_ROOM_ABOVE + reachAbove / 2 + reachBelow, props each screen sets — the H9 section below reads every <SportToggle> use and computes it (Picks 45, Models 45, Stats 35 listed short).',
+      'Sport chips: the slop is TOGGLE_ROOM_ABOVE + reachAbove / 2 + reachBelow, props each screen sets — the H9 section below reads every <SportToggle> use and computes it (Picks 45, Models 45). Stats uses the title menu instead of this row.',
   },
   {
     file: 'src/screens/PlayerStatsScreen.tsx',
@@ -129,7 +129,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/ParlayDkHandoff.tsx', 'addBtn,pressed', 1], // 43.5pt
   ['src/components/ParlayDkHandoff.tsx', 'openBtn,pressed', 1], // 43.0pt
   ['src/components/PlayerNewsSheet.tsx', 'readMore', 1], // 41.5pt
-  ['src/components/SportsbookIndicator.tsx', 'row', 1], // 42.3pt
   ['src/components/TeamsBoard.tsx', '', 1], // 34.0pt
   ['src/components/TeamsBoard.tsx', 'lineWrap,pressed', 1], // 38.3pt
   ['src/components/TeamsBoard.tsx', 'noLinesRow,pressed', 1], // 42.7pt
@@ -180,8 +179,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
   ['src/screens/SignInScreen.tsx', '', 3], // 17.8, 39.5, 39.5pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
-  ['src/screens/StatsScreen.tsx', 'clearBtn,pressed', 1], // 42.3pt
-  ['src/screens/StatsScreen.tsx', 'filterBtn,pressed', 1], // 40.0pt
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
@@ -613,19 +610,18 @@ const statAbove = intOf(ps, /const statReachAbove = [^?]+\? (\d+) : 0;/);
 check(`PlayerStats stat chips under the group header: ${statAbove + 4} + ${chipH} + 4 = ${statAbove + 4 + chipH + 4}pt`,
   statAbove + 4 + chipH + 4 >= MIN_TAP_V && /hitSlop=\{\{ top: 4 \+ statReachAbove, bottom: 4, left: 2, right: 2 \}\}/.test(ps));
 // Known short, each with the reason (reported on the PR). A NEW short case
-// fails: every <SportToggle> must be on Picks / Models (reached) or listed here.
+// fails: every <SportToggle> must be on Picks / Models (reached).
 const H9_SHORT: { where: string; eff: number; reason: string }[] = [
-  { where: 'src/screens/StatsScreen.tsx', eff: TOGGLE_H + TOGGLE_IN.above + TOGGLE_IN.below,
-    reason: 'Stats header: 39.5pt from the sportsbook line to the next control (Players/Teams bar or the stat group pill), both interactive (with no player board, the Settings button’s slop sits above instead); the chips (23pt) cannot reach 44 without covering one of them — needs ~5pt more header, a visible change (Designer).' },
   { where: 'src/screens/PlayerStatsScreen.tsx#stat-under-tabs', eff: 4 + chipH + 4,
     reason: 'PlayerStats stat chips under the group tabs: flush against the tab bar above, 8pt gap shared 4/4 with the range chips below — no whitespace left (Designer).' },
   { where: 'src/components/CalendarGrid.tsx', eff: 36,
     reason: 'Calendar day: 36pt is the row pitch; 44pt wide, 36 tall (see the size allowlist).' },
 ];
-const statsUses = (read('src/screens/StatsScreen.tsx').match(/<SportToggle\b[^>]*\/>/g) ?? []);
-check(`every <SportToggle> is reached (Picks, Models) or listed short (${statsUses.length} on Stats, all plain)`,
-  statsUses.length > 0 && statsUses.every((t) => t === '<SportToggle />') &&
-    files.every((f) => { const r = relPosix(f); const n = (readUtf8(f).match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx', 'src/screens/StatsScreen.tsx'].includes(r); }));
+const statsSrc = read('src/screens/StatsScreen.tsx');
+check('Stats sport control is the title menu, not the league row',
+  !/<SportToggle\b/.test(statsSrc) && (statsSrc.match(/<StatsSportButton\b/g) ?? []).length >= 1);
+check('every <SportToggle> is reached (Picks, Models)',
+  files.every((f) => { const r = relPosix(f); const n = (readUtf8(f).match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx'].includes(r); }));
 check('every H9 short entry carries a reason and is really short', H9_SHORT.every((x) => x.reason.length > 40 && x.eff < MIN_TAP_V));
 for (const x of H9_SHORT) console.log(`  (short: ${x.where} ≈ ${x.eff}pt — ${x.reason})`);
 
