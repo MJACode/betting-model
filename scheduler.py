@@ -40,6 +40,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         games, then, for any game whose matchup has just become known, one
         NHL odds fetch and the NHL deciders. Nothing while a refresh pass or
         the daily run is in progress. A day with no NHL game makes no call.)
+  * NCAAB odds capture    every 5 min, 24x7     -> run_ncaab_odds_capture
+        (scripts/ncaab_odds_capture.py: the college basketball board, one
+        bulk call, stored only where a price or line moved against
+        latest_odds, so the hour an opener appeared, and at which book, is
+        known to five minutes. No call when no NCAAB game tips within 36
+        hours; RUN_NCAAB_ODDS_CAPTURE=0 stops it. Writes no picks.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -719,7 +725,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "nba_total_luck_window",
                   # Writes NHL picks through the scorer and the NHL cards, and
                   # takes turns with the refresh passes in this process.
-                  "nhl_goalie_window"}
+                  "nhl_goalie_window",
+                  # Writes odds, not picks: a paid fetch beside the refresh
+                  # passes' own NCAAB fetch, not a loop.
+                  "ncaab_odds_capture"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -1461,6 +1470,31 @@ def run_nba_total_luck_window() -> None:
     bad.update({f"{model} plan": err for model, err in plan.errors.items()})
     if bad:
         raise RuntimeError(f"NBA totals window step(s) did not finish: {bad}")
+
+
+# One bulk Odds API call (15 s at most, 30 with _get_odds' one 422 retry) and
+# four small database reads; seconds in practice. Bounded so a hung call
+# cannot hold the job past the ticks that follow it (max_instances=1).
+NCAAB_ODDS_CAPTURE_TIMEOUT_S = 120
+
+
+def run_ncaab_odds_capture() -> None:
+    """One NCAAB odds capture tick (scripts/ncaab_odds_capture.py).
+
+    The refresh passes fetch NCAAB hourly overnight and through the day, and
+    college basketball openers are posted overnight and in the morning, so an
+    hourly look can only say an opener appeared in the last sixty minutes.
+    This tick fetches the board every five minutes and stores only the rows
+    whose price or line moved. It writes no picks, so it publishes nothing.
+    The script returns without an API call when no NCAAB game tips within 36
+    hours, or when RUN_NCAAB_ODDS_CAPTURE=0. A run that fails or is killed
+    raises, so the heartbeat records "error" and the failure alerter reports
+    it; the next tick, five minutes later, fetches again.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaab_odds_capture"],
+                   "ncaab-odds-capture", timeout=NCAAB_ODDS_CAPTURE_TIMEOUT_S)
+    if outcome != "ok":
+        raise RuntimeError(f"NCAAB odds capture did not finish: {outcome}")
 
 
 def run_nfl_opener_card() -> None:
@@ -2375,6 +2409,20 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour="11-23", minute="*/5", timezone=TIMEZONE),
         id="nhl_goalie_window",
         name="NHL goalie window (every 5 min, 11:00-23:55 ET: decide games once both goalies are confirmed)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # NCAAB odds capture -- every five minutes, 24x7 (run_ncaab_odds_capture).
+    # Around the clock because openers go up overnight, which is exactly where
+    # the hourly passes leave the widest gaps. An off-season tick is one read
+    # of ncaab_events and no call. The kill switch is in the script
+    # (RUN_NCAAB_ODDS_CAPTURE), so the job keeps beating while it is off and
+    # its silence still means stopped.
+    sched.add_job(
+        run_ncaab_odds_capture,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="ncaab_odds_capture",
+        name="NCAAB odds capture (every 5 min, 24x7: change-only, opener timing)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
