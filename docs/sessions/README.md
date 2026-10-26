@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NCAAB foundation. ESPN owns the games row; odds resolve onto it; 5-minute opener capture; the clean-up keeps the last price before the start; history purchase and free imports queued on the worker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats Compact B chrome. Sport sits in the title. The short At least ruler stays. Anytime TD keeps Great/Good/Average under MATCHUP. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM save requires a side or a favorite/underdog. Forward migration `byom_total_side_2026_10_25.sql`. Fallback `20261023225630` and saved models `20261023222927` are already applied. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename at 25 models is refused. The old row is deleted only when the save wrote a different id. One failed backtest does not clear the list. |
