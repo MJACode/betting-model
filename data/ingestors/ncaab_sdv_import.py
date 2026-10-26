@@ -13,7 +13,7 @@ official numbers.
 
 WHAT LANDS WHERE (both worker-only, created on first write)
 -----------------------------------------------------------
-ncaab_team_game_stats  one row per (ESPN game, team): possessions, points,
+ncaab_team_game_stats  one row per (NCAA contest, team): possessions, points,
                        shot mix (rim / three / free throws), rebounds,
                        turnovers. The rating model's input.
 ncaab_player_season    one row per (season, team, player name): games,
@@ -48,18 +48,25 @@ from data.ddl_guard import schema_is_current
 SOURCE = "sportsdataverse_ncaa"
 RELEASE = "https://github.com/sportsdataverse/sportsdataverse-data/releases/download"
 TEAM_BOX_URL = RELEASE + "/ncaa_mbb_team_box/ncaa_mbb_team_box_{season}.parquet"
+SCHEDULE_URL = RELEASE + "/ncaa_mbb_schedule/ncaa_mbb_schedule_{season}.parquet"
 PLAYER_BOX_URL = RELEASE + "/ncaa_mbb_player_box/ncaa_mbb_player_box_{season}.parquet"
 
 TEAM_TABLE = "ncaab_team_game_stats"
-TEAM_COLS = ("espn_game_id", "team_espn_id", "opp_espn_id", "season", "home_espn_id",
+TEAM_COLS = ("contest_id", "team", "game_date", "espn_game_id", "team_espn_id",
+             "opp_espn_id", "team_ncaa_id", "is_home", "season", "home_espn_id",
              "away_espn_id", "mins", "o_poss", "d_poss", "pts", "d_pts", "fga", "fgm",
              "tpa", "tpm", "fta", "ftm", "rima", "rimm", "orb", "drb", "tov", "ast",
              "blk", "e_poss", "time_per_poss", "source", "loaded_at")
 TEAM_DDL = """
 CREATE TABLE IF NOT EXISTS ncaab_team_game_stats (
-    espn_game_id   BIGINT NOT NULL,
-    team_espn_id   INTEGER NOT NULL,
+    contest_id     TEXT NOT NULL,
+    team           TEXT NOT NULL,
+    game_date      TEXT,
+    espn_game_id   BIGINT,
+    team_espn_id   INTEGER,
     opp_espn_id    INTEGER,
+    team_ncaa_id   TEXT,
+    is_home        BOOLEAN,
     season         INTEGER NOT NULL,
     home_espn_id   INTEGER,
     away_espn_id   INTEGER,
@@ -85,7 +92,7 @@ CREATE TABLE IF NOT EXISTS ncaab_team_game_stats (
     time_per_poss  REAL,
     source         TEXT NOT NULL,
     loaded_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (espn_game_id, team_espn_id)
+    PRIMARY KEY (contest_id, team)
 )
 """
 TEAM_INDEX = ("CREATE INDEX IF NOT EXISTS idx_ncaab_tgs_season "
@@ -189,31 +196,62 @@ def _fetch_parquet(url: str) -> pd.DataFrame | None:
     return pd.read_parquet(io.BytesIO(r.content))
 
 
-def team_rows(df: pd.DataFrame, season: int) -> list[dict]:
-    """One dict per (game, team) with an ESPN game id and both ESPN team ids."""
-    out = []
+def team_rows(df: pd.DataFrame, season: int, dates: dict | None = None) -> list[dict]:
+    """One dict per (NCAA contest, team).
+
+    Keyed on NCAA's contest id and the team name, because ESPN's game id is
+    filled in only from 2022-23 on (measured: NULL on every 2011-12, 2017-18
+    and 2021-22 row) and about 5% of rows (non-D-I opponents) carry no team
+    ids at all. The ESPN ids ride along where present; the rating model reads
+    rows with both teams' ESPN ids. `dates` maps contest id -> ISO date (from
+    the season's schedule file).
+    """
+    dates = dates or {}
+    out, seen = [], set()
     for rec in df.to_dict("records"):
-        gid = _int_or_none(rec.get("espn_game_id"))
+        contest = str(rec.get("contest_id") or "").strip()
+        team_name = str(rec.get("team") or "").strip()
+        if not contest or not team_name or (contest, team_name) in seen:
+            continue
+        seen.add((contest, team_name))
         team = _int_or_none(rec.get("team_espn_team_id"))
         home = _int_or_none(rec.get("home_espn_team_id"))
         away = _int_or_none(rec.get("away_espn_team_id"))
-        if gid is None or team is None:
-            continue
-        opp = away if team == home else (home if team == away else None)
-        row = {"espn_game_id": gid, "team_espn_id": team, "opp_espn_id": opp,
+        ncaa = str(rec.get("team_ncaa_team_id") or "").strip() or None
+        is_home = None
+        if ncaa and str(rec.get("home_ncaa_team_id") or "").strip() == ncaa:
+            is_home = True
+        elif ncaa and str(rec.get("away_ncaa_team_id") or "").strip() == ncaa:
+            is_home = False
+        elif str(rec.get("home") or "").strip() == team_name:
+            is_home = True
+        elif str(rec.get("away") or "").strip() == team_name:
+            is_home = False
+        opp = None
+        if team is not None and is_home is not None:
+            opp = away if is_home else home
+        row = {"contest_id": contest, "team": team_name, "game_date": dates.get(contest),
+               "espn_game_id": _int_or_none(rec.get("espn_game_id")), "team_espn_id": team,
+               "opp_espn_id": opp, "team_ncaa_id": ncaa, "is_home": is_home,
                "season": season, "home_espn_id": home, "away_espn_id": away,
                "source": SOURCE}
         for src, dst in _TEAM_MAP.items():
             row[dst] = _num(rec.get(src))
         out.append(row)
-    # A game listed twice for the same team keeps the first row (the PK).
-    seen, uniq = set(), []
-    for r in out:
-        k = (r["espn_game_id"], r["team_espn_id"])
-        if k not in seen:
-            seen.add(k)
-            uniq.append(r)
-    return uniq
+    return out
+
+
+def schedule_dates(df: pd.DataFrame) -> dict:
+    """contest id -> ISO date from a season's schedule file (MM/DD/YYYY)."""
+    out = {}
+    for rec in df.to_dict("records"):
+        c = str(rec.get("contest_id") or "").strip()
+        try:
+            m, d, y = str(rec.get("game_date") or "").split("/")
+            out[c] = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+        except ValueError:
+            continue
+    return out
 
 
 def player_rows(df: pd.DataFrame, season: int) -> list[dict]:
@@ -243,9 +281,9 @@ def player_rows(df: pd.DataFrame, season: int) -> list[dict]:
 _TEAM_UPSERT = (
     "INSERT INTO ncaab_team_game_stats (" + ", ".join(c for c in TEAM_COLS if c != "loaded_at")
     + ") VALUES (" + ", ".join(f"%({c})s" for c in TEAM_COLS if c != "loaded_at")
-    + ") ON CONFLICT (espn_game_id, team_espn_id) DO UPDATE SET "
+    + ") ON CONFLICT (contest_id, team) DO UPDATE SET "
     + ", ".join(f"{c} = EXCLUDED.{c}" for c in TEAM_COLS
-                if c not in ("espn_game_id", "team_espn_id", "loaded_at"))
+                if c not in ("contest_id", "team", "loaded_at"))
     + ", loaded_at = NOW()")
 _PLAYER_UPSERT = (
     "INSERT INTO ncaab_player_season (" + ", ".join(c for c in PLAYER_COLS if c != "loaded_at")
@@ -269,7 +307,9 @@ def import_season(conn, season: int, *, team: bool = True, players: bool = True)
         if df is None:
             out["team_missing"] = True
         else:
-            rows = team_rows(df, season)
+            sched = _fetch_parquet(SCHEDULE_URL.format(season=season))
+            dates = schedule_dates(sched) if sched is not None else {}
+            rows = team_rows(df, season, dates)
             for i in range(0, len(rows), 2000):
                 conn.executemany(_TEAM_UPSERT, rows[i:i + 2000])
             conn.commit()

@@ -106,21 +106,37 @@ def test_oriented_turns_a_flipped_row_round():
     assert ai.oriented({"flipped": False, "close_spread_home": 3.0})["close_spread_home"] == 3.0
 
 
-def test_team_box_rows_carry_the_opponent_and_drop_duplicates_and_missing_ids():
+def test_team_box_rows_key_on_the_ncaa_contest_and_carry_the_opponent():
+    # ESPN's game id is NULL before 2022-23, so the key is (contest, team name).
     df = pd.DataFrame([
-        {"espn_game_id": "401", "team_espn_team_id": "1", "home_espn_team_id": "1",
-         "away_espn_team_id": "2", "o_poss": 66, "pts": 85, "to": 8},
-        {"espn_game_id": "401", "team_espn_team_id": "2", "home_espn_team_id": "1",
-         "away_espn_team_id": "2", "o_poss": 67, "pts": 79, "to": 14},
-        {"espn_game_id": "401", "team_espn_team_id": "2", "home_espn_team_id": "1",
-         "away_espn_team_id": "2", "o_poss": 99, "pts": 0, "to": 0},
-        {"espn_game_id": None, "team_espn_team_id": "3", "home_espn_team_id": "3",
-         "away_espn_team_id": "4", "o_poss": 60, "pts": 50, "to": 5},
+        {"contest_id": "10039", "team": "Vanderbilt", "home": "Vanderbilt", "away": "Austin Peay",
+         "espn_game_id": None, "team_espn_team_id": "238", "home_espn_team_id": "238",
+         "away_espn_team_id": "2046", "team_ncaa_team_id": "111240",
+         "home_ncaa_team_id": "111240", "away_ncaa_team_id": "110954",
+         "o_poss": 66, "pts": 85, "to": 8},
+        {"contest_id": "10039", "team": "Austin Peay", "home": "Vanderbilt", "away": "Austin Peay",
+         "espn_game_id": None, "team_espn_team_id": "2046", "home_espn_team_id": "238",
+         "away_espn_team_id": "2046", "team_ncaa_team_id": "110954",
+         "home_ncaa_team_id": "111240", "away_ncaa_team_id": "110954",
+         "o_poss": 67, "pts": 79, "to": 14},
+        {"contest_id": "10039", "team": "Austin Peay", "o_poss": 99, "pts": 0, "to": 0},
+        {"contest_id": "10040", "team": "Some D-II School", "home": "Oakland",
+         "away": "Some D-II School", "team_espn_team_id": None, "o_poss": 60, "pts": 50, "to": 5},
     ])
-    rows = si.team_rows(df, 2026)
-    assert [(r["team_espn_id"], r["opp_espn_id"], r["tov"], r["o_poss"]) for r in rows] == \
-        [(1, 2, 8.0, 66.0), (2, 1, 14.0, 67.0)]
+    rows = si.team_rows(df, 2018, {"10039": "2017-11-10"})
+    got = [(r["contest_id"], r["team"], r["team_espn_id"], r["opp_espn_id"], r["is_home"], r["tov"])
+           for r in rows]
+    assert got == [("10039", "Vanderbilt", 238, 2046, True, 8.0),
+                   ("10039", "Austin Peay", 2046, 238, False, 14.0),
+                   ("10040", "Some D-II School", None, None, False, 5.0)]
+    assert rows[0]["game_date"] == "2017-11-10" and rows[0]["espn_game_id"] is None
     assert all(r["source"] == si.SOURCE for r in rows)
+
+
+def test_schedule_dates_are_iso():
+    df = pd.DataFrame([{"contest_id": "10039", "game_date": "11/10/2017"},
+                       {"contest_id": "x", "game_date": ""}])
+    assert si.schedule_dates(df) == {"10039": "2017-11-10"}
 
 
 def test_player_seasons_sum_by_team_and_folded_name():
