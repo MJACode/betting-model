@@ -3812,7 +3812,9 @@ function LineRuler({
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: false });
   };
   const openDraft = () => {
-    if (!parseTyped || draft != null) return;
+    // The wing responder and the strip's tap handler can both see one
+    // press. The second call is a no-op.
+    if (!parseTyped || draft != null || editingRef.current) return;
     commitTaken.current = false;
     editingRef.current = true;
     openedValue.current = value;
@@ -3893,7 +3895,6 @@ function LineRuler({
   // setting does not turn the short strip back into the old bubble.
   const markScale = Math.min(Math.max(fontScale, 1), 1.3);
   const markH = Math.round(22 * markScale);
-  const markerW = bubbleFrame?.width ?? markH;
   useEffect(() => {
     if (Platform.OS === 'ios' || !onEditBar) return;
     if (!fieldOpen) {
@@ -4023,10 +4024,16 @@ function LineRuler({
               if (next >= min && next <= hi) pickTick(next);
             }}
           >
-            {overhang > 0 ? (
+            {overhang > 0 && bubbleFrame != null ? (
               <View
                 pointerEvents="box-none"
-                style={{ position: 'absolute', top: 0, left: 0, right: 0, height: overhang, alignItems: 'center' }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: bubbleFrame.x,
+                  width: bubbleFrame.width,
+                  height: overhang,
+                }}
               >
                 <View
                   collapsable={false}
@@ -4035,14 +4042,20 @@ function LineRuler({
                   onStartShouldSetResponder={() => true}
                   onResponderGrant={onWingGrant}
                   onResponderRelease={onWingRelease}
-                  style={{ width: markerW, height: overhang }}
+                  style={{ width: bubbleFrame.width, height: overhang }}
                 />
               </View>
             ) : null}
-            {overhang > 0 ? (
+            {overhang > 0 && bubbleFrame != null ? (
               <View
                 pointerEvents="box-none"
-                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: overhang, alignItems: 'center' }}
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: bubbleFrame.x,
+                  width: bubbleFrame.width,
+                  height: overhang,
+                }}
               >
                 <View
                   collapsable={false}
@@ -4051,7 +4064,7 @@ function LineRuler({
                   onStartShouldSetResponder={() => true}
                   onResponderGrant={onWingGrant}
                   onResponderRelease={onWingRelease}
-                  style={{ width: markerW, height: overhang }}
+                  style={{ width: bubbleFrame.width, height: overhang }}
                 />
               </View>
             ) : null}

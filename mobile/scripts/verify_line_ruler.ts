@@ -573,7 +573,8 @@ for (const def of STAT_CATALOG) {
     'the screen hangs that 44pt box off the short strip, wings only as wide as the marker',
     screen.includes('fieldOpen ? 0 : markerHitOverhang(visualH)') &&
       screen.includes('height: hitH') &&
-      screen.includes('width: markerW') &&
+      screen.includes('width: bubbleFrame.width') &&
+      screen.includes('left: bubbleFrame.x') &&
       screen.includes('markerBoxInGesture') &&
       screen.includes('pointerEvents="box-none"'),
   );
@@ -581,7 +582,10 @@ for (const def of STAT_CATALOG) {
     'the bottom wing does not pull the next row up, and a drag on the wing does not open the field',
     !screen.includes('marginBottom: -rulerChrome.overhang') &&
       screen.includes('THRESHOLD_TAP_MAX_DIST * THRESHOLD_TAP_MAX_DIST') &&
-      screen.includes('onResponderRelease={onWingRelease}'),
+      screen.includes('onResponderRelease={onWingRelease}') &&
+      screen.includes('left: bubbleFrame.x') &&
+      screen.includes('width: bubbleFrame.width') &&
+      screen.includes('draft != null || editingRef.current'),
   );
   check(
     'Filters is a word again, and Teams or an empty board mounts the book line',

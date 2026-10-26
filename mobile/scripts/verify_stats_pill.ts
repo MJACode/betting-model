@@ -156,8 +156,12 @@ check(
   /rowScroller:\s*\{[^}]*flex: 1,[^}]*minWidth: 0,/.test(stats) &&
     /modeSeg:\s*\{[^}]*flexShrink: 0,/.test(stats) &&
     /numberOfLines=\{compact \? undefined : 1\}/.test(groupTabs) &&
-    /textCompact:\s*\{[^}]*flexShrink: 0,/.test(groupTabs) &&
-    /rowCompact:\s*\{[^}]*flexShrink: 0,/.test(groupTabs),
+    /!compact && styles\.tabGrow/.test(groupTabs) &&
+    /compact && styles\.tabCompact/.test(groupTabs) &&
+    /tabCompact:\s*\{[^}]*flexGrow: 0,\s*flexShrink: 0,\s*flexBasis: 'auto',/.test(groupTabs) &&
+    !/tabCompact:\s*\{[^}]*\bflex: 0\b/.test(groupTabs) &&
+    /textCompact:\s*\{[^}]*flexBasis: 'auto',/.test(groupTabs) &&
+    /rowCompact:\s*\{[^}]*flexBasis: 'auto',/.test(groupTabs),
 );
 check(
   'Filters control is 44pt tall, not padding-plus-slop',

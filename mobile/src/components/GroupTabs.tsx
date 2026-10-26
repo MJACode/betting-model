@@ -79,6 +79,11 @@ export function SegmentTabs<T extends string>({
             hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
             style={[
               styles.tab,
+              // flex: 1 lives on its own style. A compact tab must not carry
+              // it: the shorthand cannot be unset by a later key, and on web
+              // `flex: 0` is `0 1 0%`, which laid each label out at the 16pt
+              // of horizontal padding (Expo web, 390×1).
+              !compact && styles.tabGrow,
               second && styles.tabSecond,
               compact && styles.tabCompact,
               tight && styles.tabTight,
@@ -92,10 +97,8 @@ export function SegmentTabs<T extends string>({
                 compact && styles.textCompact,
                 isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
               ]}
-              // Compact sits at the end of the window row. numberOfLines makes
-              // Yoga's min width for the label 0, so at 390pt and the default
-              // font scale the words lay out at the tab's horizontal padding
-              // (~16pt) and do not read. Full-width rows still clip to one line.
+              // Full-width rows clip to one line. Compact does not: a 0 min
+              // width let the words paint outside a padding-only box.
               numberOfLines={compact ? undefined : 1}
               adjustsFontSizeToFit={fit}
               minimumFontScale={fit ? 0.75 : undefined}
@@ -155,16 +158,21 @@ const styles = StyleSheet.create({
   rowCompact: {
     backgroundColor: 'transparent',
     borderTopWidth: 0,
-    // The window scroller beside this row is flex: 1. This row must not
-    // give that scroller its width: shrink 0 keeps both labels.
+    // Size to the two labels. flex-basis auto, and do not shrink: the
+    // window scroller beside this row is the one that yields.
+    flexGrow: 0,
     flexShrink: 0,
+    flexBasis: 'auto',
+    alignSelf: 'flex-start',
   },
   tab: {
-    flex: 1,
     alignItems: 'center',
     paddingVertical: spacing.sm,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
+  },
+  tabGrow: {
+    flex: 1,
   },
   // The second level is not just smaller: a 1px rule against the first level's
   // 2px, and the active label in textPrimary rather than tint. Two 2px tint
@@ -183,11 +191,12 @@ const styles = StyleSheet.create({
   // No flex: the inline control sizes to its two labels and leaves the rest of
   // the row to the chips it shares it with.
   tabCompact: {
-    // flex: 0, not `undefined` — RN flattens style arrays key by key, so an
-    // undefined value is not a reliable way to unset the `flex: 1` above it.
-    // 0 is flexGrow 0 / flexShrink 0 / flexBasis auto, which is what "size to
-    // your label" means here.
-    flex: 0,
+    // Longhands. The flex shorthand for zero is grow 0, shrink 1, basis 0%
+    // on web, so the tab's border box was the horizontal padding (16pt) and
+    // "Hit Rates" painted over "Averages" and the chip beside it.
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 'auto',
     paddingVertical: 6,
     paddingHorizontal: spacing.sm,
     // 1px, and the active label in textPrimary rather than tint (see
@@ -217,7 +226,9 @@ const styles = StyleSheet.create({
   },
   textCompact: {
     fontSize: font.size.footnote,
+    flexGrow: 0,
     flexShrink: 0,
+    flexBasis: 'auto',
   },
   textActiveSecond: {
     color: colors.textPrimary,
