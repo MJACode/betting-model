@@ -342,7 +342,7 @@ def test_a_board_with_nothing_in_range_is_not_a_failure(wired, feed):
                                     NOW - timedelta(minutes=5), []))
     if feed == "beyond-only":
         wired["feed"].append(_event("Nowhere State", "Somewhere A&M",
-                                    NOW + timedelta(days=20), []))
+                                    NOW + timedelta(days=cap.RESOLVER_DAYS_FWD + 10), []))
     counts = cap.capture(FakeConn(events=_upcoming()), NOW)
     assert "failed" not in counts
 
