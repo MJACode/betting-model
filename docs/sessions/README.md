@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM save requires a side or a favorite/underdog. Forward migration `byom_total_side_2026_10_25.sql`. Fallback `20261023225630` and saved models `20261023222927` are already applied. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename at 25 models is refused. The old row is deleted only when the save wrote a different id. One failed backtest does not clear the list. |
 | 2026-10-25 | [2026-10](./2026-10.md) | 2026-10-25, BYOM rename saves the new name first. The old row is removed only after that save. A taken name asks before it replaces the other model. |
