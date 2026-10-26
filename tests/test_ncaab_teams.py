@@ -186,3 +186,19 @@ def test_no_registry_or_no_schedule_means_no_resolver():
         assert nt.make_resolver(conn, "2026-11-25") is None
     finally:
         nt.reset_registry_cache()
+
+
+def test_an_empty_registry_read_is_not_cached():
+    """A worker job that looks before the ESPN backfill creates the table must
+    not leave the empty answer behind for every later job in the process."""
+    nt.reset_registry_cache()
+    try:
+        empty = _Conn(teams=[], events=[])
+        assert nt.load_registry(empty) == []
+        filled = _Conn(teams=[(150, "Duke", "duke", "Blue Devils", "Duke Blue Devils",
+                               "Duke", "DUKE", True, None)], events=[])
+        assert [t["espn_id"] for t in nt.load_registry(filled)] == [150]
+        # a filled read IS cached: the next call does not read again
+        assert [t["espn_id"] for t in nt.load_registry(empty)] == [150]
+    finally:
+        nt.reset_registry_cache()

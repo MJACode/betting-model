@@ -223,9 +223,9 @@ def load_registry(conn) -> list[dict]:
     """Every ncaab_teams row, cached for the process.
 
     Each dict: espn_id, school, slug, mascot, display_name, short_name,
-    abbreviation, is_d1, alt (list of alternate names). An unreadable table
-    yields an empty list (logged): the resolver then resolves nothing, and the
-    caller drops the event rather than guessing.
+    abbreviation, is_d1, alt (list of alternate names). An unreadable or empty
+    table yields an empty list (logged, never cached): the resolver then
+    resolves nothing, and the caller drops the event rather than guessing.
     """
     global _TEAM_CACHE
     if _TEAM_CACHE is not None:
@@ -241,14 +241,21 @@ def load_registry(conn) -> list[dict]:
         except Exception:                                       # noqa: BLE001
             pass
         rows = []
-    _TEAM_CACHE = [
+    teams = [
         {"espn_id": int(r[0]), "school": r[1], "slug": r[2], "mascot": r[3],
          "display_name": r[4], "short_name": r[5], "abbreviation": r[6],
          "is_d1": bool(r[7]),
          "alt": [a for a in (r[8] or "").split("|") if a]}
         for r in rows
     ]
-    return _TEAM_CACHE
+    # An EMPTY read is never cached. The worker runs every job in one process,
+    # and a job that looked before the ESPN backfill created the table (the
+    # declared feed probe does) would otherwise leave every later NCAAB job,
+    # the live odds pass included, resolving nothing until a restart
+    # (2026-10-26 review).
+    if teams:
+        _TEAM_CACHE = teams
+    return teams
 
 
 def reset_registry_cache() -> None:
