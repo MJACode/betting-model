@@ -152,6 +152,18 @@ check(
   (stats.match(/<SegmentTabs[\s/>]/g) ?? []).length >= 2,
 );
 check(
+  'Hit Rates | Averages stay one row at phone width: the scroller yields, the labels do not shrink',
+  /rowScroller:\s*\{[^}]*flex: 1,[^}]*minWidth: 0,/.test(stats) &&
+    /modeSeg:\s*\{[^}]*flexShrink: 0,/.test(stats) &&
+    /numberOfLines=\{compact \? undefined : 1\}/.test(groupTabs) &&
+    /textCompact:\s*\{[^}]*flexShrink: 0,/.test(groupTabs) &&
+    /rowCompact:\s*\{[^}]*flexShrink: 0,/.test(groupTabs),
+);
+check(
+  'Filters control is 44pt tall, not padding-plus-slop',
+  /filterBtn:\s*\{[^}]*minHeight: 44,/.test(stats),
+);
+check(
   'the group row drops the top rule so the two levels read as one bar',
   /rowSecond:\s*\{\s*borderTopWidth: 0/.test(groupTabs),
 );

@@ -92,7 +92,11 @@ export function SegmentTabs<T extends string>({
                 compact && styles.textCompact,
                 isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
               ]}
-              numberOfLines={1}
+              // Compact sits at the end of the window row. numberOfLines makes
+              // Yoga's min width for the label 0, so at 390pt and the default
+              // font scale the words lay out at the tab's horizontal padding
+              // (~16pt) and do not read. Full-width rows still clip to one line.
+              numberOfLines={compact ? undefined : 1}
               adjustsFontSizeToFit={fit}
               minimumFontScale={fit ? 0.75 : undefined}
               // Segmented-control labels cap at 2x, as iOS caps its native
@@ -151,6 +155,9 @@ const styles = StyleSheet.create({
   rowCompact: {
     backgroundColor: 'transparent',
     borderTopWidth: 0,
+    // The window scroller beside this row is flex: 1. This row must not
+    // give that scroller its width: shrink 0 keeps both labels.
+    flexShrink: 0,
   },
   tab: {
     flex: 1,
@@ -210,6 +217,7 @@ const styles = StyleSheet.create({
   },
   textCompact: {
     fontSize: font.size.footnote,
+    flexShrink: 0,
   },
   textActiveSecond: {
     color: colors.textPrimary,

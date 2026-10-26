@@ -1,10 +1,11 @@
 // SportsbookIndicator — which sportsbook the stat board prices its odds
 // column at, and a tap to change it.
 //
-// Compact B (Matt, 2026-10-25) took this row off the Stats header. The
-// component stays: Settings still edits the same books, and the board's
-// coverage note still opens SportsbookPickerSheet. Mounting this again is
-// how the one-line book control comes back.
+// Compact B (Matt, 2026-10-25) took this row off the populated Players
+// board: that board's odds column header opens the same sheet. Teams, an
+// empty Players board, and a board with no odds column mount this row
+// again — those surfaces have no odds header to tap. Settings still opens
+// the same sheet.
 //
 // This is a STATS-PAGE control (Matt, 2026-09-04). The Picks and Signals boards
 // carried the same line until then and no longer do: those boards show the best

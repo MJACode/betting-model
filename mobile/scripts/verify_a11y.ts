@@ -181,7 +181,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SignInScreen.tsx', '', 3], // 17.8, 39.5, 39.5pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
   ['src/screens/StatsScreen.tsx', 'clearBtn,pressed', 1], // 42.3pt
-  ['src/screens/StatsScreen.tsx', 'filterBtn,pressed', 1], // 40.0pt
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
