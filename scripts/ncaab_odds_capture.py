@@ -29,12 +29,19 @@ WHAT A TICK DOES (scheduler.run_ncaab_odds_capture, every 5 minutes, 24x7):
   4. One bulk call, h2h + spreads + totals at every line-shop book (~3
      credits). Events already started are dropped: their prices are in-play,
      not pre-game (CLAUDE.md §6: pre-game and in-play prices never mix).
+     Events tipping past the resolver's schedule window are set aside under
+     their own count: they cannot resolve yet, and counted as unresolved they
+     would hide a real name or schedule mismatch.
   5. Parse onto ESPN's games (odds_ingestor._process_events), diff against
      latest_odds, insert only the new and changed rows, print the counts.
 
-A tick that inserts nothing is the normal case and exits 0. Only an exception
-(the call failed, the write failed) exits non-zero, so the job's heartbeat
-records an error and the failure alerter reports it.
+A tick that inserts nothing is the normal case and exits 0. It exits non-zero
+when an exception is raised (the call failed, the write failed), and when the
+feed listed games inside the window and NOT ONE resolved onto ESPN's
+schedule: that tick stored nothing because the join is broken, and it must not
+look like a quiet board. Either way the job's heartbeat records an error and
+the failure alerter reports it. The credit headers of the call are written to
+odds_api_quota, as every other Odds API job writes them.
 
     python -m scripts.ncaab_odds_capture
 """
@@ -42,7 +49,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -54,6 +61,7 @@ import config  # noqa: E402
 from data.db import get_connection, release_read  # noqa: E402
 from data.ingestors import ncaab_teams  # noqa: E402
 from data.ingestors import odds_ingestor  # noqa: E402
+from data.ingestors.odds_quota import persist_quota  # noqa: E402
 # One definition of "the price moved": the pre-game poller's columns and its
 # number-not-text comparison. odds stores prices as TEXT in mixed shapes and
 # latest_odds as NUMERIC (Decimal through psycopg), so a raw == between the
@@ -67,6 +75,17 @@ MARKETS = ["h2h", "spreads", "totals"]
 # up the night before and the morning of; 36 hours covers tomorrow's slate
 # from any hour today, and nothing earlier is spent in the off-season.
 LOOK_AHEAD_HOURS = 36
+
+# How many days past today the schedule resolver reads (make_resolver's
+# days_fwd, passed explicitly so this bound and the resolver cannot drift). An
+# event tipping later than that, plus match_event's one day of skew, cannot
+# resolve on this tick. 10 is make_resolver's own default. The ESPN schedule
+# step stores 14 days ahead, and college lines can go up earlier than 10 days
+# out (NCAAF games of 2026-10-10..25: 22 of 164 had their first stored spread
+# at DraftKings, FanDuel, BetMGM, Bovada or Pinnacle 10 or more days before
+# kickoff; production read 2026-10-26), so this is the number to widen if
+# NCAAB openers turn out to be posted that far ahead.
+RESOLVER_DAYS_FWD = 10
 
 _ET = ZoneInfo("America/New_York")
 
@@ -145,6 +164,28 @@ def drop_started(events: list[dict], now: datetime) -> tuple[list[dict], int]:
     return keep, dropped
 
 
+def drop_beyond_window(events: list[dict], today: str,
+                       days_fwd: int) -> tuple[list[dict], int]:
+    """(the events the resolver can reach, how many tip after its window).
+
+    make_resolver(conn, today, days_fwd=...) reads ESPN's games through
+    today + days_fwd, and match_event accepts an event up to one ET day from
+    its game, so an event dated later than today + days_fwd + 1 resolves to
+    None on every tick until it comes into range. Handed to the parser it
+    would be counted unresolved, and _process_events logs a warning for each
+    such event on each tick (288 ticks a day).
+    """
+    last = (date.fromisoformat(str(today)[:10])
+            + timedelta(days=days_fwd + 1)).isoformat()
+    keep, beyond = [], 0
+    for ev in events:
+        if ncaab_teams.eastern_game_date(ev.get("commence_time")) > last:
+            beyond += 1
+            continue
+        keep.append(ev)
+    return keep, beyond
+
+
 def _key(row) -> tuple:
     return (row["game_id"], row["market"], row["bookmaker"])
 
@@ -189,10 +230,12 @@ def split_changes(rows: list[dict], stored: dict) -> tuple[list[dict], dict]:
 
 def capture(conn, now: datetime | None = None) -> dict:
     """One tick against `conn`. Returns the counts; writes only new and
-    changed rows. Raises on a failed call or a failed write."""
+    changed rows. Raises on a failed call or a failed write. Sets "failed"
+    when the feed listed games in range and none resolved (main exits 1)."""
     now = now or datetime.now(timezone.utc)
-    counts = {"events": 0, "started": 0, "resolved": 0, "unresolved": 0,
-              "new": 0, "changed": 0, "unchanged": 0, "inserted": 0}
+    counts = {"events": 0, "started": 0, "beyond_window": 0, "resolved": 0,
+              "unresolved": 0, "new": 0, "changed": 0, "unchanged": 0,
+              "inserted": 0}
 
     if not has_upcoming_games(conn, now):
         release_read(conn)
@@ -200,7 +243,8 @@ def capture(conn, now: datetime | None = None) -> dict:
                     f"{LOOK_AHEAD_HOURS}h; no call made")
         return {**counts, "skipped": "no upcoming games"}
 
-    resolver = ncaab_teams.make_resolver(conn, config.today_et())
+    today = config.today_et()
+    resolver = ncaab_teams.make_resolver(conn, today, days_fwd=RESOLVER_DAYS_FWD)
     # The resolver's reads are done; do not hold their transaction open across
     # the network call (data/db.release_read).
     release_read(conn)
@@ -221,6 +265,8 @@ def capture(conn, now: datetime | None = None) -> dict:
     events = odds_ingestor._get_odds(ncaab_teams.ODDS_API_SPORT_KEY, MARKETS)
     counts["events"] = len(events or [])
     upcoming, counts["started"] = drop_started(events or [], now)
+    upcoming, counts["beyond_window"] = drop_beyond_window(upcoming, today,
+                                                           RESOLVER_DAYS_FWD)
 
     game_rows, odds_rows = odds_ingestor._process_events(
         upcoming, SPORT, "open", fetched_at, resolve_game_id=counted)
@@ -239,6 +285,15 @@ def capture(conn, now: datetime | None = None) -> dict:
         counts["inserted"] = len(to_write)
     else:
         release_read(conn)
+
+    if upcoming and not counts["resolved"]:
+        # Every event the feed listed inside the window failed to join ESPN's
+        # schedule (a team-name or schedule mismatch, the NCAAF twin-games
+        # shape), so this tick stored nothing. Exiting 0 would beat "ok" on a
+        # capture that records no opener at all; the heartbeat must say error.
+        counts["failed"] = "nothing resolved"
+        logger.error(f"NCAAB odds capture: none of {len(upcoming)} event(s) in range "
+                     f"resolved onto the ESPN schedule; nothing stored")
     return counts
 
 
@@ -250,10 +305,23 @@ def main() -> int:
     try:
         counts = capture(conn)
     finally:
+        # The call's credit headers, stored the way every Odds API job stores
+        # them (data/ingestors/odds_quota.py: once per run, own commit, never
+        # raises), so odds_api_quota and the credit health check stay current
+        # with the most frequent caller. capture() has committed or raised; a
+        # raise mid-write leaves an aborted transaction, which the rollback
+        # clears first. A tick that made no call has nothing to store.
+        try:
+            conn.rollback()
+        except Exception:                                       # noqa: BLE001
+            pass
+        persist_quota(conn)
         conn.close()
     line = " ".join(f"{k}={v}" for k, v in counts.items())
     logger.info(f"NCAAB odds capture: {line}")
     print(line)
+    if counts.get("failed"):
+        return 1
     return 0
 
 

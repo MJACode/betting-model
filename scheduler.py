@@ -1489,7 +1489,9 @@ def run_ncaab_odds_capture() -> None:
     The script returns without an API call when no NCAAB game tips within 36
     hours, or when RUN_NCAAB_ODDS_CAPTURE=0. A run that fails or is killed
     raises, so the heartbeat records "error" and the failure alerter reports
-    it; the next tick, five minutes later, fetches again.
+    it; the next tick, five minutes later, fetches again. That includes a run
+    in which the feed listed games and none resolved onto ESPN's schedule
+    (the script exits 1): it stored nothing, and must not beat "ok".
     """
     outcome = _run([sys.executable, "-m", "scripts.ncaab_odds_capture"],
                    "ncaab-odds-capture", timeout=NCAAB_ODDS_CAPTURE_TIMEOUT_S)
