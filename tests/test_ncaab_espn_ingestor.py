@@ -428,34 +428,49 @@ def test_one_bad_event_does_not_lose_the_rest_of_the_day(conn, monkeypatch):
 # ── the refresh-pass step costs nothing when nothing is due ──────────────────
 
 @pytest.fixture
-def no_http(monkeypatch):
+def http_calls(monkeypatch):
+    """Every outbound request attempt, refused. The list, not an exception, is
+    the evidence: the runner counts a failed fetch and carries on, so a raise
+    alone would be swallowed into `failed` and the test could still pass."""
     import requests
+    calls = []
 
     def refuse(*a, **k):
-        raise AssertionError("an HTTP call was made")
+        calls.append((a, k))
+        raise requests.HTTPError("no HTTP in this test")   # not retried: no sleep
     monkeypatch.setattr(requests, "get", refuse)
     monkeypatch.setattr(requests.Session, "request", refuse)
+    return calls
 
 
-def test_run_results_makes_no_http_call_on_an_empty_database(conn, no_http):
+def test_run_results_makes_no_http_call_on_an_empty_database(conn, http_calls):
     t = ing.run_results("2026-11-03", now=datetime(2026, 11, 3, 23, tzinfo=timezone.utc),
                         connect=lambda: conn)
+    assert http_calls == []
     assert t["dates"] == 0 and t["dates_fetched"] == 0 and not t["failed"]
 
 
-def test_run_results_makes_no_http_call_before_tip_or_after_the_scores(conn, no_http):
+def test_run_results_makes_no_http_call_before_tip_or_after_the_scores(conn, http_calls):
     ing.ingest_day(conn, "2026-11-03", get_json=Espn({"20261103": BOARD_1103}))
     conn.sq.execute("UPDATE games SET commence_time = '2026-11-03T23:00:00Z' WHERE game_id = ?",
                     (BETH_PAC,))
     # 2026-11-02 evening ET: nothing on the 3rd has started, the TBD tip now has a time
     t = ing.run_results("2026-11-02", now=datetime(2026, 11, 2, 23, tzinfo=timezone.utc),
                         connect=lambda: conn)
-    assert t["dates_fetched"] == 0
+    assert http_calls == [] and t["dates"] == 0 and not t["failed"]
     # both games scored: nothing due on the 4th either
     conn.sq.execute("UPDATE games SET home_score = 70, away_score = 60 WHERE sport = 'NCAAB'")
     t = ing.run_results("2026-11-04", now=datetime(2026, 11, 4, 18, tzinfo=timezone.utc),
                         connect=lambda: conn)
-    assert t["dates_fetched"] == 0
+    assert http_calls == [] and t["dates"] == 0 and not t["failed"]
+
+
+def test_the_http_guard_sees_a_call_when_one_is_due(conn, http_calls):
+    """The two tests above are only evidence if this fixture notices a call."""
+    ing.ingest_day(conn, "2026-11-03", get_json=Espn({"20261103": BOARD_1103}))
+    t = ing.run_results("2026-11-04", now=datetime(2026, 11, 4, 18, tzinfo=timezone.utc),
+                        connect=lambda: conn, sleep=0)
+    assert len(http_calls) >= 1 and t["failed"] == ["2026-11-03"]
 
 
 def test_run_results_fetches_only_the_due_date_and_fills_it(conn):
