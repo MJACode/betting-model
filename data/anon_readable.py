@@ -285,6 +285,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_player_season",
     "ncaab_team_game_stats",
     "model_artifacts",
+    # NCAAB odds events the history purchase paid for but could not place on
+    # an ESPN game, kept raw so a later name fix can replay them. Created on
+    # demand by data/ingestors/ncaab_odds_history.py; never read by the app.
+    "ncaab_odds_unmatched",
     # The 250-bet review's two tables. Created on demand by
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().

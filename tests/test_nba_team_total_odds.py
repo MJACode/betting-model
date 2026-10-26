@@ -556,11 +556,16 @@ def test_the_quota_telemetry_carries_each_call_s_own_cost():
 def test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name():
     """RULE: the pruner keeps one row per (game, market, book), which thins a
     ladder to arbitrary rungs. The live team totals and the two paid ladder
-    purchases are protected, named exactly as their writers stamp them."""
+    purchases are protected, named exactly as their writers stamp them. The
+    NCAAB first-half and team-total purchases (close and open) are a paid
+    history too (mike, 2026-10-26)."""
     from data import prune_odds
-    from data.ingestors import nba_odds_history, nhl_derivative_odds_history
+    from data.ingestors import (nba_odds_history, ncaab_odds_history,
+                                nhl_derivative_odds_history)
     for src in (feed.SOURCE, nba_odds_history.DERIV_SOURCE, nba_odds_history.ALT_SOURCE,
-                nhl_derivative_odds_history.SOURCE):
+                nhl_derivative_odds_history.SOURCE,
+                ncaab_odds_history.NCAAB_DERIV_CLOSE_SOURCE,
+                ncaab_odds_history.NCAAB_DERIV_OPEN_SOURCE):
         assert src in prune_odds.PROTECTED_SOURCES, src
         params: dict = {}
         prune_odds._unprotected(params, table="odds")

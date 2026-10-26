@@ -1,0 +1,909 @@
+"""Historical NCAAB game lines, first-half lines and team totals from The Odds API.
+
+WHY. Men's college basketball goes live for the 2026-27 season (first game
+2026-11-01) with no stored price for any past game: no NCAAB row in `games`,
+`odds` or `odds_history_pulls` (measured 2026-10-26). Without a price no NCAAB
+model can be graded against a real line. mike, 2026-10-26: "3 approved" --
+game lines 2020-21..2025-26 (~375,000 credits), first-half and team-total
+lines 2023-24..2025-26 at the opener and the close (up to ~1,380,000), with a
+reserve kept so the live feeds never stop.
+
+WHAT IS BOUGHT
+
+  --lines  The bulk /historical/sports/basketball_ncaab/odds endpoint, h2h +
+           spreads + totals at the ten fetched books (config.LINE_SHOP_BOOKMAKERS;
+           ten names bill as one region): 30 credits a snapshot for the whole
+           slate, the cost the NBA purchase measured on the same endpoint and
+           the same books (2026-10-15, x-requests-last). For every ET game date
+           D: D-1 at 22Z (the evening-before opener), D at 15Z, and the UTC hour
+           at or before tip minus 5 minutes for every tip that day, so every game
+           has a price 5 to 65 minutes before its own tip whatever time it
+           starts. NCAAB tips run from late morning to after 04Z, so the NBA's
+           fixed hour list would miss the noon and late-West tips. Rows land in
+           `odds` with source 'odds_api_historical' (the pruner protects it),
+           resumable through `odds_history_pulls` (sport 'NCAAB', snapshot_date,
+           hour_utc).
+
+  --derivatives close|open  The per-event endpoint: first-half moneyline,
+           spread and total plus team totals (4 markets; the feed bills 10 a
+           market returned, so up to 40 a game, and an empty answer is free per
+           the feed's docs). One snapshot a game: `close` at tip minus 10
+           minutes, `open` at D-1 22Z or tip minus 20 hours, whichever is later.
+           The event list (1 credit a date) names each game's event id. Period
+           history starts 2023-05-03, so 2023-24 is the first season. Rows land
+           in `odds` under NCAAB_DERIV_CLOSE_SOURCE / NCAAB_DERIV_OPEN_SOURCE;
+           team totals split into `team_totals_home` / `team_totals_away` (the
+           NBA shape). A game already holding rows under the source is skipped.
+
+  --probe  One real paid call of each kind, writing nothing, printing the
+           MEASURED x-requests-last of each, so the per-call cost is a
+           measurement before the big run.
+
+WHO OWNS THE GAME. ESPN's schedule (data/ingestors/ncaab_teams.py). The feed
+never mints an NCAAB game: every event resolves onto an ESPN game by its team
+pair, and when the feed calls ESPN's away team home the names are swapped
+before the outcomes are parsed, so the stored spread is ESPN's home number
+(CLAUDE.md section 4).
+
+UNMATCHED EVENTS ARE PAID DATA. A snapshot is bought once and ledgered, so an
+event that resolves onto no game would be lost for good if it were dropped. Its
+raw JSON goes to `ncaab_odds_unmatched` instead, and the run prints the names
+that did not resolve, so a later fix to the name map can replay them.
+
+THE PRECONDITION (raises). Every requested season must already hold its ESPN
+schedule with scores -- `games` >= 4,000 scored NCAAB rows and `ncaab_events`
+>= 4,000 rows -- because a snapshot bought before the schedule exists matches
+nothing and is still ledgered. ESPN lists 4,285 completed D1 games for 2020-21,
+the COVID season (scoreboard groups=50, 2020-11-25..2021-04-06, counted
+2026-10-26), and 6,292 for 2024-25, so the bar clears every full season.
+
+THE FLOOR. September 2026 ran the balance to 0 and every live feed stopped for
+five days. Every response carries x-requests-remaining, and the run stops the
+moment the next call would take it below `--floor` (500,000 at least). NEWEST
+DATE FIRST, so a stop leaves the most recent seasons stored.
+
+    python -m data.ingestors.ncaab_odds_history --probe --seasons 2026 2026 --max-credits 200 --floor 500000 --apply
+    python -m data.ingestors.ncaab_odds_history --lines --seasons 2021 2026 --max-credits 420000 --floor 500000 --apply
+    python -m data.ingestors.ncaab_odds_history --derivatives close --seasons 2024 2026 --max-credits 800000 --floor 500000 --apply
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from collections import Counter, defaultdict
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from loguru import logger
+
+import config
+from data.anon_readable import API_ROLES, lock_down
+from data.ddl_guard import schema_is_current
+from data.db import get_connection
+from data.ingestors.nba_odds_history import _ODDS_KEYS, Meter, _write_with_retry
+from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window,
+                                        load_registry, match_event, reset_registry_cache,
+                                        resolve_team_name)
+from data.ingestors.odds_ingestor import (HISTORICAL_ODDS_SOURCE, PULL_LEDGER_DDL,
+                                          _insert_odds, _mark_in_play, _parse_outcomes,
+                                          _parse_spread_outcomes, _parse_total_outcomes,
+                                          _process_events)
+from data.ingestors.odds_quota import persist_quota
+
+SPORT = "NCAAB"
+BASE = "https://api.the-odds-api.com/v4/historical/sports/basketball_ncaab"
+BOOKS = ",".join(config.LINE_SHOP_BOOKMAKERS[:10])
+LINE_MARKETS = ["h2h", "spreads", "totals"]
+DERIV_MARKETS = ["h2h_h1", "spreads_h1", "totals_h1", "team_totals"]
+# The two derivative purchases are separate sources so the close and the open
+# each resume on their own (a game can hold one and not the other). Named
+# exactly as data/prune_odds.PROTECTED_SOURCES lists them.
+NCAAB_DERIV_CLOSE_SOURCE = "odds_api_ncaab_derivative_close"
+NCAAB_DERIV_OPEN_SOURCE = "odds_api_ncaab_derivative_open"
+DERIV_SOURCES = {"close": NCAAB_DERIV_CLOSE_SOURCE, "open": NCAAB_DERIV_OPEN_SOURCE}
+FIRST_DERIV_DATE = "2023-05-03"     # the feed's first period / prop snapshot
+LINE_SNAPSHOT_COST = 30             # 10 x 3 markets x 1 region (measured on the NBA)
+LIST_COST = 1                       # the historical event list, a date
+DERIV_EVENT_COST = 10 * len(DERIV_MARKETS)   # the most one game can bill
+MIN_FLOOR = 500_000
+MIN_SCORED_GAMES = 4_000
+ET = ZoneInfo("America/New_York")
+
+UNMATCHED_TABLE = "ncaab_odds_unmatched"
+UNMATCHED_COLS = ("snapshot_at", "event_id", "home_name", "away_name",
+                  "commence_time", "payload", "source", "stored_at")
+UNMATCHED_DDL = """
+CREATE TABLE IF NOT EXISTS ncaab_odds_unmatched (
+    snapshot_at    TEXT NOT NULL,
+    event_id       TEXT NOT NULL,
+    home_name      TEXT,
+    away_name      TEXT,
+    commence_time  TEXT,
+    payload        JSONB NOT NULL,
+    source         TEXT NOT NULL,
+    stored_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (event_id, snapshot_at, source)
+)
+"""
+PULL_LEDGER_COLS = ("sport", "snapshot_date", "hour_utc", "pulled_at", "rows")
+
+
+class PreconditionError(RuntimeError):
+    """The purchase would pay for snapshots nothing can be matched to."""
+
+
+class ContractError(RuntimeError):
+    """odds_ingestor._process_events does not yet honour the NCAAB resolver contract."""
+
+
+def _utc(v) -> datetime | None:
+    """A stored or fed timestamp as an aware UTC datetime, or None."""
+    if not v:
+        return None
+    if isinstance(v, datetime):
+        dt = v
+    else:
+        try:
+            dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _stamp(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _season_window(first: int, last: int) -> tuple[str, str]:
+    """The game dates seasons first..last cover under the ending-year label
+    (ncaab_teams.ncaab_season_label: October onwards is the next year's)."""
+    return f"{first - 1}-10-01", f"{last}-09-30"
+
+
+# ── the two checks that run before any credit is spent ──────────────────────
+
+def check_precondition(conn, seasons: list[int]) -> dict[int, tuple[int, int]]:
+    """Raise unless every season holds its ESPN schedule. Returns {season: (games, events)}."""
+    try:
+        scored = dict(conn.execute(
+            "SELECT season, COUNT(*) FROM games WHERE sport = 'NCAAB' "
+            "AND season = ANY(%s) AND home_score IS NOT NULL GROUP BY season",
+            (list(seasons),)).fetchall())
+        events = dict(conn.execute(
+            "SELECT season, COUNT(*) FROM ncaab_events WHERE season = ANY(%s) "
+            "GROUP BY season", (list(seasons),)).fetchall())
+    except Exception as exc:                                    # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                       # noqa: BLE001
+            pass
+        raise PreconditionError(
+            f"the NCAAB schedule is unreadable ({type(exc).__name__}: {exc}); run the "
+            "ESPN backfill (data.ingestors.ncaab_espn_ingestor --backfill) first") from exc
+    got = {s: (int(scored.get(s, 0)), int(events.get(s, 0))) for s in seasons}
+    short = {s: v for s, v in got.items()
+             if v[0] < MIN_SCORED_GAMES or v[1] < MIN_SCORED_GAMES}
+    if short:
+        raise PreconditionError(
+            "the ESPN schedule is not stored for every season, so these snapshots "
+            "would match nothing and still be ledgered as bought: "
+            + ", ".join(f"{s}: {g:,} scored games, {e:,} ncaab_events rows"
+                        for s, (g, e) in sorted(short.items()))
+            + f" (each needs {MIN_SCORED_GAMES:,}). Run the ESPN backfill first.")
+    return got
+
+
+def check_process_events_contract() -> None:
+    """Prove, for free, that odds_ingestor._process_events honours the NCAAB contract.
+
+    The contract (data/ingestors/ncaab_teams.make_resolver): the resolver returns
+    (game_id, flipped); the id is used as given, a flipped event has its names
+    swapped BEFORE the outcomes are parsed, and NCAAB is not held to the
+    DraftKings gate. A synthetic event at one non-DraftKings book goes through
+    the real function; a wrong answer raises here, before the first paid call,
+    rather than storing a season of tuple ids or away-team spreads.
+    """
+    book = next(b for b in config.LINE_SHOP_BOOKMAKERS if b != config.ODDS_API_BOOKMAKER)
+    event = {"id": "selftest", "commence_time": "2026-01-10T00:00:00Z",
+             "home_team": "Feed Home", "away_team": "Feed Away",
+             "bookmakers": [{"key": book, "markets": [
+                 {"key": "h2h", "outcomes": [{"name": "Feed Home", "price": -150},
+                                             {"name": "Feed Away", "price": 130}]},
+                 {"key": "spreads", "outcomes": [
+                     {"name": "Feed Home", "price": -105, "point": -3.5},
+                     {"name": "Feed Away", "price": -115, "point": 3.5}]}]}]}
+    try:
+        _, rows = _process_events([event], SPORT, "open", "2026-01-09T22:00:00Z",
+                                  resolve_game_id=lambda h, a, c: ("NCAAB_selftest", True))
+    except Exception as exc:                                    # noqa: BLE001
+        raise ContractError(f"_process_events raised on a (game_id, flipped) resolver: "
+                            f"{type(exc).__name__}: {exc}") from exc
+    by_market = {r.get("market"): r for r in rows}
+    problems = []
+    if not rows:
+        problems.append("no rows from a non-DraftKings book (NCAAB still held to the DK gate)")
+    if any(r.get("game_id") != "NCAAB_selftest" for r in rows):
+        problems.append(f"game_id taken as {rows[0].get('game_id')!r}, not the resolved id")
+    h2h, spread = by_market.get("h2h"), by_market.get("spreads")
+    if rows and (h2h is None or h2h.get("home_price") != 130 or h2h.get("away_price") != -150):
+        problems.append(f"flipped h2h not swapped (home_price {h2h and h2h.get('home_price')})")
+    if rows and (spread is None or spread.get("spread_home") != 3.5
+                 or spread.get("home_price") != -115):
+        problems.append(f"flipped spread not ESPN's home number "
+                        f"(spread_home {spread and spread.get('spread_home')})")
+    if problems:
+        raise ContractError("odds_ingestor._process_events does not honour the NCAAB "
+                            "resolver contract: " + "; ".join(problems))
+
+
+# ── tables ───────────────────────────────────────────────────────────────────
+
+def _ensure_tables(conn) -> None:
+    """The pull ledger and the unmatched store, created once and locked down.
+
+    Both are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The catalog
+    gate means a run that finds them current fires no DDL (data/ddl_guard.py).
+    """
+    changed = False
+    if not schema_is_current(conn, "odds_history_pulls", columns=PULL_LEDGER_COLS,
+                             rls=True, revoked_from=API_ROLES):
+        conn.execute(PULL_LEDGER_DDL)
+        lock_down(conn, "odds_history_pulls")
+        changed = True
+    if not schema_is_current(conn, "ncaab_odds_unmatched", columns=UNMATCHED_COLS,
+                             rls=True, revoked_from=API_ROLES):
+        conn.execute(UNMATCHED_DDL)
+        lock_down(conn, "ncaab_odds_unmatched")
+        changed = True
+    if changed:
+        conn.commit()
+
+
+_UNMATCHED_INSERT = """
+    INSERT INTO ncaab_odds_unmatched
+           (snapshot_at, event_id, home_name, away_name, commence_time, payload, source)
+    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+    ON CONFLICT (event_id, snapshot_at, source) DO NOTHING
+"""
+
+
+# ── resolving the feed's events onto ESPN's games ────────────────────────────
+
+def _event_key(ev: dict) -> tuple[str, str, str]:
+    """(home, away, commence) as the feed sent them: the resolver's arguments."""
+    return (ev.get("home_team") or "", ev.get("away_team") or "",
+            ev.get("commence_time") or "")
+
+
+class EventResolver:
+    """ncaab_teams.match_event over a whole season, fast, and counting what misses.
+
+    A season is ~6,000 games and a lines purchase resolves ~150 events a
+    snapshot over ~2,000 snapshots, so the games are bucketed by ET date and
+    each name is resolved against the registry once.
+    """
+
+    def __init__(self, registry: list[dict], games: list[dict]):
+        self.registry = registry
+        self.by_date: dict[str, list[dict]] = defaultdict(list)
+        for g in games:
+            self.by_date[g["game_date"]].append(g)
+        self._ids: dict[str, int | None] = {}
+        self._seen: set[str] = set()
+        self.unresolved_names: Counter = Counter()   # distinct events per unresolved name
+        self.no_game: Counter = Counter()            # both names resolved, no scheduled game
+
+    def team(self, name: str) -> int | None:
+        if name not in self._ids:
+            self._ids[name] = resolve_team_name(name, self.registry)
+        return self._ids[name]
+
+    def __call__(self, home_name: str, away_name: str, commence_time: str):
+        """(game_id, flipped) or None -- the make_resolver contract."""
+        try:
+            day = date.fromisoformat(eastern_game_date(commence_time))
+        except ValueError:
+            return None
+        near = [g for k in (-1, 0, 1)
+                for g in self.by_date.get((day + timedelta(days=k)).isoformat(), ())]
+        return match_event(near, self.team(home_name), self.team(away_name), commence_time)
+
+    def split(self, events: list[dict]) -> tuple[dict, list[dict]]:
+        """Resolve every event once: ({(home, away, commence): hit}, unmatched events)."""
+        hits, unmatched = {}, []
+        for ev in events:
+            key = _event_key(ev)
+            hit = self(*key)
+            hits[key] = hit
+            if hit is not None:
+                continue
+            unmatched.append(ev)
+            eid = str(ev.get("id"))
+            if eid in self._seen:
+                continue
+            self._seen.add(eid)
+            ids = [self.team(key[0]), self.team(key[1])]
+            for name, tid in zip(key[:2], ids):
+                if tid is None:
+                    self.unresolved_names[name] += 1
+            if None not in ids:
+                self.no_game[f"{key[1]} @ {key[0]}"] += 1
+        return hits, unmatched
+
+    def report(self, top: int = 25) -> str:
+        names = ", ".join(f"{n} ({c})" for n, c in self.unresolved_names.most_common(top))
+        pairs = ", ".join(f"{n} ({c})" for n, c in self.no_game.most_common(top))
+        return (f"unresolved team names: {len(self.unresolved_names)} "
+                f"[{names or 'none'}]; resolved pairs with no ESPN game: "
+                f"{len(self.no_game)} [{pairs or 'none'}]")
+
+
+def _season_games(conn, first: int, last: int) -> list[dict]:
+    lo, hi = _season_window(first, last)
+    return load_games_window(conn, lo, hi)
+
+
+def _fresh_registry(conn) -> list[dict]:
+    """ncaab_teams read now, not the process's cached copy.
+
+    The worker runs every job in ONE process, and ncaab_teams.load_registry
+    caches whatever it read first, an empty list included. The declared feed
+    probe runs before the ESPN backfill creates the table, so without this the
+    purchases queued behind the backfill would read that empty cache and
+    refuse to start (2026-10-26 review)."""
+    reset_registry_cache()
+    return load_registry(conn)
+
+
+def _resolver(conn, games: list[dict]) -> EventResolver:
+    registry = _fresh_registry(conn)
+    if not registry:
+        raise PreconditionError("ncaab_teams is empty, so no feed name can resolve; "
+                                "run the ESPN backfill first")
+    return EventResolver(registry, games)
+
+
+# ── game lines ───────────────────────────────────────────────────────────────
+
+def line_snapshots(games: list[dict]) -> list[datetime]:
+    """The on-the-hour UTC instants to buy, newest first, each once.
+
+    For every ET game date D: D-1 22Z (the overnight opener), D 15Z (the
+    morning), and for every tip the hour at or before tip minus 5 minutes --
+    a 19:00Z tip is priced at 18Z (60 minutes out), a 19:05Z tip at 19Z (5
+    minutes out). A game with no stored tip gets the first two only. Dates and
+    tips that share an hour share the snapshot. Pure, so the plan is testable.
+    """
+    want: set[datetime] = set()
+    for g in games:
+        d = date.fromisoformat(str(g["game_date"])[:10])
+        midnight = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        want.add(midnight + timedelta(hours=15))
+        want.add(midnight - timedelta(hours=2))
+        tip = _utc(g.get("commence_time"))
+        if tip is not None:
+            want.add((tip - timedelta(minutes=5)).replace(minute=0, second=0, microsecond=0))
+    return sorted(want, reverse=True)
+
+
+def _held_hours(conn) -> set[tuple[str, int]]:
+    return {(str(r[0]), int(r[1])) for r in conn.execute(
+        "SELECT snapshot_date, hour_utc FROM odds_history_pulls WHERE sport = %s",
+        (SPORT,)).fetchall()}
+
+
+def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
+                  when: datetime, stats: dict) -> bool:
+    """Buy the whole slate at `when`, write it, its unmatched events and its
+    ledger row in one transaction. False = stop (ceiling or floor)."""
+    snap_date, hour = when.date().isoformat(), when.hour
+    held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
+                        "AND snapshot_date = %s AND hour_utc = %s",
+                        (SPORT, snap_date, hour)).fetchone()
+    if held:
+        conn.commit()
+        stats["skipped_held"] += 1
+        return True
+    stop = meter.stop_reason(LINE_SNAPSHOT_COST)
+    if stop:
+        stats["stopped"] = stop
+        logger.warning(f"lines stopping at {when:%Y-%m-%d %H}Z: {stop}")
+        return False
+    snapshot_at = _stamp(when)
+    r = meter.get(f"{BASE}/odds", {"date": snapshot_at, "markets": ",".join(LINE_MARKETS),
+                                   "bookmakers": BOOKS, "oddsFormat": "american"})
+    if r is None or r.status_code != 200:
+        stats["errors"] += 1
+        logger.warning(f"lines {snapshot_at}: HTTP {getattr(r, 'status_code', 'network')}")
+        return True
+    body = r.json()
+    events = body.get("data") or []
+    stamp = body.get("timestamp") or snapshot_at
+    hits, unmatched = resolver.split(events)
+    # The contract: _process_events takes (game_id, flipped) and swaps the
+    # names itself before parsing (proved by check_process_events_contract).
+    # It gets the resolver ITSELF, not a lookup of split()'s answers keyed on
+    # the exact strings: a lookup misses if the parser passes the start in any
+    # other form, and that event would then be neither stored nor kept raw.
+    _, odds_rows = _process_events(events, SPORT, "open", snapshot_at,
+                                   resolve_game_id=resolver)
+    for row in odds_rows:
+        row["source"] = HISTORICAL_ODDS_SOURCE
+    # The backstop for the same loss: an event that DID resolve and carried
+    # prices but produced no row (a filter inside the parser, which this
+    # module does not own) is kept raw beside the unmatched ones, because the
+    # ledger row below means this snapshot is never bought again.
+    kept = {o["game_id"] for o in odds_rows}
+    dropped = [ev for ev in events
+               if (hit := hits.get(_event_key(ev))) and hit[0] not in kept
+               and any(b.get("markets") for b in ev.get("bookmakers") or [])]
+    if dropped:
+        logger.warning(f"lines {snapshot_at}: {len(dropped)} resolved event(s) produced no "
+                       f"odds row; kept raw in {UNMATCHED_TABLE}")
+    # With a resolver _process_events emits no game rows, so the in-play
+    # relabel takes each game's tip from ESPN's schedule (the feed's own start
+    # where ESPN has none). Without this a 22Z price on a 19Z tip is stored
+    # as pre-game: the section 7 leak. Both are read as aware UTC first, so a
+    # stored tip without an offset cannot raise mid-purchase in the compare.
+    fed = {hit[0]: c for (h, a, c), hit in hits.items() if hit}
+    starts = []
+    for gid in kept:
+        tip = _utc(tips.get(gid)) or _utc(fed.get(gid))
+        starts.append({"game_id": gid, "commence_time": tip.isoformat() if tip else None})
+    stats["marked_in_play"] += _mark_in_play(starts, odds_rows)
+    lost = [(stamp, str(ev.get("id")), ev.get("home_team"), ev.get("away_team"),
+             ev.get("commence_time"), json.dumps(ev), HISTORICAL_ODDS_SOURCE)
+            for ev in unmatched + dropped]
+
+    def _write():
+        if odds_rows:
+            _insert_odds(conn, odds_rows)
+        if lost:
+            conn.executemany(_UNMATCHED_INSERT, lost)
+        conn.execute("""
+            INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
+            VALUES (%s, %s, %s, NOW(), %s)
+            ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+               SET pulled_at = NOW(), rows = EXCLUDED.rows
+        """, (SPORT, snap_date, hour, len(odds_rows)))
+        conn.commit()
+
+    if not _write_with_retry(conn, _write, f"lines {snapshot_at}"):
+        stats["errors"] += 1
+        return True
+    stats["calls"] += 1
+    stats["odds_rows"] += len(odds_rows)
+    stats["unmatched_events"] += len(unmatched)
+    stats["dropped_by_parser"] += len(dropped)
+    if stats["calls"] % 50 == 0:
+        logger.info(f"lines {snapshot_at}: {stats['calls']} calls, {stats['odds_rows']:,} rows, "
+                    f"spent {meter.spent:,}, balance {meter.remaining}")
+    return True
+
+
+def plan_lines(conn, first: int, last: int) -> tuple[list[dict], list[datetime], list[datetime]]:
+    """(games, every snapshot, the snapshots not yet ledgered), newest first."""
+    games = _season_games(conn, first, last)
+    pairs = line_snapshots(games)
+    try:
+        done = _held_hours(conn)
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()                    # a database the ledger has never reached
+        done = set()
+    todo = [w for w in pairs if (w.date().isoformat(), w.hour) not in done]
+    return games, pairs, todo
+
+
+def buy_lines(conn, meter: Meter, first: int, last: int) -> dict:
+    check_precondition(conn, list(range(first, last + 1)))
+    check_process_events_contract()
+    _ensure_tables(conn)
+    games, pairs, todo = plan_lines(conn, first, last)
+    resolver = _resolver(conn, games)
+    tips = {g["game_id"]: g.get("commence_time") for g in games}
+    logger.info(f"lines: {len(games):,} games -> {len(pairs):,} snapshots, "
+                f"{len(pairs) - len(todo):,} already stored, {len(todo):,} to buy "
+                f"(~{LINE_SNAPSHOT_COST * len(todo):,} credits)")
+    stats: dict = defaultdict(int)
+    for when in todo:
+        if not _buy_snapshot(conn, meter, tips, resolver, when, stats):
+            break
+    print("lines", resolver.report())
+    return dict(stats)
+
+
+# ── first half and team totals ───────────────────────────────────────────────
+
+def deriv_instant(tip: datetime | None, game_date: str, mode: str) -> datetime | None:
+    """The snapshot one game's derivatives are bought at, on the 5-minute grid.
+
+    close: tip minus 10 minutes. open: D-1 22Z or tip minus 20 hours, whichever
+    is LATER (a 7pm ET tip opens at 04Z the same night, a noon tip at D-1 22Z).
+    Rounded down to five minutes, the feed's snapshot spacing.
+    """
+    d = date.fromisoformat(str(game_date)[:10]) - timedelta(days=1)
+    evening_before = datetime(d.year, d.month, d.day, 22, tzinfo=timezone.utc)
+    if mode == "close":
+        if tip is None:
+            return None
+        at = tip - timedelta(minutes=10)
+    elif mode == "open":
+        at = evening_before if tip is None else max(evening_before, tip - timedelta(hours=20))
+    else:
+        raise ValueError(f"mode must be close or open, got {mode!r}")
+    return at.replace(minute=at.minute - at.minute % 5, second=0, microsecond=0)
+
+
+def _side_team(o: dict) -> tuple[str, str]:
+    """(over/under, team) of a team-total outcome, whichever field carries which."""
+    name, desc = (o.get("name") or ""), (o.get("description") or "")
+    return (name, desc) if name.lower() in ("over", "under") else (desc, name)
+
+
+def parse_derivatives(book_markets: list[dict], home_name: str, away_name: str) -> list[dict]:
+    """One `odds`-shaped dict per (market, line) for one book.
+
+    `home_name` / `away_name` are the feed's names in ESPN's orientation (the
+    caller swaps them for a flipped event), so spreads_h1 stores ESPN's home
+    number and team totals land under ESPN's home and away. A team total whose
+    description names neither team is never filed under either side.
+    """
+    rows = []
+    for m in book_markets:
+        key, outs = m.get("key"), m.get("outcomes") or []
+        if key == "h2h_h1":
+            p = _parse_outcomes(outs, SPORT, home_name)
+            if p.get("home_price") is not None and p.get("away_price") is not None:
+                rows.append({"market": key, **p})
+        elif key == "spreads_h1":
+            p = _parse_spread_outcomes(outs, home_name)
+            if p.get("spread_home") is not None:
+                rows.append({"market": key, **p})
+        elif key == "totals_h1":
+            p = _parse_total_outcomes(outs)
+            if p.get("total_line") is not None:
+                rows.append({"market": key, **p})
+        elif key == "team_totals":
+            slots: dict[tuple, dict] = {}
+            for o in outs:
+                side, team = _side_team(o)
+                if side.lower() not in ("over", "under") or o.get("point") is None:
+                    continue
+                stored = ("team_totals_home" if team == home_name else
+                          "team_totals_away" if team == away_name else None)
+                if stored is None:
+                    continue
+                slots.setdefault((stored, float(o["point"])), {})[side.lower() + "_price"] = o.get("price")
+            for (stored, pt), slot in slots.items():
+                rows.append({"market": stored, "total_line": pt,
+                             "over_price": slot.get("over_price"),
+                             "under_price": slot.get("under_price")})
+    return rows
+
+
+def _deriv_done(conn, game_ids: list[str], source: str) -> set[str]:
+    have: set[str] = set()
+    for i in range(0, len(game_ids), 500):
+        have |= {r[0] for r in conn.execute(
+            "SELECT DISTINCT game_id FROM odds WHERE game_id = ANY(%s) AND source = %s",
+            (game_ids[i:i + 500], source)).fetchall()}
+    return have
+
+
+def _list_instant(game_date: str, tips: list[datetime]) -> datetime:
+    """When to ask for date D's event list: noon ET, or an hour before D's
+    first tip when that is earlier (a Thanksgiving-tournament 11am tip is
+    already under way at noon and may no longer be listed)."""
+    noon = datetime.fromisoformat(f"{game_date}T12:00:00").replace(tzinfo=ET).astimezone(timezone.utc)
+    early = [t - timedelta(hours=1) for t in tips if t is not None]
+    return min([noon] + early)
+
+
+def plan_derivatives(conn, first: int, last: int, mode: str):
+    """(every season game, those since FIRST_DERIV_DATE, the ids already stored
+    under the mode's source)."""
+    every = _season_games(conn, first, last)
+    games = [g for g in every if g["game_date"] >= FIRST_DERIV_DATE]
+    return every, games, _deriv_done(conn, [g["game_id"] for g in games], DERIV_SOURCES[mode])
+
+
+def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dict:
+    """One purchase per game at its mode's instant, newest date first; a game
+    already holding rows under the source is skipped, so a re-run (the r2 job
+    after the monthly refill) buys only what is missing. An answer with no
+    markets writes nothing and is asked again on a re-run; the feed documents
+    an empty answer as free."""
+    source = DERIV_SOURCES[mode]
+    check_precondition(conn, list(range(first, last + 1)))
+    every, games, done = plan_derivatives(conn, first, last, mode)
+    resolver = _resolver(conn, every)
+    pending = {g["game_id"]: g for g in games if g["game_id"] not in done}
+    by_date: dict[str, list[dict]] = defaultdict(list)
+    for g in pending.values():
+        by_date[g["game_date"]].append(g)
+    logger.info(f"derivatives {mode}: {len(pending):,} games to buy on {len(by_date):,} dates "
+                f"(<= ~{DERIV_EVENT_COST * len(pending) + len(by_date):,} credits), "
+                f"{len(done):,} stored")
+    totals: dict = defaultdict(int)
+    failed: list[tuple] = []
+    unlisted: list[str] = []
+    answered: set[str] = set()             # games whose purchase got an answer
+    # End the planning reads' transaction before the first paid call, so no
+    # read lock is held across the HTTP waits of a long run.
+    conn.commit()
+
+    def listed(d: str):
+        """[(event, game, flipped)] for D's pending games, or None on no answer."""
+        when = _list_instant(d, [_utc(g.get("commence_time")) for g in by_date[d]])
+        r = meter.get(f"{BASE}/events", {"date": _stamp(when)})
+        if r is None or r.status_code != 200:
+            totals["errors"] += 1
+            return None
+        events = r.json().get("data") or []
+        hits, _ = resolver.split(events)
+        out = []
+        for ev in events:
+            hit = hits.get(_event_key(ev))
+            if hit and hit[0] in pending:
+                out.append((ev, pending.pop(hit[0]), hit[1]))
+        return out
+
+    def buy_one(ev: dict, g: dict, flipped: bool) -> bool:
+        """Buy and store one game; False = no usable answer (kept for the second pass)."""
+        tip = _utc(g.get("commence_time")) or _utc(ev.get("commence_time"))
+        at = deriv_instant(tip, g["game_date"], mode)
+        if at is None:
+            totals["no_tip"] += 1
+            return True
+        resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
+            "date": _stamp(at), "markets": ",".join(DERIV_MARKETS), "bookmakers": BOOKS,
+            "oddsFormat": "american"})
+        if resp is None or resp.status_code != 200:
+            totals["errors"] += 1
+            return False
+        body = resp.json()
+        stamp = body.get("timestamp") or _stamp(at)
+        home_name, away_name = ev.get("home_team") or "", ev.get("away_team") or ""
+        if flipped:
+            # the feed called ESPN's away team home: parse in ESPN's orientation
+            home_name, away_name = away_name, home_name
+        rows = []
+        for book in (body.get("data") or {}).get("bookmakers", []):
+            for p in parse_derivatives(book.get("markets", []), home_name, away_name):
+                row = dict.fromkeys(_ODDS_KEYS)
+                row.update({"game_id": g["game_id"], "sport": SPORT,
+                            "bookmaker": book.get("key"), "snapshot_type": "open",
+                            "snapshot_at": stamp, "source": source})
+                row.update(p)
+                rows.append(row)
+        if tip is not None:
+            totals["marked_in_play"] += _mark_in_play(
+                [{"game_id": g["game_id"], "commence_time": tip.isoformat()}], rows)
+        if rows:
+            def _write(rows=rows):
+                _insert_odds(conn, rows)
+                conn.commit()
+            if not _write_with_retry(conn, _write, g["game_id"]):
+                totals["errors"] += 1
+                return False
+            totals["rows"] += len(rows)
+        else:
+            totals["empty"] += 1
+        totals["events"] += 1
+        totals["flipped"] += int(flipped)
+        answered.add(g["game_id"])
+        return True
+
+    def run_date(d: str) -> bool:
+        # The check sits HERE, not only in the first loop, so the second pass
+        # over unanswered dates cannot list one (1 credit) under the floor.
+        why = meter.stop_reason(LIST_COST + DERIV_EVENT_COST)
+        if why:
+            totals["stopped"] = why
+            logger.warning(f"derivatives {mode} stopping before listing {d}: {why}")
+            return False
+        evs = listed(d)
+        if evs is None:
+            unlisted.append(d)
+            return True
+        for i, (ev, g, flipped) in enumerate(evs):
+            why = meter.stop_reason(DERIV_EVENT_COST)
+            if why:
+                totals["stopped"] = why
+                logger.warning(f"derivatives {mode} stopping at {d}: {why}")
+                for _, left, _ in evs[i:]:      # listed but not bought: still owed
+                    pending[left["game_id"]] = left
+                return False
+            if not buy_one(ev, g, flipped):
+                failed.append((ev, g, flipped))
+        return True
+
+    stopped = False
+    for d in sorted(by_date, reverse=True):
+        if not any(g["game_id"] in pending for g in by_date[d]):
+            continue                         # every game already bought off another date's list
+        if not run_date(d):
+            stopped = True
+            break
+        logger.info(f"derivatives {mode} {d}: {totals['events']} games so far, "
+                    f"{totals['rows']:,} rows | spent {meter.spent:,}, balance {meter.remaining}")
+    if not stopped:
+        # one more pass: re-list every date whose list got no answer, and buy
+        # every game that got none, under the same meter and floor
+        totals["dates_unlisted"] = len(unlisted)
+        for d in list(unlisted):
+            if not any(g["game_id"] in pending for g in by_date[d]):
+                continue                     # bought off another date's list meanwhile
+            if not run_date(d):
+                stopped = True
+                break
+        if not stopped:
+            totals["retried"] = len(failed)
+            for ev, g, flipped in list(failed):
+                why = meter.stop_reason(DERIV_EVENT_COST)
+                if why:
+                    totals["stopped"] = why
+                    break
+                if not buy_one(ev, g, flipped):
+                    totals["still_failed"] += 1
+    # Still owed, for the report: never listed or past a stop, plus listed games
+    # whose purchase never got an answer (a stop skips the retry pass).
+    totals["left_unbought"] = len(pending) + len(
+        {g["game_id"] for _, g, _ in failed} - answered)
+    print(f"derivatives {mode}", resolver.report())
+    return dict(totals)
+
+
+# ── the probe: one measured call of each kind ────────────────────────────────
+
+PROBE_FALLBACK_DATE = "2026-01-17"   # a full Saturday slate in 2025-26
+
+
+def _busiest_date(conn, season: int) -> str:
+    try:
+        row = conn.execute("SELECT game_date FROM ncaab_events WHERE season = %s "
+                           "GROUP BY game_date ORDER BY COUNT(*) DESC, game_date DESC LIMIT 1",
+                           (season,)).fetchone()
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()
+        row = None
+    return str(row[0]) if row else PROBE_FALLBACK_DATE
+
+
+def probe(conn, meter: Meter, season: int) -> dict:
+    """One bulk snapshot, one event list, one event's derivatives. Writes nothing.
+
+    Prints what each call was MEASURED to bill (x-requests-last), so the
+    purchase's per-call cost is a reading, not the NBA's figure carried over.
+    """
+    out: dict = {}
+    try:
+        check_process_events_contract()
+        out["contract"] = "ok"
+    except ContractError as exc:
+        out["contract"] = f"NOT MET: {exc}"
+    print(f"probe: _process_events contract {out['contract']}")
+    d = _busiest_date(conn, season)
+    try:
+        resolver = EventResolver(_fresh_registry(conn), _season_games(conn, season, season))
+    except Exception:                                           # noqa: BLE001
+        resolver = EventResolver([], [])
+
+    def billed(r) -> str:
+        return (r.headers.get("x-requests-last") if r is not None else None) or "?"
+
+    day = date.fromisoformat(d)
+    when = datetime(day.year, day.month, day.day, 23, tzinfo=timezone.utc)
+    if not meter.stop_reason(LINE_SNAPSHOT_COST):
+        r = meter.get(f"{BASE}/odds", {"date": _stamp(when), "markets": ",".join(LINE_MARKETS),
+                                       "bookmakers": BOOKS, "oddsFormat": "american"})
+        events = (r.json().get("data") or []) if r is not None and r.status_code == 200 else []
+        hits, unmatched = resolver.split(events)
+        out["bulk"] = {"status": getattr(r, "status_code", None), "billed": billed(r),
+                       "events": len(events), "resolved": len(events) - len(unmatched)}
+        print(f"probe bulk {_stamp(when)}: HTTP {out['bulk']['status']}, MEASURED "
+              f"x-requests-last {out['bulk']['billed']}, {len(events)} events, "
+              f"{out['bulk']['resolved']} resolve onto ESPN games")
+    noon = _list_instant(d, [])
+    listing = []
+    if not meter.stop_reason(LIST_COST):
+        r = meter.get(f"{BASE}/events", {"date": _stamp(noon)})
+        listing = (r.json().get("data") or []) if r is not None and r.status_code == 200 else []
+        out["list"] = {"status": getattr(r, "status_code", None), "billed": billed(r),
+                       "events": len(listing)}
+        print(f"probe list {_stamp(noon)}: HTTP {out['list']['status']}, MEASURED "
+              f"x-requests-last {out['list']['billed']}, {len(listing)} events")
+    ev = next((e for e in listing if (_utc(e.get("commence_time")) or noon) > noon), None)
+    if ev is not None and not meter.stop_reason(DERIV_EVENT_COST):
+        at = deriv_instant(_utc(ev["commence_time"]), d, "close")
+        r = meter.get(f"{BASE}/events/{ev['id']}/odds", {
+            "date": _stamp(at), "markets": ",".join(DERIV_MARKETS), "bookmakers": BOOKS,
+            "oddsFormat": "american"})
+        body = r.json() if r is not None and r.status_code == 200 else {}
+        books = {b.get("key"): sorted(m.get("key") for m in b.get("markets", []))
+                 for b in (body.get("data") or {}).get("bookmakers", [])}
+        out["derivatives"] = {"status": getattr(r, "status_code", None), "billed": billed(r),
+                              "event": f"{ev.get('away_team')} @ {ev.get('home_team')}",
+                              "books": books}
+        print(f"probe derivatives {ev.get('away_team')} @ {ev.get('home_team')} at {_stamp(at)}: "
+              f"HTTP {out['derivatives']['status']}, MEASURED x-requests-last "
+              f"{out['derivatives']['billed']}, markets by book {books}")
+    print(f"probe: MEASURED {meter.spent} credits in total; balance {meter.remaining}")
+    return out
+
+
+# ── command line ─────────────────────────────────────────────────────────────
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    what = ap.add_mutually_exclusive_group(required=True)
+    what.add_argument("--lines", action="store_true", help="bulk game lines, every planned snapshot")
+    what.add_argument("--derivatives", choices=("close", "open"),
+                      help="first-half lines and team totals, one snapshot a game")
+    what.add_argument("--probe", action="store_true",
+                      help="one measured paid call of each kind, writes nothing")
+    ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"), required=True,
+                    help="ending years (2026 = the 2025-26 season)")
+    ap.add_argument("--max-credits", type=int, help="the ceiling; required with --apply")
+    ap.add_argument("--floor", type=int,
+                    help=f"stop before the balance falls below this; required with --apply, "
+                         f">= {MIN_FLOOR:,}")
+    ap.add_argument("--apply", action="store_true", help="spend; without it, print the plan")
+    a = ap.parse_args()
+    first, last = a.seasons
+    if first > last:
+        ap.error("--seasons FIRST must not be after LAST")
+    if a.floor is not None and a.floor < MIN_FLOOR:
+        ap.error(f"--floor must be at least {MIN_FLOOR:,} (the live feeds' reserve)")
+    if a.apply and (not a.max_credits or a.max_credits <= 0):
+        ap.error("--apply needs --max-credits")
+    if a.apply and a.floor is None:
+        ap.error("--apply needs --floor")
+    conn = get_connection()
+    try:
+        if not a.apply:
+            _dry_run(conn, a, first, last)
+            return
+        meter = Meter(ceiling=a.max_credits, floor=a.floor)
+        if a.probe:
+            print("probe:", probe(conn, meter, last))
+        elif a.lines:
+            print("lines:", buy_lines(conn, meter, first, last))
+        else:
+            print(f"derivatives {a.derivatives}:",
+                  buy_derivatives(conn, meter, first, last, a.derivatives))
+        print(f"spent {meter.spent:,} credits; balance {meter.remaining}")
+    finally:
+        try:
+            persist_quota(conn)
+        finally:
+            conn.close()
+
+
+def _dry_run(conn, a, first: int, last: int) -> None:
+    """The plan and its credit estimate. Spends nothing; raises on the precondition."""
+    if a.probe:
+        print(f"dry run: --probe would buy 1 bulk snapshot (~{LINE_SNAPSHOT_COST}), 1 event "
+              f"list ({LIST_COST}) and 1 game's derivatives (<= {DERIV_EVENT_COST}) on "
+              f"{_busiest_date(conn, last)}; re-run with --apply --max-credits N --floor N")
+        return
+    print("precondition:", check_precondition(conn, list(range(first, last + 1))))
+    if a.lines:
+        games, pairs, todo = plan_lines(conn, first, last)
+        by_season = Counter((w.year + 1 if w.month >= 10 else w.year) for w in todo)
+        print(f"dry run: lines {len(games):,} games -> {len(pairs):,} snapshots, "
+              f"{len(todo):,} to buy (~{LINE_SNAPSHOT_COST * len(todo):,} credits); "
+              f"by season {dict(sorted(by_season.items()))}")
+    else:
+        _, games, done = plan_derivatives(conn, first, last, a.derivatives)
+        n = len(games) - len(done)
+        dates = len({g["game_date"] for g in games if g["game_id"] not in done})
+        print(f"dry run: derivatives {a.derivatives} {n:,} games on {dates:,} dates to buy "
+              f"(<= ~{DERIV_EVENT_COST * n + LIST_COST * dates:,} credits), {len(done):,} stored")
+    print("re-run with --apply --max-credits N --floor N")
+
+
+if __name__ == "__main__":
+    main()

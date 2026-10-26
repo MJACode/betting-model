@@ -1134,5 +1134,81 @@
       "reason": "Voided: these picks were under the minimum expected-value bar that took effect 9/19. They are void and do not count in the record. The original posts are left as they were.",
       "dry_run": false
     }
+  },
+  {
+    "key": "ncaab-feed-probe-2026-10-26",
+    "job_type": "ncaab_feed_probe",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. Before the NCAAB history purchase and the live poll: is basketball_ncaab active on The Odds API, how many events, which feed team names the ESPN registry cannot place, and how many events land on an ESPN game (free calls, x-requests-last must read 0); the market keys each book offers on the 5 soonest events (1 credit each, 5 credits); and what College Basketball Data serves on the CFBD key (teams, Duke's 2025-26 games and lines, the line providers).",
+    "args": {
+      "market_events": 5
+    }
+  },
+  {
+    "key": "ncaab-schedule-backfill-2020-2027",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. The ESPN NCAAB schedule and results, 2020-21 through 2026-27 (free, idempotent upserts of ESPN's own rows). A safety net if the local backfill is incomplete: the history purchase below refuses to start until every season it buys holds 4,000 scored games, because a snapshot bought before the schedule exists matches nothing and is still ledgered.",
+    "args": {
+      "first": "2020-11-01",
+      "last": "2027-04-10"
+    }
+  },
+  {
+    "key": "ncaab-history-probe-2026-10-26",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. One real paid call of each kind the NCAAB purchase makes (1 bulk snapshot at 30 credits planned, 1 event list at 1, 1 game's first-half and team-total lines at up to 40), writing nothing, printing the MEASURED x-requests-last of each so the per-call cost is a reading before the big runs. Ceiling 200.",
+    "args": {
+      "mode": "probe",
+      "max_credits": 200,
+      "floor": 500000
+    }
+  },
+  {
+    "key": "ncaab-history-lines-2021-2026",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. NCAAB game lines (moneyline, spread, total; ten books) on every 2020-21..2025-26 game: per ET game date the evening-before opener (D-1 22Z), D 15Z, and the hour 5-65 minutes before every tip, 30 credits a bulk snapshot (the NBA purchase's measured cost on the same endpoint and books). Approved at ~375,000 credits; ceiling 420,000, floor 500,000. Resumes on odds_history_pulls (sport NCAAB).",
+    "args": {
+      "mode": "lines",
+      "max_credits": 420000,
+      "floor": 500000
+    }
+  },
+  {
+    "key": "ncaab-history-deriv-close-2024-2026",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. NCAAB first-half moneyline, spread and total plus team totals at the close (tip minus 10 minutes) on every 2023-24..2025-26 game: 1 credit an event list a date, up to 40 a game (10 a market returned, 4 markets; an empty answer is free per the feed's docs). Approved with the open at up to ~1,380,000 together; ceiling 800,000, floor 500,000. Stored under odds_api_ncaab_derivative_close; a game holding rows is skipped.",
+    "args": {
+      "mode": "deriv_close",
+      "max_credits": 800000,
+      "floor": 500000
+    }
+  },
+  {
+    "key": "ncaab-history-deriv-close-2024-2026-r2",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. The close purchase resumed after the 2026-11-01 credit refill: a floor stop marks the first job done, and this one buys only the games it left (the source marker is the resume). Same scope and ceiling as ncaab-history-deriv-close-2024-2026.",
+    "run_after": "2026-11-02T00:30:00+00:00",
+    "args": {
+      "mode": "deriv_close",
+      "max_credits": 800000,
+      "floor": 500000
+    }
+  },
+  {
+    "key": "ncaab-history-deriv-open-2024-2026",
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '3 approved'. NCAAB first-half lines and team totals at the open (D-1 22Z or tip minus 20 hours, whichever is later) on every 2023-24..2025-26 game, after the 2026-11-01 refill: 1 credit an event list a date, up to 40 a game. Approved with the close at up to ~1,380,000 together; ceiling 800,000, floor 500,000. Stored under odds_api_ncaab_derivative_open.",
+    "run_after": "2026-11-02T01:00:00+00:00",
+    "args": {
+      "mode": "deriv_open",
+      "max_credits": 800000,
+      "floor": 500000
+    }
   }
 ]
