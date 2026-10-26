@@ -442,9 +442,11 @@ def _ncaab_resolver(conn, around_date: str):
 def _schedule_resolver(sport: str, conn, around_date: str):
     """The resolver for a SCHEDULE_RESOLVED_SPORTS sport, or None.
 
-    One dispatcher for every caller, so the live pass, the pre-game poller and
-    the historical backfill cannot drift apart on which sports resolve. None
-    means "skip this sport now", never "mint instead".
+    One dispatcher for both live callers, so the hourly pass and the pre-game
+    poller cannot drift apart on which sports resolve. None means "skip this
+    sport now", never "mint instead". The historical paths build none: both
+    refuse RESOLVE_ONLY_SPORTS before paying (see run_historical_odds_range),
+    and the NFL there still mints, as it did before NCAAB.
     """
     if sport == "NFL":
         return _nfl_resolver(conn, around_date)
@@ -1453,10 +1455,11 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     if sport in RESOLVE_ONLY_SPORTS:
         # This single-date path builds no resolver, so _process_events would
         # drop every NCAAB event AFTER the 10x call had been paid for. Refused
-        # before the call; run_historical_odds_range resolves onto ESPN's
-        # schedule and is the path for NCAAB history.
-        logger.warning(f"historical {sport}: use run_historical_odds_range, which "
-                       f"resolves onto the schedule; nothing fetched")
+        # before the call. run_historical_odds_range refuses NCAAB too (it
+        # would ledger an hour whose unresolved events it dropped; the reason
+        # is written there): NCAAB history needs a buyer that keeps them.
+        logger.warning(f"historical {sport}: refused, nothing fetched -- {sport} "
+                       f"games resolve onto the schedule, and this path cannot")
         return {"snapshot_date": snapshot_date, "sport": sport, "games": 0,
                 "odds_rows": 0, "duration_s": 0.0,
                 "skipped": "resolve_only_sport"}
@@ -1541,24 +1544,6 @@ def _mark_in_play(game_rows: list[dict], odds_rows: list[dict]) -> int:
             row["snapshot_type"] = "in_play"
             flipped += 1
     return flipped
-
-
-def _scheduled_starts(conn: DBConnection, game_ids) -> list[dict]:
-    """[{game_id, commence_time}] from `games`, for ids this file did not mint.
-
-    _mark_in_play reads each game's start from the game rows _process_events
-    emits, and a resolved sport emits none -- so without this a 22:00Z
-    historical snapshot of a noon NCAAB tip would be stored as a pre-game
-    price, the leak _mark_in_play exists to stop. The schedule's own start
-    is the right one to compare against: it is the row the odds join to.
-    """
-    ids = sorted({g for g in game_ids if g})
-    if not ids:
-        return []
-    rows = conn.execute(
-        "SELECT game_id, commence_time FROM games WHERE game_id = ANY(%s)",
-        (ids,)).fetchall()
-    return [{"game_id": r[0], "commence_time": r[1]} for r in rows]
 
 
 def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
@@ -1664,18 +1649,37 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     d0 = _date.fromisoformat(start)
     d1 = _date.fromisoformat(end)
     spent = 0
-    # NCAAB resolves onto ESPN's schedule here too and never upserts a games
-    # row (NCAAB_GAMES_ARE_NOT_OURS). The NFL is not in RESOLVE_ONLY_SPORTS,
-    # so its backfill behaves exactly as before.
-    resolve_only = sport in RESOLVE_ONLY_SPORTS
     stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
              "bookmakers": books, "markets": markets, "credit_cap": credit_cap,
              "ignore_ledger": bool(ignore_ledger),
              "calls": 0, "skipped_cached": 0, "credits_spent": 0,
-             "skipped_no_schedule": 0,
              "marked_in_play": 0,
              "games": 0, "odds_rows": 0, "errors": 0,
              "stopped_early": False, "last_date": None}
+
+    if sport in RESOLVE_ONLY_SPORTS:
+        # Refused before the connection, the paid call and the ledger. This
+        # loop ledgers every (date, hour) it buys, and a resolve-only sport
+        # drops every event that does not resolve onto ESPN's schedule (a
+        # feed name not yet in the registry or NCAAB_ODDS_API_MAP, a pair
+        # ESPN has no game for). Measured on this branch, 2026-10-26: one
+        # resolved and one unresolved event in a bought slate stored the
+        # first, dropped the second and still wrote the ledger row, so the
+        # dropped event was paid for and gone, and a re-run skipped the hour.
+        #
+        # Worse, the ledger key (sport, snapshot_date, hour_utc) is the one
+        # the dedicated NCAAB history purchase resumes on too, and that one
+        # keeps unmatched events as raw JSON for replay. An hour bought here
+        # first would read as held there, and its unmatched events could
+        # never be recovered. And this path is reachable from a worker_jobs
+        # row: tracking/job_queue's historical_odds job takes any SPORT_KEYS
+        # sport, which now includes NCAAB.
+        logger.warning(f"historical {sport}: refused, nothing fetched or ledgered -- "
+                       f"this backfill drops events that do not resolve onto the "
+                       f"schedule; {sport} history must come from a buyer that "
+                       f"keeps them")
+        stats["skipped"] = "resolve_only_sport"
+        return stats
 
     conn = get_connection()
     try:
@@ -1715,16 +1719,6 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     stats["credits_spent"] = spent
                     stats["last_date"] = day.isoformat()
                     return stats
-                resolve = None
-                if resolve_only:
-                    # Built BEFORE the paid call: with no ESPN schedule near
-                    # this day every row it bought would be dropped. Not
-                    # written to the pull ledger either, so a run after the
-                    # schedule backfill still buys this snapshot.
-                    resolve = _schedule_resolver(sport, conn, day.isoformat())
-                    if resolve is None:
-                        stats["skipped_no_schedule"] += 1
-                        continue
                 try:
                     events = _get_historical_odds(sport_key, markets,
                                                   day.isoformat(), hour, books)
@@ -1732,14 +1726,10 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     stats["calls"] += 1
                     time.sleep(REQUEST_SLEEP)
                     game_rows, odds_rows = _process_events(
-                        events, sport, "open", snapshot_at,
-                        resolve_game_id=resolve)
+                        events, sport, "open", snapshot_at)
                     for r in odds_rows:
                         r["source"] = HISTORICAL_ODDS_SOURCE
-                    timing = game_rows
-                    if resolve is not None:
-                        timing = _scheduled_starts(conn, {r["game_id"] for r in odds_rows})
-                    flipped = _mark_in_play(timing, odds_rows)
+                    flipped = _mark_in_play(game_rows, odds_rows)
                     stats["marked_in_play"] += flipped
                     if game_rows:
                         stats["games"] += _upsert_games(conn, game_rows)

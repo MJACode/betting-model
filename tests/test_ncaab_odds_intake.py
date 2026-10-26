@@ -314,10 +314,9 @@ class _CatalogConn:
     """Answers the two reads ncaab_teams.make_resolver makes, and records
     everything else so a test can check order and writes."""
 
-    def __init__(self, *, teams=None, events=None, games=None):
+    def __init__(self, *, teams=None, events=None):
         self.teams = _registry_rows() if teams is None else teams
         self.events = _events_rows() if events is None else events
-        self.games = dict(games or {})
         self.log: list[tuple] = []
 
     def execute(self, sql, params=None):
@@ -328,8 +327,6 @@ class _CatalogConn:
         if "FROM ncaab_events" in s:
             lo, hi = params
             return _Result([r for r in self.events if lo <= r[1] <= hi])
-        if "FROM games WHERE game_id = ANY" in s:
-            return _Result([(g, self.games[g]) for g in params[0] if g in self.games])
         return _Result([])
 
     def executemany(self, sql, rows):
@@ -506,61 +503,79 @@ class TestFetchPregameRows:
         assert conn.writes("games") == []
 
 
+def _unresolvable_event():
+    """A real-shaped event whose names are in no registry: the case the
+    range backfill would have paid for, dropped and ledgered."""
+    ev = _event(KANSAS, KENTUCKY)
+    rename = {KANSAS: "Texas A&M-CC Islanders", KENTUCKY: "Grambling St Tigers"}
+    for b in ev["bookmakers"]:
+        for m in b["markets"]:
+            for o in m["outcomes"]:
+                o["name"] = rename.get(o["name"], o["name"])
+    return {**ev, "id": "oddsapi-unresolvable", "home_team": rename[KANSAS],
+            "away_team": rename[KENTUCKY]}
+
+
 class TestHistoricalBackfill:
-    def test_no_schedule_means_no_paid_call_and_no_ledger_row(self, monkeypatch, no_feed):
-        """A day with nothing to resolve onto would buy rows that can only be
-        dropped. Unrecorded, so a run after the ESPN backfill still buys it."""
-        conn = _CatalogConn(events=[])
-        paid = []
-        monkeypatch.setattr(oi, "get_connection", lambda: conn)
+    """Neither historical entry point buys NCAAB.
+
+    run_historical_odds_range ledgers every (date, hour) it buys, and an
+    NCAAB event that does not resolve is dropped. A slate with one event the
+    registry cannot name was paid for, half-stored and ledgered, so the
+    dropped event was gone and a re-run skipped the hour. The ledger key is
+    also the one the dedicated NCAAB history purchase resumes on, which keeps
+    unmatched events for replay: an hour bought here first would block it.
+    """
+
+    def _wire(self, monkeypatch, conn):
+        paid, opened = [], []
+        monkeypatch.setattr(oi, "get_connection", lambda: opened.append(1) or conn)
         # A recorder, not the raising stub: the loop swallows exceptions into
         # stats["errors"], so a raise would hide a call that was attempted.
         monkeypatch.setattr(oi, "_get_historical_odds",
-                            lambda *a, **k: paid.append(a) or [])
-        stats = oi.run_historical_odds_range("NCAAB", "2026-11-10", "2026-11-10",
-                                             hours_utc=[12, 22])
-        assert paid == [], "the 10x historical endpoint was called with nothing to resolve onto"
-        assert stats["calls"] == 0 and stats["credits_spent"] == 0 and stats["errors"] == 0
-        assert stats["skipped_no_schedule"] == 2
-        assert not any(e[0] == "execute" and "INSERT INTO odds_history_pulls" in e[1]
-                       for e in conn.log)
+                            lambda *a, **k: paid.append(a)
+                            or [_event(KANSAS, KENTUCKY), _unresolvable_event()])
+        return paid, opened
 
-    def test_it_resolves_never_upserts_and_marks_in_play(self, monkeypatch, no_feed):
-        """The 03:00Z pull on the 11th is after the 02:30Z tip and must be
-        stored in_play, which needs the schedule's start: a resolved sport
-        emits no games rows for _mark_in_play to read it from. The start is in
-        ESPN's own shape ("2026-11-11T02:30Z", no seconds), as the fixture
-        carries it."""
-        conn = _CatalogConn(games={GAME_ID: KU_UK["commence_time"]})
-        monkeypatch.setattr(oi, "get_connection", lambda: conn)
-
-        def hist(sport_key, markets, day, hour, books):
-            ev = _event(KANSAS, KENTUCKY)
-            for b in ev["bookmakers"]:
-                for m in b["markets"]:
-                    m["last_update"] = f"{day}T{hour - 1:02d}:55:00Z"
-            return [ev]
-
-        monkeypatch.setattr(oi, "_get_historical_odds", hist)
-        # 02:55Z on the 10th is pre-game; 02:55Z on the 11th is 25 minutes in.
+    def test_the_range_backfill_refuses_ncaab_before_paying_or_ledgering(
+            self, monkeypatch, no_feed):
+        """The schedule is there and one of the two events resolves: the
+        partial slate that used to be ledgered. Nothing is bought, no
+        connection is opened, so no ledger row can exist."""
+        conn = _CatalogConn()
+        paid, opened = self._wire(monkeypatch, conn)
         stats = oi.run_historical_odds_range("NCAAB", "2026-11-10", "2026-11-11",
-                                             hours_utc=[3])
-        assert KU_UK["commence_time"] == "2026-11-11T02:30Z"
-        assert stats["calls"] == 2
-        assert stats["games"] == 0
-        assert conn.writes("games") == []
-        batches = conn.writes("odds")
-        assert len(batches) == 2
-        rows = [r for b in batches for r in b]
-        assert {r["game_id"] for r in rows} == {GAME_ID}
-        assert {r["source"] for r in rows} == {oi.HISTORICAL_ODDS_SOURCE}
-        early = {r["snapshot_type"] for r in batches[0]}
-        late = {r["snapshot_type"] for r in batches[1]}
-        assert early == {"open"} and late == {"in_play"}
-        assert stats["marked_in_play"] == len(batches[1])
-        (sp,) = [r for r in batches[0] if r["market"] == "spreads"
-                 and r["bookmaker"] == "draftkings"]
-        assert sp["spread_home"] == -3.5
+                                             hours_utc=[3, 15])
+        assert paid == [], "the 10x historical endpoint was called for NCAAB"
+        assert opened == [] and conn.log == []
+        assert stats["skipped"] == "resolve_only_sport"
+        assert (stats["calls"], stats["credits_spent"], stats["odds_rows"],
+                stats["games"], stats["errors"]) == (0, 0, 0, 0, 0)
+
+    def test_a_worker_job_for_ncaab_history_buys_nothing(self, monkeypatch, no_feed):
+        """The historical_odds job accepts any SPORT_KEYS sport, which now
+        includes NCAAB. A worker_jobs row asking for it must be a no-op."""
+        from tracking import job_queue as q
+
+        conn = _CatalogConn()
+        paid, opened = self._wire(monkeypatch, conn)
+        cleaned = q._validate_historical_odds({"sport": "ncaab", "start": "2026-11-10",
+                                               "end": "2026-11-12", "credit_cap": 5000})
+        stats = q._job_historical_odds(**cleaned)
+        assert paid == [] and opened == []
+        assert stats["skipped"] == "resolve_only_sport"
+
+    def test_the_nfl_backfill_still_buys(self, monkeypatch, no_feed):
+        """Positive control: the refusal is NCAAB's alone. The NFL range path
+        pays and ledgers exactly as it did before this change."""
+        conn = _CatalogConn()
+        paid, opened = self._wire(monkeypatch, conn)
+        stats = oi.run_historical_odds_range("NFL", "2026-11-10", "2026-11-10",
+                                             hours_utc=[15])
+        assert len(paid) == 1 and stats["calls"] == 1
+        assert "skipped" not in stats
+        assert any(e[0] == "execute" and "INSERT INTO odds_history_pulls" in e[1]
+                   for e in conn.log)
 
     def test_the_single_date_path_refuses_before_paying(self, monkeypatch, no_feed):
         """run_historical_odds builds no resolver; it would pay 10x and drop
