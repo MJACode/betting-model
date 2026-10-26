@@ -74,10 +74,11 @@ ESPN only for the ET dates that hold a started NCAAB game with no score and
 not postponed or cancelled, within the last HEAL_DAYS days. An idle pass, and
 every pass out of season, makes no ESPN call. A game with no tip time counts as
 started once its date is past or is one of config.live_slate_dates(), since
-the only way to learn whether it has tipped is to look. Repeat passes over the
-same date write nothing unless ESPN changed something. The daily
-run_schedule_refresh makes 2 team calls and one call per day for today and the
-next SCHEDULE_DAYS days.
+the only way to learn whether it has tipped is to look. A tip after midnight
+ET also fetches the previous date, the board ESPN files it on
+(EARLY_TIP_HOUR_ET). Repeat passes over the same date write nothing unless
+ESPN changed something. The daily run_schedule_refresh makes 2 team calls and
+one call per day for today and the next SCHEDULE_DAYS days.
 
 Usage:
     python -m data.ingestors.ncaab_espn_ingestor --teams
@@ -109,6 +110,20 @@ SCOREBOARD_LIMIT = 500
 REQUEST_SLEEP = 0.2          # between ESPN calls in a multi-day run
 SCHEDULE_DAYS = 14           # the daily refresh: today and the next 14 days
 HEAL_DAYS = 14               # run_results looks back this far for unscored games
+
+# ESPN files a tip after midnight ET on the PREVIOUS date's scoreboard, and
+# our game_date is the ET date, so the final is not on the board that date
+# names. Measured 2026-10-26: East Texas A&M @ Hawai'i (event 401824896),
+# tipped 2025-11-10T06:00Z = 01:00 ET on the 10th, is on the 20251109 board
+# and not on 20251110's. Fetching only the 10th, run_results never found the
+# final, and the daily schedule step never looks back, so the game would sit
+# unscored with its picks unsettled. Hawai'i home games, Maui and late West
+# Coast tips all land here. One data point cannot tell "the venue's local
+# date" from "ESPN's day turns over in the early morning ET"; both put such a
+# game on the previous board, so a stored tip before this hour (ET) makes
+# due_dates fetch that board too. NOT covered: a game played east of ET (an
+# Australia or Asia event) whose local date is ahead of its ET date.
+EARLY_TIP_HOUR_ET = 6
 
 _ET = ZoneInfo("America/New_York")
 _OFF = re.compile(r"POSTPON|CANCEL", re.I)   # STATUS_POSTPONED, STATUS_CANCELED
@@ -769,13 +784,15 @@ def _open(connect):
 
 def due_dates(conn, run_date: str | None = None, now: datetime | None = None,
               heal_days: int = HEAL_DAYS) -> list[str]:
-    """ET dates holding a started NCAAB game with no score, within heal_days.
+    """The scoreboard dates to fetch: the ET dates holding a started NCAAB
+    game with no score, within heal_days.
 
     Pure database read; this is what lets an idle refresh pass make no ESPN
     call. A postponed or cancelled event is never due. A game with no tip time
     (ESPN's TBD) counts as started once its date is past or is one of
-    config.live_slate_dates(). Before the first NCAAB write the tables do not
-    exist: that reads as nothing due.
+    config.live_slate_dates(). A tip before EARLY_TIP_HOUR_ET also names the
+    previous ET date, the board ESPN files it on. Before the first NCAAB write
+    the tables do not exist: that reads as nothing due.
     """
     now = now or datetime.now(timezone.utc)
     today = run_date or _today_et(now)
@@ -804,6 +821,9 @@ def due_dates(conn, run_date: str | None = None, now: datetime | None = None,
         if start is not None:
             if start <= now:
                 due.add(str(game_date)[:10])
+                et = start.astimezone(_ET)
+                if et.hour < EARLY_TIP_HOUR_ET:
+                    due.add((et.date() - timedelta(days=1)).isoformat())
         elif str(game_date) < today or str(game_date)[:10] in live:
             due.add(str(game_date)[:10])
     return sorted(due)

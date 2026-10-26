@@ -11,6 +11,9 @@ Fixtures are REAL ESPN payloads, trimmed (fetched 2026-10-26, tests/fixtures/nca
   scoreboard_2026-11-03.json  Bethesda (not D1) @ Pacific with no tip time yet
                               (timeValid false, ESPN's 05:00Z stamp), and
                               Manhattan @ Kentucky, scheduled.
+  scoreboard_2025-11-09.json  East Texas A&M @ Hawai'i 74-100, tipped 06:00Z =
+                              01:00 ET on the 10th, which ESPN lists on the
+                              9th's board and not the 10th's.
   teams.json / groups.json    /teams?groups=50 and the groups listing, trimmed;
                               groups carries Queens, which /teams lacks.
 
@@ -43,6 +46,7 @@ def _load(name):
 
 BOARD_1127 = _load("scoreboard_2025-11-27.json")
 BOARD_1103 = _load("scoreboard_2026-11-03.json")
+BOARD_1109 = _load("scoreboard_2025-11-09.json")
 TEAMS = _load("teams.json")
 GROUPS = _load("groups.json")
 
@@ -160,6 +164,7 @@ OKST_NW = "NCAAB_2025-11-27_oklahoma-state_northwestern"
 RICH_FUR = "NCAAB_2025-11-27_richmond_furman"
 MAN_UK = "NCAAB_2026-11-03_manhattan_kentucky"
 BETH_PAC = "NCAAB_2026-11-03_bethesda_pacific"
+ETAM_HAW = "NCAAB_2025-11-10_east-texas-a-m_hawai-i"
 
 
 # ── parsing ──────────────────────────────────────────────────────────────────
@@ -534,6 +539,24 @@ def test_run_results_fetches_only_the_due_date_and_fills_it(conn):
                                                 "limit": 500})]
     assert t["scores_filled"] == 3 and not t["failed"]
     assert _game(conn, OKST_NW)["home_score"] == 81
+
+
+def test_a_tip_after_midnight_et_is_read_from_the_board_espn_files_it_on(conn):
+    """Its game_date is the ET date (the 10th), but ESPN lists it on the 9th's
+    board only (measured 2026-10-26). Reading the 10th alone, the final never
+    lands and the game's picks never settle. (An ordinary late tip, 22:51 ET,
+    adds no second board: test_the_due_window_is_bounded.)"""
+    pre = _board_with(BOARD_1109, 401824896, lambda e: e["competitions"][0]["status"].update(
+        {"period": 0, "type": {"name": "STATUS_SCHEDULED", "state": "pre", "completed": False}}))
+    ing.ingest_day(conn, "2025-11-09", get_json=Espn({"20251109": pre}))
+    assert _game(conn, ETAM_HAW)["game_date"] == "2025-11-10"
+    espn = Espn({"20251109": BOARD_1109})              # the 10th's board is empty
+    t = ing.run_results("2025-11-10", now=datetime(2025, 11, 10, 15, tzinfo=timezone.utc),
+                        connect=lambda: conn, get_json=espn, sleep=0)
+    assert espn.scoreboard_dates() == ["20251109", "20251110"]
+    g = _game(conn, ETAM_HAW)
+    assert (g["home_score"], g["away_score"], g["home_win"]) == (100, 74, 1)
+    assert t["scores_filled"] == 1 and not t["failed"]
 
 
 def test_a_tbd_tip_is_due_once_its_date_is_live_or_past(conn):
