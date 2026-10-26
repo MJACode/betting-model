@@ -640,6 +640,45 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
     return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
 
 
+# Free NCAAB history into Supabase on the worker: the local DATABASE_URL is
+# stale (password authentication failed on both pooler ports, 2026-10-26), so
+# every production write runs here. Each kind is one importer's CLI with a fixed
+# argv; seasons are bounded to what each source publishes.
+NCAAB_HISTORY_IMPORTS = {
+    "box_scores": ("data.ingestors.ncaab_sdv_import", ["--seasons"], (2011, 2026)),
+    "prediction_tracker": ("data.ingestors.ncaab_archive_import", ["--pt"], (2005, 2026)),
+    "sbro": ("data.ingestors.ncaab_archive_import", ["--sbro"], (2008, 2021)),
+    "match": ("data.ingestors.ncaab_archive_import", ["--match"], None),
+}
+
+
+def _validate_ncaab_history_import(args: dict) -> dict:
+    extra = sorted(set(args) - {"kind", "first", "last"})
+    if extra:
+        raise ValueError(f"unknown args: {extra}")
+    kind = str(args.get("kind") or "")
+    if kind not in NCAAB_HISTORY_IMPORTS:
+        raise ValueError(f"kind must be one of {sorted(NCAAB_HISTORY_IMPORTS)}, got {kind!r}")
+    span = NCAAB_HISTORY_IMPORTS[kind][2]
+    if span is None:
+        if "first" in args or "last" in args:
+            raise ValueError(f"{kind} takes no seasons")
+        return {"kind": kind}
+    first = int(args.get("first", span[0]))
+    last = int(args.get("last", span[1]))
+    if not (span[0] <= first <= last <= span[1]):
+        raise ValueError(f"{kind} seasons must sit inside {span}, got {first}..{last}")
+    return {"kind": kind, "first": first, "last": last}
+
+
+def _job_ncaab_history_import(**kw) -> str:
+    mod, argv, span = NCAAB_HISTORY_IMPORTS[kw["kind"]]
+    argv = list(argv)
+    if span is not None:
+        argv += [str(kw["first"]), str(kw["last"])]
+    return _run_script_main(mod, argv)[-4000:]
+
+
 # Keys this job will read. Anything else — including max_credits, credit_cap,
 # reserve_days — is a malformed request and fails in the validator, before the
 # module is imported and before any Odds API call. Michael, 2026-10-03: there
@@ -1696,7 +1735,7 @@ def _run_script_main(mod_name: str, argv: list[str]) -> str:
     return text
 
 
-_GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF"})
+_GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF", "NCAAB"})
 _GAME_LINE_MARKETS = frozenset({"h2h", "spreads", "totals"})
 
 
@@ -1720,7 +1759,7 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
         from scripts.game_line_market_sweep import SNAPSHOT_TYPES, VS_MODES
         sport = str(args.get("sport") or "MLB").upper()
         if sport not in _GAME_LINE_SPORTS:
-            raise ValueError(f"sport must be MLB|NCAAF, got {sport!r}")
+            raise ValueError(f"sport must be MLB|NCAAF|NCAAB, got {sport!r}")
         markets = args.get("markets") or args.get("market") or ["spreads", "totals"]
         if isinstance(markets, str):
             markets = [markets]
@@ -2170,6 +2209,8 @@ JOBS = {
     # Free NCAAB feed and College Basketball Data check (at most 10 credits).
     "ncaab_feed_probe": (_job_ncaab_feed_probe, _validate_ncaab_feed_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
+    "ncaab_history_import": (_job_ncaab_history_import,
+                             _validate_ncaab_history_import),
     "ncaab_schedule_backfill": (_job_ncaab_schedule_backfill,
                                 _validate_ncaab_schedule_backfill),
     # Derivative totals (team, alternate, first period). No credit ceiling:

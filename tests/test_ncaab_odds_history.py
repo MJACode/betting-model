@@ -844,32 +844,66 @@ def test_the_schedule_backfill_hands_the_ingestor_iso_dates():
         "first": "2020-11-01", "last": "2027-04-10"}
 
 
-DECLARED = ["ncaab-feed-probe-2026-10-26", "ncaab-schedule-backfill-2020-2027",
-            "ncaab-history-probe-2026-10-26", "ncaab-history-lines-2021-2026",
-            "ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r2",
-            "ncaab-history-deriv-open-2024-2026"]
+SCHEDULES = [f"ncaab-schedule-{s - 1}-{s % 100:02d}" for s in range(2027, 2010, -1)]
+IMPORTS = [f"ncaab-history-import-{k}" for k in
+           ("box-scores", "prediction-tracker", "sbro", "match")]
+BUYS = ["ncaab-history-probe-2026-10-26", "ncaab-history-lines-2021-2026",
+        "ncaab-history-lines-2021-2026-r2"]
+SWEEPS = [f"ncaab-game-line-market-sweep-{m}-2026-10-26" for m in ("spreads", "totals", "h2h")]
+DERIVS = ["ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r2",
+          "ncaab-history-deriv-open-2024-2026"]
+DECLARED = ["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS + SWEEPS + DERIVS
 
 
 def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
+    """The queue claims oldest first, one job at a time: the probe, then every
+    season's ESPN schedule (the current one first, so live odds resolve from
+    opening night), the free history, the measured probe call, the game-line
+    purchase and its post-refill resume, the sweeps on what it bought, then
+    the first-half purchases."""
     entries = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
+    assert sorted(k for k in keys if k.startswith("ncaab-")) == sorted(DECLARED)
     by = {e["key"]: e for e in entries}
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True
-        assert "3 approved" in e["note"]
+        assert "approved" in e["note"] or "yes" in e["note"]
         jq.JOBS[e["job_type"]][1](e["args"])
     assert by["ncaab-feed-probe-2026-10-26"]["args"] == {"market_events": 5}
-    assert by["ncaab-schedule-backfill-2020-2027"]["args"] == {"first": "2020-11-01", "last": "2027-04-10"}
-    buys = [by[k]["args"] for k in DECLARED[2:]]
-    assert [a["mode"] for a in buys] == ["probe", "lines", "deriv_close", "deriv_close", "deriv_open"]
+    assert by[SCHEDULES[0]]["args"] == {"first": "2026-11-01", "last": "2027-04-10"}
+    assert by[SCHEDULES[-1]]["args"] == {"first": "2010-11-01", "last": "2011-04-10"}
+    buys = [by[k]["args"] for k in BUYS + DERIVS]
+    assert [a["mode"] for a in buys] == ["probe", "lines", "lines", "deriv_close", "deriv_close",
+                                         "deriv_open"]
     assert all(a["floor"] >= 500_000 for a in buys)
+    assert by["ncaab-history-lines-2021-2026-r2"]["run_after"] == "2026-11-02T00:20:00+00:00"
     assert by["ncaab-history-deriv-close-2024-2026-r2"]["run_after"] == "2026-11-02T00:30:00+00:00"
     assert by["ncaab-history-deriv-open-2024-2026"]["run_after"] == "2026-11-02T01:00:00+00:00"
-    assert (by["ncaab-history-deriv-close-2024-2026-r2"]["args"]
-            == by["ncaab-history-deriv-close-2024-2026"]["args"])
+    for a, b in (("ncaab-history-lines-2021-2026", "ncaab-history-lines-2021-2026-r2"),
+                 ("ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r2")):
+        assert by[a]["args"] == by[b]["args"]
+    assert all(by[k]["args"]["sport"] == "NCAAB" for k in SWEEPS)
+
+
+def test_the_history_import_job_runs_each_importer_with_its_fixed_argv(monkeypatch):
+    ran = []
+    monkeypatch.setattr(jq, "_run_script_main", lambda mod, argv: ran.append((mod, argv)) or "ok")
+    for kind in ("box_scores", "prediction_tracker", "sbro", "match"):
+        jq._job_ncaab_history_import(**jq._validate_ncaab_history_import({"kind": kind}))
+    assert ran == [("data.ingestors.ncaab_sdv_import", ["--seasons", "2011", "2026"]),
+                   ("data.ingestors.ncaab_archive_import", ["--pt", "2005", "2026"]),
+                   ("data.ingestors.ncaab_archive_import", ["--sbro", "2008", "2021"]),
+                   ("data.ingestors.ncaab_archive_import", ["--match"])]
+
+
+@pytest.mark.parametrize("args", [{}, {"kind": "kenpom"}, {"kind": "sbro", "first": 2005},
+                                  {"kind": "match", "first": 2020}, {"kind": "sbro", "x": 1}])
+def test_a_history_import_outside_its_sources_seasons_is_refused(args):
+    with pytest.raises(ValueError):
+        jq._validate_ncaab_history_import(args)
 
 
 # ── what is stored of each bought snapshot (2026-10-26, integration) ────────

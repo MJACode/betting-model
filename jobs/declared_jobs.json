@@ -1145,13 +1145,209 @@
     }
   },
   {
-    "key": "ncaab-schedule-backfill-2020-2027",
+    "key": "ncaab-schedule-2026-27",
     "job_type": "ncaab_schedule_backfill",
     "requested_by": "mike",
-    "note": "mike 2026-10-26: '3 approved'. The ESPN NCAAB schedule and results, 2020-21 through 2026-27 (free, idempotent upserts of ESPN's own rows). A safety net if the local backfill is incomplete: the history purchase below refuses to start until every season it buys holds 4,000 scored games, because a snapshot bought before the schedule exists matches nothing and is still ledgered.",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2026-27 (season label 2027); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2026-11-01",
+      "last": "2027-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2025-26",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2025-26 (season label 2026); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2025-11-01",
+      "last": "2026-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2024-25",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2024-25 (season label 2025); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2024-11-01",
+      "last": "2025-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2023-24",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2023-24 (season label 2024); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2023-11-01",
+      "last": "2024-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2022-23",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2022-23 (season label 2023); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2022-11-01",
+      "last": "2023-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2021-22",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2021-22 (season label 2022); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2021-11-01",
+      "last": "2022-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2020-21",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2020-21 (season label 2021); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
     "args": {
       "first": "2020-11-01",
-      "last": "2027-04-10"
+      "last": "2021-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2019-20",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2019-20 (season label 2020); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2019-11-01",
+      "last": "2020-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2018-19",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2018-19 (season label 2019); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2018-11-01",
+      "last": "2019-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2017-18",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2017-18 (season label 2018); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2017-11-01",
+      "last": "2018-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2016-17",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2016-17 (season label 2017); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2016-11-01",
+      "last": "2017-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2015-16",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2015-16 (season label 2016); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2015-11-01",
+      "last": "2016-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2014-15",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2014-15 (season label 2015); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2014-11-01",
+      "last": "2015-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2013-14",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2013-14 (season label 2014); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2013-11-01",
+      "last": "2014-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2012-13",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2012-13 (season label 2013); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2012-11-01",
+      "last": "2013-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2011-12",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2011-12 (season label 2012); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2011-11-01",
+      "last": "2012-04-10"
+    }
+  },
+  {
+    "key": "ncaab-schedule-2010-11",
+    "job_type": "ncaab_schedule_backfill",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). ESPN schedule, venues and finals for 2010-11 (season label 2011); free; idempotent upserts of ESPN's own rows. The current season first so live odds resolve from opening night; every bought season before its purchase (a snapshot with no matching games is ledgered and never re-bought, and the purchase refuses a season under 4,000 scored games). Runs on the worker because the local database password is stale.",
+    "args": {
+      "first": "2010-11-01",
+      "last": "2011-04-10"
+    }
+  },
+  {
+    "key": "ncaab-history-import-box-scores",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: NCAA possession box scores and season player minutes, 2010-11..2025-26 (sportsdataverse).",
+    "args": {
+      "kind": "box_scores"
+    }
+  },
+  {
+    "key": "ncaab-history-import-prediction-tracker",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: Prediction Tracker opening and updated lines plus the public systems, 2004-05..2025-26.",
+    "args": {
+      "kind": "prediction_tracker"
+    }
+  },
+  {
+    "key": "ncaab-history-import-sbro",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: SBRO opening/closing spreads and totals, moneylines and second-half lines, 2007-08..2020-21.",
+    "args": {
+      "kind": "sbro"
+    }
+  },
+  {
+    "key": "ncaab-history-import-match",
+    "job_type": "ncaab_history_import",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). Free history into Supabase on the worker: match the archive lines onto ESPN games by date and final score.",
+    "args": {
+      "kind": "match"
     }
   },
   {
@@ -1174,6 +1370,90 @@
       "mode": "lines",
       "max_credits": 420000,
       "floor": 500000
+    }
+  },
+  {
+    "job_type": "ncaab_odds_history",
+    "requested_by": "mike",
+    "args": {
+      "mode": "lines",
+      "max_credits": 420000,
+      "floor": 500000
+    },
+    "key": "ncaab-history-lines-2021-2026-r2",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). The game-line purchase resumed after the 2026-11-01 credit refill: a floor stop marks the first job done, and this one buys only the snapshots the ledger does not hold. Same scope and ceiling as ncaab-history-lines-2021-2026.",
+    "run_after": "2026-11-02T00:20:00+00:00"
+  },
+  {
+    "key": "ncaab-game-line-market-sweep-spreads-2026-10-26",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). MEASURE ONLY: Pinnacle's vig-free spreads price against the bettable books at the same number, pre-game, on the bought 2020-21..2025-26 history (runs after the game-line purchase; if that stopped at the floor, this grades what was stored by then).",
+    "args": {
+      "sport": "NCAAB",
+      "markets": [
+        "spreads"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2020-11-25",
+      "date_to": "2026-04-07"
+    }
+  },
+  {
+    "key": "ncaab-game-line-market-sweep-totals-2026-10-26",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). MEASURE ONLY: Pinnacle's vig-free totals price against the bettable books at the same number, pre-game, on the bought 2020-21..2025-26 history (runs after the game-line purchase; if that stopped at the floor, this grades what was stored by then).",
+    "args": {
+      "sport": "NCAAB",
+      "markets": [
+        "totals"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2020-11-25",
+      "date_to": "2026-04-07"
+    }
+  },
+  {
+    "key": "ncaab-game-line-market-sweep-h2h-2026-10-26",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history). MEASURE ONLY: Pinnacle's vig-free h2h price against the bettable books at the same number, pre-game, on the bought 2020-21..2025-26 history (runs after the game-line purchase; if that stopped at the floor, this grades what was stored by then).",
+    "args": {
+      "sport": "NCAAB",
+      "markets": [
+        "h2h"
+      ],
+      "edges": [
+        0.02,
+        0.03,
+        0.04
+      ],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2020-11-25",
+      "date_to": "2026-04-07"
     }
   },
   {
