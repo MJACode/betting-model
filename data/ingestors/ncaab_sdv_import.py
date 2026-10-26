@@ -180,6 +180,15 @@ def _int_or_none(v):
         return None
 
 
+def _s(v) -> str | None:
+    """A text cell, or None for empty / NaN (pandas fills missing ids with NaN,
+    and str(NaN) is "nan", which would match another missing id)."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    t = str(v).strip()
+    return t if t and t.lower() != "nan" else None
+
+
 def _num(v):
     try:
         f = float(v)
@@ -209,23 +218,23 @@ def team_rows(df: pd.DataFrame, season: int, dates: dict | None = None) -> list[
     dates = dates or {}
     out, seen = [], set()
     for rec in df.to_dict("records"):
-        contest = str(rec.get("contest_id") or "").strip()
-        team_name = str(rec.get("team") or "").strip()
+        contest = _s(rec.get("contest_id"))
+        team_name = _s(rec.get("team"))
         if not contest or not team_name or (contest, team_name) in seen:
             continue
         seen.add((contest, team_name))
         team = _int_or_none(rec.get("team_espn_team_id"))
         home = _int_or_none(rec.get("home_espn_team_id"))
         away = _int_or_none(rec.get("away_espn_team_id"))
-        ncaa = str(rec.get("team_ncaa_team_id") or "").strip() or None
+        ncaa = _s(rec.get("team_ncaa_team_id"))
         is_home = None
-        if ncaa and str(rec.get("home_ncaa_team_id") or "").strip() == ncaa:
+        if ncaa and _s(rec.get("home_ncaa_team_id")) == ncaa:
             is_home = True
-        elif ncaa and str(rec.get("away_ncaa_team_id") or "").strip() == ncaa:
+        elif ncaa and _s(rec.get("away_ncaa_team_id")) == ncaa:
             is_home = False
-        elif str(rec.get("home") or "").strip() == team_name:
+        elif _s(rec.get("home")) == team_name:
             is_home = True
-        elif str(rec.get("away") or "").strip() == team_name:
+        elif _s(rec.get("away")) == team_name:
             is_home = False
         opp = None
         if team is not None and is_home is not None:
@@ -245,7 +254,7 @@ def schedule_dates(df: pd.DataFrame) -> dict:
     """contest id -> ISO date from a season's schedule file (MM/DD/YYYY)."""
     out = {}
     for rec in df.to_dict("records"):
-        c = str(rec.get("contest_id") or "").strip()
+        c = _s(rec.get("contest_id")) or ""
         try:
             m, d, y = str(rec.get("game_date") or "").split("/")
             out[c] = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
