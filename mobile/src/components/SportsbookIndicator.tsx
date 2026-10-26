@@ -1,5 +1,10 @@
-// SportsbookIndicator — the Stats tab's book line: which sportsbook the stat
-// board prices its odds column at, and a tap to change it.
+// SportsbookIndicator — which sportsbook the stat board prices its odds
+// column at, and a tap to change it.
+//
+// Compact B (Matt, 2026-10-25) took this row off the Stats header. The
+// component stays: Settings still edits the same books, and the board's
+// coverage note still opens SportsbookPickerSheet. Mounting this again is
+// how the one-line book control comes back.
 //
 // This is a STATS-PAGE control (Matt, 2026-09-04). The Picks and Signals boards
 // carried the same line until then and no longer do: those boards show the best

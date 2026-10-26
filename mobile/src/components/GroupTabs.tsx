@@ -41,6 +41,9 @@ export function SegmentTabs<T extends string>({
    *  segments (QB / RB / WR/TE / DEF / Teams) share one screen width
    *  (Designer: "don't truncate"). */
   fit = false,
+  /** Stats Compact B: a shorter position row. Slop grows so the target
+   *  stays 44pt while the bar itself loses a few points. */
+  tight = false,
 }: {
   items: readonly T[];
   active: T;
@@ -50,6 +53,7 @@ export function SegmentTabs<T extends string>({
   compact?: boolean;
   accessibilityLabelFor?: (item: T) => string;
   fit?: boolean;
+  tight?: boolean;
 }) {
   if (items.length < 2) return null;
   return (
@@ -70,12 +74,14 @@ export function SegmentTabs<T extends string>({
             accessibilityState={{ selected: isActive }}
             // The tabs are 33-38pt tall, under the 44pt HIG floor, and adding
             // height is the one thing this screen cannot spend (UX review,
-            // 2026-09-12). hitSlop makes the target up instead.
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            // 2026-09-12). hitSlop makes the target up instead. 8pt (was 6)
+            // covers the Compact B position row, which drops 2pt of padding.
+            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
             style={[
               styles.tab,
               second && styles.tabSecond,
               compact && styles.tabCompact,
+              tight && styles.tabTight,
               isActive && (second || compact ? styles.tabActiveSecond : styles.tabActive),
             ]}
           >
@@ -161,6 +167,11 @@ const styles = StyleSheet.create({
   tabSecond: {
     paddingVertical: 7,
     borderBottomWidth: 1,
+  },
+  // Compact B position row. 6pt instead of spacing.sm (8). The extra slop
+  // on the Pressable keeps the 44pt target.
+  tabTight: {
+    paddingVertical: 6,
   },
   // No flex: the inline control sizes to its two labels and leaves the rest of
   // the row to the chips it shares it with.

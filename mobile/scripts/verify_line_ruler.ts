@@ -39,6 +39,7 @@ import {
   pointInBubble,
   previewTypedLine,
   programmaticPick,
+  compactRulerHeight,
   rulerChromeHeight,
   rulerHi,
   rulerScaleFor,
@@ -369,10 +370,11 @@ for (const def of STAT_CATALOG) {
       !screen.includes('Below one stop is refused'),
   );
   check(
-    'the bubble is the field and the separate pencil button is gone',
+    'the marker is the field and the separate pencil button is gone',
     !screen.includes('typeLineBtn') &&
+      !screen.includes('name="pencil"') &&
       screen.includes('styles.thresholdBubble') &&
-      screen.includes('name="pencil"') &&
+      screen.includes('styles.thresholdMark') &&
       screen.includes('borderColor: colors.tint') &&
       screen.includes('minWidth: THRESHOLD_BUBBLE_W') &&
       screen.includes('minHeight: THRESHOLD_BUBBLE_H') &&
@@ -519,6 +521,12 @@ for (const def of STAT_CATALOG) {
   const box = { x: 40, y: 20, width: 64, height: 44 };
   check('a point inside the bubble hits', pointInBubble(50, 30, box));
   check('a point outside the bubble misses', !pointInBubble(10, 30, box));
+  // Compact marker is 22pt. The finger target grows to 44pt tall, centered
+  // on the drawn pill. Width stays the pill's.
+  const short = { x: 40, y: 20, width: 22, height: 22 };
+  check('a 22pt marker still hits 11pt above its top', pointInBubble(50, 10, short));
+  check('a 22pt marker misses a point beside it', !pointInBubble(10, 30, short));
+  check('a 22pt marker misses a point 23pt above its top', !pointInBubble(50, 20 - 23, short));
   check(
     'the bubble name is the face and the stat',
     thresholdBubbleLabel('225', 'Pass Yards') === 'Threshold 225 Pass Yards',
@@ -534,6 +542,10 @@ for (const def of STAT_CATALOG) {
   check('landscape scrolls the line control', thresholdControlsScroll(1, 844, 390));
   check('portrait at 1x does not', !thresholdControlsScroll(1, 390, 844));
   check('the bubble has room to grow at 2x', rulerChromeHeight(2) > rulerChromeHeight(1));
+  check(
+    'the resting ruler is the short compact strip',
+    compactRulerHeight(1) === 28 && compactRulerHeight(1) < rulerChromeHeight(1),
+  );
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
