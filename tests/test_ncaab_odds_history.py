@@ -438,7 +438,7 @@ def test_the_floor_stops_the_snapshot_before_the_call(monkeypatch):
     assert "floor" in stats["stopped"] and meter.calls == []
 
 
-def test_the_lines_purchase_resumes_from_the_ledger_newest_first(monkeypatch):
+def test_the_lines_purchase_resumes_from_the_ledger(monkeypatch):
     monkeypatch.setattr(h, "check_precondition", lambda conn, seasons: {})
     monkeypatch.setattr(h, "check_process_events_contract", lambda: None)
     monkeypatch.setattr(h, "_ensure_tables", lambda conn: None)
@@ -447,7 +447,8 @@ def test_the_lines_purchase_resumes_from_the_ledger_newest_first(monkeypatch):
     monkeypatch.setattr(h, "_resolver", lambda conn, games: h.EventResolver(REGISTRY, games))
     bought = []
     monkeypatch.setattr(h, "_buy_snapshot",
-                        lambda conn, meter, tips, resolver, when, stats: bought.append(when) or True)
+                        lambda conn, meter, tips, resolver, when, stats, keeper=None:
+                        bought.append(when) or True)
     h.buy_lines(FakeConn(), FakeMeter(lambda u, p: Resp()), 2026, 2026)
     # the plan is D-1 22Z, D 15Z and the 00Z hour before the 00:30Z tip; two are held
     assert bought == [_t("2025-11-19T00:00Z")]
@@ -869,3 +870,68 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     assert by["ncaab-history-deriv-open-2024-2026"]["run_after"] == "2026-11-02T01:00:00+00:00"
     assert (by["ncaab-history-deriv-close-2024-2026-r2"]["args"]
             == by["ncaab-history-deriv-close-2024-2026"]["args"])
+
+
+# ── what is stored of each bought snapshot (2026-10-26, integration) ────────
+
+def _row(gid, market="spreads", book="fanduel", st="open"):
+    return {"game_id": gid, "market": market, "bookmaker": book, "snapshot_type": st}
+
+
+def test_the_keeper_stores_the_opener_the_anchors_and_the_pre_tip_hours_only():
+    k = h.QuoteKeeper([UK_DUKE])            # game date 2025-11-18, tip 2025-11-19 00:30Z
+    gid = UK_DUKE["game_id"]
+    seq = [("2025-11-16T22:00Z", True),     # first sighting: the opener
+           ("2025-11-17T15:00Z", False),    # another date's anchor, a repeat
+           ("2025-11-17T22:00Z", True),     # D-1 22Z: this game's anchor
+           ("2025-11-18T15:00Z", True),     # D 15Z: this game's anchor
+           ("2025-11-18T18:00Z", False),    # 6.5 hours out: a repeat
+           ("2025-11-18T22:00Z", True),     # 2.5 hours out: inside the pre-tip window
+           ("2025-11-19T00:00Z", True)]     # 30 minutes out: the close
+    assert [k.wanted(_row(gid), _t(w)) for w, _ in seq] == [want for _, want in seq]
+
+
+def test_each_book_and_market_has_its_own_first_sighting():
+    k = h.QuoteKeeper([UK_DUKE])
+    gid, w = UK_DUKE["game_id"], _t("2025-11-16T22:00Z")
+    assert k.wanted(_row(gid, "spreads", "fanduel"), w)
+    assert k.wanted(_row(gid, "totals", "fanduel"), w)
+    assert k.wanted(_row(gid, "spreads", "pinnacle"), w)
+    assert not k.wanted(_row(gid, "spreads", "fanduel"), _t("2025-11-17T15:00Z"))
+
+
+def test_in_play_prices_are_never_stored():
+    k = h.QuoteKeeper([UK_DUKE])
+    assert not k.wanted(_row(UK_DUKE["game_id"], st="in_play"), _t("2025-11-19T01:00Z"))
+
+
+def test_a_game_with_no_tip_keeps_its_opener_and_anchors():
+    k = h.QuoteKeeper([dict(UK_DUKE, commence_time=None)])
+    gid = UK_DUKE["game_id"]
+    assert k.wanted(_row(gid), _t("2025-11-16T22:00Z"))
+    assert not k.wanted(_row(gid), _t("2025-11-18T18:00Z"))
+    assert k.wanted(_row(gid), _t("2025-11-18T15:00Z"))
+
+
+def test_the_snapshot_stores_only_what_the_keeper_wants(monkeypatch):
+    ev = _event("e1", "Duke Blue Devils", "Kentucky Wildcats", "2025-11-19T00:30:00Z")
+    monkeypatch.setattr(h, "_process_events", contract_process_events)
+    inserted = []
+    monkeypatch.setattr(h, "_insert_odds", lambda conn, rows: inserted.extend(rows))
+    keeper = h.QuoteKeeper(GAMES)
+    stats = defaultdict(int)
+    meter = FakeMeter(lambda u, p: Resp(body={"timestamp": "x", "data": [ev]}))
+    tips = {g["game_id"]: g["commence_time"] for g in GAMES}
+    # 6.5 hours out after an earlier sighting: bought, ledgered, not stored
+    keeper.seen.update({(UK_DUKE["game_id"], m, "fanduel") for m in ("h2h", "spreads", "totals")})
+    assert h._buy_snapshot(FakeConn(), meter, tips, h.EventResolver(REGISTRY, GAMES),
+                           _t("2025-11-18T18:00:00Z"), stats, keeper)
+    assert inserted == [] and stats["rows_not_stored"] == 3 and stats["calls"] == 1
+    assert stats.get("dropped_by_parser", 0) == 0     # thinned, not lost: it was bought before
+
+
+def test_seasons_run_newest_first_and_each_season_oldest_first():
+    todo = [_t("2025-01-10T15:00Z"), _t("2025-11-20T15:00Z"), _t("2024-12-01T15:00Z"),
+            _t("2026-02-01T15:00Z")]
+    assert h.season_order(todo) == [_t("2025-11-20T15:00Z"), _t("2026-02-01T15:00Z"),
+                                    _t("2024-12-01T15:00Z"), _t("2025-01-10T15:00Z")]

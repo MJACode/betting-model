@@ -81,7 +81,7 @@ from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 from data.db import get_connection
 from data.ingestors.nba_odds_history import _ODDS_KEYS, Meter, _write_with_retry
-from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window,
+from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window, ncaab_season_label,
                                         load_registry, match_event, reset_registry_cache,
                                         resolve_team_name)
 from data.ingestors.odds_ingestor import (HISTORICAL_ODDS_SOURCE, PULL_LEDGER_DDL,
@@ -388,6 +388,69 @@ def line_snapshots(games: list[dict]) -> list[datetime]:
     return sorted(want, reverse=True)
 
 
+class QuoteKeeper:
+    """Which bought rows are stored: the board's opener, its two anchors, and
+    the hours before tip. Everything else in a snapshot is a repeat.
+
+    WHY. A bulk snapshot returns every game the books list, days ahead, and
+    the plan buys ~13 snapshots a game day. Storing every row of every
+    snapshot would repeat the same far-off quote a dozen times a day: NCAAF's
+    historical snapshots average 1,348 rows (odds_history_pulls, 2026-10-26)
+    and NCAAB lists more games, so the approved ~12,500 snapshots would store
+    tens of millions of rows into an odds table that holds 18.5M (13 GB) on a
+    68 GB database (2026-10-26 review). The purchase still BUYS every snapshot
+    (that is what the ledger and the credits record); it stores, per
+    (game, market, book):
+
+      * the first quote this run sees (the opener as far as the plan reaches),
+      * the game date's two anchors, D-1 22Z and D 15Z (every book at the same
+        instant, which the Pinnacle-versus-soft-book sweep pairs on),
+      * every snapshot from three hours before ESPN's tip to the tip (the
+        close and the decision window).
+
+    In-play prices are not stored at all: the approved purchase is for
+    pre-game models, and _mark_in_play has already labelled them.
+    """
+
+    PRE_TIP = timedelta(hours=3)
+
+    def __init__(self, games: list[dict]):
+        self.dates: dict[str, date] = {}
+        self.tips: dict[str, datetime | None] = {}
+        for g in games:
+            self.dates[g["game_id"]] = date.fromisoformat(str(g["game_date"])[:10])
+            self.tips[g["game_id"]] = _utc(g.get("commence_time"))
+        self.seen: set[tuple[str, str, str]] = set()
+
+    def anchors(self, game_id: str) -> tuple[datetime, ...]:
+        d = self.dates.get(game_id)
+        if d is None:
+            return ()
+        midnight = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        return (midnight - timedelta(hours=2), midnight + timedelta(hours=15))
+
+    def wanted(self, row: dict, when: datetime) -> bool:
+        if row.get("snapshot_type") == "in_play":
+            return False
+        gid = row["game_id"]
+        key = (gid, row.get("market") or "", row.get("bookmaker") or "")
+        tip = self.tips.get(gid)
+        keep = (key not in self.seen
+                or when in self.anchors(gid)
+                or (tip is not None and timedelta(0) <= tip - when <= self.PRE_TIP))
+        if keep:
+            self.seen.add(key)
+        return keep
+
+
+def season_order(todo: list[datetime]) -> list[datetime]:
+    """Seasons newest first (the recent seasons land first), each season
+    oldest first, so a quote's first appearance is its earliest snapshot."""
+    def season(w: datetime) -> int:
+        return ncaab_season_label(w.date().isoformat())
+    return sorted(todo, key=lambda w: (-season(w), w))
+
+
 def _held_hours(conn) -> set[tuple[str, int]]:
     return {(str(r[0]), int(r[1])) for r in conn.execute(
         "SELECT snapshot_date, hour_utc FROM odds_history_pulls WHERE sport = %s",
@@ -395,7 +458,7 @@ def _held_hours(conn) -> set[tuple[str, int]]:
 
 
 def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
-                  when: datetime, stats: dict) -> bool:
+                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None) -> bool:
     """Buy the whole slate at `when`, write it, its unmatched events and its
     ledger row in one transaction. False = stop (ceiling or floor)."""
     snap_date, hour = when.date().isoformat(), when.hour
@@ -453,6 +516,10 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
         tip = _utc(tips.get(gid)) or _utc(fed.get(gid))
         starts.append({"game_id": gid, "commence_time": tip.isoformat() if tip else None})
     stats["marked_in_play"] += _mark_in_play(starts, odds_rows)
+    bought = len(odds_rows)
+    if keeper is not None:
+        odds_rows = [r for r in odds_rows if keeper.wanted(r, when)]
+    stats["rows_not_stored"] += bought - len(odds_rows)
     lost = [(stamp, str(ev.get("id")), ev.get("home_team"), ev.get("away_team"),
              ev.get("commence_time"), json.dumps(ev), HISTORICAL_ODDS_SOURCE)
             for ev in unmatched + dropped]
@@ -507,8 +574,9 @@ def buy_lines(conn, meter: Meter, first: int, last: int) -> dict:
                 f"{len(pairs) - len(todo):,} already stored, {len(todo):,} to buy "
                 f"(~{LINE_SNAPSHOT_COST * len(todo):,} credits)")
     stats: dict = defaultdict(int)
-    for when in todo:
-        if not _buy_snapshot(conn, meter, tips, resolver, when, stats):
+    keeper = QuoteKeeper(games)
+    for when in season_order(todo):
+        if not _buy_snapshot(conn, meter, tips, resolver, when, stats, keeper):
             break
     print("lines", resolver.report())
     return dict(stats)
