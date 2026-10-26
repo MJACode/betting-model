@@ -69,6 +69,10 @@ SPORT_KEYS = {
     #
     # THE NFL IS READ-ONLY AGAINST `games` — see NFL_GAMES_ARE_NOT_OURS below.
     "NFL": "americanfootball_nfl",
+    # 2026-10-26: men's college basketball for 2026-27 (first tip 2026-11-01).
+    # READ-ONLY AGAINST `games` like the NFL, and stricter: see
+    # NCAAB_GAMES_ARE_NOT_OURS below.
+    "NCAAB": "basketball_ncaab",
 }
 
 # The NFL is the one sport here whose games this ingestor MUST NOT create.
@@ -84,6 +88,50 @@ SPORT_KEYS = {
 # prop lines to the real game id). An event that does not resolve is dropped
 # with a warning: a line we cannot attach to a game is not a line we can price.
 NFL_GAMES_ARE_NOT_OURS = True
+
+# Men's college basketball games belong to ESPN's schedule, never to this file
+# (data/ingestors/ncaab_teams.py says why in full, from what NCAAF cost). The
+# two reasons in one line each:
+#
+# * 360-odd Division I schools collide in three letters, so the fallback in
+#   _normalize_team would file "Kentucky Wildcats" and "Kansas State Wildcats"
+#   under one id (measured 2026-10-26: NCAAB_2026-11-03_WIL_WIL).
+# * On a neutral court the feed may call ESPN's away team home. NCAAF minted a
+#   twin games row for those, odds on one and the final on the other.
+#
+# So every NCAAB event is resolved onto ESPN's games row through
+# ncaab_teams.make_resolver, which also says when the feed's orientation is
+# flipped; _process_events then swaps the names before reading any outcome, so
+# spread_home is ESPN's home number (CLAUDE.md §4).
+#
+# STRICTER THAN THE NFL: an NCAAB event processed with no resolver at all is
+# dropped, not minted. The NFL still mints when a caller passes no resolver
+# (the two historical entry points do), and turning that off is its own change
+# with its own backfills to check; NCAAB starts closed.
+NCAAB_GAMES_ARE_NOT_OURS = True
+RESOLVE_ONLY_SPORTS = frozenset({"NCAAB"})
+
+# The sports whose games come from a schedule another ingestor owns, so every
+# live caller builds a resolver before parsing and skips the sport (never
+# mints) when it cannot build one. See _schedule_resolver.
+SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB")
+
+# Sports stored even when DraftKings does not list the event yet.
+#
+# Every other sport skips an event DraftKings has not posted, because the
+# models are scored against DraftKings and a game it does not list is a game
+# nobody can price. NCAAB is exempt on purpose (2026-10-26): the opener timing
+# work needs the FIRST post of each line from whichever book makes it, and
+# under the gate a game DraftKings has not listed yet is dropped whole, every
+# other book with it, until DraftKings does. The stored opener would then be
+# whatever was up at DraftKings' first listing, not the real one.
+#
+# This widens what is RECORDED. Whether a game can be bet is the scorer's
+# call: its DraftKings price gate (models/scorer.py, `ahead_unpriced`) covers
+# games AFTER the target date only, so a same-day NCAAB game with no
+# DraftKings row reaches the models, and an NCAAB model must refuse to decide
+# without the reference price.
+DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB"})
 
 # Markets to pull (full-game)
 MARKETS = ["h2h", "spreads", "totals"]
@@ -291,6 +339,13 @@ def _normalize_team(name: str, sport: str) -> str:
         # ncaaf_teams registry and falls back to the input unchanged.
         from data.ingestors.cfbd_ingestor import resolve_odds_api_school
         return resolve_odds_api_school(name)
+    if sport == "NCAAB":
+        # NCAAB never mints an id here (NCAAB_GAMES_ARE_NOT_OURS): the game id
+        # comes from ESPN's schedule through the resolver, so this value is
+        # never used. Returned untouched and silently, because the 3-letter
+        # fallback below would warn on every school every pass and invent the
+        # colliding ids the resolver exists to avoid.
+        return name
     if sport == "NFL":
         from config import NFL_ODDS_API_MAP
         mapping = NFL_ODDS_API_MAP
@@ -357,6 +412,45 @@ def _nfl_resolver(conn, around_date: str):
         return hit[0] if hit else None
 
     return resolve
+
+
+# ── Schedule resolution (NCAAB) ──────────────────────────────────────────────
+
+def _ncaab_resolver(conn, around_date: str):
+    """A `resolve_game_id` for `_process_events` returning (game_id, flipped).
+
+    Thin on purpose: the matching lives in data/ingestors/ncaab_teams.py, the
+    one place that knows ESPN's identity contract. Same failure rule as the
+    NFL: anything that stops the resolver being built returns None, and the
+    caller skips NCAAB for the pass.
+
+    The cached team registry is dropped first, at the cost of one read of one
+    table per build. The registry caches an EMPTY list when its table is
+    unreadable, so a long-lived process (the 30-second pre-game poller) that
+    first looked before the ESPN ingestor had written the table would
+    otherwise skip NCAAB until it restarted.
+    """
+    try:
+        from data.ingestors import ncaab_teams
+        ncaab_teams.reset_registry_cache()
+        return ncaab_teams.make_resolver(conn, str(around_date)[:10])
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NCAAB: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
+def _schedule_resolver(sport: str, conn, around_date: str):
+    """The resolver for a SCHEDULE_RESOLVED_SPORTS sport, or None.
+
+    One dispatcher for every caller, so the live pass, the pre-game poller and
+    the historical backfill cannot drift apart on which sports resolve. None
+    means "skip this sport now", never "mint instead".
+    """
+    if sport == "NFL":
+        return _nfl_resolver(conn, around_date)
+    if sport == "NCAAB":
+        return _ncaab_resolver(conn, around_date)
+    return None
 
 
 # ── Game ID Builder ───────────────────────────────────────────────────────────
@@ -821,6 +915,31 @@ def _get_historical_odds(sport_key: str, markets: list[str],
 
 # ── Event Processor ───────────────────────────────────────────────────────────
 
+def _season_label(sport: str, game_date: str) -> int:
+    """The season a games row minted here is filed under, from its ET date."""
+    year = int(game_date[:4])
+    month = int(game_date[5:7])
+    if sport == "NHL":
+        # Ending-year label, and the season can open in September
+        # (2026-27: 09-29). The old October rule split that opening week across
+        # two seasons — data/season_labels.py.
+        from data.season_labels import nhl_season_label
+        return nhl_season_label(game_date)
+    if sport in ("NBA", "NCAAB") and month >= 10:
+        # Oct–Jun (NBA) and Nov–Apr (NCAAB), both labelled by the ENDING year:
+        # ESPN calls 2026-27 college basketball season 2027. An NCAAB games
+        # row is never minted here (NCAAB_GAMES_ARE_NOT_OURS), so the stored
+        # NCAAB season is the ESPN ingestor's; this keeps the label right for
+        # anything that reads it from this function.
+        return year + 1
+    if sport == "NCAAF" and month <= 2:
+        # CFB is labeled by the year of the FALL, so a January bowl or
+        # playoff game belongs to the PRIOR season. Mirror image of the
+        # NHL/NBA rule above — and the same footgun if it is missed.
+        return year - 1
+    return year
+
+
 def _process_events(events: list[dict], sport: str,
                     snapshot_type: str, snapshot_at: str,
                     include_3way: bool = False,
@@ -829,15 +948,31 @@ def _process_events(events: list[dict], sport: str,
     Parse a list of Odds API event dicts.
     Returns (game_rows, odds_rows) ready for DB insert.
 
-    `resolve_game_id(home_name, away_name, commence_time) -> game_id | None`
-    makes this read-only against `games` for the sport that passes one: the id
-    comes from the schedule, NO game row is emitted, and an event that does not
-    resolve is dropped. The NFL is the only caller today and must stay one
-    (NFL_GAMES_ARE_NOT_OURS); everything else still mints its own id, which is
-    correct because for those sports this ingestor IS the schedule.
+    `resolve_game_id(home_name, away_name, commence_time)` makes this
+    read-only against `games` for the sport that passes one: the id comes from
+    the schedule, NO game row is emitted, and an event that does not resolve
+    is dropped. It returns either
+
+      * a game_id, or None (the NFL: NFL_GAMES_ARE_NOT_OURS), or
+      * (game_id, flipped), or None (NCAAB: NCAAB_GAMES_ARE_NOT_OURS), where
+        `flipped` means the feed called the schedule's AWAY team home. The two
+        names are then swapped before any outcome is read, so home_price and
+        spread_home are the schedule's home team's.
+
+    A RESOLVE_ONLY_SPORTS sport with no resolver writes nothing. Everything
+    else still mints its own id, which is correct because for those sports
+    this ingestor IS the schedule.
     """
     game_rows = []
     odds_rows = []
+
+    if resolve_game_id is None and sport in RESOLVE_ONLY_SPORTS:
+        # Fail closed: a caller that forgot the resolver must not mint
+        # NCAAB_<date>_WIL_WIL. One warning per call, not one per event.
+        if events:
+            logger.warning(f"{sport}: {len(events)} event(s) dropped -- no schedule "
+                           f"resolver was passed, and {sport} games are never minted here")
+        return game_rows, odds_rows
 
     _ET = ZoneInfo("America/New_York")
     for event in events:
@@ -867,38 +1002,32 @@ def _process_events(events: list[dict], sport: str,
         home_team = _normalize_team(home_name, sport)
         away_team = _normalize_team(away_name, sport)
 
-        # Extract season from game_date
-        year = int(game_date[:4])
-        month = int(game_date[5:7])
-        if sport == "NHL":
-            # Ending-year label, and the season can open in September
-            # (2026-27: 09-29). The old October rule split that opening week across
-            # two seasons — data/season_labels.py.
-            from data.season_labels import nhl_season_label
-            season = nhl_season_label(game_date)
-        elif sport == "NBA" and month >= 10:
-            season = year + 1   # NBA seasons span Oct–Jun, labeled by ending year
-        elif sport == "NCAAF" and month <= 2:
-            # CFB is labeled by the year of the FALL, so a January bowl or
-            # playoff game belongs to the PRIOR season. Mirror image of the
-            # NHL/NBA rule above — and the same footgun if it is missed.
-            season = year - 1
-        else:
-            season = year
+        season = _season_label(sport, game_date)
 
         if resolve_game_id is not None:
             # Read-only against the schedule. The resolver owns the date match
             # too (a prime-time kickoff lands on the NEXT day in UTC), so the
             # raw commence_time goes in rather than the ET date derived above.
             resolved = resolve_game_id(home_name, away_name, commence_ts)
-            if not resolved:
+            if isinstance(resolved, tuple):
+                game_id, flipped = resolved
+            else:
+                game_id, flipped = resolved, False
+            if not game_id:
                 logger.warning(
                     f"{sport}: no scheduled game for {away_name!r} @ {home_name!r} "
                     f"at {commence_ts!r}; {len(event.get('bookmakers', []))} "
                     f"book(s) dropped rather than filed under an invented id")
                 continue
-            game_id = resolved
-            # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS.
+            if flipped:
+                # The feed's home is the schedule's away (a neutral court).
+                # Outcomes are keyed by team NAME, so swapping the names here,
+                # before the bookmaker loop, is what puts the schedule's home
+                # team's price in home_price and its line in spread_home.
+                home_name, away_name = away_name, home_name
+                home_team, away_team = away_team, home_team
+            # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS and
+            # NCAAB_GAMES_ARE_NOT_OURS.
         else:
             game_id = _build_game_id(sport, game_date, away_team, home_team)
 
@@ -917,8 +1046,10 @@ def _process_events(events: list[dict], sport: str,
         # Bookmaker odds. Store a row per line-shop book (DraftKings is the book
         # the models score against; the others are kept for line shopping only).
         # Require DK to be present — if DK doesn't list a game we don't score it.
+        # Except DK_GATE_EXEMPT_SPORTS, whose first post from any book is kept.
         bookmakers = event.get("bookmakers", [])
-        if not any(b.get("key") == ODDS_API_BOOKMAKER for b in bookmakers):
+        if (sport not in DK_GATE_EXEMPT_SPORTS
+                and not any(b.get("key") == ODDS_API_BOOKMAKER for b in bookmakers)):
             continue
 
         for book in bookmakers:
@@ -1085,15 +1216,15 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
         if not events:
             continue
         resolve = None
-        if sp == "NFL":
+        if sp in SCHEDULE_RESOLVED_SPORTS:
             try:
                 conn = conn or get_connection()
-                resolve = _nfl_resolver(conn, snapshot_at)
+                resolve = _schedule_resolver(sp, conn, snapshot_at)
             except Exception as exc:                          # noqa: BLE001
-                logger.warning(f"pregame fetch: NFL resolver unavailable ({exc})")
+                logger.warning(f"pregame fetch: {sp} resolver unavailable ({exc})")
                 resolve = None
             if resolve is None:
-                continue        # never fall back to minting NFL game ids
+                continue        # never fall back to minting NFL or NCAAB game ids
         game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at,
                                                resolve_game_id=resolve)
         if sp == "UFC":
@@ -1145,7 +1276,12 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL"]
+    # NCAAB joined 2026-10-26 for the 2026-27 season, LAST on purpose: building
+    # its resolver reads ncaab_teams / ncaab_events, which roll the connection
+    # back when unreadable, so it runs after every other sport's rows are
+    # committed (see the commit before the resolver below).
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL",
+                                    "NCAAB"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -1184,10 +1320,18 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 continue
 
             resolve = None
-            if sp == "NFL":
-                resolve = _nfl_resolver(conn, target_date)
+            if sp in SCHEDULE_RESOLVED_SPORTS:
+                # Commit what the earlier sports wrote BEFORE the schedule
+                # read. ncaab_teams rolls the connection back when its tables
+                # are unreadable (they are created by the ESPN ingestor's first
+                # write), and every sport's odds sit uncommitted on this one
+                # connection until the end of the loop -- so without this, an
+                # NCAAB schedule that is not there yet would silently take the
+                # pass's MLB, NHL and NFL rows with it.
+                conn.commit()
+                resolve = _schedule_resolver(sp, conn, target_date)
                 if resolve is None:
-                    continue    # never fall back to minting NFL game ids
+                    continue    # never fall back to minting NFL or NCAAB game ids
             game_rows, odds_rows = _process_events(
                 events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve
             )
@@ -1306,6 +1450,17 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     snapshot_at = f"{snapshot_date}T12:00:00Z"
     start = datetime.now()
 
+    if sport in RESOLVE_ONLY_SPORTS:
+        # This single-date path builds no resolver, so _process_events would
+        # drop every NCAAB event AFTER the 10x call had been paid for. Refused
+        # before the call; run_historical_odds_range resolves onto ESPN's
+        # schedule and is the path for NCAAB history.
+        logger.warning(f"historical {sport}: use run_historical_odds_range, which "
+                       f"resolves onto the schedule; nothing fetched")
+        return {"snapshot_date": snapshot_date, "sport": sport, "games": 0,
+                "odds_rows": 0, "duration_s": 0.0,
+                "skipped": "resolve_only_sport"}
+
     logger.info(f"Fetching HISTORICAL odds for {sport} on {snapshot_date} "
                 f"(uses 10× credits!)")
 
@@ -1386,6 +1541,24 @@ def _mark_in_play(game_rows: list[dict], odds_rows: list[dict]) -> int:
             row["snapshot_type"] = "in_play"
             flipped += 1
     return flipped
+
+
+def _scheduled_starts(conn: DBConnection, game_ids) -> list[dict]:
+    """[{game_id, commence_time}] from `games`, for ids this file did not mint.
+
+    _mark_in_play reads each game's start from the game rows _process_events
+    emits, and a resolved sport emits none -- so without this a 22:00Z
+    historical snapshot of a noon NCAAB tip would be stored as a pre-game
+    price, the leak _mark_in_play exists to stop. The schedule's own start
+    is the right one to compare against: it is the row the odds join to.
+    """
+    ids = sorted({g for g in game_ids if g})
+    if not ids:
+        return []
+    rows = conn.execute(
+        "SELECT game_id, commence_time FROM games WHERE game_id = ANY(%s)",
+        (ids,)).fetchall()
+    return [{"game_id": r[0], "commence_time": r[1]} for r in rows]
 
 
 def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
@@ -1491,10 +1664,15 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     d0 = _date.fromisoformat(start)
     d1 = _date.fromisoformat(end)
     spent = 0
+    # NCAAB resolves onto ESPN's schedule here too and never upserts a games
+    # row (NCAAB_GAMES_ARE_NOT_OURS). The NFL is not in RESOLVE_ONLY_SPORTS,
+    # so its backfill behaves exactly as before.
+    resolve_only = sport in RESOLVE_ONLY_SPORTS
     stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
              "bookmakers": books, "markets": markets, "credit_cap": credit_cap,
              "ignore_ledger": bool(ignore_ledger),
              "calls": 0, "skipped_cached": 0, "credits_spent": 0,
+             "skipped_no_schedule": 0,
              "marked_in_play": 0,
              "games": 0, "odds_rows": 0, "errors": 0,
              "stopped_early": False, "last_date": None}
@@ -1537,6 +1715,16 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     stats["credits_spent"] = spent
                     stats["last_date"] = day.isoformat()
                     return stats
+                resolve = None
+                if resolve_only:
+                    # Built BEFORE the paid call: with no ESPN schedule near
+                    # this day every row it bought would be dropped. Not
+                    # written to the pull ledger either, so a run after the
+                    # schedule backfill still buys this snapshot.
+                    resolve = _schedule_resolver(sport, conn, day.isoformat())
+                    if resolve is None:
+                        stats["skipped_no_schedule"] += 1
+                        continue
                 try:
                     events = _get_historical_odds(sport_key, markets,
                                                   day.isoformat(), hour, books)
@@ -1544,10 +1732,14 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     stats["calls"] += 1
                     time.sleep(REQUEST_SLEEP)
                     game_rows, odds_rows = _process_events(
-                        events, sport, "open", snapshot_at)
+                        events, sport, "open", snapshot_at,
+                        resolve_game_id=resolve)
                     for r in odds_rows:
                         r["source"] = HISTORICAL_ODDS_SOURCE
-                    flipped = _mark_in_play(game_rows, odds_rows)
+                    timing = game_rows
+                    if resolve is not None:
+                        timing = _scheduled_starts(conn, {r["game_id"] for r in odds_rows})
+                    flipped = _mark_in_play(timing, odds_rows)
                     stats["marked_in_play"] += flipped
                     if game_rows:
                         stats["games"] += _upsert_games(conn, game_rows)
@@ -1616,7 +1808,8 @@ def get_latest_odds_for_game(conn: DBConnection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF"],
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF",
+                                            "NFL", "NCAAB"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],
