@@ -56,6 +56,9 @@ _SPORT_TOKENS = {
     "americanfootball_ncaaf": "NCAAF", "mma_mixed_martial_arts": "UFC",
     "golf": "GOLF", "mlb": "MLB", "nfl": "NFL", "nba": "NBA", "nhl": "NHL",
     "wnba": "WNBA", "college-football": "NCAAF", "ncaaf": "NCAAF",
+    # Men's college basketball (2026-27): the Odds API key, and ESPN's path
+    # segment for its schedule and box scores.
+    "basketball_ncaab": "NCAAB", "mens-college-basketball": "NCAAB",
 }
 
 # A request that never returns is the one failure mode this repo has no defence
