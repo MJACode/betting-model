@@ -429,11 +429,17 @@ def _ncaab_resolver(conn, around_date: str):
     unreadable, so a long-lived process (the 30-second pre-game poller) that
     first looked before the ESPN ingestor had written the table would
     otherwise skip NCAAB until it restarted.
+
+    Thirty days ahead, not the resolver's default ten: NCAAB is exempt from the
+    DraftKings gate so the FIRST price any book posts is kept, and a game the
+    feed lists more than ten days out would otherwise be dropped until it came
+    inside the window (review, 2026-10-26). The window is one indexed read of
+    ncaab_events, about 4,000 rows at mid-season.
     """
     try:
         from data.ingestors import ncaab_teams
         ncaab_teams.reset_registry_cache()
-        return ncaab_teams.make_resolver(conn, str(around_date)[:10])
+        return ncaab_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
     except Exception as exc:                                   # noqa: BLE001
         logger.warning(f"NCAAB: could not build the schedule resolver ({exc}); odds skipped")
         return None

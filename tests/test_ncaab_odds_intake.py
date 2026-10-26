@@ -552,16 +552,22 @@ class TestHistoricalBackfill:
         assert (stats["calls"], stats["credits_spent"], stats["odds_rows"],
                 stats["games"], stats["errors"]) == (0, 0, 0, 0, 0)
 
-    def test_a_worker_job_for_ncaab_history_buys_nothing(self, monkeypatch, no_feed):
-        """The historical_odds job accepts any SPORT_KEYS sport, which now
-        includes NCAAB. A worker_jobs row asking for it must be a no-op."""
+    def test_a_worker_job_for_ncaab_history_is_refused_at_validation(self, monkeypatch, no_feed):
+        """The historical_odds job validates against SPORT_KEYS, which now
+        includes NCAAB. It must refuse NCAAB with a clear error before any
+        row is queued: NCAAB history is bought by ncaab_odds_history, which
+        keeps unmatched events. The run-time refusal above stays as the
+        backstop for a row written past the validator."""
         from tracking import job_queue as q
 
+        with pytest.raises(ValueError, match="ncaab_odds_history"):
+            q._validate_historical_odds({"sport": "ncaab", "start": "2026-11-10",
+                                         "end": "2026-11-12", "credit_cap": 5000})
         conn = _CatalogConn()
         paid, opened = self._wire(monkeypatch, conn)
-        cleaned = q._validate_historical_odds({"sport": "ncaab", "start": "2026-11-10",
-                                               "end": "2026-11-12", "credit_cap": 5000})
-        stats = q._job_historical_odds(**cleaned)
+        stats = q._job_historical_odds(sport="NCAAB", start="2026-11-10", end="2026-11-12",
+                                       hours_utc=[12], bookmakers=None, credit_cap=5000,
+                                       markets=None, ignore_ledger=False)
         assert paid == [] and opened == []
         assert stats["skipped"] == "resolve_only_sport"
 
@@ -602,3 +608,17 @@ def test_the_cli_offers_ncaab_and_nfl():
     src = inspect.getsource(oi)
     cli = src[src.index('if __name__ == "__main__":'):]
     assert '"NCAAB"' in cli and '"NFL"' in cli
+
+
+def test_the_resolver_looks_thirty_days_ahead(monkeypatch):
+    """A game the feed lists more than ten days out must still resolve: NCAAB is
+    exempt from the DraftKings gate so the first posted price is kept."""
+    seen = {}
+
+    def spy(conn, around_date, *a, **k):
+        seen.update(k)
+        return None
+
+    monkeypatch.setattr(ncaab_teams, "make_resolver", spy)
+    oi._ncaab_resolver(object(), "2026-11-02")
+    assert seen.get("days_fwd") == 30

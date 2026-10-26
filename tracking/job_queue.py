@@ -433,6 +433,12 @@ def _validate_historical_odds(args: dict) -> dict:
     sport = str(args.get("sport") or "").upper()
     if sport not in SPORT_KEYS:
         raise ValueError(f"unknown sport {sport!r}")
+    if sport == "NCAAB":
+        # run_historical_odds_range refuses NCAAB (it would ledger an hour whose
+        # unresolved events it drops, so paid data would be lost and never
+        # re-bought). NCAAB history is bought only by ncaab_odds_history, which
+        # keeps unmatched events.
+        raise ValueError("NCAAB history is bought by the ncaab_odds_history job, not historical_odds")
     # Markets are what the endpoint bills by, so a job names what it funds.
     # Restricted to the bulk-endpoint set: anything else 422s the whole call.
     markets = [str(m) for m in (args.get("markets") or MARKETS)]
