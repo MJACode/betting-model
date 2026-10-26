@@ -27,7 +27,6 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { HitModeSheet } from '@/components/HitModeSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
@@ -39,7 +38,7 @@ import { SegmentTabs } from '@/components/GroupTabs';
 import { InfoSheet, InfoTooltip } from '@/components/InfoTooltip';
 import { SectionTitle } from '@/components/SectionTitle';
 import { showToast } from '@/components/Toast';
-import { SportToggle } from '@/components/SportToggle';
+import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
@@ -199,6 +198,7 @@ import {
   defaultLineN,
   pointInBubble,
   previewTypedLine,
+  compactRulerHeight,
   programmaticPick,
   rulerChromeHeight,
   rulerHi,
@@ -2495,11 +2495,14 @@ export function StatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Stats</Text>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
             <SettingsButton />
           </View>
-          <SportsbookIndicator coverageNote={coverageNote} />
-          <SportToggle />
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
         <TeamsBoard
@@ -2529,10 +2532,14 @@ export function StatsScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Stats</Text>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
             <SettingsButton />
           </View>
-          <SportToggle />
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
         <EmptyState
@@ -2588,7 +2595,12 @@ export function StatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Stats</Text>
+          <View style={styles.titleCluster}>
+            <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              Stats
+            </Text>
+            <StatsSportButton />
+          </View>
           <View style={styles.rightActions}>
             {/* "Clear all" lives beside the control it undoes rather than on a
                 row of its own at the bottom of the stack — MasterClass puts
@@ -2608,16 +2620,13 @@ export function StatsScreen() {
             ) : null}
             <Pressable
               onPress={() => setFiltersOpen(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
-              // The badge is a bare number in a View next to the word, so
-              // VoiceOver read "Filters, 2" with no trait and no idea what the
-              // 2 counted — the button said the same whether one filter was on
-              // or five. Two changes landed on this in one day and both fixed
-              // it: master made the sheet the only route to the Availability
-              // cut, which promoted a standing scan finding into a real one,
-              // and the control-stack collapse hit it from the scan side (UX
-              // reviews, 2026-09-12).
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              // The badge is a bare number in a View, so VoiceOver read
+              // "Filters, 2" with no trait and no idea what the 2 counted.
+              // The spoken name still says Filters. The word is not drawn:
+              // Stats plus the sport pill need the width on a 390pt phone
+              // (UX review, Compact B).
               accessibilityLabel={
                 activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
               }
@@ -2625,7 +2634,6 @@ export function StatsScreen() {
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color={colors.tint} />
-              <Text style={styles.filterBtnText}>Filters</Text>
               {activeFilterCount > 0 ? (
                 <View style={styles.filterBadge} importantForAccessibility="no">
                   <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
@@ -2635,8 +2643,6 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
-        <SportsbookIndicator coverageNote={coverageNote} />
-        <SportToggle />
       </View>
 
       <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
@@ -2703,20 +2709,23 @@ export function StatsScreen() {
           maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
         >
           <View style={styles.lineStack}>
-          <View style={styles.lineRow}>
+          {/* Compact B: the direction is a label, the book's number sits on
+              the same line, and the ruler underneath is the short tick row.
+              The label still opens At Least / Over / Under. */}
+          <View style={styles.lineCaption}>
             {/* Locked to the one side the member's books actually sell. It
-                loses the chevron AND the chip's fill and border, because a
-                DIMMED BORDERED CHIP is iOS for "a button you cannot use right
-                now" and gets tapped again; a label has no container (UX
-                review). The text stays at full textSecondary strength rather
-                than being faded onto a chip, which would land at ~3.5:1.
-                The reason lives in the coverage note below, so this carries no
-                accessibilityState and no sentence — VoiceOver was reading the
-                whole thing twice, once here and once from the caption, and
-                announcing "dimmed" on an element declared as static text. */}
+                loses the chip's fill and border, because a DIMMED BORDERED
+                CHIP is iOS for "a button you cannot use right now" and gets
+                tapped again; a label has no container (UX review). The text
+                stays at full textSecondary strength rather than being faded
+                onto a chip, which would land at ~3.5:1. The reason lives in
+                the coverage note below, so this carries no accessibilityState
+                and no sentence — VoiceOver was reading the whole thing twice,
+                once here and once from the caption, and announcing "dimmed"
+                on an element declared as static text. */}
             <Pressable
               onPress={() => setModeOpen(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               accessibilityRole="button"
               // Not "Show bets that are": this control survives on a column
               // with no line at all (NCAAF carries, sacks), where it is the
@@ -2729,12 +2738,27 @@ export function StatsScreen() {
               style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
             >
               <Text style={styles.dirPillText} numberOfLines={1}>
-                {hitModeLabel(hitMode)}
+                {hitMode === 'atLeast' ? 'At least' : hitModeLabel(hitMode)}
               </Text>
-              {/* chevron-expand, not chevron-down: this opens a menu in place,
-                  it does not navigate. */}
-              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
             </Pressable>
+            {/* At Least only, and a footnote rather than a headline. The row
+                this replaces restated the stat, the number and the direction —
+                all three already on screen — in the screen's second-largest
+                type, outweighing the hit rate the board exists to show (UX
+                review, 2026-09-12). Only the book's half-point line was novel,
+                so only it survives. Over and Under ARE that number already. */}
+            {hitMode === 'atLeast' ? (
+              // Silent: `describe` below already appends this exact string to
+              // the ruler's accessibilityValue, so leaving it reachable made
+              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
+              // on the next swipe. Same double-read the direction pill's note
+              // records fixing on 2026-09-05.
+              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
+                {hitModeLineLabel(lineN, hitMode)}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.lineRulerPad}>
             {/* Every mode resolves a stop to the SAME half-point line — only
                 the face differs — so a mode change renames the bet without
                 moving it (lib/hitMode.ts). The stops are not quite the same
@@ -2770,22 +2794,6 @@ export function StatsScreen() {
               // `scale.max`. Junk still parses as nothing.
               parseTyped={(text) => parseTypedLine(text, hitMode)}
             />
-            {/* At Least only, and a footnote rather than a headline. The row
-                this replaces restated the stat, the number and the direction —
-                all three already on screen — in the screen's second-largest
-                type, outweighing the hit rate the board exists to show (UX
-                review, 2026-09-12). Only the book's half-point line was novel,
-                so only it survives. Over and Under ARE that number already. */}
-            {hitMode === 'atLeast' ? (
-              // Silent: `describe` above already appends this exact string to
-              // the ruler's accessibilityValue, so leaving it reachable made
-              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
-              // on the next swipe. Same double-read the direction pill's note
-              // records fixing on 2026-09-05.
-              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
-                {hitModeLineLabel(lineN, hitMode)}
-              </Text>
-            ) : null}
           </View>
           {Platform.OS !== 'ios' && lineEditBar ? (
             <ThresholdDoneBar onCancel={lineEditBar.cancel} onDone={lineEditBar.commit} />
@@ -3021,6 +3029,7 @@ export function StatsScreen() {
           atdStack={stackAtd}
           matchupOrder={matchupOrder}
           onMatchupSort={() => setMatchupOrder((current) => nextMatchupSort(current))}
+          onOpenBooks={() => setPickerOpen(true)}
         />
       ) : null}
 
@@ -3803,6 +3812,14 @@ function LineRuler({
   commitRef.current = commitDraft;
   cancelRef.current = cancelDraft;
   const fieldOpen = draft != null;
+  // Resting row is the short tick strip. Opening the field grows it so the
+  // 44pt typing bubble is not clipped.
+  const chromeH = fieldOpen ? rulerChromeHeight(fontScale) : compactRulerHeight(fontScale);
+  // The resting marker draws with the text, and stops at 1.3× so a 2×
+  // setting does not turn the short strip back into the old bubble. The
+  // finger target is pointInBubble, which grows a short box to 44pt.
+  const markScale = Math.min(Math.max(fontScale, 1), 1.3);
+  const markH = Math.round(22 * markScale);
   useEffect(() => {
     if (Platform.OS === 'ios' || !onEditBar) return;
     if (!fieldOpen) {
@@ -3886,7 +3903,7 @@ function LineRuler({
           onHandlerStateChange={onBubbleTap}
         >
           <View
-            style={[styles.rulerWrap, { height: rulerChromeHeight(fontScale) }]}
+            style={[styles.rulerWrap, { height: chromeH, minHeight: chromeH }]}
             collapsable={false}
             onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
             // Not while typing, so VoiceOver can reach the field.
@@ -3968,25 +3985,9 @@ function LineRuler({
                       accessible={false}
                       accessibilityElementsHidden
                       importantForAccessibility="no-hide-descendants"
-                      style={[styles.tickCol, { width: tickW }]}
+                      style={[styles.tickCol, styles.tickColCompact, { width: tickW }]}
                     >
-                      <View style={[styles.tick, labeled && styles.tickMajor]} />
-                      {/* The label is wider than its tick column — centre it with a
-                          negative margin so it can't clip, and only label ticks far
-                          enough apart (labelEvery) that neighbours can't collide. */}
-                      <Text
-                        style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
-                        numberOfLines={1}
-                        // The box is a fixed LABEL_W, so a face that outgrows it
-                        // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
-                        // truncation, it reads as a different number. Capping the
-                        // scale is the sanctioned trade for numerals in a dense
-                        // strip (UX_REVIEW §5); it matters more now that the wide
-                        // branch labels EVERY stop on a five-character Over face.
-                        maxFontSizeMultiplier={1.3}
-                      >
-                        {labeled ? faceOf(v) : ''}
-                      </Text>
+                      <View style={[styles.tick, styles.tickCompact, labeled && styles.tickMajorCompact]} />
                     </Pressable>
                   );
                 })}
@@ -3996,8 +3997,8 @@ function LineRuler({
                 number reaches the strip. A quick tap is the gesture handler
                 on the wrap: it fails past THRESHOLD_TAP_MAX_DIST, and the
                 scroll keeps the gesture. The field takes touch only while open. */}
-            <View pointerEvents="box-none" style={styles.centerMarker}>
-              <View pointerEvents="none" style={styles.centerLine} />
+            <View pointerEvents="box-none" style={[styles.centerMarker, draft == null && styles.centerMarkerCompact]}>
+              {draft != null ? <View pointerEvents="none" style={styles.centerLine} /> : null}
               {draft != null ? (
                 <TextInput
                   value={draft}
@@ -4023,13 +4024,18 @@ function LineRuler({
               ) : (
                 <View
                   pointerEvents="none"
-                  style={[styles.thresholdBubble, bubblePressed && styles.pressed]}
+                  style={[
+                    styles.thresholdMark,
+                    { height: markH, minWidth: markH, borderRadius: markH / 2 },
+                    bubblePressed && styles.pressed,
+                  ]}
                   onLayout={onBubbleLayout}
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                 >
-                  <Text style={styles.tickValueActive}>{faceOf(value)}</Text>
-                  {parseTyped ? <Ionicons name="pencil" size={12} color={colors.tint} /> : null}
+                  <Text style={styles.thresholdMarkText} maxFontSizeMultiplier={1.3}>
+                    {faceOf(value)}
+                  </Text>
                 </View>
               )}
             </View>
@@ -4099,6 +4105,7 @@ function StatSegmentRow({
       labelFor={segmentLabel}
       accessibilityLabelFor={segmentAccessibilityLabel}
       fit
+      tight
     />
   );
 }
@@ -4395,6 +4402,7 @@ function ColumnHeader({
   atdStack = false,
   matchupOrder = null,
   onMatchupSort,
+  onOpenBooks,
 }: {
   rightLabel: string;
   /** False when the ranked list is empty. A line-only board is not sorted. */
@@ -4412,6 +4420,8 @@ function ColumnHeader({
   atdStack?: boolean;
   matchupOrder?: MatchupSort | null;
   onMatchupSort?: () => void;
+  /** Opens the sportsbook sheet. The header book line is gone (Compact B). */
+  onOpenBooks: () => void;
 }) {
   const { width: headerWidth, fontScale } = useWindowDimensions();
   // Room for MATCHUP on the stacked header line, after RK, PLAYER, and the
@@ -4467,17 +4477,29 @@ function ColumnHeader({
       {sorted ? <Ionicons name="arrow-down" size={9} color={colors.textTertiary} /> : null}
     </View>
   );
+  const oddsSpoken = oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel;
   const oddsHead = showOdds ? (
-    <Text
-      style={
-        atd
-          ? [styles.atdHeaderLabel, atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText]
-          : [styles.colHeaderRight, styles.colHeaderOdds]
-      }
-      numberOfLines={atd ? 2 : 1}
+    <Pressable
+      onPress={onOpenBooks}
+      accessibilityRole="button"
+      accessibilityLabel={`Sportsbooks, ${oddsSpoken}. Tap to change.`}
+      accessibilityHint="Opens the sportsbook list"
+      style={[
+        styles.oddsBookBtn,
+        atd ? (atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText) : styles.colHeaderOdds,
+      ]}
     >
-      {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
-    </Text>
+      <Text
+        style={
+          atd
+            ? [styles.atdHeaderLabel, atdStack ? styles.atdHeaderLabelFree : styles.atdOddsHeadText]
+            : [styles.colHeaderRight, styles.colHeaderOdds]
+        }
+        numberOfLines={atd ? 2 : 1}
+      >
+        {oddsSpoken}
+      </Text>
+    </Pressable>
   ) : null;
   const matchupHead = showMatchup ? (
     atd ? (
@@ -5186,20 +5208,29 @@ const styles = StyleSheet.create({
 
   header: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
+    paddingTop: spacing.sm,
+    paddingBottom: 0,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  titleCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: spacing.sm,
   },
   rightActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: spacing.sm,
   },
   title: {
+    flexShrink: 1,
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
@@ -5214,11 +5245,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-  },
-  filterBtnText: {
-    fontSize: font.size.footnote,
-    color: colors.tint,
-    fontWeight: font.weight.semibold,
   },
   filterBadge: {
     minWidth: 18,
@@ -5242,6 +5268,18 @@ const styles = StyleSheet.create({
   lineStack: {
     alignSelf: 'stretch',
   },
+  // "At least" and the book's number on one line; the short ruler sits under them.
+  lineCaption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: 2,
+  },
+  lineRulerPad: {
+    paddingHorizontal: spacing.lg,
+  },
   lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -5252,13 +5290,12 @@ const styles = StyleSheet.create({
   dirPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 9,
-    borderRadius: radii.sm,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
+    justifyContent: 'center',
+    flexShrink: 0,
+    // 44pt in the view. Bottom hit slop sits under the ruler and does not
+    // receive the tap (UX review, Compact B).
+    minHeight: 44,
+    paddingRight: spacing.sm,
   },
   dirPillLocked: {
     // The container is what says "button", so the container goes. Padding is
@@ -5275,9 +5312,9 @@ const styles = StyleSheet.create({
   },
   dirPillText: {
     flexShrink: 1,
-    fontSize: font.size.footnote,
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
+    color: colors.tint,
   },
   rulerRow: {
     flex: 1,
@@ -5292,9 +5329,11 @@ const styles = StyleSheet.create({
     flex: 1,
     // A floor, so nothing sharing the row can shrink the strip out of
     // existence. Below this the ticks are unusable anyway. The rendered
-    // height comes from rulerChromeHeight so a 44pt bubble is not clipped.
+    // height is compactRulerHeight at rest and rulerChromeHeight while the
+    // typing field is open, passed inline so this floor does not pin the
+    // short ruler at 72pt.
     minWidth: 120,
-    minHeight: 72,
+    minHeight: 28,
     justifyContent: 'center',
   },
   tickCol: {
@@ -5314,6 +5353,39 @@ const styles = StyleSheet.create({
     width: 2,
     height: 20,
     backgroundColor: colors.separatorOpaque,
+  },
+  // Compact B resting strip: short ticks, no per-stop numerals. The selected
+  // face is the marker. tickCol's 44pt floor is for the old labeled strip.
+  tickColCompact: {
+    minHeight: 28,
+    paddingTop: 0,
+    justifyContent: 'center',
+  },
+  tickCompact: {
+    height: 12,
+  },
+  tickMajorCompact: {
+    width: 2,
+    height: 16,
+    backgroundColor: colors.separatorOpaque,
+  },
+  centerMarkerCompact: {
+    justifyContent: 'center',
+    paddingTop: 0,
+  },
+  thresholdMark: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    backgroundColor: colors.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thresholdMarkText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.bold,
+    color: colors.textInverse,
   },
   tickLabel: {
     width: LABEL_W,
@@ -5568,6 +5640,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
+  // The odds header is the way back to the sportsbook sheet now the header
+  // book line is gone. 44pt so the new Pressable clears the tap floor.
+  oddsBookBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
   // Anytime TD locks the three metric columns so the header cannot drift.
   // The labels do not use colHeaderRight: that style is 48pt wide, and a
   // later `width: undefined` does not clear it, so MATCHUP drew in 48pt.

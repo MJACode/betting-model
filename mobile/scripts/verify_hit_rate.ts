@@ -226,11 +226,13 @@ check(
   check('the screen shows it beside the headline in At Least only',
     /\{hitMode === 'atLeast' \? \(\s*\n[\s\S]{0,600}?<Text style=\{styles\.bookLine\}[\s\S]{0,160}?\{hitModeLineLabel\(lineN, hitMode\)\}/
       .test(screen));
+  // Compact B drops the per-tick numerals so the strip can be short. The
+  // selected face is the marker, still printed through rulerValueLabel.
   check('and the ruler prints the stop in that same idiom',
     screen.includes('format={(n) => rulerValueLabel(n, hitMode)}')
       && screen.includes('const faceOf = format ?? String;')
-      && screen.includes('{labeled ? faceOf(v) : \'\'}')
-      && screen.includes('<Text style={styles.tickValueActive}>{faceOf(value)}</Text>'));
+      && screen.includes('{faceOf(value)}')
+      && screen.includes('styles.thresholdMarkText'));
 
   // ── the UX review's fixes, 2026-09-06 ───────────────────────────────────
   // A face carrying a decimal is up to four characters, and the old fixed
@@ -336,9 +338,11 @@ check(
       return !!label && !/\bbets?\b/i.test(label)
         && screen.includes('accessibilityHint="Opens the At Least, Over, Under options"');
     })());
-  check('it carries a menu glyph and a real hit target',
-    screen.includes('name="chevron-expand"')
-      && /onPress=\{\(\) => setModeOpen\(true\)\}\s*\n\s*hitSlop=/.test(screen));
+  // Compact B draws the direction as the word "At least", not a chevron chip.
+  // The sheet is still one tap; the hint names the three options.
+  check('it opens the mode sheet from a real hit target',
+    /onPress=\{\(\) => setModeOpen\(true\)\}\s*\n\s*hitSlop=\{\{ top: 12, bottom: 12/.test(screen)
+      && screen.includes('accessibilityHint="Opens the At Least, Over, Under options"'));
 
   // The ruler is ONE adjustable element, not N unlabelled tick buttons —
   // and in Under mode its number deliberately differs from the headline's.
