@@ -79,13 +79,13 @@ LOOK_AHEAD_HOURS = 36
 # How many days past today the schedule resolver reads (make_resolver's
 # days_fwd, passed explicitly so this bound and the resolver cannot drift). An
 # event tipping later than that, plus match_event's one day of skew, cannot
-# resolve on this tick. 10 is make_resolver's own default. The ESPN schedule
-# step stores 14 days ahead, and college lines can go up earlier than 10 days
-# out (NCAAF games of 2026-10-10..25: 22 of 164 had their first stored spread
-# at DraftKings, FanDuel, BetMGM, Bovada or Pinnacle 10 or more days before
-# kickoff; production read 2026-10-26), so this is the number to widen if
-# NCAAB openers turn out to be posted that far ahead.
-RESOLVER_DAYS_FWD = 10
+# resolve on this tick. 30, the same window the refresh pass's odds intake
+# uses (odds_ingestor._ncaab_resolver): college lines can go up more than ten
+# days out (NCAAF games of 2026-10-10..25: 22 of 164 had their first stored
+# spread at DraftKings, FanDuel, BetMGM, Bovada or Pinnacle 10 or more days
+# before kickoff; production read 2026-10-26), and the ESPN season backfill
+# holds every scheduled game, so a far-out opener resolves instead of waiting.
+RESOLVER_DAYS_FWD = 30
 
 _ET = ZoneInfo("America/New_York")
 

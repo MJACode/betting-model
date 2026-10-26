@@ -256,9 +256,10 @@ def test_started_games_are_dropped_before_parsing(wired):
     assert [(r["game_id"], r["market"]) for r in wired["inserted"]] == [(G2, "spreads")]
 
 
-def test_events_past_the_resolver_window_are_set_aside_not_counted_unresolved(wired):
+def test_events_past_the_resolver_window_are_set_aside_not_counted_unresolved(wired, monkeypatch):
     # today 2026-11-05, days_fwd 10, one day of skew: 2026-11-16 ET is the
     # last date that can still resolve. 2026-11-17 cannot, on any tick today.
+    monkeypatch.setattr(cap, "RESOLVER_DAYS_FWD", 10)
     last_in = datetime(2026, 11, 17, 3, 0, tzinfo=timezone.utc)      # 22:00 ET Nov 16
     first_out = datetime(2026, 11, 17, 23, 0, tzinfo=timezone.utc)   # 18:00 ET Nov 17
     wired["feed"].extend([
@@ -484,3 +485,12 @@ def test_the_job_writes_no_picks_so_publishes_nothing():
     import inspect
     import scheduler
     assert "_publish_new_signals" not in inspect.getsource(scheduler.run_ncaab_odds_capture)
+
+
+def test_the_capture_window_matches_the_refresh_pass_window():
+    """Both NCAAB odds writers resolve the same 30 days ahead, so an opener
+    the capture can store is one the refresh pass can store too."""
+    import inspect
+    import data.ingestors.odds_ingestor as oi
+    assert cap.RESOLVER_DAYS_FWD == 30
+    assert "days_fwd=30" in inspect.getsource(oi._ncaab_resolver)
