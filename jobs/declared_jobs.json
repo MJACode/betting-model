@@ -1099,5 +1099,40 @@
       "max_credits": 270000,
       "floor": 800000
     }
+  },
+  {
+    "key": "discord-void-ncaaf-ev-floor-2026-10-26-dry",
+    "job_type": "publish_discord_void",
+    "requested_by": "matt",
+    "note": "matt 2026-10-26: 'Void - if we voided in discord, let's clear it'. Five posted NCAAF ncaaf_over_under BETs voided 2026-09-19 under the global EV floor (mike) whose Discord posts never got a void notice, so v_discord_published still holds them and the app still shows them. Only games not yet played (11/7-12/12); matt: not worried about past games. Dry run: returns the payload, posts nothing.",
+    "args": {
+      "pick_ids": [
+        2109187,
+        2109205,
+        1769753,
+        2109285,
+        1769812
+      ],
+      "reason": "Voided: these picks were under the minimum expected-value bar that took effect 9/19. They are void and do not count in the record. The original posts are left as they were.",
+      "dry_run": true
+    }
+  },
+  {
+    "key": "discord-void-ncaaf-ev-floor-2026-10-26",
+    "job_type": "publish_discord_void",
+    "requested_by": "matt",
+    "note": "matt 2026-10-26: 'Void - if we voided in discord, let's clear it'. Five posted NCAAF ncaaf_over_under BETs voided 2026-09-19 under the global EV floor (mike) whose Discord posts never got a void notice, so v_discord_published still holds them and the app still shows them. Only games not yet played (11/7-12/12); matt: not worried about past games. Real post, held until after the dry run has been read.",
+    "run_after": "2026-10-26T03:00:00+00:00",
+    "args": {
+      "pick_ids": [
+        2109187,
+        2109205,
+        1769753,
+        2109285,
+        1769812
+      ],
+      "reason": "Voided: these picks were under the minimum expected-value bar that took effect 9/19. They are void and do not count in the record. The original posts are left as they were.",
+      "dry_run": false
+    }
   }
 ]
