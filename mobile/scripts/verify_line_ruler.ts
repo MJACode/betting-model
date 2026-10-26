@@ -578,6 +578,12 @@ for (const def of STAT_CATALOG) {
       screen.includes('pointerEvents="box-none"'),
   );
   check(
+    'the bottom wing does not pull the next row up, and a drag on the wing does not open the field',
+    !screen.includes('marginBottom: -rulerChrome.overhang') &&
+      screen.includes('THRESHOLD_TAP_MAX_DIST * THRESHOLD_TAP_MAX_DIST') &&
+      screen.includes('onResponderRelease={onWingRelease}'),
+  );
+  check(
     'Filters is a word again, and Teams or an empty board mounts the book line',
     screen.includes('styles.filterBtnText}>Filters</Text>') &&
       screen.includes('showHeaderBookLine') &&

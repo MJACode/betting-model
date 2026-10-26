@@ -55,14 +55,13 @@ export function SportsbookIndicator({
         // the row made "tap Stats lines" fail on the only entry to the picker
         // outside Settings (UX review).
         accessibilityLabel={`${label}. Your sportsbooks — tap to change.`}
-        // The row is caption-height, and with the Picks board's line removed it
-        // is the only entry to the picker outside Settings — a missed tap has
-        // nowhere else to go (UX review).
-        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+        // minHeight is the target. Vertical slop reached the sport pill and
+        // Clear all (UX review, 2026-10-26).
+        hitSlop={{ top: 0, bottom: 0, left: 8, right: 8 }}
         style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
       >
         <Ionicons name="wallet-outline" size={13} color={colors.textTertiary} />
-        <Text style={styles.text} numberOfLines={1}>
+        <Text style={styles.text} numberOfLines={2}>
           {label}
         </Text>
         <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} />
@@ -87,6 +86,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     marginLeft: -6, // visually align the icon with the header text above
     borderRadius: radii.pill,
+    // The old 12pt slop reached the sport pill and Clear all. The row is
+    // the target now.
+    minHeight: 44,
   },
   text: {
     flexShrink: 1,

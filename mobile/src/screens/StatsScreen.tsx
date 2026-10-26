@@ -2636,7 +2636,7 @@ export function StatsScreen() {
             <Pressable
               onPress={() => setFiltersOpen(true)}
               accessibilityRole="button"
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              hitSlop={{ top: 0, bottom: 0, left: 4, right: 4 }}
               // The badge is a bare number in a View, so VoiceOver read
               // "Filters, 2" with no trait and no idea what the 2 counted.
               // The word is drawn again (Matt, 2026-10-25): icon-only was
@@ -2664,7 +2664,7 @@ export function StatsScreen() {
           <View style={styles.clearRow}>
             <Pressable
               onPress={resetFilters}
-              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              hitSlop={{ top: 0, bottom: 0, left: 6, right: 6 }}
               accessibilityRole="button"
               accessibilityLabel="Clear all filters"
               style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
@@ -2739,17 +2739,7 @@ export function StatsScreen() {
           enabled={lineScroll}
           maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
         >
-          <View
-            pointerEvents="box-none"
-            style={[
-              styles.lineStack,
-              rulerChrome.overhang > 0 && {
-                zIndex: 1,
-                paddingBottom: rulerChrome.overhang,
-                marginBottom: -rulerChrome.overhang,
-              },
-            ]}
-          >
+          <View pointerEvents="box-none" style={styles.lineStack}>
           {/* Compact B: the direction is a label, the book's number sits on
               the same line, and the ruler underneath is the short tick row.
               The label still opens At Least / Over / Under. */}
@@ -2805,8 +2795,11 @@ export function StatsScreen() {
               styles.lineRulerPad,
               {
                 height: rulerChrome.visual + rulerChrome.overhang * 2,
+                // The top wing overlaps the caption. "At least" sits on the
+                // left of that line, clear of the marker. The bottom wing
+                // stays inside this pad: a negative margin here pulled the
+                // window chip under the marker into the wing (UX review).
                 marginTop: -rulerChrome.overhang,
-                marginBottom: -rulerChrome.overhang,
                 zIndex: 1,
               },
             ]}
@@ -3802,6 +3795,7 @@ function LineRuler({
   // on the next frame, or sooner when the next touch begins.
   const suppressTick = useRef(false);
   const suppressRelease = useRef<number | null>(null);
+  const wingOrigin = useRef<{ x: number; y: number } | null>(null);
   const releaseTickGuard = () => {
     if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
     suppressRelease.current = requestAnimationFrame(() => {
@@ -3825,6 +3819,21 @@ function LineRuler({
     onNotice?.(null);
     setForceSelect(true);
     setDraft(faceOf(value));
+  };
+  const onWingGrant = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+    wingOrigin.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+  };
+  // A flick that starts in the 8pt wing must not open the field. The strip's
+  // tap handler already gives up past this distance; the wing was calling
+  // openDraft on every release.
+  const onWingRelease = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+    const origin = wingOrigin.current;
+    wingOrigin.current = null;
+    if (origin == null) return;
+    const dx = e.nativeEvent.pageX - origin.x;
+    const dy = e.nativeEvent.pageY - origin.y;
+    if (dx * dx + dy * dy > THRESHOLD_TAP_MAX_DIST * THRESHOLD_TAP_MAX_DIST) return;
+    openDraft();
   };
   const closeDraft = () => {
     editingRef.current = false;
@@ -4024,7 +4033,8 @@ function LineRuler({
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                   onStartShouldSetResponder={() => true}
-                  onResponderRelease={() => openDraft()}
+                  onResponderGrant={onWingGrant}
+                  onResponderRelease={onWingRelease}
                   style={{ width: markerW, height: overhang }}
                 />
               </View>
@@ -4039,7 +4049,8 @@ function LineRuler({
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                   onStartShouldSetResponder={() => true}
-                  onResponderRelease={() => openDraft()}
+                  onResponderGrant={onWingGrant}
+                  onResponderRelease={onWingRelease}
                   style={{ width: markerW, height: overhang }}
                 />
               </View>
@@ -5289,8 +5300,9 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
   clearBtn: {
+    minHeight: 44,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    justifyContent: 'center',
   },
   clearText: {
     fontSize: font.size.caption,
@@ -5356,9 +5368,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    // padding + the 16pt icon is 24, and 8pt of slop on each side is 40.
-    // The slop sits outside the header's box, so the tap that counts is the
-    // control itself. 44pt is the bar (Designer, 2026-10-26).
+    // padding + the 16pt icon is 24. Vertical slop on top of that crossed
+    // Clear all. The control itself is the 44pt target (Designer, 2026-10-26).
     minHeight: 44,
   },
   filterBtnText: {
