@@ -412,6 +412,54 @@ def test_an_orientation_change_on_a_stored_event_is_not_written(conn):
                   "WHERE espn_event_id = 401921801") == [(96, 2363)]
 
 
+def _final(e, scores):
+    """Mark an event final with {espn team id: score}."""
+    e["competitions"][0]["status"].update(
+        {"period": 2, "type": {"name": "STATUS_FINAL", "state": "post", "completed": True}})
+    for c in e["competitions"][0]["competitors"]:
+        c["score"] = str(scores[int(c["team"]["id"])])
+
+
+def test_a_flipped_final_is_taken_in_the_stored_orientation(conn):
+    """ESPN swaps home and away on a stored game, then it goes final: the
+    schedule stays as stored, and the score lands by TEAM on the stored row,
+    so the game is not left unscored (and due) for good."""
+    espn = Espn({"20261103": BOARD_1103})
+    ing.ingest_day(conn, "2026-11-03", get_json=espn)          # Kentucky home
+
+    def flip_and_finish(e):
+        for c in e["competitions"][0]["competitors"]:
+            c["homeAway"] = "away" if c["homeAway"] == "home" else "home"
+        _final(e, {96: 85, 2363: 62})
+    espn.boards["20261103"] = _board_with(BOARD_1103, 401921801, flip_and_finish)
+    t = ing.ingest_day(conn, "2026-11-03", get_json=espn)
+    assert t["teams_changed"] == 1 and t["scores_filled"] == 1
+    g = _game(conn, MAN_UK)
+    assert (g["home_team"], g["home_score"], g["away_score"], g["home_win"]) == \
+        ("Kentucky", 85, 62, 1)
+    assert conn.q("SELECT home_espn_id, away_espn_id, status FROM ncaab_events "
+                  "WHERE espn_event_id = 401921801") == [(96, 2363, "STATUS_SCHEDULED")]
+    # and a later, different flipped final is a conflict, not an overwrite
+    espn.boards["20261103"] = _board_with(BOARD_1103, 401921801, lambda e: (
+        flip_and_finish(e), _final(e, {96: 90, 2363: 62})))
+    t = ing.ingest_day(conn, "2026-11-03", get_json=espn)
+    assert t["score_conflicts"] == 1 and _game(conn, MAN_UK)["home_score"] == 85
+
+
+def test_a_final_for_a_different_pair_of_teams_is_not_written(conn):
+    espn = Espn({"20261103": BOARD_1103})
+    ing.ingest_day(conn, "2026-11-03", get_json=espn)
+
+    def swap_opponent(e):
+        away = next(c for c in e["competitions"][0]["competitors"] if c["homeAway"] == "away")
+        away["team"] = dict(away["team"], id="279", location="Pacific", name="Tigers")
+        _final(e, {96: 85, 279: 62})
+    espn.boards["20261103"] = _board_with(BOARD_1103, 401921801, swap_opponent)
+    t = ing.ingest_day(conn, "2026-11-03", get_json=espn)
+    assert t["teams_changed"] == 1 and t["scores_filled"] == 0
+    assert _game(conn, MAN_UK)["home_score"] is None
+
+
 def test_one_bad_event_does_not_lose_the_rest_of_the_day(conn, monkeypatch):
     real = ing._one_event
 
@@ -559,6 +607,8 @@ def test_the_daily_run_ingests_ncaab_before_it_settles():
     sched = daily.index('results["ncaab_schedule"] = step_ncaab_schedule(run_date)')
     res = daily.index('results["ncaab_results"] = step_ncaab_results(run_date)')
     assert sched < res < daily.index('results["settle"] = step_settle(yesterday)')
+    # the morning odds fetch resolves onto the games the schedule step wrote
+    assert sched < daily.index('results["odds"] = step_odds(')
 
 
 def test_the_refresh_pass_runs_ncaab_results_in_the_results_group():

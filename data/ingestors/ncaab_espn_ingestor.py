@@ -54,7 +54,11 @@ WHAT IT REFUSES, each counted and logged rather than guessed:
     for a game that will not be played on that date; if ESPN reschedules it
     under the same event id it is written then);
   * an event whose teams or orientation changed since it was stored: the
-    stored spreads are in the old orientation, so a human looks first;
+    stored spreads are in the old orientation, so its schedule is not
+    rewritten and a human looks first. When ESPN only swapped home and away
+    (the same two teams), its final is still written, mapped by team onto the
+    stored orientation, so the game cannot sit unscored with its picks
+    unsettled;
   * a new event whose game_id another ESPN event already owns (same date,
     same pair): one games row per game, never NCAAF's twins.
 
@@ -596,19 +600,58 @@ def _write_venues(conn, venues: dict[int, dict]) -> int:
     return len(rows)
 
 
+def _score_action(game_id: str, g: dict | None, hs: int, as_: int,
+                  totals: dict) -> str | None:
+    """'fill' when the stored row has no score yet; None when it already holds
+    this one; a different stored score is a conflict, logged and counted and
+    never written (CLAUDE.md section 1c)."""
+    if g is None or g["home_score"] is None or g["away_score"] is None:
+        return "fill"
+    if (int(g["home_score"]), int(g["away_score"])) == (hs, as_):
+        return None
+    totals["score_conflicts"] += 1
+    logger.warning(f"NCAAB ESPN: {game_id} stored {int(g['home_score'])}-"
+                   f"{int(g['away_score'])} (home-away), ESPN says {hs}-{as_}; "
+                   f"NOT overwritten")
+    return None
+
+
+def _fill_score(conn, game_id: str, g: dict | None, hs: int, as_: int, ot: int,
+                totals: dict) -> None:
+    """The final alone onto a stored games row (the flipped-orientation case):
+    no schedule field and no ncaab_events field is touched."""
+    if g is None or _score_action(game_id, g, hs, as_, totals) != "fill":
+        return
+    n = call_in_savepoint(conn, "ncaab_espn_score", lambda: conn.execute(
+        _SCORE_FILL, (hs, as_, 1 if hs > as_ else 0, ot, ot, game_id)).rowcount or 0)
+    if n:
+        totals["scores_filled"] += 1
+        g["home_score"], g["away_score"] = hs, as_
+
+
 def _one_event(conn, p: dict, reg: dict, known: dict, game_id: str,
                stored: dict, owners: dict, totals: dict) -> None:
     eid = p["espn_event_id"]
     home, away = reg[p["home"]["espn_id"]], reg[p["away"]["espn_id"]]
     prior = known.get(eid)
     if prior is not None:
-        if (prior["home_espn_id"], prior["away_espn_id"]) != \
-                (p["home"]["espn_id"], p["away"]["espn_id"]):
+        was = (prior["home_espn_id"], prior["away_espn_id"])
+        now = (p["home"]["espn_id"], p["away"]["espn_id"])
+        if was != now:
             totals["teams_changed"] += 1
+            flipped = was == now[::-1]
             logger.warning(f"NCAAB ESPN: event {eid} ({game_id}) was stored as "
-                           f"{prior['away_espn_id']} @ {prior['home_espn_id']}, ESPN now "
-                           f"says {p['away']['espn_id']} @ {p['home']['espn_id']}; NOT "
-                           f"written (stored odds are in the old orientation)")
+                           f"{was[1]} @ {was[0]}, ESPN now says {now[1]} @ {now[0]}; "
+                           f"schedule NOT rewritten (stored odds are in the old orientation)"
+                           + ("; its final is taken in the stored orientation"
+                              if flipped and p["final"] else ""))
+            # Home and away swapped, same two teams: the final still belongs on
+            # the stored row, mapped by team (stored home = ESPN's away now).
+            # Skipping it too would leave the game unscored and its picks
+            # unsettled for good. A different pair of teams is left to a human.
+            if flipped and p["final"]:
+                _fill_score(conn, game_id, stored.get(game_id), p["away_score"],
+                            p["home_score"], p["went_to_ot"], totals)
             return
     else:
         if p["off"]:
@@ -635,14 +678,9 @@ def _one_event(conn, p: dict, reg: dict, known: dict, game_id: str,
                  p["conference_game"], venue_id, p["season_type"], p["status"], p["notes"])
 
     fill = None
-    if p["final"]:
-        if g is None or g["home_score"] is None or g["away_score"] is None:
-            fill = p
-        elif (int(g["home_score"]), int(g["away_score"])) != (p["home_score"], p["away_score"]):
-            totals["score_conflicts"] += 1
-            logger.warning(f"NCAAB ESPN: {game_id} stored {int(g['home_score'])}-"
-                           f"{int(g['away_score'])} (home-away), ESPN says "
-                           f"{p['home_score']}-{p['away_score']}; NOT overwritten")
+    if p["final"] and _score_action(game_id, g, p["home_score"], p["away_score"],
+                                    totals) == "fill":
+        fill = p
 
     game_same = g is not None and tuple(g["row"]) == game_row
     event_same = prior is not None and prior["row"] == event_row
