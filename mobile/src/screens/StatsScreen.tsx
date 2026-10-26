@@ -28,6 +28,7 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { HitModeSheet } from '@/components/HitModeSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
@@ -199,6 +200,8 @@ import {
   pointInBubble,
   previewTypedLine,
   compactRulerHeight,
+  markerBoxInGesture,
+  markerHitOverhang,
   programmaticPick,
   rulerChromeHeight,
   rulerHi,
@@ -2144,6 +2147,32 @@ export function StatsScreen() {
   const nhlLogEmpty =
     sport === 'NHL' && effectiveMode === 'totals' && rows.length === 0 && lineOnlyList.length > 0;
   const nhlLinesOnly = sport === 'NHL' && lineOnlyList.length > 0 && effectiveMode === 'totals';
+  // The odds column header opens the sportsbook sheet where it is on screen.
+  // Teams, a settled empty Players board, and a board with no odds column
+  // have no such header — the book line is the visible control there.
+  // While the player list or the book list is still loading, the odds header
+  // is about to appear, so the line stays off and the header does not jump.
+  const playersBoardSettling =
+    loading ||
+    (timeWindow === 'h2h' && slateChecking) ||
+    (touchView === 'loading' && !error);
+  const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
+  const showHeaderBookLine =
+    (boardMode === 'teams' && supportsTeamBoard(sport)) ||
+    !stat ||
+    (!oddsHeaderSlot && !playersBoardSettling);
+  // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
+  // stack grow by the overhang and pull the same amount back with a negative
+  // margin. The typing field reports overhang 0 and the pad matches it.
+  const [rulerChrome, setRulerChrome] = useState(() => {
+    const visual = compactRulerHeight(windowFontScale);
+    return { visual, overhang: markerHitOverhang(visual) };
+  });
+  const onRulerChrome = useCallback((visual: number, overhang: number) => {
+    setRulerChrome((prev) =>
+      prev.visual === visual && prev.overhang === overhang ? prev : { visual, overhang },
+    );
+  }, []);
   const lineOnlySection =
     lineOnlyList.length > 0 ? (
       <View>
@@ -2503,6 +2532,7 @@ export function StatsScreen() {
             </View>
             <SettingsButton />
           </View>
+          {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
         <TeamsBoard
@@ -2540,6 +2570,7 @@ export function StatsScreen() {
             </View>
             <SettingsButton />
           </View>
+          {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
         <EmptyState
@@ -2602,31 +2633,16 @@ export function StatsScreen() {
             <StatsSportButton />
           </View>
           <View style={styles.rightActions}>
-            {/* "Clear all" lives beside the control it undoes rather than on a
-                row of its own at the bottom of the stack — MasterClass puts
-                FILTERS and CLEAR FILTERS on one line, and with the duplicate
-                slate pill suppressed below there was nothing else left on that
-                row to justify its 34pt (UX review, 2026-09-12). */}
-            {activeFilterCount > 0 ? (
-              <Pressable
-                onPress={resetFilters}
-                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear all filters"
-                style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.clearText}>Clear all</Text>
-              </Pressable>
-            ) : null}
             <Pressable
               onPress={() => setFiltersOpen(true)}
               accessibilityRole="button"
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              hitSlop={{ top: 0, bottom: 0, left: 4, right: 4 }}
               // The badge is a bare number in a View, so VoiceOver read
               // "Filters, 2" with no trait and no idea what the 2 counted.
-              // The spoken name still says Filters. The word is not drawn:
-              // Stats plus the sport pill need the width on a 390pt phone
-              // (UX review, Compact B).
+              // The word is drawn again (Matt, 2026-10-25): icon-only was
+              // how the sport pill fit, and it was not obvious. "Clear all"
+              // sits on the next line so this row — Stats, NFL ▾, Filters,
+              // gear — stays inside a 390pt phone.
               accessibilityLabel={
                 activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
               }
@@ -2634,6 +2650,7 @@ export function StatsScreen() {
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color={colors.tint} />
+              <Text style={styles.filterBtnText}>Filters</Text>
               {activeFilterCount > 0 ? (
                 <View style={styles.filterBadge} importantForAccessibility="no">
                   <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
@@ -2643,6 +2660,20 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
+        {activeFilterCount > 0 ? (
+          <View style={styles.clearRow}>
+            <Pressable
+              onPress={resetFilters}
+              hitSlop={{ top: 0, bottom: 0, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all filters"
+              style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.clearText}>Clear all</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
       </View>
 
       <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
@@ -2708,7 +2739,7 @@ export function StatsScreen() {
           enabled={lineScroll}
           maxHeight={Math.max(160, Math.round(windowHeight * 0.45))}
         >
-          <View style={styles.lineStack}>
+          <View pointerEvents="box-none" style={styles.lineStack}>
           {/* Compact B: the direction is a label, the book's number sits on
               the same line, and the ruler underneath is the short tick row.
               The label still opens At Least / Over / Under. */}
@@ -2758,7 +2789,21 @@ export function StatsScreen() {
               </Text>
             ) : null}
           </View>
-          <View style={styles.lineRulerPad}>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.lineRulerPad,
+              {
+                height: rulerChrome.visual + rulerChrome.overhang * 2,
+                // The top wing overlaps the caption. "At least" sits on the
+                // left of that line, clear of the marker. The bottom wing
+                // stays inside this pad: a negative margin here pulled the
+                // window chip under the marker into the wing (UX review).
+                marginTop: -rulerChrome.overhang,
+                zIndex: 1,
+              },
+            ]}
+          >
             {/* Every mode resolves a stop to the SAME half-point line — only
                 the face differs — so a mode change renames the bet without
                 moving it (lib/hitMode.ts). The stops are not quite the same
@@ -2793,6 +2838,7 @@ export function StatsScreen() {
               // the stops VoiceOver can step — LineRuler's `hi`, not
               // `scale.max`. Junk still parses as nothing.
               parseTyped={(text) => parseTypedLine(text, hitMode)}
+              onChrome={onRulerChrome}
             />
           </View>
           {Platform.OS !== 'ios' && lineEditBar ? (
@@ -2819,9 +2865,11 @@ export function StatsScreen() {
           RN ScrollViews default to flexGrow/flexShrink 1, so a direct child of
           the screen column gets crushed to a sliver whenever the controls +
           list overflow the screen (labels clip out entirely). The WRAPPER is
-          that child now and carries the pin; the scroller inside it flexes on
-          the horizontal axis, which cannot crush anything. The FlatList below
-          stays the one flexible region. */}
+          that child now and carries the pin. The scroller is flex: 1 with
+          basis 0 (styles.rowScroller) so it takes the width the labels leave
+          and the chips scroll; a content-sized basis measured "Hit Rates" and
+          "Averages" down to their padding at 390×1. The FlatList below stays
+          the one flexible region. */}
       {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
@@ -3586,6 +3634,7 @@ function LineRuler({
   statLabel = '',
   onNotice,
   onEditBar,
+  onChrome,
   parseTyped,
 }: {
   a11yLabel: string;
@@ -3596,6 +3645,8 @@ function LineRuler({
   /** Android and web draw Cancel and Done under the whole row. iOS ignores
    *  this and uses the keyboard accessory. Null when the field is closed. */
   onEditBar?: (bar: { cancel: () => void; commit: () => void } | null) => void;
+  /** Resting strip height and how far the 44pt marker target hangs past it. */
+  onChrome?: (visualH: number, overhang: number) => void;
   /** Reads a typed line into a stop, or null to refuse it. UNCLAMPED — the
    *  commit decides min / max. When given, the centre bubble is the field
    *  (Matt, 2026-10-09: "need to allow user to edit manually"). A typed
@@ -3737,12 +3788,14 @@ function LineRuler({
   const commitTaken = useRef(false);
   const openedValue = useRef(value);
   const bubbleBox = useRef<BubbleBox | null>(null);
+  const rawBubble = useRef<BubbleBox | null>(null);
   // A tap that started on the bubble also lands on the tick underneath.
   // That tick must not move the line. The tick's onPress can arrive after
   // the tap handler's END, so the guard stays up through this turn and drops
   // on the next frame, or sooner when the next touch begins.
   const suppressTick = useRef(false);
   const suppressRelease = useRef<number | null>(null);
+  const wingOrigin = useRef<{ x: number; y: number } | null>(null);
   const releaseTickGuard = () => {
     if (suppressRelease.current != null) cancelAnimationFrame(suppressRelease.current);
     suppressRelease.current = requestAnimationFrame(() => {
@@ -3759,13 +3812,30 @@ function LineRuler({
     scrollRef.current?.scrollTo({ x: offsetFor(v), animated: false });
   };
   const openDraft = () => {
-    if (!parseTyped || draft != null) return;
+    // The wing responder and the strip's tap handler can both see one
+    // press. The second call is a no-op.
+    if (!parseTyped || draft != null || editingRef.current) return;
     commitTaken.current = false;
     editingRef.current = true;
     openedValue.current = value;
     onNotice?.(null);
     setForceSelect(true);
     setDraft(faceOf(value));
+  };
+  const onWingGrant = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+    wingOrigin.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+  };
+  // A flick that starts in the 8pt wing must not open the field. The strip's
+  // tap handler already gives up past this distance; the wing was calling
+  // openDraft on every release.
+  const onWingRelease = (e: { nativeEvent: { pageX: number; pageY: number } }) => {
+    const origin = wingOrigin.current;
+    wingOrigin.current = null;
+    if (origin == null) return;
+    const dx = e.nativeEvent.pageX - origin.x;
+    const dy = e.nativeEvent.pageY - origin.y;
+    if (dx * dx + dy * dy > THRESHOLD_TAP_MAX_DIST * THRESHOLD_TAP_MAX_DIST) return;
+    openDraft();
   };
   const closeDraft = () => {
     editingRef.current = false;
@@ -3814,10 +3884,15 @@ function LineRuler({
   const fieldOpen = draft != null;
   // Resting row is the short tick strip. Opening the field grows it so the
   // 44pt typing bubble is not clipped.
-  const chromeH = fieldOpen ? rulerChromeHeight(fontScale) : compactRulerHeight(fontScale);
+  const visualH = fieldOpen ? rulerChromeHeight(fontScale) : compactRulerHeight(fontScale);
+  // The press handler used to be this strip (~28pt). pointInBubble already
+  // grew a 22pt pill to 44pt on paper, and the touches never arrived: the
+  // gesture view was the strip. The wings below are that missing band, only
+  // as wide as the pill, so a neighbouring tick still receives its own tap.
+  const overhang = fieldOpen ? 0 : markerHitOverhang(visualH);
+  const hitH = visualH + overhang * 2;
   // The resting marker draws with the text, and stops at 1.3× so a 2×
-  // setting does not turn the short strip back into the old bubble. The
-  // finger target is pointInBubble, which grows a short box to 44pt.
+  // setting does not turn the short strip back into the old bubble.
   const markScale = Math.min(Math.max(fontScale, 1), 1.3);
   const markH = Math.round(22 * markScale);
   useEffect(() => {
@@ -3846,7 +3921,10 @@ function LineRuler({
   };
   const onBubbleLayout = (e: { nativeEvent: { layout: BubbleBox } }) => {
     const box = e.nativeEvent.layout;
-    bubbleBox.current = box;
+    rawBubble.current = box;
+    // Layout is inside the visual strip. The gesture view starts `overhang`
+    // above that strip; the wings live in that band.
+    bubbleBox.current = markerBoxInGesture(box, overhang);
     setBubbleFrame((prev) =>
       prev &&
       prev.x === box.x &&
@@ -3857,6 +3935,13 @@ function LineRuler({
         : box,
     );
   };
+  useEffect(() => {
+    const raw = rawBubble.current;
+    if (raw) bubbleBox.current = markerBoxInGesture(raw, overhang);
+  }, [overhang]);
+  useEffect(() => {
+    onChrome?.(visualH, overhang);
+  }, [visualH, overhang, onChrome]);
   const onBubbleTap = (e: { nativeEvent: { state: number; x: number; y: number } }) => {
     const box = bubbleBox.current;
     const { state, x, y } = e.nativeEvent;
@@ -3903,7 +3988,8 @@ function LineRuler({
           onHandlerStateChange={onBubbleTap}
         >
           <View
-            style={[styles.rulerWrap, { height: chromeH, minHeight: chromeH }]}
+            pointerEvents="box-none"
+            style={[styles.rulerWrap, { height: hitH, minHeight: hitH }]}
             collapsable={false}
             onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
             // Not while typing, so VoiceOver can reach the field.
@@ -3938,10 +4024,56 @@ function LineRuler({
               if (next >= min && next <= hi) pickTick(next);
             }}
           >
+            {overhang > 0 && bubbleFrame != null ? (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: bubbleFrame.x,
+                  width: bubbleFrame.width,
+                  height: overhang,
+                }}
+              >
+                <View
+                  collapsable={false}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  onStartShouldSetResponder={() => true}
+                  onResponderGrant={onWingGrant}
+                  onResponderRelease={onWingRelease}
+                  style={{ width: bubbleFrame.width, height: overhang }}
+                />
+              </View>
+            ) : null}
+            {overhang > 0 && bubbleFrame != null ? (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: bubbleFrame.x,
+                  width: bubbleFrame.width,
+                  height: overhang,
+                }}
+              >
+                <View
+                  collapsable={false}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  onStartShouldSetResponder={() => true}
+                  onResponderGrant={onWingGrant}
+                  onResponderRelease={onWingRelease}
+                  style={{ width: bubbleFrame.width, height: overhang }}
+                />
+              </View>
+            ) : null}
+            <View pointerEvents="box-none" style={{ height: visualH, marginTop: overhang }}>
             {width > 0 ? (
               <GestureScrollView
                 ref={scrollRef}
                 simultaneousHandlers={tapRef}
+                style={{ height: visualH }}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={tickW}
@@ -4039,6 +4171,7 @@ function LineRuler({
                 </View>
               )}
             </View>
+            </View>
           </View>
         </TapGestureHandler>
         {parseTyped && draft == null ? (
@@ -4058,7 +4191,7 @@ function LineRuler({
               bubbleFrame
                 ? {
                     left: bubbleFrame.x,
-                    top: bubbleFrame.y,
+                    top: bubbleFrame.y + overhang,
                     width: Math.max(bubbleFrame.width, THRESHOLD_BUBBLE_W),
                     height: Math.max(bubbleFrame.height, THRESHOLD_BUBBLE_H),
                   }
@@ -5180,8 +5313,9 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
   clearBtn: {
+    minHeight: 44,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    justifyContent: 'center',
   },
   clearText: {
     fontSize: font.size.caption,
@@ -5221,6 +5355,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 1,
+    minWidth: 0,
     gap: spacing.sm,
   },
   rightActions: {
@@ -5231,6 +5366,7 @@ const styles = StyleSheet.create({
   },
   title: {
     flexShrink: 1,
+    minWidth: 0,
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
@@ -5245,6 +5381,21 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
+    // padding + the 16pt icon is 24. Vertical slop on top of that crossed
+    // Clear all. The control itself is the 44pt target (Designer, 2026-10-26).
+    minHeight: 44,
+  },
+  filterBtnText: {
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+  // Under the title row, not in it. The word Filters plus NFL ▾ plus the
+  // gear already fill a 390pt phone once a badge is on; Clear all on that
+  // same line clips Stats.
+  clearRow: {
+    alignItems: 'flex-end',
+    marginTop: 2,
   },
   filterBadge: {
     minWidth: 18,
@@ -5532,11 +5683,18 @@ const styles = StyleSheet.create({
   },
 
   // Shared by the two rows that pair a pinned control with a scroller.
+  // flex: 1 (basis 0), not flexGrow alone. A horizontal ScrollView's basis
+  // is otherwise its content, which is wider than the phone, and the Hit
+  // Rates | Averages labels beside it were measured into the leftover —
+  // about 16pt, the tab padding, at 390×1. minWidth 0 lets the chips scroll
+  // inside the space the labels leave.
   rowScroller: {
-    flexGrow: 1,
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
   },
   modeSeg: {
+    flexGrow: 0,
+    flexShrink: 0,
     paddingRight: spacing.lg,
     paddingLeft: spacing.sm,
   },

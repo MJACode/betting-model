@@ -129,7 +129,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/ParlayDkHandoff.tsx', 'addBtn,pressed', 1], // 43.5pt
   ['src/components/ParlayDkHandoff.tsx', 'openBtn,pressed', 1], // 43.0pt
   ['src/components/PlayerNewsSheet.tsx', 'readMore', 1], // 41.5pt
-  ['src/components/SportsbookIndicator.tsx', 'row', 1], // 42.3pt
   ['src/components/TeamsBoard.tsx', '', 1], // 34.0pt
   ['src/components/TeamsBoard.tsx', 'lineWrap,pressed', 1], // 38.3pt
   ['src/components/TeamsBoard.tsx', 'noLinesRow,pressed', 1], // 42.7pt
@@ -180,8 +179,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
   ['src/screens/SignInScreen.tsx', '', 3], // 17.8, 39.5, 39.5pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
-  ['src/screens/StatsScreen.tsx', 'clearBtn,pressed', 1], // 42.3pt
-  ['src/screens/StatsScreen.tsx', 'filterBtn,pressed', 1], // 40.0pt
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt

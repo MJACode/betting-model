@@ -311,12 +311,35 @@ export function previewTypedLine(
   return Math.min(ceil, Math.max(floor, parsed));
 }
 
+/** Finger target for the compact marker. The strip itself stays short. */
+export const MARKER_HIT_H = 44;
+
+/**
+ * How far a 44pt marker target hangs past the short strip, each side.
+ * Zero once the strip is already at least 44pt (the typing field).
+ */
+export function markerHitOverhang(visualH: number, hitH = MARKER_HIT_H): number {
+  if (!Number.isFinite(visualH) || visualH <= 0) return 0;
+  const target = Number.isFinite(hitH) && hitH > 0 ? hitH : MARKER_HIT_H;
+  return Math.max(0, (target - visualH) / 2);
+}
+
+/**
+ * Marker layout measured inside the visual strip, shifted into the gesture
+ * view. The strip sits `overhang` below that view's top; the wings occupy
+ * the overhang and are only as wide as the pill.
+ */
+export function markerBoxInGesture(box: BubbleBox, overhang: number): BubbleBox {
+  const shift = Number.isFinite(overhang) ? overhang : 0;
+  return { x: box.x, y: box.y + shift, width: box.width, height: box.height };
+}
+
 export function pointInBubble(x: number, y: number, box: BubbleBox): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  // The compact marker draws at 22pt. The finger target is at least 44pt
-  // tall, grown equally above and below the drawn pill. Width stays the
-  // pill's, so a tap on a neighbouring tick still moves the line.
-  const height = Math.max(box.height, 44);
+  // The compact marker draws at 22pt inside a 28pt strip. The finger target
+  // is at least 44pt tall, grown equally above and below the drawn pill.
+  // Width stays the pill's, so a tap on a neighbouring tick still moves the line.
+  const height = Math.max(box.height, MARKER_HIT_H);
   const top = box.y - (height - box.height) / 2;
   return x >= box.x && x <= box.x + box.width && y >= top && y <= top + height;
 }
