@@ -629,6 +629,10 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
     totals: dict = defaultdict(int)
     failed: list[tuple] = []
     unlisted: list[str] = []
+    answered: set[str] = set()             # games whose purchase got an answer
+    # End the planning reads' transaction before the first paid call, so no
+    # read lock is held across the HTTP waits of a long run.
+    conn.commit()
 
     def listed(d: str):
         """[(event, game, flipped)] for D's pending games, or None on no answer."""
@@ -689,6 +693,7 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
             totals["empty"] += 1
         totals["events"] += 1
         totals["flipped"] += int(flipped)
+        answered.add(g["game_id"])
         return True
 
     def run_date(d: str) -> bool:
@@ -743,7 +748,10 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
                     break
                 if not buy_one(ev, g, flipped):
                     totals["still_failed"] += 1
-    totals["left_unbought"] = len(pending)   # never listed, or past a stop
+    # Still owed, for the report: never listed or past a stop, plus listed games
+    # whose purchase never got an answer (a stop skips the retry pass).
+    totals["left_unbought"] = len(pending) + len(
+        {g["game_id"] for _, g, _ in failed} - answered)
     print(f"derivatives {mode}", resolver.report())
     return dict(totals)
 

@@ -630,6 +630,24 @@ def test_the_second_pass_does_not_list_a_date_under_the_floor(monkeypatch):
     assert "floor" in out["stopped"] and out["left_unbought"] == 1
 
 
+def test_a_listed_game_whose_purchase_never_answered_is_reported_as_owed(monkeypatch):
+    """A floor stop skips the retry of a game whose purchase got no answer; the
+    run's report still counts it as owed, so the r2 job's scope is visible."""
+    inserted, answer = _deriv_world(monkeypatch)
+
+    def e1_fails_then_low(url, params):
+        if "/events/e1/" in url:
+            return Resp(status=503, body={}, last="0", remaining="600000")
+        r = answer(url, params)
+        r.headers["x-requests-remaining"] = "600000" if url.endswith("/events") else "500030"
+        return r
+    meter = FakeMeter(e1_fails_then_low, floor=500_000)
+    meter.remaining = 600_000
+    out = h.buy_derivatives(FakeConn(), meter, 2026, 2026, "close")
+    assert out["events"] == 1 and "floor" in out["stopped"]
+    assert out["left_unbought"] == 1                   # Kentucky-Duke, never answered
+
+
 # ── the probe ────────────────────────────────────────────────────────────────
 
 def test_the_probe_makes_one_measured_call_of_each_kind_and_writes_nothing(monkeypatch, capsys):
