@@ -46,8 +46,10 @@ against the ~210 MB/day that keeping everything would cost.
 The close is bounded on the game's start as of 2026-10-26 (mike approved:
 "2) yes"). Until then it was the last row TYPED pre-game, and the evening
 refresh writes `open` rows after the start: the bulk /odds endpoint returns
-events already under way and run_odds_ingestor does not relabel them. So the
-kept close was routinely a price from after kickoff. Measured 2026-10-26 on
+events already under way, and run_odds_ingestor does not relabel them (only
+the historical range backfill calls odds_ingestor._mark_in_play;
+relabel_in_play is a repair job run on demand). So the kept close was
+routinely a price from after kickoff. Measured 2026-10-26 on
 the 44 NCAAF games of 2026-10-24 that hold Pinnacle and FanDuel rows (game
 dates inside the window, so already thinned to opener, close and newest):
 Pinnacle still had a price from the last hour before kickoff on 4 of 44 games
