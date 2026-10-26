@@ -47,8 +47,9 @@ The close is bounded on the game's start as of 2026-10-26 (mike approved:
 "2) yes"). Until then it was the last row TYPED pre-game, and the evening
 refresh writes `open` rows after the start: the bulk /odds endpoint returns
 events already under way, and run_odds_ingestor does not relabel them (only
-the historical range backfill calls odds_ingestor._mark_in_play;
-relabel_in_play is a repair job run on demand). So the kept close was
+the historical purchases call odds_ingestor._mark_in_play:
+run_historical_odds_range and nba_odds_history; relabel_in_play is a repair
+job run on demand). So the kept close was
 routinely a price from after kickoff. Measured 2026-10-26 on
 the 44 NCAAF games of 2026-10-24 that hold Pinnacle and FanDuel rows (game
 dates inside the window, so already thinned to opener, close and newest):
@@ -58,6 +59,16 @@ and every FanDuel game kept a pre-game-typed row stamped after the start. Now
 the close is the last pre-game row at or before data.first_pitch's cutoff
 (the trusted first pitch, else the scheduled start); a game with no start
 time keeps the old rule. The opener and Tier 2's newest row are not bounded.
+
+The latest-line tables (latest_odds, latest_prop_odds) have no DELETE
+trigger, on the ground that this job always keeps a key's newest pre-game row
+(data/migrations/latest_line_state_tables.sql). Since this change it does not
+when that row is after the start. The state row keeps its prices, the same
+post-start price it showed before, and its id names a deleted row. Checked
+2026-10-26: no view or module joins those ids back to the log, and the ladders
+had already broken the same claim (NFL_2026_06_ARI_LA
+player_pass_yds_alternate: williamhill_us holds 38 state rows, and only 2 of
+their source rows survive the prune).
 
 NBA and NCAAB keep their whole price path (NBA 2026-10-17, NCAAB 2026-10-26):
 the two tiers skip every `PATH_KEPT_SPORTS` row, and `thin_repeats` deletes
