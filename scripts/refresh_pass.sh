@@ -253,6 +253,8 @@ step push-notifications
 #                    has a final and no nhl_api_score row (20 dates on
 #                    2026-10-21; none once those are stored). No-ops out of season
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
+#   ncaab-results    no ESPN call unless a started NCAAB game in the last 14
+#                    days is unscored; then one scoreboard call per such date
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
 par game-log-today
@@ -260,6 +262,7 @@ par nfl-results
 par nhl-results
 par ufc-results-poll
 par nba-results
+par ncaab-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
