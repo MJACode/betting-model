@@ -549,6 +549,11 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
                 stats["sample"].append(row)
     stats["written"] = 0 if dry_run else _upsert(conn, out)
     stats["roster_seen"] = 0 if dry_run else _stamp_roster_seen(conn, sport, seen)
+    if not dry_run and not seen:
+        # Three mornings of this and every not-yet-played player drops off the
+        # NBA Stats boards (they trust a roster row seen in the last 3 days).
+        logger.warning(f"player positions {sport}: no athlete listed on any roster "
+                       f"this pass — roster stamps not refreshed")
     stats["unmatched_cached"] = 0 if dry_run else _remember_unmatched(conn, sport, unmatched_ids)
     stats["espn_calls"] = budget["espn_calls"]
     stats["athlete_http"] = budget["athlete_http"]

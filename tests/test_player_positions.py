@@ -498,3 +498,18 @@ def test_stamp_is_skipped_until_the_column_exists():
     conn = _StampConn(has_column=False)
     assert ppi._stamp_roster_seen(conn, "NBA", {"10": "PHI"}) == 0
     assert not any("UPDATE" in q for q, _ in conn.sql)
+
+
+def test_an_empty_roster_pass_warns(monkeypatch):
+    """No listed athletes means no stamps; three such mornings empty the NBA
+    boards' roster fallback, so it must not be silent."""
+    from data.ingestors import player_positions_ingestor as ppi
+
+    _espn_stub(monkeypatch, [])
+    monkeypatch.setattr(ppi, "_fresh_source_ids", lambda conn, sport: set())
+    monkeypatch.setattr(ppi, "_cached_unmatched_ids", lambda conn, sport: set())
+    monkeypatch.setattr(ppi, "_remember_unmatched", lambda conn, sport, ids: 0)
+    warned: list[str] = []
+    monkeypatch.setattr(ppi.logger, "warning", lambda msg, *a, **k: warned.append(msg))
+    ppi._basketball(object(), "NBA", dry_run=False)
+    assert any("roster stamps not refreshed" in m for m in warned), warned
