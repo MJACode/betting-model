@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { discordErrorMessage } from '@/lib/discord';
-import { DISCORD_URL, openLink } from '@/lib/socialLinks';
+import { discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
+import { openLink } from '@/lib/socialLinks';
 import { useAccess } from '@/hooks/useAccess';
+import { useMembership } from '@/hooks/useMembership';
+import { isEntitled } from '@/lib/billingHelpers';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -36,6 +38,9 @@ export function DiscordLinkModal({
   onClose: () => void;
 }) {
   const { access, link, busy } = useAccess();
+  const { subscription } = useMembership();
+  const applePaid = Boolean(subscription && isEntitled(subscription) && subscription.status === 'active');
+  const invite = discordInviteIfPaid(applePaid);
   const [working, setWorking] = useState(false);
 
   const onConnect = useCallback(async () => {
@@ -87,24 +92,24 @@ export function DiscordLinkModal({
 
           <View style={styles.iconRow}>
             <View style={[styles.iconTile, styles.discordTile]}>
-              <Ionicons name="logo-discord" size={34} color="#FFFFFF" />
+              <Ionicons name="logo-discord" size={34} color={colors.textInverse} />
             </View>
             <Ionicons name="add" size={22} color={colors.tint} />
             <View style={[styles.iconTile, styles.appTile]}>
-              <Ionicons name="trophy" size={30} color="#FFFFFF" />
+              <Ionicons name="trophy" size={30} color={colors.textInverse} />
             </View>
           </View>
 
-          {alreadyLinked ? (
+          {alreadyLinked && invite ? (
             <Pressable
               accessibilityLabel="Open the Discord"
-              onPress={() => openLink(DISCORD_URL, 'Discord')}
+              onPress={() => openLink(invite, 'Discord')}
               accessibilityRole="button"
               style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
             >
               <Text style={styles.ctaText}>Open the Discord</Text>
             </Pressable>
-          ) : (
+          ) : alreadyLinked ? null : (
             <Pressable
               accessibilityLabel="Join the Discord"
               accessibilityState={{ busy: pending, disabled: pending }}
@@ -125,19 +130,9 @@ export function DiscordLinkModal({
             </Pressable>
           )}
 
-          {/* Fallback for a user who would rather not authorize, or for a
-              guild-join that failed. The invite still works; they just won't
-              get the subscriber role until they connect. */}
-          {!alreadyLinked ? (
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel="Use an invite link instead"
-              onPress={() => openLink(DISCORD_URL, 'Discord')}
-              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-            >
-              <Text style={styles.altLink}>Use an invite link instead</Text>
-            </Pressable>
-          ) : null}
+          {/* No invite fallback. The URL is Apple-paid only, and this sheet
+              is the account link — it must not hand the invite to a trial
+              or a free member. */}
         </View>
       </View>
     </Modal>
@@ -186,7 +181,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   discordTile: { backgroundColor: '#5865F2' },
-  appTile: { backgroundColor: '#000000' },
+  appTile: { backgroundColor: colors.textPrimary },
   cta: {
     alignSelf: 'stretch',
     height: 50,

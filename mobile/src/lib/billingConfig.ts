@@ -114,7 +114,7 @@ export const PLANS: readonly Plan[] = [
     price: 24.99,
     months: 1,
     blurb: 'Cancel anytime.',
-    badge: 'Most popular',
+    // No badge. Annual is the only one marked (Best value), Matt 2026-10-27.
     trialDays: 7,
   },
   {
@@ -134,6 +134,9 @@ export const PLANS: readonly Plan[] = [
  * offered, which is what the marketing line is about.
  */
 export const TRIAL_DAYS = 7;
+
+/** Plan selected when the paywall opens. Annual, Matt 2026-10-27. */
+export const DEFAULT_PLAN_KEY: PlanKey = 'annual';
 
 /** Where Stripe Checkout sends the browser back to. */
 export const BILLING_RETURN_URL = 'signalbase://billing-return';

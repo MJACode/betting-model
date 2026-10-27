@@ -121,7 +121,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/CalendarGrid.tsx', 'monthBtn', 2], // 42.0, 42.0pt
   ['src/components/DailyResultsModal.tsx', 'dateChip', 1], // 43.5pt
   ['src/components/DailyResultsModal.tsx', 'sportChip,sportChipActive', 1], // 41.5pt
-  ['src/components/DiscordLinkModal.tsx', '', 1], // 39.5pt
   ['src/components/ManualBetModal.tsx', 'cancelBtn', 1], // 41.8pt
   ['src/components/NotificationsCard.tsx', '', 1], // 38.3pt
   ['src/components/OnboardingModal.tsx', '', 1], // 41.8pt
@@ -159,7 +158,7 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/ParlayScreen.tsx', 'buildBtn,manualBtn,pressed', 1], // 43.0pt
   ['src/screens/ParlayScreen.tsx', 'clearBtn,pressed', 1], // 43.0pt
   ['src/screens/ParlayScreen.tsx', 'missingNote,pressed', 1], // 39.5pt
-  ['src/screens/PaywallScreen.tsx', '', 6], // 17.8, 38.3, 38.3, 38.3, 39.5, 39.5pt
+  ['src/screens/PaywallScreen.tsx', '', 5], // 38.3, 38.3, 38.3, 39.5, 39.5pt — close is 44pt
   ['src/screens/PerformanceScreen.tsx', '', 3], // 39.5, 41.8, 41.8pt
   ['src/screens/PerformanceScreen.tsx', 'addManualBtn', 1], // 42.0pt
   ['src/screens/PerformanceScreen.tsx', 'reconnect,btnPressed', 1], // 40.0pt
@@ -177,7 +176,7 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SettingsScreen.tsx', 'helplineRow', 1], // 39.5pt
   ['src/screens/SettingsScreen.tsx', 'pressed', 1], // 38.3pt
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
-  ['src/screens/SignInScreen.tsx', '', 3], // 17.8, 39.5, 39.5pt
+  ['src/screens/SignInScreen.tsx', '', 2], // 17.8, 39.5pt — legal links are 44pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
   ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt

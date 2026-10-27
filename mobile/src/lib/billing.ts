@@ -101,6 +101,19 @@ export async function startCheckout(
 }
 
 /**
+ * End the free trial now and start the paid plan.
+ *
+ * This is the store purchase for the plan they are already trialing, not the
+ * paywall. A customer in that plan's introductory trial is not eligible for
+ * another one, so the StoreKit / Play sheet bills the plan price and the
+ * trial ends. The RevenueCat webhook writes status `active` when period_type
+ * is not TRIAL. Discord stays locked until that row is active.
+ */
+export async function endTrialEarly(plan: PlanKey, userId: string): Promise<CheckoutResult> {
+  return startCheckout(plan, userId);
+}
+
+/**
  * Open subscription management: the OS subscription screen for IAP (the only
  * place an IAP subscription can be cancelled), the Stripe portal otherwise.
  */

@@ -12,12 +12,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  defaultPlan,
   describeSubscription,
   formatPerMonth,
+  formatPerWeek,
   formatPrice,
   isEntitled,
   isPlanKey,
   monthlyPlan,
+  paywallCta,
+  paywallSubtitle,
+  planPriceCaption,
+  planStatusCopy,
   perMonth,
   renewalDisclosure,
   savingsPct,
@@ -27,11 +33,13 @@ import {
 import {
   BILLING_ENABLED,
   BILLING_RAIL,
+  DEFAULT_PLAN_KEY,
   PLANS,
   TRIAL_DAYS,
   billingReady,
   planFor,
 } from '../src/lib/billingConfig';
+import { contentLocked, membershipTier } from '../src/lib/membership';
 import {
   REVENUECAT_ENTITLEMENT_ID,
   customerInfoEntitled,
@@ -122,8 +130,10 @@ check(
   renewalDisclosure(planFor('monthly')).startsWith('7-day free trial'),
 );
 check(
-  'weekly disclosure claims no trial',
-  !renewalDisclosure(planFor('weekly')).toLowerCase().includes('trial'),
+  'weekly disclosure does not offer a trial',
+  !/\d+-day free trial/i.test(renewalDisclosure(planFor('weekly'))) &&
+    /no free trial/i.test(renewalDisclosure(planFor('weekly'))) &&
+    /charged today/i.test(renewalDisclosure(planFor('weekly'))),
 );
 check(
   'weekly disclosure names the weekly term',
@@ -141,6 +151,82 @@ check(
   'every disclosure says how to cancel',
   PLANS.every((p) => renewalDisclosure(p).includes('Cancel anytime')),
 );
+
+// --- paywall copy (Matt, 2026-10-27) ----------------------------------------
+eq('default plan is annual', DEFAULT_PLAN_KEY, 'annual');
+eq('defaultPlan() is annual', defaultPlan().key, 'annual');
+eq('annual is the only badge', planFor('annual').badge, 'Best value');
+check('monthly has no badge', planFor('monthly').badge == null);
+check('weekly has no badge', planFor('weekly').badge == null);
+eq('weekly button is Subscribe', paywallCta(planFor('weekly')), 'Subscribe');
+eq('monthly button offers the trial', paywallCta(planFor('monthly')), 'Start 7-day free trial');
+eq('annual button offers the trial', paywallCta(planFor('annual')), 'Start 7-day free trial');
+check(
+  'weekly subtitle does not promise a 7-day trial',
+  !paywallSubtitle(planFor('weekly')).includes('7-day free trial') &&
+    paywallSubtitle(planFor('weekly')).includes('Charged today'),
+);
+check(
+  'monthly subtitle names the trial plans',
+  paywallSubtitle(planFor('monthly')).includes('7-day free trial on Monthly and Annual'),
+);
+eq('annual per week is $2.88', formatPerWeek(planFor('annual')), '$2.88/wk');
+eq('annual caption keeps the per-week equivalent', planPriceCaption(planFor('annual')), 'per year · $2.88/wk');
+check('weekly has no per-week equivalent', formatPerWeek(planFor('weekly')) == null);
+eq(
+  'trial status names the end date',
+  planStatusCopy(sub({ status: 'trialing', trial_end: '2026-11-03T00:00:00Z' }), {}, NOW),
+  { badge: 'Trial', line: 'Free trial ends Nov 3' },
+);
+eq(
+  'paid status names the renew date',
+  planStatusCopy(sub({ plan: 'annual', current_period_end: '2027-10-27T00:00:00Z' }), {}, NOW),
+  { badge: 'Premium', line: 'Annual · renews Oct 27, 2027' },
+);
+eq('no subscription is Free', planStatusCopy(null, {}, NOW), { badge: 'Free', line: 'Free plan' });
+
+const tierSub = (over: Partial<SubscriptionRow> = {}) => sub(over);
+eq('billing off is open', membershipTier({ billingOn: false, entitled: false, subscription: null, discordPaid: false }), 'open');
+eq('no row is free', membershipTier({ billingOn: true, entitled: false, subscription: null, discordPaid: false, now: NOW }), 'free');
+eq(
+  'trialing is trial',
+  membershipTier({ billingOn: true, entitled: true, subscription: tierSub({ status: 'trialing', trial_end: '2026-11-03T00:00:00Z' }), discordPaid: false, now: NOW }),
+  'trial',
+);
+eq(
+  'active is paid',
+  membershipTier({ billingOn: true, entitled: true, subscription: tierSub(), discordPaid: false, now: NOW }),
+  'paid',
+);
+eq(
+  'discord paid is paid even without an app row',
+  membershipTier({ billingOn: true, entitled: true, subscription: null, discordPaid: true, now: NOW }),
+  'paid',
+);
+eq(
+  'receipt before the row is not paid',
+  membershipTier({ billingOn: true, entitled: true, subscription: null, discordPaid: false, now: NOW }),
+  'trial',
+);
+check('only free locks the app', contentLocked('free') && !contentLocked('trial') && !contentLocked('paid') && !contentLocked('open'));
+
+const paywallSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'PaywallScreen.tsx'), 'utf8');
+const settingsSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SettingsScreen.tsx'), 'utf8');
+check('paywall has no Whop checkout button', !paywallSrc.includes('WHOP_CHECKOUT_URL') && !paywallSrc.includes('Get access on Discord') && !paywallSrc.includes('whop.com'));
+check('settings has no Whop checkout button', !settingsSrc.includes('WHOP_CHECKOUT_URL') && !settingsSrc.includes('Get access on Discord') && !settingsSrc.includes('whop.com'));
+const discordConfigSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'discordConfig.ts'), 'utf8');
+check('client config has no Whop checkout URL', !discordConfigSrc.includes('WHOP_CHECKOUT_URL') && !discordConfigSrc.includes('whop.com') && !discordConfigSrc.includes('EXPO_PUBLIC_WHOP'));
+check('trial discord button is Unlock Discord early', settingsSrc.includes('Unlock Discord early') && !settingsSrc.includes('See plan details'));
+check('unlock discord early calls the store, not the paywall', settingsSrc.includes('endTrialEarly') && settingsSrc.includes('onUnlockDiscord'));
+check(
+  'whop soft copy is connect-only',
+  settingsSrc.includes('Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.') &&
+    !settingsSrc.includes('whop.com'),
+);
+check('paywall selects DEFAULT_PLAN_KEY', paywallSrc.includes('DEFAULT_PLAN_KEY'));
+const signInSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SignInScreen.tsx'), 'utf8');
+check('sign-in does not say it is optional', !signInSrc.includes('Signing in is optional') && !signInSrc.includes('Not now'));
+check('sign-in links Terms and Privacy', signInSrc.includes('TERMS_URL') && signInSrc.includes('PRIVACY_URL'));
 
 // --- entitlement ------------------------------------------------------------
 check('active entitles', isEntitled(sub(), NOW));

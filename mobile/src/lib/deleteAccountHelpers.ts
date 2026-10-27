@@ -158,12 +158,14 @@ export function subscriptionNotice(
   if (place === 'none') {
     return { show: false, kicker: '', body: '', showManage: false };
   }
-  const storeHow =
-    platform === 'android'
-      ? 'Cancel it in the Play Store, where you bought it.'
-      : 'Cancel it in iPhone Settings → your name → Subscriptions.';
+  const apple = platform !== 'android';
+  const storeHow = apple
+    ? 'Cancel it first in Manage subscription (iPhone Settings → your name → Subscriptions), or Apple will keep billing you.'
+    : 'Cancel it in the Play Store, where you bought it.';
   const whopHow = 'Cancel it on Whop, where you bought it.';
-  const lead = "Deleting your account doesn't cancel your subscription.";
+  const lead = apple
+    ? "Deleting your account doesn't cancel your Apple subscription."
+    : "Deleting your account doesn't cancel your subscription.";
   if (place === 'whop') {
     return {
       show: true,

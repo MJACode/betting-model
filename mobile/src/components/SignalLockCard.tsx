@@ -2,82 +2,79 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { TRIAL_DAYS } from '@/lib/billingConfig';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * Shown in place of the signal list when the user isn't subscribed.
+ * Soft lock for a free member. Same card on Picks, Signals, Live, Lines,
+ * and the other non-Record tabs. Record is not locked.
  *
- * It reports HOW MANY signals are waiting rather than hiding that anything
- * exists. That's the honest framing and the one that converts: a "0 signals
- * today" day is a real outcome in this product, so a lock screen claiming
- * value on a day with nothing behind it would be a lie the user discovers
- * immediately after paying.
+ * The copy is the picks board's. Other tabs reuse it rather than inventing
+ * a second offer. Unlock opens the paywall.
  */
 export function SignalLockCard({
-  count,
   onPress,
+  title = "Today's picks are for Premium",
+  body = 'See every BET signal, stake and live in-play pick. Start with 7 days free.',
+  onRecord,
 }: {
-  count: number;
   onPress: () => void;
+  title?: string;
+  body?: string;
+  /** Picks only — the board's "Record stays free" row. */
+  onRecord?: () => void;
 }) {
-  const none = count === 0;
-
   return (
     <View style={styles.wrap}>
       <View style={styles.card}>
         <View style={styles.iconWrap}>
-          <Ionicons
-            name={none ? 'moon-outline' : 'lock-closed'}
-            size={26}
-            color={colors.tint}
-          />
+          <Ionicons name="lock-closed" size={22} color={colors.brand} />
         </View>
-
-        <Text style={styles.title}>
-          {none
-            ? 'No signals right now'
-            : `${count} signal${count === 1 ? '' : 's'} waiting`}
-        </Text>
-
-        <Text style={styles.body}>
-          {none
-            ? "The models haven't found a bet that clears the line yet today. Zero-signal days are normal — subscribe and you'll see them the moment they fire."
-            : 'Subscribe to see which side the model likes, the price it wants, and the unit stake that goes with it.'}
-        </Text>
-
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.body}>{body}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Start ${TRIAL_DAYS}-day free trial`}
+          accessibilityLabel="Unlock with Premium"
           onPress={onPress}
           style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
         >
-          <Text style={styles.ctaText}>Start {TRIAL_DAYS}-day free trial</Text>
+          <Text style={styles.ctaText}>Unlock with Premium</Text>
         </Pressable>
-
-        <Text style={styles.footnote}>
-          The full track record, model pages and stats stay free — check the
-          record before you pay for anything.
-        </Text>
       </View>
+
+      {onRecord ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Record stays free. See how every model did."
+          onPress={onRecord}
+          style={({ pressed }) => [styles.record, pressed && styles.pressed]}
+        >
+          <View style={styles.recordText}>
+            <Text style={styles.recordTitle}>Record stays free</Text>
+            <Text style={styles.recordBody}>
+              See how every model did — all sports, all time.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { padding: spacing.lg },
+  wrap: { padding: spacing.lg, gap: spacing.md },
   card: {
-    backgroundColor: colors.bgCard,
+    backgroundColor: colors.brandNavy,
     borderRadius: radii.lg,
     padding: spacing.xl,
     alignItems: 'center',
     gap: spacing.md,
   },
   iconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.noneSoft,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.brandNavyRaised,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -85,35 +82,51 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textPrimary,
+    color: colors.textInverse,
     textAlign: 'center',
   },
   body: {
     fontFamily: font.family,
     fontSize: font.size.body,
-    color: colors.textSecondary,
+    color: colors.brandMuted,
     textAlign: 'center',
     lineHeight: 21,
   },
   cta: {
-    height: 48,
+    minHeight: 48,
     alignSelf: 'stretch',
     borderRadius: radii.md,
-    backgroundColor: colors.tint,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
   ctaText: {
     fontFamily: font.family,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
+    color: colors.brandInk,
+  },
+  record: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 64,
+  },
+  recordText: { flex: 1, gap: 2 },
+  recordTitle: {
+    fontFamily: font.family,
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  recordBody: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
   pressed: { opacity: 0.6 },
-  footnote: {
-    fontFamily: font.family,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    textAlign: 'center',
-  },
 });

@@ -17,7 +17,7 @@
  * is correct, they are still paying.
  *
  * While `DISCORD_LINK_ENABLED` is false:
- *   - Settings shows the plain "Join our Discord" invite row exactly as today.
+ *   - Settings does not open the invite. The invite is Apple-paid only.
  *   - No Connect button renders, and no edge function is ever called.
  *   - `useDiscordLink()` reports status 'disabled' and never touches the network.
  *
@@ -53,14 +53,3 @@ export const DISCORD_REDIRECT_URL = 'signalbase://discord-callback';
 
 /** The edge function that owns the OAuth exchange and the role sync. */
 export const DISCORD_LINK_FUNCTION = 'discord-link';
-
-/**
- * Where a Discord-side membership is actually sold. Shown to a signed-in user
- * with no access as the alternative to the App Store — some people would
- * rather buy where the community is.
- *
- * PLACEHOLDER until the Whop product is live; the "Get access on Discord" row
- * is hidden while this is empty rather than linking somewhere broken.
- */
-export const WHOP_CHECKOUT_URL: string =
-  process.env.EXPO_PUBLIC_WHOP_CHECKOUT_URL ?? '';

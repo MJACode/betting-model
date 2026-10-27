@@ -8,7 +8,7 @@
  * react-native transitively (Supabase → AsyncStorage), which esbuild can't
  * transform. Same split as authHelpers / billingHelpers.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -18,6 +18,7 @@ import {
   assertDiscordLinkEnabled,
   describeDiscordLink,
   discordErrorMessage,
+  discordInviteIfPaid,
   parseAccess,
   parseDiscordCallback,
   type AccessRow,
@@ -197,6 +198,31 @@ check(
   'an unknown error passes through rather than being swallowed',
   discordErrorMessage(new Error('kaboom')) === 'kaboom',
 );
+
+// --- invite is paid-only ----------------------------------------------------
+eq('unpaid invite is withheld', discordInviteIfPaid(false, 'https://discord.gg/example'), null);
+eq('blank invite is withheld', discordInviteIfPaid(true, '  '), null);
+eq('paid invite is returned', discordInviteIfPaid(true, ' https://discord.gg/example '), 'https://discord.gg/example');
+eq('unpaid default invite is withheld', discordInviteIfPaid(false), null);
+eq('paid default invite is the apple link', discordInviteIfPaid(true), 'https://discord.gg/JWMUzK9Da');
+function walkSrc(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (name === 'node_modules') continue;
+    try {
+      if (readdirSync(p)) walkSrc(p, out);
+    } catch {
+      if (name.endsWith('.ts') || name.endsWith('.tsx')) out.push(p);
+    }
+  }
+  return out;
+}
+const inviteLeaks = walkSrc(join(__dirname, '..', 'src')).filter((p) => {
+  if (p.endsWith('discordHelpers.ts')) return false;
+  const text = readFileSync(p, 'utf8');
+  return text.includes('discord.gg') || text.includes('DISCORD_URL');
+});
+check('invite url is only in discordHelpers', inviteLeaks.length === 0, inviteLeaks.join('; '));
 
 // --- source-level guards ----------------------------------------------------
 const libSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'discord.ts'), 'utf8');

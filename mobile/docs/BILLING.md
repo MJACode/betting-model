@@ -16,7 +16,18 @@ is nothing to migrate. Display prices locked 2026-10-27 (Matt).
 |---|---|---|---|---|
 | Weekly | $9.99 | $43.29 | — | none |
 | Monthly | $24.99 | $24.99 | — | 7 days |
-| Annual | $149.99 | $12.50 | 50% | 7 days |
+| Annual | $149.99 | $12.50 ($2.88/wk) | 50% | 7 days |
+
+Annual is the default selection and the only plan with a badge (Best value).
+Monthly has no badge. The paywall subtitle follows the selected plan, so Weekly
+does not say "7-day free trial". Weekly's button is Subscribe; Monthly and
+Annual say Start 7-day free trial. Neither the paywall nor Settings shows a Whop checkout button. Discord unlock is the Apple plan.
+
+When billing is on, a free member keeps Record and the other tabs soft-lock
+behind Unlock with Premium. A trial unlocks the app and not Discord. Discord's
+invite is shown only after a paid entitlement. The paywall opens right after
+the first sign-in, and again from Unlock or a locked tab. Closing it returns
+to that free shell.
 
 **Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
 free week that renews into another free week for anyone willing to cancel and
@@ -259,7 +270,7 @@ not returns — keep it that way.
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (88 assertions) | `scripts/verify_billing.ts` |
+| Verification (115 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,
