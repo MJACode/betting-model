@@ -270,7 +270,7 @@ not returns — keep it that way.
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (115 assertions) | `scripts/verify_billing.ts` |
+| Verification (122 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, merged origin/master price lock 42881cb7. Community order matches boards 04/05. #1060 my_access SQL not taken. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, login required, paywall after first sign-in, free shell is Record only, Discord invite paid-only. Flags stay off. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, billing display prices locked (Matt): weekly $9.99 no trial, monthly $24.99 and annual $149.99 with 7-day trials. Suggested premium.* product ids documented only. Billing stays off. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |

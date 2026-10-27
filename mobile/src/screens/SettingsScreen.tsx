@@ -694,43 +694,6 @@ export function SettingsScreen() {
                       : 'Unlocks when your paid plan starts. End the trial to join now. No invite is shown until then.'
                     : 'Included with a paid plan. No invite is shown until then.'}
             </Text>
-            {storePaid ? (
-              <Pressable
-                onPress={() => {
-                  const invite = discordInviteIfPaid(true);
-                  if (invite) void openLink(invite, 'Discord');
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Join Discord"
-                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.manageText}>Join Discord</Text>
-              </Pressable>
-            ) : planStatus.badge === 'Trial' ? (
-              <Pressable
-                onPress={onUnlockDiscord}
-                disabled={endingTrial}
-                accessibilityRole="button"
-                accessibilityLabel="Unlock Discord early"
-                accessibilityState={{ busy: endingTrial, disabled: endingTrial }}
-                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
-              >
-                {endingTrial ? (
-                  <ActivityIndicator color={colors.textInverse} />
-                ) : (
-                  <Text style={styles.manageText}>Unlock Discord early</Text>
-                )}
-              </Pressable>
-            ) : planStatus.badge === 'Free' ? (
-              <Pressable
-                onPress={() => navigation.navigate('Paywall')}
-                accessibilityRole="button"
-                accessibilityLabel="Upgrade to Premium"
-                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.manageText}>Upgrade to Premium</Text>
-              </Pressable>
-            ) : null}
             {access.discord_linked ? (
               <>
                 <Text style={styles.sub}>{`Connected as ${linkedName}.`}</Text>
@@ -778,6 +741,43 @@ export function SettingsScreen() {
                   <Text style={styles.restoreText}>Connect Discord</Text>
                 </Pressable>
               </>
+            ) : null}
+            {storePaid ? (
+              <Pressable
+                onPress={() => {
+                  const invite = discordInviteIfPaid(true);
+                  if (invite) void openLink(invite, 'Discord');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Join Discord"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Join Discord</Text>
+              </Pressable>
+            ) : planStatus.badge === 'Trial' ? (
+              <Pressable
+                onPress={onUnlockDiscord}
+                disabled={endingTrial}
+                accessibilityRole="button"
+                accessibilityLabel="Unlock Discord early"
+                accessibilityState={{ busy: endingTrial, disabled: endingTrial }}
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                {endingTrial ? (
+                  <ActivityIndicator color={colors.textInverse} />
+                ) : (
+                  <Text style={styles.manageText}>Unlock Discord early</Text>
+                )}
+              </Pressable>
+            ) : planStatus.badge === 'Free' ? (
+              <Pressable
+                onPress={() => navigation.navigate('Paywall')}
+                accessibilityRole="button"
+                accessibilityLabel="Upgrade to Premium"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Upgrade to Premium</Text>
+              </Pressable>
             ) : null}
           </View>
           )
