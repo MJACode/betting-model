@@ -15,9 +15,9 @@
 //
 // Secrets (supabase secrets set):
 //   STRIPE_SECRET_KEY            sk_test_… / sk_live_…
-//   STRIPE_PRICE_MONTHLY         price_…  ($29.99 / month)
+//   STRIPE_PRICE_MONTHLY         price_…  ($24.99 / month)
 //   STRIPE_PRICE_SEMIANNUAL      price_…  ($129.99 / 6 months)
-//   STRIPE_PRICE_ANNUAL          price_…  ($199.99 / year)
+//   STRIPE_PRICE_ANNUAL          price_…  ($149.99 / year)
 //   STRIPE_TRIAL_DAYS            optional, defaults to 7
 //   BILLING_RETURN_URL           optional, defaults to the app scheme below
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected automatically.

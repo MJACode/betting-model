@@ -18,9 +18,9 @@ export interface MinimalPackage {
   /** RevenueCat package type: MONTHLY | SIX_MONTH | ANNUAL | CUSTOM | … */
   packageType: string;
   product: {
-    /** Store product id, e.g. com.mja.bettingpicks.sub.annual */
+    /** Store product id, e.g. com.mja.bettingpicks.premium.annual */
     identifier: string;
-    /** Localized display price from the store, e.g. "$199.99". */
+    /** Localized display price from the store, e.g. "$149.99". */
     priceString: string;
   };
 }

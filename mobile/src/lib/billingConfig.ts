@@ -88,14 +88,16 @@ export interface Plan {
 
 /**
  * The ladder — Weekly / Monthly / Annual, set 2026-08-30 to mirror the layout
- * Matt asked for.
+ * Matt asked for. Display prices locked 2026-10-27 (Matt): weekly $9.99 with
+ * no trial, monthly $24.99 and annual $149.99, each with a 7-day trial.
  *
  * These numbers are DISPLAY ONLY. The store (App Store Connect) is the source
  * of truth for what is actually charged, and the paywall prefers the store's
  * own localized price string whenever it can fetch one; these are the fallback
  * for the moment before that arrives. If you change a price in App Store
  * Connect, change it here too or the fallback quotes a number the user is not
- * charged.
+ * charged. Suggested product ids (not created here):
+ * com.mja.bettingpicks.premium.weekly / .monthly / .annual.
  */
 export const PLANS: readonly Plan[] = [
   {
@@ -109,7 +111,7 @@ export const PLANS: readonly Plan[] = [
   {
     key: 'monthly',
     name: 'Monthly',
-    price: 29.99,
+    price: 24.99,
     months: 1,
     blurb: 'Cancel anytime.',
     badge: 'Most popular',
@@ -118,7 +120,7 @@ export const PLANS: readonly Plan[] = [
   {
     key: 'annual',
     name: 'Annual',
-    price: 199.99,
+    price: 149.99,
     months: 12,
     blurb: 'Every sport, all year.',
     badge: 'Best value',

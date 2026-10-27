@@ -48,7 +48,7 @@ export function perMonth(plan: Plan): number {
 /**
  * Percent saved versus paying monthly, rounded to a whole number.
  *
- * Can be NEGATIVE, and deliberately is: the weekly plan costs about 44% MORE
+ * Can be NEGATIVE, and deliberately is: the weekly plan costs about 73% MORE
  * per month than the monthly one, and the honest number says so. The paywall
  * shows the badge only when this is positive, so a worse-value plan simply
  * carries no badge rather than a fabricated one.
@@ -60,12 +60,12 @@ export function savingsPct(plan: Plan, monthly: Plan): number {
   return Math.round(((full - plan.price) / full) * 100);
 }
 
-/** "$29.99" / "$199.99" — no trailing cents games, these are real prices. */
+/** "$24.99" / "$149.99" — no trailing cents games, these are real prices. */
 export function formatPrice(dollars: number): string {
   return `$${dollars.toFixed(2)}`;
 }
 
-/** "$16.67/mo" for the per-month line under a multi-month plan. */
+/** "$12.50/mo" for the per-month line under a multi-month plan. */
 export function formatPerMonth(plan: Plan): string {
   return `${formatPrice(perMonth(plan))}/mo`;
 }

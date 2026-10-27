@@ -82,8 +82,8 @@ eq("default rail is 'iap'", BILLING_RAIL, 'iap');
 // Weekly / Monthly / Annual (2026-08-30). These must match App Store Connect
 // exactly or the paywall's fallback quotes a number the user isn't charged.
 eq('weekly price', planFor('weekly').price, 9.99);
-eq('monthly price', planFor('monthly').price, 29.99);
-eq('annual price', planFor('annual').price, 199.99);
+eq('monthly price', planFor('monthly').price, 24.99);
+eq('annual price', planFor('annual').price, 149.99);
 eq('three plans offered', PLANS.length, 3);
 check('every plan key is recognised', PLANS.every((p) => isPlanKey(p.key)));
 check('unknown plan key rejected', !isPlanKey('semiannual'));
@@ -96,7 +96,7 @@ eq('annual carries the 7-day trial', planFor('annual').trialDays, 7);
 
 // --- per-month + savings math ----------------------------------------------
 const monthly = monthlyPlan();
-check('monthly per-month is the price itself', perMonth(monthly) === 29.99);
+check('monthly per-month is the price itself', perMonth(monthly) === 24.99);
 // 52 weeks / 12 months, not 4 weeks: a four-week "month" understates the
 // weekly plan's real cost by 8%, in the direction that flatters us.
 check(
@@ -104,16 +104,16 @@ check(
   Math.abs(perMonth(planFor('weekly')) - 43.29) < 0.01,
 );
 check(
-  'annual works out near $16.67/mo',
-  Math.abs(perMonth(planFor('annual')) - 16.666) < 0.01,
+  'annual works out near $12.50/mo',
+  Math.abs(perMonth(planFor('annual')) - 12.5) < 0.01,
 );
-eq('annual saves 44%', savingsPct(planFor('annual'), monthly), 44);
+eq('annual saves 50%', savingsPct(planFor('annual'), monthly), 50);
 eq('monthly saves nothing vs itself', savingsPct(monthly, monthly), 0);
 // Negative on purpose — weekly costs MORE per month than monthly, and the
 // paywall hides the badge rather than inventing a saving.
 check('weekly shows no saving', savingsPct(planFor('weekly'), monthly) < 0);
-eq('price formatting', formatPrice(199.99), '$199.99');
-eq('per-month formatting', formatPerMonth(planFor('annual')), '$16.67/mo');
+eq('price formatting', formatPrice(149.99), '$149.99');
+eq('per-month formatting', formatPerMonth(planFor('annual')), '$12.50/mo');
 
 // --- renewal disclosure -----------------------------------------------------
 // A plan with no trial must never claim one: untrue, and a 3.1.2 rejection.
@@ -128,6 +128,14 @@ check(
 check(
   'weekly disclosure names the weekly term',
   renewalDisclosure(planFor('weekly')).includes('$9.99 per week'),
+);
+check(
+  'monthly disclosure names the monthly price',
+  renewalDisclosure(planFor('monthly')).includes('$24.99 per month'),
+);
+check(
+  'annual disclosure names the annual price',
+  renewalDisclosure(planFor('annual')).includes('$149.99 per year'),
 );
 check(
   'every disclosure says how to cancel',
@@ -233,18 +241,33 @@ eq('unknown package type → null', planForPackageType('SIX_MONTH'), null);
 // The ordering trap: a longer marker that contains a shorter one has to win.
 eq(
   'a 52-week yearly id is annual, not weekly',
-  planForProductId('com.mja.bettingpicks.sub.52_week_year'),
+  planForProductId('com.mja.bettingpicks.premium.52_week_year'),
   'annual',
 );
 eq('weekly product id', planForProductId('sb_weekly_999'), 'weekly');
-eq('annual product id', planForProductId('sb_annual_19999'), 'annual');
-eq('monthly product id', planForProductId('sb_monthly_2999'), 'monthly');
+eq('annual product id', planForProductId('sb_annual_14999'), 'annual');
+eq('monthly product id', planForProductId('sb_monthly_2499'), 'monthly');
+eq(
+  'suggested weekly id',
+  planForProductId('com.mja.bettingpicks.premium.weekly'),
+  'weekly',
+);
+eq(
+  'suggested monthly id',
+  planForProductId('com.mja.bettingpicks.premium.monthly'),
+  'monthly',
+);
+eq(
+  'suggested annual id',
+  planForProductId('com.mja.bettingpicks.premium.annual'),
+  'annual',
+);
 eq('unrecognisable product id → null', planForProductId('sb_lifetime'), null);
 
 const pkgs: MinimalPackage[] = [
-  { packageType: 'ANNUAL', product: { identifier: 'sb_annual', priceString: '$199.99' } },
+  { packageType: 'ANNUAL', product: { identifier: 'sb_annual', priceString: '$149.99' } },
   { packageType: 'CUSTOM', product: { identifier: 'sb_weekly', priceString: '$9.99' } },
-  { packageType: 'MONTHLY', product: { identifier: 'sb_monthly', priceString: '$29.99' } },
+  { packageType: 'MONTHLY', product: { identifier: 'sb_monthly', priceString: '$24.99' } },
 ];
 eq(
   'packageForPlan matches by package type',
@@ -260,15 +283,15 @@ eq('packageForPlan misses honestly', packageForPlan([], 'annual'), null);
 
 eq(
   'localized store price wins',
-  displayPrice(planFor('annual'), '$199.99'),
-  '$199.99',
+  displayPrice(planFor('annual'), '$149.99'),
+  '$149.99',
 );
 eq(
   'config price is the fallback',
   displayPrice(planFor('annual'), null),
-  '$199.99',
+  '$149.99',
 );
-eq('blank localized price falls back', displayPrice(planFor('monthly'), ' '), '$29.99');
+eq('blank localized price falls back', displayPrice(planFor('monthly'), ' '), '$24.99');
 
 check(
   'active entitlement recognised',
