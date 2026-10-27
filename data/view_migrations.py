@@ -430,10 +430,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # until this lands the gate fails closed and no NHL model bets. One new
     # table, anon locked out. Does not rewrite the record views or picks.
     "add_nhl_goalie_designations_2026_10_20.sql",
-    # 2026-10-23 (Matt): NBA last-N Stats reads span into the previous season,
-    # so an L10 a week into the season is ten games, with the newest game's
-    # team. Same signatures; guards on its own property, so it fires once.
-    "nba_window_reads_span_seasons_2026_10_23.sql",
+    # 2026-10-26 (Matt): NBA last-N Stats reads span into the previous season
+    # (10-23), and a player with no game yet this season is listed under his
+    # ESPN roster team instead of being dropped. Replaces
+    # nba_window_reads_span_seasons_2026_10_23.sql, deleted so the two never
+    # rewrite each other on a pass. Same signatures; guards on its property.
+    "nba_window_reads_roster_team_2026_10_26.sql",
     # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
     # return when the function body already has the marker. Unapplied.
     # Does not touch picks or the record views. Win, loss, or push.

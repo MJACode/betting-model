@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats follow-up review. The marker wing no longer covers the window chip. Header taps no longer share a band. The book line can use two lines. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats Compact B follow-up. Marker tap is 44pt tall. Filters is a word and 44pt. Book line returns on Teams and an empty board. Hit Rates and Averages stay readable on the window row at 390. |
