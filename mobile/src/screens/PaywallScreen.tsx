@@ -42,13 +42,12 @@ import type { RootStackParamList } from '@/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type PaywallRoute = RouteProp<RootStackParamList, 'Paywall'>;
 
-/** What a subscription buys. The Discord line is paid-only, after the trial. */
+/** What a subscription buys. The Discord line depends on the selected plan. */
 const INCLUDED = [
   'Every BET signal, all 7 sports',
   'A recommended stake, in units, on every pick',
   'Live in-play signals as games move',
   'Player props, parlays and same-game builder',
-  'The subscriber Discord (paid plans, after the trial)',
 ];
 
 const PLAN_ORDER: Record<PlanKey, number> = { annual: 0, monthly: 1, weekly: 2 };
@@ -197,7 +196,12 @@ export function PaywallScreen() {
           <Text style={styles.title}>Unlock every signal</Text>
           <Text style={styles.subtitle}>{paywallSubtitle(plan)}</Text>
 
-          {INCLUDED.map((line) => (
+          {[
+            ...INCLUDED,
+            plan.trialDays > 0
+              ? 'The subscriber Discord (paid plans, after the trial)'
+              : 'The subscriber Discord, included with this plan',
+          ].map((line) => (
             <View key={line} style={styles.includedRow}>
               <Ionicons name="checkmark" size={16} color={colors.bet} />
               <Text style={styles.includedText}>{line}</Text>

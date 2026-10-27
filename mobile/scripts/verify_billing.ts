@@ -224,6 +224,9 @@ check(
     !settingsSrc.includes('whop.com'),
 );
 check('paywall selects DEFAULT_PLAN_KEY', paywallSrc.includes('DEFAULT_PLAN_KEY'));
+check('weekly discord line does not wait on a trial', paywallSrc.includes('included with this plan'));
+const lockSrc = readFileSync(join(__dirname, '..', 'src', 'components', 'SignalLockCard.tsx'), 'utf8');
+check('lock card does not promise 7 days free on every plan', !lockSrc.includes('Start with 7 days free') && lockSrc.includes('Monthly and Annual include 7 days free'));
 const signInSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SignInScreen.tsx'), 'utf8');
 check('sign-in does not say it is optional', !signInSrc.includes('Signing in is optional') && !signInSrc.includes('Not now'));
 check('sign-in links Terms and Privacy', signInSrc.includes('TERMS_URL') && signInSrc.includes('PRIVACY_URL'));

@@ -678,7 +678,7 @@ export function PicksHomeScreen() {
             <SettingsButton />
           </View>
         </View>
-        {signalsLocked ? null : (
+        {picksHold || signalsLocked ? null : (
         <>
         <Text style={styles.subtitle} accessibilityLabel={unknownCountSpeech(unitsSpeech(subtitle))}>{subtitle}</Text>
         {/* Neutral chips until today's board (and the live one) is known: built

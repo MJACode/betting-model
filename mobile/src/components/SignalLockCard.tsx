@@ -8,13 +8,13 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * Soft lock for a free member. Same card on Picks, Signals, Live, Lines,
  * and the other non-Record tabs. Record is not locked.
  *
- * The copy is the picks board's. Other tabs reuse it rather than inventing
- * a second offer. Unlock opens the paywall.
+ * The copy is shared. It does not promise a trial on Weekly, which has none.
+ * Unlock opens the paywall.
  */
 export function SignalLockCard({
   onPress,
   title = "Today's picks are for Premium",
-  body = 'See every BET signal, stake and live in-play pick. Start with 7 days free.',
+  body = 'See every BET signal, stake and live in-play pick. Monthly and Annual include 7 days free.',
   onRecord,
 }: {
   onPress: () => void;

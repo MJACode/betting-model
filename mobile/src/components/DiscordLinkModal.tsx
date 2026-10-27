@@ -18,17 +18,8 @@ import { isEntitled } from '@/lib/billingHelpers';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * "Your subscription includes access to the Discord" — the join sheet, modelled
- * on the reference Matt supplied.
- *
- * ONE TAP, not an invite link. Connecting authorizes `guilds.join`, so the
- * edge function puts the user in the server and grants the subscriber role in
- * the same round trip. The plain invite stays as the fallback for the cases
- * where that can't work: the bot being briefly unreachable, or a user who
- * declines the join scope.
- *
- * Rendered by the caller only when it is worth showing — this component does
- * not decide who sees it.
+ * Connect Discord. Free and trial are linking a Whop account, not joining.
+ * The invite opens only when the App Store subscription is active.
  */
 export function DiscordLinkModal({
   visible,
@@ -82,12 +73,16 @@ export function DiscordLinkModal({
           <Text style={styles.title}>
             {alreadyLinked
               ? 'You’re connected to the Signalbase Discord'
-              : 'Your subscription includes access to the Signalbase Discord'}
+              : 'Connect Discord'}
           </Text>
           <Text style={styles.body}>
             {alreadyLinked
-              ? 'Open Discord to jump into the subscriber channels.'
-              : 'Connect your Discord account to join the subscriber-only server and chat with other members.'}
+              ? applePaid
+                ? 'Open Discord to jump into the subscriber channels.'
+                : 'The invite unlocks when your Apple plan is paid. No invite is shown until then.'
+              : applePaid
+                ? 'Your subscription includes the subscriber Discord. Connect your account to join.'
+                : 'Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.'}
           </Text>
 
           <View style={styles.iconRow}>
@@ -111,7 +106,7 @@ export function DiscordLinkModal({
             </Pressable>
           ) : alreadyLinked ? null : (
             <Pressable
-              accessibilityLabel="Join the Discord"
+              accessibilityLabel="Connect Discord"
               accessibilityState={{ busy: pending, disabled: pending }}
               onPress={onConnect}
               disabled={pending}
@@ -125,7 +120,7 @@ export function DiscordLinkModal({
               {pending ? (
                 <ActivityIndicator color={colors.textInverse} />
               ) : (
-                <Text style={styles.ctaText}>Join the Discord</Text>
+                <Text style={styles.ctaText}>Connect Discord</Text>
               )}
             </Pressable>
           )}
