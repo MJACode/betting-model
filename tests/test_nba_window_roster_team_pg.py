@@ -9,6 +9,9 @@ player is the guard that passed while the board was wrong):
   brown    traded BOS -> PHI in the summer, has played for PHI   -> PHI (log)
   injured  traded MIA -> GSW, roster says GS, not yet played      -> GSW (roster, mapped)
   retired  last game 2025-26 for BOS, on no roster                -> not listed
+  waived   last game 2025-26 for DAL, roster row last seen 10 days
+           ago (stamp stopped when he left every roster)          -> not listed
+  unseen   last game 2025-26 for CHI, roster row never stamped    -> not listed
   steady   NYK both seasons, roster says NY                       -> NYK
 """
 from __future__ import annotations
@@ -31,7 +34,8 @@ CREATE TABLE nba_player_game_log (
     player_id text, player_name text, team text, game_id text, game_date text,
     season integer, minutes numeric, points integer, rebounds integer,
     assists integer, fg3_made integer, steals integer, blocks integer, turnovers integer);
-CREATE TABLE player_positions (sport text, player_id text, player_name text, team text);
+CREATE TABLE player_positions (sport text, player_id text, player_name text, team text,
+                               roster_seen_at timestamptz);
 """
 
 
@@ -45,11 +49,15 @@ ROWS = (
     + _games("brown", "Jaylen Brown", "PHI", 2027, ["2026-10-20", "2026-10-22"])
     + _games("injured", "Hurt Guy", "MIA", 2026, [f"2026-03-{d:02d}" for d in range(1, 11)])
     + _games("retired", "Old Guy", "BOS", 2026, [f"2026-02-{d:02d}" for d in range(1, 11)])
+    + _games("waived", "Cut Guy", "DAL", 2026, [f"2026-02-{d:02d}" for d in range(1, 11)])
+    + _games("unseen", "Null Guy", "CHI", 2026, [f"2026-02-{d:02d}" for d in range(1, 11)])
     + _games("steady", "Same Guy", "NYK", 2026, [f"2026-04-{d:02d}" for d in range(1, 11)])
     + _games("steady", "Same Guy", "NYK", 2027, ["2026-10-21"])
 )
-ROSTER = [("NBA", "brown", "Jaylen Brown", "PHI"), ("NBA", "injured", "Hurt Guy", "GS"),
-          ("NBA", "steady", "Same Guy", "NY")]
+NOW, STALE, NEVER = "now()", "now() - interval '10 days'", "NULL"
+ROSTER = [("brown", "Jaylen Brown", "PHI", NOW), ("injured", "Hurt Guy", "GS", NOW),
+          ("steady", "Same Guy", "NY", NOW), ("waived", "Cut Guy", "DAL", STALE),
+          ("unseen", "Null Guy", "CHI", NEVER)]
 
 
 @pytest.fixture(scope="module")
@@ -61,7 +69,9 @@ def cur():
         c.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
         c.execute(SCHEMA)
         c.executemany("INSERT INTO nba_player_game_log VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", ROWS)
-        c.executemany("INSERT INTO player_positions VALUES (%s,%s,%s,%s)", ROSTER)
+        for pid, name, team, seen in ROSTER:
+            c.execute(f"INSERT INTO player_positions VALUES ('NBA', %s, %s, %s, {seen})",
+                      (pid, name, team))
         c.execute(MIG.read_text(encoding="utf-8"))
         return conn, c
     dsn = env_dsn()
@@ -77,24 +87,20 @@ def cur():
 
 
 def _board(cur, teams=None):
-    cur.execute("SELECT player_id, team, count(*) FROM player_recent_games_nba(2027, 10, %s) "
-                "WHERE rn = 1 OR true GROUP BY player_id, team ORDER BY 1, 2", (teams,))
-    rows = cur.fetchall()
     cur.execute("SELECT player_id, team FROM player_recent_games_nba(2027, 10, %s) WHERE rn = 1", (teams,))
     head = dict(cur.fetchall())
     cur.execute("SELECT player_id, count(*) FROM player_recent_games_nba(2027, 10, %s) GROUP BY 1", (teams,))
     games = dict(cur.fetchall())
-    return head, games, rows
+    return head, games
 
 
 def test_newest_row_carries_the_current_team(cur):
-    head, games, _ = _board(cur)
+    head, games = _board(cur)
     assert head == {"brown": "PHI", "injured": "GSW", "steady": "NYK"}
-    assert "retired" not in head
 
 
 def test_window_still_spans_last_season(cur):
-    _, games, _ = _board(cur)
+    _, games = _board(cur)
     assert games == {"brown": 10, "injured": 10, "steady": 10}
 
 
@@ -104,11 +110,13 @@ def test_older_rows_keep_the_team_they_were_played_for(cur):
 
 
 def test_slate_narrowing_uses_the_resolved_team(cur):
-    head, games, _ = _board(cur, ["GSW"])
+    head, games = _board(cur, ["GSW"])
     assert head == {"injured": "GSW"} and games == {"injured": 10}
-    head, _, _ = _board(cur, ["MIA"])
+    head, _ = _board(cur, ["MIA"])
     assert head == {}, "a player who left MIA must not be admitted to its board"
-    head, _, _ = _board(cur, ["BOS"])
+    head, _ = _board(cur, ["DAL"])
+    assert head == {}, "a roster row not seen for 10 days is not a roster spot"
+    head, _ = _board(cur, ["BOS"])
     assert head == {}, "Brown left BOS; the retired BOS player is on no roster"
 
 
@@ -119,8 +127,8 @@ def test_window_totals_match(cur):
 
 def test_season_chip_stays_this_season_only(cur):
     cur.execute("SELECT player_id, games_played FROM player_window_totals_nba(2027, NULL) ORDER BY 1")
-    # injured has no game this season but is on a roster: listed with 0? No —
-    # the Season read has no last-season rows to sum, so he has no row at all.
+    # The Season read sums this season only, so a player with no game yet
+    # this season (injured) has no rows to sum and no row at all.
     assert cur.fetchall() == [("brown", 2), ("steady", 1)]
 
 

@@ -310,6 +310,44 @@ def _fresh_source_ids(conn, sport: str, now: datetime | None = None) -> set[str]
     return fresh
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    row = conn.execute("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+    """, (table, column)).fetchone()
+    return bool(row)
+
+
+def _stamp_roster_seen(conn, sport: str, seen: dict[str, str]) -> int:
+    """Stamp every athlete listed on a roster this morning: his current team
+    and `roster_seen_at = now()`. No ESPN call, and `updated_at` is left alone
+    so the jittered position refresh is unchanged.
+
+    Why (2026-10-27, Matt): a skipped-as-fresh athlete kept his stored team
+    for up to 13 days, and a player off every roster kept his row forever.
+    The Stats boards' NBA reads trust only rows seen in the last few days
+    (nba_window_reads_roster_team_2026_10_26.sql). Nothing is deleted: the
+    prop models read positions from this table too.
+
+    Skipped, with a warning, until the migration adds the column — the pass
+    still runs."""
+    if not seen:
+        return 0
+    if not _column_exists(conn, "player_positions", "roster_seen_at"):
+        logger.warning(
+            "player_positions.roster_seen_at does not exist yet — roster stamp "
+            "skipped (migration not applied)")
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    for aid, team in seen.items():
+        conn.execute("""
+            UPDATE player_positions SET team = %s, roster_seen_at = %s
+            WHERE sport = %s AND source_athlete_id = %s
+        """, (team, now, sport, aid))
+    conn.commit()
+    return len(seen)
+
+
 def _relation_exists(conn, name: str) -> bool:
     row = conn.execute("SELECT to_regclass(%s)", (f"public.{name}",)).fetchone()
     return bool(row and row[0])
@@ -431,6 +469,10 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
              "no_group": 0, "positions": {}, "sample": [], "unmatched_sample": []}
     out: list[dict] = []
     unmatched_ids: list[str] = []
+    # Every athlete on a roster this morning, with the team listing him —
+    # fresh and cached ones too. Stamped after the upsert (_stamp_roster_seen),
+    # so the Stats boards can tell a current roster spot from a stale row.
+    seen: dict[str, str] = {}
     for tref in teams:
         tdoc = _espn(tref, budget) or {}
         team_abbrev = tdoc.get("abbreviation")
@@ -448,6 +490,8 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
             stats["athletes_listed"] += 1
             am = _ATHLETE_ID.search(aref)
             aid = am.group(1) if am else None
+            if aid and team_abbrev:
+                seen[aid] = team_abbrev
             # Skipped rows are not rewritten. The jittered window is what
             # keeps this cohort from expiring together; a touch of updated_at
             # would keep them fresh forever.
@@ -504,6 +548,7 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
             if len(stats["sample"]) < SAMPLE:
                 stats["sample"].append(row)
     stats["written"] = 0 if dry_run else _upsert(conn, out)
+    stats["roster_seen"] = 0 if dry_run else _stamp_roster_seen(conn, sport, seen)
     stats["unmatched_cached"] = 0 if dry_run else _remember_unmatched(conn, sport, unmatched_ids)
     stats["espn_calls"] = budget["espn_calls"]
     stats["athlete_http"] = budget["athlete_http"]

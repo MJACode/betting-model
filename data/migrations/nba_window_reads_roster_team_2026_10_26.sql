@@ -13,8 +13,11 @@
 -- THE TEAM, IN ORDER:
 --   1. newest game is THIS season -> that game's team (the log is the truth
 --      once he has played);
---   2. otherwise, his team in `player_positions` (ESPN roster, refreshed
---      daily; 508 NBA players, one row each, 30 teams);
+--   2. otherwise, his team in `player_positions`, if that row was seen on an
+--      ESPN roster in the last 3 days (`roster_seen_at`, stamped each morning
+--      by the roster job with his current team — so a waived or retired
+--      player drops off and a trade shows the next morning; 3 days rides out
+--      two failed mornings);
 --   3. neither -> not listed (retired, unsigned).
 -- It is written on the rn = 1 row, which is the row the board takes a
 -- player's team from (StatsScreen groups by player, head = games[0]).
@@ -26,17 +29,30 @@
 --
 -- p_teams narrows on the RESOLVED team, so a slate board admits exactly the
 -- players it would show. Same signatures: CREATE OR REPLACE, grants kept.
--- Guarded on the property (the body reads player_positions), so it fires once.
+-- Guarded on the property (the body reads roster_seen_at), so it fires once.
 
 DO $mig$
 BEGIN
+    -- The roster stamp (2026-10-27, Matt). player_positions_ingestor writes it
+    -- each morning on every athlete listed on a roster, with his current team.
+    -- Before it existed a player off every roster kept his row forever, and a
+    -- traded player kept his old team until his 7-13 day position refresh.
+    -- Guarded on the column; it must exist before the functions below, which
+    -- are validated against it at CREATE.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'player_positions'
+           AND column_name = 'roster_seen_at') THEN
+        ALTER TABLE public.player_positions ADD COLUMN roster_seen_at TIMESTAMPTZ;
+    END IF;
+
     IF (SELECT count(*)
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'public'
            AND p.proname IN ('player_recent_games_nba', 'player_window_totals_nba')
            AND position('p_season - 1' in pg_get_functiondef(p.oid)) > 0
-           AND position('player_positions' in pg_get_functiondef(p.oid)) > 0) >= 2 THEN
+           AND position('roster_seen_at' in pg_get_functiondef(p.oid)) > 0) >= 2 THEN
         RAISE NOTICE 'NBA window reads already resolve the roster team — skipping';
         RETURN;
     END IF;
@@ -65,6 +81,7 @@ BEGIN
                                 ELSE pp.team END AS team
             FROM player_positions pp
             WHERE pp.sport = 'NBA'
+              AND pp.roster_seen_at >= now() - interval '3 days'
         ),
         keep AS (
             SELECT r.player_id,
@@ -113,6 +130,7 @@ BEGIN
                                 ELSE pp.team END AS team
             FROM player_positions pp
             WHERE pp.sport = 'NBA'
+              AND pp.roster_seen_at >= now() - interval '3 days'
         ),
         agg AS (
             SELECT

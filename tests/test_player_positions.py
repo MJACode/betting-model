@@ -256,6 +256,7 @@ def _espn_stub(monkeypatch, athlete_ids):
     monkeypatch.setattr(ppi, "_get_json", fake_get)
     monkeypatch.setattr(ppi, "_name_index", lambda conn, sport: {})
     monkeypatch.setattr(ppi, "_upsert", lambda conn, rows: len(rows))
+    monkeypatch.setattr(ppi, "_stamp_roster_seen", lambda conn, sport, seen: len(seen))
     return calls
 
 
@@ -427,3 +428,73 @@ def test_unmatched_cache_migration_is_guarded_and_closed():
     assert "ENABLE ROW LEVEL SECURITY" in code
     assert "GRANT " not in sql
     assert "player_position_unmatched" not in VIEW_BASE_TABLES
+
+
+def test_every_listed_athlete_is_stamped_with_his_roster_team(monkeypatch):
+    """Fresh (skipped) and cached-unmatched athletes are stamped too, with the
+    team listing them and no athlete HTTP: a traded player's team must change
+    the next morning, not at his 7-13 day position refresh (2026-10-27)."""
+    from data.ingestors import player_positions_ingestor as ppi
+
+    calls = _espn_stub(monkeypatch, ["10", "11", "12"])
+    stamped: list[dict] = []
+    monkeypatch.setattr(ppi, "_stamp_roster_seen",
+                        lambda conn, sport, seen: stamped.append(dict(seen)) or len(seen))
+    monkeypatch.setattr(ppi, "_fresh_source_ids", lambda conn, sport: {"10"})
+    monkeypatch.setattr(ppi, "_cached_unmatched_ids", lambda conn, sport: {"11"})
+    monkeypatch.setattr(ppi, "_remember_unmatched", lambda conn, sport, ids: len(ids))
+
+    stats = ppi._basketball(object(), "NBA", dry_run=False)
+    assert stamped == [{"10": "ORL", "11": "ORL", "12": "ORL"}]
+    assert stats["roster_seen"] == 3
+    assert [u for u in calls if re.search(r"/athletes/1[01]$", u)] == []
+
+
+def test_a_dry_run_stamps_nothing(monkeypatch):
+    from data.ingestors import player_positions_ingestor as ppi
+
+    _espn_stub(monkeypatch, ["10"])
+    monkeypatch.setattr(ppi, "_stamp_roster_seen",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("stamped on a dry run")))
+    stats = ppi._basketball(object(), "NBA", dry_run=True)
+    assert stats["roster_seen"] == 0
+
+
+class _StampConn:
+    def __init__(self, has_column):
+        self.has_column, self.sql, self.committed = has_column, [], False
+
+    def execute(self, sql, params=()):
+        self.sql.append((sql, params))
+        outer = self
+
+        class R:
+            def fetchone(self):
+                return (1,) if outer.has_column else None
+        return R()
+
+    def commit(self):
+        self.committed = True
+
+
+def test_stamp_updates_team_and_seen_but_never_updated_at():
+    """updated_at drives the jittered position refresh; touching it on every
+    morning would mean a position is never re-read."""
+    from data.ingestors import player_positions_ingestor as ppi
+
+    conn = _StampConn(has_column=True)
+    assert ppi._stamp_roster_seen(conn, "NBA", {"10": "PHI"}) == 1
+    updates = [(q, p) for q, p in conn.sql if "UPDATE player_positions" in q]
+    assert len(updates) == 1
+    q, p = updates[0]
+    assert "roster_seen_at" in q and "team = %s" in q and "updated_at" not in q
+    assert p[0] == "PHI" and p[2:] == ("NBA", "10")
+    assert conn.committed
+
+
+def test_stamp_is_skipped_until_the_column_exists():
+    from data.ingestors import player_positions_ingestor as ppi
+
+    conn = _StampConn(has_column=False)
+    assert ppi._stamp_roster_seen(conn, "NBA", {"10": "PHI"}) == 0
+    assert not any("UPDATE" in q for q, _ in conn.sql)
