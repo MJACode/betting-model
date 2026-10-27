@@ -286,6 +286,12 @@ check(
   settingsSrc.includes('Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.') &&
     !settingsSrc.includes('whop.com'),
 );
+check(
+  'a whop-covered member connects on the membership card',
+  settingsSrc.includes('whopCovered && !access.discord_linked') &&
+    settingsSrc.includes('styles.chargeLine') &&
+    settingsSrc.includes('styles.connectedLine'),
+);
 check('paywall selects DEFAULT_PLAN_KEY', paywallSrc.includes('DEFAULT_PLAN_KEY'));
 check('weekly discord line does not wait on a trial', paywallSrc.includes('included with this plan'));
 const lockSrc = readFileSync(join(__dirname, '..', 'src', 'components', 'SignalLockCard.tsx'), 'utf8');

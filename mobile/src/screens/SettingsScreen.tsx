@@ -691,7 +691,7 @@ export function SettingsScreen() {
                     : 'Included with a paid plan. No invite is shown until then.'}
             </Text>
             {planStatus.badge === 'Trial' && trialPlan ? (
-              <Text style={styles.sub}>{earlyUnlockLine(trialPlan.key)}</Text>
+              <Text style={[styles.sub, styles.chargeLine]}>{earlyUnlockLine(trialPlan.key)}</Text>
             ) : null}
             {storePaid ? (
               <Pressable
@@ -729,10 +729,19 @@ export function SettingsScreen() {
               >
                 <Text style={styles.manageText}>Upgrade to Premium</Text>
               </Pressable>
+            ) : whopCovered && !access.discord_linked ? (
+              <Pressable
+                onPress={() => setDiscordSheet(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Connect Discord"
+                style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.restoreText}>Connect Discord</Text>
+              </Pressable>
             ) : null}
             {access.discord_linked ? (
               <>
-                <Text style={styles.sub}>{`Connected as ${linkedName}.`}</Text>
+                <Text style={[styles.sub, styles.connectedLine]}>{`Connected as ${linkedName}.`}</Text>
                 <Pressable
                   onPress={() => {
                     Alert.alert(
@@ -763,13 +772,11 @@ export function SettingsScreen() {
               </>
             ) : null}
           </View>
-          {!access.discord_linked && (planStatus.badge === 'Free' || planStatus.badge === 'Trial' || whopCovered) ? (
+          {!access.discord_linked && (planStatus.badge === 'Free' || planStatus.badge === 'Trial') ? (
             <View style={styles.card}>
-              {planStatus.badge === 'Free' || planStatus.badge === 'Trial' ? (
-                <Text style={styles.sub}>
-                  Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.
-                </Text>
-              ) : null}
+              <Text style={styles.sub}>
+                Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.
+              </Text>
               <Pressable
                 onPress={() => setDiscordSheet(true)}
                 accessibilityRole="button"
@@ -972,6 +979,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  chargeLine: {
+    marginTop: spacing.sm,
+  },
+  connectedLine: {
+    marginTop: spacing.md,
   },
   noMargin: {
     marginBottom: 0,
