@@ -1,6 +1,6 @@
 import {
   DEFAULT_PLAN_KEY,
-  EARLY_UNLOCK_PLAN_KEY,
+  EARLY_UNLOCK_PRODUCT_IDS,
   PLANS,
   STORE_PRODUCT_IDS,
   TRIAL_DAYS,
@@ -131,16 +131,22 @@ export function describeSubscription(
 }
 
 /**
- * Shown when Unlock Discord early would purchase the product the user is
- * already trialing. The store sheet must not open.
+ * Shown when Unlock Discord early would purchase the intro product the user
+ * is already trialing. StoreKit does not end a trial by buying that same id.
  */
 export const SAME_PLAN_PURCHASE_MESSAGE =
   'Ending the trial would buy the same App Store product you are already trialing. That purchase was refused.';
+
+/** Shown when the convert would change tier or open a second subscription. */
+export const TIER_SWITCH_MESSAGE =
+  'Ending the trial would switch you to a different plan or start a second subscription. That purchase was refused.';
 
 export interface EarlyUnlockTarget {
   ok: true;
   plan: PlanKey;
   productId: string;
+  /** The intro id already on the trial. The convert purchase must not be this. */
+  replacesProductId: string;
 }
 
 export interface EarlyUnlockRefusal {
@@ -148,32 +154,47 @@ export interface EarlyUnlockRefusal {
   reason: string;
 }
 
+/** Same marker order as planForProductId. annual before week before month. */
+function tierOfProductId(productId: string): PlanKey | null {
+  const id = productId.toLowerCase();
+  if (/annual|year/.test(id)) return 'annual';
+  if (/week|wk/.test(id)) return 'weekly';
+  if (/month/.test(id)) return 'monthly';
+  return null;
+}
+
 /**
  * The product Unlock Discord early purchases.
  *
- * Monthly and annual trials convert by buying Weekly
- * (`com.mja.bettingpicks.premium.weekly`), which has no free trial. That id
- * is not the id they are trialing. If it is the same id, the purchase is
- * refused — StoreKit must not be asked to buy the current trial again.
+ * A monthly trial converts by buying `…premium.monthly.notrial`. An annual
+ * trial buys `…premium.annual.notrial`. Those ids have no introductory offer
+ * and must share a subscription group with the trial id, so the store
+ * replaces that subscription. Weekly is refused: it is a different tier, and
+ * weekly has no trial to end. The intro id itself is also refused.
  */
 export function earlyUnlockTarget(trialingPlan: PlanKey): EarlyUnlockTarget | EarlyUnlockRefusal {
-  const trialProductId = STORE_PRODUCT_IDS[trialingPlan];
-  const plan = EARLY_UNLOCK_PLAN_KEY;
-  const productId = STORE_PRODUCT_IDS[plan];
-  if (trialProductId === productId) {
-    return { ok: false, reason: SAME_PLAN_PURCHASE_MESSAGE };
+  const replacesProductId = STORE_PRODUCT_IDS[trialingPlan];
+  const productId = EARLY_UNLOCK_PRODUCT_IDS[trialingPlan];
+  if (!productId || trialingPlan === 'weekly') {
+    return { ok: false, reason: TIER_SWITCH_MESSAGE };
   }
-  return { ok: true, plan, productId };
+  if (productId === replacesProductId || productId === STORE_PRODUCT_IDS.weekly) {
+    return { ok: false, reason: productId === replacesProductId ? SAME_PLAN_PURCHASE_MESSAGE : TIER_SWITCH_MESSAGE };
+  }
+  if (tierOfProductId(productId) !== trialingPlan) {
+    return { ok: false, reason: TIER_SWITCH_MESSAGE };
+  }
+  return { ok: true, plan: trialingPlan, productId, replacesProductId };
 }
 
-/** Settings line under a trial. Names the convert price, not the trial price. */
+/** Charge line on Unlock Discord early. Same tier, that tier's price. */
 export function earlyUnlockLine(trialingPlan: PlanKey): string {
   const target = earlyUnlockTarget(trialingPlan);
   if (!target.ok) {
-    return 'This trial cannot be ended by buying the same plan. No invite is shown until a paid plan is active.';
+    return 'This trial cannot be ended by switching plans. No invite is shown until a paid plan is active.';
   }
   const convert = planForKey(target.plan);
-  return `Ends the trial now. ${formatPrice(convert.price)} today on ${convert.name}. No invite is shown until that plan is active.`;
+  return `Ends the ${convert.name} trial. ${formatPrice(convert.price)} today. No invite is shown until that plan is active.`;
 }
 
 function planForKey(key: PlanKey): Plan {

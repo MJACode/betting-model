@@ -29,16 +29,25 @@ invite is shown only after the subscriptions row is `active`, not `trialing`.
 The paywall opens right after the first sign-in, and again from Unlock or a
 locked tab. Closing it returns to that free shell.
 
-**Unlock Discord early does not repurchase the trial.** Monthly and annual
-trials convert by purchasing Weekly, `com.mja.bettingpicks.premium.weekly`
-($9.99, no trial). That product id is not
-`com.mja.bettingpicks.premium.monthly` or `.annual`. If the trialing product
-id is already the convert product, the app refuses and shows an error. The
-store sheet does not open. App Store Connect and RevenueCat must list
-`com.mja.bettingpicks.premium.weekly` (and the monthly and annual ids) before
-that sheet can complete. This repo does not create those products. StoreKit
+**Unlock Discord early stays on the plan they are trialing.** StoreKit will
+not end an intro by buying that same product id. A monthly trial purchases
+`com.mja.bettingpicks.premium.monthly.notrial`. An annual trial purchases
+`com.mja.bettingpicks.premium.annual.notrial`. Those ids have no free trial.
+Each must be in the same App Store subscription group as its trial sibling
+(`…premium.monthly` and `…premium.annual`) so the store replaces that
+subscription instead of starting a second one. Weekly is not the convert
+product. If the purchase would switch tiers or buy the intro id again, the
+app shows an error and does not open the store sheet. App Store Connect and
+RevenueCat must list the two `.notrial` ids. Attach the intro product as the
+MONTHLY or ANNUAL package, and the no-trial sibling as its own package with
+that exact product id. This repo does not create those products. StoreKit
 sandbox verification is a device check and cannot be run here. Join Discord
 appears only after a refresh shows status `active`.
+
+On the Stripe rail, Unlock Discord early sets `trial_end=now` on the
+subscription the user already has. It does not open a second Checkout. A
+webhook for a different live subscription id is cancelled so it cannot bill
+beside the trial.
 
 **Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
 free week that renews into another free week for anyone willing to cancel and
@@ -126,19 +135,22 @@ Discord role. Decide access with `useEntitlement()`, never
 
 ### 1. App Store Connect (and later, Play Console)
 
-Create three auto-renewable subscriptions in one subscription group:
+Create these auto-renewable subscriptions. The trial product and its
+no-trial sibling belong in the **same subscription group**.
 
 | Reference | Product ID (suggested) | Price | Duration |
 |---|---|---|---|
 | Weekly | `com.mja.bettingpicks.premium.weekly` | $9.99 | 1 week |
 | Monthly | `com.mja.bettingpicks.premium.monthly` | $24.99 | 1 month |
+| Monthly, no trial | `com.mja.bettingpicks.premium.monthly.notrial` | $24.99 | 1 month |
 | Annual | `com.mja.bettingpicks.premium.annual` | $149.99 | 1 year |
+| Annual, no trial | `com.mja.bettingpicks.premium.annual.notrial` | $149.99 | 1 year |
 
 Add a **7-day free trial** as an introductory offer on **monthly and annual
-only** — not weekly (see the ladder note above). Prices must match
-`billingConfig.ts` (the paywall's fallback display) exactly. The product ids
-are suggestions for that future setup. This change does not create them in
-App Store Connect or RevenueCat, and it does not flip
+only** — not weekly, and not the `.notrial` siblings (see the ladder note
+above). Prices must match `billingConfig.ts` (the paywall's fallback display)
+exactly. The product ids are suggestions for that future setup. This change
+does not create them in App Store Connect or RevenueCat, and it does not flip
 `EXPO_PUBLIC_BILLING_ENABLED`.
 
 ### 2. RevenueCat dashboard
@@ -147,9 +159,13 @@ App Store Connect or RevenueCat, and it does not flip
    the App Store Connect API key.
 2. Create an **entitlement** named exactly **`signals`**
    (`REVENUECAT_ENTITLEMENT_ID` in `iapHelpers.ts`).
-3. Attach all three products to it.
+3. Attach all five products to it. The `.notrial` siblings share the
+   `signals` entitlement with the intro products.
 4. Create an **offering** (default) with packages **Weekly / Monthly /
-   Annual** — the standard package types are what `planForPackageType` maps.
+   Annual** for the intro products — the standard package types are what
+   `planForPackageType` maps. Attach each `.notrial` id as its own package
+   (custom is fine). Unlock Discord early looks that package up by exact
+   product id. The paywall never selects a `.notrial` id.
 5. Copy the **public** SDK key(s) into the build env:
    `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (and `_ANDROID_KEY` when Play ships).
 
@@ -281,7 +297,7 @@ not returns — keep it that way.
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (133 assertions) | `scripts/verify_billing.ts` |
+| Verification (142 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,

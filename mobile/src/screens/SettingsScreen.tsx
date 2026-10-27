@@ -660,10 +660,7 @@ export function SettingsScreen() {
           icon="logo-x"
         />
 
-        {/* While linking is dark this is exactly today's row: a plain invite
-            link, no account involved. Once it is live the row becomes the
-            connect/disconnect control, because the invite alone can't grant
-            the subscriber role. */}
+        {/* No public invite. Join Discord is inside the paid card only. */}
         {billingReady() ? (
           !signedIn ? null : planHold ? (
           <View style={styles.card}>

@@ -108,6 +108,17 @@ async function stripeGet(path: string): Promise<any> {
   return data;
 }
 
+/** Cancel immediately. Used when a second live subscription arrives. */
+async function stripeDelete(path: string): Promise<void> {
+  const res = await fetch(`${STRIPE_API}${path}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${STRIPE_KEY}` },
+  });
+  if (res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  throw new Error(data?.error?.message ?? `Stripe ${path} → ${res.status}`);
+}
+
 /**
  * Resolve which of our users a Stripe subscription belongs to.
  *
@@ -145,6 +156,30 @@ async function applySubscription(sub: any): Promise<string> {
   const priceId: string | undefined = sub?.items?.data?.[0]?.price?.id;
   const plan = sub?.metadata?.plan ?? (priceId ? PRICE_TO_PLAN[priceId] : null);
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+
+  // One row per user. A second live Stripe subscription must not sit beside
+  // the trial. Cancel the new one and keep the row on the subscription we
+  // already have. Ending a trial updates that same id, so it is not cancelled.
+  const { data: existing } = await admin
+    .from("subscriptions")
+    .select("stripe_subscription_id, status")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const live = existing?.status === "trialing" || existing?.status === "active";
+  const incomingLive = sub.status === "trialing" || sub.status === "active";
+  if (
+    live &&
+    existing?.stripe_subscription_id &&
+    existing.stripe_subscription_id !== sub.id
+  ) {
+    // A cancel/update for the extra subscription must not replace the row.
+    // Ending the trial updates the same id, so that event still upserts.
+    if (incomingLive) {
+      await stripeDelete(`/subscriptions/${sub.id}`);
+      return `${userId} second subscription ${sub.id} cancelled`;
+    }
+    return `${userId} second subscription ${sub.id} ignored`;
+  }
 
   const { error } = await admin.from("subscriptions").upsert(
     {

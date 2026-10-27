@@ -6,11 +6,13 @@ import {
   billingReady,
   type PlanKey,
 } from './billingConfig';
-import { SAME_PLAN_PURCHASE_MESSAGE } from './billingHelpers';
+import { STORE_PRODUCT_IDS } from './billingConfig';
+import { SAME_PLAN_PURCHASE_MESSAGE, TIER_SWITCH_MESSAGE } from './billingHelpers';
 import {
   customerInfoEntitled,
   fallbackManagementUrl,
   packageForPlan,
+  packageForProductId,
   planForProductId,
   type MinimalCustomerInfo,
   type MinimalPackage,
@@ -127,11 +129,10 @@ export interface IapPurchaseResult {
   entitled: boolean;
 }
 
-/** Run the native purchase sheet for a plan. */
+/** Run the native purchase sheet for a plan. The paywall uses this. */
 export async function purchasePlan(
   plan: PlanKey,
   userId: string,
-  opts?: { forbidProductId?: string },
 ): Promise<IapPurchaseResult> {
   if (!billingReady()) {
     throw new Error('Billing is not enabled in this build.');
@@ -142,20 +143,56 @@ export async function purchasePlan(
   if (!pkg) {
     throw new Error('That plan is not available in the store yet.');
   }
-  const forbidden = opts?.forbidProductId?.toLowerCase();
-  const buying = pkg.product.identifier.toLowerCase();
-  const sameId = Boolean(forbidden) && buying === forbidden;
-  const forbiddenPlan = forbidden ? planForProductId(forbidden) : null;
-  const samePlan = Boolean(forbiddenPlan) && planForProductId(buying) === forbiddenPlan;
-  if (sameId || samePlan) {
-    throw new Error(SAME_PLAN_PURCHASE_MESSAGE);
-  }
   try {
     const { customerInfo } = await purchases.purchasePackage(pkg);
     return { outcome: 'purchased', entitled: customerInfoEntitled(customerInfo) };
   } catch (e) {
     // RevenueCat marks a user-dismissed sheet explicitly — that's a normal
     // outcome, not an error.
+    if ((e as { userCancelled?: boolean })?.userCancelled) {
+      return { outcome: 'cancelled', entitled: false };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Buy the no-trial sibling of the plan already on trial.
+ *
+ * Looks up that exact product id. The intro package is refused, and so is
+ * any package whose tier is not the trial's tier (Weekly included). The
+ * sibling has to share the trial product's subscription group in App Store
+ * Connect so this replaces the trial instead of stacking a second plan.
+ */
+export async function purchaseEarlyUnlock(
+  productId: string,
+  trialingPlan: PlanKey,
+  userId: string,
+): Promise<IapPurchaseResult> {
+  if (!billingReady()) {
+    throw new Error('Billing is not enabled in this build.');
+  }
+  const trialProductId = STORE_PRODUCT_IDS[trialingPlan].toLowerCase();
+  const want = productId.toLowerCase();
+  if (want === trialProductId) throw new Error(SAME_PLAN_PURCHASE_MESSAGE);
+  if (want === STORE_PRODUCT_IDS.weekly.toLowerCase() || planForProductId(want) !== trialingPlan) {
+    throw new Error(TIER_SWITCH_MESSAGE);
+  }
+  const purchases = await ensureConfigured(userId);
+  const offerings = await purchases.getOfferings();
+  const pkg = packageForProductId(offerings.current?.availablePackages ?? [], productId);
+  if (!pkg) {
+    throw new Error('That plan is not available in the store yet.');
+  }
+  const buying = pkg.product.identifier.toLowerCase();
+  if (buying === trialProductId) throw new Error(SAME_PLAN_PURCHASE_MESSAGE);
+  if (buying === STORE_PRODUCT_IDS.weekly.toLowerCase() || planForProductId(buying) !== trialingPlan) {
+    throw new Error(TIER_SWITCH_MESSAGE);
+  }
+  try {
+    const { customerInfo } = await purchases.purchasePackage(pkg);
+    return { outcome: 'purchased', entitled: customerInfoEntitled(customerInfo) };
+  } catch (e) {
     if ((e as { userCancelled?: boolean })?.userCancelled) {
       return { outcome: 'cancelled', entitled: false };
     }

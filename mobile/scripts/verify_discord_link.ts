@@ -224,6 +224,10 @@ const inviteLeaks = walkSrc(join(__dirname, '..', 'src')).filter((p) => {
   return text.includes('discord.gg') || text.includes('DISCORD_URL');
 });
 check('invite url is only in discordHelpers', inviteLeaks.length === 0);
+const publicJoin = walkSrc(join(__dirname, '..', 'src')).filter((p) =>
+  readFileSync(p, 'utf8').includes('Join our Discord'),
+);
+check('no public Join our Discord row', publicJoin.length === 0);
 
 const NOW = Date.parse('2026-09-01T00:00:00Z');
 check(

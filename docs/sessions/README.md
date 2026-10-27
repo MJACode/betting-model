@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Unlock Discord early converts the trial plan via `monthly.notrial` / `annual.notrial`. Stripe ends that subscription in place. Public Join our Discord row removed. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Community navy action first, Whop sentence on a second card. Trial charge stays on Unlock Discord early. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Unlock Discord early buys Weekly (`premium.weekly`), not the trial SKU. Discord role is active-only. Trial app access stays. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, merged origin/master price lock 42881cb7. Community order matches boards 04/05. #1060 my_access SQL not taken. |

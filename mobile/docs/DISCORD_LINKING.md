@@ -110,7 +110,7 @@ what stops a client claiming a membership it did not buy.
 | Discord bot API helpers | `supabase/functions/_shared/discord.ts` |
 | The two-way rule, one place | `supabase/functions/_shared/entitlement.ts` |
 | Schema + access RPCs | `data/migrations/add_discord_link_and_whop_memberships.sql` |
-| Verification (47 assertions) | `scripts/verify_discord_link.ts` |
+| Verification (58 assertions) | `scripts/verify_discord_link.ts` |
 
 ### `useEntitlement`, not `useSubscription`
 

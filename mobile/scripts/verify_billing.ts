@@ -36,7 +36,7 @@ import {
   BILLING_ENABLED,
   BILLING_RAIL,
   DEFAULT_PLAN_KEY,
-  EARLY_UNLOCK_PLAN_KEY,
+  EARLY_UNLOCK_PRODUCT_IDS,
   PLANS,
   STORE_PRODUCT_IDS,
   TRIAL_DAYS,
@@ -50,6 +50,7 @@ import {
   displayPrice,
   fallbackManagementUrl,
   packageForPlan,
+  packageForProductId,
   planForPackageType,
   planForProductId,
   type MinimalPackage,
@@ -222,51 +223,63 @@ const discordConfigSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'disco
 check('client config has no Whop checkout URL', !discordConfigSrc.includes('WHOP_CHECKOUT_URL') && !discordConfigSrc.includes('whop.com') && !discordConfigSrc.includes('EXPO_PUBLIC_WHOP'));
 check('trial discord button is Unlock Discord early', settingsSrc.includes('Unlock Discord early') && !settingsSrc.includes('See plan details'));
 check('unlock discord early calls the store, not the paywall', settingsSrc.includes('endTrialEarly') && settingsSrc.includes('onUnlockDiscord'));
-check('trial card names the weekly convert price', settingsSrc.includes('earlyUnlockLine'));
+check('trial card names the same-plan convert price', settingsSrc.includes('earlyUnlockLine'));
 check(
   'trial status uses the board sentence',
   settingsSrc.includes('Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'),
 );
+check('settings has no public Join our Discord row', !settingsSrc.includes('Join our Discord'));
 const billingSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
 const earlyFn = billingSrc.split('export async function endTrialEarly')[1]?.split('export async function')[0] ?? '';
 check(
-  'endTrialEarly buys the convert plan, not the trial plan',
+  'endTrialEarly converts the trial plan and does not buy weekly',
   earlyFn.includes('earlyUnlockTarget(trialingPlan)') &&
     earlyFn.includes('if (!target.ok) throw new Error(target.reason)') &&
-    earlyFn.includes('startCheckout(target.plan') &&
-    !earlyFn.includes('startCheckout(trialingPlan'),
+    earlyFn.includes('purchaseEarlyUnlock(target.productId, trialingPlan, userId)') &&
+    earlyFn.includes('end_trial: true') &&
+    !earlyFn.includes('STORE_PRODUCT_IDS.weekly') &&
+    !earlyFn.includes("plan: 'weekly'"),
 );
 const iapSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'iap.ts'), 'utf8');
 check(
-  'the store sheet refuses the same product id',
-  iapSrc.includes('SAME_PLAN_PURCHASE_MESSAGE') && iapSrc.includes('forbidProductId'),
+  'the convert purchase refuses the intro id and a tier switch',
+  iapSrc.includes('purchaseEarlyUnlock') &&
+    iapSrc.includes('SAME_PLAN_PURCHASE_MESSAGE') &&
+    iapSrc.includes('TIER_SWITCH_MESSAGE') &&
+    iapSrc.includes('packageForProductId'),
 );
-eq('early unlock plan is weekly', EARLY_UNLOCK_PLAN_KEY, 'weekly');
-eq('annual trial converts to weekly', earlyUnlockTarget('annual'), {
+eq('annual trial converts to the annual no-trial id', earlyUnlockTarget('annual'), {
   ok: true,
-  plan: 'weekly',
-  productId: 'com.mja.bettingpicks.premium.weekly',
+  plan: 'annual',
+  productId: 'com.mja.bettingpicks.premium.annual.notrial',
+  replacesProductId: STORE_PRODUCT_IDS.annual,
 });
-eq('monthly trial converts to weekly', earlyUnlockTarget('monthly'), {
+eq('monthly trial converts to the monthly no-trial id', earlyUnlockTarget('monthly'), {
   ok: true,
-  plan: 'weekly',
-  productId: STORE_PRODUCT_IDS.weekly,
+  plan: 'monthly',
+  productId: EARLY_UNLOCK_PRODUCT_IDS.monthly,
+  replacesProductId: STORE_PRODUCT_IDS.monthly,
 });
 const weeklyUnlock = earlyUnlockTarget('weekly');
 check(
-  'weekly trial is refused rather than rebought',
-  weeklyUnlock.ok === false && weeklyUnlock.reason.includes('same App Store product'),
+  'weekly is refused and is not the convert product',
+  weeklyUnlock.ok === false &&
+    weeklyUnlock.reason.includes('different plan') &&
+    !('productId' in weeklyUnlock && weeklyUnlock.productId === STORE_PRODUCT_IDS.weekly),
 );
 check(
-  'convert product id differs from the trial ids',
-  STORE_PRODUCT_IDS.weekly !== STORE_PRODUCT_IDS.monthly &&
-    STORE_PRODUCT_IDS.weekly !== STORE_PRODUCT_IDS.annual,
+  'convert ids are not weekly and not the intro ids',
+  EARLY_UNLOCK_PRODUCT_IDS.monthly !== STORE_PRODUCT_IDS.weekly &&
+    EARLY_UNLOCK_PRODUCT_IDS.annual !== STORE_PRODUCT_IDS.weekly &&
+    EARLY_UNLOCK_PRODUCT_IDS.monthly !== STORE_PRODUCT_IDS.monthly &&
+    EARLY_UNLOCK_PRODUCT_IDS.annual !== STORE_PRODUCT_IDS.annual,
 );
 eq(
-  'trial line names weekly price, not the annual price',
+  'trial line names the annual price, not weekly',
   earlyUnlockLine('annual'),
-  'Ends the trial now. $9.99 today on Weekly. No invite is shown until that plan is active.',
+  'Ends the Annual trial. $149.99 today. No invite is shown until that plan is active.',
 );
+check('monthly convert line does not say weekly', !earlyUnlockLine('monthly').toLowerCase().includes('weekly'));
 check('paid join waits for an active row', settingsSrc.includes("subscription.status === 'active'"));
 check(
   'whop soft copy is connect-only',
@@ -419,6 +432,36 @@ eq(
   'sb_weekly',
 );
 eq('packageForPlan misses honestly', packageForPlan([], 'annual'), null);
+eq(
+  'monthly.notrial stays monthly',
+  planForProductId('com.mja.bettingpicks.premium.monthly.notrial'),
+  'monthly',
+);
+eq(
+  'annual.notrial stays annual',
+  planForProductId('com.mja.bettingpicks.premium.annual.notrial'),
+  'annual',
+);
+const convertPkgs: MinimalPackage[] = [
+  {
+    packageType: 'MONTHLY',
+    product: { identifier: 'com.mja.bettingpicks.premium.monthly.notrial', priceString: '$24.99' },
+  },
+  {
+    packageType: 'MONTHLY',
+    product: { identifier: 'com.mja.bettingpicks.premium.monthly', priceString: '$24.99' },
+  },
+];
+eq(
+  'packageForProductId matches the no-trial sibling exactly',
+  packageForProductId(convertPkgs, 'com.mja.bettingpicks.premium.monthly.notrial')?.product.identifier,
+  'com.mja.bettingpicks.premium.monthly.notrial',
+);
+eq(
+  'packageForPlan keeps the intro monthly when a no-trial sibling is also monthly',
+  packageForPlan(convertPkgs, 'monthly')?.product.identifier,
+  'com.mja.bettingpicks.premium.monthly',
+);
 
 eq(
   'localized store price wins',
@@ -453,6 +496,7 @@ check(
 const src = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
 for (const fn of [
   'startCheckout',
+  'endTrialEarly',
   'openManageSubscription',
   'restorePurchases',
   'redeemCode',
@@ -483,6 +527,16 @@ const fn = readFileSync(
 );
 check('checkout maps plan → price server-side', fn.includes('const priceId = PRICES[plan]'));
 check(
+  'ending a trial updates that subscription and does not open a second checkout',
+  fn.includes('end_trial') &&
+    fn.includes('trial_end: "now"') &&
+    fn.indexOf('trial_end: "now"') < fn.indexOf('"/checkout/sessions"'),
+);
+check(
+  'a live subscription still cannot start checkout',
+  fn.includes('You already have an active subscription.'),
+);
+check(
   'checkout takes the user from the JWT, not the body',
   fn.includes('admin.auth.getUser(token)'),
 );
@@ -493,6 +547,10 @@ const hook = readFileSync(
 check('webhook verifies the Stripe signature', hook.includes('verifySignature(rawBody'));
 check('webhook signs over the raw body', hook.includes('await req.text()'));
 check('webhook enforces a timestamp tolerance', hook.includes('TOLERANCE_SEC'));
+check(
+  'a second live stripe subscription is cancelled',
+  hook.includes('second subscription') && hook.includes('stripeDelete'),
+);
 
 // The IAP file must never import the native module statically — an OTA bundle
 // doing so crashes on launch on binaries that predate the rebuild. Only a

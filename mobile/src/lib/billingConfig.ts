@@ -140,8 +140,8 @@ export const DEFAULT_PLAN_KEY: PlanKey = 'annual';
 
 /**
  * Suggested App Store product ids. Not created by this repo.
- * Weekly is also the early-unlock product: it has no trial, so buying it
- * charges now, and its id is not the monthly or annual trial id.
+ * The intro products carry the free trial. They are not what Unlock Discord
+ * early purchases.
  */
 export const STORE_PRODUCT_IDS: Record<PlanKey, string> = {
   weekly: 'com.mja.bettingpicks.premium.weekly',
@@ -149,8 +149,16 @@ export const STORE_PRODUCT_IDS: Record<PlanKey, string> = {
   annual: 'com.mja.bettingpicks.premium.annual',
 };
 
-/** Immediate-pay plan used to leave a monthly or annual trial. */
-export const EARLY_UNLOCK_PLAN_KEY: PlanKey = 'weekly';
+/**
+ * Same-tier convert ids. No introductory offer. Not created by this repo.
+ * Each one must sit in the same App Store subscription group as its trial
+ * sibling so StoreKit replaces that subscription instead of starting a second.
+ * Weekly has no trial, so it has no convert id.
+ */
+export const EARLY_UNLOCK_PRODUCT_IDS: Partial<Record<PlanKey, string>> = {
+  monthly: 'com.mja.bettingpicks.premium.monthly.notrial',
+  annual: 'com.mja.bettingpicks.premium.annual.notrial',
+};
 
 /** Where Stripe Checkout sends the browser back to. */
 export const BILLING_RETURN_URL = 'signalbase://billing-return';
