@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  discordTile: { backgroundColor: '#5865F2' },
+  discordTile: { backgroundColor: colors.discord },
   appTile: { backgroundColor: colors.textPrimary },
   cta: {
     alignSelf: 'stretch',

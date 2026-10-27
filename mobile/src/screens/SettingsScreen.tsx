@@ -671,6 +671,7 @@ export function SettingsScreen() {
             <Text style={styles.sub}>Checking your plan…</Text>
           </View>
           ) : (
+          <>
           <View style={styles.card}>
             <View style={styles.bookRow}>
               <Text style={styles.cardLabel}>Discord for members</Text>
@@ -689,58 +690,11 @@ export function SettingsScreen() {
                 : whopCovered
                   ? 'Your Discord membership already includes the subscriber Discord.'
                   : planStatus.badge === 'Trial'
-                    ? trialPlan
-                      ? earlyUnlockLine(trialPlan.key)
-                      : 'Unlocks when your paid plan starts. End the trial to join now. No invite is shown until then.'
+                    ? 'Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'
                     : 'Included with a paid plan. No invite is shown until then.'}
             </Text>
-            {access.discord_linked ? (
-              <>
-                <Text style={styles.sub}>{`Connected as ${linkedName}.`}</Text>
-                <Pressable
-                  onPress={() => {
-                    Alert.alert(
-                      'Disconnect Discord?',
-                      access.discord_access
-                        ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
-                        : "We'll remove the subscriber role we granted you. You'll stay in the server.",
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Disconnect',
-                          style: 'destructive',
-                          onPress: () => {
-                            unlink().catch((e) =>
-                              Alert.alert('Could not disconnect', discordErrorMessage(e)),
-                            );
-                          },
-                        },
-                      ],
-                    );
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Disconnect Discord"
-                  style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
-                >
-                  <Text style={styles.restoreText}>Disconnect Discord</Text>
-                </Pressable>
-              </>
-            ) : (planStatus.badge === 'Free' || planStatus.badge === 'Trial' || whopCovered) ? (
-              <>
-                {planStatus.badge === 'Free' || planStatus.badge === 'Trial' ? (
-                  <Text style={styles.sub}>
-                    Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.
-                  </Text>
-                ) : null}
-                <Pressable
-                  onPress={() => setDiscordSheet(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Connect Discord"
-                  style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
-                >
-                  <Text style={styles.restoreText}>Connect Discord</Text>
-                </Pressable>
-              </>
+            {planStatus.badge === 'Trial' && trialPlan ? (
+              <Text style={styles.sub}>{earlyUnlockLine(trialPlan.key)}</Text>
             ) : null}
             {storePaid ? (
               <Pressable
@@ -779,7 +733,57 @@ export function SettingsScreen() {
                 <Text style={styles.manageText}>Upgrade to Premium</Text>
               </Pressable>
             ) : null}
+            {access.discord_linked ? (
+              <>
+                <Text style={styles.sub}>{`Connected as ${linkedName}.`}</Text>
+                <Pressable
+                  onPress={() => {
+                    Alert.alert(
+                      'Disconnect Discord?',
+                      access.discord_access
+                        ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
+                        : "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Disconnect',
+                          style: 'destructive',
+                          onPress: () => {
+                            unlink().catch((e) =>
+                              Alert.alert('Could not disconnect', discordErrorMessage(e)),
+                            );
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Disconnect Discord"
+                  style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.restoreText}>Disconnect Discord</Text>
+                </Pressable>
+              </>
+            ) : null}
           </View>
+          {!access.discord_linked && (planStatus.badge === 'Free' || planStatus.badge === 'Trial' || whopCovered) ? (
+            <View style={styles.card}>
+              {planStatus.badge === 'Free' || planStatus.badge === 'Trial' ? (
+                <Text style={styles.sub}>
+                  Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.
+                </Text>
+              ) : null}
+              <Pressable
+                onPress={() => setDiscordSheet(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Connect Discord"
+                style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.restoreText}>Connect Discord</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          </>
           )
         ) : discordLinkReady() && signedIn ? (
           <LinkRow

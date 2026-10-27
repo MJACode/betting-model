@@ -223,6 +223,10 @@ check('client config has no Whop checkout URL', !discordConfigSrc.includes('WHOP
 check('trial discord button is Unlock Discord early', settingsSrc.includes('Unlock Discord early') && !settingsSrc.includes('See plan details'));
 check('unlock discord early calls the store, not the paywall', settingsSrc.includes('endTrialEarly') && settingsSrc.includes('onUnlockDiscord'));
 check('trial card names the weekly convert price', settingsSrc.includes('earlyUnlockLine'));
+check(
+  'trial status uses the board sentence',
+  settingsSrc.includes('Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'),
+);
 const billingSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
 const earlyFn = billingSrc.split('export async function endTrialEarly')[1]?.split('export async function')[0] ?? '';
 check(
