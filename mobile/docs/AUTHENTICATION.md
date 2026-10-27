@@ -77,6 +77,13 @@ is no legacy account state to reconcile.
 
 ## Activation
 
+Do not flip `AUTH_ENABLED`, `BILLING_ENABLED`, or `DISCORD_LINK_ENABLED` until
+`data/migrations/add_discord_link_and_whop_memberships.sql` is applied in that
+environment. That file is the first apply of `my_access()` / `has_app_access()`,
+and both are Apple-only. With billing or Discord linking on, a signed-in
+`fetchAccess()` calls `my_access()` and throws if the function is missing.
+That throw is a ship blocker.
+
 ### 1. Supabase → Authentication → URL Configuration
 
 Add the redirect URL to the allow-list, or Apple/Google will refuse the round

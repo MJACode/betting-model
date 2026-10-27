@@ -1,8 +1,8 @@
 // Discord account linking for the mobile app.
 //
 // The user taps "Connect Discord", authorizes in an in-app browser, and comes
-// back linked, in the server, and holding whichever role their membership
-// entitles them to. Four actions, all requiring the caller's Supabase JWT
+// back linked and in the server. Our App Subscriber role is granted only when
+// the Apple subscription entitles. Four actions, all requiring the caller's JWT
 // (verify_jwt = true), because a link is an assertion about WHO someone is and
 // must never be makeable on another account's behalf:
 //
@@ -14,10 +14,10 @@
 //
 // SCOPES: identify, email, guilds.join.
 //   identify   — the Discord user id, which is the durable join key
-//   email      — lets a Whop membership bought with the same address match
-//                automatically, so a Discord subscriber who signs into the app
-//                is entitled without any extra step. Only Discord-VERIFIED
-//                addresses are ever trusted (see discord_access_for()).
+//   email      — backfills a Whop membership bought with the same address so
+//                the Discord identity and the app account are the same person.
+//                That match does not unlock the app. Only Discord-VERIFIED
+//                addresses are stored as verified (see discord_access_for()).
 //   guilds.join— one-tap join, instead of handing back an invite link the user
 //                has to accept in another app.
 //

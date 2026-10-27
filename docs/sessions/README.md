@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Whop is Discord-only. Unapplied `my_access` / `has_app_access` are Apple-only on first apply. No flag flip, no production migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats follow-up review. The marker wing no longer covers the window chip. Header taps no longer share a band. The book line can use two lines. |

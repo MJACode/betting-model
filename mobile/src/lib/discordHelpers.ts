@@ -125,24 +125,24 @@ export function parseDiscordCallback(url: string): DiscordCallback {
 }
 
 /**
- * One line describing the Discord connection for the Settings card.
+ * One line describing the Discord connection.
  *
- * States it plainly when the membership is the thing PAYING for the app —
- * a Discord subscriber should never be left wondering why they were not
- * charged, or worry that they need to buy again.
+ * A Whop membership ties the person. It does not pay for the app, so this
+ * line never says that it does. An Apple subscription still includes our
+ * Discord role.
  */
 export function describeDiscordLink(access: AccessRow): string {
   if (!access.discord_linked) {
     return access.discord_access
-      ? 'Your Discord membership covers the app. Connect Discord to manage it here.'
+      ? 'A Discord membership matches this account. Connect Discord to tie them together.'
       : 'Connect your Discord account to join the subscriber server.';
   }
   const who = access.discord_username ?? 'Discord';
-  if (access.discord_access) {
-    return `Connected as ${who} — your Discord membership includes the app.`;
-  }
   if (access.app_role_granted) {
     return `Connected as ${who} — your subscription includes the Discord.`;
+  }
+  if (access.discord_access) {
+    return `Connected as ${who}.`;
   }
   if (access.guild_member) {
     return `Connected as ${who}. Subscribe to unlock the subscriber channels.`;
@@ -151,17 +151,14 @@ export function describeDiscordLink(access: AccessRow): string {
 }
 
 /**
- * What the "one membership covers both" line on the paywall should say, given
- * where the user's access comes from. Empty string when there is nothing worth
- * saying, so the caller can render it conditionally without a null check.
+ * Paywall line for where access came from. Empty when there is nothing to
+ * say, so the caller can skip it. A Whop-only match (`source === 'discord'`)
+ * does not unlock the app and gets no "included" line.
  */
 export function accessSourceCopy(access: AccessRow): string {
   switch (access.source) {
-    case 'discord':
-      return 'Included with your Discord membership — no second subscription needed.';
-    case 'both':
-      return 'You have both an app subscription and a Discord membership. You are only being charged for the app subscription if it is active in the App Store.';
     case 'app':
+    case 'both':
       return 'Your subscription includes access to the subscriber Discord.';
     default:
       return '';

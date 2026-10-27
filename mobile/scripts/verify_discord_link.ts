@@ -1,6 +1,6 @@
 /**
- * Verifies the pure Discord-linking helpers, plus source-level checks that the
- * two-way membership rule is actually wired the way it is documented.
+ * Verifies the pure Discord-linking helpers, plus source-level checks that
+ * Apple-only app access is what the unapplied migration and the webhooks do.
  *
  *   npx tsx scripts/verify_discord_link.ts
  *
@@ -142,13 +142,26 @@ eq(
 );
 
 // --- copy -------------------------------------------------------------------
-// The case that matters most: a Discord-paid member must be TOLD that is why
-// they were not charged, or they will assume something is broken and buy again.
+// Whop ties the person. It must not be described as paying for the app.
 check(
-  'a Discord-paid member is told the app is included',
-  describeDiscordLink(
-    access({ discord_linked: true, discord_access: true, discord_username: 'matt' }),
-  ).includes('includes the app'),
+  'a Whop-only link does not say the app is included',
+  !describeDiscordLink(
+    access({
+      discord_linked: true,
+      discord_access: true,
+      app_access: false,
+      entitled: false,
+      discord_username: 'matt',
+    }),
+  )
+    .toLowerCase()
+    .includes('includes the app'),
+);
+check(
+  'an unmatched Discord membership does not say it covers the app',
+  !describeDiscordLink(access({ discord_access: true }))
+    .toLowerCase()
+    .includes('covers the app'),
 );
 check(
   'an app subscriber is told the Discord is included',
@@ -171,9 +184,16 @@ eq(
   accessSourceCopy(NO_ACCESS),
   '',
 );
+eq(
+  'a Whop-only source does not tell the paywall the app is included',
+  accessSourceCopy(access({ source: 'discord', discord_access: true, entitled: false })),
+  '',
+);
 check(
-  'the discord source explains why nothing is being charged',
-  accessSourceCopy(access({ source: 'discord' })).includes('no second subscription'),
+  'an Apple subscription still says Discord is included',
+  accessSourceCopy(access({ source: 'app', entitled: true, app_access: true })).includes(
+    'includes access to the subscriber Discord',
+  ),
 );
 
 // --- error copy -------------------------------------------------------------
@@ -255,11 +275,14 @@ check(
   "whop-webhook trusts Whop's own valid flag rather than re-deriving it",
   whopFn.includes('if (typeof m.valid === "boolean") return m.valid;'),
 );
-// Whop owns its own role. If we revoked it, a member who cancelled in the app
-// but still pays through Discord would lose access they are paying for.
+// Whop owns its Discord role and does not unlock the app. Our role is the
+// Apple subscription only.
 check(
-  'whop-webhook never touches Discord roles',
-  !whopFn.includes('addAppRole') && !whopFn.includes('removeAppRole'),
+  'whop-webhook never touches Discord roles or the subscription row',
+  !whopFn.includes('addAppRole') &&
+    !whopFn.includes('removeAppRole') &&
+    !whopFn.includes('syncAppRoleForUser') &&
+    !/from\(['"]subscriptions['"]\)/.test(whopFn),
 );
 
 // It grants OUR role, which represents an app-side purchase. Reading the Whop
@@ -283,6 +306,41 @@ check(
   'only OUR role id is ever written',
   discordShared.includes('APP_ROLE_ID') &&
     !/ROLE_ID_(WHOP|OTHER)/.test(discordShared),
+);
+
+const mig = readFileSync(
+  join(__dirname, '..', '..', 'data', 'migrations', 'add_discord_link_and_whop_memberships.sql'),
+  'utf8',
+);
+const hasApp = mig.slice(
+  mig.indexOf('FUNCTION public.has_app_access()'),
+  mig.indexOf('$$;', mig.indexOf('FUNCTION public.has_app_access()')),
+);
+const myFor = mig.slice(
+  mig.indexOf('FUNCTION public.my_access_for'),
+  mig.indexOf('$$;', mig.indexOf('FUNCTION public.my_access_for')),
+);
+check(
+  'has_app_access is the Apple subscription and does not OR Whop',
+  hasApp.includes('app_subscription_access_for') && !hasApp.includes('discord_access_for'),
+);
+check(
+  'my_access_for entitled column is the Apple flag, not an OR',
+  myFor.includes('SELECT a,') && !myFor.includes('(a OR d)') && !myFor.includes('a OR d'),
+);
+
+const entHook = readFileSync(
+  join(__dirname, '..', 'src', 'hooks', 'useEntitlement.ts'),
+  'utf8',
+);
+const entFn = entHook.split('export function useEntitlement')[1] ?? '';
+check(
+  'useEntitlement does not OR discord_access into entitled',
+  !entFn.includes('discord_access') && !entHook.includes('ORs both'),
+);
+check(
+  'useEntitlement still folds in a just-completed Apple purchase',
+  entHook.includes('accessEntitled || (billingReady() && subEntitled)'),
 );
 
 if (failures.length === 0) {

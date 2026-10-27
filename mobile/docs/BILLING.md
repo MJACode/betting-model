@@ -93,10 +93,13 @@ flight; the table remains the durable truth.
 `isEntitled()` checks status **and** period end — an `active` row whose period
 lapsed (missed webhook) does not entitle.
 
-**The subscription is no longer the whole story.** Since 2026-08-30 a Discord
-(Whop) membership entitles too, and the webhook now also syncs the member's
-Discord role. Decide access with `useEntitlement()`, never
-`useSubscription().entitled` — see `docs/DISCORD_LINKING.md`.
+**The Apple subscription is the app.** `useEntitlement()` reads
+`my_access().entitled` (trialing/active, period open) and the receipt just
+purchased. A Whop membership does not unlock the app. The RevenueCat webhook
+also grants our Discord role from that same subscription. See
+`docs/DISCORD_LINKING.md`. Do not flip `BILLING_ENABLED` until
+`add_discord_link_and_whop_memberships.sql` is applied in that environment —
+`fetchAccess()` throws if `my_access()` is missing.
 
 ---
 
@@ -227,8 +230,8 @@ JWT; webhook signature verified over the raw body.
 **1. The paywall is client-side.** `picks` is anon-readable and deliberately so
 — the website and the Claude-mobile workflow (CLAUDE.md §16) both query it with
 the anon key. The gate stops ordinary users, not someone reading the table
-directly. `has_app_access()` exists for real enforcement (it supersedes
-`has_active_subscription()`, which cannot see a Whop-paid member); wiring it up
+directly. `has_app_access()` is the server-side check, and it is the Apple
+subscription only — the same predicate as `my_access().entitled`. Wiring it up
 means first moving the website + Claude-mobile onto a service-role key, then
 revoking anon SELECT on `picks`, then serving signals through a gated RPC. Do
 it in that order or the daily workflow breaks.
@@ -252,7 +255,7 @@ not returns — keep it that way.
 | Rail dispatcher (checkout / manage / restore) | `src/lib/billing.ts` |
 | Entitlement state | `src/hooks/useSubscription.ts` |
 | Paywall (localized prices, restore, redeem) | `src/screens/PaywallScreen.tsx` |
-| **The access gate** (subscription OR Discord) | `src/hooks/useEntitlement.ts` |
+| **The access gate** (Apple subscription only) | `src/hooks/useEntitlement.ts` |
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
