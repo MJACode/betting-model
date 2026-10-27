@@ -10,13 +10,13 @@ reinstall.
 
 Set 2026-08-30 (Matt) to Weekly / Monthly / Annual, mirroring the layout he
 supplied. The six-month "Season Pass" is retired — nothing was live, so there
-is nothing to migrate.
+is nothing to migrate. Display prices locked 2026-10-27 (Matt).
 
 | Plan | Price | Effective/mo | Saving | Trial |
 |---|---|---|---|---|
 | Weekly | $9.99 | $43.29 | — | none |
-| Monthly | $29.99 | $29.99 | — | 7 days |
-| Annual | $199.99 | $16.67 | 44% | 7 days |
+| Monthly | $24.99 | $24.99 | — | 7 days |
+| Annual | $149.99 | $12.50 | 50% | 7 days |
 
 **Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
 free week that renews into another free week for anyone willing to cancel and
@@ -108,13 +108,16 @@ Create three auto-renewable subscriptions in one subscription group:
 
 | Reference | Product ID (suggested) | Price | Duration |
 |---|---|---|---|
-| Weekly | `com.mja.bettingpicks.sub.weekly` | $9.99 | 1 week |
-| Monthly | `com.mja.bettingpicks.sub.monthly` | $29.99 | 1 month |
-| Annual | `com.mja.bettingpicks.sub.annual` | $199.99 | 1 year |
+| Weekly | `com.mja.bettingpicks.premium.weekly` | $9.99 | 1 week |
+| Monthly | `com.mja.bettingpicks.premium.monthly` | $24.99 | 1 month |
+| Annual | `com.mja.bettingpicks.premium.annual` | $149.99 | 1 year |
 
 Add a **7-day free trial** as an introductory offer on **monthly and annual
 only** — not weekly (see the ladder note above). Prices must match
-`billingConfig.ts` (the paywall's fallback display) exactly.
+`billingConfig.ts` (the paywall's fallback display) exactly. The product ids
+are suggestions for that future setup. This change does not create them in
+App Store Connect or RevenueCat, and it does not flip
+`EXPO_PUBLIC_BILLING_ENABLED`.
 
 ### 2. RevenueCat dashboard
 
@@ -140,9 +143,9 @@ Authorization:  <a long random string>
 ```bash
 supabase secrets set REVENUECAT_WEBHOOK_AUTH=<same string>
 # optional exact product→plan pins (the substring heuristic is the fallback):
-supabase secrets set RC_PRODUCT_WEEKLY=com.mja.bettingpicks.sub.weekly \
-  RC_PRODUCT_MONTHLY=com.mja.bettingpicks.sub.monthly \
-  RC_PRODUCT_ANNUAL=com.mja.bettingpicks.sub.annual
+supabase secrets set RC_PRODUCT_WEEKLY=com.mja.bettingpicks.premium.weekly \
+  RC_PRODUCT_MONTHLY=com.mja.bettingpicks.premium.monthly \
+  RC_PRODUCT_ANNUAL=com.mja.bettingpicks.premium.annual
 
 supabase functions deploy revenuecat-webhook --no-verify-jwt
 ```
@@ -256,7 +259,7 @@ not returns — keep it that way.
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (83 assertions) | `scripts/verify_billing.ts` |
+| Verification (88 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,
