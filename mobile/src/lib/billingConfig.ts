@@ -96,8 +96,8 @@ export interface Plan {
  * own localized price string whenever it can fetch one; these are the fallback
  * for the moment before that arrives. If you change a price in App Store
  * Connect, change it here too or the fallback quotes a number the user is not
- * charged. Suggested product ids (not created here):
- * com.mja.bettingpicks.premium.weekly / .monthly / .annual.
+ * charged. Product ids are documented in STORE_PRODUCT_IDS. This repo does
+ * not create them in App Store Connect or RevenueCat.
  */
 export const PLANS: readonly Plan[] = [
   {
@@ -137,6 +137,20 @@ export const TRIAL_DAYS = 7;
 
 /** Plan selected when the paywall opens. Annual, Matt 2026-10-27. */
 export const DEFAULT_PLAN_KEY: PlanKey = 'annual';
+
+/**
+ * Suggested App Store product ids. Not created by this repo.
+ * Weekly is also the early-unlock product: it has no trial, so buying it
+ * charges now, and its id is not the monthly or annual trial id.
+ */
+export const STORE_PRODUCT_IDS: Record<PlanKey, string> = {
+  weekly: 'com.mja.bettingpicks.premium.weekly',
+  monthly: 'com.mja.bettingpicks.premium.monthly',
+  annual: 'com.mja.bettingpicks.premium.annual',
+};
+
+/** Immediate-pay plan used to leave a monthly or annual trial. */
+export const EARLY_UNLOCK_PLAN_KEY: PlanKey = 'weekly';
 
 /** Where Stripe Checkout sends the browser back to. */
 export const BILLING_RETURN_URL = 'signalbase://billing-return';

@@ -17,8 +17,12 @@ import {
   discordConfigured,
   removeAppRole,
 } from "./discord.ts";
+import { subscriptionGrantsDiscordRole } from "./discordRole.ts";
 
-/** Statuses that entitle. Mirrors mobile/src/lib/billingHelpers.ts::isEntitled. */
+/**
+ * Statuses that entitle the APP. Mirrors mobile/src/lib/billingHelpers.ts::isEntitled.
+ * The Discord role is stricter: subscriptionGrantsDiscordRole, active only.
+ */
 const ENTITLING = new Set(["trialing", "active"]);
 
 /**
@@ -50,7 +54,9 @@ export interface RoleSyncResult {
 }
 
 /**
- * Make this user's Discord role match their APP subscription.
+ * Make this user's Discord role match a paid APP subscription.
+ *
+ * `active` only. A `trialing` row keeps app access and does not get the role.
  *
  * Deliberately reads only `subscriptions`: this grants and revokes OUR role,
  * which exists to represent an app-side purchase. A Whop member's access rides
@@ -92,7 +98,8 @@ export async function syncAppRoleForUser(
     .eq("user_id", userId)
     .maybeSingle();
 
-  const shouldHold = subscriptionEntitles(sub);
+  // Trial keeps the app. It does not receive the paid Discord role.
+  const shouldHold = subscriptionGrantsDiscordRole(sub);
   const holds = Boolean(link.app_role_granted);
 
   // Already in the desired state. Re-asserting is harmless (both Discord calls

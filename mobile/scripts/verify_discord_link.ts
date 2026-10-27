@@ -28,6 +28,7 @@ import {
   DISCORD_REDIRECT_URL,
   discordLinkReady,
 } from '../src/lib/discordConfig';
+import { subscriptionGrantsDiscordRole } from '../../supabase/functions/_shared/discordRole';
 
 let passed = 0;
 const failures: string[] = [];
@@ -222,7 +223,44 @@ const inviteLeaks = walkSrc(join(__dirname, '..', 'src')).filter((p) => {
   const text = readFileSync(p, 'utf8');
   return text.includes('discord.gg') || text.includes('DISCORD_URL');
 });
-check('invite url is only in discordHelpers', inviteLeaks.length === 0, inviteLeaks.join('; '));
+check('invite url is only in discordHelpers', inviteLeaks.length === 0);
+
+const NOW = Date.parse('2026-09-01T00:00:00Z');
+check(
+  'a trial does not get the paid discord role',
+  subscriptionGrantsDiscordRole(
+    { status: 'trialing', current_period_end: '2026-09-08T00:00:00Z' },
+    NOW,
+  ) === false,
+);
+check(
+  'an active paid row gets the discord role',
+  subscriptionGrantsDiscordRole(
+    { status: 'active', current_period_end: '2026-10-01T00:00:00Z' },
+    NOW,
+  ) === true,
+);
+check(
+  'an ended active row does not keep the discord role',
+  subscriptionGrantsDiscordRole(
+    { status: 'active', current_period_end: '2026-08-01T00:00:00Z' },
+    NOW,
+  ) === false,
+);
+check('no subscription row does not get the discord role', subscriptionGrantsDiscordRole(null, NOW) === false);
+check(
+  'a just-paid active row with no period end still gets the role',
+  subscriptionGrantsDiscordRole({ status: 'active', current_period_end: null }, NOW) === true,
+);
+
+const modalSrc = readFileSync(join(__dirname, '..', 'src', 'components', 'DiscordLinkModal.tsx'), 'utf8');
+check(
+  'connect discord during a trial does not open the invite',
+  modalSrc.includes("subscription.status === 'active'") &&
+    modalSrc.includes('discordInviteIfPaid(applePaid)') &&
+    modalSrc.includes('onPress={onConnect}') &&
+    modalSrc.includes('const linked = await link()'),
+);
 
 // --- source-level guards ----------------------------------------------------
 const libSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'discord.ts'), 'utf8');
@@ -296,6 +334,11 @@ check(
   'the role sync reads only the app subscription',
   shared.includes('.from("subscriptions")') &&
     !shared.includes('.from("whop_memberships")'),
+);
+check(
+  'the role sync grants only an active subscription',
+  shared.includes('subscriptionGrantsDiscordRole(sub)') &&
+    !shared.includes('shouldHold = subscriptionEntitles'),
 );
 check(
   'the role sync never throws into a webhook response',

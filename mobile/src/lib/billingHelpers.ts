@@ -1,4 +1,12 @@
-import { DEFAULT_PLAN_KEY, PLANS, TRIAL_DAYS, type Plan, type PlanKey } from './billingConfig';
+import {
+  DEFAULT_PLAN_KEY,
+  EARLY_UNLOCK_PLAN_KEY,
+  PLANS,
+  STORE_PRODUCT_IDS,
+  TRIAL_DAYS,
+  type Plan,
+  type PlanKey,
+} from './billingConfig';
 
 /**
  * Pure billing helpers — no React, no react-native, no Supabase, so
@@ -120,6 +128,58 @@ export function describeSubscription(
     return when ? `${planName} — ends ${when}.` : `${planName} — cancels at period end.`;
   }
   return when ? `${planName} — renews ${when}.` : `${planName} — active.`;
+}
+
+/**
+ * Shown when Unlock Discord early would purchase the product the user is
+ * already trialing. The store sheet must not open.
+ */
+export const SAME_PLAN_PURCHASE_MESSAGE =
+  'Ending the trial would buy the same App Store product you are already trialing. That purchase was refused.';
+
+export interface EarlyUnlockTarget {
+  ok: true;
+  plan: PlanKey;
+  productId: string;
+}
+
+export interface EarlyUnlockRefusal {
+  ok: false;
+  reason: string;
+}
+
+/**
+ * The product Unlock Discord early purchases.
+ *
+ * Monthly and annual trials convert by buying Weekly
+ * (`com.mja.bettingpicks.premium.weekly`), which has no free trial. That id
+ * is not the id they are trialing. If it is the same id, the purchase is
+ * refused — StoreKit must not be asked to buy the current trial again.
+ */
+export function earlyUnlockTarget(trialingPlan: PlanKey): EarlyUnlockTarget | EarlyUnlockRefusal {
+  const trialProductId = STORE_PRODUCT_IDS[trialingPlan];
+  const plan = EARLY_UNLOCK_PLAN_KEY;
+  const productId = STORE_PRODUCT_IDS[plan];
+  if (trialProductId === productId) {
+    return { ok: false, reason: SAME_PLAN_PURCHASE_MESSAGE };
+  }
+  return { ok: true, plan, productId };
+}
+
+/** Settings line under a trial. Names the convert price, not the trial price. */
+export function earlyUnlockLine(trialingPlan: PlanKey): string {
+  const target = earlyUnlockTarget(trialingPlan);
+  if (!target.ok) {
+    return 'This trial cannot be ended by buying the same plan. No invite is shown until a paid plan is active.';
+  }
+  const convert = planForKey(target.plan);
+  return `Ends the trial now. ${formatPrice(convert.price)} today on ${convert.name}. No invite is shown until that plan is active.`;
+}
+
+function planForKey(key: PlanKey): Plan {
+  const plan = PLANS.find((p) => p.key === key);
+  if (!plan) throw new Error(`Unknown plan: ${key}`);
+  return plan;
 }
 
 /** The plan the paywall selects on open. */

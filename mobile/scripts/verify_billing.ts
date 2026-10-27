@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import {
   defaultPlan,
   describeSubscription,
+  earlyUnlockLine,
+  earlyUnlockTarget,
   formatPerMonth,
   formatPerWeek,
   formatPrice,
@@ -34,7 +36,9 @@ import {
   BILLING_ENABLED,
   BILLING_RAIL,
   DEFAULT_PLAN_KEY,
+  EARLY_UNLOCK_PLAN_KEY,
   PLANS,
+  STORE_PRODUCT_IDS,
   TRIAL_DAYS,
   billingReady,
   planFor,
@@ -218,6 +222,48 @@ const discordConfigSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'disco
 check('client config has no Whop checkout URL', !discordConfigSrc.includes('WHOP_CHECKOUT_URL') && !discordConfigSrc.includes('whop.com') && !discordConfigSrc.includes('EXPO_PUBLIC_WHOP'));
 check('trial discord button is Unlock Discord early', settingsSrc.includes('Unlock Discord early') && !settingsSrc.includes('See plan details'));
 check('unlock discord early calls the store, not the paywall', settingsSrc.includes('endTrialEarly') && settingsSrc.includes('onUnlockDiscord'));
+check('trial card names the weekly convert price', settingsSrc.includes('earlyUnlockLine'));
+const billingSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
+const earlyFn = billingSrc.split('export async function endTrialEarly')[1]?.split('export async function')[0] ?? '';
+check(
+  'endTrialEarly buys the convert plan, not the trial plan',
+  earlyFn.includes('earlyUnlockTarget(trialingPlan)') &&
+    earlyFn.includes('if (!target.ok) throw new Error(target.reason)') &&
+    earlyFn.includes('startCheckout(target.plan') &&
+    !earlyFn.includes('startCheckout(trialingPlan'),
+);
+const iapSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'iap.ts'), 'utf8');
+check(
+  'the store sheet refuses the same product id',
+  iapSrc.includes('SAME_PLAN_PURCHASE_MESSAGE') && iapSrc.includes('forbidProductId'),
+);
+eq('early unlock plan is weekly', EARLY_UNLOCK_PLAN_KEY, 'weekly');
+eq('annual trial converts to weekly', earlyUnlockTarget('annual'), {
+  ok: true,
+  plan: 'weekly',
+  productId: 'com.mja.bettingpicks.premium.weekly',
+});
+eq('monthly trial converts to weekly', earlyUnlockTarget('monthly'), {
+  ok: true,
+  plan: 'weekly',
+  productId: STORE_PRODUCT_IDS.weekly,
+});
+const weeklyUnlock = earlyUnlockTarget('weekly');
+check(
+  'weekly trial is refused rather than rebought',
+  weeklyUnlock.ok === false && weeklyUnlock.reason.includes('same App Store product'),
+);
+check(
+  'convert product id differs from the trial ids',
+  STORE_PRODUCT_IDS.weekly !== STORE_PRODUCT_IDS.monthly &&
+    STORE_PRODUCT_IDS.weekly !== STORE_PRODUCT_IDS.annual,
+);
+eq(
+  'trial line names weekly price, not the annual price',
+  earlyUnlockLine('annual'),
+  'Ends the trial now. $9.99 today on Weekly. No invite is shown until that plan is active.',
+);
+check('paid join waits for an active row', settingsSrc.includes("subscription.status === 'active'"));
 check(
   'whop soft copy is connect-only',
   settingsSrc.includes('Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.') &&
@@ -447,7 +493,6 @@ check('webhook enforces a timestamp tolerance', hook.includes('TOLERANCE_SEC'));
 // The IAP file must never import the native module statically — an OTA bundle
 // doing so crashes on launch on binaries that predate the rebuild. Only a
 // dynamic require inside loadPurchases() (and type-only imports) are allowed.
-const iapSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'iap.ts'), 'utf8');
 check(
   'iap.ts has no static value import of react-native-purchases',
   !/^import\s+(?!type\b)[^;]*from\s+'react-native-purchases'/m.test(iapSrc),

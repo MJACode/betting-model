@@ -25,9 +25,20 @@ Annual say Start 7-day free trial. Neither the paywall nor Settings shows a Whop
 
 When billing is on, a free member keeps Record and the other tabs soft-lock
 behind Unlock with Premium. A trial unlocks the app and not Discord. Discord's
-invite is shown only after a paid entitlement. The paywall opens right after
-the first sign-in, and again from Unlock or a locked tab. Closing it returns
-to that free shell.
+invite is shown only after the subscriptions row is `active`, not `trialing`.
+The paywall opens right after the first sign-in, and again from Unlock or a
+locked tab. Closing it returns to that free shell.
+
+**Unlock Discord early does not repurchase the trial.** Monthly and annual
+trials convert by purchasing Weekly, `com.mja.bettingpicks.premium.weekly`
+($9.99, no trial). That product id is not
+`com.mja.bettingpicks.premium.monthly` or `.annual`. If the trialing product
+id is already the convert product, the app refuses and shows an error. The
+store sheet does not open. App Store Connect and RevenueCat must list
+`com.mja.bettingpicks.premium.weekly` (and the monthly and annual ids) before
+that sheet can complete. This repo does not create those products. StoreKit
+sandbox verification is a device check and cannot be run here. Join Discord
+appears only after a refresh shows status `active`.
 
 **Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
 free week that renews into another free week for anyone willing to cancel and
@@ -270,7 +281,7 @@ not returns — keep it that way.
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (122 assertions) | `scripts/verify_billing.ts` |
+| Verification (132 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,

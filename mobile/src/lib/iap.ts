@@ -6,10 +6,12 @@ import {
   billingReady,
   type PlanKey,
 } from './billingConfig';
+import { SAME_PLAN_PURCHASE_MESSAGE } from './billingHelpers';
 import {
   customerInfoEntitled,
   fallbackManagementUrl,
   packageForPlan,
+  planForProductId,
   type MinimalCustomerInfo,
   type MinimalPackage,
 } from './iapHelpers';
@@ -129,6 +131,7 @@ export interface IapPurchaseResult {
 export async function purchasePlan(
   plan: PlanKey,
   userId: string,
+  opts?: { forbidProductId?: string },
 ): Promise<IapPurchaseResult> {
   if (!billingReady()) {
     throw new Error('Billing is not enabled in this build.');
@@ -138,6 +141,14 @@ export async function purchasePlan(
   const pkg = packageForPlan(offerings.current?.availablePackages ?? [], plan);
   if (!pkg) {
     throw new Error('That plan is not available in the store yet.');
+  }
+  const forbidden = opts?.forbidProductId?.toLowerCase();
+  const buying = pkg.product.identifier.toLowerCase();
+  const sameId = Boolean(forbidden) && buying === forbidden;
+  const forbiddenPlan = forbidden ? planForProductId(forbidden) : null;
+  const samePlan = Boolean(forbiddenPlan) && planForProductId(buying) === forbiddenPlan;
+  if (sameId || samePlan) {
+    throw new Error(SAME_PLAN_PURCHASE_MESSAGE);
   }
   try {
     const { customerInfo } = await purchases.purchasePackage(pkg);

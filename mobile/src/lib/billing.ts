@@ -5,9 +5,11 @@ import { errorText } from './errors';
 import {
   BILLING_RAIL,
   BILLING_RETURN_URL,
+  STORE_PRODUCT_IDS,
   billingReady,
   type PlanKey,
 } from './billingConfig';
+import { SAME_PLAN_PURCHASE_MESSAGE, earlyUnlockTarget } from './billingHelpers';
 import {
   openIapManagement,
   presentRedeemCodeSheet,
@@ -68,11 +70,15 @@ export interface CheckoutResult {
 export async function startCheckout(
   plan: PlanKey,
   userId: string,
+  opts?: { forbidProductId?: string },
 ): Promise<CheckoutResult> {
   assertBillingReady();
+  if (opts?.forbidProductId && STORE_PRODUCT_IDS[plan] === opts.forbidProductId) {
+    throw new Error(SAME_PLAN_PURCHASE_MESSAGE);
+  }
 
   if (BILLING_RAIL === 'iap') {
-    const result = await purchasePlan(plan, userId);
+    const result = await purchasePlan(plan, userId, opts);
     return {
       outcome: result.outcome === 'purchased' ? 'completed' : 'dismissed',
       entitledNow: result.entitled,
@@ -101,16 +107,21 @@ export async function startCheckout(
 }
 
 /**
- * End the free trial now and start the paid plan.
+ * End the free trial by purchasing the convert product, not the plan the
+ * user is already trialing.
  *
- * This is the store purchase for the plan they are already trialing, not the
- * paywall. A customer in that plan's introductory trial is not eligible for
- * another one, so the StoreKit / Play sheet bills the plan price and the
- * trial ends. The RevenueCat webhook writes status `active` when period_type
- * is not TRIAL. Discord stays locked until that row is active.
+ * Monthly and annual trials buy Weekly (`com.mja.bettingpicks.premium.weekly`),
+ * which has no trial, so the store charges that price now. If that product id
+ * is the one they are already trialing, this throws and the store sheet does
+ * not open. Discord's invite stays hidden until a later read shows the
+ * subscriptions row as `active`, not `trialing`.
  */
-export async function endTrialEarly(plan: PlanKey, userId: string): Promise<CheckoutResult> {
-  return startCheckout(plan, userId);
+export async function endTrialEarly(trialingPlan: PlanKey, userId: string): Promise<CheckoutResult> {
+  const target = earlyUnlockTarget(trialingPlan);
+  if (!target.ok) throw new Error(target.reason);
+  return startCheckout(target.plan, userId, {
+    forbidProductId: STORE_PRODUCT_IDS[trialingPlan],
+  });
 }
 
 /**

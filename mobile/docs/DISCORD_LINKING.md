@@ -83,7 +83,7 @@ app: "Connect Discord"
         /users/@me                          → discord id + verified email
         PUT /guilds/{id}/members/{user}     → one-tap join (guilds.join scope)
         upsert discord_links
-        syncAppRoleForUser()                → grant our role if they're subscribed
+        syncAppRoleForUser()                → grant our role only if status is active (not trialing)
         backfill discord id onto a Whop membership bought with the same email
   → app reads my_access()
 ```

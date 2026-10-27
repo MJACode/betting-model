@@ -52,7 +52,7 @@ import { discordLinkReady } from '@/lib/discordConfig';
 import { describeDiscordLink, discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
 import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, endTrialEarly, openManageSubscription, restorePurchases } from '@/lib/billing';
-import { formatPrice, isEntitled, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
+import { earlyUnlockLine, isEntitled, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
@@ -690,7 +690,7 @@ export function SettingsScreen() {
                   ? 'Your Discord membership already includes the subscriber Discord.'
                   : planStatus.badge === 'Trial'
                     ? trialPlan
-                      ? `Ends the ${trialPlan.name} trial. ${formatPrice(trialPlan.price)} today. No invite is shown until then.`
+                      ? earlyUnlockLine(trialPlan.key)
                       : 'Unlocks when your paid plan starts. End the trial to join now. No invite is shown until then.'
                     : 'Included with a paid plan. No invite is shown until then.'}
             </Text>
