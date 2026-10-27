@@ -35,7 +35,16 @@ not end an intro by buying that same product id. A monthly trial purchases
 `com.mja.bettingpicks.premium.annual.notrial`. Those ids have no free trial.
 Each must be in the same App Store subscription group as its trial sibling
 (`…premium.monthly` and `…premium.annual`) so the store replaces that
-subscription instead of starting a second one. Weekly is not the convert
+subscription instead of starting a second one. In that group, rank each
+`.notrial` product at the same level as its trial sibling, or higher.
+App Store Connect level 1 is the highest rank. A higher rank is an upgrade:
+Apple refunds any prorated amount of the current subscription and the new
+one starts immediately. The same level is a crossgrade. These siblings use
+the same duration (1 month with 1 month, 1 year with 1 year), and a
+same-duration crossgrade also starts immediately. A lower rank is a
+downgrade: Apple waits until the next renewal date, so the trial would keep
+running. A same-level switch to a different duration also waits until the
+next renewal. Weekly is not the convert
 product. If the purchase would switch tiers or buy the intro id again, the
 app shows an error and does not open the store sheet. App Store Connect and
 RevenueCat must list the two `.notrial` ids. Attach the intro product as the
@@ -46,8 +55,12 @@ appears only after a refresh shows status `active`.
 
 On the Stripe rail, Unlock Discord early sets `trial_end=now` on the
 subscription the user already has. It does not open a second Checkout. A
-webhook for a different live subscription id is cancelled so it cannot bill
-beside the trial.
+webhook for a different live subscription id cancels that subscription only
+after Stripe still reports the stored id as `trialing` or `active`. The
+cancel sends `prorate=true` and `invoice_now=true`, so unused time is
+credited on a final invoice. A stored id that Stripe has already canceled,
+or that Stripe no longer has, is a stale row: the incoming subscription is
+kept and the new one is not cancelled.
 
 **Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
 free week that renews into another free week for anyone willing to cancel and
@@ -148,7 +161,9 @@ no-trial sibling belong in the **same subscription group**.
 
 Add a **7-day free trial** as an introductory offer on **monthly and annual
 only** — not weekly, and not the `.notrial` siblings (see the ladder note
-above). Prices must match `billingConfig.ts` (the paywall's fallback display)
+above). Put each `.notrial` product on the same subscription-group level as
+its trial sibling, or on a higher level (a smaller level number). Level 1
+is the highest. A lower level waits until renewal. Prices must match `billingConfig.ts` (the paywall's fallback display)
 exactly. The product ids are suggestions for that future setup. This change
 does not create them in App Store Connect or RevenueCat, and it does not flip
 `EXPO_PUBLIC_BILLING_ENABLED`.
@@ -297,7 +312,7 @@ not returns — keep it that way.
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (143 assertions) | `scripts/verify_billing.ts` |
+| Verification (147 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,

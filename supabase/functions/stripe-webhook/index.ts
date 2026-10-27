@@ -12,6 +12,10 @@
 //   STRIPE_WEBHOOK_SECRET   whsec_… (from the Stripe dashboard endpoint)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import {
+  secondSubscriptionAction,
+  type StripeSubscriptionSnapshot,
+} from "../_shared/stripeDuplicateSub.ts";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 const STRIPE_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
@@ -108,15 +112,52 @@ async function stripeGet(path: string): Promise<any> {
   return data;
 }
 
-/** Cancel immediately. Used when a second live subscription arrives. */
-async function stripeDelete(path: string): Promise<void> {
-  const res = await fetch(`${STRIPE_API}${path}`, {
-    method: "DELETE",
+/**
+ * Read the subscription we already stored. A 404 / resource_missing means
+ * the row is stale. Any other Stripe error is thrown so we neither cancel
+ * the incoming subscription nor overwrite the row.
+ */
+async function readStoredSubscription(
+  subscriptionId: string,
+): Promise<StripeSubscriptionSnapshot | null> {
+  const res = await fetch(`${STRIPE_API}/subscriptions/${subscriptionId}`, {
     headers: { Authorization: `Bearer ${STRIPE_KEY}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404 || data?.error?.code === "resource_missing") return null;
+  if (!res.ok) {
+    throw new Error(
+      data?.error?.message ?? `Stripe /subscriptions/${subscriptionId} → ${res.status}`,
+    );
+  }
+  return { id: data.id, status: data.status ?? null };
+}
+
+/**
+ * Cancel a second live subscription immediately.
+ *
+ * `prorate` credits unused time through the period end. `invoice_now` puts
+ * that credit on a final invoice. Both default to false, and a DELETE with
+ * neither drops pending prorations. Stripe's cancel reference:
+ * https://docs.stripe.com/api/subscriptions/cancel
+ */
+async function stripeCancelDuplicate(subscriptionId: string): Promise<void> {
+  const body = new URLSearchParams();
+  body.set("prorate", "true");
+  body.set("invoice_now", "true");
+  const res = await fetch(`${STRIPE_API}/subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${STRIPE_KEY}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
   });
   if (res.ok) return;
   const data = await res.json().catch(() => ({}));
-  throw new Error(data?.error?.message ?? `Stripe ${path} → ${res.status}`);
+  throw new Error(
+    data?.error?.message ?? `Stripe cancel ${subscriptionId} → ${res.status}`,
+  );
 }
 
 /**
@@ -158,27 +199,32 @@ async function applySubscription(sub: any): Promise<string> {
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
 
   // One row per user. A second live Stripe subscription must not sit beside
-  // the trial. Cancel the new one and keep the row on the subscription we
-  // already have. Ending a trial updates that same id, so it is not cancelled.
+  // one Stripe still reports as live. The row alone is not that proof: a
+  // missed delete leaves it saying active. Read the stored id from Stripe
+  // first. Ending a trial updates that same id, so it is not cancelled.
   const { data: existing } = await admin
     .from("subscriptions")
     .select("stripe_subscription_id, status")
     .eq("user_id", userId)
     .maybeSingle();
-  const live = existing?.status === "trialing" || existing?.status === "active";
-  const incomingLive = sub.status === "trialing" || sub.status === "active";
   if (
-    live &&
     existing?.stripe_subscription_id &&
-    existing.stripe_subscription_id !== sub.id
+    existing.stripe_subscription_id !== sub.id &&
+    (existing.status === "trialing" || existing.status === "active")
   ) {
-    // A cancel/update for the extra subscription must not replace the row.
-    // Ending the trial updates the same id, so that event still upserts.
-    if (incomingLive) {
-      await stripeDelete(`/subscriptions/${sub.id}`);
+    const storedInStripe = await readStoredSubscription(existing.stripe_subscription_id);
+    const action = secondSubscriptionAction(
+      existing,
+      { id: sub.id, status: sub.status },
+      storedInStripe,
+    );
+    if (action === "cancel_incoming") {
+      await stripeCancelDuplicate(sub.id);
       return `${userId} second subscription ${sub.id} cancelled`;
     }
-    return `${userId} second subscription ${sub.id} ignored`;
+    if (action === "ignore") {
+      return `${userId} second subscription ${sub.id} ignored`;
+    }
   }
 
   const { error } = await admin.from("subscriptions").upsert(

@@ -11,6 +11,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { secondSubscriptionAction } from '../../supabase/functions/_shared/stripeDuplicateSub';
+
 import {
   defaultPlan,
   describeSubscription,
@@ -257,7 +259,7 @@ eq('annual trial converts to the annual no-trial id', earlyUnlockTarget('annual'
 eq('monthly trial converts to the monthly no-trial id', earlyUnlockTarget('monthly'), {
   ok: true,
   plan: 'monthly',
-  productId: EARLY_UNLOCK_PRODUCT_IDS.monthly,
+  productId: 'com.mja.bettingpicks.premium.monthly.notrial',
   replacesProductId: STORE_PRODUCT_IDS.monthly,
 });
 const weeklyUnlock = earlyUnlockTarget('weekly');
@@ -554,8 +556,51 @@ check('webhook verifies the Stripe signature', hook.includes('verifySignature(ra
 check('webhook signs over the raw body', hook.includes('await req.text()'));
 check('webhook enforces a timestamp tolerance', hook.includes('TOLERANCE_SEC'));
 check(
-  'a second live stripe subscription is cancelled',
-  hook.includes('second subscription') && hook.includes('stripeDelete'),
+  'a second live stripe subscription is cancelled only after Stripe confirms the stored one',
+  hook.includes('readStoredSubscription(existing.stripe_subscription_id)') &&
+    hook.includes('secondSubscriptionAction') &&
+    hook.indexOf('readStoredSubscription(existing.stripe_subscription_id)') <
+      hook.indexOf('stripeCancelDuplicate(sub.id)') &&
+    hook.includes('prorate') &&
+    hook.includes('invoice_now') &&
+    hook.includes('resource_missing') &&
+    !hook.includes('async function stripeDelete'),
+);
+eq(
+  'a stale row does not cancel the incoming subscription',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'active' },
+    { id: 'sub_new', status: 'active' },
+    { id: 'sub_old', status: 'canceled' },
+  ),
+  'apply',
+);
+eq(
+  'a missing Stripe subscription is a stale row',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'trialing' },
+    { id: 'sub_new', status: 'active' },
+    null,
+  ),
+  'apply',
+);
+eq(
+  'a subscription Stripe still reports as live cancels the other live one',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'trialing' },
+    { id: 'sub_new', status: 'active' },
+    { id: 'sub_old', status: 'trialing' },
+  ),
+  'cancel_incoming',
+);
+eq(
+  'the same subscription id is applied',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'trialing' },
+    { id: 'sub_old', status: 'active' },
+    null,
+  ),
+  'apply',
 );
 
 // The IAP file must never import the native module statically — an OTA bundle
