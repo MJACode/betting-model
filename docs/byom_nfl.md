@@ -293,8 +293,11 @@ and the prompt says that model will be overwritten. One model’s
 backtest can fail without clearing the rest of the list. An empty
 filter is not graded. The backtest’s left-out count is not parsed.
 Price and line filters are not on screen. There is no position chip,
-no line-range filter, and no EV. A saved game market or one of those
-twelve props shows units. An empty market list does not.
+no line-range filter, and no EV. A saved game market shows units. A
+prop shows units only when the filter is exactly that one market and
+Over or Under is set. Anytime TD shows units only for Yes, which is
+over. A mix, two props, a prop with no side, and an empty market list
+do not.
 There is no recommended stake. `package.json` is unchanged. Sign-in
 is unchanged. NBA props are not in this builder.
 

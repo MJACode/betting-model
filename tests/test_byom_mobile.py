@@ -202,10 +202,29 @@ if (seasons[0] !== 2020 || seasons[seasons.length - 1] !== 2026 || seasons.lengt
 if (!isWholeSeason({})) throw new Error('empty');
 if (isWholeSeason({ markets: ['h2h'] })) throw new Error('market is not the whole season');
 if (showsUnits({})) throw new Error('empty shows units');
-if (!showsUnits({ markets: ['player_pass_yds'] })) throw new Error('prop hides units');
-if (!showsUnits({ markets: ['h2h', 'player_pass_yds'] })) throw new Error('mix hides units');
+if (showsUnits({ markets: ['player_pass_yds'] })) throw new Error('unsided prop shows units');
+if (showsUnits({ markets: ['h2h', 'player_pass_yds'] })) throw new Error('mix shows units');
+if (showsUnits({ markets: ['h2h', 'player_pass_yds'], prop_side: 'over' })) {
+  throw new Error('sided mix shows units');
+}
+if (showsUnits({ markets: ['player_pass_yds', 'player_rush_yds'], prop_side: 'over' })) {
+  throw new Error('two props show units');
+}
 if (showsUnits({ markets: ['not_a_market'] })) throw new Error('unknown shows units');
+if (showsUnits({ markets: ['player_anytime_td'] })) throw new Error('unsided atd shows units');
+if (showsUnits({ markets: ['player_anytime_td'], prop_side: 'under' })) {
+  throw new Error('atd under shows units');
+}
 if (!showsUnits({ markets: ['h2h', 'spreads'] })) throw new Error('game markets hide units');
+if (!showsUnits({ markets: ['h2h'] })) throw new Error('moneyline hides units');
+if (!showsUnits({ markets: ['totals'], side: 'over' })) throw new Error('total hides units');
+if (!showsUnits({ markets: ['player_pass_yds'], prop_side: 'over' })) throw new Error('over hides units');
+if (!showsUnits({ markets: ['player_pass_yds'], prop_side: 'under', side: 'away' })) {
+  throw new Error('under hides units');
+}
+if (!showsUnits({ markets: ['player_anytime_td'], prop_side: 'over' })) {
+  throw new Error('atd over hides units');
+}
 if (marketLabel({}) !== '\u2014') throw new Error('empty label');
 if (marketLabel({ markets: ['h2h', 'player_pass_yds'] }) !== 'Moneyline \u00b7 Passing yards') {
   throw new Error('label ' + marketLabel({ markets: ['h2h', 'player_pass_yds'] }));
