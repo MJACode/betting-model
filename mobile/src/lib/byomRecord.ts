@@ -21,22 +21,74 @@ export type ByomSeasonScope = 'all' | 'current';
 
 export type ByomGameMarket = 'h2h' | 'spreads' | 'totals';
 
+/** Odds API keys graded into byom_prop_facts. Same twelve, same order as the builder. */
+export type ByomPropMarket =
+  | 'player_pass_yds'
+  | 'player_pass_tds'
+  | 'player_pass_attempts'
+  | 'player_pass_completions'
+  | 'player_rush_yds'
+  | 'player_rush_attempts'
+  | 'player_reception_yds'
+  | 'player_receptions'
+  | 'player_rush_reception_yds'
+  | 'player_anytime_td'
+  | 'player_tackles_assists'
+  | 'player_sacks';
+
+export type ByomMarket = ByomGameMarket | ByomPropMarket;
+
+export type ByomPropSide = 'over' | 'under';
+
+/** Yes on anytime TD is this market's over leg. */
+export const ANYTIME_TD_MARKET: ByomPropMarket = 'player_anytime_td';
+
+export const NFL_PROP_MARKETS: readonly { value: ByomPropMarket; label: string }[] = [
+  { value: 'player_pass_yds', label: 'Passing yards' },
+  { value: 'player_pass_tds', label: 'Passing TDs' },
+  { value: 'player_pass_attempts', label: 'Pass attempts' },
+  { value: 'player_pass_completions', label: 'Completions' },
+  { value: 'player_rush_yds', label: 'Rushing yards' },
+  { value: 'player_rush_attempts', label: 'Rush attempts' },
+  { value: 'player_reception_yds', label: 'Receiving yards' },
+  { value: 'player_receptions', label: 'Receptions' },
+  { value: 'player_rush_reception_yds', label: 'Rush + rec yards' },
+  { value: 'player_anytime_td', label: 'Anytime TD' },
+  { value: 'player_tackles_assists', label: 'Tackles + assists' },
+  { value: 'player_sacks', label: 'Sacks' },
+];
+
+export function propMarketLabel(market: string | null | undefined): string | null {
+  if (market == null) return null;
+  for (const row of NFL_PROP_MARKETS) {
+    if (row.value === market) return row.label;
+  }
+  return null;
+}
+
+export function isPropMarket(market: string | null | undefined): market is ByomPropMarket {
+  return propMarketLabel(market) != null;
+}
+
 export interface ByomDraft {
-  market: ByomGameMarket;
-  /** Home or away on a moneyline or spread. Over or under on a total. */
+  market: ByomMarket;
+  /** Home or away on a moneyline, a spread, or a prop player's team. Over or under on a total. */
   side: 'home' | 'away' | 'over' | 'under' | null;
   role: 'favorite' | 'underdog' | 'pickem' | null;
   /** null is any game. true is primetime only. false is the other kickoffs. */
   primetime: boolean | null;
+  /** Over or under on a prop. Yes on anytime TD is over. Null on a game market. */
+  propSide: ByomPropSide | null;
 }
 
 /** Matt, 2026-10-24: require a side or a favorite/underdog choice. */
 export const TEAM_OR_ROLE_REQUIRED = 'Choose a team, or a favorite or underdog.';
 export const TOTAL_SIDE_REQUIRED = 'Choose over or under.';
+export const ANYTIME_YES_REQUIRED = 'Choose yes.';
 
 /** The side values that belong on this market. Anything else is no choice. */
 export function sideForMarket(
-  market: ByomGameMarket,
+  market: ByomMarket,
   side: ByomDraft['side'],
 ): ByomDraft['side'] {
   if (market === 'totals') {
@@ -46,11 +98,53 @@ export function sideForMarket(
 }
 
 /**
+ * Prop side after a market change. Leaving Anytime TD for another prop
+ * clears Over, because Yes was stored as over and was not a choice.
+ * A chosen Over or Under stays when moving between the other props.
+ * Anytime TD itself is always over.
+ */
+export function propSideAfterMarketChange(
+  previous: ByomMarket | null,
+  next: ByomMarket,
+  current: ByomPropSide | null,
+): ByomPropSide | null {
+  if (previous === ANYTIME_TD_MARKET && isPropMarket(next) && next !== ANYTIME_TD_MARKET) {
+    return null;
+  }
+  return propSideForMarket(next, current);
+}
+
+/** Over or under on a prop. Anytime TD is Yes, which is the over leg. */
+export function propSideForMarket(
+  market: ByomMarket,
+  propSide: ByomDraft['propSide'],
+): ByomDraft['propSide'] {
+  if (!isPropMarket(market)) return null;
+  if (market === ANYTIME_TD_MARKET) return 'over';
+  return propSide === 'over' || propSide === 'under' ? propSide : null;
+}
+
+export function betTypeLabel(market: ByomMarket): string {
+  if (market === 'h2h' || market === 'spreads' || market === 'totals') {
+    return MARKET_LABEL[market];
+  }
+  return propMarketLabel(market) ?? '—';
+}
+
+/**
  * Moneyline and spread need a team or a favorite, underdog, or pick'em.
  * A total needs over or under. Team Any with a favorite or underdog set
  * is allowed. A missing choice is not both sides.
  */
 export function saveBlockReason(draft: ByomDraft): string | null {
+  if (isPropMarket(draft.market)) {
+    if (draft.market === ANYTIME_TD_MARKET) {
+      if (draft.propSide !== 'over') return ANYTIME_YES_REQUIRED;
+      return null;
+    }
+    if (draft.propSide !== 'over' && draft.propSide !== 'under') return TOTAL_SIDE_REQUIRED;
+    return null;
+  }
   if (draft.market === 'totals') {
     if (draft.side !== 'over' && draft.side !== 'under') return TOTAL_SIDE_REQUIRED;
     return null;
@@ -125,11 +219,14 @@ export function isWholeSeason(filters: ByomFilters | null | undefined): boolean 
   return Object.keys(byomFilters(filters)).length === 0;
 }
 
-/** Game markets only. An empty market list is every market, including props. */
+/**
+ * A named game market or one of the twelve NFL props. An empty market
+ * list is every market, and that blend stays hidden.
+ */
 export function showsUnits(filters: ByomFilters | null | undefined): boolean {
   const markets = byomFilters(filters).markets;
   if (markets == null || markets.length === 0) return false;
-  return markets.every((market) => GAME_MARKETS.has(market));
+  return markets.every((market) => GAME_MARKETS.has(market) || isPropMarket(market));
 }
 
 export function gameMarket(filters: ByomFilters | null | undefined): ByomGameMarket | null {
@@ -141,7 +238,8 @@ export function gameMarket(filters: ByomFilters | null | undefined): ByomGameMar
 }
 
 export function marketLabel(filters: ByomFilters | null | undefined): string {
-  const markets = byomFilters(filters).markets;
+  const parsed = byomFilters(filters);
+  const markets = parsed.markets;
   if (markets == null || markets.length === 0) return '—';
   const parts: string[] = [];
   let props = false;
@@ -149,11 +247,19 @@ export function marketLabel(filters: ByomFilters | null | undefined): string {
     if (market === 'h2h' || market === 'spreads' || market === 'totals') {
       parts.push(MARKET_LABEL[market]);
     } else {
-      props = true;
+      const label = propMarketLabel(market);
+      if (label) parts.push(label);
+      else props = true;
     }
   }
   if (props) parts.push('Props');
-  return parts.length > 0 ? parts.join(' · ') : '—';
+  if (parts.length === 0) return '—';
+  let text = parts.join(' · ');
+  if (markets.length === 1 && isPropMarket(markets[0]) && markets[0] !== ANYTIME_TD_MARKET) {
+    if (parsed.prop_side === 'over') text += ' · Over';
+    else if (parsed.prop_side === 'under') text += ' · Under';
+  }
+  return text;
 }
 
 export function recordFromRows(rows: readonly ByomCountedRow[]): ByomRecord {
@@ -208,30 +314,62 @@ export function formatByomRecord(record: ByomRecord): string {
 
 export function filtersForDraft(draft: ByomDraft, base: ByomFilters = {}): ByomFilters {
   const next: ByomFilters = { ...base, markets: [draft.market] };
-  const side = sideForMarket(draft.market, draft.side);
-  if (side) next.side = side;
-  else delete next.side;
-  if (draft.market === 'totals' || !draft.role) delete next.role;
-  else next.role = draft.role;
+  if (isPropMarket(draft.market)) {
+    const team = sideForMarket(draft.market, draft.side);
+    if (team === 'home' || team === 'away') next.side = team;
+    else delete next.side;
+    delete next.role;
+    const direction = propSideForMarket(draft.market, draft.propSide);
+    if (direction) next.prop_side = direction;
+    else delete next.prop_side;
+  } else {
+    delete next.prop_side;
+    const side = sideForMarket(draft.market, draft.side);
+    if (side) next.side = side;
+    else delete next.side;
+    if (draft.market === 'totals' || !draft.role) delete next.role;
+    else next.role = draft.role;
+  }
   if (draft.primetime == null) delete next.primetime;
   else next.primetime = draft.primetime;
   return byomFilters(next);
 }
 
 export function draftFromFilters(filters: ByomFilters | null | undefined): ByomDraft | null {
-  const market = gameMarket(filters);
-  if (market == null) return null;
+  const markets = byomFilters(filters).markets;
+  if (markets?.length !== 1) return null;
+  const market = markets[0];
   const parsed = byomFilters(filters);
+  if (market === 'h2h' || market === 'spreads' || market === 'totals') {
+    return {
+      market,
+      side: sideForMarket(market, parsed.side ?? null),
+      role: market === 'totals' ? null : (parsed.role ?? null),
+      primetime: parsed.primetime ?? null,
+      propSide: null,
+    };
+  }
+  if (!isPropMarket(market)) return null;
+  const stored = parsed.prop_side === 'over' || parsed.prop_side === 'under'
+    ? parsed.prop_side
+    : null;
   return {
     market,
     side: sideForMarket(market, parsed.side ?? null),
-    role: market === 'totals' ? null : (parsed.role ?? null),
+    role: null,
     primetime: parsed.primetime ?? null,
+    propSide: propSideForMarket(market, stored),
   };
 }
 
-/** Refuses a single game market that still has no side. Other filters pass through. */
+/** Refuses one market that still has no side. Other filters pass through. */
 export function assertByomSide(filters: ByomFilters | null | undefined): void {
+  const parsed = byomFilters(filters);
+  if (parsed.markets?.length === 1
+    && parsed.markets[0] === ANYTIME_TD_MARKET
+    && parsed.prop_side !== 'over') {
+    throw new Error(ANYTIME_YES_REQUIRED);
+  }
   const draft = draftFromFilters(filters);
   if (draft == null) return;
   const reason = saveBlockReason(draft);
@@ -240,6 +378,7 @@ export function assertByomSide(filters: ByomFilters | null | undefined): void {
 
 /** The side sentence inside a save error, when the save was refused for that. */
 export function sideBlockFromError(raw: string): string | null {
+  if (raw.includes(ANYTIME_YES_REQUIRED)) return ANYTIME_YES_REQUIRED;
   if (raw.includes(TEAM_OR_ROLE_REQUIRED)) return TEAM_OR_ROLE_REQUIRED;
   if (raw.includes(TOTAL_SIDE_REQUIRED)) return TOTAL_SIDE_REQUIRED;
   return null;
@@ -262,7 +401,22 @@ export function otherModelWithName<T extends { model_id: string; name: string }>
   return null;
 }
 
+function suggestedPropName(draft: ByomDraft): string {
+  const label = propMarketLabel(draft.market) ?? 'Props';
+  const lead: string[] = [];
+  if (draft.primetime === true) lead.push('Primetime');
+  if (draft.side === 'home') lead.push(lead.length ? 'home' : 'Home');
+  else if (draft.side === 'away') lead.push(lead.length ? 'away' : 'Away');
+  const stat = lead.length ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+  const parts = [...lead, stat];
+  if (draft.market === ANYTIME_TD_MARKET) return parts.join(' ');
+  if (draft.propSide === 'over') parts.push('over');
+  else if (draft.propSide === 'under') parts.push('under');
+  return parts.join(' ');
+}
+
 export function suggestedName(draft: ByomDraft): string {
+  if (isPropMarket(draft.market)) return suggestedPropName(draft);
   if (draft.market === 'totals') {
     const totalSide = sideForMarket('totals', draft.side);
     if (draft.primetime === true && totalSide == null) return 'Primetime over/under';
@@ -298,7 +452,7 @@ function byName(a: Rankable, b: Rankable): number {
 
 /**
  * Models with a real unit total rank first, highest units first.
- * A model whose units are hidden (props, or units missing) ranks after those.
+ * A model whose units are hidden (an unknown market, or units missing) ranks after those.
  * Zero included bets are unranked and sort last.
  */
 export function rankByUnits<T extends Rankable>(items: readonly T[]): Array<T & { rank: number | null }> {
