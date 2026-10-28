@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard Medium follow-ups from #1065. NCAAF by game id. One in-play DK row per market. Sheet polls only while focused. Index migration is hand-applied, not on prod. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter Season row reads `v_nba_team_q1_season`. Last 5 / Last 10 stay on the 40-game fetch. Follow-up to #1069. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter stats on the team page. Stats only, free. New `nba-quarters` step backfills quarter scores and play-by-play the 2026-27 season was missing. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |

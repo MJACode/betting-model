@@ -8,6 +8,7 @@ import {
   feedFromMlb,
   feedFromNcaaf,
   livePollerCaption,
+  mergeDkInplay,
   movementText,
   presentScoreboard,
   scoreboardLiveEnabled,
@@ -157,6 +158,24 @@ const old = feedFromNcaaf({
   raw_state: JSON.stringify({ state: 'in', state_name: 'in_progress' }),
 }, Date.now());
 check('an old NCAAF in-progress row is not live', old == null || old.inProgress === false);
+
+const keptSpread = mergeDkInplay(
+  new Map([['G', [
+    { market: 'spreads', spread_home: -3 },
+    { market: 'h2h', home_price: -150 },
+    { market: 'totals', total_line: 8.5 },
+  ]]]),
+  ['G'],
+  [
+    { market: 'spreads', gameIds: ['G'], ok: false, rows: [], error: 'nope' },
+    { market: 'h2h', gameIds: ['G'], ok: true, rows: [{ market: 'h2h', home_price: -140, game_id: 'G' }], error: null },
+    { market: 'totals', gameIds: ['G'], ok: true, rows: [], error: null },
+  ],
+);
+const kept = keptSpread.lines.get('G') ?? [];
+check('a failed spread chunk keeps the previous spread', kept.find((q) => q.market === 'spreads')?.spread_home === -3 && keptSpread.error === 'nope');
+check('a successful moneyline replaces the previous one', kept.find((q) => q.market === 'h2h')?.home_price === -140);
+check('a successful empty total drops that market', kept.find((q) => q.market === 'totals') == null);
 
 check('line movement names open and now', movementText(
   { market: 'spreads', spread_home: -3, home_price: -110 },

@@ -324,6 +324,54 @@ export function scoreboardPhase(game: ScoreboardGame, feed: ScoreboardFeed | nul
   return 'upcoming';
 }
 
+export interface InplayChunkResult {
+  market: string;
+  gameIds: readonly string[];
+  ok: boolean;
+  rows: readonly (ScoreboardQuote & { game_id: string })[];
+  error: string | null;
+}
+
+/**
+ * Fold one poll of per-market in-play reads onto the lines already shown.
+ * A failed chunk keeps that market. A chunk that succeeds with no row
+ * drops it, and the card uses the pregame number. Games that are no
+ * longer live are left out.
+ */
+export function mergeDkInplay(
+  prev: ReadonlyMap<string, readonly ScoreboardQuote[]>,
+  liveIds: readonly string[],
+  chunks: readonly InplayChunkResult[],
+): { lines: Map<string, ScoreboardQuote[]>; error: string | null } {
+  const byGame = new Map<string, Map<string, ScoreboardQuote>>();
+  for (const id of liveIds) {
+    const markets = new Map<string, ScoreboardQuote>();
+    for (const quote of prev.get(id) ?? []) markets.set(quote.market, quote);
+    byGame.set(id, markets);
+  }
+  let error: string | null = null;
+  for (const chunk of chunks) {
+    if (!chunk.ok) {
+      if (!error && chunk.error) error = chunk.error;
+      continue;
+    }
+    const found = new Map<string, ScoreboardQuote & { game_id: string }>();
+    for (const row of chunk.rows) found.set(row.game_id, row);
+    for (const id of chunk.gameIds) {
+      const markets = byGame.get(id);
+      if (!markets) continue;
+      const row = found.get(id);
+      if (row) markets.set(chunk.market, row);
+      else markets.delete(chunk.market);
+    }
+  }
+  const lines = new Map<string, ScoreboardQuote[]>();
+  for (const [id, markets] of byGame) {
+    if (markets.size > 0) lines.set(id, [...markets.values()]);
+  }
+  return { lines, error };
+}
+
 function mergedQuotes(
   pregame: readonly ScoreboardQuote[] | undefined,
   inplay: readonly ScoreboardQuote[] | undefined,
