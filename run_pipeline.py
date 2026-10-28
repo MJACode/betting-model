@@ -786,6 +786,62 @@ def step_nba_results(run_date: str) -> bool:
         return False
 
 
+def step_nba_quarters(run_date: str) -> bool:
+    """NBA first-quarter team stats for the Stats tab (Matt, 2026-10-28).
+
+    Three parts, each logged on its own, all from free ESPN endpoints:
+      1. quarter scores for every finished game this season that lacks them
+         (data/ingestors/nba_period_scores.py; only missing games are fetched)
+      2. play-by-play and possessions for the same games
+         (data/ingestors/nba_pbp.fill_gaps; it refuses past MAX_GAPS)
+      3. nba_team_q1_games rebuilt for this season and the last, since the
+         last-10 window reaches back into last season early on
+         (data/ingestors/nba_team_q1.py)
+    Until 2026-10-28 nothing on the worker ran 1 or 2: the 2026-27 season had
+    0 of 56 finished games with quarter scores. Runs after view migrations
+    (which create the table) and after nba_results (which writes the finals).
+    """
+    from data.db import get_connection
+    ok = True
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT season, min(game_date) FROM games WHERE sport = 'NBA' AND season = ("
+            "SELECT season FROM games WHERE sport = 'NBA' AND game_date <= %s "
+            "ORDER BY game_date DESC LIMIT 1) GROUP BY season", (run_date,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        logger.info("NBA quarters: no NBA season on or before run_date; skipped")
+        return True
+    season, season_start = int(row[0]), row[1]
+    try:
+        from data.ingestors.nba_period_scores import run as period_run
+        logger.success(f"✓ NBA quarter scores: {period_run(season_start, run_date)}")
+    except Exception as exc:
+        logger.error(f"✗ NBA quarter scores failed: {exc}")
+        ok = False
+    conn = get_connection()
+    try:
+        try:
+            from data.ingestors.nba_pbp import fill_gaps
+            logger.success(f"✓ NBA play-by-play: {fill_gaps(conn, season)}")
+        except Exception as exc:
+            conn.rollback()
+            logger.error(f"✗ NBA play-by-play failed: {exc}")
+            ok = False
+        try:
+            from data.ingestors.nba_team_q1 import rebuild
+            logger.success(f"✓ NBA 1Q team stats: {rebuild(conn, [season - 1, season])}")
+        except Exception as exc:
+            conn.rollback()
+            logger.error(f"✗ NBA 1Q team stats failed: {exc}")
+            ok = False
+    finally:
+        conn.close()
+    return ok
+
+
 def step_nba_schedule(run_date: str) -> bool:
     """
     The NBA schedule, refreshed from ESPN for this month and the next eight
@@ -2044,6 +2100,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["column_migrations"] = step_apply_column_migrations(run_date)
     results["view_migrations"] = step_apply_view_migrations(run_date)
 
+    # ── Step 0c1: NBA first-quarter team stats (after migrations + results) ─
+    # Quarter scores, play-by-play possessions, then nba_team_q1_games, which
+    # the NBA team page reads. Free ESPN endpoints; only missing games fetched.
+    logger.info("Step 0c1: NBA quarter scores, possessions and 1Q team stats...")
+    results["nba_quarters"] = step_nba_quarters(run_date)
+
     # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
     # Keeps the table (public track record + mobile action filter + Discord)
     # in lockstep with config.py so a threshold/pause change never needs a
@@ -2455,7 +2517,7 @@ Examples:
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nba-results", "nba-schedule", "nfl-results",
+                                 "nhl-results", "wnba-results", "nba-results", "nba-quarters", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
@@ -2549,6 +2611,7 @@ Examples:
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nba-results":  lambda: step_nba_results(run_date),
+            "nba-quarters": lambda: step_nba_quarters(run_date),
             "nba-schedule": lambda: step_nba_schedule(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),

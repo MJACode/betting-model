@@ -26,6 +26,7 @@ import {
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
+import { NBA_Q1_FETCH_GAMES, type NbaQ1Game, type NbaQ1SeasonRow } from './nbaQ1';
 import {
   DUPLICATE_STATUS,
   isDuplicateCopy,
@@ -2764,6 +2765,39 @@ export async function fetchTeamRecentGamesForSport(
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as unknown as GameRow[];
+}
+
+/**
+ * One NBA team's first-quarter rows, newest first (src/lib/nbaQ1.ts). At most
+ * NBA_Q1_FETCH_GAMES rows, so the 1,000-row cap never applies; enough for a
+ * last-10 at one venue to reach into last season.
+ */
+export async function fetchNbaTeamQ1Games(team: string, limit = NBA_Q1_FETCH_GAMES): Promise<NbaQ1Game[]> {
+  const { data, error } = await supabase
+    .from('nba_team_q1_games')
+    .select('game_id,team,season,game_date,opponent,is_home,pts_for,pts_against,poss_for,poss_against')
+    .eq('team', team)
+    .order('game_date', { ascending: false })
+    .order('game_id', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as NbaQ1Game[];
+}
+
+/** One team's season ranks, one row per venue (all / home / away): 3 rows. */
+export async function fetchNbaTeamQ1Season(team: string, season: number): Promise<NbaQ1SeasonRow[]> {
+  const { data, error } = await supabase
+    .from('v_nba_team_q1_season')
+    .select('season,team,venue,games,rated_games,ortg,drtg,net_rtg,ortg_rank,drtg_rank,net_rank,teams')
+    .eq('team', team)
+    .eq('season', season);
+  if (error) throw error;
+  return ((data ?? []) as NbaQ1SeasonRow[]).map((r) => ({
+    ...r,
+    ortg: r.ortg == null ? null : Number(r.ortg),
+    drtg: r.drtg == null ? null : Number(r.drtg),
+    net_rtg: r.net_rtg == null ? null : Number(r.net_rtg),
+  }));
 }
 
 /** The last N finished meetings between two teams in one sport, newest first. */

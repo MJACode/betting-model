@@ -20,6 +20,8 @@ import { MODEL_BOOK } from '@/lib/markets';
 import {
   fetchGameLineRowsAllMarkets,
   fetchHeadToHead,
+  fetchNbaTeamQ1Games,
+  fetchNbaTeamQ1Season,
   fetchNflTeamGameStats,
   fetchOpeningLine,
   fetchPublicSplits,
@@ -28,6 +30,7 @@ import {
   fetchTeamRecentGamesForSport,
   fetchTeamStats,
 } from '@/lib/queries';
+import type { NbaQ1Game, NbaQ1SeasonRow } from '@/lib/nbaQ1';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
@@ -234,6 +237,21 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
     [h2hGames.data, team, opponent],
   );
 
+  // ── NBA first quarter (Matt, 2026-10-28) ────────────────────────────────
+  // The team's last 40 team-games, then its season ranks for the newest
+  // game's season. NBA only; every other sport skips both reads.
+  const q1Games = useSection<NbaQ1Game[]>(
+    [],
+    sport === 'NBA' ? () => fetchNbaTeamQ1Games(team) : null,
+    [sport, team, nonce],
+  );
+  const q1SeasonLabel = q1Games.data[0]?.season ?? null;
+  const q1Season = useSection<NbaQ1SeasonRow[]>(
+    [],
+    sport === 'NBA' && q1SeasonLabel != null ? () => fetchNbaTeamQ1Season(team, q1SeasonLabel) : null,
+    [sport, team, q1SeasonLabel, nonce],
+  );
+
   const loading = board.loading || recent.loading || slate.loading;
   // The picks read waits on the recent-games read, so "loading" is both — or
   // the card prints its empty sentence for a frame before the spinner.
@@ -257,5 +275,7 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
     marketError: market.error,
     h2h,
     h2hLoading: h2hGames.loading,
+    q1Games,
+    q1Season,
   };
 }

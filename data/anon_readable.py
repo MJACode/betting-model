@@ -126,6 +126,11 @@ ANON_READABLE: tuple[str, ...] = (
     "v_nhl_player_prop_odds",
     "v_player_season_totals_nhl",
     "v_team_season_totals_nhl",
+    # NBA team page, first quarter (Matt, 2026-10-28). The table is written
+    # by data/ingestors/nba_team_q1.py; RLS on with a SELECT policy, and the
+    # view is security_invoker over it (add_nba_team_q1_2026_10_28.sql).
+    "nba_team_q1_games",
+    "v_nba_team_q1_season",
     "v_public_track_record",
     "v_public_track_record_daily",
 )
