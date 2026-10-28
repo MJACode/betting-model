@@ -5,15 +5,14 @@
  * possessions), with All / Home / Away on top and the season's league ranks
  * underneath. Logic and its checks: src/lib/nbaQ1.ts, scripts/verify_nba_q1.ts.
  *
- * At 2x text and up the four columns cannot hold "112.4" (48pt each on a
- * 320pt phone), so each window stacks into label-value lines, the threshold
- * LinesBoard uses (UX review, 2026-10-28).
+ * From 1.5x text the four columns cannot hold "112.4" (48pt each on a 320pt
+ * phone), so each window stacks into label-value lines. Below that the cells
+ * shrink to fit rather than truncate (UX review, 2026-10-28).
  */
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { friendlyCause } from '@/lib/errors';
-import { linesMarketsStack } from '@/lib/linesBoard';
 import {
   formatQ1Record,
   formatRating,
@@ -33,6 +32,9 @@ import {
 import { ordinal } from '@/lib/teamDetail';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
+/** Stack from 1.5x, not the Lines board's 2x: "112.4" outgrows a 48pt column first (UX review, second pass). */
+const Q1_STACK_SCALE = 1.5;
+
 interface Props {
   team: string;
   games: NbaQ1Game[];
@@ -45,7 +47,7 @@ interface Props {
 export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, seasonRows, seasonError }: Props) {
   const [venue, setVenue] = useState<NbaQ1Venue>('all');
   const { fontScale } = useWindowDimensions();
-  const stack = linesMarketsStack(fontScale);
+  const stack = Number.isFinite(fontScale) && fontScale >= Q1_STACK_SCALE;
   const { season, rows } = useMemo(() => nbaQ1Windows(games, venue), [games, venue]);
   const ranks = seasonRows.find((r) => r.venue === venue) ?? null;
   const seasonSummary = rows[2].summary;
@@ -126,21 +128,21 @@ function WindowRow({ row }: { row: NbaQ1WindowRow }) {
   return (
     <View style={styles.row} accessible accessibilityLabel={q1RowA11yLabel(row)}>
       <View style={styles.cellLabel}>
-        <Text style={styles.rowLabel} numberOfLines={1}>
+        <Text style={styles.rowLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
           {row.label}
         </Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
-      <Text style={styles.cell} numberOfLines={1}>
+      <Text style={styles.cell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
         {empty ? '—' : formatQ1Record(s)}
       </Text>
-      <Text style={[styles.cell, marginTint(s.margin)]} numberOfLines={1}>
+      <Text style={[styles.cell, marginTint(s.margin)]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
         {empty ? '—' : formatSigned1(s.margin)}
       </Text>
-      <Text style={styles.cell} numberOfLines={1}>
+      <Text style={styles.cell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
         {formatRating(s.ortg)}
       </Text>
-      <Text style={styles.cell} numberOfLines={1}>
+      <Text style={styles.cell} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
         {formatRating(s.drtg)}
       </Text>
     </View>
