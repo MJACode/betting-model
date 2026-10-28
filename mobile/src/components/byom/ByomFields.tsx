@@ -2,40 +2,74 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ByomChoiceGroup } from '@/components/byom/ByomChoiceGroup';
-import type { ByomGameMarket } from '@/lib/byomRecord';
+import {
+  ANYTIME_TD_MARKET,
+  isPropMarket,
+  NFL_PROP_MARKETS,
+  type ByomMarket,
+  type ByomPropSide,
+} from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-const MARKETS: { value: ByomGameMarket; label: string }[] = [
+const GAME_MARKETS: { value: ByomMarket; label: string }[] = [
   { value: 'h2h', label: 'Moneyline' },
   { value: 'spreads', label: 'Spread' },
   { value: 'totals', label: 'Over/Under' },
 ];
 
+function MarketRow({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      style={[styles.market, selected && styles.marketOn]}
+    >
+      <Text style={[styles.marketText, selected && styles.marketTextOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function ByomMarketField({
   market,
   onChange,
 }: {
-  market: ByomGameMarket | null;
-  onChange: (market: ByomGameMarket) => void;
+  market: ByomMarket | null;
+  onChange: (market: ByomMarket) => void;
 }) {
   return (
-    <View style={styles.block} accessibilityRole="radiogroup" accessibilityLabel="Game bets">
-      <Text style={styles.kicker}>Game bets</Text>
-      {MARKETS.map((option) => {
-        const selected = option.value === market;
-        return (
-          <Pressable
+    <View accessibilityRole="radiogroup" accessibilityLabel="Bet type">
+      <View style={styles.block}>
+        <Text style={styles.kicker}>Game bets</Text>
+        {GAME_MARKETS.map((option) => (
+          <MarketRow
             key={option.value}
+            label={option.label}
+            selected={option.value === market}
             onPress={() => onChange(option.value)}
-            accessibilityRole="radio"
-            accessibilityState={{ selected }}
-            accessibilityLabel={option.label}
-            style={[styles.market, selected && styles.marketOn]}
-          >
-            <Text style={[styles.marketText, selected && styles.marketTextOn]}>{option.label}</Text>
-          </Pressable>
-        );
-      })}
+          />
+        ))}
+      </View>
+      <View style={styles.block}>
+        <Text style={styles.kicker}>NFL player props</Text>
+        {NFL_PROP_MARKETS.map((option) => (
+          <MarketRow
+            key={option.value}
+            label={option.label}
+            selected={option.value === market}
+            onPress={() => onChange(option.value)}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -45,18 +79,23 @@ export function ByomSideFields({
   side,
   role,
   primetime,
+  propSide,
   onSide,
   onRole,
   onPrimetime,
+  onPropSide,
 }: {
-  market: ByomGameMarket;
+  market: ByomMarket;
   side: 'home' | 'away' | 'over' | 'under' | null;
   role: 'favorite' | 'underdog' | 'pickem' | null;
   primetime: boolean | null;
+  propSide: ByomPropSide | null;
   onSide: (side: 'home' | 'away' | 'over' | 'under' | null) => void;
   onRole: (role: 'favorite' | 'underdog' | 'pickem' | null) => void;
   onPrimetime: (primetime: boolean | null) => void;
+  onPropSide: (propSide: ByomPropSide | null) => void;
 }) {
+  const prop = isPropMarket(market);
   return (
     <View>
       {market === 'totals' ? (
@@ -69,6 +108,35 @@ export function ByomSideFields({
             { value: 'under', label: 'Under' },
           ]}
         />
+      ) : prop ? (
+        <>
+          {market === ANYTIME_TD_MARKET ? (
+            <View accessible accessibilityLabel="Side, Yes">
+              <Text style={styles.kicker}>Side</Text>
+              <Text style={styles.yes}>Yes</Text>
+            </View>
+          ) : (
+            <ByomChoiceGroup
+              label="Side"
+              value={propSide === 'over' || propSide === 'under' ? propSide : ''}
+              onChange={(value) => onPropSide(value === 'over' || value === 'under' ? value : null)}
+              options={[
+                { value: 'over', label: 'Over' },
+                { value: 'under', label: 'Under' },
+              ]}
+            />
+          )}
+          <ByomChoiceGroup
+            label="Player’s team"
+            value={side === 'home' || side === 'away' ? side : 'any'}
+            onChange={(value) => onSide(value === 'any' ? null : value)}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'home', label: 'Home' },
+              { value: 'away', label: 'Away' },
+            ]}
+          />
+        </>
       ) : (
         <>
           <ByomChoiceGroup
@@ -140,5 +208,11 @@ const styles = StyleSheet.create({
   marketTextOn: {
     color: colors.tint,
     fontWeight: font.weight.semibold,
+  },
+  yes: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.lg,
   },
 });

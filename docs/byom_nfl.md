@@ -148,7 +148,7 @@ values are locals. `season` NULL is the current NFL season only: the
 year the season starts, in `America/New_York`, and January through
 August stay on the previous year's label. A caller can pass an older
 season. Filters are side (home/away on a moneyline or spread, over/under
-on a total), role (favorite/underdog/pickem),
+on a total, and the player's team on a prop), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
 is left out. There is no spread-size, price, or line filter. Each
 market row counts wins, losses, pushes, and ties, plus `units` and
@@ -172,6 +172,13 @@ ungraded prop (null result) stays out of the record and out of
 not in `ACTIVE_MIGRATIONS`. Matt applies it by hand after the price
 columns. It keeps `byom_backtest_v1` and the return columns. It keeps
 the total-leg side labels from `byom_total_side_2026_10_25.sql`.
+`data/migrations/byom_prop_side_2026_10_28.sql` replaces that function
+and `byom_save_model`. `prop_side` `over` keeps the over leg and
+`under` keeps the under leg. A missing `prop_side` still counts both.
+The player's team stays on `side`. One of the twelve NFL prop markets
+with no `prop_side` is refused on save. A filter with no prop market
+drops `prop_side`. It is not in `ACTIVE_MIGRATIONS`. Apply it by hand
+after the price backtest and after `byom_total_side_2026_10_25.sql`.
 Do not re-apply the older backtest files after it. Unknown filter
 keys are rejected. The field names `market`, `bets`, `wins`,
 `losses`, `pushes`, and `ties` are unchanged.
@@ -266,9 +273,17 @@ lists that user’s NFL rows from `byom_list_models`. Rank and the builder previ
 call `byom_backtest` (`fetchByomScopedBacktest`): this season is one
 call with season null, and all seasons is one call per season from
 2020 through the current NFL season. The create flow is three steps
-(bet type, side, name). Save stays off until a moneyline or spread has a
+(bet type, side, name). Step 1 is the three game bets and the twelve
+NFL props, each its own choice: Passing yards, Passing TDs, Pass
+attempts, Completions, Rushing yards, Rush attempts, Receiving yards,
+Receptions, Rush + rec yards, Anytime TD, Tackles + assists, Sacks.
+Save stays off until a moneyline or spread has a
 team or a favorite, underdog, or pick’em, and until an over/under is
-Over or Under. Team Any with a favorite or underdog set can be saved.
+Over or Under. A prop stays off until Over or Under is set. Anytime
+TD stays off until Yes, which is the over leg. The under is not a
+choice on that market. The player’s team is Any, Home, or Away. Any
+does not need a favorite. Team Any with a favorite or underdog set can be saved
+on a moneyline or a spread.
 A missing side is not stored as both sides. The preview does not grade
 that missing choice. Editing a saved model is one screen. A rename
 saves the new name first and removes the old row only when that save
@@ -277,10 +292,11 @@ original stays. A name that already belongs to another model asks,
 and the prompt says that model will be overwritten. One model’s
 backtest can fail without clearing the rest of the list. An empty
 filter is not graded. The backtest’s left-out count is not parsed.
-Price and line filters are not on screen. Player props are not a
-choice in this builder. A saved prop market does not show units.
+Price and line filters are not on screen. There is no position chip,
+no line-range filter, and no EV. A saved game market or one of those
+twelve props shows units. An empty market list does not.
 There is no recommended stake. `package.json` is unchanged. Sign-in
-is unchanged.
+is unchanged. NBA props are not in this builder.
 
 `mobile/src/lib/byom.ts` types the rows and calls `byom_backtest`,
 `byom_save_model`, `byom_list_models`, and `byom_delete_model`.

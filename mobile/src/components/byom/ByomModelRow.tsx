@@ -77,7 +77,7 @@ export function ByomModelRow({
             {rank != null ? <Text style={styles.rank}>{rank}</Text> : null}
             <Text style={styles.name} numberOfLines={2}>{name}</Text>
           </View>
-          <Text style={styles.sub} numberOfLines={1}>{market}</Text>
+          <Text style={styles.sub} numberOfLines={2}>{market}</Text>
           {noGames || unknown ? null : (
             <Text style={styles.sub}>{bets} bet{bets === 1 ? '' : 's'}</Text>
           )}

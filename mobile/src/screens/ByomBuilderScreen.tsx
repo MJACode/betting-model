@@ -26,15 +26,20 @@ import { AUTH_ENABLED } from '@/lib/authConfig';
 import { fetchByomModels, saveByomModel } from '@/lib/byom';
 import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
 import {
+  ANYTIME_TD_MARKET,
+  betTypeLabel,
   filtersForDraft,
+  isPropMarket,
   otherModelWithName,
+  propSideAfterMarketChange,
   saveBlockReason,
   sideBlockFromError,
   showsUnits,
   sideForMarket,
   suggestedName,
   type ByomDraft,
-  type ByomGameMarket,
+  type ByomMarket,
+  type ByomPropSide,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -46,17 +51,20 @@ export function ByomBuilderScreen() {
   const { signedIn } = useAuth();
   const { scope } = useByomSeason();
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [market, setMarket] = useState<ByomGameMarket | null>(null);
+  const [market, setMarket] = useState<ByomMarket | null>(null);
   const [side, setSide] = useState<'home' | 'away' | 'over' | 'under' | null>(null);
   const [role, setRole] = useState<'favorite' | 'underdog' | 'pickem' | null>(null);
   const [primetime, setPrimetime] = useState<boolean | null>(null);
+  const [propSide, setPropSide] = useState<ByomPropSide | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const suggestion = useRef('');
   const scrollRef = useRef<ScrollView>(null);
 
-  const draft: ByomDraft | null = market == null ? null : { market, side, role, primetime };
+  const draft: ByomDraft | null = market == null
+    ? null
+    : { market, side, role, primetime, propSide };
   const sideReason = draft == null ? null : saveBlockReason(draft);
   const filters = draft == null ? null : filtersForDraft(draft);
   const previewFilters = step === 1 || sideReason != null ? null : filters;
@@ -84,15 +92,16 @@ export function ByomBuilderScreen() {
 
   useEffect(() => {
     if (step !== 3 || market == null || sideReason != null) return;
-    const next = suggestedName({ market, side, role, primetime });
+    const next = suggestedName({ market, side, role, primetime, propSide });
     setName((current) => (current.trim() === '' || current === suggestion.current ? next : current));
     suggestion.current = next;
-  }, [step, market, side, role, primetime, sideReason]);
+  }, [step, market, side, role, primetime, propSide, sideReason]);
 
-  const chooseMarket = (next: ByomGameMarket) => {
+  const chooseMarket = (next: ByomMarket) => {
     setMarket(next);
     setSide((current) => sideForMarket(next, current));
-    if (next === 'totals') setRole(null);
+    setPropSide((current) => propSideAfterMarketChange(market, next, current));
+    if (next === 'totals' || isPropMarket(next)) setRole(null);
   };
 
   const goNext = () => {
@@ -183,15 +192,22 @@ export function ByomBuilderScreen() {
       ) : null}
       {step === 2 && market != null ? (
         <>
-          <Text style={styles.title}>Which side?</Text>
+          <Text style={[styles.title, market === ANYTIME_TD_MARKET ? null : styles.titleTight]}>
+            {betTypeLabel(market)}
+          </Text>
+          {market === ANYTIME_TD_MARKET ? null : (
+            <Text style={styles.lead}>Which side?</Text>
+          )}
           <ByomSideFields
             market={market}
             side={side}
             role={role}
             primetime={primetime}
+            propSide={propSide}
             onSide={setSide}
             onRole={setRole}
             onPrimetime={setPrimetime}
+            onPropSide={setPropSide}
           />
         </>
       ) : null}
@@ -295,6 +311,14 @@ const styles = StyleSheet.create({
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+    marginBottom: spacing.lg,
+  },
+  titleTight: {
+    marginBottom: spacing.sm,
+  },
+  lead: {
+    fontSize: font.size.body,
+    color: colors.textSecondary,
     marginBottom: spacing.lg,
   },
   input: {
