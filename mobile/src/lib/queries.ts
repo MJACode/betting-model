@@ -16,6 +16,7 @@ import {
   type PlayerLogSport,
 } from './playerLog';
 import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
+import { SCOREBOARD_MARKETS, SCOREBOARD_SPORTS } from './scoreboard';
 import {
   gameMarketForModel,
   lineShopForPick,
@@ -3016,4 +3017,158 @@ export async function fetchPlayerNews(args: {
     return (byName ?? []) as unknown as PlayerNewsRow[];
   }
   return rows;
+}
+
+const NCAAF_SCOREBOARD_COLUMNS =
+  'game_id, game_date, snapshot_at, period, clock_seconds, home_score, away_score, ' +
+  'possession, down, distance, yardline_100, raw_state';
+
+export interface NcaafScoreboardRow {
+  game_id: string;
+  game_date: string;
+  snapshot_at: string;
+  period: number | null;
+  clock_seconds: number | null;
+  home_score: number | null;
+  away_score: number | null;
+  possession: string | null;
+  down: number | null;
+  distance: number | null;
+  yardline_100: number | null;
+  raw_state: string | null;
+}
+
+/**
+ * Every game on the scoreboard dates for the five sports. Measured
+ * 2026-10-20 through 2026-10-28: the busiest sport-day in that window was
+ * NCAAF (the DK join on 2026-10-03 was 54 games). Two ET dates across five
+ * sports stay under the 1,000-row cap on a normal slate; this is paged
+ * anyway because a Saturday plus the midnight lookback is the read that
+ * would be the one to cross it.
+ */
+export async function fetchScoreboardGames(dates: readonly string[]): Promise<GameRow[]> {
+  if (dates.length === 0) return [];
+  return fetchAllPages<GameRow>(
+    (from, to) =>
+      supabase
+        .from('games')
+        .select(GAME_COLUMNS)
+        .in('sport', [...SCOREBOARD_SPORTS])
+        .in('game_date', [...dates])
+        .order('game_date')
+        .order('commence_time')
+        .order('game_id')
+        .range(from, to),
+    (row) => row.game_id,
+  );
+}
+
+/**
+ * DraftKings pre-game game markets for those dates. v_latest_dk_odds is
+ * the newest pre-game row (in-play never enters it). Measured 2026-10-03,
+ * the biggest NCAAF day in the October read: 54 games, 160 DK rows across
+ * h2h, spreads and totals. Paged. Props are a different table and are not
+ * selected.
+ */
+export async function fetchScoreboardDkOdds(dates: readonly string[]): Promise<LatestDkOddsRow[]> {
+  if (dates.length === 0) return [];
+  return fetchAllPages<LatestDkOddsRow>(
+    (from, to) =>
+      supabase
+        .from('v_latest_dk_odds')
+        .select(LATEST_ODDS_COLUMNS)
+        .in('game_date', [...dates])
+        .in('market', [...SCOREBOARD_MARKETS])
+        .order('game_id')
+        .order('market')
+        .range(from, to),
+    (row) => `${row.game_id}|${row.market}`,
+  );
+}
+
+/**
+ * Latest NCAAF live state per game. The view is one row per game (379
+ * games on 2026-10-28), so a date filter is a small read. A missing view
+ * (migration not applied yet) throws; the board treats that as no live
+ * state rather than a made-up score.
+ */
+export async function fetchNcaafScoreboard(dates: readonly string[]): Promise<NcaafScoreboardRow[]> {
+  if (dates.length === 0) return [];
+  const { data, error } = await supabase
+    .from('v_ncaaf_scoreboard_latest')
+    .select(NCAAF_SCOREBOARD_COLUMNS)
+    .in('game_date', [...dates]);
+  if (error) throw error;
+  return (data ?? []) as unknown as NcaafScoreboardRow[];
+}
+
+/**
+ * Newest in-play DK snapshots for one game. Indexed by
+ * (game_id, market, bookmaker, snapshot_at). Twelve rows is enough to
+ * cover the three game markets from the latest write. The all-books
+ * in-play view is not used: a date filter on it timed out on 2026-10-28
+ * because the view distincts the whole odds log first.
+ */
+export async function fetchDkInplayForGame(gameId: string): Promise<OddsSnapshotRow[]> {
+  const { data, error } = await supabase
+    .from('odds')
+    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
+    .eq('game_id', gameId)
+    .eq('bookmaker', 'draftkings')
+    .eq('snapshot_type', 'in_play')
+    .in('market', [...SCOREBOARD_MARKETS])
+    .order('snapshot_at', { ascending: false })
+    .limit(12);
+  if (error) throw error;
+  return (data ?? []) as OddsSnapshotRow[];
+}
+
+/** The next game for one sport after an ET date. One row. */
+export async function fetchNextScoreboardGame(sport: string, afterDate: string): Promise<GameRow | null> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('sport', sport)
+    .gt('game_date', afterDate)
+    .order('commence_time')
+    .order('game_id')
+    .limit(1);
+  if (error) throw error;
+  const row = (data ?? [])[0];
+  return row ? (row as unknown as GameRow) : null;
+}
+
+/** First and latest pre-game DK snapshot for one market. Line movement on the game sheet. */
+export async function fetchDkMarketEnds(
+  gameId: string,
+  market: string,
+): Promise<{ open: OddsSnapshotRow | null; current: OddsSnapshotRow | null }> {
+  const series = () =>
+    supabase
+      .from('odds')
+      .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
+      .eq('game_id', gameId)
+      .eq('market', market)
+      .eq('bookmaker', 'draftkings')
+      .neq('snapshot_type', 'in_play');
+  const [openRes, nowRes] = await Promise.all([
+    series().order('snapshot_at', { ascending: true }).limit(1),
+    series().order('snapshot_at', { ascending: false }).limit(1),
+  ]);
+  if (openRes.error) throw openRes.error;
+  if (nowRes.error) throw nowRes.error;
+  const open = (openRes.data?.[0] ?? null) as OddsSnapshotRow | null;
+  const current = (nowRes.data?.[0] ?? null) as OddsSnapshotRow | null;
+  return { open, current };
+}
+
+export async function fetchScoreboardGame(gameId: string): Promise<GameRow | null> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('game_id', gameId)
+    .limit(1);
+  if (error) throw error;
+  const row = (data ?? [])[0];
+  return row ? (row as unknown as GameRow) : null;
 }

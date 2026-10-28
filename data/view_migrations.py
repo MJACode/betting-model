@@ -453,6 +453,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # these back, or settlement's query names a function that does not
     # exist. Does not rewrite snapshots, picks, or push_sent.
     "published_pick_units_2026_10_17.sql",
+    # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
+    # One view over ncaaf_live_states, plus the SELECT policy the closed
+    # table never had. Does not rewrite picks, odds, or the record.
+    # Returns once the policy exists; CREATE OR REPLACE VIEW is idempotent.
+    # This file stays off the end — published_record_units stays last.
+    "add_ncaaf_scoreboard_latest_2026_10_28.sql",
     # 2026-10-16: Discord #results and the Record tab share one stake.
     # The two record views gain units and risked from the functions
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.

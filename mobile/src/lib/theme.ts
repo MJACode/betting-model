@@ -143,6 +143,21 @@ export const colors = {
   neutral: '#C7C7CC',
 };
 
+/**
+ * Abbreviation discs on the Scoreboard. White text. Dark fills only —
+ * amber and the bright signal greens are too light under a white label.
+ */
+export const teamDisc = [
+  '#0B1320',
+  '#0B3D91',
+  '#8C1D18',
+  '#0E6B4F',
+  '#5C2E91',
+  '#8A4B08',
+  '#1A365D',
+  '#7A2E0E',
+] as const;
+
 export const radii = {
   // Small status tags (the Stats board's IR / O / Q chip).
   xs: 4,

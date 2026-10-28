@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard replaces the Lines segment. DK game markets. MLB and NCAAF live from stored feeds. NFL, NBA, and NHL do not invent a score. Free soft-lock. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Picks card Best/Bet control opens the selected-books sheet. No "now". Line stays in the hero. Flags unchanged. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 terms §8 and Settings Whop line. Apple unlocks the app and Discord. Whop does not unlock the app. Flags stay off. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 merged master after #1061 and #1062. Apple-only my_access kept. No Whop checkout URL. Flags stay off. |
