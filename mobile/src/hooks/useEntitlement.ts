@@ -7,22 +7,18 @@ import { useAccess } from './useAccess';
 import { useSubscription } from './useSubscription';
 
 /**
- * THE GATE. One question — "can this person see paid signals?" — answered once,
- * so no screen has to remember that a Discord membership counts too.
+ * THE GATE. One question — "can this person see paid signals?" — answered once.
  *
- * Use this, not `useSubscription().entitled`, anywhere access is being decided.
- * `useSubscription` still exists and is still correct, but it only knows about
- * the `subscriptions` table: a member who paid through Whop has no row there,
- * and gating on it alone would charge them twice for the thing they already
- * bought. That is the exact failure this hook exists to prevent, and it is why
- * the Settings subscription card is the only remaining caller of the narrower
- * hook — it is describing the app subscription specifically, not deciding
- * access.
- *
- * The database is the arbiter (`public.my_access()` ORs both sources). The
- * receipt-validated client signal from a just-completed purchase is folded in
- * on top, so a user who has paid this second is not staring at a lock while
+ * The database is the arbiter. `public.my_access().entitled` is the Apple
+ * subscription (trialing/active, period open). A Whop membership is
+ * `discord_access` and does not unlock the app, so this hook does not OR it in.
+ * The receipt-validated client signal from a just-completed purchase is folded
+ * in on top, so a user who has paid this second is not staring at a lock while
  * the RevenueCat webhook is still in flight.
+ *
+ * Use this, not a screen-local read of `discord_access`, to decide access.
+ * `useSubscription` still describes the App Store row. The Settings
+ * subscription card is that description, not a second gate.
  */
 export interface UseEntitlement {
   /** Can this user see paid signals? */

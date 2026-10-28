@@ -1,7 +1,8 @@
 /**
  * Free / trial / paid, decided on the client from the subscription row.
  *
- * `entitled` is trial OR paid — that unlocks the app. Discord is paid only.
+ * `entitled` is an Apple trial or paid plan — that unlocks the app.
+ * `discordPaid` does not. A Whop membership is Discord-only.
  * A receipt that arrives before the webhook has no status yet, so it unlocks
  * the app and does not unlock Discord.
  *
@@ -17,12 +18,11 @@ export function membershipTier(input: {
   billingOn: boolean;
   entitled: boolean;
   subscription: SubscriptionRow | null | undefined;
-  /** Whop (or any non-trial) Discord membership. Those people already paid. */
-  discordPaid: boolean;
+  /** Matched Whop membership. It does not change this tier. */
+  discordPaid?: boolean;
   now?: Date;
 }): MembershipTier {
   if (!input.billingOn) return 'open';
-  if (input.discordPaid) return 'paid';
   const now = input.now ?? new Date();
   const sub = input.subscription;
   if (sub && isEntitled(sub, now) && sub.status === 'trialing') return 'trial';

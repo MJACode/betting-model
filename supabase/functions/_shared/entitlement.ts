@@ -1,15 +1,12 @@
-// The two-way membership rule, in one place.
+// Our App Subscriber Discord role, matched to the Apple subscription.
 //
-// Called from three directions, all of which must reach the same answer:
+// Called from two places:
 //   * discord-link       — a user just connected (or disconnected) Discord
 //   * revenuecat-webhook — an app subscription started, renewed or lapsed
-//   * whop-webhook       — a Discord-side membership went valid or invalid
 //
-// The app side of the rule is computed from `subscriptions`; the Discord side
-// is `whop_memberships`. Read direction (does this user get the app?) is the
-// database's job — public.my_access(). Write direction (should this member
-// hold OUR Discord role?) is this file's job, because it has to talk to
-// Discord.
+// The Whop webhook does not call this file. A Whop membership is Discord-only
+// and never grants or revokes our role. App access is public.my_access() /
+// has_app_access(), which read `subscriptions` only.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import {
@@ -58,10 +55,9 @@ export interface RoleSyncResult {
  *
  * `active` only. A `trialing` row keeps app access and does not get the role.
  *
- * Deliberately reads only `subscriptions`: this grants and revokes OUR role,
- * which exists to represent an app-side purchase. A Whop member's access rides
- * on Whop's own role, and touching it here is exactly the destructive
- * behaviour the two-role split exists to prevent.
+ * Reads only `subscriptions`. This grants and revokes OUR role, which is the
+ * App Store purchase. A Whop member's Discord role is Whop's. Touching it
+ * here would strip a member who is still paying Whop for Discord.
  *
  * Never throws. Every caller is a webhook whose primary job (writing the
  * subscription row) has already succeeded, and failing that write's response

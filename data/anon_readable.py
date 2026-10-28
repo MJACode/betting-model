@@ -554,8 +554,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
 RPC_REVOKE: tuple[str, ...] = (
     # the support-side reply path; already anon-revoked, authenticated too
     "feedback_reply",
-    # superseded by has_app_access()/my_access(), which cannot see a Whop-paid
-    # member (data/supabase_schema.sql). Nothing in the repo or the app calls it.
+    # Older app-subscription check. has_app_access()/my_access() are the gate
+    # once their migration is applied, and they are also Apple-only — a Whop
+    # membership does not unlock the app. Nothing in the repo calls this.
     "has_active_subscription",
     # The Teams board's compute-and-swap pair (2026-09-04, migration
     # cache_team_stats_board). team_stats_board_compute is the 31 s season

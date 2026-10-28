@@ -147,9 +147,11 @@ export async function unlinkDiscord(): Promise<AccessRow> {
 /**
  * The caller's whole access picture, straight from `public.my_access()`.
  *
- * Read through the RPC rather than by selecting the tables, because the answer
- * is an OR across a subscription the user can read and a Whop membership they
- * cannot (it carries other people's emails). One round trip, one truth.
+ * Read through the RPC rather than by selecting the tables. `whop_memberships`
+ * carries other people's emails, so the app only sees the booleans
+ * `my_access()` returns. `entitled` is the Apple subscription. A missing
+ * function throws — do not flip billing or Discord linking until the migration
+ * that creates `my_access()` is applied in that environment.
  *
  * Returns NO_ACCESS rather than throwing when linking is off — callers treat
  * that as "the flag decides", not as an error.

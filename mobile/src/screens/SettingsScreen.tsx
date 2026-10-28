@@ -279,9 +279,8 @@ export function SettingsScreen() {
   const { replay: replayIntro } = useOnboarding();
   const feedbackUnread = useFeedbackUnread();
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
-  // Two different questions, deliberately asked of two different hooks:
-  // `subscription` DESCRIBES the app subscription (this row is about it), while
-  // `entitled` DECIDES access and has to include a Discord-paid member.
+  // `subscription` describes the App Store plan. A Whop membership does not
+  // make this row Premium.
   const { subscription, hold: planHold, refresh: refreshMembership } = useMembership();
   const { access, unlink, busy: discordBusy } = useAccess();
   const planStatus = planHold
@@ -290,7 +289,6 @@ export function SettingsScreen() {
   const [discordSheet, setDiscordSheet] = useState(false);
   const [endingTrial, setEndingTrial] = useState(false);
   const storePaid = Boolean(subscription && isEntitled(subscription) && subscription.status === 'active');
-  const whopCovered = planStatus.badge === 'Premium' && !storePaid;
   const trialPlan = subscription?.plan && isPlanKey(subscription.plan) ? planFor(subscription.plan) : null;
   const linkedName = access.discord_username ?? 'Discord';
   const openHelpline = () => {
@@ -342,13 +340,6 @@ export function SettingsScreen() {
     if (subscription) {
       openManageSubscription(authUser?.id ?? null).catch((e) =>
         Alert.alert('Could not open billing', billingErrorMessage(e)),
-      );
-      return;
-    }
-    if (access.discord_access) {
-      Alert.alert(
-        'Included with Discord',
-        'Your Discord membership covers the app. Manage or cancel it where you bought it — cancelling there ends app access too.',
       );
       return;
     }
@@ -672,7 +663,7 @@ export function SettingsScreen() {
           <View style={styles.card}>
             <View style={styles.bookRow}>
               <Text style={styles.cardLabel}>Discord for members</Text>
-              {storePaid || whopCovered ? (
+              {storePaid ? (
                 <View style={styles.bookPill}>
                   <View style={styles.bookDot} />
                   <Text style={styles.bookPillText}>Included</Text>
@@ -684,11 +675,9 @@ export function SettingsScreen() {
             <Text style={styles.sub}>
               {storePaid
                 ? 'Talk picks with other subscribers.'
-                : whopCovered
-                  ? 'Your Discord membership already includes the subscriber Discord.'
-                  : planStatus.badge === 'Trial'
-                    ? 'Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'
-                    : 'Included with a paid plan. No invite is shown until then.'}
+                : planStatus.badge === 'Trial'
+                  ? 'Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'
+                  : 'Included with a paid plan. No invite is shown until then.'}
             </Text>
             {planStatus.badge === 'Trial' && trialPlan ? (
               <Text style={[styles.sub, styles.chargeLine]}>{earlyUnlockLine(trialPlan.key)}</Text>
@@ -729,15 +718,6 @@ export function SettingsScreen() {
               >
                 <Text style={styles.manageText}>Upgrade to Premium</Text>
               </Pressable>
-            ) : whopCovered && !access.discord_linked ? (
-              <Pressable
-                onPress={() => setDiscordSheet(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Connect Discord"
-                style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.restoreText}>Connect Discord</Text>
-              </Pressable>
             ) : null}
             {access.discord_linked ? (
               <>
@@ -746,9 +726,7 @@ export function SettingsScreen() {
                   onPress={() => {
                     Alert.alert(
                       'Disconnect Discord?',
-                      access.discord_access
-                        ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
-                        : "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                      "We'll remove the subscriber role we granted you. You'll stay in the server.",
                       [
                         { text: 'Cancel', style: 'cancel' },
                         {
@@ -800,9 +778,7 @@ export function SettingsScreen() {
               }
               Alert.alert(
                 'Disconnect Discord?',
-                access.discord_access
-                  ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
-                  : "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                "We'll remove the subscriber role we granted you. You'll stay in the server.",
                 [
                   { text: 'Cancel', style: 'cancel' },
                   {

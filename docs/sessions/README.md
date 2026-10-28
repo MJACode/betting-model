@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 terms §8 and Settings Whop line. Apple unlocks the app and Discord. Whop does not unlock the app. Flags stay off. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 merged master after #1061 and #1062. Apple-only my_access kept. No Whop checkout URL. Flags stay off. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, ParlayMatt tracked like Eggz: own channel, author, webhook, ledger keys, and all-time. A parlay is one unit at its stated price. Unset env no-ops. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, pytest comments no longer say Record only. Paywall feature check is tint. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, mobile-tsc TS2322 fixed. `.notrial` rank documented. Stripe cancel confirms the stored subscription and prorates. |
@@ -29,6 +31,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, merged origin/master price lock 42881cb7. Community order matches boards 04/05. #1060 my_access SQL not taken. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, login required, paywall after first sign-in, free shell is Record only, Discord invite paid-only. Flags stay off. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, billing display prices locked (Matt): weekly $9.99 no trial, monthly $24.99 and annual $149.99 with 7-day trials. Suggested premium.* product ids documented only. Billing stays off. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Whop is Discord-only. Unapplied `my_access` / `has_app_access` are Apple-only on first apply. No flag flip, no production migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats follow-up review. The marker wing no longer covers the window chip. Header taps no longer share a band. The book line can use two lines. |

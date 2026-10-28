@@ -15,11 +15,9 @@ import { useAuth } from './useAuth';
 /**
  * The signed-in user's whole access picture, from `public.my_access()`.
  *
- * ONE read answers both halves of the membership rule: an app subscription and
- * a Whop-sold Discord membership are ORed in the database, so the client never
- * has to know which one paid. That matters beyond tidiness — computing it here
- * would mean the app and any future server-side gate could disagree, and the
- * user would see a different answer depending on who asked.
+ * ONE read is the access picture. `entitled` is the Apple subscription.
+ * `discord_access` is a matched Whop membership and does not unlock the app.
+ * Computing either here would let the app and `has_app_access()` disagree.
  *
  * Module-store + listener set, the same shape as useAuth / useSportFilter, so
  * every mounted consumer sees one source of truth and there is only ever one
