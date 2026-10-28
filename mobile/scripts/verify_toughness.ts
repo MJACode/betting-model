@@ -155,11 +155,11 @@ function main() {
   const s = read('src/screens/StatsScreen.tsx');
   const tb = read('src/components/TeamsBoard.tsx');
   check('the football grade names the season it fell back to',
-    /the \$\{defenceSeason\} season/.test(s) || /defenceSeason != null/.test(s));
+    /the \$\{seasonName\} season/.test(s) && /defenceSeason/.test(s));
   check('the tooltip is built per sport, not one MLB paragraph',
-    /gradesOnDefence\(sport\)\s*\n?\s*\?\s*`Graded on \$\{defenceMetricSpoken\(sport\)\}/.test(s));
+    /gradesOnDefence\(sport\)\s*\n?\s*\?\s*`Measured on \$\{defenceMetricSpoken\(sport\)\}/.test(s));
   check('and the dash sentence no longer talks about a starter on those sports',
-    /no matchup data for this row yet/.test(s));
+    /no matchup for this row yet/.test(s));
   check('the slate gate is an identity, not a boolean read stale on a switch',
     /slateFor !== sport/.test(s) && !/slateReady/.test(s));
   check('the slate chip is announced busy, not dimmed',

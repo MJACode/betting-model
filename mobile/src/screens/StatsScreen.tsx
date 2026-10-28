@@ -34,6 +34,7 @@ import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { AnytimeMatchupCell } from '@/components/AnytimeMatchupCell';
+import { MatchupFloorMark, MatchupStrengthBar } from '@/components/MatchupStrengthBar';
 import { BookMark } from '@/components/BookMark';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { InfoSheet, InfoTooltip } from '@/components/InfoTooltip';
@@ -97,12 +98,13 @@ import { parseTypedLine, stepLineFrom, supportsPlayerDetail } from '@/lib/player
 import {
   buildMatchupMap,
   defenceMetricSpoken,
-  gradeColorDiscriminates,
   gradeMatchup,
   gradeOpponentDefence,
-  gradeSpoken,
   gradesOnDefence,
+  matchupStrengthFloorSpoken,
+  matchupStrengthSpoken,
   meetsGradeFloor,
+  strengthForGrade,
   GRADE_FLOORS,
   type MatchupGrade,
   type MatchupInfo,
@@ -236,11 +238,11 @@ import {
   compareAnytimeRows,
   defenseKey,
   groupsUsedByBoard,
-  ranksInGroup,
   isAnytimeTdBoard,
   meetsTierFloor,
   nextMatchupSort,
-  tierFloorLabel,
+  tierBars,
+  tierFloorSpoken,
   TIER_FLOORS,
   type AnytimeMatchupView,
   type DefenseRank,
@@ -248,7 +250,7 @@ import {
   type MatchupTier,
 } from '@/lib/anytimeMatchup';
 import { nflPositionGroup } from '@/lib/positionVsOpponent';
-import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import type {
@@ -313,20 +315,9 @@ const SEASON = yearET();
  *     perfectly and then clips the PRICE at about fontScale 1.3, which is the
  *     one number on the row a user came for.
  */
-// The GRADE column holds two characters now, not a stacked opponent + fact
-// (2026-09-05), so it gives ~24pt back to the player name — which is exactly
-// where the new subline needs it.
-//
-// The header word is GRADE, not MATCHUP: "MATCHUP" at 11pt semibold needs
-// ~56-58pt and truncated to "MATCHU…" inside a 52pt box (UX review). It is
-// also the more honest label — the cell IS a grade, and the subline above
-// already says who the opponent is, so "MATCHUP" promises a fixture the column
-// no longer prints.
-//
-// 64, not 52, because the header carries the LEGEND: "B+" explains nothing on
-// its own — not which end is good, not what it is graded against, not why some
-// rows are a dash — where the two-line cell it replaces explained itself by
-// printing "S. Gray 5.90 ERA". Still 12pt narrower than the old SPOT column.
+// The column is five bars, not a stacked opponent + fact (2026-09-05) and not
+// a letter (2026-10-28). 64pt holds the meter. The header word sits to the
+// right of the info icon so it shares the bars' trailing edge.
 const MATCHUP_W = 64;
 const ODDS_W = 62;
 
@@ -1621,7 +1612,6 @@ export function StatsScreen() {
           inactive: injuryFor(row)?.sidelined ?? null,
         },
         rank,
-        groupRanks: group ? ranksInGroup(defenseRanks, group) : null,
       });
     },
     [rankStatus, failedGroups, slateGameIndex, h2hIndex, defenseRanks, leagueHasGames, injuryFor],
@@ -1631,7 +1621,7 @@ export function StatsScreen() {
   const showMatchupCol = matchupByTeam.size > 0 || (gradesOnDefence(sport) && defenceByTeam.size > 0);
 
   /**
-   * The GRADE column's legend, per sport and naming the season it graded on.
+   * The MATCHUP column's legend, per sport and naming the season it measured.
    *
    * It has to be per sport because the column now answers the same question
    * three different ways, and it has to name the season because the football
@@ -1650,19 +1640,19 @@ export function StatsScreen() {
           : String(defenceSeason);
     const seasonWords = seasonName != null ? `the ${seasonName} season` : 'the season so far';
     const head =
-      'How hard tonight\u2019s spot is for this player, graded against the rest of ' +
-      'the league. A+ is the easiest matchup on the board and F the hardest.';
+      'How hard tonight\u2019s spot is for this player. Five filled bars is the ' +
+      'strongest spot on the board. One filled bar is the weakest.';
     const how = gradesOnDefence(sport)
-      ? `Graded on ${defenceMetricSpoken(sport)} for the team this player faces, over ${seasonWords}.`
-      : 'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
+      ? `Measured on ${defenceMetricSpoken(sport)} for the team this player faces, over ${seasonWords}.`
+      : 'Batters are measured on the opposing starter\u2019s ERA, pitchers on the ' +
         'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
         'opposing defence\u2019s rating.';
     const dash = gradesOnDefence(sport)
-      ? 'A dash means we have no matchup data for this row yet \u2014 no game ' +
+      ? 'A dash means we have no matchup for this row yet \u2014 no game ' +
         'tonight, or nothing on file for the opponent. An unknown matchup is ' +
-        'never graded as average.'
-      : 'A dash means the starter isn\u2019t confirmed yet \u2014 an unknown matchup ' +
-        'is never graded as average.';
+        'a dash, never a bar.'
+      : 'A dash means the starter isn\u2019t confirmed yet. An unknown matchup ' +
+        'is a dash, never a bar.';
     return `${head}\n\n${how}\n\n${dash}`;
   }, [sport, defenceSeason]);
 
@@ -2233,22 +2223,6 @@ export function StatsScreen() {
   // a verdict on the bet rather than a ranking of players. Computed over what
   // is actually on screen, so the board never colours what it cannot
   // distinguish.
-  /**
-   * Does the GRADE column span more than one colour on what is rendered?
-   *
-   * Computed here, over the visible rows, for the same reason `colorful` is:
-   * on a two-team NFL slate whose defences were both elite, every row grades
-   * D- and the column paints one red block beside a live price. The letter
-   * stays — it is true — and only the ramp goes quiet.
-   */
-  const gradesColorful = useMemo(() => {
-    const rowsOnScreen: { team?: string | null; player_name?: string | null }[] =
-      effectiveMode === 'hitRate' ? hitRatePlayers : ranked.map((r) => r.row);
-    return gradeColorDiscriminates(
-      rowsOnScreen.slice(0, 60).map((r) => matchupFor(r)?.grade ?? null),
-    );
-  }, [effectiveMode, hitRatePlayers, ranked, matchupFor]);
-
   const colorful = useMemo(
     () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
     [hitRatePlayers],
@@ -2432,18 +2406,25 @@ export function StatsScreen() {
       });
     }
     if (atdOn && minTier) {
+      const spoken = tierFloorSpoken(minTier);
       out.push({
         key: 'tier',
-        label: `${tierFloorLabel(minTier)}${includeUngraded ? '' : ', ranked only'}`,
+        label: includeUngraded ? '' : 'ranked only',
+        spoken: includeUngraded ? `matchup ${spoken}` : `matchup ${spoken}, ranked only`,
+        leading: <MatchupFloorMark filled={tierBars(minTier)} tone="tint" />,
         onRemove: () => {
           setMinTier(null);
           setIncludeUngraded(true);
         },
       });
     } else if (!atdOn && minGrade) {
+      const filled = strengthForGrade(minGrade);
+      const spoken = filled ? matchupStrengthFloorSpoken(filled) : 'matchup';
       out.push({
         key: 'grade',
-        label: `${minGrade} or better${includeUngraded ? '' : ', graded only'}`,
+        label: includeUngraded ? '' : 'ranked only',
+        spoken: includeUngraded ? `matchup ${spoken}` : `matchup ${spoken}, ranked only`,
+        leading: filled ? <MatchupFloorMark filled={filled} tone="tint" /> : undefined,
         onRemove: () => {
           setMinGrade(null);
           setIncludeUngraded(true);
@@ -2983,11 +2964,12 @@ export function StatsScreen() {
               accessibilityRole="button"
               key={p.key}
               onPress={p.onRemove}
-              accessibilityLabel={`Remove filter ${p.label}`}
+              accessibilityLabel={`Remove filter ${p.spoken ?? p.label}`}
               style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
               hitSlop={6}
             >
-              <Text style={styles.pillText}>{p.label}</Text>
+              {p.leading}
+              {p.label ? <Text style={styles.pillText}>{p.label}</Text> : null}
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
@@ -3103,7 +3085,6 @@ export function StatsScreen() {
                 atdView={atdOn ? atdViewFor(item) : undefined}
                 atdStack={stackAtd}
                 onMatchupExplain={openMatchupInfo}
-                gradeColorful={gradesColorful}
                 subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
@@ -3169,7 +3150,6 @@ export function StatsScreen() {
                 atdView={atdOn ? atdViewFor(item.row) : undefined}
                 atdStack={stackAtd}
                 onMatchupExplain={openMatchupInfo}
-                gradeColorful={gradesColorful}
                 subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
@@ -3363,7 +3343,9 @@ export function StatsScreen() {
           <FilterSection
             title={ATD_COPY.filterTitle}
             subtitle={ATD_COPY.filterSubtitle}
-            summary={minTier ? tierFloorLabel(minTier) : 'Any matchup'}
+            summary={minTier ? undefined : 'Any matchup'}
+            summaryNode={minTier ? <MatchupFloorMark filled={tierBars(minTier)} /> : undefined}
+            summarySpoken={minTier ? tierFloorSpoken(minTier) : undefined}
             defaultOpen={minTier != null}
             onClear={minTier ? () => { setMinTier(null); setIncludeUngraded(true); } : undefined}
           >
@@ -3376,8 +3358,11 @@ export function StatsScreen() {
               {TIER_FLOORS.map((tier) => (
                 <FilterChip
                   key={tier}
-                  label={tierFloorLabel(tier)}
+                  appearance="outline"
+                  label="+"
+                  leading={<MatchupStrengthBar filled={tierBars(tier)} size="chip" />}
                   active={minTier === tier}
+                  accessibilityLabel={tierFloorSpoken(tier)}
                   onPress={() => setMinTier(minTier === tier ? null : tier)}
                 />
               ))}
@@ -3395,13 +3380,24 @@ export function StatsScreen() {
           </FilterSection>
         ) : showMatchupCol ? (
           <FilterSection
-            title="Matchup grade"
+            title="Matchup"
             // The comparison is stated once, here, so the chip, this summary
             // and the pill all say the same thing. The chips were labelled
             // "A+" and set floor 'A' — ambiguous on a scale where A+ is a real
-            // grade, and a second name for one setting (UX review).
-            subtitle="How soft the defence is, at or above the grade you pick. A is the easiest spot on the board."
-            summary={minGrade ? `${minGrade} or better` : 'Any matchup'}
+            // grade, and a second name for one setting (UX review). The floor
+            // is now the bar count: A is five filled, and the chip draws that.
+            subtitle="Five bars, filled from the left. The floor keeps that strength and every stronger spot."
+            summary={minGrade ? undefined : 'Any matchup'}
+            summaryNode={
+              minGrade && strengthForGrade(minGrade)
+                ? <MatchupFloorMark filled={strengthForGrade(minGrade)!} />
+                : undefined
+            }
+            summarySpoken={
+              minGrade && strengthForGrade(minGrade)
+                ? matchupStrengthFloorSpoken(strengthForGrade(minGrade)!)
+                : undefined
+            }
             defaultOpen={minGrade != null}
             onClear={minGrade ? () => { setMinGrade(null); setIncludeUngraded(true); } : undefined}
           >
@@ -3411,15 +3407,21 @@ export function StatsScreen() {
                 active={minGrade == null}
                 onPress={() => setMinGrade(null)}
               />
-              {GRADE_FLOORS.map((g) => (
-                <FilterChip
-                  key={g}
-                  label={g}
-                  active={minGrade === g}
-                  accessibilityLabel={`${gradeSpoken(g)} or better`}
-                  onPress={() => setMinGrade(minGrade === g ? null : g)}
-                />
-              ))}
+              {GRADE_FLOORS.map((g) => {
+                const filled = strengthForGrade(g);
+                if (!filled) return null;
+                return (
+                  <FilterChip
+                    key={g}
+                    appearance="outline"
+                    label="+"
+                    leading={<MatchupStrengthBar filled={filled} size="chip" />}
+                    active={minGrade === g}
+                    accessibilityLabel={matchupStrengthFloorSpoken(filled)}
+                    onPress={() => setMinGrade(minGrade === g ? null : g)}
+                  />
+                );
+              })}
             </View>
             {/* A dash is "no rating for that defence", not "a bad spot" — and
                 on a college Saturday those rows are the FCS visitors, the
@@ -3427,11 +3429,11 @@ export function StatsScreen() {
                 anyone who wants only rows we can vouch for. */}
             {minGrade ? (
               <View style={styles.ungradedRow}>
-                <Text style={styles.ungradedLabel}>Include ungraded matchups</Text>
+                <Text style={styles.ungradedLabel}>Include matchups we can’t rank</Text>
                 <Switch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
-                  accessibilityLabel="Include players whose matchup has no grade"
+                  accessibilityLabel="Include matchups we can’t rank"
                 />
               </View>
             ) : null}
@@ -4456,43 +4458,23 @@ function OddsCell({
   ));
 }
 
-/** MATCHUP: how hard this spot is, as one letter.
+/** MATCHUP: how hard this spot is, as five bars.
  *
- * Matt, 2026-09-05: "update spot column to just be difficulty of that match up
- * and have a bigger scale besides low med and high". So the cell is the grade
- * and nothing else — the opponent moved under the name the same day, and the
- * FACT behind the grade (the opposing starter and his ERA, the defence's
- * rating) moved to the player's detail screen, which was Matt's own alternative
- * home for it on 2026-09-04 ("or have it be in the player data when you click
- * on a record"). It is also still spoken in full here, in the cell's label.
+ * Matt, 2026-09-05: the column is the difficulty of the matchup, and the FACT
+ * behind it (the opposing starter and his ERA, the defence's rating) lives on
+ * the player's detail screen. Matt, 2026-10-28: the letter is gone. Five
+ * segments, filled from the left. VoiceOver says "Matchup strength N of 5".
  *
- * The grade is a percentile against MEASURED league distributions, not the
- * three hand-set cliffs it replaces — `lib/matchup.ts` carries the numbers and
- * why the old bands called 77% of WNBA matchups favourable.
+ * The count is a percentile against MEASURED league distributions — `lib/matchup.ts`
+ * carries the numbers. Colour is the `colors.grade*` ramp, NOT bet/avoid, and
+ * it is not the only carrier: the filled count is the fact.
  *
- * Colour is the `colors.grade*` ramp, NOT bet/avoid: those are this app's
- * BET/AVOID semantics and the hit-rate column 60pt away is already a traffic
- * light. It is also never the only carrier — the letter is the fact, the
- * colour only speeds up the scan, and the label spells the letter out
- * ("B plus", because VoiceOver reads a bare "+" as nothing).
- *
- * An ungraded matchup is a DASH, never a C: grading a starter we do not know
+ * An ungraded matchup is a DASH, never a bar: grading a starter we do not know
  * as average invents the one fact this column exists to report.
  */
-function MatchupCell({
-  matchup,
-  colorful = true,
-}: {
-  matchup: MatchupInfo | null;
-  /**
-   * False when every visible row lands in the same colour band — the letter is
-   * still right, but a whole column of one colour beside a live price reads as
-   * a verdict on the bet rather than a ranking of players (the same rule
-   * `colorful` applies to the hit-rate column).
-   */
-  colorful?: boolean;
-}) {
-  if (!matchup?.grade) {
+function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+  const filled = strengthForGrade(matchup?.grade);
+  if (!filled) {
     return (
       <View
         style={styles.matchupWrap}
@@ -4507,17 +4489,9 @@ function MatchupCell({
     <View
       style={styles.matchupWrap}
       accessible
-      accessibilityLabel={`Matchup grade ${gradeSpoken(matchup.grade)}${matchup.fact ? `, ${matchup.fact}` : ''}`}
+      accessibilityLabel={`${matchupStrengthSpoken(filled)}${matchup?.fact ? `, ${matchup.fact}` : ''}`}
     >
-      <Text
-        style={[
-          styles.matchupGrade,
-          { color: colorful ? gradeColor(matchup.grade) : colors.textPrimary },
-        ]}
-        numberOfLines={1}
-      >
-        {matchup.grade}
-      </Text>
+      <MatchupStrengthBar filled={filled} />
     </View>
   );
 }
@@ -4669,20 +4643,25 @@ function ColumnHeader({
       </View>
     ) : (
       <View style={styles.colHeaderMatchup}>
-        <Text style={styles.colHeaderRight} numberOfLines={1}>
-          GRADE
-        </Text>
-        {/* The column's only legend, so it has to describe the grade the
-            reader is ACTUALLY looking at. It named the two baseball answers
+        {/* Icon first so MATCHUP and the bars share the trailing edge.
+            The column's only legend. It named the two baseball answers
             alone and asserted "this season" -- both wrong for the three
-            sports now graded on defence, whose numbers come from the season
+            sports now measured on defence, whose numbers come from the season
             this text names, which on opening night is LAST season (UX
             review, 2026-09-09). */}
         <InfoTooltip
-          title="Matchup grade"
+          title="Matchup"
           body={matchupTooltip}
-          accessibilityLabel="What the matchup grade means"
+          accessibilityLabel="What the matchup bars mean"
         />
+        <Text
+          style={styles.matchupHeaderWord}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          MATCHUP
+        </Text>
       </View>
     )
   ) : null;
@@ -4777,7 +4756,6 @@ function LeaderRow({
   atdView,
   atdStack = false,
   onMatchupExplain,
-  gradeColorful,
   subline,
   quote,
   started,
@@ -4799,13 +4777,11 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  /** Set on NFL Anytime TD. Replaces the A–F grade on this board only. */
+  /** Set on NFL Anytime TD. Same five-bar meter, from the defense rank. */
   atdView?: AnytimeMatchupView;
   /** Metrics move under the name once Dynamic Type would clip the price. */
   atdStack?: boolean;
   onMatchupExplain: () => void;
-  /** False when every visible grade lands in one colour band. */
-  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -4891,7 +4867,7 @@ function LeaderRow({
           muted={!!injury?.sidelined}
         />
       ) : null}
-      {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   const body = atdView && atdStack ? (
@@ -5088,7 +5064,6 @@ function HitRateRow({
   atdView,
   atdStack = false,
   onMatchupExplain,
-  gradeColorful,
   subline,
   quote,
   started,
@@ -5112,8 +5087,6 @@ function HitRateRow({
   atdView?: AnytimeMatchupView;
   atdStack?: boolean;
   onMatchupExplain: () => void;
-  /** False when every visible grade lands in one colour band. */
-  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -5216,7 +5189,7 @@ function HitRateRow({
           muted={!!injury?.sidelined}
         />
       ) : null}
-      {!atdView && showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
+      {!atdView && showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   const body = atdView && atdStack ? (
@@ -5958,6 +5931,16 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 2,
   },
+  // The info icon sits to the left of the word, so the word and the bars
+  // share the row's trailing edge. The word shrinks when the name needs the room.
+  matchupHeaderWord: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    letterSpacing: 0,
+  },
   // Rows are deliberately compact — more players visible per screen.
   rowStacked: {
     flexDirection: 'column',
@@ -6207,15 +6190,7 @@ const styles = StyleSheet.create({
     maxWidth: MATCHUP_W * 1.4,
     flexShrink: 1,
     alignItems: 'flex-end',
-  },
-  // One letter (two with a modifier), so it can carry the row's weight — it is
-  // the only thing in the column and it has to be legible at a glance down 25
-  // rows. Bumped from caption because a bold "B+" at 12pt reads as a footnote
-  // rather than a grade.
-  matchupGrade: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.bold,
-    letterSpacing: 0.2,
+    justifyContent: 'center',
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
