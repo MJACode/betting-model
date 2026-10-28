@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-import { lineLegsAfterAdd } from '@/lib/betslipGuard';
+import { lineLegsAfterAdd, lineLegsAfterEdit } from '@/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '@/lib/injuryStatus';
 import { injuryIndexForSport } from '@/lib/injuryLookup';
 import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
@@ -136,9 +136,25 @@ export function useLineLegs() {
     );
   }, []);
 
+  /** Swap a leg for its edited version in place (the betslip's Edit).
+   *  Resolves 'ok', 'duplicate' (a no-op, or a bet already on the slip), or
+   *  'sidelined': an edit commits a new bet, so it passes the same injury gate
+   *  as an add (Matt, 2026-10-24) — a player ruled out after the leg was added
+   *  cannot be re-bet by editing the line. */
+  const replace = useCallback((oldKey: string, next: LineLegSpec): Promise<'ok' | 'duplicate' | 'sidelined'> => {
+    return (async () => {
+      const index = isGameSpec(next) ? EMPTY_INJURY_INDEX : await injuryIndexForSport(next.sport);
+      // No await between this read of `cached` and `save` assigning it.
+      const result = lineLegsAfterEdit(cached ?? [], oldKey, next, index);
+      if (result.outcome !== 'ok') return result.outcome;
+      await save(result.specs);
+      return 'ok';
+    })();
+  }, []);
+
   const clear = useCallback(() => {
     save([]).catch((err) => console.warn('[lineLegs] clear failed', err));
   }, []);
 
-  return { specs, count: specs.length, ready, has, add, remove, clear };
+  return { specs, count: specs.length, ready, has, add, remove, replace, clear };
 }

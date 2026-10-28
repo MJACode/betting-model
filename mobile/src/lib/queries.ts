@@ -12,6 +12,8 @@ import {
   LOG_TABLE,
   logFetchLimit,
   normalizeLogRow,
+  attachGameSides,
+  type GameSidesRow,
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
@@ -2255,9 +2257,25 @@ export async function fetchPlayerGameLog(
   q = playerId ? q.eq('player_id', playerId) : q.ilike('player_name', playerName!);
   const { data, error } = await q;
   if (error) throw error;
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
     normalizeLogRow(sport, r),
   );
+  // Opponent and home/away for every sport (the chart labels "@CHI · 10/26").
+  // At most logFetchLimit ids (50), so one bounded read. A failure costs the
+  // labels, never the log.
+  const ids = [...new Set(rows.map((r) => r.game_id).filter(Boolean))];
+  if (ids.length === 0) return rows;
+  try {
+    const { data: games, error: gamesError } = await supabase
+      .from('games')
+      .select('game_id, home_team, away_team')
+      .in('game_id', ids);
+    if (gamesError) throw gamesError;
+    return attachGameSides(rows, (games ?? []) as unknown as GameSidesRow[]);
+  } catch (err) {
+    console.warn('[playerLog] opponent lookup failed', err);
+    return rows;
+  }
 }
 
 export async function fetchPlayerByName(

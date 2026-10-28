@@ -55,6 +55,10 @@ export interface PlayerLogEntry {
   /** NFL only — CFBD's box score names participants, not positions. */
   pos?: string | null;
   opponent?: string | null;
+  /** Where the player's team played. Filled from `games` on fetch
+   *  (attachGameSides), so every sport has it, not only the two football logs
+   *  that store an opponent column. Absent when the game row was not found. */
+  venue?: 'home' | 'away' | null;
   week?: number | null;
   /** Every sport's stat columns, plus the derived ones added below. */
   [key: string]: number | string | null | undefined;
@@ -638,6 +642,113 @@ export function windowOptionsFor(sport: PlayerLogSport): WindowOption[] {
   return [...spans.map((n) => ({ value: n as GameWindow, label: `L${n}` })), { value: 'all' as GameWindow, label: 'All' }];
 }
 
+// ── Opponent and venue, from the games table ────────────────────────────────
+
+/** The `games` columns needed to name a log row's opponent. */
+export interface GameSidesRow {
+  game_id: string;
+  home_team: string | null;
+  away_team: string | null;
+}
+
+/**
+ * Fills `opponent` and `venue` on each log row from its game.
+ *
+ * Matt, 2026-10-28: on the player chart "I cannot tell which is the recent game
+ * and latest game. Add dates and … @ Chicago". Only the NFL and NCAAF logs
+ * store an opponent; the other sports' logs have a game_id and a team. Measured
+ * the same day: every log game_id is in `games` (NBA 1,286 of 1,286 this
+ * season) and every log team is that game's home or away team (NBA 27,920 of
+ * 27,920 rows), so the join is exact. A row whose game is missing keeps the
+ * opponent its own log stored, and `venue` stays unset.
+ */
+export function attachGameSides(
+  rows: PlayerLogEntry[],
+  games: readonly GameSidesRow[],
+): PlayerLogEntry[] {
+  const byId = new Map(games.map((g) => [g.game_id, g]));
+  return rows.map((r) => {
+    const g = byId.get(r.game_id);
+    if (!g || !r.team) return r;
+    if (r.team === g.home_team) return { ...r, venue: 'home' as const, opponent: r.opponent ?? g.away_team };
+    if (r.team === g.away_team) return { ...r, venue: 'away' as const, opponent: r.opponent ?? g.home_team };
+    return r;
+  });
+}
+
+/** Longest opponent name a chart label prints before shortening. 3-letter
+ *  codes always fit; NCAAF school names ("Ohio State") do not. */
+const OPP_LABEL_MAX = 4;
+
+/**
+ * "@CHI" (away) or "vs CHI" (home), the way every box score writes it, and
+ * the bare name when the venue is unknown. With
+ * `short`, a long name is replaced by its abbreviation from `abbrevs` (the
+ * NCAAF school → CFBD code map, lib/ncaafAbbrevs.ts) and only cut to four
+ * letters when the map has no entry — a bare cut prints "Michigan" and
+ * "Michigan State" both as MICH (UX review, 2026-10-28). Null when the
+ * opponent is unknown.
+ */
+export function opponentLabel(
+  row: Pick<PlayerLogEntry, 'opponent' | 'venue'>,
+  short = false,
+  abbrevs?: ReadonlyMap<string, string>,
+): string | null {
+  const opp = row.opponent ? String(row.opponent) : '';
+  if (!opp) return null;
+  let name = opp;
+  if (short && opp.length > OPP_LABEL_MAX) {
+    const code = abbrevs?.get(opp);
+    name = code && code.length <= 5 ? code : opp.slice(0, OPP_LABEL_MAX).toUpperCase();
+  }
+  if (row.venue === 'away') return `@${name}`;
+  if (row.venue === 'home') return `vs ${name}`;
+  // Venue unknown (no games row): the bare name, so it never claims a
+  // home game it cannot vouch for (review, 2026-10-28).
+  return name;
+}
+
+/** "10/26" from an ISO date, no year and no leading zeros. */
+export function shortGameDate(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ''));
+  if (!m) return '';
+  return `${Number(m[2])}/${Number(m[3])}`;
+}
+
+/** One charted game: its value plus what the chart prints under it. */
+export interface ChartGame {
+  value: number;
+  date: string;
+  opp: string | null;
+  /** Full-length version for the tapped-bar caption ("@ Ohio State"). */
+  oppFull: string | null;
+}
+
+/**
+ * The same games `logValues` keeps, in the same order (newest first), with
+ * each one's date and opponent. Built in one pass so a bar can never carry
+ * another game's label: logValues DROPS games with no value, so indexing the
+ * log by a value's position would shift every label after the first gap.
+ */
+export function chartGames(
+  games: PlayerLogEntry[],
+  valueOf: (r: PlayerLogEntry) => number | null,
+  abbrevs?: ReadonlyMap<string, string>,
+): ChartGame[] {
+  const out: ChartGame[] = [];
+  for (const r of games) {
+    const v = valueOf(r);
+    if (v == null) continue;
+    out.push({
+      value: v,
+      date: shortGameDate(r.game_date),
+      opp: opponentLabel(r, true, abbrevs),
+      oppFull: opponentLabel(r, false),
+    });
+  }
+  return out;
+}
+
 // ── Display helpers ─────────────────────────────────────────────────────────
 
 /** The line under the player's name: team, plus position where a sport has one. */
@@ -659,18 +770,19 @@ export function playerSubtitle(
  */
 export function gameContextLine(sport: PlayerLogSport, row: PlayerLogEntry): string {
   const team = row.team ?? '—';
+  // "@CHI" on an away game, "vs CHI" at home — every sport now, from `games`.
+  const opp = opponentLabel(row);
   if (FOOTBALL.has(sport)) {
-    const opp = row.opponent ? `vs ${row.opponent}` : null;
     const wk = row.week != null ? `Wk ${row.week}` : null;
     return [team, opp, wk].filter(Boolean).join(' · ');
   }
   if (sport === 'WNBA' || sport === 'NBA') {
     const min = num(row.minutes);
-    return `${team} · ${min == null ? '—' : min.toFixed(0)} min`;
+    return [team, opp, `${min == null ? '—' : min.toFixed(0)} min`].filter(Boolean).join(' · ');
   }
   const isPitcher = row.player_type === 'pitcher';
   const vol = isPitcher ? `${row.innings_pitched ?? '—'} IP` : `${row.at_bats ?? '—'} AB`;
-  return `${team} · ${vol}`;
+  return [team, opp, vol].filter(Boolean).join(' · ');
 }
 
 /**

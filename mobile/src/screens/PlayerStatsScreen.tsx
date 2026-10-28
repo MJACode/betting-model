@@ -28,6 +28,7 @@ import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -46,6 +47,8 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  chartGames,
+  shortGameDate,
   openingChip,
   pagePlayerId,
   playerSubtitle,
@@ -371,12 +374,17 @@ export function PlayerStatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
-  // Values come most-recent-first. Window slices the most recent N.
-  const windowed = useMemo(
-    () => (gameWindow === 'all' ? values : values.slice(0, gameWindow)),
-    [values, gameWindow],
-  );
-
+  // NCAAF school → short code, so "Michigan State" is not cut to MICH.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
+  // The windowed games, most recent first, each with its date and opponent so
+  // every bar on the chart says which game it is (Matt, 2026-10-28).
+  const windowedGames = useMemo(() => {
+    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
+    return gameWindow === 'all' ? all : all.slice(0, gameWindow);
+  }, [games, stat, gameWindow, ncaafAbbrevs]);
+  // The values ARE the labelled games' values, so the chart's bars and labels
+  // cannot fall out of step (review, 2026-10-28).
+  const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
@@ -898,6 +906,8 @@ export function PlayerStatsScreen() {
 
               <HitRateChart
                 values={windowed}
+                games={windowedGames}
+                unit={statLabel}
                 line={selection.line}
                 side={selection.side}
                 lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
@@ -1179,8 +1189,10 @@ function GameRow({
         ) : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.gameDate}>{row.game_date}</Text>
-        <Text style={styles.gameMeta}>{gameContextLine(sport, row)}</Text>
+        {/* The chart's own date idiom ("10/26"), so the bar and the row
+            name the game the same way. */}
+        <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
+        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>

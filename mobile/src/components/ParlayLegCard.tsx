@@ -15,11 +15,14 @@ interface Props {
   onRemove?: () => void;
   /** Optional — when omitted (e.g. manual builder) the swap control is hidden. */
   onSwap?: () => void;
+  /** Optional — change the leg's line (a Stats line leg) or its text and odds
+   *  (a custom leg). Omitted for model picks, which keep their own line. */
+  onEdit?: () => void;
 }
 
 /** Compact card for a single parlay leg, modeled on PickCard. Read-mostly with
  * trailing remove / swap controls. */
-export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
+export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
   // A leg rebuilt from a saved parlay carries no live game, but its snapshot
   // kept the matchup — so it reads "MIL @ CHC / Over 8.5" here the same way it
   // does on the saved card, instead of losing the game it belongs to.
@@ -66,12 +69,21 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           ) : null}
         </View>
       </View>
-      {onSwap || onRemove ? (
+      {onSwap || onRemove || onEdit ? (
         <View style={styles.controls}>
+          {onEdit ? (
+            <Pressable
+              onPress={onEdit}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${leg.label}`}
+              style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
+            >
+              <Ionicons name="create-outline" size={20} color={colors.tint} />
+            </Pressable>
+          ) : null}
           {onSwap ? (
             <Pressable
               onPress={onSwap}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Swap ${leg.label} for another leg`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -82,7 +94,6 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           {onRemove ? (
             <Pressable
               onPress={onRemove}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Remove ${leg.label} from the slip`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -174,11 +185,16 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginLeft: spacing.sm,
+    marginLeft: spacing.xs,
   },
+  // A 44pt box each, no hit slop: Edit and Remove sit side by side and
+  // slop made their targets overlap, so a near-miss on Edit removed the leg
+  // (UX review, 2026-10-28).
   ctrl: {
-    padding: 4,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pressed: {
     opacity: 0.5,
