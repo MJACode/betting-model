@@ -59,12 +59,14 @@ the COVID season (scoreboard groups=50, 2020-11-25..2021-04-06, counted
 
 THE FLOOR. September 2026 ran the balance to 0 and every live feed stopped for
 five days. Every response carries x-requests-remaining, and the run stops the
-moment the next call would take it below `--floor` (500,000 at least). NEWEST
+moment the next call would take it below `--floor` (300,000 at least: 3.5 of
+October's worst organic days, measured 2026-10-28 from odds_api_quota; mike,
+2026-10-28: "dont stop the spend" — the floor is the feeds' reserve, not a pause). NEWEST
 DATE FIRST, so a stop leaves the most recent seasons stored.
 
-    python -m data.ingestors.ncaab_odds_history --probe --seasons 2026 2026 --max-credits 200 --floor 500000 --apply
-    python -m data.ingestors.ncaab_odds_history --lines --seasons 2021 2026 --max-credits 420000 --floor 500000 --apply
-    python -m data.ingestors.ncaab_odds_history --derivatives close --seasons 2024 2026 --max-credits 800000 --floor 500000 --apply
+    python -m data.ingestors.ncaab_odds_history --probe --seasons 2026 2026 --max-credits 200 --floor 300000 --apply
+    python -m data.ingestors.ncaab_odds_history --lines --seasons 2021 2026 --max-credits 420000 --floor 300000 --apply
+    python -m data.ingestors.ncaab_odds_history --derivatives close --seasons 2024 2026 --max-credits 800000 --floor 300000 --apply
 """
 from __future__ import annotations
 
@@ -105,7 +107,7 @@ FIRST_DERIV_DATE = "2023-05-03"     # the feed's first period / prop snapshot
 LINE_SNAPSHOT_COST = 30             # 10 x 3 markets x 1 region (measured on the NBA)
 LIST_COST = 1                       # the historical event list, a date
 DERIV_EVENT_COST = 10 * len(DERIV_MARKETS)   # the most one game can bill
-MIN_FLOOR = 500_000
+MIN_FLOOR = 300_000     # 3.5 of October's worst organic days (84,534 on 10-04); refill lands ~00:00Z on the 1st
 MIN_SCORED_GAMES = 4_000
 ET = ZoneInfo("America/New_York")
 

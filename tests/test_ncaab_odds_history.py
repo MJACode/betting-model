@@ -754,7 +754,7 @@ def test_every_job_mode_runs_the_buyer_through_its_own_argv(monkeypatch, mode, w
 @pytest.mark.parametrize("argv", [
     ["--lines", "--seasons", "2021", "2026", "--apply", "--max-credits", "1000"],          # no floor
     ["--lines", "--seasons", "2021", "2026", "--apply", "--floor", "500000"],             # no ceiling
-    ["--lines", "--seasons", "2021", "2026", "--apply", "--max-credits", "1000", "--floor", "499999"],
+    ["--lines", "--seasons", "2021", "2026", "--apply", "--max-credits", "1000", "--floor", "299999"],
     ["--lines", "--probe", "--seasons", "2026", "2026"],                                  # two at once
     ["--derivatives", "both", "--seasons", "2024", "2026"],
     ["--lines", "--seasons", "2026", "2021"],
@@ -798,7 +798,7 @@ def test_the_jobs_are_on_the_allowlist_and_run_repo_modules():
     {"mode": "deriv_open", "max_credits": 800_001, "floor": 500_000},
     {"mode": "probe", "max_credits": 201, "floor": 500_000},
     {"mode": "lines", "max_credits": 0, "floor": 500_000},
-    {"mode": "lines", "max_credits": 100_000, "floor": 499_999},       # would let the feeds run dry
+    {"mode": "lines", "max_credits": 100_000, "floor": 299_999},       # would let the feeds run dry
     {"mode": "lines", "max_credits": 100_000},
     {"mode": "props", "max_credits": 100_000, "floor": 500_000},       # not an approved purchase
     {"mode": "lines", "max_credits": 100_000, "floor": 500_000, "seasons": [2015, 2026]},
@@ -813,7 +813,7 @@ def test_the_approved_scopes_and_floor():
     assert {m: (v["cap"], v["seasons"]) for m, v in modes.items()} == {
         "lines": (420_000, (2021, 2026)), "deriv_close": (800_000, (2024, 2026)),
         "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026))}
-    assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 500_000
+    assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 300_000
     # the probe mode may carry the same floor as the purchases
     assert jq._validate_ncaab_odds_history({"mode": "probe", "max_credits": 200, "floor": 500_000})
 
@@ -848,10 +848,11 @@ SCHEDULES = [f"ncaab-schedule-{s - 1}-{s % 100:02d}" for s in range(2027, 2010, 
 IMPORTS = [f"ncaab-history-import-{k}" for k in
            ("box-scores", "prediction-tracker", "sbro", "match")]
 BUYS = ["ncaab-history-probe-2026-10-26", "ncaab-history-lines-2021-2026",
-        "ncaab-history-lines-2021-2026-r2"]
+        "ncaab-history-lines-2021-2026-r1", "ncaab-history-lines-2021-2026-r2"]
 SWEEPS = [f"ncaab-game-line-market-sweep-{m}-2026-10-26" for m in ("spreads", "totals", "h2h")]
-DERIVS = ["ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r2",
-          "ncaab-history-deriv-open-2024-2026"]
+DERIVS = ["ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r1",
+          "ncaab-history-deriv-close-2024-2026-r2", "ncaab-history-deriv-open-2024-2026",
+          "ncaab-history-deriv-open-2024-2026-r2"]
 DECLARED = ["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS + SWEEPS + DERIVS
 
 
@@ -876,12 +877,18 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     assert by[SCHEDULES[0]]["args"] == {"first": "2026-11-01", "last": "2027-04-10"}
     assert by[SCHEDULES[-1]]["args"] == {"first": "2010-11-01", "last": "2011-04-10"}
     buys = [by[k]["args"] for k in BUYS + DERIVS]
-    assert [a["mode"] for a in buys] == ["probe", "lines", "lines", "deriv_close", "deriv_close",
-                                         "deriv_open"]
-    assert all(a["floor"] >= 500_000 for a in buys)
+    assert [a["mode"] for a in buys] == ["probe", "lines", "lines", "lines", "deriv_close",
+                                         "deriv_close", "deriv_close", "deriv_open", "deriv_open"]
+    assert all(a["floor"] == 300_000 for a in buys)
+    # the first resume fires six hours after the measured refill (about 00:00Z on the
+    # 1st); the 2026-11-02 copies are backstops if a resume fired before it
+    assert by["ncaab-history-lines-2021-2026-r1"]["run_after"] == "2026-11-01T06:00:00+00:00"
     assert by["ncaab-history-lines-2021-2026-r2"]["run_after"] == "2026-11-02T00:20:00+00:00"
+    assert by["ncaab-history-deriv-close-2024-2026-r1"]["run_after"] == "2026-11-01T06:10:00+00:00"
     assert by["ncaab-history-deriv-close-2024-2026-r2"]["run_after"] == "2026-11-02T00:30:00+00:00"
-    assert by["ncaab-history-deriv-open-2024-2026"]["run_after"] == "2026-11-02T01:00:00+00:00"
+    assert by["ncaab-history-deriv-open-2024-2026"]["run_after"] == "2026-11-01T06:20:00+00:00"
+    assert by["ncaab-history-deriv-open-2024-2026-r2"]["run_after"] == "2026-11-02T01:00:00+00:00"
+    assert "ncaab-history-lines-2021-2026" not in {k for k in by if by[k].get("run_after")}  # the first run is immediate
     for a, b in (("ncaab-history-lines-2021-2026", "ncaab-history-lines-2021-2026-r2"),
                  ("ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r2")):
         assert by[a]["args"] == by[b]["args"]

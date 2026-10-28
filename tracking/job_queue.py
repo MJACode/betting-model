@@ -549,7 +549,11 @@ NCAAB_ODDS_HISTORY_MODES = {
                    "argv": ["--derivatives", "open"]},
     "probe": {"cap": 200, "seasons": (2026, 2026), "argv": ["--probe"]},
 }
-NCAAB_ODDS_HISTORY_MIN_FLOOR = 500_000
+# 300,000 = 3.5 of October's worst organic days (84,534 credits on 2026-10-04,
+# odds_api_quota) ahead of a refill that lands about 00:00Z on the 1st (the
+# Sept and Oct resets both show a full day's burn by the 1st's 23:40Z reading).
+# mike, 2026-10-28: "dont stop the spend" — lowered from 500,000.
+NCAAB_ODDS_HISTORY_MIN_FLOOR = 300_000
 
 
 def _job_ncaab_odds_history(**kw):
