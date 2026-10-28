@@ -74,7 +74,6 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
           {onEdit ? (
             <Pressable
               onPress={onEdit}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Edit ${leg.label}`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -85,7 +84,6 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
           {onSwap ? (
             <Pressable
               onPress={onSwap}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Swap ${leg.label} for another leg`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -96,7 +94,6 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
           {onRemove ? (
             <Pressable
               onPress={onRemove}
-              hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={`Remove ${leg.label} from the slip`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
@@ -188,11 +185,16 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginLeft: spacing.sm,
+    marginLeft: spacing.xs,
   },
+  // A 44pt box each, no hit slop: Edit and Remove sit side by side and
+  // slop made their targets overlap, so a near-miss on Edit removed the leg
+  // (UX review, 2026-10-28).
   ctrl: {
-    padding: 4,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pressed: {
     opacity: 0.5,

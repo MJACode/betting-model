@@ -28,6 +28,7 @@ import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -47,6 +48,7 @@ import {
   lineStepFor,
   logStatValue,
   chartGames,
+  shortGameDate,
   openingChip,
   pagePlayerId,
   playerSubtitle,
@@ -378,12 +380,14 @@ export function PlayerStatsScreen() {
     [values, gameWindow],
   );
 
+  // NCAAF school → short code, so "Michigan State" is not cut to MICH.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
   // The same games as `windowed`, each with its date and opponent, so every
   // bar on the chart says which game it is (Matt, 2026-10-28).
   const windowedGames = useMemo(() => {
-    const all = chartGames(games, (r) => logStatValue(r, stat));
+    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
     return gameWindow === 'all' ? all : all.slice(0, gameWindow);
-  }, [games, stat, gameWindow]);
+  }, [games, stat, gameWindow, ncaafAbbrevs]);
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
@@ -1188,8 +1192,10 @@ function GameRow({
         ) : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.gameDate}>{row.game_date}</Text>
-        <Text style={styles.gameMeta}>{gameContextLine(sport, row)}</Text>
+        {/* The chart's own date idiom ("10/26"), so the bar and the row
+            name the game the same way. */}
+        <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
+        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>

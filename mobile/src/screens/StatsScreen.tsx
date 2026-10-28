@@ -4232,7 +4232,6 @@ function LineRuler({
                     style={[
                       styles.thresholdMark,
                       { height: markH, minWidth: markH * 2, borderRadius: markH / 2 },
-                      preview != null && preview !== value && styles.thresholdMarkMoving,
                       bubblePressed && styles.pressed,
                     ]}
                     onLayout={onBubbleLayout}
@@ -5597,11 +5596,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-  },
-  // Mid-drag, the bubble names a stop the board is not on yet: a lighter fill
-  // says "heading to", and it snaps back to solid when the board catches up.
-  thresholdMarkMoving: {
-    opacity: 0.85,
   },
   thresholdMarkText: {
     fontSize: font.size.headline,

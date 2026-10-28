@@ -208,10 +208,7 @@ function buildLeg<R extends { bookmaker: string }>(
   if (at.length === 0) return null;
   const key = lineLegKey(spec);
   const dk = at.find((r) => r.bookmaker === MODEL_BOOK) ?? null;
-  // Best bettable price otherwise -- American odds are monotonic in payout, so
-  // the numeric max pays most (statsOdds.ts bestOf).
-  const best = at.reduce((b, r) => ((priceOf(r) as number) > (priceOf(b) as number) ? r : b), at[0]!);
-  const anchor = dk ?? best;
+  const anchor = anchorRow(at, priceOf)!;
   const americanOdds = priceOf(anchor) as number;
   const decimalOdds = americanToDecimal(americanOdds);
 
@@ -243,6 +240,23 @@ function buildLeg<R extends { bookmaker: string }>(
     dkLink: dk ? linkOf(dk) : null,
     pricedAt: anchor.bookmaker,
   };
+}
+
+/**
+ * The row a line leg is priced at: DraftKings when it posts the side, else the
+ * best bettable price (American odds are monotonic in payout, so the numeric
+ * max pays most — statsOdds.ts bestOf). ONE rule, shared by the leg and the
+ * edit sheet, so the price a user picks in the sheet is the price the slip
+ * shows (UX review, 2026-10-28). `at` holds only rows that price the side.
+ */
+export function anchorRow<R extends { bookmaker: string }>(
+  at: readonly R[],
+  priceOf: (r: R) => number | null,
+): R | null {
+  if (at.length === 0) return null;
+  const dk = at.find((r) => r.bookmaker === MODEL_BOOK);
+  if (dk) return dk;
+  return at.reduce((b, r) => ((priceOf(r) as number) > (priceOf(b) as number) ? r : b), at[0]!);
 }
 
 /**
@@ -403,7 +417,8 @@ export interface LineOptionPrice {
   book: string;
 }
 
-/** One number the books post for this player and market, with each side. */
+/** One number the books post for this player and market, with each side —
+ *  priced the way the leg will be (anchorRow), not at the best book. */
 export interface LineOption {
   line: number;
   over: LineOptionPrice | null;
@@ -419,20 +434,23 @@ export function lineOptionsFromRows(
   spec: PropLineLegSpec,
   rows: readonly PropOddsByBookRow[],
 ): LineOption[] {
-  const byLine = new Map<number, LineOption>();
-  const better = (cur: LineOptionPrice | null, price: number | null, book: string) =>
-    price == null ? cur : cur == null || price > cur.price ? { price, book } : cur;
+  const byLine = new Map<number, PropOddsByBookRow[]>();
   for (const r of rows) {
     if (r.game_id !== spec.game_id || r.market !== spec.market || r.player_name !== spec.player_name) continue;
     if (!isBettableBook(r.bookmaker)) continue;
     const line = num(r.line);
     if (line == null) continue;
-    const opt = byLine.get(line) ?? { line, over: null, under: null };
-    opt.over = better(opt.over, num(r.over_price), r.bookmaker);
-    opt.under = better(opt.under, num(r.under_price), r.bookmaker);
-    byLine.set(line, opt);
+    const list = byLine.get(line) ?? [];
+    list.push(r);
+    byLine.set(line, list);
   }
-  return [...byLine.values()]
+  const sideOf = (list: PropOddsByBookRow[], side: LineSide): LineOptionPrice | null => {
+    const priceOf = (r: PropOddsByBookRow) => num(side === 'under' ? r.under_price : r.over_price);
+    const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
+    return a ? { price: priceOf(a) as number, book: a.bookmaker } : null;
+  };
+  return [...byLine.entries()]
+    .map(([line, list]) => ({ line, over: sideOf(list, 'over'), under: sideOf(list, 'under') }))
     .filter((o) => o.over != null || o.under != null)
     .sort((a, b) => a.line - b.line);
 }

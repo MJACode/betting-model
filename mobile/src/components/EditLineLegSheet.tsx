@@ -12,6 +12,7 @@ import {
   type LineSide,
   type PropLineLegSpec,
 } from '@/lib/lineLegs';
+import { SegmentTabs } from '@/components/GroupTabs';
 import { bookLabelShort } from '@/lib/markets';
 import { fetchPropLineRows } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -109,25 +110,16 @@ export function EditLineLegSheet({
           </View>
           <Text style={styles.subtitle}>Pick a new line. Only lines a sportsbook posts are listed.</Text>
 
-          <View style={styles.segment} accessibilityRole="tablist">
-            {(['over', 'under'] as const).map((s) => {
-              const active = side === s;
-              return (
-                <Pressable
-                  key={s}
-                  onPress={() => {
-                    setSide(s);
-                    setNote(null);
-                  }}
-                  accessibilityRole="tab"
-                  accessibilityLabel={s === 'over' ? 'Over' : 'Under'}
-                  accessibilityState={{ selected: active }}
-                  style={({ pressed }) => [styles.segBtn, active && styles.segBtnActive, pressed && styles.pressed]}
-                >
-                  <Text style={[styles.segText, active && styles.segTextActive]}>{s === 'over' ? 'Over' : 'Under'}</Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.segmentWrap}>
+            <SegmentTabs
+              items={['over', 'under'] as const}
+              active={side}
+              onChange={(s) => {
+                setSide(s);
+                setNote(null);
+              }}
+              labelFor={(s) => (s === 'over' ? 'Over' : 'Under')}
+            />
           </View>
 
           {failed ? (
@@ -284,30 +276,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.md,
   },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.pill,
-    padding: 3,
+  segmentWrap: {
     marginBottom: spacing.md,
-  },
-  segBtn: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segBtnActive: {
-    backgroundColor: colors.tint,
-  },
-  segText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-  },
-  segTextActive: {
-    color: colors.textInverse,
   },
   state: {
     paddingVertical: spacing.xl,

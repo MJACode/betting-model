@@ -655,15 +655,19 @@ check('the same-position card excludes the player by the resolved id',
   ]);
   check('an away game reads @CHI, a home game vs ORL',
     opponentLabel(sided[0]!) === '@CHI' && opponentLabel(sided[2]!) === 'vs ORL'
-      && opponentLabel(sided[2]!, true) === 'vORL');
+      && opponentLabel(sided[2]!, true) === 'vs ORL');
   check('a game missing from games keeps no opponent and no venue',
     opponentLabel(sided[3]!) === null && sided[3]!.venue == null);
   check('a stored football opponent is kept, venue still added',
     attachGameSides([{ ...base, team: 'Ohio State', opponent: 'Michigan', game_id: 'f', game_date: '2026-11-28' }] as never,
       [{ game_id: 'f', home_team: 'Michigan', away_team: 'Ohio State' }])[0]!.venue === 'away');
-  check('a long school name is shortened under a bar, whole in the caption',
-    opponentLabel({ opponent: 'Ohio State', venue: 'away' }, true) === '@OHIO'
-      && opponentLabel({ opponent: 'Ohio State', venue: 'away' }) === '@Ohio State');
+  const abbr = new Map([['Michigan', 'MICH'], ['Michigan State', 'MSU']]);
+  check('a school name uses its own abbreviation, so two Michigans stay two',
+    opponentLabel({ opponent: 'Michigan State', venue: 'away' }, true, abbr) === '@MSU'
+      && opponentLabel({ opponent: 'Michigan', venue: 'home' }, true, abbr) === 'vs MICH'
+      && opponentLabel({ opponent: 'Michigan State', venue: 'away' }) === '@Michigan State');
+  check('a school with no abbreviation falls back to four letters under a bar',
+    opponentLabel({ opponent: 'Ohio State', venue: 'away' }, true) === '@OHIO');
   check('dates print as 10/26, junk as empty',
     shortGameDate('2026-10-26') === '10/26' && shortGameDate('2026-01-05') === '1/5' && shortGameDate(null) === '');
   // logValues DROPS a game with no value. The labels must drop the same game,
@@ -671,7 +675,7 @@ check('the same-position card excludes the player by the resolved id',
   const cg = chartGames(sided, (r) => (r.points == null ? null : Number(r.points)));
   check('chart labels skip the same games the values skip, in the same order',
     cg.length === 3 && cg[0]!.value === 27 && cg[0]!.opp === '@CHI' && cg[0]!.date === '10/26'
-      && cg[1]!.value === 22 && cg[1]!.opp === 'vORL' && cg[2]!.value === 19 && cg[2]!.opp === null);
+      && cg[1]!.value === 22 && cg[1]!.opp === 'vs ORL' && cg[2]!.value === 19 && cg[2]!.opp === null);
   check('the Recent games row names the opponent in basketball too',
     gameContextLine('NBA', { ...sided[0]!, minutes: 34 } as never) === 'NYK · @CHI · 34 min');
   check('the player chart is handed the labelled games',

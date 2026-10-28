@@ -283,10 +283,18 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   ]);
   check('edit options: every posted line, lowest first, one per number',
     opts.map((o) => o.line).join(',') === '9.5,14.5,19.5', opts.map((o) => o.line).join(','));
-  check('edit options: best price per side, and the book that has it',
-    opts[1]!.over!.price === -450 && opts[1]!.over!.book === 'fanduel' && opts[1]!.under!.price === 320);
+  // DraftKings when it posts the side, else the best book — the leg's own
+  // rule, so the sheet never shows a price the slip will not use.
+  check('edit options: priced the way the leg is (DraftKings first, else the best book)',
+    opts[1]!.over!.price === -490 && opts[1]!.over!.book === 'draftkings'
+      && opts[1]!.under!.price === 320 && opts[1]!.under!.book === 'fanduel');
   check('edit options: a side nobody posts is empty, not invented',
     opts[0]!.under === null);
+  const sheetRows = [row('draftkings', 14.5, -490, null), row('fanduel', 14.5, -450, 320)];
+  const picked = lineOptionsFromRows(spec, sheetRows)[0]!;
+  check('the price picked in the sheet is the price the slip then shows',
+    lineLegFromRows(withLine(spec, 14.5, 'over'), sheetRows, null)!.americanOdds === picked.over!.price
+      && lineLegFromRows(withLine(spec, 14.5, 'under'), sheetRows, null)!.americanOdds === picked.under!.price);
   const a = withLine(spec, 14.5, 'over');
   const b: PropLineLegSpec = { ...spec, player_name: 'Franz Wagner', team: 'ORL' };
   const specs = [spec, b];

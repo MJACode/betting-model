@@ -682,19 +682,26 @@ const OPP_LABEL_MAX = 4;
 
 /**
  * "@CHI" (away) or "vs CHI" (home), the way every box score writes it. With
- * `short`, a long name (NCAAF schools) is cut to fit under one bar. Null when
- * the opponent is unknown.
+ * `short`, a long name is replaced by its abbreviation from `abbrevs` (the
+ * NCAAF school → CFBD code map, lib/ncaafAbbrevs.ts) and only cut to four
+ * letters when the map has no entry — a bare cut prints "Michigan" and
+ * "Michigan State" both as MICH (UX review, 2026-10-28). Null when the
+ * opponent is unknown.
  */
 export function opponentLabel(
   row: Pick<PlayerLogEntry, 'opponent' | 'venue'>,
   short = false,
+  abbrevs?: ReadonlyMap<string, string>,
 ): string | null {
   const opp = row.opponent ? String(row.opponent) : '';
   if (!opp) return null;
-  const name = short && opp.length > OPP_LABEL_MAX ? opp.slice(0, OPP_LABEL_MAX).toUpperCase() : opp;
+  let name = opp;
+  if (short && opp.length > OPP_LABEL_MAX) {
+    const code = abbrevs?.get(opp);
+    name = code && code.length <= 5 ? code : opp.slice(0, OPP_LABEL_MAX).toUpperCase();
+  }
   if (row.venue === 'away') return `@${name}`;
-  if (row.venue === 'home') return short ? `v${name}` : `vs ${name}`;
-  return short ? name : `vs ${name}`;
+  return `vs ${name}`;
 }
 
 /** "10/26" from an ISO date, no year and no leading zeros. */
@@ -722,6 +729,7 @@ export interface ChartGame {
 export function chartGames(
   games: PlayerLogEntry[],
   valueOf: (r: PlayerLogEntry) => number | null,
+  abbrevs?: ReadonlyMap<string, string>,
 ): ChartGame[] {
   const out: ChartGame[] = [];
   for (const r of games) {
@@ -730,7 +738,7 @@ export function chartGames(
     out.push({
       value: v,
       date: shortGameDate(r.game_date),
-      opp: opponentLabel(r, true),
+      opp: opponentLabel(r, true, abbrevs),
       oppFull: opponentLabel(r, false),
     });
   }

@@ -33,16 +33,17 @@ interface Props {
    *  newest is tagged LATEST, and tapping a bar names that game above the
    *  chart. */
   games?: ChartGame[];
-  /** Word after the value in the tapped-bar caption ("27 Points"). */
+  /** The stat's name, read by VoiceOver after the value. Not printed: a
+   *  plural label reads "1 Points" on screen. */
   unit?: string;
 }
 
 const BAR_W = 16;
 const GAP = 10;
-// Labelled bars are wider: "vsMIA" and "10/26" have to fit under one bar at
-// 9pt without touching the next one.
-const LABELLED_BAR_W = 22;
-const LABELLED_GAP = 14;
+// Labelled bars are wider: "vs MIA" and "10/26" have to fit under one bar at
+// 9pt, and bar + gap is the tap column, which HIG wants at 44pt.
+const LABELLED_BAR_W = 26;
+const LABELLED_GAP = 18;
 const LEFT_PAD = 26;
 const RIGHT_PAD = 12;
 const TOP_PAD = 18; // room for the value label above each bar
@@ -80,6 +81,8 @@ export function HitRateChart({
   // the window or stat changes so it never points past the end.
   const [selected, setSelected] = useState(0);
   useEffect(() => setSelected(0), [values.length, games]);
+  // The "Tap a bar" hint goes once a bar has been tapped.
+  const [tapped, setTapped] = useState(false);
 
   if (values.length === 0) {
     return (
@@ -123,6 +126,11 @@ export function HitRateChart({
     return { x, y, h: TOP_PAD + plotH - y, v, hit, gameNo: n - i, valueIdx: n - 1 - i };
   });
   const labelY = TOP_PAD + plotH;
+
+  const pick = (idx: number) => {
+    setSelected(idx);
+    setTapped(true);
+  };
 
   const chart = (
     <Svg width={svgW} height={svgH}>
@@ -214,7 +222,7 @@ export function HitRateChart({
                     x={cx}
                     y={labelY + 38}
                     fill={colors.tint}
-                    fontSize={8}
+                    fontSize={font.size.nano}
                     fontWeight="800"
                     textAnchor="middle"
                   >
@@ -228,7 +236,7 @@ export function HitRateChart({
                   width={barW + gap}
                   height={svgH}
                   fill="transparent"
-                  onPress={() => setSelected(b.valueIdx)}
+                  onPress={() => pick(b.valueIdx)}
                 />
               </>
             ) : (
@@ -251,16 +259,12 @@ export function HitRateChart({
 
   const sel = labelled ? games![Math.min(selected, n - 1)] : null;
   const selHit = sel ? isHit(sel.value, line, side) : false;
-  const caption = sel
-    ? [
-        selected === 0 ? 'Latest' : selected === 1 ? '1 game ago' : `${selected} games ago`,
-        sel.date,
-        sel.oppFull,
-        `${fmtTick(sel.value)}${unit ? ` ${unit}` : ''}`,
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    : null;
+  const ago = selected === 0 ? 'Latest' : selected === 1 ? '1 game ago' : `${selected} games ago`;
+  const caption = sel ? [ago, sel.date, sel.oppFull, fmtTick(sel.value)].filter(Boolean).join(' · ') : null;
+  // What VoiceOver reads for the selected game: the whole sentence.
+  const spoken = sel
+    ? `${ago}, ${sel.date}${sel.oppFull ? `, ${sel.oppFull}` : ''}, ${fmtTick(sel.value)}${unit ? ` ${unit}` : ''}, ${selHit ? 'hit' : 'miss'}`
+    : '';
 
   const scroller = (
     <ScrollView
@@ -278,8 +282,23 @@ export function HitRateChart({
   return (
     <View>
       {/* Which game the highlighted bar is. Starts on the newest; tap any bar
-          to read another. Live region so VoiceOver hears the change. */}
-      <View style={styles.captionRow} accessibilityLiveRegion="polite">
+          to read another. The bars are SVG and VoiceOver cannot reach them,
+          so this row is ONE adjustable element: swipe up/down moves to the
+          older/newer game (the Stats ruler's pattern, UX review 2026-10-28). */}
+      <View
+        style={styles.captionRow}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Game"
+        accessibilityValue={{ text: spoken }}
+        accessibilityHint="Swipe up or down to move between games"
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => {
+          // Increment = older (further left), decrement = newer.
+          const next = selected + (e.nativeEvent.actionName === 'increment' ? 1 : -1);
+          if (next >= 0 && next < n) setSelected(next);
+        }}
+      >
         <View style={[styles.captionDot, { backgroundColor: selHit ? colors.bet : colors.avoid }]} />
         <Text style={styles.captionText} numberOfLines={1}>
           {caption}
@@ -289,7 +308,7 @@ export function HitRateChart({
         </Text>
       </View>
       {scroller}
-      <Text style={styles.hint}>Tap a bar to see that game</Text>
+      {tapped ? null : <Text style={styles.hint}>Tap a bar to see that game</Text>}
     </View>
   );
 }
