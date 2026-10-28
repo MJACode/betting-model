@@ -87,7 +87,7 @@ import { BetslipButton } from '@/components/BetslipButton';
 import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { showToast } from '@/components/Toast';
-import { useEntitlement } from '@/hooks/useEntitlement';
+import { useMembership } from '@/hooks/useMembership';
 import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useThresholdsRevision } from '@/hooks/useActionThresholds';
@@ -343,11 +343,27 @@ export function PicksHomeScreen() {
   // switch tabs and land on whatever segment was already showing. The param is
   // cleared after use so a second tap works and a back-navigation does not
   // re-trigger it.
+  // A free member can use the Record tab (Matt, 2026-10-27). Today, Signals,
+  // Live and Lines all lock. `contentLocked` is false while billing is dark, and while the
+  // subscription row is still loading, so a subscriber does not flash the lock.
+  const { contentLocked: signalsLocked, hold: picksHold, entitled } = useMembership();
+  const openPaywall = useCallback(() => {
+    navigation.navigate('Paywall');
+  }, [navigation]);
+  const selectView = useCallback((next: PicksView) => {
+    if (signalsLocked) {
+      openPaywall();
+      return;
+    }
+    setView(next);
+  }, [signalsLocked, openPaywall]);
+
   useEffect(() => {
-    if (!requestedView) return;
-    setView(requestedView);
+    if (!requestedView || picksHold) return;
+    if (signalsLocked) openPaywall();
+    else setView(requestedView);
     navigation.setParams({ view: undefined } as never);
-  }, [requestedView, navigation]);
+  }, [requestedView, navigation, signalsLocked, picksHold, openPaywall]);
   // Signals per sport, across ALL sports (not just the selected one) — the
   // toggle badge. The boards show one sport at a time, so without this a user
   // parked on their usual sport never learns another has bets waiting.
@@ -366,13 +382,6 @@ export function PicksHomeScreen() {
   const activeItems: EnrichedPick[] =
     view === 'today' ? todayData : view === 'live' ? liveData : view === 'lines' ? [] : live;
 
-  // Signals is the paid surface; Today (every scored pick, with
-  // model % and edge) stays free. Lines is the board of prices, so it stays
-  // up when Signals is locked; the pick mark on a card is the signal, and
-  // that mark waits for entitlement. `entitled` is true whenever billing is
-  // off, so this is inert until the flag flips.
-  const { entitled } = useEntitlement();
-  const signalsLocked = !entitled && view !== 'today' && view !== 'lines';
   const linesGames = filterLinesGames(lines.games, linesSport);
   // Posted paused picks stay in allData and mark as a pick. The rest are a
   // grey "Paused pick" chip, with no navy dot.
@@ -648,6 +657,11 @@ export function PicksHomeScreen() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
+          {signalsLocked ? (
+            <View style={styles.freePill}>
+              <Text style={styles.freePillText}>Free</Text>
+            </View>
+          ) : null}
           <InfoTooltip
             title="These boards"
             body={
@@ -664,6 +678,8 @@ export function PicksHomeScreen() {
             <SettingsButton />
           </View>
         </View>
+        {picksHold || signalsLocked ? null : (
+        <>
         <Text style={styles.subtitle} accessibilityLabel={unknownCountSpeech(unitsSpeech(subtitle))}>{subtitle}</Text>
         {/* Neutral chips until today's board (and the live one) is known: built
             from empty data, every chip read muted and "no picks today" after a
@@ -717,8 +733,8 @@ export function PicksHomeScreen() {
           contentContainerStyle={[styles.subTabsScroll, subTabsReach.content]}
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
-            <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
-            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => setView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => selectView('today')} onLayout={onSegmentLayout('today')} />
+            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -729,7 +745,7 @@ export function PicksHomeScreen() {
               label="Live Signals"
               count={liveUnknown ? null : liveData.length}
               active={view === 'live'}
-              onPress={() => setView('live')}
+              onPress={() => selectView('live')}
               live
               dot={liveData.length > 0}
               onLayout={onSegmentLayout('live')}
@@ -738,7 +754,7 @@ export function PicksHomeScreen() {
               label="Lines"
               count={lines.loaded ? linesGames.length : null}
               active={view === 'lines'}
-              onPress={() => setView('lines')}
+              onPress={() => selectView('lines')}
               onLayout={onSegmentLayout('lines')}
             />
           </View>
@@ -757,9 +773,18 @@ export function PicksHomeScreen() {
           </View>
         ) : null}
         </View>
+        </>
+        )}
       </View>
 
-      {view === 'lines' ? (
+      {picksHold ? (
+        <PicksSkeleton sport={sport} />
+      ) : signalsLocked ? (
+        <SignalLockCard
+          onPress={openPaywall}
+          onRecord={() => navigation.navigate('Tabs', { screen: 'TrackRecord' })}
+        />
+      ) : view === 'lines' ? (
         <LinesBoard
           games={lines.games}
           odds={lines.odds}
@@ -872,7 +897,7 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-      {activeItems.length > 0 && !signalsLocked ? (
+      {activeItems.length > 0 ? (
         <PickFilters
           state={displayFilter}
           onChange={setFilter}
@@ -897,18 +922,6 @@ export function PicksHomeScreen() {
         />
       ) : null}
 
-      {/* The paywall card is for picks that EXIST and are hidden behind it. On an
-          empty live board it said "the models haven't found a bet that clears the
-          line yet today", which on a sport with no in-play model is a promise the
-          app cannot keep — the exact sentence lib/liveSports.ts exists to prevent
-          — and it pitched a trial on a board that is structurally empty there
-          (UX review, 2026-09-12). */}
-      {signalsLocked && !(view === 'live' && liveData.length === 0) ? (
-        <SignalLockCard
-          count={view === 'live' ? liveData.length : live.length}
-          onPress={() => navigation.navigate('Paywall')}
-        />
-      ) : (
       <FlatList
         ListFooterComponent={<BetslipBarSpacer />}
         data={rows}
@@ -986,7 +999,6 @@ export function PicksHomeScreen() {
           />
         }
       />
-      )}
       </>
       )}
     </SafeAreaView>
@@ -1202,6 +1214,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  freePill: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  freePillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
   },
   subtitle: {
     fontSize: font.size.footnote,

@@ -8,9 +8,11 @@ import {
   billingReady,
   type PlanKey,
 } from './billingConfig';
+import { earlyUnlockTarget } from './billingHelpers';
 import {
   openIapManagement,
   presentRedeemCodeSheet,
+  purchaseEarlyUnlock,
   purchasePlan,
   restoreIapPurchases,
 } from './iap';
@@ -98,6 +100,41 @@ export async function startCheckout(
     outcome: result.type === 'opened' ? 'completed' : 'dismissed',
     entitledNow: false,
   };
+}
+
+/**
+ * End the free trial on the plan the user is already trialing.
+ *
+ * StoreKit will not end an intro by repurchasing that same product id, so
+ * monthly buys `…premium.monthly.notrial` and annual buys
+ * `…premium.annual.notrial`. Those are the same tier, with no free trial,
+ * in the same subscription group. Weekly is refused. Stripe does not open
+ * a second Checkout: it sets `trial_end=now` on the subscription row that
+ * already exists. Discord's invite stays hidden until a later read shows
+ * status `active`, not `trialing`. A receipt that is still a trial is not
+ * treated as paid here (`entitledNow` stays false).
+ */
+export async function endTrialEarly(trialingPlan: PlanKey, userId: string): Promise<CheckoutResult> {
+  assertBillingReady();
+  const target = earlyUnlockTarget(trialingPlan);
+  if (!target.ok) throw new Error(target.reason);
+
+  if (BILLING_RAIL === 'iap') {
+    const result = await purchaseEarlyUnlock(target.productId, trialingPlan, userId);
+    return {
+      outcome: result.outcome === 'purchased' ? 'completed' : 'dismissed',
+      entitledNow: false,
+    };
+  }
+
+  const { data, error } = await supabase.functions.invoke('stripe-checkout', {
+    body: { plan: target.plan, end_trial: true },
+  });
+  if (error) throw new Error(billingErrorMessage(error));
+  const payload = data as { ended?: boolean; error?: string } | null;
+  if (payload?.error) throw new Error(payload.error);
+  if (!payload?.ended) throw new Error('Could not end the trial.');
+  return { outcome: 'completed', entitledNow: false };
 }
 
 /**

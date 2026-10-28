@@ -603,7 +603,8 @@ export type RootStackParamList = {
   // reachable, but nothing navigates here while AUTH_ENABLED is false.
   SignIn: undefined;
   // Paywall. Same posture — unreachable while BILLING_ENABLED is false.
-  Paywall: undefined;
+  // autoCloseIfEntitled is set only on the screen shown right after sign-in.
+  Paywall: { autoCloseIfEntitled?: boolean } | undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
   // Account deletion. Reachable from Settings only while signed in.

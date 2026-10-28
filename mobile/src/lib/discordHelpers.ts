@@ -165,6 +165,26 @@ export function accessSourceCopy(access: AccessRow): string {
   }
 }
 
+/**
+ * The Apple-paid invite. Not exported: a screen that wants it has to go
+ * through discordInviteIfPaid, and only after the App Store row is active.
+ */
+const APPLE_PAID_DISCORD_INVITE = 'https://discord.gg/JWMUzK9Da';
+
+/**
+ * The invite URL, or null. `paid` means an active Apple subscription, not a
+ * trial and not a Whop membership. Free and trial must not be handed a string
+ * they could render or open.
+ */
+export function discordInviteIfPaid(
+  paid: boolean,
+  inviteUrl: string = APPLE_PAID_DISCORD_INVITE,
+): string | null {
+  if (!paid) return null;
+  const url = inviteUrl.trim();
+  return url.length > 0 ? url : null;
+}
+
 /** Turn a link failure into something worth showing a user. */
 export function discordErrorMessage(err: unknown): string {
   const raw = errorText(err, 'Something went wrong. Please try again.');

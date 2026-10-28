@@ -19,7 +19,7 @@
  * function is missing.
  *
  * While `DISCORD_LINK_ENABLED` is false:
- *   - Settings shows the plain "Join our Discord" invite row exactly as today.
+ *   - Settings does not open the invite. The invite is Apple-paid only.
  *   - No Connect button renders, and no edge function is ever called.
  *   - `useDiscordLink()` reports status 'disabled' and never touches the network.
  *
@@ -55,12 +55,3 @@ export const DISCORD_REDIRECT_URL = 'signalbase://discord-callback';
 
 /** The edge function that owns the OAuth exchange and the role sync. */
 export const DISCORD_LINK_FUNCTION = 'discord-link';
-
-/**
- * Left empty on purpose. Whop checkout stays outside the app (App Store
- * 3.1.1). Do not set EXPO_PUBLIC_WHOP_CHECKOUT_URL on an App Store build.
- * The paywall row that reads this stays hidden while it is empty; removing
- * that row is the UI draft's job.
- */
-export const WHOP_CHECKOUT_URL: string =
-  process.env.EXPO_PUBLIC_WHOP_CHECKOUT_URL ?? '';

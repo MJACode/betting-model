@@ -20,8 +20,8 @@ crons had).
 | Job | When (ET) | Command |
 |---|---|---|
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
-| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set |
-| Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only. No request when the token, channel id, or author id is unset |
+| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set, and ParlayMatt's windows when `DISCORD_WEBHOOK_PARLAYMATT` is set |
+| Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only, then ParlayMatt's channel when `DISCORD_PARLAYMATT_CHANNEL_ID` and `DISCORD_PARLAYMATT_AUTHOR_ID` are set. No request for a capper whose token, channel id, or author id is unset |
 | Model quality monitor | 11:00am | `tracking.model_quality.run_model_quality()` — also Step 13 of the daily; report only, `model_quality_checks`. Kill switch: `RUN_MODEL_QUALITY=0` |
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
@@ -375,10 +375,13 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
   public audience than the full feed, so leaving it unset posts nothing rather than leaking the
   free pick into the catch-all channel. |
-| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. An Eggz post that cannot be parsed is logged here once per message id when this is set. |
+| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. A capper post that cannot be parsed is logged here once per message id when this is set (`eggz_review`, `parlaymatt_review`). |
 | `DISCORD_WEBHOOK_EGGZ` | Eggz recaps in `#eggz-picks` only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
 | `DISCORD_EGGZ_CHANNEL_ID` | The `#eggz-picks` channel id the bot reads. Unset, the poll does not call Discord. |
 | `DISCORD_EGGZ_AUTHOR_ID` | Discord user id of the only author stored. That id is the user whose username is `jack_mehoff123` and whose display name is Dr. Eggz. The username is not the filter. |
+| `DISCORD_WEBHOOK_PARLAYMATT` | ParlayMatt recaps in his channel only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
+| `DISCORD_PARLAYMATT_CHANNEL_ID` | The `#parlaymatt-picks` channel id the bot reads. Unset, his poll does not call Discord. |
+| `DISCORD_PARLAYMATT_AUTHOR_ID` | Discord user id of the only ParlayMatt author stored. The username is not the filter. |
 | `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
@@ -394,6 +397,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | **Weekly results** | Monday 7:30am ET, the prior Monday–Sunday. Later settle passes retry until the next Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Monthly results** | The first Monday of the month, 7:30am ET, the previous calendar month. Later settle passes retry until the next month's first Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Eggz results** | Previous day from the 6:00am ET settle, and again on later settle passes. The week and the month use the Monday 7:30am clock. A window that still has a pending leg is not ledgered. | `DISCORD_WEBHOOK_EGGZ` (`#eggz-picks`) |
+| **ParlayMatt results** | The same windows as Eggz. Unset webhook posts nothing. | `DISCORD_WEBHOOK_PARLAYMATT` |
 | **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
@@ -438,6 +442,18 @@ pre-start close. They are not rows in `picks`, and they are not in `#results`
 or on X. A line that cannot be parsed or matched is `needs_review` and is
 logged; if `DISCORD_WEBHOOK_OPS` is set, one alert is posted for that message
 id. The read is `eggz_ingest`, every 15 minutes, with `DISCORD_BOT_TOKEN`.
+
+ParlayMatt uses that same clock and the same tally, on `DISCORD_WEBHOOK_PARLAYMATT`
+only. Ledger keys are `discord_parlaymatt_results_day`,
+`discord_parlaymatt_results_week`, and `discord_parlaymatt_results_month`.
+His rows are `capper_picks` with `capper_key = 'parlaymatt'`. A parlay header
+(`PARLAY +450 1u`, `3 leg parlay`) is one bet at that price and stake. The
+legs are stored and graded, and they are not a second unit. A line that
+cannot be parsed, a round robin, and a push that would change the stated
+price are `needs_review`. They are not dropped. His all-time line starts at
+his own first graded `game_date`. Unset channel, author, or webhook: that
+half returns without a request and without a post. The same 15-minute job
+reads his channel after Eggz.
 
 ### Guarantees
 

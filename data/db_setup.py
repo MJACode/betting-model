@@ -1551,6 +1551,12 @@ _MIGRATIONS = [
     ("games", "first_pitch_at", "TEXT"),
     ("picks", "prop_market", "TEXT"),
     ("picks", "player_key",  "TEXT"),
+    # Capper rows are one table for every tracked Discord capper. Boot adds
+    # the columns before the 15-minute poll. The view migration backfills
+    # eggz and sets the default. NULL capper_key is Eggz until that lands.
+    ("capper_picks", "capper_key", "TEXT"),
+    ("capper_picks", "parlay_id", "BIGINT"),
+    ("capper_messages", "capper_key", "TEXT"),
 ]
 
 

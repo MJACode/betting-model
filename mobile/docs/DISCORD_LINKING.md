@@ -7,11 +7,20 @@ Matt, 2026-08-30, asked for one membership across the app and Discord. Matt,
 > access only and go through there. If a user comes through the App Store they
 > are buying the app and getting Discord access. Tie the users together.
 
-Whop checkout stays outside the app. App Store IAP unlocks the app and our
-Discord role. Linking is how the same person is one row on both sides.
+Whop checkout stays outside the app. App Store IAP unlocks the app. Our
+Discord role is granted only when that subscription is `active`, not while
+it is `trialing`. Linking is how the same person is one row on both sides.
 
-Like auth and billing, linking ships **dark**: `DISCORD_LINK_ENABLED` is
-`false`, and `discordLinkReady()` also requires `AUTH_ENABLED`.
+The in-app invite is Apple-paid only (Matt, 2026-10-27, #1061). An active
+App Store subscription may open it. Free and trial never see the URL. Trial's
+button is "Unlock Discord early" and buys the current plan through StoreKit /
+RevenueCat, which ends the trial. Paid's button is "Join Discord". Free and
+trial also see "Already in Discord via Whop? Connect Discord to link your
+account. Premium in the app is still via Apple." That button is Connect
+Discord. There is no Whop checkout URL in the app.
+
+Linking ships **dark**: `DISCORD_LINK_ENABLED` is `false`, and
+`discordLinkReady()` also requires `AUTH_ENABLED`.
 
 **Do not flip `AUTH_ENABLED`, `BILLING_ENABLED`, or `DISCORD_LINK_ENABLED`
 until `data/migrations/add_discord_link_and_whop_memberships.sql` is applied
@@ -98,7 +107,7 @@ app: "Connect Discord"
         /users/@me                          → discord id + verified email
         PUT /guilds/{id}/members/{user}     → one-tap join (guilds.join scope)
         upsert discord_links
-        syncAppRoleForUser()                → our role only if Apple entitles
+        syncAppRoleForUser()                → our role only if Apple status is active (not trialing)
         backfill discord id onto a Whop membership with the same verified email
   → app reads my_access()
         entitled is still false when the only payment is Whop
@@ -130,14 +139,12 @@ That sync reads `subscriptions` only.
 | OAuth + guild join + role sync | `supabase/functions/discord-link/` |
 | Whop membership mirror (identity only) | `supabase/functions/whop-webhook/` |
 | Discord bot API helpers | `supabase/functions/_shared/discord.ts` |
-| Apple subscription → our Discord role | `supabase/functions/_shared/entitlement.ts` |
+| Apple subscription → our Discord role (`active` only) | `supabase/functions/_shared/entitlement.ts` |
 | Schema + access RPCs (unapplied, Apple-only) | `data/migrations/add_discord_link_and_whop_memberships.sql` |
 | Verification | `scripts/verify_discord_link.ts` |
 
-`EXPO_PUBLIC_WHOP_CHECKOUT_URL` stays empty. Do not set it on an App Store
-build (guideline 3.1.1). Whop checkout is on Whop's site. The paywall row
-that reads the variable is hidden while it is empty; removing that row is
-the UI draft, not this change.
+The app does not embed a Whop checkout URL (App Store 3.1.1). Discord-only
+buyers pay on Whop, outside the app.
 
 ### `useEntitlement`
 
@@ -189,6 +196,8 @@ revokes `anon`/`authenticated` by name (CLAUDE.md §7).
    - URL `https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/whop-webhook`
    - events `membership.went_valid` and `membership.went_invalid`
    - copy the signing secret.
+3. The app does not embed a Whop checkout URL. Discord-only buyers pay on
+   Whop, outside the app. App Store buyers subscribe in the app.
 
 ### 4. Secrets
 
@@ -223,8 +232,9 @@ With a preview build carrying `EXPO_PUBLIC_AUTH_ENABLED=true` and
 
 1. **Link** — sign in, Settings → Connect Discord. Expect: consent screen,
    back in the app, you are in the server, Settings says "Connected as …".
-2. **App → Discord** — buy in the app (sandbox). Within seconds you hold the
-   `App Subscriber` role, and `my_access().entitled` is true.
+2. **App → Discord** — buy in the app (sandbox). `my_access().entitled` is
+   true for `trialing` or `active`. The `App Subscriber` role is granted only
+   once status is `active`, not during the trial.
 3. **Whop does not unlock the app** — buy the Whop product with a different
    account, connect that Discord account in the app. Expect: `discord_access`
    true, `entitled` false, the paywall still blocks premium features, our
@@ -272,8 +282,7 @@ sync again.
 **4. Unlinking does not kick anyone from the server.** Unlinking takes back
 our role, when we had granted it, and deletes the link row.
 
-**5. Invite-on-paid and the trial "Unlock Discord early" path are the UI
-draft.** This document does not change those screens. Settings still has
-older sentences that describe a Whop membership as covering the app; those
-rows render only after the Discord or billing flag is on, which stays off
-until the migration is applied and the UI draft replaces the copy.
+**5. Invite-on-paid and "Unlock Discord early" landed in #1061.** Flags stay
+off. This merge does not add another Settings sentence and does not change
+`web/content/terms.md`. The subscription manage alert still says a Discord
+membership covers the app; that sentence was already on master.

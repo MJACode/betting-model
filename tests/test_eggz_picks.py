@@ -526,7 +526,8 @@ def test_the_all_time_line_stops_at_the_period_and_posts_on_every_span(monkeypat
     db.execute("""CREATE TABLE capper_picks (
         id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
         sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
-        graded_at TEXT, posted_at TEXT)""")
+        graded_at TEXT, posted_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute("""CREATE TABLE games (
         game_id TEXT, sport TEXT, game_date TEXT,
         home_score INT, away_score INT, commence_time TEXT)""")
@@ -1268,7 +1269,7 @@ def test_a_needs_review_leg_holds_the_recap(monkeypatch):
     db.execute("""CREATE TABLE capper_picks (
         id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
         sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
-        posted_at TEXT)""")
+        posted_at TEXT, capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute("""CREATE TABLE games (
         game_id TEXT, sport TEXT, game_date TEXT,
         home_score INT, away_score INT, commence_time TEXT)""")
@@ -1276,11 +1277,13 @@ def test_a_needs_review_leg_holds_the_recap(monkeypatch):
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")
     db.execute(
-        "INSERT INTO capper_picks VALUES (1,'graded','WIN','2026-10-22','NHL',"
-        "-112,NULL,1,1.12,'2026-10-22T17:54:00+00:00')")
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, price, "
+        "clv_pct, units, risked, posted_at) VALUES (1,'graded','WIN','2026-10-22',"
+        "'NHL',-112,NULL,1,1.12,'2026-10-22T17:54:00+00:00')")
     db.execute(
-        "INSERT INTO capper_picks VALUES (2,'needs_review',NULL,'2026-10-22','NFL',"
-        "116,NULL,NULL,NULL,'2026-10-22T17:54:00+00:00')")
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, price, "
+        "clv_pct, units, risked, posted_at) VALUES (2,'needs_review',NULL,"
+        "'2026-10-22','NFL',116,NULL,NULL,NULL,'2026-10-22T17:54:00+00:00')")
     conn = Conn()
     assert eg._post_window(conn, "day", "2026-10-22", "2026-10-22", "Oct 22") == 0
     assert posted == []
@@ -1290,10 +1293,11 @@ def test_a_needs_review_leg_holds_the_recap(monkeypatch):
 def test_an_undated_needs_review_holds_the_new_york_day():
     db, Conn = _sqlite()
     db.execute("""CREATE TABLE capper_picks (
-        id INTEGER PRIMARY KEY, status TEXT, game_date TEXT, posted_at TEXT)""")
+        id INTEGER PRIMARY KEY, status TEXT, game_date TEXT, posted_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute(
-        "INSERT INTO capper_picks VALUES (1,'needs_review',NULL,"
-        "'2026-10-23T02:00:00+00:00')")
+        "INSERT INTO capper_picks (id, status, game_date, posted_at) "
+        "VALUES (1,'needs_review',NULL,'2026-10-23T02:00:00+00:00')")
     conn = Conn()
     assert eg._unresolved_in(conn, "2026-10-22", "2026-10-22") == 1
     assert eg._unresolved_in(conn, "2026-10-23", "2026-10-23") == 0
@@ -1307,21 +1311,24 @@ def test_reparse_leaves_a_graded_leg_and_keeps_an_unparsed_line(monkeypatch):
     db, Conn = _sqlite()
     db.execute("""CREATE TABLE capper_messages (
         message_id TEXT PRIMARY KEY, body TEXT, posted_at TEXT,
-        parse_status TEXT, parse_note TEXT)""")
+        parse_status TEXT, parse_note TEXT, capper_key TEXT DEFAULT 'eggz')""")
     db.execute("""CREATE TABLE capper_picks (
         id INTEGER PRIMARY KEY, message_id TEXT, line_no INTEGER, status TEXT,
         review_reason TEXT, sport TEXT, game_id TEXT, game_date TEXT,
         home_team TEXT, away_team TEXT, commence_time TEXT, market TEXT,
         side TEXT, line REAL, price REAL, stake_units REAL, player_name TEXT,
         prop_stat TEXT, prop_market TEXT, posted_at TEXT, result TEXT,
-        units REAL, risked REAL, UNIQUE (message_id, line_no))""")
+        units REAL, risked REAL, capper_key TEXT DEFAULT 'eggz',
+        parlay_id INTEGER, UNIQUE (message_id, line_no))""")
     db.execute("""CREATE TABLE push_sent (
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")
     body = "EDM Oilers ML -135\nlets ride"
     posted = "2026-10-20T16:06:51+00:00"
     db.execute(
-        "INSERT INTO capper_messages VALUES ('m1',?,?, 'needs_review','old')",
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note) "
+        "VALUES ('m1',?,?, 'needs_review','old')",
         (body, posted))
     db.execute(
         "INSERT INTO capper_picks (id, message_id, line_no, status, result, "
@@ -1360,7 +1367,8 @@ def _recap_db():
     db.execute("""CREATE TABLE capper_picks (
         id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
         sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
-        stake_units REAL, review_reason TEXT, posted_at TEXT, graded_at TEXT)""")
+        stake_units REAL, review_reason TEXT, posted_at TEXT, graded_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute("""CREATE TABLE games (
         game_id TEXT, sport TEXT, game_date TEXT,
         home_score INT, away_score INT, commence_time TEXT)""")
@@ -1430,7 +1438,8 @@ def test_settle_manual_uses_the_stored_price_and_refuses_a_graded_row():
     db.execute("""CREATE TABLE capper_picks (
         id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
         price REAL, stake_units REAL, units REAL, risked REAL,
-        review_reason TEXT, graded_at TEXT)""")
+        review_reason TEXT, graded_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute(
         "INSERT INTO capper_picks (id, status, game_date, price, stake_units) "
         "VALUES (7,'needs_review','2026-10-22',100,1)")
@@ -1490,7 +1499,8 @@ def test_the_record_script_does_not_write_without_apply(monkeypatch, capsys):
         id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
         sport TEXT, market TEXT, player_name TEXT, side TEXT, price REAL,
         stake_units REAL, units REAL, risked REAL, review_reason TEXT,
-        graded_at TEXT, posted_at TEXT)""")
+        graded_at TEXT, posted_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute(
         "INSERT INTO capper_picks (id, status, review_reason, game_date, sport, "
         "market, player_name, side, price, stake_units) VALUES "
@@ -1525,3 +1535,279 @@ def test_the_record_script_does_not_write_without_apply(monkeypatch, capsys):
     assert calls == [True]
     assert eggz_record.main(["restate", "2026-10-23", "--apply"]) == 0
     assert calls == [True, False]
+
+
+def test_a_parlay_is_one_bet_at_the_stated_price_and_stake():
+    posted = datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc)
+    body = "\n".join([
+        "NBA Oct. 24",
+        "LAL @ BOS",
+        "3 leg parlay +450 1u",
+        "Lakers -3.5 -110",
+        "- Celtics ML -150",
+        "Over 220.5",
+    ])
+    legs, reviews = eg.parse_message(body, posted)
+    assert reviews == []
+    assert len(legs) == 3
+    header = legs[0]["parlay_header"]
+    assert header["ok"] is True
+    assert header["price"] == 450
+    assert header["stake_units"] == 1
+    assert all(leg["parlay_header"] is header for leg in legs)
+    assert [leg["market"] for leg in legs] == ["spreads", "h2h", "totals"]
+    assert legs[0]["line"] == -3.5 and legs[0]["price"] == -110
+    assert legs[1]["team_text"] == "Celtics"
+    assert "parlay_header" not in eg.parse_message(OCT18, _POSTED_OCT18)[0][0]
+
+
+def test_an_unparsed_parlay_line_is_kept_and_not_booked_as_singles():
+    body = "\n".join([
+        "PARLAY +450 2u",
+        "Lakers -3.5",
+        "lets ride",
+        "Celtics ML",
+    ])
+    legs, reviews = eg.parse_message(body)
+    assert reviews == [{"line_no": 3, "raw": "lets ride", "reason": "unparsed"}]
+    assert len(legs) == 2
+    assert legs[0]["parlay_header"]["ok"] is False
+    assert legs[0]["parlay_header"]["stake_units"] == 2
+    assert legs[0]["parlay_header"]["price"] == 450
+
+    bare, bare_reviews = eg.parse_message("PARLAY")
+    assert bare == []
+    assert bare_reviews[0]["reason"] == "unparsed"
+    assert "PARLAY" in bare_reviews[0]["raw"]
+
+    robin_legs, robin_reviews = eg.parse_message(
+        "round robin +400 1u\nLakers -3.5\nCeltics ML")
+    assert robin_reviews == []
+    assert len(robin_legs) == 2
+    assert robin_legs[0]["parlay_header"]["ok"] is False
+    assert robin_legs[0]["parlay_header"]["broken"] is True
+
+
+def test_parlaymatt_unset_does_not_read_or_post(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_CHANNEL_ID", "")
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_AUTHOR_ID", "")
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_PARLAYMATT", "")
+    monkeypatch.setattr(eg, "_token", lambda: "bot")
+
+    def boom(*_a, **_k):
+        raise AssertionError("discord was called")
+
+    monkeypatch.setattr(eg.requests, "get", boom)
+    assert eg.configured_to_read(eg.PARLAYMATT) is False
+    assert eg.configured_to_post(eg.PARLAYMATT) is False
+    assert eg.post_parlaymatt_recaps(
+        datetime(2026, 10, 20, 12, 0, tzinfo=eg.ET)) == 0
+    eg.run_parlaymatt_ingest()
+
+
+def test_parlaymatt_ingest_keeps_his_author_and_eggz_kinds_stay(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_CHANNEL_ID", "pm-chan")
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_AUTHOR_ID", "1186644933180923904")
+    monkeypatch.setattr(eg, "_token", lambda: "bot")
+    seen = []
+
+    def fetch(channel, after=None, before=None):
+        seen.append(channel)
+        if len(seen) == 1:
+            return [
+                {"id": "9", "author": {"id": "someone-else"}, "content": "nope",
+                 "timestamp": "2026-10-24T18:00:00+00:00"},
+                {"id": "8", "author": {"id": "1186644933180923904",
+                                       "username": "parlaymatt"},
+                 "content": "PARLAY +450 1u\nLakers -3.5\nCeltics ML",
+                 "timestamp": "2026-10-24T17:00:00+00:00"},
+            ]
+        return []
+
+    class Conn:
+        def __init__(self):
+            self.cursor = None
+            self.messages = {}
+            self.picks = []
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            if "INSERT INTO capper_ingest_cursor" in sql:
+                self.cursor = (params[1], params[2], params[3])
+            elif "INSERT INTO capper_messages" in sql:
+                self.messages[params[0]] = params
+            elif "INSERT INTO capper_picks" in sql:
+                self.picks.append((sql, params))
+            return self
+
+        def fetchone(self):
+            if "FROM capper_ingest_cursor" in self.sql:
+                return self.cursor
+            if "FROM capper_messages WHERE message_id" in self.sql:
+                return None
+            if "status = 'graded'" in self.sql:
+                return None
+            if "FROM push_sent" in self.sql:
+                return None
+            if "RETURNING" in self.sql:
+                return (1,)
+            return None
+
+        def fetchall(self):
+            return []
+
+        def commit(self):
+            pass
+
+    conn = Conn()
+    assert eg.ingest_messages(conn, fetch, eg.PARLAYMATT) == 1
+    assert seen[0] == "pm-chan"
+    assert "8" in conn.messages
+    assert conn.messages["8"][-1] == "parlaymatt"
+    assert "9" not in conn.messages
+    assert any("'parlay'" in sql for sql, _params in conn.picks)
+    assert any("parlaymatt" in params for _sql, params in conn.picks)
+    assert "discord_eggz_results" in eg.EGGZ.results_prefix
+    assert eg.PARLAYMATT.results_prefix == "discord_parlaymatt_results"
+    assert eg.EGGZ.review_kind == "eggz_review"
+    assert "'eggz'" in eg._GRADED_LEGS
+    assert "discord_eggz" not in eg._graded_legs(eg.PARLAYMATT)
+
+
+def test_a_graded_parlay_counts_once_and_his_all_time_starts_at_his_first(monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_PARLAYMATT", "https://discord.test/pm")
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append((url, body)) or "55")
+    db = sqlite3.connect(":memory:")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        sport TEXT, market TEXT, price REAL, clv_pct REAL, units REAL,
+        risked REAL, stake_units REAL, posted_at TEXT, parlay_id INTEGER,
+        capper_key TEXT, message_id TEXT, line_no INTEGER)""")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT, commence_time TEXT)""")
+    db.execute("""CREATE TABLE push_sent (
+        lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
+        UNIQUE (lock_key, kind))""")
+    db.executemany(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, market, "
+        "price, units, risked, stake_units, capper_key, parlay_id, message_id, "
+        "line_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (1, "graded", "WIN", "2026-10-18", "NBA", "parlay", 450, 1.0, 0.2222,
+             1, "parlaymatt", None, "m", 1),
+            (2, "graded", "WIN", "2026-10-18", "NBA", "spreads", -110, 9.0, 9.0,
+             1, "parlaymatt", 1, "m", 2),
+            (3, "graded", "WIN", "2026-10-18", "NBA", "h2h", -110, 9.0, 9.0,
+             1, "parlaymatt", 1, "m", 3),
+            (4, "graded", "LOSS", "2026-10-18", "NHL", "h2h", -110, -1.1, 1.1,
+             1, "eggz", None, "e", 1),
+        ])
+
+    class Conn:
+        def execute(self, sql, params=None):
+            return db.execute(sql.replace("%s", "?"), tuple(params or ()))
+
+        def commit(self):
+            db.commit()
+
+    conn = Conn()
+    assert eg._post_window(
+        conn, "day", "2026-10-18", "2026-10-18", "Oct 18",
+        capper=eg.PARLAYMATT) == 1
+    assert eg._post_window(
+        conn, "day", "2026-10-18", "2026-10-18", "Oct 18") == 1
+    pm, eggz = posted
+    assert pm[0] == "https://discord.test/pm"
+    assert pm[1]["embeds"][0]["title"] == "\U0001F4CA ParlayMatt — Oct 18"
+    assert "1-0" in pm[1]["embeds"][0]["description"]
+    assert "+9.00u" not in pm[1]["embeds"][0]["description"]
+    assert "since 2026-10-18" in pm[1]["embeds"][0]["fields"][-1]["name"] or any(
+        "since 2026-10-18" in f["name"] for f in pm[1]["embeds"][0]["fields"])
+    assert eggz[0] == "https://discord.test/eggz"
+    assert eggz[1]["embeds"][0]["title"] == "\U0001F4CA Eggz — Oct 18"
+    assert "0-1" in eggz[1]["embeds"][0]["description"]
+    assert "+1.00u" not in eggz[1]["embeds"][0]["description"]
+    locks = db.execute("SELECT lock_key, kind FROM push_sent").fetchall()
+    assert ("discord_parlaymatt_results_day:2026-10-18",
+            "discord_parlaymatt_results_day") in locks
+    assert ("discord_eggz_results_day:2026-10-18",
+            "discord_eggz_results_day") in locks
+
+
+def test_parlay_rollup_uses_the_stated_price_not_the_leg_prices():
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, market TEXT,
+        price REAL, stake_units REAL, units REAL, risked REAL,
+        parlay_id INTEGER, capper_key TEXT, graded_at TEXT, review_reason TEXT,
+        clv_pct REAL, closing_price REAL, clv_beat_close INTEGER)""")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, market, price, stake_units, capper_key) "
+        "VALUES (1,'pending','parlay',450,1,'parlaymatt')")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, market, price, parlay_id, capper_key) "
+        "VALUES (2,'graded','WIN','spreads',-110,1,'parlaymatt')")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, market, price, parlay_id, capper_key) "
+        "VALUES (3,'graded','LOSS','h2h',-150,1,'parlaymatt')")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            return db.execute(sql.replace("%s", "?"), tuple(params or ()))
+
+        def commit(self):
+            pass
+
+    assert eg._grade_parlays(Conn(), eg.PARLAYMATT) == 1
+    row = db.execute(
+        "SELECT status, result, units, risked FROM capper_picks WHERE id = 1"
+    ).fetchone()
+    profit, risked = eg.units_for_result(1, 450, "LOSS")
+    assert row[0] == "graded" and row[1] == "LOSS"
+    assert abs(row[2] - profit) < 1e-9
+    assert abs(row[3] - risked) < 1e-9
+    assert db.execute(
+        "SELECT status FROM capper_picks WHERE id = 2").fetchone()[0] == "graded"
+
+
+def test_parlaymatt_is_on_the_same_schedule_and_the_migration_is_registered():
+    import scheduler
+    src = Path(scheduler.__file__).read_text(encoding="utf-8")
+    assert "run_parlaymatt_ingest" in src
+    assert "post_parlaymatt_recaps" in src
+    pipe = (Path(__file__).parent.parent / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "post_parlaymatt_recaps" in pipe
+    assert "post_eggz_recaps" in pipe
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    name = "capper_parlaymatt_2026_10_28.sql"
+    assert name in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
+    assert ACTIVE_MIGRATIONS.index(name) < len(ACTIVE_MIGRATIONS) - 2
+
+
+def test_the_record_script_accepts_parlaymatt_and_still_defaults_to_eggz(monkeypatch):
+    from scripts import eggz_record
+    seen = []
+    monkeypatch.setattr(
+        eggz_record, "grade_pending",
+        lambda conn, capper=eg.EGGZ: seen.append(capper.key) or 0)
+    monkeypatch.setattr(eggz_record, "open_legs", lambda conn, capper=eg.EGGZ: [])
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    assert eggz_record.main(["grade", "--apply"]) == 0
+    assert seen == ["eggz"]
+    assert eggz_record.main(["--capper", "parlaymatt", "grade", "--apply"]) == 0
+    assert seen == ["eggz", "parlaymatt"]
+    assert eggz_record.main(["grade", "--capper", "parlaymatt", "--apply"]) == 0
+    assert seen == ["eggz", "parlaymatt", "parlaymatt"]
