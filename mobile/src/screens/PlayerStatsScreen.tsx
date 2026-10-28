@@ -374,20 +374,17 @@ export function PlayerStatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
-  // Values come most-recent-first. Window slices the most recent N.
-  const windowed = useMemo(
-    () => (gameWindow === 'all' ? values : values.slice(0, gameWindow)),
-    [values, gameWindow],
-  );
-
   // NCAAF school → short code, so "Michigan State" is not cut to MICH.
   const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
-  // The same games as `windowed`, each with its date and opponent, so every
-  // bar on the chart says which game it is (Matt, 2026-10-28).
+  // The windowed games, most recent first, each with its date and opponent so
+  // every bar on the chart says which game it is (Matt, 2026-10-28).
   const windowedGames = useMemo(() => {
     const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
     return gameWindow === 'all' ? all : all.slice(0, gameWindow);
   }, [games, stat, gameWindow, ncaafAbbrevs]);
+  // The values ARE the labelled games' values, so the chart's bars and labels
+  // cannot fall out of step (review, 2026-10-28).
+  const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 

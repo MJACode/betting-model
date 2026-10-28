@@ -245,11 +245,11 @@ function ParlayScreenBody() {
     [legs, editableSpec],
   );
   const saveEditedLine = useCallback(
-    (next: PropLineLegSpec): boolean => {
-      if (!editingLine) return false;
-      const ok = lineLegs.replace(lineLegKey(editingLine), next);
-      if (ok) showToast('Leg updated');
-      return ok;
+    async (next: PropLineLegSpec): Promise<'ok' | 'duplicate' | 'sidelined'> => {
+      if (!editingLine) return 'duplicate';
+      const outcome = await lineLegs.replace(lineLegKey(editingLine), next);
+      if (outcome === 'ok') showToast('Leg updated');
+      return outcome;
     },
     [editingLine, lineLegs],
   );

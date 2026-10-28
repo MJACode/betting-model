@@ -24,7 +24,8 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * user to edit a bet. So example if I select 10 points for someone I should be
  * able to edit and change it to 15." The sheet lists every number a bettable
  * book posts for that player and stat (main and alternate lines), on the side
- * chosen at the top, with the best price for each. Picking one and tapping
+ * chosen at the top, each priced the way the leg will be (DraftKings when it
+ * posts the side, else the best book — lineLegs.anchorRow). Picking one and tapping
  * Update swaps the leg in place; the slip then re-prices it like any line leg.
  *
  * Model picks are not editable here (Matt, same day): a pick is a bet of
@@ -38,9 +39,9 @@ export function EditLineLegSheet({
   /** The leg being edited; null closes the sheet. */
   spec: PropLineLegSpec | null;
   onClose: () => void;
-  /** Return false when the edit could not be applied (e.g. that bet is
-   *  already another leg); the sheet then stays open with a note. */
-  onSave: (next: PropLineLegSpec) => boolean;
+  /** 'ok' closes the sheet. 'duplicate' (that bet is already a leg) and
+   *  'sidelined' (the player is ruled out) keep it open with a note. */
+  onSave: (next: PropLineLegSpec) => Promise<'ok' | 'duplicate' | 'sidelined'>;
 }) {
   const [options, setOptions] = useState<LineOption[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -81,9 +82,11 @@ export function EditLineLegSheet({
 
   const save = () => {
     if (!spec || line == null || !canSave) return;
-    const ok = onSave(withLine(spec, line, side));
-    if (ok) onClose();
-    else setNote('That bet is already on your betslip.');
+    void onSave(withLine(spec, line, side)).then((outcome) => {
+      if (outcome === 'ok') onClose();
+      else if (outcome === 'sidelined') setNote('This player is ruled out, so the leg can’t be changed.');
+      else setNote('That bet is already on your betslip.');
+    });
   };
 
   return (

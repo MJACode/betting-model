@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { lineLegsAfterAdd, slipKeysAfterAdd } from '../src/lib/betslipGuard';
+import { lineLegsAfterAdd, lineLegsAfterEdit, slipKeysAfterAdd } from '../src/lib/betslipGuard';
 import type { GameLineLegSpec, PropLineLegSpec } from '../src/lib/lineLegs';
 import {
   INJURY_FRESH_HOURS,
@@ -136,6 +136,20 @@ check('betslip add accepts the Questionable Josh Allen', lineLegsAfterAdd([], pr
 check('betslip add does not guess between two Josh Allens', lineLegsAfterAdd([], prop('Josh Allen', null), idx)?.length === 1);
 check('betslip add accepts Doubtful', lineLegsAfterAdd([], prop('Odell Beckham Jr.', 'MIA'), idx)?.length === 1);
 check('betslip add accepts a player who is not on a report', lineLegsAfterAdd([], prop('Hunter Henry', 'NE'), idx)?.length === 1);
+// An EDIT commits a new bet, so it passes the same gate (review, 2026-10-28):
+// a leg added before Doubs went on IR cannot be re-bet by changing its line.
+{
+  const doubs = prop('Romeo Doubs', 'NE');
+  const henry = prop('Hunter Henry', 'NE');
+  const k = (s: PropLineLegSpec) => `line:${s.game_id}|${s.market}|${s.player_name}|${s.line}|${s.side}`;
+  check('betslip edit rejects a player ruled out since the add',
+    lineLegsAfterEdit([doubs], k(doubs), { ...doubs, line: 1.5 }, idx).outcome === 'sidelined');
+  const ok = lineLegsAfterEdit([henry], k(henry), { ...henry, line: 1.5 }, idx);
+  check('betslip edit accepts a player who is playing',
+    ok.outcome === 'ok' && ok.specs.length === 1 && ok.specs[0]!.line === 1.5);
+  check('betslip edit to the same bet is a no-op',
+    lineLegsAfterEdit([henry], k(henry), henry, idx).outcome === 'duplicate');
+}
 const gameLeg: GameLineLegSpec = {
   kind: 'game',
   game_id: 'NFL_2026-10-23_NE_CHI',

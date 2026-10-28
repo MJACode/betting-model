@@ -271,10 +271,15 @@ check('basketball subtitle is team only (no position column in the log)',
 check('a player with no games loaded still renders a subtitle',
   playerSubtitle('NBA', null, undefined) === '—');
 
+// The opponent carries its venue once attachGameSides has run ("vs" home,
+// "@" away); with no venue it is the bare name, never a guessed home game
+// (review, 2026-10-28).
 check('NFL game line shows opponent and week',
-  gameContextLine('NFL', nflRow) === 'SF · vs SEA · Wk 4');
+  gameContextLine('NFL', nflRow) === 'SF · SEA · Wk 4'
+    && gameContextLine('NFL', { ...nflRow, venue: 'away' }) === 'SF · @SEA · Wk 4');
 check('NCAAF game line shows opponent and week',
-  gameContextLine('NCAAF', ncaafRow) === 'Ohio State · vs Michigan · Wk 13');
+  gameContextLine('NCAAF', ncaafRow) === 'Ohio State · Michigan · Wk 13'
+    && gameContextLine('NCAAF', { ...ncaafRow, venue: 'home' }) === 'Ohio State · vs Michigan · Wk 13');
 check('NCAAF subtitle is team only (CFBD names participants, not positions)',
   playerSubtitle('NCAAF', 'Ohio State', ncaafRow) === 'Ohio State');
 check('basketball game line shows minutes', gameContextLine('WNBA', wnbaRow) === 'LV · 31 min');
@@ -656,6 +661,10 @@ check('the same-position card excludes the player by the resolved id',
   check('an away game reads @CHI, a home game vs ORL',
     opponentLabel(sided[0]!) === '@CHI' && opponentLabel(sided[2]!) === 'vs ORL'
       && opponentLabel(sided[2]!, true) === 'vs ORL');
+  check('a stored opponent with no venue reads as the bare name, never as a home game',
+    opponentLabel({ opponent: 'Michigan', venue: null }) === 'Michigan');
+  check('the chart values are the labelled games\' values',
+    /const windowed = useMemo\(\(\) => windowedGames\.map\(\(g\) => g\.value\)/.test(playerScreen));
   check('a game missing from games keeps no opponent and no venue',
     opponentLabel(sided[3]!) === null && sided[3]!.venue == null);
   check('a stored football opponent is kept, venue still added',

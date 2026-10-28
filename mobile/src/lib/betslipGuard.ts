@@ -9,7 +9,7 @@
  * A game line and a custom leg have no player for that lookup, so they pass.
  */
 import { playerIsSidelined, type InjuryIndex } from '@/lib/injuryStatus';
-import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
+import { isGameSpec, lineLegKey, lineLegsAfterReplace, type LineLegSpec } from '@/lib/lineLegs';
 import { playerNameFromPickLabel } from '@/lib/markets';
 import { isPropModel } from '@/lib/modelMeta';
 
@@ -54,6 +54,23 @@ export function lineLegsAfterAdd(
   if (specs.some((s) => lineLegKey(s) === key)) return null;
   if (!isGameSpec(spec) && playerIsSidelined(index, spec.player_name, spec.team)) return null;
   return [...specs, spec];
+}
+
+/**
+ * The line legs after an EDIT (the betslip's pencil, 2026-10-28). An edit
+ * commits a new bet, so it passes the same sidelined check as an add: a
+ * player ruled out after the leg went in cannot be re-bet by changing the
+ * line. Then the in-place swap, which refuses a no-op or a duplicate.
+ */
+export function lineLegsAfterEdit(
+  specs: readonly LineLegSpec[],
+  oldKey: string,
+  next: LineLegSpec,
+  index: InjuryIndex,
+): { outcome: 'ok'; specs: LineLegSpec[] } | { outcome: 'duplicate' | 'sidelined' } {
+  if (!isGameSpec(next) && playerIsSidelined(index, next.player_name, next.team)) return { outcome: 'sidelined' };
+  const updated = lineLegsAfterReplace(specs, oldKey, next);
+  return updated ? { outcome: 'ok', specs: updated } : { outcome: 'duplicate' };
 }
 
 /**

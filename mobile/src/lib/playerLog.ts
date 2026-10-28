@@ -681,7 +681,8 @@ export function attachGameSides(
 const OPP_LABEL_MAX = 4;
 
 /**
- * "@CHI" (away) or "vs CHI" (home), the way every box score writes it. With
+ * "@CHI" (away) or "vs CHI" (home), the way every box score writes it, and
+ * the bare name when the venue is unknown. With
  * `short`, a long name is replaced by its abbreviation from `abbrevs` (the
  * NCAAF school → CFBD code map, lib/ncaafAbbrevs.ts) and only cut to four
  * letters when the map has no entry — a bare cut prints "Michigan" and
@@ -701,7 +702,10 @@ export function opponentLabel(
     name = code && code.length <= 5 ? code : opp.slice(0, OPP_LABEL_MAX).toUpperCase();
   }
   if (row.venue === 'away') return `@${name}`;
-  return `vs ${name}`;
+  if (row.venue === 'home') return `vs ${name}`;
+  // Venue unknown (no games row): the bare name, so it never claims a
+  // home game it cannot vouch for (review, 2026-10-28).
+  return name;
 }
 
 /** "10/26" from an ISO date, no year and no leading zeros. */

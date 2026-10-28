@@ -427,7 +427,8 @@ export interface LineOption {
 
 /**
  * Every line the bettable books post for the spec's player and market, lowest
- * first, with the best price on each side. `rows` is what fetchPropLineRows
+ * first, with each side priced the way the leg would be (anchorRow:
+ * DraftKings when it posts the side, else the best book). `rows` is what fetchPropLineRows
  * returns (main and alternate markets already folded into one).
  */
 export function lineOptionsFromRows(
