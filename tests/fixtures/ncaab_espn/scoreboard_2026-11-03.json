@@ -1,0 +1,192 @@
+{
+ "_fixture": "ESPN scoreboard sb_20261103.json, trimmed to events ['401917511', '401921801'] (fetched 2026-10-26)",
+ "eventsDate": {
+  "date": "2026-11-03T05:00Z",
+  "seasonType": 2
+ },
+ "events": [
+  {
+   "id": "401917511",
+   "date": "2026-11-03T05:00Z",
+   "name": "Bethesda Flames at Pacific Tigers",
+   "shortName": "BTHS @ PAC",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401917511",
+     "date": "2026-11-03T05:00Z",
+     "timeValid": false,
+     "neutralSite": false,
+     "conferenceCompetition": false,
+     "venue": {
+      "id": "553",
+      "fullName": "Alex G. Spanos Center",
+      "address": {
+       "city": "Stockton",
+       "state": "CA"
+      },
+      "indoor": true
+     },
+     "notes": [],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "11/3 - TBD",
+       "shortDetail": "TBD"
+      }
+     },
+     "competitors": [
+      {
+       "id": "279",
+       "homeAway": "home",
+       "winner": null,
+       "score": "0",
+       "team": {
+        "id": "279",
+        "location": "Pacific",
+        "name": "Tigers",
+        "abbreviation": "PAC",
+        "displayName": "Pacific Tigers",
+        "shortDisplayName": "Pacific",
+        "conferenceId": "29",
+        "isActive": true
+       }
+      },
+      {
+       "id": "3246",
+       "homeAway": "away",
+       "winner": null,
+       "score": "0",
+       "team": {
+        "id": "3246",
+        "location": "Bethesda",
+        "name": "Flames",
+        "abbreviation": "BTHS",
+        "displayName": "Bethesda Flames",
+        "shortDisplayName": "Bethesda",
+        "isActive": false
+       }
+      }
+     ]
+    }
+   ],
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "11/3 - TBD",
+     "shortDetail": "TBD"
+    }
+   }
+  },
+  {
+   "id": "401921801",
+   "date": "2026-11-04T00:00Z",
+   "name": "Manhattan Jaspers at Kentucky Wildcats",
+   "shortName": "MAN @ UK",
+   "season": {
+    "year": 2027,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401921801",
+     "date": "2026-11-04T00:00Z",
+     "timeValid": true,
+     "neutralSite": false,
+     "conferenceCompetition": false,
+     "venue": {
+      "id": "251",
+      "fullName": "Rupp Arena",
+      "address": {
+       "city": "Lexington",
+       "state": "KY"
+      },
+      "indoor": true
+     },
+     "notes": [],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "Tue, November 3rd at 7:00 PM EST",
+       "shortDetail": "11/3 - 7:00 PM EST"
+      }
+     },
+     "competitors": [
+      {
+       "id": "96",
+       "homeAway": "home",
+       "winner": null,
+       "score": "0",
+       "team": {
+        "id": "96",
+        "location": "Kentucky",
+        "name": "Wildcats",
+        "abbreviation": "UK",
+        "displayName": "Kentucky Wildcats",
+        "shortDisplayName": "Kentucky",
+        "conferenceId": "23",
+        "isActive": true
+       }
+      },
+      {
+       "id": "2363",
+       "homeAway": "away",
+       "winner": null,
+       "score": "0",
+       "team": {
+        "id": "2363",
+        "location": "Manhattan",
+        "name": "Jaspers",
+        "abbreviation": "MAN",
+        "displayName": "Manhattan Jaspers",
+        "shortDisplayName": "Manhattan",
+        "conferenceId": "13",
+        "isActive": true
+       }
+      }
+     ]
+    }
+   ],
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Tue, November 3rd at 7:00 PM EST",
+     "shortDetail": "11/3 - 7:00 PM EST"
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,121 @@
+{
+ "_fixture": "ESPN /teams?groups=50&limit=500, trimmed (fetched 2026-10-26: 362 teams)",
+ "sports": [
+  {
+   "leagues": [
+    {
+     "teams": [
+      {
+       "team": {
+        "id": "231",
+        "location": "Furman",
+        "name": "Paladins",
+        "abbreviation": "FUR",
+        "displayName": "Furman Paladins",
+        "shortDisplayName": "Furman",
+        "slug": "furman-paladins",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "96",
+        "location": "Kentucky",
+        "name": "Wildcats",
+        "abbreviation": "UK",
+        "displayName": "Kentucky Wildcats",
+        "shortDisplayName": "Kentucky",
+        "slug": "kentucky-wildcats",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "2363",
+        "location": "Manhattan",
+        "name": "Jaspers",
+        "abbreviation": "MAN",
+        "displayName": "Manhattan Jaspers",
+        "shortDisplayName": "Manhattan",
+        "slug": "manhattan-jaspers",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "77",
+        "location": "Northwestern",
+        "name": "Wildcats",
+        "abbreviation": "NU",
+        "displayName": "Northwestern Wildcats",
+        "shortDisplayName": "Northwestern",
+        "slug": "northwestern-wildcats",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "197",
+        "location": "Oklahoma State",
+        "name": "Cowboys",
+        "abbreviation": "OKST",
+        "displayName": "Oklahoma State Cowboys",
+        "shortDisplayName": "Oklahoma St",
+        "slug": "oklahoma-state-cowboys",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "279",
+        "location": "Pacific",
+        "name": "Tigers",
+        "abbreviation": "PAC",
+        "displayName": "Pacific Tigers",
+        "shortDisplayName": "Pacific",
+        "slug": "pacific-tigers",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "257",
+        "location": "Richmond",
+        "name": "Spiders",
+        "abbreviation": "RICH",
+        "displayName": "Richmond Spiders",
+        "shortDisplayName": "Richmond",
+        "slug": "richmond-spiders",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "58",
+        "location": "South Florida",
+        "name": "Bulls",
+        "abbreviation": "USF",
+        "displayName": "South Florida Bulls",
+        "shortDisplayName": "South Florida",
+        "slug": "south-florida-bulls",
+        "isActive": true
+       }
+      },
+      {
+       "team": {
+        "id": "98",
+        "location": "Western Kentucky",
+        "name": "Hilltoppers",
+        "abbreviation": "WKU",
+        "displayName": "Western Kentucky Hilltoppers",
+        "shortDisplayName": "Western KY",
+        "slug": "western-kentucky-hilltoppers",
+        "isActive": true
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
