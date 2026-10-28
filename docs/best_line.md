@@ -234,7 +234,9 @@ preference:
 > mattered: after `keep_days` the pruner already kept exactly one non-DK row per
 > (proposition, book) — but it was the **opener**, which cannot reconstruct a
 > decision-time price. It now keeps the opener AND the **close** (the last
-> pre-game-typed snapshot). Measured cost: **+6 MB/day**. See
+> pre-game-typed snapshot at or before the start: until 2026-10-26 it was the
+> last pre-game-TYPED row, which the evening refresh writes after tip-off, so
+> the kept "close" was an in-play price). Measured cost: **+6 MB/day**. See
 > `data/prune_odds.py` and `tests/test_prune_keeps_the_close.py`.
 
 Raising `PRUNE_NON_DK_KEEP_DAYS` wholesale is the expensive third option. What

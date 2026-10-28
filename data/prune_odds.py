@@ -28,8 +28,8 @@ NEVER deleted, under any setting:
 
 Deleted, for line-shop books only:
   1. Games older than `keep_days` → every non-DK row EXCEPT the OPENER and the
-     CLOSE (the last pre-game-typed snapshot) per (game, market, [player],
-     book).
+     CLOSE (the last pre-game snapshot at or before the game's start, below)
+     per (game, market, [player], book).
   2. Games before today but inside the window → every non-DK row EXCEPT the
      latest per (game, market, [player], book), which is the only one the
      views can return, plus the opener and the close.
@@ -43,11 +43,38 @@ never got a scored row, and it is the "did the best book beat DK at close?"
 feature the caveat below used to warn about. Cost, measured: about +6 MB/day
 against the ~210 MB/day that keeping everything would cost.
 
-NBA keeps its whole price path (2026-10-17): the two tiers skip every
-`PATH_KEPT_SPORTS` row, and `thin_repeats` deletes only the middle of an
-unchanged run, keeping the row where each book moved and the last row it held.
-The thinning never touches the books above either, nor a `cfbd…` archive book
-(it did until 2026-10-20: it filtered on source alone).
+The close is bounded on the game's start as of 2026-10-26 (mike approved:
+"2) yes"). Until then it was the last row TYPED pre-game, and the evening
+refresh writes `open` rows after the start: the bulk /odds endpoint returns
+events already under way, and run_odds_ingestor does not relabel them (only
+the historical purchases call odds_ingestor._mark_in_play:
+run_historical_odds_range and nba_odds_history; relabel_in_play is a repair
+job run on demand). So the kept close was
+routinely a price from after kickoff. Measured 2026-10-26 on
+the 44 NCAAF games of 2026-10-24 that hold Pinnacle and FanDuel rows (game
+dates inside the window, so already thinned to opener, close and newest):
+Pinnacle still had a price from the last hour before kickoff on 4 of 44 games
+in spreads and totals and 6 of 44 in h2h; FanDuel on 0 of 44 in every market,
+and every FanDuel game kept a pre-game-typed row stamped after the start. Now
+the close is the last pre-game row at or before data.first_pitch's cutoff
+(the trusted first pitch, else the scheduled start); a game with no start
+time keeps the old rule. The opener and Tier 2's newest row are not bounded.
+
+The latest-line tables (latest_odds, latest_prop_odds) have no DELETE
+trigger, on the ground that this job always keeps a key's newest pre-game row
+(data/migrations/latest_line_state_tables.sql). Since this change it does not
+when that row is after the start. The state row keeps its prices, the same
+post-start price it showed before, and its id names a deleted row. Checked
+2026-10-26: no view or module joins those ids back to the log, and the ladders
+had already broken the same claim (NFL_2026_06_ARI_LA
+player_pass_yds_alternate: williamhill_us holds 38 state rows, and only 2 of
+their source rows survive the prune).
+
+NBA and NCAAB keep their whole price path (NBA 2026-10-17, NCAAB 2026-10-26):
+the two tiers skip every `PATH_KEPT_SPORTS` row, and `thin_repeats` deletes
+only the middle of an unchanged run, keeping the row where each book moved and
+the last row it held. The thinning never touches the books above either, nor a
+`cfbd…` archive book (it did until 2026-10-20: it filtered on source alone).
 
 Caveat: pruned history is still gone permanently, and what survives is TWO rows
 per proposition per book, not a series. Anything needing intraday non-DK
@@ -100,7 +127,7 @@ skipped for the run), makes the run raise once both tables have had their
 turn, so the pipeline step is marked failed.
 
 A run stops starting new statements when its budget (PRUNE_RUN_SECONDS of wall
-time, PRUNE_RUN_ROWS deleted, per table; PRUNE_THIN_SECONDS for the NBA
+time, PRUNE_RUN_ROWS deleted, per table; PRUNE_THIN_SECONDS for the path
 thinning) is spent, and carries on from the same place the next day. Which
 dates are finished, and which are waiting for a retry, is stored in Supabase,
 in a `job_heartbeats` row per table (FRONTIER_JOB_PREFIX + table), so a run
@@ -138,6 +165,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import ODDS_API_BOOKMAKER, PRUNE_NON_DK_KEEP_DAYS, SHARP_BOOKMAKERS
 from data.db import ConnectionLost, DBConnection, get_connection, statement_timeout
+from data.first_pitch import pregame_cutoff_sql
 from data.ingestors.odds_ingestor import HISTORICAL_ODDS_SOURCE
 
 # Books whose snapshots must never be pruned. draftkings = the scoring book;
@@ -236,11 +264,19 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # the writers' constants by tests/test_nba_team_total_odds.py
 # (test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name), so
 # the pruner does not import the purchase modules.
+#
+# The two NCAAB literals (2026-10-26) are the stamps the NCAAB history purchase
+# writes on its derivative closes and opens: paid rows on games that are past
+# the window by the time they land, the shape Tier 1 deletes. They are named
+# here before that writer exists so its first run cannot be thinned by the
+# next 6am prune, as the 2026-09-01 MLB backfill was.
 PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nba_derivative_history",
                      "odds_api_nba_alt_history",
                      "odds_api_nhl_totals_history",
-                     "odds_api_nba_team_totals_live")
+                     "odds_api_nba_team_totals_live",
+                     "odds_api_ncaab_derivative_close",
+                     "odds_api_ncaab_derivative_open")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
@@ -254,7 +290,11 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # the same book's previous row (642 of them the first row of a proposition).
 # Keeping each run's first and last row is about twice the change count; the
 # rest are exact repeats.
-PATH_KEPT_SPORTS = ("NBA",)
+#
+# NCAAB joins it for its first season (2026-10-26, first game 2026-11-01), so
+# that season keeps when each book moved and from what, as the NBA's does. A
+# season thinned to opener and close cannot be put back.
+PATH_KEPT_SPORTS = ("NBA", "NCAAB")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:
@@ -328,7 +368,8 @@ BACKLOG_FLOOR = "2026-09-01"
 # the worst, before pipeline_watch reads it at 7:15am ET.
 PRUNE_RUN_SECONDS = int(os.environ.get("PRUNE_RUN_SECONDS", "600"))
 PRUNE_RUN_ROWS = int(os.environ.get("PRUNE_RUN_ROWS", "10000000"))
-# The NBA repeat thinning's own wall-time budget, run before the two tables.
+# The path-kept sports' repeat thinning's own wall-time budget, run before the
+# two tables.
 # A cap, not a measurement: the one measured thinning, a dry run over the
 # opening week's 773,041 NBA rows, took 38.9 s for five game dates.
 PRUNE_THIN_SECONDS = int(os.environ.get("PRUNE_THIN_SECONDS", "300"))
@@ -342,6 +383,26 @@ PRUNE_THIN_SECONDS = int(os.environ.get("PRUNE_THIN_SECONDS", "300"))
 FRONTIER_JOB_PREFIX = "prune_odds_frontier:"
 
 _IS_PRE = "(snapshot_type IS NULL OR snapshot_type <> 'in_play')"
+
+# The game's pre-game cutoff, joined onto every row of the proposition as
+# `b.close_by` (2026-10-26). One primary-key read of `games` inside the same
+# statement, so a proposition is still one statement (a separate lookup would
+# be a statement the budget has to allow for). %(game_id)s is bound in every
+# prune statement already. games.game_id is the primary key (checked against
+# the live catalog 2026-10-26), so the join can never multiply a row; a game
+# with no row, or no commence_time, gives one NULL and the close falls open to
+# the rule before this change. The cutoff SQL carries no literal percent sign,
+# which psycopg2 would read as a placeholder.
+_CLOSE_BY_JOIN = (f"LEFT JOIN (SELECT ({pregame_cutoff_sql('g')})::timestamptz AS close_by"
+                  f" FROM games g WHERE g.game_id = %(game_id)s) b ON TRUE")
+
+# A row that may be kept as the CLOSE: pre-game typed AND stamped at or before
+# the game's cutoff. Cast, never compared as text: both columns are TEXT, and
+# their shapes differ (measured 2026-10-26 on NCAAF 2026-10-24: snapshot_at
+# ends 'Z', commence_time ends '+00:00' on 44 games and '.000Z' on 245). As
+# text '...T19:00:00Z' sorts after '...T19:00:00+00:00', the same instant.
+_IS_CLOSE = (f"({_IS_PRE} AND (b.close_by IS NULL"
+             f" OR snapshot_at::timestamptz <= b.close_by))")
 
 
 def _pk(table: str) -> str:
@@ -387,15 +448,28 @@ def doomed_sql(table: str, identity: tuple[str, ...], row_date: str,
     The close must never be an in-play price: that is a different proposition
     entirely (CLAUDE.md §6), and keeping one as "the close" would hand every
     later analysis a price from the third inning. Partitioning the DESC ranking
-    by the pre-game flag puts pre-game rows in their own partition, so
-    rn_last = 1 AND is_pre is the newest PRE-GAME row rather than the newest row
-    that happens to be pre-game. NULL counts as pre-game, as every reader
-    treats it.
+    by the close flag puts candidate rows in their own partition, so
+    rn_last = 1 AND is_close is the newest CANDIDATE row rather than the newest
+    row that happens to be one. NULL snapshot_type counts as pre-game, as every
+    reader treats it.
 
-    It is the last pre-game-TYPED row, which is not automatically the last row
-    before first pitch — the evening refresh keeps writing `open` rows after
-    the game starts (§7's leak trap). snapshot_at is retained with it, so an
-    analysis can still apply the `<= commence_time` bound.
+    A candidate is pre-game TYPED and stamped at or before the game's pre-game
+    cutoff (2026-10-26, mike approved: "2) yes"): data.first_pitch's bound,
+    the trusted first pitch else the scheduled start, joined in as
+    `b.close_by`. Until then the close was the last pre-game-typed row, and
+    the evening refresh keeps writing `open` rows after the game starts (§7's
+    leak trap), so the kept close was routinely a post-start price (module
+    docstring, measured). A game with no start time keeps the old rule: NULL
+    fails open. When every pre-game-typed row is after the start, the
+    proposition keeps its opener and no close. Run read-only on production
+    2026-10-26 (this SELECT, NCAAF_2026-10-24_baylor_kansas h2h, start
+    17:02:30Z): FanDuel's `open` row at 20:17Z, the old close, is doomed; its
+    opener is now the close; its in-play newest row stays for Tier 2.
+
+    Only the close is bounded. The opener deliberately ranks every row,
+    in-play included (a proposition first quoted in play still keeps where it
+    started), and rn_newest is the row the live all-books views return, which
+    Tier 2 must keep whenever it was written.
 
     Tier 1 (game date before the cutoff) deletes everything but the keepers.
     Tier 2 (cutoff to today) also keeps the NEWEST row, the one the DISTINCT ON
@@ -417,19 +491,20 @@ def doomed_sql(table: str, identity: tuple[str, ...], row_date: str,
                        PARTITION BY {part_by} ORDER BY snapshot_at ASC, {pk} ASC
                    ) AS rn_first,
                    ROW_NUMBER() OVER (
-                       PARTITION BY {part_by}, {_IS_PRE} ORDER BY snapshot_at DESC, {pk} DESC
+                       PARTITION BY {part_by}, {_IS_CLOSE} ORDER BY snapshot_at DESC, {pk} DESC
                    ) AS rn_last,
                    ROW_NUMBER() OVER (
                        PARTITION BY {part_by}, ({row_date} >= %(cutoff)s)
                        ORDER BY snapshot_at DESC, {pk} DESC
                    ) AS rn_newest,
-                   {_IS_PRE} AS is_pre
+                   {_IS_CLOSE} AS is_close
             FROM {table}
+            {_CLOSE_BY_JOIN}
             WHERE {match}
               AND {prunable}
               AND {row_date} < %(today)s
         ) u
-        WHERE NOT (rn_first = 1 OR (is_pre AND rn_last = 1))
+        WHERE NOT (rn_first = 1 OR (is_close AND rn_last = 1))
           AND (row_date < %(cutoff)s OR rn_newest > 1)
     """
 
@@ -911,10 +986,10 @@ def run_prune_odds(run_date: str = None, keep_days: int = None,
                    rows: int | None = None) -> dict:
     """Prune line-shop snapshots in both odds tables. Safe to run any time.
 
-    The NBA path thinning runs first, then each table, each on its own
-    connection and with its own budget (`seconds`, default PRUNE_THIN_SECONDS
-    for the thinning and PRUNE_RUN_SECONDS for each table), so a slow or failed
-    one cannot starve the others.
+    The path thinning (PATH_KEPT_SPORTS) runs first, then each table, each on
+    its own connection and with its own budget (`seconds`, default
+    PRUNE_THIN_SECONDS for the thinning and PRUNE_RUN_SECONDS for each table),
+    so a slow or failed one cannot starve the others.
 
     Raises once both tables have had their turn when any of the three had a
     problem: an error that is not a timeout, a progress record that could not
@@ -1004,7 +1079,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="Report what would be deleted, delete nothing")
     ap.add_argument("--seconds", type=float, default=None,
-                    help=f"Wall-time budget per table and for the NBA thinning "
+                    help=f"Wall-time budget per table and for the path thinning "
                          f"(default {PRUNE_RUN_SECONDS} a table, "
                          f"{PRUNE_THIN_SECONDS} for the thinning)")
     ap.add_argument("--rows", type=int, default=None,

@@ -4418,6 +4418,14 @@ NCAAF_PROMOTED_TO_FBS: dict = {
     "Sacramento State":   2026,
 }
 
+# Men's college basketball: an odds-feed team name -> ESPN team id, for the
+# names data.ingestors.ncaab_teams.resolve_team_name cannot place on its own
+# (it matches ESPN's display name, "school mascot", school, short name and
+# alternate names first). Fill it from the unresolved-name list the
+# ncaab_feed_probe worker job prints. A value is an ESPN id, not a name, so a
+# school renaming itself cannot silently re-point an entry.
+NCAAB_ODDS_API_MAP: dict = {}
+
 # The Odds API team name → CFBD canonical school name.
 #
 # LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD

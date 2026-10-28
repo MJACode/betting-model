@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard Medium follow-ups from #1065. NCAAF by game id. One in-play DK row per market. Sheet polls only while focused. Index migration is hand-applied, not on prod. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter Season row reads `v_nba_team_q1_season`. Last 5 / Last 10 stay on the 40-game fetch. Follow-up to #1069. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM NFL props in the guided builder. Twelve markets. Over or Under required. Anytime TD is Yes. Units at the stored DraftKings price. `prop_side` is hand-applied. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter stats on the team page. Stats only, free. New `nba-quarters` step backfills quarter scores and play-by-play the 2026-27 season was missing. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |
@@ -40,6 +42,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, billing display prices locked (Matt): weekly $9.99 no trial, monthly $24.99 and annual $149.99 with 7-day trials. Suggested premium.* product ids documented only. Billing stays off. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Whop is Discord-only. Unapplied `my_access` / `has_app_access` are Apple-only on first apply. No flag flip, no production migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
+| 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NCAAB foundation. ESPN owns the games row; odds resolve onto it; 5-minute opener capture; the clean-up keeps the last price before the start; history purchase and free imports queued on the worker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats follow-up review. The marker wing no longer covers the window chip. Header taps no longer share a band. The book line can use two lines. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats Compact B follow-up. Marker tap is 44pt tall. Filters is a word and 44pt. Book line returns on Teams and an empty board. Hit Rates and Averages stay readable on the window row at 390. |
