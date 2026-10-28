@@ -28,7 +28,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { gradeFor, gradeSpoken, lastName, normalCdf } from '../src/lib/matchup';
+import { gradeFor, lastName, matchupStrengthSpoken, normalCdf, strengthForGrade } from '../src/lib/matchup';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -355,22 +355,21 @@ check(
   })(),
 );
 check(
-  'the header word fits its column, and the column carries the legend',
-  // "MATCHUP" needs ~56-58pt at 11pt semibold and truncated inside 52.
-  // And a bare "B+" says neither which end is good nor why some rows dash.
-  /\n\s+GRADE\n/.test(stats) && /title="Matchup grade"/.test(stats),
+  'the header word is MATCHUP, and the column carries the legend',
+  /\n\s+MATCHUP\n/.test(stats) && /title="Matchup"/.test(stats) && !/title="Matchup grade"/.test(stats),
 );
 check(
   "the cell's label does not re-announce the opponent the subline just took",
   // Built on `text` it said "at SEA" (subline) then "vs LAA" (cell) — the same
   // duplication the visual layer fixed, one layer down.
-  /accessibilityLabel=\{`Matchup grade \$\{gradeSpoken\(matchup\.grade\)\}\$\{matchup\.fact/.test(stats) &&
+  /accessibilityLabel=\{`\$\{matchupStrengthSpoken\(filled\)\}\$\{matchup\?\.fact/.test(stats) &&
     /fact: string \| null;/.test(matchup),
 );
 check(
-  'the detail screen spells the grade out too — a bare "+" is dropped by VoiceOver',
+  'the detail screen speaks the bar count and keeps the fact',
   /accessibilityLabel=\{`Tonight's matchup, \$\{/.test(playerDetail) &&
-    /gradeSpoken\(matchupGrade\)/.test(playerDetail),
+    /matchupStrengthPhrase\(matchupStrength\)/.test(playerDetail) &&
+    !/gradeSpoken\(/.test(playerDetail),
 );
 check(
   'both boards answer the pull gesture',
@@ -393,11 +392,18 @@ check(
   /AppState\.addEventListener/.test(read('src/hooks/useNow.ts')),
 );
 check(
-  'and colour is never the only carrier — the LETTER is the fact, spelled out for VoiceOver',
-  /accessibilityLabel=\{`Matchup grade \$\{gradeSpoken\(matchup\.grade\)\}/.test(stats) &&
-    gradeSpoken('B+') === 'B plus' &&
-    gradeSpoken('C-') === 'C minus' &&
-    gradeSpoken('A') === 'A',
+  'and colour is never the only carrier — the filled count is the fact, spoken for VoiceOver',
+  /matchupStrengthSpoken\(filled\)/.test(stats) &&
+    matchupStrengthSpoken(5) === 'Matchup strength 5 of 5' &&
+    matchupStrengthSpoken(1) === 'Matchup strength 1 of 5' &&
+    strengthForGrade('A+') === 5 &&
+    strengthForGrade('A-') === 5 &&
+    strengthForGrade('B+') === 4 &&
+    strengthForGrade('B') === 4 &&
+    strengthForGrade('C+') === 3 &&
+    strengthForGrade('D-') === 2 &&
+    strengthForGrade('F') === 1 &&
+    strengthForGrade(null) === null,
 );
 
 // ── 3c. …and the opponent came back under the name (2026-09-05) ────────────

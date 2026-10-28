@@ -19,6 +19,25 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, DK prices on NFL BYOM prop facts. Hand-applied columns and backtest. Job enabled with apply. Backfill from 2023-09-01. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard replaces the Lines segment. DK game markets. MLB and NCAAF live from stored feeds. NFL, NBA, and NHL do not invent a score. Free soft-lock. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Matchup strength is five bars. No Good/Great/Average or Nth easiest. VoiceOver says Matchup strength N of 5. Parlay EV pills unchanged. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Picks card Best/Bet control opens the selected-books sheet. No "now". Line stays in the hero. Flags unchanged. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 terms §8 and Settings Whop line. Apple unlocks the app and Discord. Whop does not unlock the app. Flags stay off. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 merged master after #1061 and #1062. Apple-only my_access kept. No Whop checkout URL. Flags stay off. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, ParlayMatt tracked like Eggz: own channel, author, webhook, ledger keys, and all-time. A parlay is one unit at its stated price. Unset env no-ops. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, pytest comments no longer say Record only. Paywall feature check is tint. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, mobile-tsc TS2322 fixed. `.notrial` rank documented. Stripe cancel confirms the stored subscription and prorates. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Community charge line and Connected-as spacing. Whop-covered Connect Discord sits on the membership card. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Unlock Discord early converts the trial plan via `monthly.notrial` / `annual.notrial`. Stripe ends that subscription in place. Public Join our Discord row removed. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Community navy action first, Whop sentence on a second card. Trial charge stays on Unlock Discord early. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Unlock Discord early buys Weekly (`premium.weekly`), not the trial SKU. Discord role is active-only. Trial app access stays. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, merged origin/master price lock 42881cb7. Community order matches boards 04/05. #1060 my_access SQL not taken. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, login required, paywall after first sign-in, free shell is Record only, Discord invite paid-only. Flags stay off. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, billing display prices locked (Matt): weekly $9.99 no trial, monthly $24.99 and annual $149.99 with 7-day trials. Suggested premium.* product ids documented only. Billing stays off. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Whop is Discord-only. Unapplied `my_access` / `has_app_access` are Apple-only on first apply. No flag flip, no production migration |
+| 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NCAAB foundation. ESPN owns the games row; odds resolve onto it; 5-minute opener capture; the clean-up keeps the last price before the start; history purchase and free imports queued on the worker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats follow-up review. The marker wing no longer covers the window chip. Header taps no longer share a band. The book line can use two lines. |

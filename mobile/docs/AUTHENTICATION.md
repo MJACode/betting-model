@@ -18,9 +18,16 @@ dead end.
 | Pure helpers | `src/lib/authHelpers.ts` | No RN/expo imports, so the verify script can load them |
 | Auth API | `src/lib/auth.ts` | Email OTP + Apple/Google OAuth, all guarded |
 | Session state | `src/hooks/useAuth.ts` | Module store, one Supabase subscription, AppState-driven refresh |
-| Sign-in screen | `src/screens/SignInScreen.tsx` | Registered as the `SignIn` route; nothing links to it |
+| Sign-in screen | `src/screens/SignInScreen.tsx` | Required on cold open once `AUTH_ENABLED` is on. No skip. |
 | Settings entry | `src/screens/SettingsScreen.tsx` | Account card renders **only** when `AUTH_ENABLED` |
 | Verification | `scripts/verify_auth.ts` | 41 assertions — `npx tsx scripts/verify_auth.ts` |
+
+When `AUTH_ENABLED` is on, SignIn is the first screen. There is no guest path
+and no "Signing in is optional" line. Terms and Privacy open
+`signalbase-ai.com`. Models and tracked bets stay on the device. A successful
+sign-in opens the paywall when billing is also on; closing it leaves the free
+shell (Record, with the other tabs locked). A restored session does not show
+the paywall again until a locked tab or Unlock is tapped.
 
 Scope is **session only**, by design. Signing in does not yet move any data:
 bankroll, Kelly settings, custom models, saved parlays, tracked bets and manual
@@ -76,6 +83,13 @@ is no legacy account state to reconcile.
 ---
 
 ## Activation
+
+Do not flip `AUTH_ENABLED`, `BILLING_ENABLED`, or `DISCORD_LINK_ENABLED` until
+`data/migrations/add_discord_link_and_whop_memberships.sql` is applied in that
+environment. That file is the first apply of `my_access()` / `has_app_access()`,
+and both are Apple-only. With billing or Discord linking on, a signed-in
+`fetchAccess()` calls `my_access()` and throws if the function is missing.
+That throw is a ship blocker.
 
 ### 1. Supabase → Authentication → URL Configuration
 

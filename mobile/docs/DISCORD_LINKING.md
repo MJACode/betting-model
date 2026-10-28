@@ -1,64 +1,97 @@
-# One membership, two surfaces — Discord linking, built and switched off
+# Discord linking — Whop is Discord-only, Apple unlocks the app
 
-Matt, 2026-08-30: *"make sure the email for the app is linked to give them
-access to discord and vice versa. If someone has discord they should be able to
-get an account on the app at no additional cost because they will pay via
-discord. If access is removed from one, it should be removed from the other."*
+Matt, 2026-08-30, asked for one membership across the app and Discord. Matt,
+2026-10-27, reversed the Whop half:
 
-That is now built. Like auth and billing before it, it ships **dark**:
-`DISCORD_LINK_ENABLED` in `src/lib/discordConfig.ts` is `false`, and linking
-also requires `AUTH_ENABLED` — `discordLinkReady()` enforces the pair, because
-a link binds a Discord account to an app ACCOUNT and a device id dies on
-reinstall.
+> Whop should only be to collect payment from people who want the Discord
+> access only and go through there. If a user comes through the App Store they
+> are buying the app and getting Discord access. Tie the users together.
+
+Whop checkout stays outside the app. App Store IAP unlocks the app. Our
+Discord role is granted only when that subscription is `active`, not while
+it is `trialing`. Linking is how the same person is one row on both sides.
+
+The in-app invite is Apple-paid only (Matt, 2026-10-27, #1061). An active
+App Store subscription may open it. Free and trial never see the URL. Trial's
+button is "Unlock Discord early" and buys the current plan through StoreKit /
+RevenueCat, which ends the trial. Paid's button is "Join Discord". Free and
+trial also see "Already in Discord via Whop? Connect Discord to link your
+account. Premium in the app is still via Apple." That button is Connect
+Discord. There is no Whop checkout URL in the app.
+
+Linking ships **dark**: `DISCORD_LINK_ENABLED` is `false`, and
+`discordLinkReady()` also requires `AUTH_ENABLED`.
+
+**Do not flip `AUTH_ENABLED`, `BILLING_ENABLED`, or `DISCORD_LINK_ENABLED`
+until `data/migrations/add_discord_link_and_whop_memberships.sql` is applied
+in that environment.** The function is not in production. With billing or
+Discord linking on, a signed-in `fetchAccess()` calls `my_access()` and
+throws if it is missing. That throw is a ship blocker, not an empty state.
 
 ---
 
-## The rule, and the one idea that makes it work
+## Who pays for what
 
 | You pay… | …and you get |
 |---|---|
-| in the app (App Store / RevenueCat) | the app **and** the subscriber Discord |
-| on Discord (Whop) | the Discord **and** the app, at no extra cost |
-| nothing, on either side | neither |
+| in the app (App Store / RevenueCat) | the app **and** our subscriber Discord role |
+| on Discord (Whop), outside the app | Whop's Discord role only. The app stays locked until an Apple subscription entitles |
+| nothing | neither |
 
-**The Discord role is the entitlement carrier, and each side only ever revokes
-the role it granted.** Two roles exist in the guild:
+A Whop member who also buys in the app is the same person: `discord_access`
+stays true and `entitled` becomes true. Cancelling Whop does not remove the
+Apple subscription. Cancelling Apple removes app access and **our** role, and
+leaves Whop's role alone.
 
-- **`DISCORD_APP_ROLE_ID`** — ours. Granted when an app subscription entitles,
-  removed when it lapses.
-- **Whop's own role** — Whop's. We never touch it.
+Two roles:
 
-That split is what makes "remove access from one and it goes from the other"
-correct rather than destructive. A member who cancels in the App Store but is
-still paying Whop loses **our** role and keeps theirs — and keeps their access,
-because they are still paying. If a single shared role carried both, cancelling
-either side would strip a member who had paid for the other.
+- **`DISCORD_APP_ROLE_ID`** — ours. `syncAppRoleForUser` grants it from the
+  Apple subscription and removes it when that subscription lapses.
+- **Whop's own role** — Whop's. `whop-webhook` never touches it.
 
-`discord_links.app_role_granted` records that OUR role is on, so revocation is
-a fact we hold rather than a guess about the guild's current state.
+`discord_links.app_role_granted` records that OUR role is on.
 
-### Access is computed, never cached as a grant
+### Access is computed, and the app half is Apple-only
 
-`public.my_access()` ORs the two sources on every read:
+`add_discord_link_and_whop_memberships.sql` has **not** been applied. The
+definition in that file is the first apply. It does not OR Whop into the app
+and then reverse it.
+
+Before this change the unapplied functions were:
 
 ```
-entitled = (subscriptions row is trialing/active AND not past its period end)
-        OR (a valid whop_memberships row matches this user)
+entitled        = app_subscription OR whop_match
+has_app_access  = app_subscription OR whop_match
 ```
 
-There is no second table to keep in step, and no window where a cancelled
-member still holds a stale entitlement — a Whop membership going invalid takes
-app access away on the very next read.
+After, in the same file:
 
-A Whop membership matches a user three ways, all of which are evidence the user
-actually controls the identity:
+```
+a = subscriptions.status IN ('trialing','active')
+    AND (current_period_end IS NULL OR current_period_end > now())
+d = a valid whop_memberships row matches this user
 
-1. the **Discord account they explicitly linked** (unique per app account);
-2. the app account's own **confirmed** email (`auth.users.email_confirmed_at`);
-3. the linked Discord account's **Discord-verified** email.
+my_access().entitled     = a
+my_access().app_access   = a
+my_access().discord_access = d
+has_app_access()         = auth.uid() IS NOT NULL AND a
 
-An unverified address on either side matches nothing. Trusting one would let
-anybody claim a paid membership by typing the buyer's address.
+source = both     when a AND d
+       = app      when a
+       = discord  when d AND NOT a   -- Whop matched, app locked
+       = none     otherwise
+```
+
+`useEntitlement()` uses `entitled` plus a receipt that just completed. It
+does not OR `discord_access`.
+
+A Whop row matches on evidence the user controls:
+
+1. the Discord account they linked (one Discord id, one app account);
+2. the app account's confirmed email (`auth.users.email_confirmed_at`);
+3. the linked Discord account's Discord-verified email.
+
+An unverified address matches nothing.
 
 ---
 
@@ -74,14 +107,21 @@ app: "Connect Discord"
         /users/@me                          → discord id + verified email
         PUT /guilds/{id}/members/{user}     → one-tap join (guilds.join scope)
         upsert discord_links
-        syncAppRoleForUser()                → grant our role if they're subscribed
-        backfill discord id onto a Whop membership bought with the same email
+        syncAppRoleForUser()                → our role only if Apple status is active (not trialing)
+        backfill discord id onto a Whop membership with the same verified email
   → app reads my_access()
+        entitled is still false when the only payment is Whop
 ```
 
 Scopes are `identify email guilds.join`. The bot token, the client secret and
-every role write live server-side; **the app never grants anything**, which is
-what stops a client claiming a membership it did not buy.
+every role write live server-side. The app never writes `discord_links` or
+`whop_memberships`.
+
+`whop-webhook` upserts `whop_memberships` after an HMAC check on the raw body.
+It does not write `subscriptions` and it does not call the role sync.
+
+`revenuecat-webhook` writes `subscriptions`, then calls `syncAppRoleForUser`.
+That sync reads `subscriptions` only.
 
 ---
 
@@ -89,37 +129,36 @@ what stops a client claiming a membership it did not buy.
 
 | Piece | File |
 |---|---|
-| Flag + redirect + Whop checkout URL | `src/lib/discordConfig.ts` |
+| Flag + redirect | `src/lib/discordConfig.ts` |
 | Pure helpers (parsing, copy, errors) | `src/lib/discordHelpers.ts` |
 | Link API (start / complete / unlink / read) | `src/lib/discord.ts` |
 | Access state (module store, one fetch) | `src/hooks/useAccess.ts` |
-| **The gate** — use this to decide access | `src/hooks/useEntitlement.ts` |
+| **The gate** — Apple `entitled`, not Whop | `src/hooks/useEntitlement.ts` |
 | Join sheet | `src/components/DiscordLinkModal.tsx` |
 | Settings connect / disconnect row | `src/screens/SettingsScreen.tsx` |
 | OAuth + guild join + role sync | `supabase/functions/discord-link/` |
-| Whop membership mirror | `supabase/functions/whop-webhook/` |
+| Whop membership mirror (identity only) | `supabase/functions/whop-webhook/` |
 | Discord bot API helpers | `supabase/functions/_shared/discord.ts` |
-| The two-way rule, one place | `supabase/functions/_shared/entitlement.ts` |
-| Schema + access RPCs | `data/migrations/add_discord_link_and_whop_memberships.sql` |
-| Verification (44 assertions) | `scripts/verify_discord_link.ts` |
+| Apple subscription → our Discord role (`active` only) | `supabase/functions/_shared/entitlement.ts` |
+| Schema + access RPCs (unapplied, Apple-only) | `data/migrations/add_discord_link_and_whop_memberships.sql` |
+| Verification | `scripts/verify_discord_link.ts` |
 
-### `useEntitlement`, not `useSubscription`
+The app does not embed a Whop checkout URL (App Store 3.1.1). Discord-only
+buyers pay on Whop, outside the app.
 
-`useSubscription().entitled` only knows about the `subscriptions` table. A
-member who paid through Whop has no row there, so gating on it would charge
-them twice for what they already bought. `LiveScreen` and `PicksHomeScreen`
-were moved onto `useEntitlement()`; the only remaining caller of the narrower
-hook is the Settings subscription card, which is *describing* the app
-subscription rather than deciding access.
+### `useEntitlement`
 
-**Any new gate uses `useEntitlement()`.**
+Paid signals follow `my_access().entitled` (Apple) or a purchase receipt
+that has not landed in the table yet. A Whop-only linked user is not
+entitled and hits the paywall for premium app features. Connect Discord
+still runs.
 
 ---
 
 ## Activation
 
-Do all of it before flipping the flag — a half-configured link drops users on a
-dead end.
+Do this before any flag flip. A flag flip against a database that has no
+`my_access()` throws inside `fetchAccess()`.
 
 ### 1. Apply the migration
 
@@ -127,9 +166,9 @@ dead end.
 psql "$DATABASE_URL" -f data/migrations/add_discord_link_and_whop_memberships.sql
 ```
 
-Then run `get_advisors(security)` and **read the result, not the intent** — the
-migration revokes `anon`/`authenticated` by name, but that check is the backstop
-(CLAUDE.md §7).
+This is the first apply. The functions it creates are already Apple-only.
+Then run `get_advisors(security)` and read the result — the migration
+revokes `anon`/`authenticated` by name (CLAUDE.md §7).
 
 ### 2. Discord application + bot
 
@@ -139,27 +178,26 @@ migration revokes `anon`/`authenticated` by name, but that check is the backstop
      `DISCORD_REDIRECT_URL` in `discordConfig.ts` and `expo.scheme` in
      `app.json` (`signalbase`).
    - *If Discord rejects the custom scheme*, point the redirect at an HTTPS
-     bounce that 302s to the scheme and set `DISCORD_REDIRECT_URI` to it. That
-     is the only change needed; nothing else reads the value.
+     bounce that 302s to the scheme and set `DISCORD_REDIRECT_URI` to it.
 2. **Bot** tab → add a bot → copy the token. Permissions: **Manage Roles**.
 3. Invite the bot to the server with `scope=bot%20applications.commands` and
    `permissions=268435456` (Manage Roles).
 4. Server Settings → Roles → create **`App Subscriber`**, and **drag the bot's
    own role above it**. Discord refuses to let a bot assign a role positioned
-   above its own — this is the single most common reason role grants 403.
+   above its own.
 5. Copy the role id and the server id (Developer Mode → right-click → Copy ID).
 
 ### 3. Whop
 
-1. Create the product that sells Discord access; connect the Discord app so
-   Whop assigns **its own** role on purchase.
+1. Create the product that sells Discord access only. Connect the Discord
+   app so Whop assigns **its own** role on purchase. Do not point that
+   product at an in-app URL.
 2. Whop dashboard → Developer → **Webhooks**:
    - URL `https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/whop-webhook`
    - events `membership.went_valid` and `membership.went_invalid`
    - copy the signing secret.
-3. Copy the checkout URL into `EXPO_PUBLIC_WHOP_CHECKOUT_URL` if you want the
-   "Get access on Discord" button on the paywall. Leave it unset and the button
-   simply doesn't render.
+3. The app does not embed a Whop checkout URL. Discord-only buyers pay on
+   Whop, outside the app. App Store buyers subscribe in the app.
 
 ### 4. Secrets
 
@@ -180,31 +218,33 @@ supabase secrets set \
 ```bash
 supabase functions deploy discord-link
 supabase functions deploy whop-webhook --no-verify-jwt
-supabase functions deploy revenuecat-webhook --no-verify-jwt   # now syncs the role
+supabase functions deploy revenuecat-webhook --no-verify-jwt
 ```
 
-`discord-link` keeps `verify_jwt` **true** — a link is an assertion about who
-someone is and must never be makeable on another account's behalf.
-`whop-webhook` must be `--no-verify-jwt` (Whop sends no Supabase JWT;
-authenticity is the HMAC over the raw body).
+`discord-link` keeps `verify_jwt` **true**. `whop-webhook` and
+`revenuecat-webhook` are `--no-verify-jwt`; authenticity is the HMAC or the
+Authorization header over the raw body.
 
-### 6. Test, in this order
+### 6. Test, in this order, after the migration is applied
 
 With a preview build carrying `EXPO_PUBLIC_AUTH_ENABLED=true` and
-`EXPO_PUBLIC_DISCORD_LINK_ENABLED=true`:
+`EXPO_PUBLIC_DISCORD_LINK_ENABLED=true` (and billing on if you are buying):
 
-1. **Link** — sign in, Settings → Connect Discord. Expect: consent screen, back
-   in the app, you are in the server, Settings says "Connected as …".
-2. **App → Discord** — buy in the app (sandbox). Within seconds you hold the
-   `App Subscriber` role.
-3. **Discord → app** — buy the Whop product with a *different* account, connect
-   that Discord account in the app. Expect: entitled, Settings shows "Discord",
-   paywall never appears, nothing charged.
-4. **Revoke, Whop side** — cancel/refund in Whop. `whop_memberships.valid` goes
-   false; app access disappears on the next read.
-5. **Revoke, app side** — cancel in the App Store sandbox and let it expire. The
-   `App Subscriber` role comes off; if that account also has a Whop membership,
-   confirm it **keeps** Whop's role and its access.
+1. **Link** — sign in, Settings → Connect Discord. Expect: consent screen,
+   back in the app, you are in the server, Settings says "Connected as …".
+2. **App → Discord** — buy in the app (sandbox). `my_access().entitled` is
+   true for `trialing` or `active`. The `App Subscriber` role is granted only
+   once status is `active`, not during the trial.
+3. **Whop does not unlock the app** — buy the Whop product with a different
+   account, connect that Discord account in the app. Expect: `discord_access`
+   true, `entitled` false, the paywall still blocks premium features, our
+   App Subscriber role is absent, Whop's role is present.
+4. **Revoke, Whop side** — cancel in Whop. `whop_memberships.valid` goes
+   false and `discord_access` follows. An Apple subscription on that account,
+   if there is one, is unchanged.
+5. **Revoke, app side** — cancel in the App Store sandbox and let it expire.
+   The `App Subscriber` role comes off and `entitled` goes false. If that
+   account also has a Whop membership, Whop's role stays.
 
 ```sql
 SELECT user_id, discord_username, guild_member, app_role_granted, last_sync_error
@@ -213,34 +253,36 @@ SELECT membership_id, email, discord_user_id, status, valid FROM whop_membership
 SELECT * FROM my_access_for('<user-uuid>');
 ```
 
+`entitled` on that last row follows the Apple subscription only.
+
 ### 7. Ship
 
-Flip `DISCORD_LINK_ENABLED` (and `AUTH_ENABLED`). Pure JS, so it goes over OTA
-— no EAS rebuild, unlike IAP.
+Flip the flags only after step 1 has been run in the environment you are
+shipping. Pure JS, so the flag change goes over OTA. This change does not
+flip any `EXPO_PUBLIC_*` flag.
 
 ---
 
-## Known limitations, stated plainly
+## Known limitations
 
-**1. The gate is still client-side.** `picks` is anon-readable by design (the
-website and the Claude-mobile workflow both query it with the anon key), so the
-gate stops ordinary users, not someone reading the table directly.
-`public.has_app_access()` is the honest server-side check and now supersedes
-`has_active_subscription()` — which cannot see a Whop-paid member and would
-lock out everyone who bought through Discord. Wiring real enforcement still
-means moving the website and Claude-mobile onto a service-role key first, then
-revoking anon SELECT, then serving signals through a gated RPC. In that order.
+**1. The gate is still client-side.** `picks` is anon-readable by design.
+`public.has_app_access()` is the server-side check and is Apple-only, same
+as `my_access().entitled`. Wiring real enforcement still means moving the
+website and Claude-mobile onto a service-role key first, then revoking anon
+SELECT, then serving signals through a gated RPC. In that order.
 
-**2. Guild-join can fail without the link failing.** A bot outage or a declined
-scope leaves the user linked but not in the server; the error is recorded in
-`discord_links.last_sync_error` and the modal falls back to the plain invite.
-They just won't hold the subscriber role until it is retried.
+**2. Guild-join can fail without the link failing.** The error is recorded
+in `discord_links.last_sync_error` and the modal falls back to the plain
+invite. They will not hold our role until it is retried.
 
 **3. Role sync failures are recorded, not retried on a schedule.** Nothing
-sweeps `last_sync_error` yet. If Discord is down during a renewal batch, those
-members keep whatever role they had until something re-triggers a sync (any
-subsequent RevenueCat event, or re-connecting). A periodic reconciliation job
-is the obvious follow-on and is deliberately not built yet.
+sweeps `last_sync_error`. A later RevenueCat event or a reconnect runs the
+sync again.
 
-**4. Unlinking does not kick anyone from the server.** Leaving is the member's
-own choice; unlinking is about our record of who they are.
+**4. Unlinking does not kick anyone from the server.** Unlinking takes back
+our role, when we had granted it, and deletes the link row.
+
+**5. Invite-on-paid and "Unlock Discord early" landed in #1061.** Flags stay
+off. Settings uses one Whop sentence: "Already in Discord via Whop? Connect
+Discord to link your account. Premium in the app is still via Apple."
+`web/content/terms.md` §8 says the same product fact.

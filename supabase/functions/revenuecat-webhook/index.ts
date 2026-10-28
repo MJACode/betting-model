@@ -22,7 +22,11 @@
 //                             RevenueCat webhook config (any long random string)
 //   RC_PRODUCT_WEEKLY / RC_PRODUCT_MONTHLY / RC_PRODUCT_ANNUAL
 //                             optional store product ids for exact plan
-//                             mapping; a substring heuristic is the fallback
+//                             mapping; a substring heuristic is the fallback.
+//                             Suggested ids (not created here):
+//                             com.mja.bettingpicks.premium.weekly
+//                             com.mja.bettingpicks.premium.monthly
+//                             com.mja.bettingpicks.premium.annual
 //
 // Discord: after writing the row this syncs the member's app-subscriber role
 // in the guild, so paying in the app grants Discord access and letting the
@@ -61,7 +65,7 @@ const PRODUCT_TO_PLAN: Record<string, string> = {
 
 /**
  * Substring fallback. ORDER MATTERS — 'annual|year' is tested before 'week',
- * because a yearly id like "com...sub.annual" carries no week marker but a
+ * because a yearly id like "com.mja.bettingpicks.premium.annual" carries no week marker but a
  * "52_week" style id would otherwise resolve to weekly. Kept in sync with
  * planForProductId in mobile/src/lib/iapHelpers.ts.
  *

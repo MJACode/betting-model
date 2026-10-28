@@ -329,6 +329,15 @@ DISCORD_WEBHOOK_EGGZ: str = os.environ.get("DISCORD_WEBHOOK_EGGZ", "").strip()
 DISCORD_EGGZ_CHANNEL_ID: str = os.environ.get("DISCORD_EGGZ_CHANNEL_ID", "").strip()
 DISCORD_EGGZ_AUTHOR_ID: str = os.environ.get("DISCORD_EGGZ_AUTHOR_ID", "").strip()
 
+# ParlayMatt's own results, in #parlaymatt-picks. Same rules as Eggz: no
+# fallback, and these recaps never go to #results or to X. Unset channel,
+# author, or webhook: that half no-ops. The bot token is DISCORD_BOT_TOKEN.
+DISCORD_WEBHOOK_PARLAYMATT: str = os.environ.get("DISCORD_WEBHOOK_PARLAYMATT", "").strip()
+DISCORD_PARLAYMATT_CHANNEL_ID: str = os.environ.get(
+    "DISCORD_PARLAYMATT_CHANNEL_ID", "").strip()
+DISCORD_PARLAYMATT_AUTHOR_ID: str = os.environ.get(
+    "DISCORD_PARLAYMATT_AUTHOR_ID", "").strip()
+
 # How stale the newest pipeline_runs row may get before the watchdog calls it a
 # stall, in minutes. The tightest real cadence is the evening refresh at every
 # 10 minutes; the loosest gap a HEALTHY system produces is the quiet stretch

@@ -11,13 +11,23 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { secondSubscriptionAction } from '../../supabase/functions/_shared/stripeDuplicateSub';
+
 import {
+  defaultPlan,
   describeSubscription,
+  earlyUnlockLine,
+  earlyUnlockTarget,
   formatPerMonth,
+  formatPerWeek,
   formatPrice,
   isEntitled,
   isPlanKey,
   monthlyPlan,
+  paywallCta,
+  paywallSubtitle,
+  planPriceCaption,
+  planStatusCopy,
   perMonth,
   renewalDisclosure,
   savingsPct,
@@ -27,17 +37,22 @@ import {
 import {
   BILLING_ENABLED,
   BILLING_RAIL,
+  DEFAULT_PLAN_KEY,
+  EARLY_UNLOCK_PRODUCT_IDS,
   PLANS,
+  STORE_PRODUCT_IDS,
   TRIAL_DAYS,
   billingReady,
   planFor,
 } from '../src/lib/billingConfig';
+import { contentLocked, membershipTier } from '../src/lib/membership';
 import {
   REVENUECAT_ENTITLEMENT_ID,
   customerInfoEntitled,
   displayPrice,
   fallbackManagementUrl,
   packageForPlan,
+  packageForProductId,
   planForPackageType,
   planForProductId,
   type MinimalPackage,
@@ -82,8 +97,8 @@ eq("default rail is 'iap'", BILLING_RAIL, 'iap');
 // Weekly / Monthly / Annual (2026-08-30). These must match App Store Connect
 // exactly or the paywall's fallback quotes a number the user isn't charged.
 eq('weekly price', planFor('weekly').price, 9.99);
-eq('monthly price', planFor('monthly').price, 29.99);
-eq('annual price', planFor('annual').price, 199.99);
+eq('monthly price', planFor('monthly').price, 24.99);
+eq('annual price', planFor('annual').price, 149.99);
 eq('three plans offered', PLANS.length, 3);
 check('every plan key is recognised', PLANS.every((p) => isPlanKey(p.key)));
 check('unknown plan key rejected', !isPlanKey('semiannual'));
@@ -96,7 +111,7 @@ eq('annual carries the 7-day trial', planFor('annual').trialDays, 7);
 
 // --- per-month + savings math ----------------------------------------------
 const monthly = monthlyPlan();
-check('monthly per-month is the price itself', perMonth(monthly) === 29.99);
+check('monthly per-month is the price itself', perMonth(monthly) === 24.99);
 // 52 weeks / 12 months, not 4 weeks: a four-week "month" understates the
 // weekly plan's real cost by 8%, in the direction that flatters us.
 check(
@@ -104,16 +119,16 @@ check(
   Math.abs(perMonth(planFor('weekly')) - 43.29) < 0.01,
 );
 check(
-  'annual works out near $16.67/mo',
-  Math.abs(perMonth(planFor('annual')) - 16.666) < 0.01,
+  'annual works out near $12.50/mo',
+  Math.abs(perMonth(planFor('annual')) - 12.5) < 0.01,
 );
-eq('annual saves 44%', savingsPct(planFor('annual'), monthly), 44);
+eq('annual saves 50%', savingsPct(planFor('annual'), monthly), 50);
 eq('monthly saves nothing vs itself', savingsPct(monthly, monthly), 0);
 // Negative on purpose — weekly costs MORE per month than monthly, and the
 // paywall hides the badge rather than inventing a saving.
 check('weekly shows no saving', savingsPct(planFor('weekly'), monthly) < 0);
-eq('price formatting', formatPrice(199.99), '$199.99');
-eq('per-month formatting', formatPerMonth(planFor('annual')), '$16.67/mo');
+eq('price formatting', formatPrice(149.99), '$149.99');
+eq('per-month formatting', formatPerMonth(planFor('annual')), '$12.50/mo');
 
 // --- renewal disclosure -----------------------------------------------------
 // A plan with no trial must never claim one: untrue, and a 3.1.2 rejection.
@@ -122,17 +137,168 @@ check(
   renewalDisclosure(planFor('monthly')).startsWith('7-day free trial'),
 );
 check(
-  'weekly disclosure claims no trial',
-  !renewalDisclosure(planFor('weekly')).toLowerCase().includes('trial'),
+  'weekly disclosure does not offer a trial',
+  !/\d+-day free trial/i.test(renewalDisclosure(planFor('weekly'))) &&
+    /no free trial/i.test(renewalDisclosure(planFor('weekly'))) &&
+    /charged today/i.test(renewalDisclosure(planFor('weekly'))),
 );
 check(
   'weekly disclosure names the weekly term',
   renewalDisclosure(planFor('weekly')).includes('$9.99 per week'),
 );
 check(
+  'monthly disclosure names the monthly price',
+  renewalDisclosure(planFor('monthly')).includes('$24.99 per month'),
+);
+check(
+  'annual disclosure names the annual price',
+  renewalDisclosure(planFor('annual')).includes('$149.99 per year'),
+);
+check(
   'every disclosure says how to cancel',
   PLANS.every((p) => renewalDisclosure(p).includes('Cancel anytime')),
 );
+
+// --- paywall copy (Matt, 2026-10-27) ----------------------------------------
+eq('default plan is annual', DEFAULT_PLAN_KEY, 'annual');
+eq('defaultPlan() is annual', defaultPlan().key, 'annual');
+eq('annual is the only badge', planFor('annual').badge, 'Best value');
+check('monthly has no badge', planFor('monthly').badge == null);
+check('weekly has no badge', planFor('weekly').badge == null);
+eq('weekly button is Subscribe', paywallCta(planFor('weekly')), 'Subscribe');
+eq('monthly button offers the trial', paywallCta(planFor('monthly')), 'Start 7-day free trial');
+eq('annual button offers the trial', paywallCta(planFor('annual')), 'Start 7-day free trial');
+check(
+  'weekly subtitle does not promise a 7-day trial',
+  !paywallSubtitle(planFor('weekly')).includes('7-day free trial') &&
+    paywallSubtitle(planFor('weekly')).includes('Charged today'),
+);
+check(
+  'monthly subtitle names the trial plans',
+  paywallSubtitle(planFor('monthly')).includes('7-day free trial on Monthly and Annual'),
+);
+eq('annual per week is $2.88', formatPerWeek(planFor('annual')), '$2.88/wk');
+eq('annual caption keeps the per-week equivalent', planPriceCaption(planFor('annual')), 'per year · $2.88/wk');
+check('weekly has no per-week equivalent', formatPerWeek(planFor('weekly')) == null);
+eq(
+  'trial status names the end date',
+  planStatusCopy(sub({ status: 'trialing', trial_end: '2026-11-03T00:00:00Z' }), {}, NOW),
+  { badge: 'Trial', line: 'Free trial ends Nov 3' },
+);
+eq(
+  'paid status names the renew date',
+  planStatusCopy(sub({ plan: 'annual', current_period_end: '2027-10-27T00:00:00Z' }), {}, NOW),
+  { badge: 'Premium', line: 'Annual · renews Oct 27, 2027' },
+);
+eq('no subscription is Free', planStatusCopy(null, {}, NOW), { badge: 'Free', line: 'Free plan' });
+
+const tierSub = (over: Partial<SubscriptionRow> = {}) => sub(over);
+eq('billing off is open', membershipTier({ billingOn: false, entitled: false, subscription: null, discordPaid: false }), 'open');
+eq('no row is free', membershipTier({ billingOn: true, entitled: false, subscription: null, discordPaid: false, now: NOW }), 'free');
+eq(
+  'trialing is trial',
+  membershipTier({ billingOn: true, entitled: true, subscription: tierSub({ status: 'trialing', trial_end: '2026-11-03T00:00:00Z' }), discordPaid: false, now: NOW }),
+  'trial',
+);
+eq(
+  'active is paid',
+  membershipTier({ billingOn: true, entitled: true, subscription: tierSub(), discordPaid: false, now: NOW }),
+  'paid',
+);
+eq(
+  'a discord membership does not unlock the app',
+  membershipTier({ billingOn: true, entitled: false, subscription: null, discordPaid: true, now: NOW }),
+  'free',
+);
+eq(
+  'receipt before the row is not paid',
+  membershipTier({ billingOn: true, entitled: true, subscription: null, discordPaid: false, now: NOW }),
+  'trial',
+);
+check('only free locks the app', contentLocked('free') && !contentLocked('trial') && !contentLocked('paid') && !contentLocked('open'));
+
+const paywallSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'PaywallScreen.tsx'), 'utf8');
+const settingsSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SettingsScreen.tsx'), 'utf8');
+check('paywall has no Whop checkout button', !paywallSrc.includes('WHOP_CHECKOUT_URL') && !paywallSrc.includes('Get access on Discord') && !paywallSrc.includes('whop.com'));
+check('settings has no Whop checkout button', !settingsSrc.includes('WHOP_CHECKOUT_URL') && !settingsSrc.includes('Get access on Discord') && !settingsSrc.includes('whop.com'));
+const discordConfigSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'discordConfig.ts'), 'utf8');
+check('client config has no Whop checkout URL', !discordConfigSrc.includes('WHOP_CHECKOUT_URL') && !discordConfigSrc.includes('whop.com') && !discordConfigSrc.includes('EXPO_PUBLIC_WHOP'));
+check('trial discord button is Unlock Discord early', settingsSrc.includes('Unlock Discord early') && !settingsSrc.includes('See plan details'));
+check('unlock discord early calls the store, not the paywall', settingsSrc.includes('endTrialEarly') && settingsSrc.includes('onUnlockDiscord'));
+check('trial card names the same-plan convert price', settingsSrc.includes('earlyUnlockLine'));
+check(
+  'trial status uses the board sentence',
+  settingsSrc.includes('Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'),
+);
+check('settings has no public Join our Discord row', !settingsSrc.includes('Join our Discord'));
+const billingSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
+const earlyFn = billingSrc.split('export async function endTrialEarly')[1]?.split('export async function')[0] ?? '';
+check(
+  'endTrialEarly converts the trial plan and does not buy weekly',
+  earlyFn.includes('earlyUnlockTarget(trialingPlan)') &&
+    earlyFn.includes('if (!target.ok) throw new Error(target.reason)') &&
+    earlyFn.includes('purchaseEarlyUnlock(target.productId, trialingPlan, userId)') &&
+    earlyFn.includes('end_trial: true') &&
+    !earlyFn.includes('STORE_PRODUCT_IDS.weekly') &&
+    !earlyFn.includes("plan: 'weekly'"),
+);
+const iapSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'iap.ts'), 'utf8');
+check(
+  'the convert purchase refuses the intro id and a tier switch',
+  iapSrc.includes('purchaseEarlyUnlock') &&
+    iapSrc.includes('SAME_PLAN_PURCHASE_MESSAGE') &&
+    iapSrc.includes('TIER_SWITCH_MESSAGE') &&
+    iapSrc.includes('packageForProductId'),
+);
+eq('annual trial converts to the annual no-trial id', earlyUnlockTarget('annual'), {
+  ok: true,
+  plan: 'annual',
+  productId: 'com.mja.bettingpicks.premium.annual.notrial',
+  replacesProductId: STORE_PRODUCT_IDS.annual,
+});
+eq('monthly trial converts to the monthly no-trial id', earlyUnlockTarget('monthly'), {
+  ok: true,
+  plan: 'monthly',
+  productId: 'com.mja.bettingpicks.premium.monthly.notrial',
+  replacesProductId: STORE_PRODUCT_IDS.monthly,
+});
+const weeklyUnlock = earlyUnlockTarget('weekly');
+check(
+  'weekly is refused and is not the convert product',
+  weeklyUnlock.ok === false &&
+    weeklyUnlock.reason.includes('different plan') &&
+    !('productId' in weeklyUnlock && weeklyUnlock.productId === STORE_PRODUCT_IDS.weekly),
+);
+check(
+  'convert ids are not weekly and not the intro ids',
+  EARLY_UNLOCK_PRODUCT_IDS.monthly !== STORE_PRODUCT_IDS.weekly &&
+    EARLY_UNLOCK_PRODUCT_IDS.annual !== STORE_PRODUCT_IDS.weekly &&
+    EARLY_UNLOCK_PRODUCT_IDS.monthly !== STORE_PRODUCT_IDS.monthly &&
+    EARLY_UNLOCK_PRODUCT_IDS.annual !== STORE_PRODUCT_IDS.annual,
+);
+eq(
+  'trial line names the annual price, not weekly',
+  earlyUnlockLine('annual'),
+  'Ends the Annual trial. $149.99 today. No invite is shown until that plan is active.',
+);
+check('monthly convert line does not say weekly', !earlyUnlockLine('monthly').toLowerCase().includes('weekly'));
+check('paid join waits for an active row', settingsSrc.includes("subscription.status === 'active'"));
+check(
+  'whop soft copy is Matt\'s line and does not say Discord unlocks the app',
+  settingsSrc.includes('Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.') &&
+    !settingsSrc.includes('whop.com') &&
+    !settingsSrc.includes('WHOP_CHECKOUT_URL') &&
+    !settingsSrc.includes('covers the app') &&
+    !settingsSrc.includes('gives you access to the app') &&
+    !settingsSrc.includes('Included with your Discord membership'),
+);
+check('paywall selects DEFAULT_PLAN_KEY', paywallSrc.includes('DEFAULT_PLAN_KEY'));
+check('weekly discord line does not wait on a trial', paywallSrc.includes('included with this plan'));
+const lockSrc = readFileSync(join(__dirname, '..', 'src', 'components', 'SignalLockCard.tsx'), 'utf8');
+check('lock card does not promise 7 days free on every plan', !lockSrc.includes('Start with 7 days free') && lockSrc.includes('Monthly and Annual include 7 days free'));
+const signInSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SignInScreen.tsx'), 'utf8');
+check('sign-in does not say it is optional', !signInSrc.includes('Signing in is optional') && !signInSrc.includes('Not now'));
+check('sign-in links Terms and Privacy', signInSrc.includes('TERMS_URL') && signInSrc.includes('PRIVACY_URL'));
 
 // --- entitlement ------------------------------------------------------------
 check('active entitles', isEntitled(sub(), NOW));
@@ -233,18 +399,33 @@ eq('unknown package type → null', planForPackageType('SIX_MONTH'), null);
 // The ordering trap: a longer marker that contains a shorter one has to win.
 eq(
   'a 52-week yearly id is annual, not weekly',
-  planForProductId('com.mja.bettingpicks.sub.52_week_year'),
+  planForProductId('com.mja.bettingpicks.premium.52_week_year'),
   'annual',
 );
 eq('weekly product id', planForProductId('sb_weekly_999'), 'weekly');
-eq('annual product id', planForProductId('sb_annual_19999'), 'annual');
-eq('monthly product id', planForProductId('sb_monthly_2999'), 'monthly');
+eq('annual product id', planForProductId('sb_annual_14999'), 'annual');
+eq('monthly product id', planForProductId('sb_monthly_2499'), 'monthly');
+eq(
+  'suggested weekly id',
+  planForProductId('com.mja.bettingpicks.premium.weekly'),
+  'weekly',
+);
+eq(
+  'suggested monthly id',
+  planForProductId('com.mja.bettingpicks.premium.monthly'),
+  'monthly',
+);
+eq(
+  'suggested annual id',
+  planForProductId('com.mja.bettingpicks.premium.annual'),
+  'annual',
+);
 eq('unrecognisable product id → null', planForProductId('sb_lifetime'), null);
 
 const pkgs: MinimalPackage[] = [
-  { packageType: 'ANNUAL', product: { identifier: 'sb_annual', priceString: '$199.99' } },
+  { packageType: 'ANNUAL', product: { identifier: 'sb_annual', priceString: '$149.99' } },
   { packageType: 'CUSTOM', product: { identifier: 'sb_weekly', priceString: '$9.99' } },
-  { packageType: 'MONTHLY', product: { identifier: 'sb_monthly', priceString: '$29.99' } },
+  { packageType: 'MONTHLY', product: { identifier: 'sb_monthly', priceString: '$24.99' } },
 ];
 eq(
   'packageForPlan matches by package type',
@@ -257,18 +438,48 @@ eq(
   'sb_weekly',
 );
 eq('packageForPlan misses honestly', packageForPlan([], 'annual'), null);
+eq(
+  'monthly.notrial stays monthly',
+  planForProductId('com.mja.bettingpicks.premium.monthly.notrial'),
+  'monthly',
+);
+eq(
+  'annual.notrial stays annual',
+  planForProductId('com.mja.bettingpicks.premium.annual.notrial'),
+  'annual',
+);
+const convertPkgs: MinimalPackage[] = [
+  {
+    packageType: 'MONTHLY',
+    product: { identifier: 'com.mja.bettingpicks.premium.monthly.notrial', priceString: '$24.99' },
+  },
+  {
+    packageType: 'MONTHLY',
+    product: { identifier: 'com.mja.bettingpicks.premium.monthly', priceString: '$24.99' },
+  },
+];
+eq(
+  'packageForProductId matches the no-trial sibling exactly',
+  packageForProductId(convertPkgs, 'com.mja.bettingpicks.premium.monthly.notrial')?.product.identifier,
+  'com.mja.bettingpicks.premium.monthly.notrial',
+);
+eq(
+  'packageForPlan keeps the intro monthly when a no-trial sibling is also monthly',
+  packageForPlan(convertPkgs, 'monthly')?.product.identifier,
+  'com.mja.bettingpicks.premium.monthly',
+);
 
 eq(
   'localized store price wins',
-  displayPrice(planFor('annual'), '$199.99'),
-  '$199.99',
+  displayPrice(planFor('annual'), '$149.99'),
+  '$149.99',
 );
 eq(
   'config price is the fallback',
   displayPrice(planFor('annual'), null),
-  '$199.99',
+  '$149.99',
 );
-eq('blank localized price falls back', displayPrice(planFor('monthly'), ' '), '$29.99');
+eq('blank localized price falls back', displayPrice(planFor('monthly'), ' '), '$24.99');
 
 check(
   'active entitlement recognised',
@@ -291,6 +502,7 @@ check(
 const src = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
 for (const fn of [
   'startCheckout',
+  'endTrialEarly',
   'openManageSubscription',
   'restorePurchases',
   'redeemCode',
@@ -321,6 +533,16 @@ const fn = readFileSync(
 );
 check('checkout maps plan → price server-side', fn.includes('const priceId = PRICES[plan]'));
 check(
+  'ending a trial updates that subscription and does not open a second checkout',
+  fn.includes('end_trial') &&
+    fn.includes('trial_end: "now"') &&
+    fn.indexOf('trial_end: "now"') < fn.indexOf('"/checkout/sessions"'),
+);
+check(
+  'a live subscription still cannot start checkout',
+  fn.includes('You already have an active subscription.'),
+);
+check(
   'checkout takes the user from the JWT, not the body',
   fn.includes('admin.auth.getUser(token)'),
 );
@@ -331,11 +553,57 @@ const hook = readFileSync(
 check('webhook verifies the Stripe signature', hook.includes('verifySignature(rawBody'));
 check('webhook signs over the raw body', hook.includes('await req.text()'));
 check('webhook enforces a timestamp tolerance', hook.includes('TOLERANCE_SEC'));
+check(
+  'a second live stripe subscription is cancelled only after Stripe confirms the stored one',
+  hook.includes('readStoredSubscription(existing.stripe_subscription_id)') &&
+    hook.includes('secondSubscriptionAction') &&
+    hook.indexOf('readStoredSubscription(existing.stripe_subscription_id)') <
+      hook.indexOf('stripeCancelDuplicate(sub.id)') &&
+    hook.includes('prorate') &&
+    hook.includes('invoice_now') &&
+    hook.includes('resource_missing') &&
+    !hook.includes('async function stripeDelete'),
+);
+eq(
+  'a stale row does not cancel the incoming subscription',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'active' },
+    { id: 'sub_new', status: 'active' },
+    { id: 'sub_old', status: 'canceled' },
+  ),
+  'apply',
+);
+eq(
+  'a missing Stripe subscription is a stale row',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'trialing' },
+    { id: 'sub_new', status: 'active' },
+    null,
+  ),
+  'apply',
+);
+eq(
+  'a subscription Stripe still reports as live cancels the other live one',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'trialing' },
+    { id: 'sub_new', status: 'active' },
+    { id: 'sub_old', status: 'trialing' },
+  ),
+  'cancel_incoming',
+);
+eq(
+  'the same subscription id is applied',
+  secondSubscriptionAction(
+    { stripe_subscription_id: 'sub_old', status: 'trialing' },
+    { id: 'sub_old', status: 'active' },
+    null,
+  ),
+  'apply',
+);
 
 // The IAP file must never import the native module statically — an OTA bundle
 // doing so crashes on launch on binaries that predate the rebuild. Only a
 // dynamic require inside loadPurchases() (and type-only imports) are allowed.
-const iapSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'iap.ts'), 'utf8');
 check(
   'iap.ts has no static value import of react-native-purchases',
   !/^import\s+(?!type\b)[^;]*from\s+'react-native-purchases'/m.test(iapSrc),

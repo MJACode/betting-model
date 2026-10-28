@@ -110,6 +110,7 @@ jobs:
         run: |
           python -m pytest -q -rs \
             tests/test_config.py \
+            tests/test_claude_settings_allowlist.py \
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
             tests/test_mobile_threshold_parity.py \
@@ -226,5 +227,6 @@ jobs:
             tests/test_ddl_guard.py \
             tests/test_nfl_wind_stability.py \
             tests/test_mobile_lines_board.py \
+            tests/test_mobile_scoreboard.py \
             tests/test_pregame_insert_cutoff.py \
             tests/test_web_site.py

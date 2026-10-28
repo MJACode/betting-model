@@ -8,10 +8,11 @@
 | `stripe-webhook` | **false** | Stripe entitlement → `subscriptions`. Signature verified over the raw body. | `mobile/docs/BILLING.md` |
 | `revenuecat-webhook` | **false** | IAP entitlement → `subscriptions`, **and** the Discord role sync. Authorization header, constant-time. | `mobile/docs/BILLING.md` |
 | `discord-link` | true | Discord OAuth link, one-tap guild join, role sync, unlink. A link asserts who someone IS, so it must never be makeable on another account's behalf. | `mobile/docs/DISCORD_LINKING.md` |
-| `whop-webhook` | **false** | Whop membership state → `whop_memberships`, which is what lets a Discord-paid member into the app for free. HMAC over the raw body. | `mobile/docs/DISCORD_LINKING.md` |
+| `whop-webhook` | **false** | Whop membership mirror + identity keys in `whop_memberships`. Does not unlock the app and does not touch our Discord role. HMAC over the raw body. | `mobile/docs/DISCORD_LINKING.md` |
 
-`_shared/discord.ts` (bot API) and `_shared/entitlement.ts` (the two-way
-membership rule) are imported by `discord-link` and `revenuecat-webhook`.
+`_shared/discord.ts` (bot API) and `_shared/entitlement.ts` (Apple subscription
+→ our Discord role) are imported by `discord-link` and `revenuecat-webhook`.
+`whop-webhook` imports neither.
 **Deno resolves relative imports at deploy time, so a change to either file
 requires redeploying every function that imports it.**
 

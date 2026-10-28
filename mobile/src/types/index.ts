@@ -493,6 +493,8 @@ export interface TrendValue {
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   PickDetail: { pickId: number };
+  /** Scoreboard game sheet. Game markets and line movement. No pick. */
+  ScoreboardGame: { gameId: string };
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
@@ -512,7 +514,8 @@ export type RootStackParamList = {
     fromParlay?: boolean;
     /**
      * Tonight's matchup in full — "vs LAA · S. Gray 5.90 ERA (R)" — and the
-     * letter the board graded it.
+     * letter the board measured. The screen draws that letter as bars. The
+     * letter is not shown.
      *
      * Carried as params rather than refetched here: the Stats board already
      * holds both, and this screen would otherwise pull the whole matchup view
@@ -603,7 +606,8 @@ export type RootStackParamList = {
   // reachable, but nothing navigates here while AUTH_ENABLED is false.
   SignIn: undefined;
   // Paywall. Same posture — unreachable while BILLING_ENABLED is false.
-  Paywall: undefined;
+  // autoCloseIfEntitled is set only on the screen shown right after sign-in.
+  Paywall: { autoCloseIfEntitled?: boolean } | undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
   // Account deletion. Reachable from Settings only while signed in.
@@ -714,7 +718,7 @@ export interface ParlayTrackRow {
  * push router in lib/ — and lib/ importing a type from screens/ inverts the
  * layering. It was spelled out inline in all three.
  */
-export type PicksView = 'today' | 'signals' | 'live' | 'lines';
+export type PicksView = 'today' | 'signals' | 'live' | 'scoreboard';
 
 export type TabParamList = {
   // Merged Picks home (Today | Signals | Live) replaces the old Picks +

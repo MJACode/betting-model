@@ -1060,11 +1060,11 @@
     "key": "byom-nfl-prop-facts",
     "job_type": "byom_prop_facts",
     "requested_by": "owner",
-    "enabled": false,
-    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. Turning it on is the owner's call, and apply has to be set true in the same change or the run writes nothing. Builds byom_prop_facts from player_prop_odds (from 2023-09-01) and nfl_player_game_log. The line is the last DraftKings snapshot at or before kickoff. No alt ladders. A posted line on a player who logged the game is a win, a loss, or a push. A player who did not play, and a row with no line, are not graded and are not in the record. Does not write picks.",
+    "enabled": true,
+    "note": "Matt, 2026-10-28: enabled and apply are both true. sync_declared_jobs enqueues this once. Apply data/migrations/byom_prop_facts_dk_prices_2026_10_28.sql before the job runs. A failed row keeps dedupe_key byom-nfl-prop-facts, so a retry needs that row gone. No season arg: every NFL season from 2023 whose game_date is on or after 2023-09-01. The line is the last DraftKings snapshot at or before kickoff. over_price and under_price are the American prices on that same quote. A side with no American price on that quote is null. No alt ladders. No other book. No constant price. A player who did not play, and a row with no line, are not graded. Does not write picks. The backtest that stakes these prices is data/migrations/byom_backtest_prop_dk_prices_2026_10_28.sql, applied by hand.",
     "args": {
       "sport": "NFL",
-      "apply": false
+      "apply": true
     }
   },
   {

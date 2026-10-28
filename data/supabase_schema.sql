@@ -2314,14 +2314,13 @@ CREATE POLICY "users read own subscription" ON subscriptions
 -- the honest entitlement check for future server-side signal gating.
 
 
--- ── DISCORD LINKING + WHOP MEMBERSHIPS (two-way membership) ──────────────────
--- Applied via migration add_discord_link_and_whop_memberships. Ships the rule
--- that one membership covers both surfaces: pay in the app and you get the
--- Discord subscriber role; pay via Whop (the Discord seller) and the app costs
--- nothing extra; lose access on either side and it goes on both.
--- Each side only ever revokes the role IT granted (DISCORD_APP_ROLE_ID is
--- ours, Whop keeps its own), so a lapsed app subscription cannot strip a
--- member who is still paying Whop.
+-- ── DISCORD LINKING + WHOP MEMBERSHIPS (Apple app, Whop Discord-only) ───────
+-- Defined in add_discord_link_and_whop_memberships.sql, which is NOT applied
+-- in production. First apply is Apple-only: my_access().entitled and
+-- has_app_access() read subscriptions (trialing/active, period open). A Whop
+-- row is discord_access — identity for the same person — and does not unlock
+-- the app. Pay in the app and you get our Discord role. Pay via Whop and Whop
+-- assigns its own role. Each side only revokes the role it granted.
 -- NOT mirrored into the SQLite schema in db_setup.py: references auth.users
 -- and the Python pipeline never reads either table.
 CREATE TABLE IF NOT EXISTS discord_links (
@@ -2363,9 +2362,9 @@ CREATE POLICY "users read own discord link" ON discord_links
 -- other people's emails and is service-role only — the app sees only the
 -- boolean that falls out of my_access().)
 -- Plus public.my_access() and public.has_app_access() (SECURITY DEFINER,
--- pinned to auth.uid(), EXECUTE granted to authenticated only) — the single
--- place the two-way rule is expressed. has_app_access() supersedes
--- has_active_subscription(), which cannot see a Whop-paid member.
+-- pinned to auth.uid(), EXECUTE granted to authenticated only). Both grant
+-- the app from the Apple subscription only. discord_access_for() is the Whop
+-- identity match and is not an input to either gate.
 
 
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────

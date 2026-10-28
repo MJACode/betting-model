@@ -102,6 +102,9 @@ ANON_READABLE: tuple[str, ...] = (
     "v_latest_odds_all_books",
     "v_latest_prop_odds_all_books",
     "v_live_game_state_latest",
+    # Scoreboard: latest NCAAF live state per game. The log itself is
+    # VIEW_BASE_TABLES (ncaaf_live_states) — the app never .from()s it.
+    "v_ncaaf_scoreboard_latest",
     "v_model_full_outcome_picks",
     "v_model_full_outcome_record",
     "v_opening_signal_slices",
@@ -228,6 +231,11 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",
+    # Scoreboard NCAAF live row. security_invoker view
+    # v_ncaaf_scoreboard_latest. Policy is
+    # add_ncaaf_scoreboard_latest_2026_10_28.sql. The app does not
+    # .from() the log.
+    "ncaaf_live_states",
     # security_invoker bases of the NHL Stats views. The logs were created
     # with RLS on and no policy (add_nhl_game_logs.sql). The stats migration
     # adds a SELECT policy; the caller still needs the grant, and nothing in
@@ -572,8 +580,9 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
 RPC_REVOKE: tuple[str, ...] = (
     # the support-side reply path; already anon-revoked, authenticated too
     "feedback_reply",
-    # superseded by has_app_access()/my_access(), which cannot see a Whop-paid
-    # member (data/supabase_schema.sql). Nothing in the repo or the app calls it.
+    # Older app-subscription check. has_app_access()/my_access() are the gate
+    # once their migration is applied, and they are also Apple-only — a Whop
+    # membership does not unlock the app. Nothing in the repo calls this.
     "has_active_subscription",
     # The Teams board's compute-and-swap pair (2026-09-04, migration
     # cache_team_stats_board). team_stats_board_compute is the 31 s season

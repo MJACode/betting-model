@@ -142,14 +142,12 @@ export function normalCdf(z: number): number {
 }
 
 /**
- * Does the grade column span more than one COLOUR on screen?
+ * Does a set of letters span more than one COLOUR on the grade ramp?
  *
- * `gradeColor` collapses A/B into good, C into mid and D/F into bad, so a
- * two-team NFL slate whose defences were both top-decile paints every one of
- * ~110 rows the same red, 60pt from a live price — which reads as a verdict on
- * the bet rather than a ranking of players. The LETTER is right and stays
- * (D- on both sides of tonight's opener is true); it is the ramp that has to
- * go quiet. Same rule, and the same reason, as hitRateColorDiscriminates.
+ * `gradeColor` collapses A/B into good, C into mid and D/F into bad. The
+ * matchup column no longer consults this: it draws bars, and the filled count
+ * is the signal, so the ramp stays on. The hit-rate column still goes quiet
+ * when every row is one band (`hitRateColorDiscriminates`).
  */
 export function gradeColorDiscriminates(grades: (MatchupGrade | null)[]): boolean {
   const bands = grades
@@ -202,11 +200,47 @@ export function gradeFor(score: number | null): MatchupGrade | null {
   return 'F';
 }
 
-/** 'B+' → "B plus" — VoiceOver reads a bare "+" as nothing at all. */
+/** 'B+' → "B plus" — VoiceOver reads a bare "+" as nothing at all.
+ *
+ * Not the matchup column. That column speaks `matchupStrengthSpoken`. This
+ * stays for a letter that is still the stored grade.
+ */
 export function gradeSpoken(grade: MatchupGrade): string {
   if (grade.endsWith('+')) return `${grade[0]} plus`;
   if (grade.endsWith('-')) return `${grade[0]} minus`;
   return grade;
+}
+
+/** How many segments the bar fills. A± is 5, B± is 4, C± is 3, D± is 2, F is 1. */
+export type MatchupStrength = 1 | 2 | 3 | 4 | 5;
+
+const LETTER_STRENGTH: Record<string, MatchupStrength> = {
+  A: 5,
+  B: 4,
+  C: 3,
+  D: 2,
+  F: 1,
+};
+
+/** Null when there is no grade. An unknown spot is a dash, never an empty bar. */
+export function strengthForGrade(grade: MatchupGrade | null | undefined): MatchupStrength | null {
+  if (!grade) return null;
+  return LETTER_STRENGTH[grade[0]] ?? null;
+}
+
+/** "strength 4 of 5". The detail screen puts "Tonight's matchup" in front. */
+export function matchupStrengthPhrase(filled: MatchupStrength): string {
+  return `strength ${filled} of 5`;
+}
+
+/** The meter. "Matchup strength 4 of 5". The count is the fact. */
+export function matchupStrengthSpoken(filled: MatchupStrength): string {
+  return `Matchup ${matchupStrengthPhrase(filled)}`;
+}
+
+/** A floor chip. "strength 4 or more". */
+export function matchupStrengthFloorSpoken(filled: MatchupStrength): string {
+  return `strength ${filled} or more`;
 }
 
 /** "R" → "right-handed". Spoken labels get words, not initials. */

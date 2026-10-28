@@ -1945,6 +1945,17 @@ def step_settle(settle_date: str) -> bool:
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ Eggz results recap failed (settlement "
                      f"unaffected): {exc}")
+
+    # ParlayMatt's channel only. Same windows as Eggz. Unset webhook posts
+    # nothing. His rows stay out of picks, #results, and X.
+    try:
+        from tracking.eggz_picks import post_parlaymatt_recaps
+        n = post_parlaymatt_recaps()
+        if n:
+            logger.info(f"ParlayMatt results recap posted: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ ParlayMatt results recap failed (settlement "
+                     f"unaffected): {exc}")
     return True
 
 

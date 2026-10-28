@@ -2236,9 +2236,10 @@ JOBS = {
     # in jobs/declared_jobs.json, so a merge does not backfill production.
     # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
-    # NFL prop facts. apply defaults false. Listed in declared_jobs.json
-    # with enabled false and apply false, so a merge does not enqueue a
-    # writer.
+    # NFL prop facts. apply defaults false when the arg is omitted.
+    # jobs/declared_jobs.json lists byom-nfl-prop-facts with enabled
+    # true and apply true, and with no season, so sync enqueues one
+    # backfill from 2023-09-01. The price columns have to exist first.
     "byom_prop_facts": (_job_byom_prop_facts, _validate_byom_prop_facts),
     # Current-season refresh. apply defaults false. Listed in
     # declared_jobs.json with enabled false and apply false, so a merge
@@ -2324,8 +2325,8 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
         try:
             # Missing `enabled` stays on. Only the boolean false is off, so
             # a string or a 0 does not silently drop a job that was meant
-            # to run. A declared BYOM entry ships false until the owner sets
-            # it true and sets apply true in the same change.
+            # to run. byom-nfl-refresh ships false. byom-nfl-prop-facts is
+            # enabled with apply true (Matt, 2026-10-28).
             if entry.get("enabled", True) is False:
                 continue
             key = str(entry["key"])

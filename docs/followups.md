@@ -1782,17 +1782,16 @@ Found 2026-09-04 in session 208 while enumerating the function grant surface.
 `fetchAccess()` does `if (error) throw error` — it does not fail soft. But
 `my_access()` is **absent from `pg_proc`**: it and `has_app_access()` are defined
 only in `data/migrations/add_discord_link_and_whop_memberships.sql`, which has
-**never been applied**. `has_active_subscription()` — the function that migration
-supersedes — is the one that actually exists.
+**never been applied**. As of 2026-10-27 that unapplied file is Apple-only:
+`entitled` / `has_app_access()` read `subscriptions` (trialing/active, period
+open). A Whop row is `discord_access` and does not unlock the app. Do not apply
+an older copy of the file that ORs Whop in. Do not flip AUTH/BILLING/DISCORD
+until this file is applied — `fetchAccess()` throws if `my_access()` is missing.
 
-CLAUDE.md §6 states the gate is `public.my_access()` / `has_app_access()`. That
-is the intended design, not the deployed one, and the difference has never been
-written down.
+CLAUDE.md §6 states the gate. That is the intended design, not the deployed one.
 
-**What needs deciding:** whether to apply that migration (it also creates the
-Discord-link and Whop-membership tables), or to change the app. Not touched here
-— it is the entitlement path, and applying a never-run migration that creates
-billing-adjacent tables is not a side effect of a grant change.
+**Still open:** Matt applies the migration. This file is the first apply and
+is already Apple-only. Applying it is not a side effect of another change.
 
 Note it does NOT block the grant work: the migration already carries its own
 `REVOKE ALL ... FROM PUBLIC, anon, authenticated` plus

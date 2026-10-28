@@ -10,13 +10,57 @@ reinstall.
 
 Set 2026-08-30 (Matt) to Weekly / Monthly / Annual, mirroring the layout he
 supplied. The six-month "Season Pass" is retired — nothing was live, so there
-is nothing to migrate.
+is nothing to migrate. Display prices locked 2026-10-27 (Matt).
 
 | Plan | Price | Effective/mo | Saving | Trial |
 |---|---|---|---|---|
 | Weekly | $9.99 | $43.29 | — | none |
-| Monthly | $29.99 | $29.99 | — | 7 days |
-| Annual | $199.99 | $16.67 | 44% | 7 days |
+| Monthly | $24.99 | $24.99 | — | 7 days |
+| Annual | $149.99 | $12.50 ($2.88/wk) | 50% | 7 days |
+
+Annual is the default selection and the only plan with a badge (Best value).
+Monthly has no badge. The paywall subtitle follows the selected plan, so Weekly
+does not say "7-day free trial". Weekly's button is Subscribe; Monthly and
+Annual say Start 7-day free trial. Neither the paywall nor Settings shows a Whop checkout button. Discord unlock is the Apple plan.
+
+When billing is on, a free member keeps Record and the other tabs soft-lock
+behind Unlock with Premium. A trial unlocks the app and not Discord. Discord's
+invite is shown only after the subscriptions row is `active`, not `trialing`.
+The paywall opens right after the first sign-in, and again from Unlock or a
+locked tab. Closing it returns to that free shell.
+
+**Unlock Discord early stays on the plan they are trialing.** StoreKit will
+not end an intro by buying that same product id. A monthly trial purchases
+`com.mja.bettingpicks.premium.monthly.notrial`. An annual trial purchases
+`com.mja.bettingpicks.premium.annual.notrial`. Those ids have no free trial.
+Each must be in the same App Store subscription group as its trial sibling
+(`…premium.monthly` and `…premium.annual`) so the store replaces that
+subscription instead of starting a second one. In that group, rank each
+`.notrial` product at the same level as its trial sibling, or higher.
+App Store Connect level 1 is the highest rank. A higher rank is an upgrade:
+Apple refunds any prorated amount of the current subscription and the new
+one starts immediately. The same level is a crossgrade. These siblings use
+the same duration (1 month with 1 month, 1 year with 1 year), and a
+same-duration crossgrade also starts immediately. A lower rank is a
+downgrade: Apple waits until the next renewal date, so the trial would keep
+running. A same-level switch to a different duration also waits until the
+next renewal. Weekly is not the convert
+product. If the purchase would switch tiers or buy the intro id again, the
+app shows an error and does not open the store sheet. App Store Connect and
+RevenueCat must list the two `.notrial` ids. Attach the intro product as the
+MONTHLY or ANNUAL package, and the no-trial sibling as its own package with
+that exact product id. This repo does not create those products. StoreKit
+sandbox verification is a device check and cannot be run here. Join Discord
+appears only after a refresh shows status `active`.
+
+On the Stripe rail, Unlock Discord early sets `trial_end=now` on the
+subscription the user already has. It does not open a second Checkout. A
+webhook for a different live subscription id cancels that subscription only
+after Stripe still reports the stored id as `trialing` or `active`. The
+cancel sends `prorate=true` and `invoice_now=true`, so unused time is
+credited on a final invoice. A stored id that Stripe has already canceled,
+or that Stripe no longer has, is a stale row: the incoming subscription is
+kept and the new one is not cancelled.
 
 **Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
 free week that renews into another free week for anyone willing to cancel and
@@ -93,10 +137,13 @@ flight; the table remains the durable truth.
 `isEntitled()` checks status **and** period end — an `active` row whose period
 lapsed (missed webhook) does not entitle.
 
-**The subscription is no longer the whole story.** Since 2026-08-30 a Discord
-(Whop) membership entitles too, and the webhook now also syncs the member's
-Discord role. Decide access with `useEntitlement()`, never
-`useSubscription().entitled` — see `docs/DISCORD_LINKING.md`.
+**The Apple subscription is the app.** `useEntitlement()` reads
+`my_access().entitled` (trialing/active, period open) and the receipt just
+purchased. A Whop membership does not unlock the app. The RevenueCat webhook
+also grants our Discord role from that same subscription. See
+`docs/DISCORD_LINKING.md`. Do not flip `BILLING_ENABLED` until
+`add_discord_link_and_whop_memberships.sql` is applied in that environment —
+`fetchAccess()` throws if `my_access()` is missing.
 
 ---
 
@@ -104,17 +151,25 @@ Discord role. Decide access with `useEntitlement()`, never
 
 ### 1. App Store Connect (and later, Play Console)
 
-Create three auto-renewable subscriptions in one subscription group:
+Create these auto-renewable subscriptions. The trial product and its
+no-trial sibling belong in the **same subscription group**.
 
 | Reference | Product ID (suggested) | Price | Duration |
 |---|---|---|---|
-| Weekly | `com.mja.bettingpicks.sub.weekly` | $9.99 | 1 week |
-| Monthly | `com.mja.bettingpicks.sub.monthly` | $29.99 | 1 month |
-| Annual | `com.mja.bettingpicks.sub.annual` | $199.99 | 1 year |
+| Weekly | `com.mja.bettingpicks.premium.weekly` | $9.99 | 1 week |
+| Monthly | `com.mja.bettingpicks.premium.monthly` | $24.99 | 1 month |
+| Monthly, no trial | `com.mja.bettingpicks.premium.monthly.notrial` | $24.99 | 1 month |
+| Annual | `com.mja.bettingpicks.premium.annual` | $149.99 | 1 year |
+| Annual, no trial | `com.mja.bettingpicks.premium.annual.notrial` | $149.99 | 1 year |
 
 Add a **7-day free trial** as an introductory offer on **monthly and annual
-only** — not weekly (see the ladder note above). Prices must match
-`billingConfig.ts` (the paywall's fallback display) exactly.
+only** — not weekly, and not the `.notrial` siblings (see the ladder note
+above). Put each `.notrial` product on the same subscription-group level as
+its trial sibling, or on a higher level (a smaller level number). Level 1
+is the highest. A lower level waits until renewal. Prices must match `billingConfig.ts` (the paywall's fallback display)
+exactly. The product ids are suggestions for that future setup. This change
+does not create them in App Store Connect or RevenueCat, and it does not flip
+`EXPO_PUBLIC_BILLING_ENABLED`.
 
 ### 2. RevenueCat dashboard
 
@@ -122,9 +177,13 @@ only** — not weekly (see the ladder note above). Prices must match
    the App Store Connect API key.
 2. Create an **entitlement** named exactly **`signals`**
    (`REVENUECAT_ENTITLEMENT_ID` in `iapHelpers.ts`).
-3. Attach all three products to it.
+3. Attach all five products to it. The `.notrial` siblings share the
+   `signals` entitlement with the intro products.
 4. Create an **offering** (default) with packages **Weekly / Monthly /
-   Annual** — the standard package types are what `planForPackageType` maps.
+   Annual** for the intro products — the standard package types are what
+   `planForPackageType` maps. Attach each `.notrial` id as its own package
+   (custom is fine). Unlock Discord early looks that package up by exact
+   product id. The paywall never selects a `.notrial` id.
 5. Copy the **public** SDK key(s) into the build env:
    `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (and `_ANDROID_KEY` when Play ships).
 
@@ -140,9 +199,9 @@ Authorization:  <a long random string>
 ```bash
 supabase secrets set REVENUECAT_WEBHOOK_AUTH=<same string>
 # optional exact product→plan pins (the substring heuristic is the fallback):
-supabase secrets set RC_PRODUCT_WEEKLY=com.mja.bettingpicks.sub.weekly \
-  RC_PRODUCT_MONTHLY=com.mja.bettingpicks.sub.monthly \
-  RC_PRODUCT_ANNUAL=com.mja.bettingpicks.sub.annual
+supabase secrets set RC_PRODUCT_WEEKLY=com.mja.bettingpicks.premium.weekly \
+  RC_PRODUCT_MONTHLY=com.mja.bettingpicks.premium.monthly \
+  RC_PRODUCT_ANNUAL=com.mja.bettingpicks.premium.annual
 
 supabase functions deploy revenuecat-webhook --no-verify-jwt
 ```
@@ -227,8 +286,8 @@ JWT; webhook signature verified over the raw body.
 **1. The paywall is client-side.** `picks` is anon-readable and deliberately so
 — the website and the Claude-mobile workflow (CLAUDE.md §16) both query it with
 the anon key. The gate stops ordinary users, not someone reading the table
-directly. `has_app_access()` exists for real enforcement (it supersedes
-`has_active_subscription()`, which cannot see a Whop-paid member); wiring it up
+directly. `has_app_access()` is the server-side check, and it is the Apple
+subscription only — the same predicate as `my_access().entitled`. Wiring it up
 means first moving the website + Claude-mobile onto a service-role key, then
 revoking anon SELECT on `picks`, then serving signals through a gated RPC. Do
 it in that order or the daily workflow breaks.
@@ -252,11 +311,11 @@ not returns — keep it that way.
 | Rail dispatcher (checkout / manage / restore) | `src/lib/billing.ts` |
 | Entitlement state | `src/hooks/useSubscription.ts` |
 | Paywall (localized prices, restore, redeem) | `src/screens/PaywallScreen.tsx` |
-| **The access gate** (subscription OR Discord) | `src/hooks/useEntitlement.ts` |
+| **The access gate** (Apple subscription only) | `src/hooks/useEntitlement.ts` |
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (83 assertions) | `scripts/verify_billing.ts` |
+| Verification (147 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,

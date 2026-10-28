@@ -1,8 +1,10 @@
 """Grade one NFL player prop into a byom_prop_facts row.
 
 No database. The line is the last DraftKings snapshot at or before
-game start. A missing line is not a prop. There is no price and no
-unit. Standard markets only. A key ending in `_alternate` is an alt
+game start. A missing line is not a prop. The prices are the American
+prices on that same quote. A side that quote does not price is null.
+An earlier quote is not the price. There is no unit on the row.
+Standard markets only. A key ending in `_alternate` is an alt
 ladder and is not a fact.
 
 Thin data, recorded on the row as log_status. Only `logged` is graded.
@@ -43,7 +45,7 @@ from decimal import Decimal
 from data.name_match import normalize_player_name
 
 from byom.constants import LINE_BASIS, SPORT
-from byom.game_facts import lead_hours, parse_game_id, parse_ts
+from byom.game_facts import american_odds, lead_hours, parse_game_id, parse_ts
 
 # Odds API market -> nfl_player_game_log columns summed into actual.
 # Alternates are absent on purpose.
@@ -279,6 +281,9 @@ def facts_for_game(game: dict, quotes: list[dict],
     Two points on that snapshot are one fact: the later captured_at, then
     the higher prop_id, then the line text. A quote with no line is
     dropped before that rank. An earlier number is not a second fact.
+    over_price and under_price are the American prices on the quote that
+    won that rank. A side missing on that quote is null. The quote that
+    lost the rank is not read for a price.
     """
     parsed = parse_game_id(game.get("game_id") or "")
     if parsed is None:
@@ -337,6 +342,8 @@ def _one(canonical, season, week, key, market, line, quote,
         "team": quote.get("team"),
         "market": market,
         "line": line,
+        "over_price": american_odds(quote.get("over_price")),
+        "under_price": american_odds(quote.get("under_price")),
         "line_basis": LINE_BASIS,
         "actual": actual,
         "over_result": over_result,

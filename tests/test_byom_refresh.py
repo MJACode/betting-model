@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,10 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         price = (ROOT / "data/migrations" / "byom_dk_start_price_2026_10_23.sql").read_text(
             encoding="utf-8")
         cur.execute(price)
+        prop_prices = (
+            ROOT / "data/migrations" / "byom_prop_facts_dk_prices_2026_10_28.sql"
+        ).read_text(encoding="utf-8")
+        cur.execute(prop_prices)
         _load(cur)
         raw.autocommit = False
 
@@ -208,8 +213,11 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         }
         assert rows["2026_02_NYJ_SF"].startswith("2026-10-01") is False
         assert rows["2026_06_BUF_MIA"].startswith("2026-10-14") is False
-        cur.execute("SELECT canonical_key FROM byom_prop_facts")
-        assert [row[0] for row in cur.fetchall()] == ["2026_05_BAL_KC"]
+        cur.execute("SELECT canonical_key, over_price, under_price FROM byom_prop_facts")
+        prop_row = cur.fetchone()
+        assert prop_row[0] == "2026_05_BAL_KC"
+        assert Decimal(str(prop_row[1])) == Decimal("-110")
+        assert Decimal(str(prop_row[2])) == Decimal("-110")
         cur.execute("""
             SELECT props_scanned_at IS NOT NULL
               FROM byom_game_facts

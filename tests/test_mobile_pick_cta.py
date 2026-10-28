@@ -530,7 +530,10 @@ def test_pick_card_wiring():
     card = _read(SRC / "components" / "PickCard.tsx")
     assert "const cta = pickCtaFor(pick, game, liveState);" in card
     assert "priceCheckForItem(item, liveState)" in card
-    assert re.search(r"offersBook && cta\.handoff\s*\?\s*bestHandoffForPick", card)
+    assert re.search(
+        r"offersBook && cta\.handoff && \(myBooksReady \|\| pick\.is_live === true\)\s*\?\s*bestHandoffForPick",
+        card,
+    )
     assert re.search(r"const canSlip =[^;]*&& cta\.slip;", card)
     assert re.search(r"const canTrack = [^;]*&& open && cta\.track;", card)
     # The started line is not gated on paused: no NEW paused gating (#847).
@@ -611,16 +614,20 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "signalsReasonLine(" in card and "signalsModelCaption(" in card
     assert "signalsCardSpeech(" in card
     assert "Model chance" in card and "Expected return" in card
-    navy = re.search(r"handoffNavy: \{([^}]*)\}", card)
-    assert navy and "backgroundColor: colors.tint" in navy.group(1)
-    assert "DK_GREEN" not in navy.group(1) and "colors.info" not in navy.group(1)
-    assert re.search(r"handoffNavyText: \{[^}]*color: colors\.textInverse", card)
+    assert "handoffNavy" not in card
+    control = re.search(r"bookControl: \{([^}]*)\}", card)
+    assert control and "backgroundColor: colors.bg" in control.group(1)
+    assert "borderWidth: StyleSheet.hairlineWidth" in control.group(1)
+    assert "minHeight: 44" in control.group(1)
+    assert "colors.tint" not in control.group(1) and "DK_GREEN" not in control.group(1)
+    assert re.search(r"bookControlText: \{[^}]*color: colors\.textPrimary", card)
+    assert "chevron-down" in card and "<PickBooksSheet" in card
+    assert "pickSportsbookRows(" in card
     assert "signalsStakeLine(signalsRiskUnits, signalsWinUnits)" in card
     assert "formatUnits(stake.risk)" in card and "formatUnits(stake.win)" in card
     assert "signalsContextTime(" in card and "signalsHeroSpeech(" in card
     assert "signalsNowLine(" in card and "now: signalsNowSpoken" in card
-    cta_block = re.search(r"const ctaAtMovedLine = Boolean\((.*?)\);", card, re.S)
-    assert cta_block and "kind === 'now'" not in cta_block.group(1)
+    assert "ctaAtMovedLine" not in card and "buttonDiffers" not in card
     markets = _read(LIB / "markets.ts")
     assert "if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book)" in markets
     assert "else if (hero.kind !== 'now')" not in markets
@@ -631,8 +638,7 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "flexBasis: '30%'" in card and "maxWidth: '32%'" in card
     assert "flexBasis: '46%'" not in card
     assert "flexBasis: '100%'" not in card
-    assert "bestNow: buttonDiffers" in card and "signalsPickedAtLine" not in card
-    assert "bestNow: boardHandoff.verb === 'Best'" in card
+    assert "bestNow" not in card and "Best now" not in card and "signalsPickedAtLine" not in card
     assert "const boardHandoff = todayBoardHandoff(handoff, heroPrice)" in card
     assert "openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)" in card
     assert "export function todayBoardHandoff" in markets
@@ -640,8 +646,6 @@ def test_signals_card_quotes_the_bet_and_names_the_best_book():
     assert "export const SIGNALS_STAKE_FORM: SignalsStakeForm = 'bet-win'" in stake
     assert "SIGNALS_STAKE_FORM === 'single'" not in stake
     assert "SIGNALS_STAKE_FORM === 'risk-win'" in stake
-    differs = re.search(r"const buttonDiffers = Boolean\((.*?)\);", card, re.S)
-    assert differs and "ctaAtMovedLine" in differs.group(1)
     assert "buttonNowSpoken" not in card
     assert "signalsMuted" in card and "tintSoft:" in _read(SRC / "lib" / "theme.ts")
     assert "colors.tintSoft" in _read(SRC / "components" / "TrackButton.tsx")
@@ -771,14 +775,16 @@ ok(!signalsCardSpeech({
 }).includes('models agree'), 'agreement count is not on the card');
 ok(signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`, 'price book');
 ok(signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`, 'cta');
-ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`, 'cta names a moved line');
+ok(signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}105`, 'cta does not repeat the line');
+ok(!signalsCtaLabel('DK', '-105', '-8.5').includes('8.5'), 'line stays off the control');
 ok(signalsCtaLabel('DK', null) === 'Open DK', 'no invented price');
-ok(signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`, 'best now');
-ok(signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105`, 'best now names the line');
-ok(signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105`, 'spoken best now');
-ok(signalsCtaSpeech('DraftKings', '-105', '-8.5', { bestNow: true }) === `Best now, DraftKings, ${MINUS}8.5, ${MINUS}105`, 'spoken best now names the line');
+ok(signalsCtaLabel('FD', '-105', null, { best: true }) === `Best FD ${MINUS}105`, 'best');
+ok(signalsCtaLabel('DK', '-105', '-8.5', { best: true }) === `Best DK ${MINUS}105`, 'best does not name the line');
+ok(!signalsCtaLabel('FD', '-105', null, { best: true }).includes('now'), 'no now');
+ok(signalsCtaSpeech('FanDuel', '-105', null, { best: true }) === `Best, FanDuel, ${MINUS}105`, 'spoken best');
+ok(signalsCtaSpeech('DraftKings', '-105', '-8.5', { best: true }) === `Best, DraftKings, ${MINUS}105`, 'spoken best drops the line');
 ok(signalsCtaSpeech('DraftKings', null) === 'Open DraftKings', 'spoken open');
-ok(!signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'), 'spoken label has no middle dot');
+ok(!signalsCtaSpeech('FanDuel', '-105', null, { best: true }).includes('·'), 'spoken label has no middle dot');
 const moved = signalsNowLine({ line: '-8.5', price: '-110', priceDiffers: false, book: 'DK' });
 const priced = signalsNowLine({ line: null, price: '-105', priceDiffers: true, book: 'DK' });
 ok(moved === `DK line now ${MINUS}8.5 (${MINUS}110)`, 'moved line');

@@ -25,6 +25,10 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 export interface ActivePill {
   key: string;
   label: string;
+  /** Spoken name when `label` is a suffix beside a mark. Defaults to `label`. */
+  spoken?: string;
+  /** A mark in front of the label. The remove button speaks `spoken`. */
+  leading?: React.ReactNode;
   onRemove: () => void;
 }
 
@@ -132,11 +136,12 @@ export function FilterBar({
                 key={p.key}
                 onPress={p.onRemove}
                 accessibilityRole="button"
-                accessibilityLabel={`Remove filter ${p.label}`}
+                accessibilityLabel={`Remove filter ${p.spoken ?? p.label}`}
                 style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
                 hitSlop={8}
               >
-                <Text style={styles.pillText}>{p.label}</Text>
+                {p.leading}
+                {p.label ? <Text style={styles.pillText}>{p.label}</Text> : null}
                 <Ionicons name="close" size={12} color={colors.tint} />
               </Pressable>
             ))}

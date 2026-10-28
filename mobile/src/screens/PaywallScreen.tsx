@@ -11,16 +11,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { BILLING_RAIL, PLANS, type PlanKey } from '@/lib/billingConfig';
+import { BILLING_RAIL, DEFAULT_PLAN_KEY, PLANS, type PlanKey } from '@/lib/billingConfig';
 import {
-  formatPerMonth,
-  monthlyPlan,
+  paywallCta,
+  paywallSubtitle,
+  planPriceCaption,
+  planTrialLine,
   renewalDisclosure,
-  savingsPct,
-  trialCopy,
 } from '@/lib/billingHelpers';
 import { displayPrice } from '@/lib/iapHelpers';
 import { fetchLocalizedPrices } from '@/lib/iap';
@@ -30,56 +31,52 @@ import {
   restorePurchases,
   startCheckout,
 } from '@/lib/billing';
-import { WHOP_CHECKOUT_URL, discordLinkReady } from '@/lib/discordConfig';
 import { accessSourceCopy } from '@/lib/discord';
 import { EULA_URL, PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
 import { useAuth } from '@/hooks/useAuth';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { useMembership } from '@/hooks/useMembership';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+type PaywallRoute = RouteProp<RootStackParamList, 'Paywall'>;
 
-/** What a subscription actually buys. Kept honest — no ROI promises. */
+/** What a subscription buys. The Discord line depends on the selected plan. */
 const INCLUDED = [
   'Every BET signal, all 7 sports',
   'A recommended stake, in units, on every pick',
   'Live in-play signals as games move',
   'Player props, parlays and same-game builder',
-  'The subscriber Discord, included',
 ];
 
+const PLAN_ORDER: Record<PlanKey, number> = { annual: 0, monthly: 1, weekly: 2 };
+
 /**
- * The paywall.
+ * The paywall. Annual is selected by default and is the only plan with a
+ * badge. Weekly's header and button do not offer a trial.
  *
- * Layout mirrors the reference Matt supplied: three plans side by side with the
- * saving called out above the best-value card, one primary CTA, and a footer
- * row of Restore / Redeem / legal links.
- *
- * The second CTA is the DISCORD rail, not a duplicate of the first. One
- * membership covers both surfaces, so someone who would rather buy where the
- * community is can do that and the app comes with it — and someone who already
- * did never sees this screen, because `useEntitlement()` reads the Whop
- * membership as access. The row hides itself when no Whop checkout URL is
- * configured, rather than linking somewhere broken.
+ * No Whop checkout on this screen — the board is the App Store ladder only.
+ * The Whop rail stays in the backend.
  */
 export function PaywallScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<PaywallRoute>();
   const { signedIn, user } = useAuth();
-  const { access, refresh } = useEntitlement();
+  const { access, entitled, loading, refresh } = useEntitlement();
+  const { subscription } = useMembership();
 
-  const [selected, setSelected] = useState<PlanKey>('monthly');
+  const [selected, setSelected] = useState<PlanKey>(DEFAULT_PLAN_KEY);
   const [busy, setBusy] = useState(false);
-  const monthly = useMemo(() => monthlyPlan(), []);
+  const plans = useMemo(
+    () => [...PLANS].sort((a, b) => PLAN_ORDER[a.key] - PLAN_ORDER[b.key]),
+    [],
+  );
   const plan = useMemo(
-    () => PLANS.find((p) => p.key === selected) ?? monthly,
-    [selected, monthly],
+    () => plans.find((p) => p.key === selected) ?? plans[0],
+    [plans, selected],
   );
 
-  // On the IAP rail, prefer the store's localized prices — they're what the
-  // user is actually charged. Config prices are the fallback (and must match
-  // App Store Connect, or the fallback lies). Best-effort: a fetch failure
-  // just leaves the config numbers.
   const [storePrices, setStorePrices] = useState<Partial<Record<PlanKey, string>>>({});
   useEffect(() => {
     if (BILLING_RAIL !== 'iap' || !user?.id) return;
@@ -94,10 +91,20 @@ export function PaywallScreen() {
     };
   }, [user?.id]);
 
+  const dismiss = useCallback(() => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+  }, [navigation]);
+
+  // Only the screen shown right after sign-in closes itself for someone who
+  // is already subscribed. Opening the paywall from a lock must stay open.
+  useEffect(() => {
+    if (!route.params?.autoCloseIfEntitled || loading || !entitled) return;
+    dismiss();
+  }, [route.params?.autoCloseIfEntitled, loading, entitled, dismiss]);
+
   const requireSignIn = useCallback((): boolean => {
     if (signedIn && user?.id) return false;
-    // A subscription belongs to an account — without one there's nothing to
-    // attach it to, and the user could never restore it on another device.
     navigation.navigate('SignIn');
     return true;
   }, [signedIn, user?.id, navigation]);
@@ -107,21 +114,17 @@ export function PaywallScreen() {
     setBusy(true);
     try {
       const result = await startCheckout(selected, user.id);
-      // The durable truth lands via webhook — refresh now and once more a few
-      // seconds later so a just-paid user isn't staring at a lock while the
-      // webhook is in flight. On IAP, entitledNow is receipt-validated, so we
-      // can also close the paywall immediately.
       await refresh();
       setTimeout(() => {
         void refresh();
       }, 4000);
-      if (result.entitledNow && navigation.canGoBack()) navigation.goBack();
+      if (result.entitledNow) dismiss();
     } catch (e) {
       Alert.alert('Could not start checkout', billingErrorMessage(e));
     } finally {
       setBusy(false);
     }
-  }, [requireSignIn, user?.id, selected, navigation, refresh]);
+  }, [requireSignIn, user?.id, selected, dismiss, refresh]);
 
   const onRestore = useCallback(async () => {
     if (requireSignIn() || !user?.id) return;
@@ -135,13 +138,13 @@ export function PaywallScreen() {
           ? 'Your subscription is active on this device.'
           : 'No active subscription was found for this App Store account.',
       );
-      if (restored && navigation.canGoBack()) navigation.goBack();
+      if (restored) dismiss();
     } catch (e) {
       Alert.alert('Could not restore', billingErrorMessage(e));
     } finally {
       setBusy(false);
     }
-  }, [requireSignIn, user?.id, navigation, refresh]);
+  }, [requireSignIn, user?.id, dismiss, refresh]);
 
   const onRedeem = useCallback(async () => {
     if (requireSignIn() || !user?.id) return;
@@ -155,8 +158,6 @@ export function PaywallScreen() {
         );
         return;
       }
-      // StoreKit reports nothing back — the entitlement arrives by webhook, so
-      // re-read rather than believing anything about what the sheet did.
       await refresh();
       setTimeout(() => {
         void refresh();
@@ -168,293 +169,265 @@ export function PaywallScreen() {
     }
   }, [requireSignIn, user?.id, refresh]);
 
-  const sourceCopy = accessSourceCopy(access);
-  const showDiscordRail = discordLinkReady() && WHOP_CHECKOUT_URL !== '';
+  // A trial is entitled, so source "app" would say Discord is already included.
+  // The checklist above says it comes after the trial. Hide the sentence then.
+  const sourceCopy = subscription?.status === 'trialing' ? '' : accessSourceCopy(access);
+  const cta = paywallCta(plan);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Unlock every signal</Text>
-        <Text style={styles.subtitle}>{trialCopy()}</Text>
-
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <View style={styles.frame}>
         <View style={styles.card}>
-          {INCLUDED.map((line) => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close paywall"
+            onPress={dismiss}
+            disabled={busy}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.close}
+          >
+            <Ionicons name="close" size={22} color={colors.textInverse} />
+          </Pressable>
+          <ScrollView
+            style={styles.scroller}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+          <Text style={styles.title}>Unlock every signal</Text>
+          <Text style={styles.subtitle}>{paywallSubtitle(plan)}</Text>
+
+          {[
+            ...INCLUDED,
+            plan.trialDays > 0
+              ? 'The subscriber Discord (paid plans, after the trial)'
+              : 'The subscriber Discord, included with this plan',
+          ].map((line) => (
             <View key={line} style={styles.includedRow}>
-              <Ionicons name="checkmark-circle" size={18} color={colors.tint} />
+              <Ionicons name="checkmark-circle" size={16} color={colors.tint} />
               <Text style={styles.includedText}>{line}</Text>
             </View>
           ))}
-        </View>
 
-        {sourceCopy ? <Text style={styles.sourceNote}>{sourceCopy}</Text> : null}
+          {sourceCopy ? <Text style={styles.sourceNote}>{sourceCopy}</Text> : null}
 
-        {/* Three plans in a row, the way the reference lays them out. Each card
-            carries its own price, per-month equivalent and selection dot. */}
-        <View style={styles.planRow}>
-          {PLANS.map((p) => {
+          {plans.map((p) => {
             const active = p.key === selected;
-            const save = savingsPct(p, monthly);
             return (
               <Pressable
                 key={p.key}
                 onPress={() => setSelected(p.key)}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={`${p.name}, ${displayPrice(p, storePrices[p.key])}`}
-                style={({ pressed }) => [
-                  styles.planCard,
-                  active && styles.planCardActive,
-                  pressed && styles.pressed,
-                ]}
+                accessibilityLabel={`${p.name}, ${planTrialLine(p)}, ${displayPrice(p, storePrices[p.key])}, ${planPriceCaption(p)}`}
+                style={[styles.plan, active && styles.planActive]}
               >
-                {/* Badge only when the saving is real. savingsPct is negative
-                    for the weekly plan (it costs more per month), and a
-                    fabricated badge there would be a lie on a paid screen. */}
-                {save > 0 ? (
-                  <View style={styles.saveBadge}>
-                    <Text style={styles.saveBadgeText}>Save {save}%</Text>
-                  </View>
-                ) : (
-                  <View style={styles.saveBadgeSpacer} />
-                )}
-
-                <Text style={styles.planName}>{p.name}</Text>
-                <Text style={styles.planPrice}>
-                  {displayPrice(p, storePrices[p.key])}
-                </Text>
-                <Text style={styles.planPerMonth}>
-                  {p.key === 'monthly' ? 'per month' : formatPerMonth(p)}
-                </Text>
-
-                <View style={styles.planFooter}>
+                <View style={styles.planTop}>
                   <Ionicons
-                    name={active ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={20}
-                    color={active ? colors.tint : colors.textTertiary}
+                    name={active ? 'radio-button-on' : 'radio-button-off'}
+                    size={22}
+                    color={active ? colors.brand : colors.brandMuted}
                   />
+                  <View style={styles.planNameCol}>
+                    {p.badge ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{p.badge}</Text>
+                      </View>
+                    ) : null}
+                    <Text style={styles.planName}>{p.name}</Text>
+                    <Text style={styles.planTrial}>{planTrialLine(p)}</Text>
+                  </View>
+                  <View style={styles.planPriceCol}>
+                    <Text style={styles.planPrice}>{displayPrice(p, storePrices[p.key])}</Text>
+                    <Text style={styles.planCaption}>{planPriceCaption(p)}</Text>
+                  </View>
                 </View>
               </Pressable>
             );
           })}
-        </View>
 
-        <Pressable
-          accessibilityLabel={
-            !signedIn
-              ? 'Sign in to continue'
-              : plan.trialDays > 0
-                ? `Start ${plan.trialDays}-day free trial`
-                : 'Continue'
-          }
-          accessibilityState={{ busy, disabled: busy }}
-          onPress={onSubscribe}
-          disabled={busy}
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.cta,
-            pressed && styles.pressed,
-            busy && styles.disabled,
-          ]}
-        >
-          {busy ? (
-            <ActivityIndicator color={colors.textInverse} />
-          ) : (
-            <Text style={styles.ctaText}>
-              {!signedIn
-                ? 'Sign in to continue'
-                : plan.trialDays > 0
-                  ? `Start ${plan.trialDays}-day free trial`
-                  : 'Continue'}
-            </Text>
-          )}
-        </Pressable>
-
-        {/* The other rail. One membership covers both surfaces, so buying on
-            Discord unlocks the app too — see docs/DISCORD_LINKING.md. */}
-        {showDiscordRail ? (
           <Pressable
-            accessibilityLabel="Get access on Discord"
-            onPress={() => openLink(WHOP_CHECKOUT_URL, 'Discord membership')}
+            accessibilityLabel={cta}
+            accessibilityState={{ busy, disabled: busy }}
+            onPress={onSubscribe}
             disabled={busy}
             accessibilityRole="button"
-            style={({ pressed }) => [styles.secondaryCta, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.cta, pressed && styles.pressed, busy && styles.disabled]}
           >
-            <Ionicons name="logo-discord" size={18} color={colors.textPrimary} />
-            <Text style={styles.secondaryCtaText}>Get access on Discord</Text>
+            {busy ? (
+              <ActivityIndicator color={colors.brandInk} />
+            ) : (
+              <Text style={styles.ctaText}>{cta}</Text>
+            )}
           </Pressable>
-        ) : null}
 
-        <View style={styles.linkRow}>
-          {BILLING_RAIL === 'iap' ? (
-            <>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Restore purchases"
-                onPress={onRestore}
-                disabled={busy}
-                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              >
-                <Text style={styles.linkText}>Restore Purchases</Text>
-              </Pressable>
-              {Platform.OS === 'ios' ? (
+          <Text style={styles.legal}>
+            {BILLING_RAIL === 'iap'
+              ? renewalDisclosure(plan)
+              : `${renewalDisclosure(plan)} Payment is handled by Stripe; we never see your card details.`}
+          </Text>
+
+          <View style={styles.linkRow}>
+            {BILLING_RAIL === 'iap' ? (
+              <>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Redeem code"
-                  onPress={onRedeem}
+                  accessibilityLabel="Restore purchases"
+                  onPress={onRestore}
                   disabled={busy}
                   hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
                 >
-                  <Text style={styles.linkText}>Redeem Code</Text>
+                  <Text style={styles.linkText}>Restore purchases</Text>
                 </Pressable>
-              ) : null}
-            </>
-          ) : null}
+                {Platform.OS === 'ios' ? (
+                  <>
+                    <Text style={styles.linkSep}>·</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Redeem code"
+                      onPress={onRedeem}
+                      disabled={busy}
+                      hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.linkText}>Redeem code</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+                <Text style={styles.linkSep}>·</Text>
+              </>
+            ) : null}
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Terms"
+              onPress={() => openLink(TERMS_URL, 'Terms')}
+              hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+            >
+              <Text style={styles.linkText}>Terms</Text>
+            </Pressable>
+            <Text style={styles.linkSep}>·</Text>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Privacy policy"
+              onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')}
+              hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+            >
+              <Text style={styles.linkText}>Privacy</Text>
+            </Pressable>
+            <Text style={styles.linkSep}>·</Text>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="EULA"
+              onPress={() => openLink(EULA_URL, 'EULA')}
+              hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+            >
+              <Text style={styles.linkText}>EULA</Text>
+            </Pressable>
+          </View>
+          </ScrollView>
         </View>
-
-        <View style={styles.legalRow}>
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="Terms"
-            onPress={() => openLink(TERMS_URL, 'Terms')}
-            hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
-          >
-            <Text style={styles.legalLink}>Terms</Text>
-          </Pressable>
-          <Text style={styles.legalSep}>·</Text>
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="Privacy policy"
-            onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')}
-            hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
-          >
-            <Text style={styles.legalLink}>Privacy</Text>
-          </Pressable>
-          <Text style={styles.legalSep}>·</Text>
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="EULA"
-            onPress={() => openLink(EULA_URL, 'EULA')}
-            hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
-          >
-            <Text style={styles.legalLink}>EULA</Text>
-          </Pressable>
-        </View>
-
-        <Pressable
-          hitSlop={{ top: 0, bottom: 0, left: 16, right: 16 }}
-          accessibilityRole="button"
-          accessibilityLabel="Not now"
-          onPress={() => navigation.goBack()}
-          disabled={busy}
-        >
-          <Text style={styles.skip}>Not now</Text>
-        </Pressable>
-
-        {/* Required disclosure — renewal terms and how to cancel, worded for
-            the SELECTED plan. The weekly plan has no trial, and claiming one
-            it doesn't have is both untrue and a 3.1.2 rejection. */}
-        <Text style={styles.legal}>
-          {BILLING_RAIL === 'iap'
-            ? `${renewalDisclosure(plan)} Billed through your App Store account; manage or cancel any time in your device's subscription settings or from Settings → Subscription.`
-            : `${renewalDisclosure(plan)} Payment is handled by Stripe; we never see your card details.`}
-        </Text>
-        <Text style={styles.legal}>
-          Signalbase publishes model signals for information only. It is not
-          betting advice, and past performance does not predict future results.
-        </Text>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgGrouped },
-  content: { padding: spacing.lg, gap: spacing.md },
-  title: {
-    fontFamily: font.family,
-    fontSize: font.size.title1,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-    marginTop: spacing.md,
-  },
-  subtitle: {
-    fontFamily: font.family,
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-  },
+  frame: { flex: 1, padding: spacing.lg },
   card: {
-    backgroundColor: colors.bgCard,
+    flex: 1,
+    backgroundColor: colors.brandNavy,
     borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.sm,
   },
-  includedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  scroller: { flex: 1 },
+  scrollContent: { gap: spacing.sm, paddingBottom: spacing.md },
+  close: {
+    alignSelf: 'flex-end',
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    fontFamily: font.family,
+    fontSize: font.size.title1,
+    fontWeight: font.weight.bold,
+    color: colors.textInverse,
+  },
+  subtitle: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    color: colors.brandMuted,
+    marginBottom: spacing.sm,
+  },
+  includedRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   includedText: {
     flex: 1,
     fontFamily: font.family,
-    fontSize: font.size.body,
-    color: colors.textPrimary,
+    fontSize: font.size.footnote,
+    color: colors.textInverse,
+    lineHeight: 18,
   },
   sourceNote: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.betInk,
+    color: colors.brand,
+    marginTop: spacing.xs,
   },
-  planRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  planCard: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
+  plan: {
+    borderRadius: radii.md,
     borderWidth: 2,
-    borderColor: 'transparent',
-    gap: 2,
+    borderColor: colors.brandNavyRaised,
+    backgroundColor: colors.brandNavyRaised,
+    padding: spacing.md,
+    marginTop: spacing.xs,
   },
-  planCardActive: { borderColor: colors.tint },
-  saveBadge: {
-    backgroundColor: colors.betSoft,
-    borderRadius: radii.pill,
+  planActive: { borderColor: colors.brand },
+  planTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  planNameCol: { flex: 1 },
+  planPriceCol: { alignItems: 'flex-end' },
+  badge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.brand,
+    borderRadius: radii.xs,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
+    marginBottom: 2,
   },
-  saveBadgeText: {
+  badgeText: {
     fontFamily: font.family,
     fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.betInk,
+    fontWeight: font.weight.bold,
+    color: colors.brandInk,
+    textTransform: 'uppercase',
   },
-  // Keeps the three cards the same height when only one carries a badge.
-  saveBadgeSpacer: { height: 18 },
   planName: {
     fontFamily: font.family,
-    fontSize: font.size.footnote,
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
+    color: colors.textInverse,
+  },
+  planTrial: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    color: colors.brandMuted,
   },
   planPrice: {
     fontFamily: font.family,
-    fontSize: font.size.headline,
+    fontSize: font.size.body,
     fontWeight: font.weight.bold,
-    color: colors.textPrimary,
+    color: colors.textInverse,
   },
-  planPerMonth: {
+  planCaption: {
     fontFamily: font.family,
     fontSize: font.size.caption,
-    color: colors.textTertiary,
-    textAlign: 'center',
+    color: colors.brandMuted,
+    textAlign: 'right',
   },
-  planFooter: { marginTop: spacing.xs },
   cta: {
-    height: 52,
+    minHeight: 52,
     borderRadius: radii.md,
-    backgroundColor: colors.tint,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: spacing.sm,
@@ -463,65 +436,35 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
-    color: colors.textInverse,
-  },
-  secondaryCta: {
-    height: 48,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    borderRadius: radii.md,
-    backgroundColor: colors.bgCard,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryCtaText: {
-    fontFamily: font.family,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
+    color: colors.brandInk,
   },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.4 },
+  legal: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    color: colors.brandMuted,
+    lineHeight: 16,
+    marginTop: spacing.xs,
+  },
   linkRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingVertical: spacing.sm,
   },
   linkText: {
     fontFamily: font.family,
-    fontSize: font.size.footnote,
+    fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.tint,
+    color: colors.brand,
     textDecorationLine: 'underline',
   },
-  legalRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  legalLink: {
+  linkSep: {
     fontFamily: font.family,
     fontSize: font.size.caption,
-    color: colors.textSecondary,
-    textDecorationLine: 'underline',
-  },
-  legalSep: {
-    fontFamily: font.family,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-  },
-  skip: {
-    fontFamily: font.family,
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    paddingVertical: spacing.md,
-  },
-  legal: {
-    fontFamily: font.family,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 16,
+    color: colors.brandMuted,
   },
 });

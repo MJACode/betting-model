@@ -430,16 +430,31 @@ ACTIVE_MIGRATIONS: list[str] = [
     # until this lands the gate fails closed and no NHL model bets. One new
     # table, anon locked out. Does not rewrite the record views or picks.
     "add_nhl_goalie_designations_2026_10_20.sql",
-    # 2026-10-23 (Matt): NBA last-N Stats reads span into the previous season,
-    # so an L10 a week into the season is ten games, with the newest game's
-    # team. Same signatures; guards on its own property, so it fires once.
-    "nba_window_reads_span_seasons_2026_10_23.sql",
+    # 2026-10-26 (Matt): NBA last-N Stats reads span into the previous season
+    # (10-23), and a player with no game yet this season is listed under his
+    # ESPN roster team instead of being dropped. Replaces
+    # nba_window_reads_span_seasons_2026_10_23.sql, deleted so the two never
+    # rewrite each other on a pass. Same signatures; guards on its property.
+    "nba_window_reads_roster_team_2026_10_26.sql",
+    # 2026-10-28: ParlayMatt shares the capper tables. capper_key separates
+    # his rows from Eggz (existing rows backfill to eggz). parlay_id marks
+    # a leg of one parlay so the leg is not a second unit. Nullable until
+    # this file sets the default. Does not rewrite picks or the record views.
+    # Returns before ALTER once the columns are NOT NULL with the eggz default.
+    "capper_parlaymatt_2026_10_28.sql",
     # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
     # return when the function body already has the marker. Unapplied.
     # Does not touch picks or the record views. Win, loss, or push.
     # No spread, price, or line filter. After master's list. The
     # posted-stake pair stays last and adjacent.
     "byom_backtest_rpc_2026_10_16.sql",
+    # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
+    # One view over ncaaf_live_states, plus the SELECT policy the closed
+    # table never had. Does not rewrite picks, odds, or the record.
+    # Returns once the policy exists; CREATE OR REPLACE VIEW is idempotent.
+    # Sits before the posted-stake pair so those two files stay adjacent
+    # and published_record_units stays last. Not applied until Matt says so.
+    "add_ncaaf_scoreboard_latest_2026_10_28.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

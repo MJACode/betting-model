@@ -33,6 +33,7 @@ import {
   MODEL_BOOK,
 } from '../src/lib/markets';
 import { heroPriceSpeech, lockedCaptionText } from '../src/lib/heroPriceText';
+import { pickSportsbookRows } from '../src/lib/pickBooks';
 import { formatAmerican, gameStatus, MINUS } from '../src/lib/format';
 import {
   signalsBetHeadline,
@@ -191,7 +192,8 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     'line-only move with a current slip link names the line and uses that link',
     linked?.bookmaker === 'draftkings' && linked.price === -110 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
       signalsCtaLabel(bookLabel(linked.bookmaker), formatAmerican(linked.price), sideLine) ===
-        `Bet DK ${MINUS}8.5 ${MINUS}110`,
+        `Bet DK ${MINUS}110` &&
+      !signalsCtaLabel(bookLabel(linked.bookmaker), formatAmerican(linked.price), sideLine).includes('8.5'),
     JSON.stringify(linked),
   );
   const today = todayBoardHandoff(linked, hero);
@@ -199,7 +201,7 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     bookLabel(today?.bookmaker ?? ''),
     today?.price == null ? null : formatAmerican(today.price),
     null,
-    { bestNow: today?.verb === 'Best' },
+    { best: today?.verb === 'Best' },
   );
   check(
     'Today line-only move, no book at the picked line: Open DK, and the slip is not the new line',
@@ -277,11 +279,12 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   ];
   const linked = bestHandoffForPick(pick, linkedRows, heroAmericanForPick(pick, row, linkedRows));
   check(
-    'price and line moved: the button names the line and uses the current row link',
+    'price and line moved: the button keeps the price and the current row link, and does not repeat the line',
     linked?.price === -105 && linked.link === 'dk://now-8.5' && linked.verb === 'Bet' &&
       linked.link !== pick.dk_bet_link &&
       signalsCtaLabel(bookLabel(linked!.bookmaker), formatAmerican(linked!.price), sideLine) ===
-        `Bet DK ${MINUS}8.5 ${MINUS}105`,
+        `Bet DK ${MINUS}105` &&
+      !signalsCtaLabel(bookLabel(linked!.bookmaker), formatAmerican(linked!.price), sideLine).includes('8.5'),
     JSON.stringify(linked),
   );
   const todayMovedPrice = todayBoardHandoff(linked, heroAmericanForPick(pick, row, linkedRows));
@@ -1328,14 +1331,48 @@ check(
     signalsPriceText('-110', 'MGM') === `${MINUS}110 MGM`,
   );
   check('CTA names the best book, word is Bet', signalsCtaLabel('MGM', '-110') === `Bet MGM ${MINUS}110`);
-  check('CTA names the line when that bet is at a moved line', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}8.5 ${MINUS}105`);
+  check('CTA does not repeat the line; it stays in the hero', signalsCtaLabel('DK', '-105', '-8.5') === `Bet DK ${MINUS}105` && !signalsCtaLabel('DK', '-105', '-8.5').includes('8.5'));
   check('CTA with no price does not invent one', signalsCtaLabel('DK', null) === 'Open DK');
+  {
+    const rows = pickSportsbookRows(
+      [
+        { bookmaker: 'fanduel', price: -118, link: 'fd://', isBest: false },
+        { bookmaker: 'draftkings', price: -115, link: 'dk://', isBest: true },
+        { bookmaker: 'betmgm', price: -115, link: 'mgm://', isBest: true },
+      ],
+      ['draftkings', 'fanduel', 'betmgm', 'betrivers', 'hardrockbet'],
+    );
+    check(
+      'sheet ranks best price first and puts a missing book last',
+      rows.map((r) => r.bookmaker).join(',') === 'draftkings,betmgm,fanduel,betrivers,hardrockbet' &&
+        rows[0].isBest && rows[1].isBest && !rows[2].isBest &&
+        rows[0].priceText === `${MINUS}115` &&
+        rows[3].price == null && rows[3].priceText === '—' && rows[4].priceText === '—' &&
+        rows[0].name === 'DraftKings' && rows[0].short === 'DK',
+      rows.map((r) => `${r.short}:${r.priceText}:${r.isBest}`).join(' '),
+    );
+    const one = pickSportsbookRows(
+      [{ bookmaker: 'fanduel', price: -105, link: null, isBest: true }],
+      ['fanduel', 'draftkings'],
+    );
+    check(
+      'one priced book is not a Best row; the other selected book is a dash',
+      one.length === 2 && !one[0].isBest && one[0].short === 'FD' && one[1].priceText === '—',
+    );
+    const live = pickSportsbookRows(
+      [{ bookmaker: 'draftkings', price: -115, link: 'dk://', isBest: true }],
+      null,
+    );
+    check('a live quote list does not invent dashes', live.length === 1 && !live[0].isBest);
+  }
   check(
-    'a different book or price is Best now on the button',
-    signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105` &&
-      signalsCtaLabel('DK', '-105', '-8.5', { bestNow: true }) === `Best now · DK ${MINUS}8.5 ${MINUS}105` &&
-      signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }) === `Best now, FanDuel, ${MINUS}105` &&
-      !signalsCtaSpeech('FanDuel', '-105', null, { bestNow: true }).includes('·'),
+    'several books compare as Best, with no now and no line',
+    signalsCtaLabel('FD', '-105', null, { best: true }) === `Best FD ${MINUS}105` &&
+      signalsCtaLabel('DK', '-105', '-8.5', { best: true }) === `Best DK ${MINUS}105` &&
+      signalsCtaSpeech('FanDuel', '-105', null, { best: true }) === `Best, FanDuel, ${MINUS}105` &&
+      !signalsCtaSpeech('FanDuel', '-105', null, { best: true }).includes('·') &&
+      !signalsCtaLabel('DK', '-105', '-8.5', { best: true }).includes('now') &&
+      !signalsCtaLabel('DK', '-105', '-8.5', { best: true }).includes('8.5'),
   );
   check(
     'stake cell names units to bet and units to win',
@@ -1352,11 +1389,30 @@ check(
   const card = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
   check('the picked-at line is not under the hero', !card.includes('signalsPickedAtLine') && !/pickedAt:/.test(card));
   check(
-    'Today uses the same Best now wording as Signals',
-    /bestNow: boardHandoff\.verb === 'Best'/.test(card) &&
-      card.includes('const boardHandoff = todayBoardHandoff(handoff, heroPrice)') &&
+    'the resting control is a gray chevron, and the sheet is the shop',
+    card.includes('const boardHandoff = todayBoardHandoff(handoff, heroPrice)') &&
       card.includes('openBookBetslip(boardHandoff.bookmaker, boardHandoff.link)') &&
-      signalsCtaLabel('FD', '-105', null, { bestNow: true }) === `Best now · FD ${MINUS}105`,
+      card.includes('pickSportsbookRows(') &&
+      card.includes('<PickBooksSheet') &&
+      card.includes('name="chevron-down"') &&
+      /bookControl: \{[\s\S]*?backgroundColor: colors\.bg/.test(card) &&
+      /bookControl: \{[\s\S]*?borderWidth: StyleSheet\.hairlineWidth/.test(card) &&
+      /bookControl: \{[\s\S]*?minHeight: 44/.test(card) &&
+      !card.includes('handoffNavy') &&
+      !card.includes('bestNow') &&
+      /movedLine != null && leadRow\.bookmaker === heroPrice\.book/.test(card) &&
+      card.includes('lineNote=') &&
+      card.includes('betSpeech={sheetBetSpeech}') &&
+      card.includes('myBooksReady || pick.is_live === true') &&
+      signalsCtaLabel('FD', '-105', null, { best: true }) === `Best FD ${MINUS}105`,
+  );
+  const booksSheet = readFileSync(join(__dirname, '../src/components/PickBooksSheet.tsx'), 'utf-8');
+  check(
+    'the sheet scrolls the rows and keeps Bet on screen, and speaks the full book name',
+    /list: \{[\s\S]*?flexShrink: 1/.test(booksSheet) &&
+      /numberOfLines=\{2\}/.test(booksSheet) &&
+      /accessibilityLabel=\{betSpeech \|\| betLabel\}/.test(booksSheet) &&
+      booksSheet.includes('lineNote'),
   );
   const home = readFileSync(join(__dirname, '../src/screens/PicksHomeScreen.tsx'), 'utf-8');
   check(
@@ -1465,9 +1521,14 @@ check(
     /betLeft: \{[\s\S]*?flexShrink: 0[\s\S]*?maxWidth: '100%'/.test(card) &&
       !/betLeft: \{[\s\S]*?flexBasis: '55%'/.test(card),
   );
-  const navy = /handoffNavy: \{[\s\S]*?\}/.exec(card)?.[0] ?? '';
-  check('CTA fill is navy tint, not DK green or system blue', /backgroundColor: colors\.tint/.test(navy) && !/DK_GREEN|colors\.info/.test(navy));
-  check('CTA label is textInverse', /handoffNavyText: \{[\s\S]*?color: colors\.textInverse/.test(card));
+  const control = /bookControl: \{[\s\S]*?\n  \},/.exec(card)?.[0] ?? '';
+  check(
+    'resting CTA is gray with a hairline, not a navy or DK fill',
+    /backgroundColor: colors\.bg/.test(control) &&
+      /borderWidth: StyleSheet\.hairlineWidth/.test(control) &&
+      !/colors\.tint|DK_GREEN|colors\.info/.test(control),
+  );
+  check('resting CTA label is textPrimary', /bookControlText: \{[\s\S]*?color: colors\.textPrimary/.test(card));
   check(
     'signals stake is stakeFor risk and win, and the value is not line-capped',
     /signalsStakeLine\(signalsRiskUnits, signalsWinUnits\)/.test(card) &&

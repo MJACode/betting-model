@@ -10,23 +10,16 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { discordErrorMessage } from '@/lib/discord';
-import { DISCORD_URL, openLink } from '@/lib/socialLinks';
+import { discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
+import { openLink } from '@/lib/socialLinks';
 import { useAccess } from '@/hooks/useAccess';
+import { useMembership } from '@/hooks/useMembership';
+import { isEntitled } from '@/lib/billingHelpers';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * "Your subscription includes access to the Discord" — the join sheet, modelled
- * on the reference Matt supplied.
- *
- * ONE TAP, not an invite link. Connecting authorizes `guilds.join`, so the
- * edge function puts the user in the server and grants the subscriber role in
- * the same round trip. The plain invite stays as the fallback for the cases
- * where that can't work: the bot being briefly unreachable, or a user who
- * declines the join scope.
- *
- * Rendered by the caller only when it is worth showing — this component does
- * not decide who sees it.
+ * Connect Discord. Free and trial are linking a Whop account, not joining.
+ * The invite opens only when the App Store subscription is active.
  */
 export function DiscordLinkModal({
   visible,
@@ -36,6 +29,9 @@ export function DiscordLinkModal({
   onClose: () => void;
 }) {
   const { access, link, busy } = useAccess();
+  const { subscription } = useMembership();
+  const applePaid = Boolean(subscription && isEntitled(subscription) && subscription.status === 'active');
+  const invite = discordInviteIfPaid(applePaid);
   const [working, setWorking] = useState(false);
 
   const onConnect = useCallback(async () => {
@@ -77,36 +73,40 @@ export function DiscordLinkModal({
           <Text style={styles.title}>
             {alreadyLinked
               ? 'You’re connected to the Signalbase Discord'
-              : 'Your subscription includes access to the Signalbase Discord'}
+              : 'Connect Discord'}
           </Text>
           <Text style={styles.body}>
             {alreadyLinked
-              ? 'Open Discord to jump into the subscriber channels.'
-              : 'Connect your Discord account to join the subscriber-only server and chat with other members.'}
+              ? applePaid
+                ? 'Open Discord to jump into the subscriber channels.'
+                : 'The invite unlocks when your Apple plan is paid. No invite is shown until then.'
+              : applePaid
+                ? 'Your subscription includes the subscriber Discord. Connect your account to join.'
+                : 'Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.'}
           </Text>
 
           <View style={styles.iconRow}>
             <View style={[styles.iconTile, styles.discordTile]}>
-              <Ionicons name="logo-discord" size={34} color="#FFFFFF" />
+              <Ionicons name="logo-discord" size={34} color={colors.textInverse} />
             </View>
             <Ionicons name="add" size={22} color={colors.tint} />
             <View style={[styles.iconTile, styles.appTile]}>
-              <Ionicons name="trophy" size={30} color="#FFFFFF" />
+              <Ionicons name="trophy" size={30} color={colors.textInverse} />
             </View>
           </View>
 
-          {alreadyLinked ? (
+          {alreadyLinked && invite ? (
             <Pressable
               accessibilityLabel="Open the Discord"
-              onPress={() => openLink(DISCORD_URL, 'Discord')}
+              onPress={() => openLink(invite, 'Discord')}
               accessibilityRole="button"
               style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
             >
               <Text style={styles.ctaText}>Open the Discord</Text>
             </Pressable>
-          ) : (
+          ) : alreadyLinked ? null : (
             <Pressable
-              accessibilityLabel="Join the Discord"
+              accessibilityLabel="Connect Discord"
               accessibilityState={{ busy: pending, disabled: pending }}
               onPress={onConnect}
               disabled={pending}
@@ -120,24 +120,14 @@ export function DiscordLinkModal({
               {pending ? (
                 <ActivityIndicator color={colors.textInverse} />
               ) : (
-                <Text style={styles.ctaText}>Join the Discord</Text>
+                <Text style={styles.ctaText}>Connect Discord</Text>
               )}
             </Pressable>
           )}
 
-          {/* Fallback for a user who would rather not authorize, or for a
-              guild-join that failed. The invite still works; they just won't
-              get the subscriber role until they connect. */}
-          {!alreadyLinked ? (
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel="Use an invite link instead"
-              onPress={() => openLink(DISCORD_URL, 'Discord')}
-              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-            >
-              <Text style={styles.altLink}>Use an invite link instead</Text>
-            </Pressable>
-          ) : null}
+          {/* No invite fallback. The URL is Apple-paid only, and this sheet
+              is the account link — it must not hand the invite to a trial
+              or a free member. */}
         </View>
       </View>
     </Modal>
@@ -185,8 +175,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  discordTile: { backgroundColor: '#5865F2' },
-  appTile: { backgroundColor: '#000000' },
+  discordTile: { backgroundColor: colors.discord },
+  appTile: { backgroundColor: colors.textPrimary },
   cta: {
     alignSelf: 'stretch',
     height: 50,

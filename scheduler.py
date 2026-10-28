@@ -434,15 +434,30 @@ def run_period_recaps() -> None:
         log.info("eggz recaps: %s post(s)", n)
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR eggz recaps crashed")
+    try:
+        from tracking.eggz_picks import post_parlaymatt_recaps
+        n = post_parlaymatt_recaps()
+        log.info("parlaymatt recaps: %s post(s)", n)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR parlaymatt recaps crashed")
 
 
 def run_eggz_ingest() -> None:
-    """Read #eggz-picks and grade what is final. No-op when the token is unset."""
+    """Read #eggz-picks and grade what is final. No-op when the token is unset.
+
+    ParlayMatt is the same 15-minute tick, in his own try. Unset channel,
+    author, or webhook: his half returns without a request and without a post.
+    """
     try:
         from tracking.eggz_picks import run_eggz_ingest as _run
         _run()
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR eggz ingest crashed")
+    try:
+        from tracking.eggz_picks import run_parlaymatt_ingest
+        run_parlaymatt_ingest()
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR parlaymatt ingest crashed")
 
 
 def run_failure_alerter() -> None:

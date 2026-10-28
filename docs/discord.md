@@ -481,6 +481,17 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   is `needs_review` (`no_regulation_score`) and is tried again. A message
   whose parse_status is still `needs_review` is reparsed on the next grade
   pass.
+- **ParlayMatt's recap is his channel only.** `DISCORD_WEBHOOK_PARLAYMATT`
+  has no fallback to `#results` or X. The windows and the 15-minute read
+  are the same as Eggz. Ledger keys are `discord_parlaymatt_results_day`,
+  `discord_parlaymatt_results_week`, and `discord_parlaymatt_results_month`.
+  The poll uses `DISCORD_PARLAYMATT_CHANNEL_ID` and
+  `DISCORD_PARLAYMATT_AUTHOR_ID`. Unset channel, author, or webhook: his
+  half does not call Discord and does not post. A parlay header is one bet
+  at its stated price and stake. The legs are not a second unit. Anything
+  that does not parse, including a round robin, is `needs_review` and is
+  kept. His all-time line starts at his own first graded game date. His
+  rows stay out of `picks`.
 - **Units and the record are the same graded picks.** A home-run bet with a
   real price counts in both. One with no price is staked at the bare
   conviction. Neither is left out of the units.

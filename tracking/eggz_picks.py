@@ -1,11 +1,16 @@
-"""Read Eggz's posts in #eggz-picks, grade them, and recap that channel only.
+"""Read a tracked capper's Discord channel, grade it, and recap that channel only.
 
-The model record stays in `picks`. These rows live in `capper_messages` and
-`capper_picks`. A line that cannot be parsed or matched is `needs_review`.
-It is stored and logged. It is not dropped, and it is not given a result.
-A pending or needs_review leg holds that day's recap. `settle_manual` is
-how a set-aside leg gets a WIN, LOSS, or PUSH. `restate_eggz_day` posts a
-Corrected recap and leaves the original `push_sent` row in place.
+Eggz is the first. ParlayMatt is the second. Each has a channel, an author,
+a webhook, a display name, and its own push_sent kinds. They share
+`capper_messages` and `capper_picks`. `capper_key` says whose row it is.
+NULL is Eggz, so a row written before that column existed stays his.
+
+The model record stays in `picks`. A line that cannot be parsed or matched
+is `needs_review`. It is stored and logged. It is not dropped, and it is
+not given a result. A pending or needs_review leg holds that day's recap.
+`settle_manual` is how a set-aside leg gets a WIN, LOSS, or PUSH.
+`restate_eggz_day` posts a Corrected recap and leaves the original
+`push_sent` row in place.
 
 The Oct 18 and Oct 20 posts are the grammar the tests pin: a sport/date
 header, `All 1U` as the message stake, and `60 Minute ML` as `h2h_3way`.
@@ -13,12 +18,21 @@ A date with no sport (`Friday Oct. 22`) and `Player (TEAM) O5.5 Receptions`
 parse too. A line that still does not parse is needs_review, and the recap
 waits.
 
-Env, all optional. Any one missing and that half no-ops:
-    DISCORD_BOT_TOKEN          existing bot token (monitoring/discord_stats.py)
-    DISCORD_EGGZ_CHANNEL_ID    #eggz-picks channel id
-    DISCORD_EGGZ_AUTHOR_ID     his user id (username jack_mehoff123,
-                               display name Dr. Eggz)
-    DISCORD_WEBHOOK_EGGZ       recaps only. Never #results, never X.
+A line that is a parlay header (`PARLAY +450 1u`, `3 leg parlay`) is one
+bet at that price and stake. The lines under it are legs. The parlay row
+is the unit. A leg is not a second unit. A round robin is not one price,
+so that block is needs_review. A push that would change the stated price
+is needs_review. Anything still unparsed is needs_review.
+
+Env, all optional. Any one missing and that capper's half no-ops:
+    DISCORD_BOT_TOKEN                 existing bot token
+    DISCORD_EGGZ_CHANNEL_ID           #eggz-picks channel id
+    DISCORD_EGGZ_AUTHOR_ID            his user id (username jack_mehoff123,
+                                      display name Dr. Eggz)
+    DISCORD_WEBHOOK_EGGZ              Eggz recaps only. Never #results, never X.
+    DISCORD_PARLAYMATT_CHANNEL_ID     #parlaymatt-picks channel id
+    DISCORD_PARLAYMATT_AUTHOR_ID      his user id
+    DISCORD_WEBHOOK_PARLAYMATT        ParlayMatt recaps only. Never #results, never X.
 
 The bot needs View Channel, Read Message History, and the Message Content
 intent. Without that intent Discord returns an empty body.
@@ -142,19 +156,90 @@ _MONTHS = {
     "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 _FUZZY_CUTOFF = 0.88
+_CAPPER_KEY_RE = re.compile(r"^[a-z]+$")
+_PARLAY_HEADER_RE = re.compile(
+    r"^(?:(?P<tag>[A-Za-z][A-Za-z0-9]{0,12})\s+)?"
+    r"(?:(?P<nlegs>\d+)\s*[- ]?\s*leg\s+)?"
+    r"parlay\b(?P<rest>.*)$",
+    re.I)
+_ROUND_ROBIN_RE = re.compile(r"\bround\s*robin\b", re.I)
+_BULLET_RE = re.compile(r"^(?:[-*•]+|\d+[.)])\s+")
+
+
+class Capper:
+    """One Discord capper. Keys and kinds are fixed strings, not user input."""
+
+    def __init__(self, key: str, display_name: str, channel_attr: str,
+                 author_attr: str, webhook_attr: str, results_prefix: str,
+                 review_kind: str):
+        if not _CAPPER_KEY_RE.match(key):
+            raise ValueError(key)
+        self.key = key
+        self.display_name = display_name
+        self.channel_attr = channel_attr
+        self.author_attr = author_attr
+        self.webhook_attr = webhook_attr
+        self.results_prefix = results_prefix
+        self.review_kind = review_kind
+
+    def channel_id(self) -> str:
+        return getattr(config, self.channel_attr, "") or ""
+
+    def author_id(self) -> str:
+        return getattr(config, self.author_attr, "") or ""
+
+    def webhook(self) -> str:
+        return getattr(config, self.webhook_attr, "") or ""
+
+
+EGGZ = Capper(
+    key="eggz",
+    display_name="Eggz",
+    channel_attr="DISCORD_EGGZ_CHANNEL_ID",
+    author_attr="DISCORD_EGGZ_AUTHOR_ID",
+    webhook_attr="DISCORD_WEBHOOK_EGGZ",
+    results_prefix="discord_eggz_results",
+    review_kind="eggz_review",
+)
+PARLAYMATT = Capper(
+    key="parlaymatt",
+    display_name="ParlayMatt",
+    channel_attr="DISCORD_PARLAYMATT_CHANNEL_ID",
+    author_attr="DISCORD_PARLAYMATT_AUTHOR_ID",
+    webhook_attr="DISCORD_WEBHOOK_PARLAYMATT",
+    results_prefix="discord_parlaymatt_results",
+    review_kind="parlaymatt_review",
+)
+CAPPERS = {"eggz": EGGZ, "parlaymatt": PARLAYMATT}
+
+
+def _owner_clause(capper: Capper, alias: str = "") -> str:
+    """Rows that belong to this capper, including parlay legs.
+
+    NULL capper_key is Eggz. Those rows were written before the column.
+    """
+    prefix = f"{alias}." if alias else ""
+    if capper.key == "eggz":
+        return f"COALESCE({prefix}capper_key, 'eggz') = 'eggz'"
+    return f"{prefix}capper_key = '{capper.key}'"
+
+
+def _record_clause(capper: Capper, alias: str = "") -> str:
+    """Graded bets that count as units. A parlay leg is not one of them."""
+    prefix = f"{alias}." if alias else ""
+    return f"{_owner_clause(capper, alias)} AND {prefix}parlay_id IS NULL"
 
 
 def _token() -> str:
     return os.environ.get("DISCORD_BOT_TOKEN", "").strip()
 
 
-def configured_to_read() -> bool:
-    return bool(_token() and config.DISCORD_EGGZ_CHANNEL_ID
-                and config.DISCORD_EGGZ_AUTHOR_ID)
+def configured_to_read(capper: Capper = EGGZ) -> bool:
+    return bool(_token() and capper.channel_id() and capper.author_id())
 
 
-def configured_to_post() -> bool:
-    return bool(config.DISCORD_WEBHOOK_EGGZ)
+def configured_to_post(capper: Capper = EGGZ) -> bool:
+    return bool(capper.webhook())
 
 
 _SKIP_LAST = {"team", "fc", "club"}
@@ -344,6 +429,61 @@ def _spread_number(text: str) -> tuple[str, float | None]:
     return (text[:m.start()] + " " + text[m.end():]).strip(), float(m.group(1))
 
 
+def _strip_bullet(text: str) -> str:
+    return _BULLET_RE.sub("", text, count=1).strip()
+
+
+def _parlay_header(raw: str, default_stake: float) -> dict | None:
+    """A parlay header, or None when the line is an ordinary bet.
+
+    `PARLAY +450 1u` and `3 leg parlay +450` are one bet. The price on the
+    header is the price. A missing price stays missing. Round robin is not
+    one stated price, so it is not a header the grader can settle.
+    """
+    if _ROUND_ROBIN_RE.search(raw):
+        return None
+    m = _PARLAY_HEADER_RE.match(raw.strip())
+    if not m:
+        return None
+    _text, price, stake = _price_and_stake(m.group("rest") or "", default_stake)
+    return {
+        "price": price,
+        "stake_units": stake,
+        "raw": raw,
+        "legs": [],
+        "broken": False,
+        "ok": False,
+    }
+
+
+def _finish_parlay(parlay: dict | None, reviews: list[dict]) -> None:
+    if parlay is None:
+        return
+    parlay["ok"] = (not parlay["broken"]) and len(parlay["legs"]) >= 2
+    if not parlay["legs"]:
+        reviews.append({
+            "line_no": parlay["line_no"],
+            "raw": parlay["raw"],
+            "reason": "unparsed",
+        })
+
+
+def _start_broken_parlay(raw: str, n: int, default_stake: float,
+                         context) -> dict:
+    """A round robin. The lines under it stay needs_review, not singles."""
+    return {
+        "price": None,
+        "stake_units": default_stake,
+        "raw": raw,
+        "legs": [],
+        "broken": True,
+        "ok": False,
+        "line_no": n,
+        "sport_hint": (context or {}).get("sport"),
+        "slate_date": (context or {}).get("slate_date"),
+    }
+
+
 def parse_message(body: str, posted_at: datetime | None = None
                   ) -> tuple[list[dict], list[dict]]:
     """(legs, reviews). A review is a line that was not turned into a bet.
@@ -353,11 +493,16 @@ def parse_message(body: str, posted_at: datetime | None = None
     date. `All 1U` sets the stake for the lines that do not name their own.
     Neither of those is a bet. Stake defaults to 1 unit to win. A missing
     price stays missing.
+
+    A parlay header groups the bet lines under it into one bet. Those legs
+    carry `parlay_header`. A line with no parlay header is the same bet it
+    was before.
     """
     legs: list[dict] = []
     reviews: list[dict] = []
     context: dict | None = None
     default_stake = 1.0
+    parlay: dict | None = None
     lines = [_strip_emoji(ln).strip() for ln in (body or "").splitlines()]
     lines = [ln for ln in lines if ln and not ln.startswith("#")]
     if not lines:
@@ -366,12 +511,43 @@ def parse_message(body: str, posted_at: datetime | None = None
     for n, raw in enumerate(lines, start=1):
         slate = _slate_header(raw, posted_at)
         if slate:
+            _finish_parlay(parlay, reviews)
+            parlay = None
             context = dict(context or {})
             context.update(slate)
             continue
         all_stake = _ALL_STAKE_RE.match(raw.strip())
         if all_stake:
+            _finish_parlay(parlay, reviews)
+            parlay = None
             default_stake = float(all_stake.group(1))
+            continue
+        if _ROUND_ROBIN_RE.search(raw):
+            _finish_parlay(parlay, reviews)
+            parlay = _start_broken_parlay(raw, n, default_stake, context)
+            continue
+        header = _parlay_header(raw, default_stake)
+        if header:
+            _finish_parlay(parlay, reviews)
+            header["line_no"] = n
+            header["sport_hint"] = (context or {}).get("sport")
+            header["slate_date"] = (context or {}).get("slate_date")
+            parlay = header
+            continue
+        if parlay is not None:
+            stripped, price, _stake = _price_and_stake(
+                _strip_bullet(raw), parlay["stake_units"])
+            leg = _parse_line(stripped, price, parlay["stake_units"], context, raw)
+            if leg is None:
+                reviews.append({"line_no": n, "raw": raw, "reason": "unparsed"})
+                parlay["broken"] = True
+                continue
+            leg["line_no"] = n
+            leg["sport_hint"] = (context or {}).get("sport")
+            leg["slate_date"] = (context or {}).get("slate_date")
+            leg["parlay_header"] = parlay
+            parlay["legs"].append(leg)
+            legs.append(leg)
             continue
         stripped, price, stake = _price_and_stake(raw, default_stake)
         header = _matchup_header(stripped)
@@ -387,6 +563,7 @@ def parse_message(body: str, posted_at: datetime | None = None
         leg["sport_hint"] = (context or {}).get("sport")
         leg["slate_date"] = (context or {}).get("slate_date")
         legs.append(leg)
+    _finish_parlay(parlay, reviews)
     return legs, reviews
 
 
@@ -593,8 +770,10 @@ def units_for_result(stake_units, price, result: str) -> tuple[float, float]:
 
 
 def fetch_channel_messages(channel_id: str, *, after: str | None = None,
-                           before: str | None = None) -> list[dict] | None:
+                           before: str | None = None,
+                           capper: Capper = EGGZ) -> list[dict] | None:
     """One Discord page. None means the call failed and the cursor must stay."""
+    name = capper.display_name
     params: dict[str, str | int] = {"limit": _PAGE}
     if after:
         params["after"] = after
@@ -608,20 +787,20 @@ def fetch_channel_messages(channel_id: str, *, after: str | None = None,
             timeout=20,
         )
     except requests.RequestException as exc:
-        logger.error(f"Eggz read failed: {exc}")
+        logger.error(f"{name} read failed: {exc}")
         return None
     if r.status_code == 429:
-        logger.error("Eggz read rate-limited (429); cursor left where it was")
+        logger.error(f"{name} read rate-limited (429); cursor left where it was")
         return None
     if r.status_code in (401, 403, 404):
-        logger.error(f"Eggz read refused ({r.status_code})")
+        logger.error(f"{name} read refused ({r.status_code})")
         return None
     if r.status_code >= 300:
-        logger.error(f"Eggz read HTTP {r.status_code}")
+        logger.error(f"{name} read HTTP {r.status_code}")
         return None
     body = r.json()
     if not isinstance(body, list):
-        logger.error("Eggz read returned a non-list")
+        logger.error(f"{name} read returned a non-list")
         return None
     return body
 
@@ -633,17 +812,22 @@ def _snow(message_id: str) -> int:
         return 0
 
 
-def ingest_messages(conn, fetch=fetch_channel_messages) -> int:
+def ingest_messages(conn, fetch=None, capper: Capper = EGGZ) -> int:
     """Store new messages from the configured author. Returns rows written.
 
     The cursor is the newest snowflake examined, including other authors,
     so the next poll asks Discord for messages after that id. The first
-    runs walk backward until a short page, then forward.
+    runs walk backward until a short page, then forward. One cursor per
+    channel. Eggz and ParlayMatt do not share one.
     """
-    if not configured_to_read():
+    if fetch is None:
+        def fetch(channel_id, *, after=None, before=None):
+            return fetch_channel_messages(
+                channel_id, after=after, before=before, capper=capper)
+    if not configured_to_read(capper):
         return 0
-    channel = config.DISCORD_EGGZ_CHANNEL_ID
-    author = config.DISCORD_EGGZ_AUTHOR_ID
+    channel = capper.channel_id()
+    author = capper.author_id()
     cur = conn.execute(
         "SELECT newest_id, oldest_id, backfill_done FROM capper_ingest_cursor "
         "WHERE channel_id = %s", (channel,)).fetchone()
@@ -660,10 +844,12 @@ def ingest_messages(conn, fetch=fetch_channel_messages) -> int:
                 break
             batch_ids = [str(m.get("id")) for m in batch if m.get("id")]
             if not batch_ids:
-                logger.error("Eggz page had no message ids; cursor left where it was")
+                logger.error(
+                    f"{capper.display_name} page had no message ids; "
+                    "cursor left where it was")
                 conn.commit()
                 return written
-            written += _store_batch(conn, batch, channel, author)
+            written += _store_batch(conn, batch, channel, author, capper)
             oldest = min(batch_ids, key=_snow)
             newest = max([newest, max(batch_ids, key=_snow)], key=lambda x: _snow(x or "0"))
             pages += 1
@@ -682,12 +868,14 @@ def ingest_messages(conn, fetch=fetch_channel_messages) -> int:
     if batch:
         batch_ids = [str(m.get("id")) for m in batch if m.get("id")]
         if not batch_ids:
-            logger.error("Eggz page had no message ids; cursor left where it was")
+            logger.error(
+                f"{capper.display_name} page had no message ids; "
+                "cursor left where it was")
         else:
-            written += _store_batch(conn, batch, channel, author)
+            written += _store_batch(conn, batch, channel, author, capper)
             newest = max(batch_ids, key=_snow)
             _save_cursor(conn, channel, newest, oldest, True)
-    _refresh_edits(conn, fetch, channel, author)
+    _refresh_edits(conn, fetch, channel, author, capper)
     conn.commit()
     return written
 
@@ -704,17 +892,18 @@ def _save_cursor(conn, channel, newest, oldest, done) -> None:
     )
 
 
-def _store_batch(conn, batch: list[dict], channel: str, author: str) -> int:
+def _store_batch(conn, batch: list[dict], channel: str, author: str,
+                 capper: Capper = EGGZ) -> int:
     n = 0
     for msg in batch:
         if str((msg.get("author") or {}).get("id")) != str(author):
             continue
-        if _upsert_message(conn, msg, channel):
+        if _upsert_message(conn, msg, channel, capper):
             n += 1
     return n
 
 
-def _upsert_message(conn, msg: dict, channel: str) -> bool:
+def _upsert_message(conn, msg: dict, channel: str, capper: Capper = EGGZ) -> bool:
     mid = str(msg.get("id") or "")
     if not mid:
         return False
@@ -724,7 +913,7 @@ def _upsert_message(conn, msg: dict, channel: str) -> bool:
     edited = _parse_ts(msg.get("edited_timestamp"))
     if posted is None:
         _flag_message(conn, mid, channel, author, body or "", datetime.now(timezone.utc),
-                      "needs_review", "no timestamp")
+                      "needs_review", "no timestamp", capper)
         return True
     existing = conn.execute(
         "SELECT body, edited_at FROM capper_messages WHERE message_id = %s",
@@ -737,38 +926,41 @@ def _upsert_message(conn, msg: dict, channel: str) -> bool:
     conn.execute(
         "INSERT INTO capper_messages (message_id, channel_id, author_id, "
         "author_username, author_display, body, posted_at, edited, edited_at, "
-        "parse_status, parse_note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "parse_status, parse_note, capper_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (message_id) DO UPDATE SET body = EXCLUDED.body, "
         "edited = EXCLUDED.edited, edited_at = EXCLUDED.edited_at, "
         "author_username = EXCLUDED.author_username, "
-        "author_display = EXCLUDED.author_display",
+        "author_display = EXCLUDED.author_display, "
+        "capper_key = EXCLUDED.capper_key",
         (mid, channel, str(author.get("id") or ""),
          author.get("username"), author.get("global_name") or author.get("username"),
          body, posted.isoformat(), edited is not None,
          edited.isoformat() if edited else None,
-         "parsed", None),
+         "parsed", None, capper.key),
     )
     if graded:
         return True
-    _replace_legs(conn, mid, body, posted)
+    _replace_legs(conn, mid, body, posted, capper)
     return True
 
 
-def _flag_message(conn, mid, channel, author, body, posted, status, note) -> None:
+def _flag_message(conn, mid, channel, author, body, posted, status, note,
+                  capper: Capper = EGGZ) -> None:
     conn.execute(
         "INSERT INTO capper_messages (message_id, channel_id, author_id, "
         "author_username, author_display, body, posted_at, edited, parse_status, "
-        "parse_note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "parse_note, capper_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (message_id) DO NOTHING",
         (mid, channel, str((author or {}).get("id") or ""),
          (author or {}).get("username"),
          (author or {}).get("global_name"),
-         body, posted.isoformat(), False, status, note),
+         body, posted.isoformat(), False, status, note, capper.key),
     )
-    _surface_review(conn, mid, note)
+    _surface_review(conn, mid, note, capper)
 
 
-def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
+def _replace_legs(conn, message_id: str, body: str, posted: datetime,
+                  capper: Capper = EGGZ) -> None:
     prev = conn.execute(
         "SELECT parse_note FROM capper_messages WHERE message_id = %s",
         (message_id,)).fetchone()
@@ -778,15 +970,25 @@ def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
         (message_id,))
     legs, reviews = parse_message(body, posted)
     note_parts = []
+    seen_parlays: set[int] = set()
     for leg in legs:
+        header = leg.get("parlay_header")
+        if header is not None:
+            if id(header) in seen_parlays:
+                continue
+            seen_parlays.add(id(header))
+            note_parts.extend(
+                _store_parlay(conn, message_id, header, posted, capper))
+            continue
         game, reason = _match_leg(conn, leg, posted)
         if reason:
-            _insert_pick(conn, message_id, leg, posted, "needs_review", reason, game)
+            _insert_pick(conn, message_id, leg, posted, "needs_review", reason, game,
+                         capper)
             note_parts.append(f"line {leg['line_no']}: {reason}")
         else:
-            _insert_pick(conn, message_id, leg, posted, "pending", None, game)
+            _insert_pick(conn, message_id, leg, posted, "pending", None, game, capper)
     for rev in reviews:
-        _insert_review(conn, message_id, rev, posted)
+        _insert_review(conn, message_id, rev, posted, capper)
         note_parts.append(f"line {rev['line_no']}: {rev['reason']}")
     status = "needs_review" if note_parts else "parsed"
     note = "; ".join(note_parts)[:500] or None
@@ -794,26 +996,28 @@ def _replace_legs(conn, message_id: str, body: str, posted: datetime) -> None:
         "UPDATE capper_messages SET parse_status = %s, parse_note = %s "
         "WHERE message_id = %s", (status, note, message_id))
     if note_parts and note != old_note:
-        _surface_review(conn, message_id, note)
+        _surface_review(conn, message_id, note, capper)
 
 
-def _insert_review(conn, message_id, rev, posted) -> None:
+def _insert_review(conn, message_id, rev, posted, capper: Capper = EGGZ) -> None:
     conn.execute(
         "INSERT INTO capper_picks (message_id, line_no, status, review_reason, "
-        "stake_units, posted_at) VALUES (%s,%s,'needs_review',%s,1,%s) "
+        "stake_units, posted_at, capper_key) VALUES (%s,%s,'needs_review',%s,1,%s,%s) "
         "ON CONFLICT (message_id, line_no) DO NOTHING",
         (message_id, rev["line_no"], f"{rev['reason']}: {rev['raw'][:240]}",
-         posted.isoformat()),
+         posted.isoformat(), capper.key),
     )
 
 
-def _insert_pick(conn, message_id, leg, posted, status, reason, game) -> None:
+def _insert_pick(conn, message_id, leg, posted, status, reason, game,
+                 capper: Capper = EGGZ, parlay_id=None) -> None:
     g = game or {}
     conn.execute(
         "INSERT INTO capper_picks (message_id, line_no, status, review_reason, "
         "sport, game_id, game_date, home_team, away_team, commence_time, market, "
         "side, line, price, stake_units, player_name, prop_stat, prop_market, "
-        "posted_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "posted_at, capper_key, parlay_id) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
         "ON CONFLICT (message_id, line_no) DO UPDATE SET status = EXCLUDED.status, "
         "review_reason = EXCLUDED.review_reason, sport = EXCLUDED.sport, "
         "game_id = EXCLUDED.game_id, game_date = EXCLUDED.game_date, "
@@ -821,15 +1025,86 @@ def _insert_pick(conn, message_id, leg, posted, status, reason, game) -> None:
         "commence_time = EXCLUDED.commence_time, market = EXCLUDED.market, "
         "side = EXCLUDED.side, line = EXCLUDED.line, price = EXCLUDED.price, "
         "stake_units = EXCLUDED.stake_units, player_name = EXCLUDED.player_name, "
-        "prop_stat = EXCLUDED.prop_stat, prop_market = EXCLUDED.prop_market "
+        "prop_stat = EXCLUDED.prop_stat, prop_market = EXCLUDED.prop_market, "
+        "capper_key = EXCLUDED.capper_key, parlay_id = EXCLUDED.parlay_id "
         "WHERE capper_picks.status <> 'graded'",
         (message_id, leg["line_no"], status, reason, g.get("sport"), g.get("game_id"),
          g.get("game_date"), g.get("home_team"), g.get("away_team"),
          g.get("commence_time"), leg["market"], g.get("side") or leg.get("side"),
          leg.get("line"), leg.get("price"), leg.get("stake_units") or 1,
          leg.get("player_name"), leg.get("prop_stat"), leg.get("prop_market"),
-         posted.isoformat()),
+         posted.isoformat(), capper.key, parlay_id),
     )
+
+
+def _store_parlay(conn, message_id: str, header: dict, posted: datetime,
+                  capper: Capper) -> list[str]:
+    """One parlay row at the header price and stake, plus one row per leg.
+
+    The parlay row is the unit. Legs carry parlay_id so the record query
+    leaves them out. A parlay that is short a leg, or that says round robin,
+    is needs_review. The lines are still stored.
+    """
+    notes: list[str] = []
+    matched = []
+    for leg in header["legs"]:
+        game, reason = _match_leg(conn, leg, posted)
+        matched.append((leg, game, reason))
+        if reason:
+            notes.append(f"line {leg['line_no']}: {reason}")
+    if not header.get("ok"):
+        notes.append(f"line {header['line_no']}: parlay_incomplete")
+    games = [game for _leg, game, reason in matched if game and not reason]
+    dates = [game.get("game_date") for game in games if game.get("game_date")]
+    if header.get("slate_date"):
+        dates.append(header["slate_date"])
+    game_date = max(dates) if dates else None
+    sports = {game.get("sport") for game in games if game.get("sport")}
+    if len(sports) == 1:
+        sport = sports.pop()
+    elif len(sports) > 1:
+        sport = "PARLAY"
+    else:
+        sport = header.get("sport_hint")
+    ready = bool(header.get("ok")) and not any(reason for _l, _g, reason in matched)
+    status = "pending" if ready else "needs_review"
+    reason = "; ".join(notes)[:500] if status != "pending" else None
+    parent_id = _insert_parlay_parent(
+        conn, message_id, header, posted, capper, status, reason, sport, game_date)
+    for leg, game, leg_reason in matched:
+        if status == "pending":
+            leg_status, leg_note = "pending", None
+        else:
+            leg_status = "needs_review"
+            leg_note = leg_reason or "parlay_incomplete"
+        _insert_pick(conn, message_id, leg, posted, leg_status, leg_note, game,
+                     capper, parent_id)
+    return notes
+
+
+def _insert_parlay_parent(conn, message_id, header, posted, capper, status,
+                          reason, sport, game_date):
+    row = conn.execute(
+        "INSERT INTO capper_picks (message_id, line_no, status, review_reason, "
+        "sport, game_date, market, price, stake_units, posted_at, capper_key) "
+        "VALUES (%s,%s,%s,%s,%s,%s,'parlay',%s,%s,%s,%s) "
+        "ON CONFLICT (message_id, line_no) DO UPDATE SET "
+        "status = EXCLUDED.status, review_reason = EXCLUDED.review_reason, "
+        "sport = EXCLUDED.sport, game_date = EXCLUDED.game_date, "
+        "market = EXCLUDED.market, price = EXCLUDED.price, "
+        "stake_units = EXCLUDED.stake_units, capper_key = EXCLUDED.capper_key "
+        "WHERE capper_picks.status <> 'graded' "
+        "RETURNING id",
+        (message_id, header["line_no"], status, reason, sport, game_date,
+         header.get("price"), header.get("stake_units") or 1,
+         posted.isoformat(), capper.key),
+    ).fetchone()
+    if row:
+        return row[0]
+    existing = conn.execute(
+        "SELECT id FROM capper_picks WHERE message_id = %s AND line_no = %s",
+        (message_id, header["line_no"])).fetchone()
+    return existing[0] if existing else None
 
 
 def _match_leg(conn, leg: dict, posted: datetime) -> tuple[dict | None, str | None]:
@@ -994,7 +1269,7 @@ def _game_dict(row) -> dict:
     }
 
 
-def _refresh_edits(conn, fetch, channel, author) -> None:
+def _refresh_edits(conn, fetch, channel, author, capper: Capper = EGGZ) -> None:
     """The newest page, so an edit of a recent post is stored.
 
     Graded legs are left alone. The cursor does not move backward.
@@ -1002,20 +1277,22 @@ def _refresh_edits(conn, fetch, channel, author) -> None:
     batch = fetch(channel)
     if not batch:
         return
-    _store_batch(conn, batch, channel, author)
+    _store_batch(conn, batch, channel, author, capper)
 
 
-def _surface_review(conn, message_id: str, note: str) -> None:
-    logger.error(f"Eggz message {message_id} needs review: {note}")
+def _surface_review(conn, message_id: str, note: str, capper: Capper = EGGZ) -> None:
+    logger.error(f"{capper.display_name} message {message_id} needs review: {note}")
     url = config.DISCORD_WEBHOOK_OPS
     if not url:
         return
-    kind = "eggz_review"
+    kind = capper.review_kind
     if conn.execute(
         "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
         (message_id, kind)).fetchone():
         return
-    posted = _post(url, {"content": f"Eggz pick needs review ({message_id}): {note[:1500]}"})
+    posted = _post(url, {"content": (
+        f"{capper.display_name} pick needs review ({message_id}): {note[:1500]}"
+    )})
     if not posted:
         return
     conn.execute(
@@ -1025,14 +1302,16 @@ def _surface_review(conn, message_id: str, note: str) -> None:
     )
 
 
-def reparse_stored(conn) -> int:
+def reparse_stored(conn, capper: Capper = EGGZ) -> int:
     """Re-read stored messages whose parse was needs_review.
 
     A graded leg is left as it was. A message that already parsed is left
-    as it was, so a later grade is not wiped on the next poll.
+    as it was, so a later grade is not wiped on the next poll. Only this
+    capper's messages are re-read.
     """
     rows = conn.execute(
-        "SELECT message_id, body, posted_at, parse_status FROM capper_messages"
+        "SELECT message_id, body, posted_at, parse_status FROM capper_messages "
+        "WHERE " + _owner_clause(capper)
     ).fetchall()
     n = 0
     for mid, body, posted, status in rows:
@@ -1043,14 +1322,17 @@ def reparse_stored(conn) -> int:
         ts = _parse_ts(posted)
         if ts is None or body is None:
             continue
-        _replace_legs(conn, mid, body, ts)
+        if capper is EGGZ:
+            _replace_legs(conn, mid, body, ts)
+        else:
+            _replace_legs(conn, mid, body, ts, capper)
         n += 1
     if n:
         conn.commit()
     return n
 
 
-def grade_pending(conn) -> int:
+def grade_pending(conn, capper: Capper = EGGZ) -> int:
     """Grade pending legs whose game is final. Returns how many settled.
 
     Stored messages that are still needs_review are reparsed first, so a
@@ -1062,24 +1344,26 @@ def grade_pending(conn) -> int:
     not arrived stays pending. A player missing from a log that has arrived
     is needs_review. Both hold the recap.
     """
-    reparse_stored(conn)
+    reparse_stored(conn, capper)
     rows = conn.execute(
         "SELECT id, game_id, market, side, line, price, stake_units, "
         "player_name, prop_stat, prop_market, commence_time, sport "
         "FROM capper_picks WHERE game_id IS NOT NULL AND ("
         "status = 'pending' OR (status = 'needs_review' AND "
-        "review_reason = 'no_regulation_score'))"
+        "review_reason = 'no_regulation_score')) AND "
+        + _owner_clause(capper)
     ).fetchall()
     n = 0
     for row in rows:
-        if _grade_one(conn, row):
+        if _grade_one(conn, row, capper):
             n += 1
+    n += _grade_parlays(conn, capper)
     if n:
         conn.commit()
     return n
 
 
-def _grade_one(conn, row) -> bool:
+def _grade_one(conn, row, capper: Capper = EGGZ) -> bool:
     (pid, game_id, market, side, line, price, stake, player, prop_stat,
      prop_market, commence, sport) = row
     prop_kind = "pitcher" if prop_stat in {
@@ -1092,13 +1376,16 @@ def _grade_one(conn, row) -> bool:
     if not game or game[0] is None or game[1] is None:
         return False
     home_score, away_score, home_win, home_win_reg, went_to_ot, commence_db, _gd = game
+    if market == "parlay":
+        return False
     if market == "prop":
         return _grade_prop(conn, pid, game_id, side, line, price, stake, player,
                            prop_stat, prop_kind, prop_market, commence or commence_db,
-                           sport)
+                           sport, capper)
     if market == "h2h_3way":
         return _grade_regulation(conn, pid, game_id, side, price, stake,
-                                 commence or commence_db, home_win_reg, went_to_ot)
+                                 commence or commence_db, home_win_reg, went_to_ot,
+                                 capper)
     if home_win is None and home_score is not None and away_score is not None:
         if float(home_score) > float(away_score):
             home_win = 1
@@ -1111,7 +1398,7 @@ def _grade_one(conn, row) -> bool:
         home_win, home_win_reg, int(went_to_ot or 0),
         price, spread_home, total_line, 0.0)
     if result == "NO_ACTION":
-        _mark_review(conn, pid, "ungraded")
+        _mark_review(conn, pid, "ungraded", capper)
         return True
     profit, risked = units_for_result(stake, price, result)
     clv, close_px, beat = _game_clv(
@@ -1143,7 +1430,7 @@ def _regulation_from_game(side, home_win_reg, went_to_ot) -> str | None:
 
 
 def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
-                      home_win_reg, went_to_ot) -> bool:
+                      home_win_reg, went_to_ot, capper: Capper = EGGZ) -> bool:
     """60-minute ML. A regulation tie, including OT/SO, is a loss for either side.
 
     Period rows win when any exist: the score is the sum of the three period
@@ -1159,7 +1446,7 @@ def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
     if not rows:
         result = _regulation_from_game(side, home_win_reg, went_to_ot)
         if result is None:
-            return _mark_review(conn, pid, "no_regulation_score")
+            return _mark_review(conn, pid, "no_regulation_score", capper)
         profit, risked = units_for_result(stake, price, result)
         clv, close_px, beat = _game_clv(
             conn, game_id, "h2h_3way", side, None, price, commence)
@@ -1173,10 +1460,10 @@ def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
                 int(away_p1) + int(away_p2) + int(away_p3),
             ))
         except (TypeError, ValueError):
-            _mark_review(conn, pid, "no_regulation_score")
+            _mark_review(conn, pid, "no_regulation_score", capper)
             return True
     if len(set(sums)) != 1:
-        _mark_review(conn, pid, "regulation_scores_disagree")
+        _mark_review(conn, pid, "regulation_scores_disagree", capper)
         return True
     reg_home, reg_away = sums[0]
     if reg_home == reg_away:
@@ -1193,7 +1480,7 @@ def _grade_regulation(conn, pid, game_id, side, price, stake, commence,
 
 
 def _grade_log_prop(conn, pid, game_id, side, line, price, stake, player,
-                    table: str, column: str) -> bool:
+                    table: str, column: str, capper: Capper = EGGZ) -> bool:
     """NFL / NBA / WNBA box score. An empty log waits. A log that does not
     name this player is needs_review, never a graded NO_ACTION that the
     recap then leaves out."""
@@ -1207,7 +1494,7 @@ def _grade_log_prop(conn, pid, game_id, side, line, price, stake, player,
     hits = [actual for name, actual in rows
             if normalize_player_name(name) == want]
     if len(hits) != 1 or hits[0] is None or line is None:
-        _mark_review(conn, pid, "player_not_in_log")
+        _mark_review(conn, pid, "player_not_in_log", capper)
         return True
     actual = hits[0]
     if float(actual) == float(line):
@@ -1222,13 +1509,14 @@ def _grade_log_prop(conn, pid, game_id, side, line, price, stake, player,
 
 
 def _grade_prop(conn, pid, game_id, side, line, price, stake, player,
-                prop_stat, prop_kind, prop_market, commence, sport) -> bool:
+                prop_stat, prop_kind, prop_market, commence, sport,
+                capper: Capper = EGGZ) -> bool:
     spec = _LOG_STAT.get((sport, prop_stat))
     if spec and line is not None:
         return _grade_log_prop(conn, pid, game_id, side, line, price, stake,
-                               player, spec[0], spec[1])
+                               player, spec[0], spec[1], capper)
     if prop_kind not in ("batter", "pitcher") or not prop_stat or line is None:
-        _mark_review(conn, pid, "prop_not_graded")
+        _mark_review(conn, pid, "prop_not_graded", capper)
         return True
     rows = conn.execute(
         "SELECT player_name, player_type, innings_pitched, p_strikeouts, "
@@ -1240,7 +1528,7 @@ def _grade_prop(conn, pid, game_id, side, line, price, stake, player,
         # table, so leaving it pending would hold the recap open.
         if sport == "MLB":
             return False
-        _mark_review(conn, pid, "prop_not_graded")
+        _mark_review(conn, pid, "prop_not_graded", capper)
         return True
     cols = ["player_name", "player_type", "innings_pitched", "p_strikeouts",
             "p_walks", "p_hits_allowed", "p_earned_runs", "hits", "total_bases",
@@ -1326,68 +1614,118 @@ def _write_grade(conn, pid, result, profit, risked, clv, close_px, beat) -> None
          datetime.now(timezone.utc).isoformat(), pid))
 
 
-def _mark_review(conn, pid, reason: str) -> bool:
+def _mark_review(conn, pid, reason: str, capper: Capper = EGGZ) -> bool:
     changed = conn.execute(
         "UPDATE capper_picks SET status = 'needs_review', review_reason = %s "
         "WHERE id = %s AND status = 'pending' RETURNING id",
         (reason, pid)).fetchone()
     if changed:
-        logger.error(f"Eggz pick {pid} needs review: {reason}")
+        logger.error(f"{capper.display_name} pick {pid} needs review: {reason}")
     return bool(changed)
 
 
-_GRADED_LEGS = (
-    "SELECT sport, 'eggz', result, NULL, price, "
-    "CASE WHEN clv_pct IS NOT NULL THEN clv_pct END, FALSE, units, risked "
-    "FROM capper_picks WHERE status = 'graded' "
-    "AND result IN ('WIN','LOSS','PUSH') "
-)
+def _grade_parlays(conn, capper: Capper) -> int:
+    """Settle a parlay once every leg is graded. The stated price is the price.
+
+    Any LOSS loses the parlay. All WIN wins it. All PUSH pushes it. A push
+    mixed with wins would need a new price, and the post did not state one,
+    so that parlay is needs_review. A leg that is not graded yet waits.
+    """
+    rows = conn.execute(
+        "SELECT id, price, stake_units FROM capper_picks "
+        "WHERE market = 'parlay' AND status='pending' AND "
+        + _owner_clause(capper)
+    ).fetchall()
+    n = 0
+    for pid, price, stake in rows:
+        legs = conn.execute(
+            "SELECT status, result FROM capper_picks WHERE parlay_id = %s",
+            (pid,)).fetchall()
+        if not legs:
+            continue
+        if any(status != "graded" for status, _result in legs):
+            continue
+        results = [result for _status, result in legs]
+        if any(result == "LOSS" for result in results):
+            outcome = "LOSS"
+        elif all(result == "WIN" for result in results):
+            outcome = "WIN"
+        elif all(result == "PUSH" for result in results):
+            outcome = "PUSH"
+        elif any(result in (None, "NO_ACTION") for result in results):
+            if _mark_review(conn, pid, "parlay_leg_unsettled", capper):
+                n += 1
+            continue
+        else:
+            if _mark_review(conn, pid, "parlay_push_changes_price", capper):
+                n += 1
+            continue
+        profit, risked = units_for_result(stake, price, outcome)
+        _write_grade(conn, pid, outcome, profit, risked, None, None, None)
+        n += 1
+    return n
 
 
-def _window_rows(conn, start: str, end: str) -> list[tuple]:
+def _graded_legs(capper: Capper = EGGZ) -> str:
+    return (
+        f"SELECT sport, '{capper.key}', result, NULL, price, "
+        "CASE WHEN clv_pct IS NOT NULL THEN clv_pct END, FALSE, units, risked "
+        "FROM capper_picks WHERE status = 'graded' "
+        "AND result IN ('WIN','LOSS','PUSH') "
+        f"AND {_record_clause(capper)} "
+    )
+
+
+_GRADED_LEGS = _graded_legs(EGGZ)
+
+
+def _window_rows(conn, start: str, end: str, capper: Capper = EGGZ) -> list[tuple]:
     return conn.execute(
-        _GRADED_LEGS + "AND game_date BETWEEN %s AND %s",
+        _graded_legs(capper) + "AND game_date BETWEEN %s AND %s",
         (start, end)).fetchall()
 
 
-def _all_time_rows(conn, through: str) -> list[tuple]:
-    """Every graded Eggz leg from the start of tracking through `through`.
+def _all_time_rows(conn, through: str, capper: Capper = EGGZ) -> list[tuple]:
+    """Every graded leg of this capper from his first one through `through`.
 
     needs_review and pending stay out. A leg whose game_date is after the
     recap's period stays out, including one that is already graded. Every
-    graded leg inside the bound is in the units.
+    graded leg inside the bound is in the units. A parlay leg is not a
+    second unit. ParlayMatt's since-date is his own first graded game_date.
     """
     return conn.execute(
-        _GRADED_LEGS + "AND game_date <= %s",
+        _graded_legs(capper) + "AND game_date <= %s",
         (through,)).fetchall()
 
 
-def _pending_in(conn, start: str, end: str) -> int:
+def _pending_in(conn, start: str, end: str, capper: Capper = EGGZ) -> int:
     row = conn.execute(
         "SELECT COUNT(*) FROM capper_picks WHERE status = 'pending' "
-        "AND game_date BETWEEN %s AND %s",
+        "AND game_date BETWEEN %s AND %s AND " + _record_clause(capper),
         (start, end)).fetchone()
     return int(row[0]) if row else 0
 
 
-def _unresolved_in(conn, start: str, end: str) -> int:
+def _unresolved_in(conn, start: str, end: str, capper: Capper = EGGZ) -> int:
     """Pending and needs_review legs in this window.
 
     A set-aside leg with a game_date is in the window it was matched to.
     One that never matched has no game_date; it belongs to the New York
     date it was posted. Either one holds the recap. A graded leg is not
-    in this count.
+    in this count. A parlay leg does not hold it on its own. The parlay
+    row does.
     """
+    scope = _record_clause(capper)
     row = conn.execute(
         "SELECT COUNT(*) FROM capper_picks "
         "WHERE status IN ('pending', 'needs_review') "
-        "AND game_date BETWEEN %s AND %s",
+        "AND game_date BETWEEN %s AND %s AND " + scope,
         (start, end)).fetchone()
     n = int(row[0]) if row and row[0] else 0
     loose = conn.execute(
         "SELECT posted_at FROM capper_picks "
         "WHERE status IN ('pending', 'needs_review') "
-        "AND game_date IS NULL AND posted_at IS NOT NULL",
+        "AND game_date IS NULL AND posted_at IS NOT NULL AND " + scope,
     ).fetchall()
     for row in loose or []:
         posted = row[0] if row else None
@@ -1400,7 +1738,7 @@ def _unresolved_in(conn, start: str, end: str) -> int:
     return n
 
 
-def _slate_unfinished(conn, start: str, end: str) -> bool:
+def _slate_unfinished(conn, start: str, end: str, capper: Capper = EGGZ) -> bool:
     """A game on a slate date in this window has no final score.
 
     The slate dates are the dates he has a pick. Every game of that sport
@@ -1416,15 +1754,16 @@ def _slate_unfinished(conn, start: str, end: str) -> bool:
         "AND (g.home_score IS NULL OR g.away_score IS NULL) "
         "AND EXISTS (SELECT 1 FROM capper_picks c "
         "WHERE c.game_date = g.game_date AND c.sport = g.sport "
-        "AND c.game_date BETWEEN %s AND %s) "
+        "AND c.game_date BETWEEN %s AND %s AND "
+        + _record_clause(capper, "c") + ") "
         "LIMIT 1",
         (start, end, start, end)).fetchone()
     return row is not None
 
 
-def eggz_embed(heading: str, rows: list[tuple], pending: int,
-               all_time: list[tuple] | None = None, since: str | None = None,
-               corrected: bool = False) -> dict | None:
+def capper_embed(capper: Capper, heading: str, rows: list[tuple], pending: int,
+                 all_time: list[tuple] | None = None, since: str | None = None,
+                 corrected: bool = False) -> dict | None:
     """The Discord embed, or None when the window is not ready to post.
 
     `pending` counts unresolved legs, including needs_review. `all_time` is
@@ -1451,7 +1790,7 @@ def eggz_embed(heading: str, rows: list[tuple], pending: int,
         fields.extend(render_all_time_fields(
             all_time, since or "the first graded leg"))
     color = 0x3BA55D if overall["units"] > 0 else 0xED4245 if overall["units"] < 0 else 0x4F545C
-    title = f"\U0001F4CA Eggz — {heading}"
+    title = f"\U0001F4CA {capper.display_name} — {heading}"
     description = f"**{_tally_line(overall, with_clv=True)}**  ·  {len(rows)} settled"
     if corrected:
         title += "  ·  Corrected"
@@ -1468,35 +1807,43 @@ def eggz_embed(heading: str, rows: list[tuple], pending: int,
     }
 
 
-def _record_since(conn, through: str) -> str:
+def eggz_embed(heading: str, rows: list[tuple], pending: int,
+               all_time: list[tuple] | None = None, since: str | None = None,
+               corrected: bool = False) -> dict | None:
+    """Eggz's embed. The title and the tally are the ones already posted."""
+    return capper_embed(EGGZ, heading, rows, pending, all_time, since, corrected)
+
+
+def _record_since(conn, through: str, capper: Capper = EGGZ) -> str:
     row = conn.execute(
         "SELECT MIN(game_date) FROM capper_picks WHERE status = 'graded' "
         "AND result IN ('WIN', 'LOSS', 'PUSH') AND game_date IS NOT NULL "
-        "AND game_date <= %s",
+        "AND game_date <= %s AND " + _record_clause(capper),
         (through,)).fetchone()
     if row and row[0]:
         return str(row[0])[:10]
     return "the first graded leg"
 
 
-def _blocked(conn, span: str, start: str, end: str, now) -> bool:
-    unresolved = _unresolved_in(conn, start, end)
+def _blocked(conn, span: str, start: str, end: str, now,
+             capper: Capper = EGGZ) -> bool:
+    unresolved = _unresolved_in(conn, start, end, capper)
     if unresolved:
         logger.error(
-            f"Eggz {span} {start}..{end} held: {unresolved} unresolved "
-            f"or set-aside leg(s)")
+            f"{capper.display_name} {span} {start}..{end} held: {unresolved} "
+            f"unresolved or set-aside leg(s)")
         return True
-    if _slate_unfinished(conn, start, end):
+    if _slate_unfinished(conn, start, end, capper):
         return True
     return False
 
 
 def _post_window(conn, span: str, start: str, end: str, heading: str,
                  dry_run: bool = False, now: datetime | None = None,
-                 restate_published_at=None) -> int:
-    if not configured_to_post():
+                 restate_published_at=None, capper: Capper = EGGZ) -> int:
+    if not configured_to_post(capper):
         return 0
-    kind = f"discord_eggz_results_{span}"
+    kind = f"{capper.results_prefix}_{span}"
     if restate_published_at is not None:
         kind = f"{kind}_restate"
         lock = restate_lock_key(kind, start, restate_published_at)
@@ -1506,36 +1853,37 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
         "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
         (lock, kind)).fetchone():
         return 0
-    if _blocked(conn, span, start, end, now):
+    if _blocked(conn, span, start, end, now, capper):
         return 0
-    rows = _window_rows(conn, start, end)
+    rows = _window_rows(conn, start, end, capper)
     sports = tuple({r[0] for r in rows if r[0]})
     if sport_in_progress(conn, sports, now):
-        logger.info(f"Eggz {span} waits, a game of that sport is in progress")
+        logger.info(
+            f"{capper.display_name} {span} waits, a game of that sport is in progress")
         return 0
-    all_time = _all_time_rows(conn, end) if rows else None
-    since = _record_since(conn, end) if all_time else None
-    embed = eggz_embed(
-        heading, rows, 0, all_time, since,
+    all_time = _all_time_rows(conn, end, capper) if rows else None
+    since = _record_since(conn, end, capper) if all_time else None
+    embed = capper_embed(
+        capper, heading, rows, 0, all_time, since,
         corrected=restate_published_at is not None)
     if embed is None:
         return 0
     embed.pop("clv", None)
     if dry_run:
         logger.info(
-            f"[dry-run] eggz {span} {heading}: {embed.get('title')} "
+            f"[dry-run] {capper.key} {span} {heading}: {embed.get('title')} "
             f"{embed.get('description')}")
         return 1
-    message_id = _post(config.DISCORD_WEBHOOK_EGGZ, {"embeds": [embed]})
+    message_id = _post(capper.webhook(), {"embeds": [embed]})
     if not message_id:
-        logger.error(f"Eggz {span} recap not confirmed")
+        logger.error(f"{capper.display_name} {span} recap not confirmed")
         return 0
     conn.execute(
         "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
         (lock, kind, datetime.now(ET).isoformat(), message_id))
     conn.commit()
-    logger.info(f"Eggz {span} recap posted: {heading}")
+    logger.info(f"{capper.display_name} {span} recap posted: {heading}")
     return 1
 
 
@@ -1547,65 +1895,110 @@ def _as_et(now: datetime | None) -> datetime:
     return now.astimezone(ET)
 
 
-def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+def post_capper_recaps(capper: Capper, now: datetime | None = None,
+                       dry_run: bool = False) -> int:
     """Daily from 6:00am ET, week and month from 7:30am ET, all through noon.
 
-    Skips when DISCORD_WEBHOOK_EGGZ is unset. Does not post to X or #results.
+    Skips when that capper's webhook is unset. Does not post to X or #results.
     The day is yesterday in America/New_York. A day that missed its morning
     stays eligible for DAILY_CATCHUP_DAYS mornings, oldest first, and the
     post names that date. A pending leg, a needs_review leg, a slate date
     that is not final, or a game of that sport in progress is left
     unledgered. After noon the miss waits for the next morning.
     """
-    if not configured_to_post():
+    if not configured_to_post(capper):
         return 0
     from data.db import get_connection
     now = _as_et(now)
     conn = get_connection()
     try:
         try:
-            ingest_messages(conn)
+            if capper is EGGZ:
+                ingest_messages(conn)
+            else:
+                ingest_messages(conn, capper=capper)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"Eggz ingest before recap failed: {exc}")
+            logger.error(f"{capper.display_name} ingest before recap failed: {exc}")
         try:
-            grade_pending(conn)
+            if capper is EGGZ:
+                grade_pending(conn)
+            else:
+                grade_pending(conn, capper)
         except Exception as exc:                              # noqa: BLE001
-            logger.error(f"Eggz grade before recap failed: {exc}")
+            logger.error(f"{capper.display_name} grade before recap failed: {exc}")
         posted = 0
         if in_daily_recap_window(now):
             for back in range(DAILY_CATCHUP_DAYS, 0, -1):
                 day = (now.date() - timedelta(days=back)).isoformat()
-                posted += _post_window(
-                    conn, "day", day, day, _day_heading(day), dry_run, now)
+                if capper is EGGZ:
+                    posted += _post_window(
+                        conn, "day", day, day, _day_heading(day), dry_run, now)
+                else:
+                    posted += _post_window(
+                        conn, "day", day, day, _day_heading(day), dry_run, now,
+                        capper=capper)
         if in_period_recap_window(now):
             for window in recap_periods_due(now):
-                posted += _post_window(
-                    conn, window["span"], window["start"].isoformat(),
-                    window["end"].isoformat(), window["heading"], dry_run, now)
+                if capper is EGGZ:
+                    posted += _post_window(
+                        conn, window["span"], window["start"].isoformat(),
+                        window["end"].isoformat(), window["heading"], dry_run, now)
+                else:
+                    posted += _post_window(
+                        conn, window["span"], window["start"].isoformat(),
+                        window["end"].isoformat(), window["heading"], dry_run, now,
+                        capper=capper)
         return posted
     finally:
         conn.close()
+
+
+def post_eggz_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """Eggz's recap. Unset DISCORD_WEBHOOK_EGGZ posts nothing."""
+    return post_capper_recaps(EGGZ, now, dry_run)
+
+
+def post_parlaymatt_recaps(now: datetime | None = None, dry_run: bool = False) -> int:
+    """ParlayMatt's recap. Unset DISCORD_WEBHOOK_PARLAYMATT posts nothing."""
+    return post_capper_recaps(PARLAYMATT, now, dry_run)
 
 
 def _day_heading(day: str) -> str:
     return datetime.fromisoformat(day).strftime("%b %d").replace(" 0", " ")
 
 
-def run_eggz_ingest() -> None:
-    """Poll, parse, and grade. Recaps stay on the daily and Monday jobs."""
-    if not configured_to_read():
+def run_capper_ingest(capper: Capper) -> None:
+    """Poll, parse, and grade. Recaps stay on the daily and Monday jobs.
+
+    Unset token, channel, or author returns before any Discord call.
+    """
+    if not configured_to_read(capper):
         return
     from data.db import get_connection
     conn = get_connection()
     try:
-        n = ingest_messages(conn)
-        g = grade_pending(conn)
+        if capper is EGGZ:
+            n = ingest_messages(conn)
+            g = grade_pending(conn)
+        else:
+            n = ingest_messages(conn, capper=capper)
+            g = grade_pending(conn, capper)
         if n or g:
-            logger.info(f"Eggz ingest stored {n}, graded {g}")
+            logger.info(f"{capper.display_name} ingest stored {n}, graded {g}")
     except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"Eggz ingest failed: {exc}")
+        logger.error(f"{capper.display_name} ingest failed: {exc}")
     finally:
         conn.close()
+
+
+def run_eggz_ingest() -> None:
+    """Poll Eggz. Recaps stay on the daily and Monday jobs."""
+    run_capper_ingest(EGGZ)
+
+
+def run_parlaymatt_ingest() -> None:
+    """Poll ParlayMatt. No-op when his channel or author is unset."""
+    run_capper_ingest(PARLAYMATT)
 
 
 _MANUAL_RESULTS = {"WIN", "LOSS", "PUSH"}
@@ -1615,17 +2008,18 @@ class EggzSettleError(ValueError):
     """A manual result was refused. The row is unchanged."""
 
 
-def open_legs(conn) -> list[tuple]:
+def open_legs(conn, capper: Capper = EGGZ) -> list[tuple]:
     """Pending and needs_review legs, oldest id first. Read only."""
     return conn.execute(
         "SELECT id, status, review_reason, game_date, sport, market, "
         "player_name, side, price, stake_units, posted_at "
-        "FROM capper_picks WHERE status IN ('pending', 'needs_review') "
-        "ORDER BY id"
+        "FROM capper_picks WHERE status IN ('pending', 'needs_review') AND "
+        + _owner_clause(capper) + " ORDER BY id"
     ).fetchall()
 
 
-def settle_manual(conn, pick_id, result: str, note: str, apply: bool = True) -> dict:
+def settle_manual(conn, pick_id, result: str, note: str, apply: bool = True,
+                  capper: Capper = EGGZ) -> dict:
     """Grade one set-aside leg from a stated result. The price already stored
     is the price. A missing price stays the bare stake. A graded row is
     refused. A row with no game_date is refused: the recap only sums legs
@@ -1641,7 +2035,7 @@ def settle_manual(conn, pick_id, result: str, note: str, apply: bool = True) -> 
         raise EggzSettleError("a note is required")
     row = conn.execute(
         "SELECT id, status, price, stake_units, game_date FROM capper_picks "
-        "WHERE id = %s",
+        "WHERE id = %s AND " + _owner_clause(capper),
         (pick_id,)).fetchone()
     if not row:
         raise EggzSettleError(f"no capper_picks row {pick_id}")
@@ -1671,7 +2065,7 @@ def settle_manual(conn, pick_id, result: str, note: str, apply: bool = True) -> 
 
 
 def restate_eggz_day(game_date: str, dry_run: bool = False,
-                     now: datetime | None = None) -> int:
+                     now: datetime | None = None, capper: Capper = EGGZ) -> int:
     """Post a Corrected recap for a day that already has a sent recap.
 
     The original push_sent row stays. One correction per that row's
@@ -1679,21 +2073,22 @@ def restate_eggz_day(game_date: str, dry_run: bool = False,
     return 0 and post nothing. This does not ingest and does not grade.
     dry_run returns 1 when a post would go out, and writes nothing.
     """
-    if not configured_to_post():
+    if not configured_to_post(capper):
         return 0
     from data.db import get_connection
+    kind = f"{capper.results_prefix}_day"
     conn = get_connection()
     try:
         row = conn.execute(
             "SELECT sent_at FROM push_sent WHERE lock_key = %s AND kind = %s",
-            (f"discord_eggz_results_day:{game_date}",
-             "discord_eggz_results_day")).fetchone()
+            (f"{kind}:{game_date}", kind)).fetchone()
         if not row or not row[0]:
-            logger.error(f"Eggz day {game_date} has no sent recap to correct")
+            logger.error(
+                f"{capper.display_name} day {game_date} has no sent recap to correct")
             return 0
         return _post_window(
             conn, "day", game_date, game_date, _day_heading(game_date),
-            dry_run, now, restate_published_at=row[0])
+            dry_run, now, restate_published_at=row[0], capper=capper)
     finally:
         conn.close()
 
