@@ -38,6 +38,7 @@ import { DeleteAccountScreen } from '@/screens/DeleteAccountScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
+import { ScoreboardGameScreen } from '@/screens/ScoreboardGameScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
@@ -132,6 +133,7 @@ const GatedPerformance = withPremiumGate(PerformanceScreen, 'Performance', true)
 const GatedModels = withPremiumGate(ModelsScreen, 'Models', true);
 const GatedStats = withPremiumGate(StatsScreen, 'Stats', true);
 const GatedPickDetail = withPremiumGate(PickDetailScreen, 'Pick', false);
+const GatedScoreboardGame = withPremiumGate(ScoreboardGameScreen, 'Game', false);
 const GatedModelEdit = withPremiumGate(ModelEditScreen, 'Model', false);
 const GatedModelDetail = withPremiumGate(ModelDetailScreen, 'Model', false);
 const GatedBuiltInModel = withPremiumGate(BuiltInModelDetailScreen, 'Model', false);
@@ -328,6 +330,11 @@ export default function App() {
             name="PickDetail"
             component={GatedPickDetail}
             options={{ title: 'Pick Detail', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="ScoreboardGame"
+            component={GatedScoreboardGame}
+            options={{ title: 'Game', headerBackTitle: 'Scoreboard' }}
           />
           <Stack.Screen
             name="ModelEdit"

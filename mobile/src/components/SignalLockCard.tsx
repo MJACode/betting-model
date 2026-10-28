@@ -5,8 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * Soft lock for a free member. Same card on Picks, Signals, Live, Lines,
- * and the other non-Record tabs. Record is not locked.
+ * Soft lock for a free member. Same card on Picks, Signals, Live,
+ * and the other non-Record tabs. Record is not locked. Scoreboard uses
+ * its own sheet ("Scoreboard is Premium") over a blurred board.
  *
  * The copy is shared. It does not promise a trial on Weekly, which has none.
  * Unlock opens the paywall.

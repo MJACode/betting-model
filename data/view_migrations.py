@@ -448,6 +448,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # No spread, price, or line filter. After master's list. The
     # posted-stake pair stays last and adjacent.
     "byom_backtest_rpc_2026_10_16.sql",
+    # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
+    # One view over ncaaf_live_states, plus the SELECT policy the closed
+    # table never had. Does not rewrite picks, odds, or the record.
+    # Returns once the policy exists; CREATE OR REPLACE VIEW is idempotent.
+    # Sits before the posted-stake pair so those two files stay adjacent
+    # and published_record_units stays last. Not applied until Matt says so.
+    "add_ncaaf_scoreboard_latest_2026_10_28.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
