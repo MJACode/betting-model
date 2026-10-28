@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import { errorText, isAbortError } from '@/lib/errors';
 import {
-  fetchDkInplayForGame,
+  fetchDkInplayForGames,
   fetchLiveGameStates,
   fetchNcaafScoreboard,
   fetchNextScoreboardGame,
@@ -14,11 +14,12 @@ import {
 import {
   feedFromMlb,
   feedFromNcaaf,
+  mergeDkInplay,
   scoreboardPhase,
   type ScoreboardFeed,
   type ScoreboardQuote,
 } from '@/lib/scoreboard';
-import type { GameRow, LatestDkOddsRow, LiveGameStateRow, OddsSnapshotRow } from '@/types';
+import type { GameRow, LatestDkOddsRow, LiveGameStateRow } from '@/types';
 
 const POLL_MS = 30_000;
 
@@ -33,34 +34,6 @@ function groupQuotes(rows: readonly LatestDkOddsRow[]): Map<string, ScoreboardQu
     const list = out.get(row.game_id) ?? [];
     list.push(row);
     out.set(row.game_id, list);
-  }
-  return out;
-}
-
-function newestByMarket(rows: readonly OddsSnapshotRow[]): ScoreboardQuote[] {
-  const by = new Map<string, OddsSnapshotRow>();
-  for (const row of rows) {
-    const prev = by.get(row.market);
-    if (!prev || row.snapshot_at > prev.snapshot_at) by.set(row.market, row);
-  }
-  return [...by.values()];
-}
-
-async function inplayFor(ids: readonly string[]): Promise<Map<string, ScoreboardQuote[]>> {
-  const out = new Map<string, ScoreboardQuote[]>();
-  const size = 6;
-  for (let i = 0; i < ids.length; i += size) {
-    const chunk = ids.slice(i, i + size);
-    const rows = await Promise.all(
-      chunk.map(async (id) => {
-        try {
-          return [id, newestByMarket(await fetchDkInplayForGame(id))] as const;
-        } catch {
-          return [id, [] as ScoreboardQuote[]] as const;
-        }
-      }),
-    );
-    for (const [id, quotes] of rows) if (quotes.length > 0) out.set(id, quotes);
   }
   return out;
 }
@@ -84,6 +57,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
   const [liveError, setLiveError] = useState<string | null>(null);
   const [ncaafUnavailable, setNcaafUnavailable] = useState(false);
   const loadGen = useRef(0);
+  const inplayRef = useRef<Map<string, ScoreboardQuote[]>>(new Map());
   const dateKey = dates.join(',');
 
   const load = useCallback(async () => {
@@ -95,6 +69,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
     try {
       const gs = await fetchScoreboardGames(slate);
       if (gen !== loadGen.current) return;
+      const ncaafIds = gs.filter((game) => game.sport === 'NCAAF').map((game) => game.game_id);
       const [oddsRes, mlbRes, ncaafRes, nextRes] = await Promise.all([
         fetchScoreboardDkOdds(slate).then(
           (rows) => ({ rows, error: null as string | null }),
@@ -107,7 +82,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
             error: isAbortError(e) ? null : errorText(e),
           }),
         ),
-        fetchNcaafScoreboard(slate).then(
+        fetchNcaafScoreboard(ncaafIds).then(
           (rows) => ({ rows, missing: false, error: null as string | null }),
           (e: unknown) => ({
             rows: [] as NcaafScoreboardRow[],
@@ -136,15 +111,18 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       const liveIds = gs
         .filter((game) => scoreboardPhase(game, feedMap.get(game.game_id) ?? null) === 'live')
         .map((game) => game.game_id);
-      const liveLines = await inplayFor(liveIds);
+      const merged = mergeDkInplay(inplayRef.current, liveIds, await fetchDkInplayForGames(liveIds));
+      const liveLines = merged.lines;
+      const inplayError = merged.error;
       if (gen !== loadGen.current) return;
 
       setGames(gs);
       setQuotes(groupQuotes(oddsRes.rows));
       setFeeds(feedMap);
+      inplayRef.current = liveLines;
       setInplay(liveLines);
       setNextGame(nextRes);
-      setLinesError(oddsRes.error);
+      setLinesError(oddsRes.error ?? inplayError);
       setNcaafUnavailable(ncaafRes.missing);
       setLiveError(sport === 'MLB' ? mlbRes.error : sport === 'NCAAF' ? ncaafRes.error : null);
       setLoaded(true);

@@ -1,23 +1,24 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
-import { useRoute } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { errorText, isAbortError } from '@/lib/errors';
 import {
-  fetchDkInplayForGame,
+  fetchDkInplayForGames,
   fetchDkMarketEnds,
-  fetchLiveGameStates,
+  fetchLiveGameStateById,
   fetchNcaafScoreboard,
-  fetchScoreboardDkOdds,
+  fetchScoreboardDkOddsForGame,
   fetchScoreboardGame,
 } from '@/lib/queries';
 import {
   feedFromMlb,
   feedFromNcaaf,
+  mergeDkInplay,
   movementText,
   presentScoreboard,
   type ScoreboardQuote,
@@ -47,35 +48,46 @@ export function ScoreboardGameScreen() {
   const [card, setCard] = useState<ReturnType<typeof presentScoreboard> | null>(null);
   const [movement, setMovement] = useState<Record<string, string | null>>({});
   const [retrying, setRetrying] = useState(false);
+  const [linesError, setLinesError] = useState<string | null>(null);
+  const inplayHold = useRef<ScoreboardQuote[]>([]);
+  const loadGen = useRef(0);
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     setLoading(true);
     setError(null);
     try {
       const game = await fetchScoreboardGame(gameId);
+      if (gen !== loadGen.current) return;
       if (!game) {
         setCard(null);
         setError('This game isn’t on the board.');
         return;
       }
       const [dk, ends, inplayRows, mlb, ncaaf] = await Promise.all([
-        fetchScoreboardDkOdds([game.game_date]).catch(() => []),
+        fetchScoreboardDkOddsForGame(gameId).catch(() => []),
         Promise.all(MARKETS.map(async (m) => [m.id, await fetchDkMarketEnds(gameId, m.id)] as const)).catch(
           () => [] as const,
         ),
-        fetchDkInplayForGame(gameId).catch(() => []),
-        game.sport === 'MLB' ? fetchLiveGameStates(game.game_date).catch(() => []) : Promise.resolve([]),
-        game.sport === 'NCAAF' ? fetchNcaafScoreboard([game.game_date]).catch(() => []) : Promise.resolve([]),
+        fetchDkInplayForGames([gameId]),
+        game.sport === 'MLB' ? fetchLiveGameStateById(gameId).catch(() => null) : Promise.resolve(null),
+        game.sport === 'NCAAF' ? fetchNcaafScoreboard([gameId]).catch(() => []) : Promise.resolve([]),
       ]);
-      const pregame = dk.filter((row) => row.game_id === gameId);
-      const inplay = newest(inplayRows);
+      const merged = mergeDkInplay(
+        new Map([[gameId, inplayHold.current]]),
+        [gameId],
+        inplayRows,
+      );
+      const inplay = merged.lines.get(gameId) ?? [];
       const now = Date.now();
       const feed = game.sport === 'MLB'
-        ? feedFromMlb(mlb.find((row) => row.game_id === gameId), now)
+        ? feedFromMlb(mlb, now)
         : game.sport === 'NCAAF'
-          ? feedFromNcaaf(ncaaf.find((row) => row.game_id === gameId), now)
+          ? feedFromNcaaf(ncaaf[0], now)
           : null;
-      setCard(presentScoreboard({ game, pregame, inplay, feed, abbrevs }));
+      if (gen !== loadGen.current) return;
+      inplayHold.current = inplay;
+      setCard(presentScoreboard({ game, pregame: dk, inplay, feed, abbrevs }));
       const moved: Record<string, string | null> = {};
       for (const [market, pair] of ends) {
         const live = market === 'spreads' || market === 'totals' || market === 'h2h'
@@ -85,19 +97,25 @@ export function ScoreboardGameScreen() {
         moved[market] = movementText(pair.open, current, market);
       }
       setMovement(moved);
+      setLinesError(merged.error);
     } catch (e: unknown) {
+      if (gen !== loadGen.current) return;
       if (!isAbortError(e)) setError(errorText(e));
     } finally {
-      setLoading(false);
-      setRetrying(false);
+      if (gen === loadGen.current) {
+        setLoading(false);
+        setRetrying(false);
+      }
     }
   }, [gameId, abbrevs]);
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 30_000);
-    return () => clearInterval(id);
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      const id = setInterval(() => void load(), 30_000);
+      return () => clearInterval(id);
+    }, [load]),
+  );
 
   if (loading && !card) {
     return (
@@ -127,6 +145,17 @@ export function ScoreboardGameScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
+      {linesError ? (
+        <ErrorBanner
+          what="DraftKings lines"
+          error={linesError}
+          onRetry={() => {
+            setRetrying(true);
+            void load();
+          }}
+          retrying={retrying}
+        />
+      ) : null}
       {error ? (
         <ErrorBanner
           what="this game"

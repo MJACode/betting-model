@@ -5,7 +5,7 @@ import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
-import { isNotFoundError } from './errors';
+import { errorText, isAbortError, isNotFoundError } from './errors';
 import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
@@ -16,7 +16,7 @@ import {
   type PlayerLogSport,
 } from './playerLog';
 import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
-import { SCOREBOARD_MARKETS, SCOREBOARD_SPORTS } from './scoreboard';
+import { SCOREBOARD_MARKETS, SCOREBOARD_SPORTS, type InplayChunkResult } from './scoreboard';
 import {
   gameMarketForModel,
   lineShopForPick,
@@ -826,6 +826,18 @@ export async function fetchLiveGameStates(
     .in('game_date', Array.isArray(dates) ? dates : [dates]);
   if (error) throw error;
   return (data ?? []) as unknown as LiveGameStateRow[];
+}
+
+/** One game's stored MLB live row. The scoreboard sheet does not read the slate. */
+export async function fetchLiveGameStateById(gameId: string): Promise<LiveGameStateRow | null> {
+  const { data, error } = await supabase
+    .from('v_live_game_state_latest')
+    .select(LIVE_STATE_COLUMNS)
+    .eq('game_id', gameId)
+    .limit(1);
+  if (error) throw error;
+  const row = (data ?? [])[0];
+  return row ? (row as unknown as LiveGameStateRow) : null;
 }
 
 /** Freshest DK snapshot per game+market for a date (v_latest_dk_odds). */
@@ -3136,41 +3148,91 @@ export async function fetchScoreboardDkOdds(dates: readonly string[]): Promise<L
   );
 }
 
-/**
- * Latest NCAAF live state per game. The view is one row per game (379
- * games on 2026-10-28), so a date filter is a small read. A missing view
- * (migration not applied yet) throws; the board treats that as no live
- * state rather than a made-up score.
- */
-export async function fetchNcaafScoreboard(dates: readonly string[]): Promise<NcaafScoreboardRow[]> {
-  if (dates.length === 0) return [];
+/** Pregame DK game markets for one game. The sheet does not read the slate. */
+export async function fetchScoreboardDkOddsForGame(gameId: string): Promise<LatestDkOddsRow[]> {
   const { data, error } = await supabase
-    .from('v_ncaaf_scoreboard_latest')
-    .select(NCAAF_SCOREBOARD_COLUMNS)
-    .in('game_date', [...dates]);
+    .from('v_latest_dk_odds')
+    .select(LATEST_ODDS_COLUMNS)
+    .eq('game_id', gameId)
+    .in('market', [...SCOREBOARD_MARKETS]);
   if (error) throw error;
-  return (data ?? []) as unknown as NcaafScoreboardRow[];
+  return (data ?? []) as unknown as LatestDkOddsRow[];
 }
 
 /**
- * Newest in-play DK snapshots for one game. Indexed by
- * (game_id, market, bookmaker, snapshot_at). Twelve rows is enough to
- * cover the three game markets from the latest write. The all-books
- * in-play view is not used: a date filter on it timed out on 2026-10-28
- * because the view distincts the whole odds log first.
+ * Latest NCAAF live state for these games. The view is DISTINCT ON
+ * (game_id). A game_date filter cannot run until the whole log is
+ * sorted (EXPLAIN 2026-10-28: 18,661 rows, cost 3659). game_id is that
+ * key, and PostgREST sends it as = ANY, which the planner pushes into
+ * the index (same day, three ids, 149 rows, cost 411). Callers pass
+ * the games they already loaded. A missing view throws; the board
+ * treats that as no live state rather than a made-up score.
  */
-export async function fetchDkInplayForGame(gameId: string): Promise<OddsSnapshotRow[]> {
-  const { data, error } = await supabase
-    .from('odds')
-    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
-    .eq('game_id', gameId)
-    .eq('bookmaker', 'draftkings')
-    .eq('snapshot_type', 'in_play')
-    .in('market', [...SCOREBOARD_MARKETS])
-    .order('snapshot_at', { ascending: false })
-    .limit(12);
-  if (error) throw error;
-  return (data ?? []) as OddsSnapshotRow[];
+export async function fetchNcaafScoreboard(gameIds: readonly string[]): Promise<NcaafScoreboardRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: NcaafScoreboardRow[] = [];
+  const size = 80;
+  for (let i = 0; i < gameIds.length; i += size) {
+    const chunk = gameIds.slice(i, i + size);
+    const { data, error } = await supabase
+      .from('v_ncaaf_scoreboard_latest')
+      .select(NCAAF_SCOREBOARD_COLUMNS)
+      .in('game_id', [...chunk]);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as NcaafScoreboardRow[]));
+  }
+  return out;
+}
+
+const INPLAY_QUOTE =
+  'market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price';
+
+export type DkInplayRow = OddsSnapshotRow & { game_id: string };
+
+/**
+ * Latest in-play DraftKings row for each game market. One request per
+ * market, and one row per game: a limit across markets lets moneyline
+ * fill the window. Measured 2026-10-28, MLB_2026-10-27_MIL_TB: the
+ * newest 12 in-play DK rows were all h2h (2,265 spreads and 2,265
+ * totals on that game). The all-books in-play view is not used. A date
+ * filter on it timed out the same day because that view distincts the
+ * odds log first. odds_game_id_fkey is the embed, so each game is a
+ * LIMIT 1 on idx_odds_book_snap.
+ */
+export async function fetchDkInplayForGames(gameIds: readonly string[]): Promise<InplayChunkResult[]> {
+  if (gameIds.length === 0) return [];
+  const size = 40;
+  const chunks: string[][] = [];
+  for (let i = 0; i < gameIds.length; i += size) chunks.push([...gameIds.slice(i, i + size)]);
+  return Promise.all(SCOREBOARD_MARKETS.flatMap((market) => chunks.map(async (chunk) => {
+    try {
+      const { data, error } = await supabase
+        .from('games')
+        .select(`game_id, odds!odds_game_id_fkey(${INPLAY_QUOTE})`)
+        .in('game_id', chunk)
+        .eq('odds.market', market)
+        .eq('odds.bookmaker', 'draftkings')
+        .eq('odds.snapshot_type', 'in_play')
+        .order('snapshot_at', { foreignTable: 'odds', ascending: false })
+        .limit(1, { foreignTable: 'odds' });
+      if (error) throw error;
+      const rows = (data ?? []) as unknown as { game_id: string; odds: OddsSnapshotRow[] | null }[];
+      const found: DkInplayRow[] = [];
+      for (const row of rows) {
+        const quote = row.odds?.[0];
+        if (quote) found.push({ ...quote, game_id: row.game_id, market });
+      }
+      return { market, gameIds: chunk, ok: true, rows: found, error: null };
+    } catch (e) {
+      return {
+        market,
+        gameIds: chunk,
+        ok: false,
+        rows: [] as DkInplayRow[],
+        error: isAbortError(e) ? null : errorText(e),
+      };
+    }
+  })));
 }
 
 /** The next game for one sport after an ET date. One row. */
