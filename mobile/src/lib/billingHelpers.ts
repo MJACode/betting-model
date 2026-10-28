@@ -261,11 +261,12 @@ function formatStatusDate(iso: string | null, withYear: boolean): string | null 
 
 /**
  * Settings plan row. Free, "Free trial ends DATE", or "Annual · renews DATE".
- * A Discord-paid member with no App Store row is Premium without a renew date.
+ * A Whop membership does not change this row. The app plan is the Apple
+ * subscription.
  */
 export function planStatusCopy(
   sub: SubscriptionRow | null | undefined,
-  opts: { discordPaid?: boolean } = {},
+  _opts: { discordPaid?: boolean } = {},
   now: Date = new Date(),
 ): PlanStatusCopy {
   if (sub && isEntitled(sub, now) && sub.status === 'trialing') {
@@ -282,9 +283,6 @@ export function planStatusCopy(
       };
     }
     return { badge: 'Premium', line: when ? `${planName} · renews ${when}` : planName };
-  }
-  if (opts.discordPaid) {
-    return { badge: 'Premium', line: 'Included with your Discord membership' };
   }
   return { badge: 'Free', line: 'Free plan' };
 }

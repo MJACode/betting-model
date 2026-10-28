@@ -283,6 +283,6 @@ sync again.
 our role, when we had granted it, and deletes the link row.
 
 **5. Invite-on-paid and "Unlock Discord early" landed in #1061.** Flags stay
-off. This merge does not add another Settings sentence and does not change
-`web/content/terms.md`. The subscription manage alert still says a Discord
-membership covers the app; that sentence was already on master.
+off. Settings uses one Whop sentence: "Already in Discord via Whop? Connect
+Discord to link your account. Premium in the app is still via Apple."
+`web/content/terms.md` §8 says the same product fact.

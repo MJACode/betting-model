@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 terms §8 and Settings Whop line. Apple unlocks the app and Discord. Whop does not unlock the app. Flags stay off. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, #1060 merged master after #1061 and #1062. Apple-only my_access kept. No Whop checkout URL. Flags stay off. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, ParlayMatt tracked like Eggz: own channel, author, webhook, ledger keys, and all-time. A parlay is one unit at its stated price. Unset env no-ops. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, pytest comments no longer say Record only. Paywall feature check is tint. |

@@ -206,9 +206,9 @@ eq(
   'paid',
 );
 eq(
-  'discord paid is paid even without an app row',
-  membershipTier({ billingOn: true, entitled: true, subscription: null, discordPaid: true, now: NOW }),
-  'paid',
+  'a discord membership does not unlock the app',
+  membershipTier({ billingOn: true, entitled: false, subscription: null, discordPaid: true, now: NOW }),
+  'free',
 );
 eq(
   'receipt before the row is not paid',
@@ -284,15 +284,13 @@ eq(
 check('monthly convert line does not say weekly', !earlyUnlockLine('monthly').toLowerCase().includes('weekly'));
 check('paid join waits for an active row', settingsSrc.includes("subscription.status === 'active'"));
 check(
-  'whop soft copy is connect-only',
+  'whop soft copy is Matt\'s line and does not say Discord unlocks the app',
   settingsSrc.includes('Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.') &&
-    !settingsSrc.includes('whop.com'),
-);
-check(
-  'a whop-covered member connects on the membership card',
-  settingsSrc.includes('whopCovered && !access.discord_linked') &&
-    settingsSrc.includes('styles.chargeLine') &&
-    settingsSrc.includes('styles.connectedLine'),
+    !settingsSrc.includes('whop.com') &&
+    !settingsSrc.includes('WHOP_CHECKOUT_URL') &&
+    !settingsSrc.includes('covers the app') &&
+    !settingsSrc.includes('gives you access to the app') &&
+    !settingsSrc.includes('Included with your Discord membership'),
 );
 check('paywall selects DEFAULT_PLAN_KEY', paywallSrc.includes('DEFAULT_PLAN_KEY'));
 check('weekly discord line does not wait on a trial', paywallSrc.includes('included with this plan'));
