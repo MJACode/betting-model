@@ -5,9 +5,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   DefaultTheme,
   NavigationContainer,
+  useNavigation,
   useNavigationContainerRef,
 } from '@react-navigation/native';
-import { View } from 'react-native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ActivityIndicator, View } from 'react-native';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -62,6 +64,10 @@ import {
   setTabBarHeight,
   useTabBarHeight,
 } from '@/hooks/useTabBarHeight';
+import { FeatureGate } from '@/components/FeatureGate';
+import { useAuth } from '@/hooks/useAuth';
+import { useMembership } from '@/hooks/useMembership';
+import { AUTH_ENABLED } from '@/lib/authConfig';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -106,7 +112,44 @@ const NAV_THEME = {
   },
 };
 
+function withPremiumGate(
+  Screen: React.ComponentType,
+  heading: string,
+  chrome: boolean,
+) {
+  function Gated() {
+    return (
+      <FeatureGate heading={heading} chrome={chrome}>
+        <Screen />
+      </FeatureGate>
+    );
+  }
+  Gated.displayName = `PremiumGate(${heading})`;
+  return Gated;
+}
+
+const GatedPerformance = withPremiumGate(PerformanceScreen, 'Performance', true);
+const GatedModels = withPremiumGate(ModelsScreen, 'Models', true);
+const GatedStats = withPremiumGate(StatsScreen, 'Stats', true);
+const GatedPickDetail = withPremiumGate(PickDetailScreen, 'Pick', false);
+const GatedModelEdit = withPremiumGate(ModelEditScreen, 'Model', false);
+const GatedModelDetail = withPremiumGate(ModelDetailScreen, 'Model', false);
+const GatedBuiltInModel = withPremiumGate(BuiltInModelDetailScreen, 'Model', false);
+const GatedByomBuilder = withPremiumGate(ByomBuilderScreen, 'Model', false);
+const GatedByomEdit = withPremiumGate(ByomEditScreen, 'Model', false);
+const GatedByomDetail = withPremiumGate(ByomDetailScreen, 'Model', false);
+const GatedPlayerStats = withPremiumGate(PlayerStatsScreen, 'Stats', false);
+const GatedTeamStats = withPremiumGate(TeamStatsScreen, 'Stats', false);
+const GatedSavedParlays = withPremiumGate(SavedParlaysScreen, 'Parlays', false);
+
 function TabsRoot() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { contentLocked } = useMembership();
+  const lockedTab = {
+    tabPress: () => {
+      if (contentLocked) navigation.navigate('Paywall');
+    },
+  };
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -132,15 +175,15 @@ function TabsRoot() {
         </View>
       )}
     >
-      <Tab.Screen name="Picks" component={PicksHomeScreen} />
+      <Tab.Screen name="Picks" component={PicksHomeScreen} listeners={lockedTab} />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
         options={{ title: 'Record' }}
       />
-      <Tab.Screen name="Performance" component={PerformanceScreen} />
-      <Tab.Screen name="Models" component={ModelsScreen} />
-      <Tab.Screen name="Stats" component={StatsScreen} />
+      <Tab.Screen name="Performance" component={GatedPerformance} listeners={lockedTab} />
+      <Tab.Screen name="Models" component={GatedModels} listeners={lockedTab} />
+      <Tab.Screen name="Stats" component={GatedStats} listeners={lockedTab} />
     </Tab.Navigator>
   );
 }
@@ -205,6 +248,7 @@ startCrashLogging();
 
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
+  const { ready: authReady, signedIn } = useAuth();
   // A member who saw the intro before the sportsbook step existed gets that
   // step on its own, once (OnboardingModal booksOnly).
   const { needsChoice: needsBooks } = usePreferredBooks();
@@ -245,68 +289,84 @@ export default function App() {
     navRef.navigate('Betslip');
   }, [navRef]);
   const overTabs = routeName != null && TAB_ROUTE_NAMES.has(routeName);
+  const authHold = AUTH_ENABLED && !authReady;
+  const signedOut = AUTH_ENABLED && authReady && !signedIn;
+  // The paywall is the first screen after a fresh sign-in. The intro and the
+  // daily recap are modals, so they would cover it. Hold both until Close.
+  const holdIntro = routeName === 'Paywall' || routeName === 'SignIn';
+
+  useEffect(() => {
+    if (!signedOut || !navReady) return;
+    if (navRef.getCurrentRoute()?.name === 'SignIn') return;
+    navRef.reset({ index: 0, routes: [{ name: 'SignIn' }] });
+  }, [signedOut, navReady, navRef]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
     <AppErrorBoundary onReset={resetNav}>
       <OnboardingModal
-        visible={ready && (!seen || needsBooks)}
+        visible={ready && (!seen || needsBooks) && (!AUTH_ENABLED || signedIn) && !holdIntro}
         booksOnly={seen && needsBooks}
         onDone={markSeen}
       />
-      <DailyRecap onboardingDone={ready && seen && !needsBooks} />
+      <DailyRecap onboardingDone={ready && seen && !needsBooks && (!AUTH_ENABLED || signedIn) && !holdIntro} />
+      {authHold ? (
+        <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.tint} />
+        </View>
+      ) : (
       <NavigationContainer
         ref={navRef}
         theme={NAV_THEME}
         onReady={onNavReady}
         onStateChange={syncRoute}
       >
-        <Stack.Navigator>
+        <Stack.Navigator initialRouteName={signedOut ? 'SignIn' : 'Tabs'}>
           <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
           <Stack.Screen
             name="PickDetail"
-            component={PickDetailScreen}
+            component={GatedPickDetail}
             options={{ title: 'Pick Detail', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="ModelEdit"
-            component={ModelEditScreen}
+            component={GatedModelEdit}
             options={{ title: 'Model', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="ModelDetail"
-            component={ModelDetailScreen}
+            component={GatedModelDetail}
             options={{ title: 'Model', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="BuiltInModelDetail"
-            component={BuiltInModelDetailScreen}
+            component={GatedBuiltInModel}
             options={{ title: 'Model', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="ByomBuilder"
-            component={ByomBuilderScreen}
+            component={GatedByomBuilder}
             options={{ title: 'New NFL model', headerBackTitle: 'Cancel' }}
           />
           <Stack.Screen
             name="ByomEdit"
-            component={ByomEditScreen}
+            component={GatedByomEdit}
             options={{ title: 'Edit model', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="ByomDetail"
-            component={ByomDetailScreen}
+            component={GatedByomDetail}
             options={{ title: 'Model', headerBackTitle: 'My models' }}
           />
           <Stack.Screen
             name="PlayerStats"
-            component={PlayerStatsScreen}
+            component={GatedPlayerStats}
             options={{ title: 'Player Stats', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="TeamStats"
-            component={TeamStatsScreen}
+            component={GatedTeamStats}
             options={{ title: 'Team', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
@@ -339,7 +399,7 @@ export default function App() {
           />
           <Stack.Screen
             name="SavedParlays"
-            component={SavedParlaysScreen}
+            component={GatedSavedParlays}
             options={{ title: 'Saved Parlays', headerBackTitle: 'Back' }}
           />
           {/* No UI navigates here since the Track Record link was removed
@@ -366,7 +426,7 @@ export default function App() {
           <Stack.Screen
             name="SignIn"
             component={SignInScreen}
-            options={{ title: 'Sign in', headerBackTitle: 'Back' }}
+            options={{ headerShown: false, gestureEnabled: false }}
           />
           {/* Paywall is behind BILLING_ENABLED (lib/billingConfig.ts). Same
               posture as SignIn — registered, but nothing navigates to it while
@@ -374,11 +434,12 @@ export default function App() {
           <Stack.Screen
             name="Paywall"
             component={PaywallScreen}
-            options={{ title: 'Subscribe', headerBackTitle: 'Back' }}
+            options={{ headerShown: false, title: 'Subscribe' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />
       </NavigationContainer>
+      )}
       <BetslipBar
         hidden={routeName == null || NO_BETSLIP_BAR_ROUTES.has(routeName)}
         bottomOffset={overTabs ? tabBarHeight || FALLBACK_TAB_BAR_HEIGHT : 0}

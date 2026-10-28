@@ -1,5 +1,5 @@
 import { formatPrice } from './billingHelpers';
-import type { Plan, PlanKey } from './billingConfig';
+import { EARLY_UNLOCK_PRODUCT_IDS, type Plan, type PlanKey } from './billingConfig';
 
 /**
  * Pure IAP helpers — no react-native, no react-native-purchases imports (the
@@ -59,14 +59,33 @@ export function planForProductId(productId: string): PlanKey | null {
   return null;
 }
 
-/** Find the store package for one of our plans; packageType first, then id. */
+/** Exact store product, for the no-trial convert sibling. Not the intro package. */
+export function packageForProductId(
+  packages: readonly MinimalPackage[],
+  productId: string,
+): MinimalPackage | null {
+  const want = productId.toLowerCase();
+  return packages.find((p) => p.product.identifier.toLowerCase() === want) ?? null;
+}
+
+function isEarlyUnlockProduct(identifier: string): boolean {
+  const id = identifier.toLowerCase();
+  return Object.values(EARLY_UNLOCK_PRODUCT_IDS).some((convert) => convert.toLowerCase() === id);
+}
+
+/**
+ * Find the intro package for one of our plans; packageType first, then id.
+ * The no-trial convert sibling is excluded so a MONTHLY/ANNUAL package type
+ * on that sibling cannot replace the trial product on the paywall.
+ */
 export function packageForPlan(
   packages: readonly MinimalPackage[],
   key: PlanKey,
 ): MinimalPackage | null {
-  const byType = packages.find((p) => planForPackageType(p.packageType) === key);
+  const intro = packages.filter((p) => !isEarlyUnlockProduct(p.product.identifier));
+  const byType = intro.find((p) => planForPackageType(p.packageType) === key);
   if (byType) return byType;
-  return packages.find((p) => planForProductId(p.product.identifier) === key) ?? null;
+  return intro.find((p) => planForProductId(p.product.identifier) === key) ?? null;
 }
 
 /**

@@ -41,6 +41,7 @@ export {
   assertDiscordLinkEnabled,
   describeDiscordLink,
   discordErrorMessage,
+  discordInviteIfPaid,
   parseAccess,
   parseDiscordCallback,
   type AccessRow,

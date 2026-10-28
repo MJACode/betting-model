@@ -19,6 +19,14 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, pytest comments no longer say Record only. Paywall feature check is tint. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, mobile-tsc TS2322 fixed. `.notrial` rank documented. Stripe cancel confirms the stored subscription and prorates. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Community charge line and Connected-as spacing. Whop-covered Connect Discord sits on the membership card. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Unlock Discord early converts the trial plan via `monthly.notrial` / `annual.notrial`. Stripe ends that subscription in place. Public Join our Discord row removed. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Community navy action first, Whop sentence on a second card. Trial charge stays on Unlock Discord early. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Unlock Discord early buys Weekly (`premium.weekly`), not the trial SKU. Discord role is active-only. Trial app access stays. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, merged origin/master price lock 42881cb7. Community order matches boards 04/05. #1060 my_access SQL not taken. |
+| 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, login required, paywall after first sign-in, free shell is Record only, Discord invite paid-only. Flags stay off. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, billing display prices locked (Matt): weekly $9.99 no trial, monthly $24.99 and annual $149.99 with 7-day trials. Suggested premium.* product ids documented only. Billing stays off. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |

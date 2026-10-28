@@ -47,6 +47,9 @@ export const colors = {
   brandInk: BRAND_INK, //                                 (18.6:1 on white)
   brandNavy: '#0B1220', // the banner's ground — dark chrome surfaces
   brandNavyRaised: '#152034', // the banner's watermark — a raised dark surface
+  // Discord's own mark. Not a Signal Base colour. Named so the link sheet
+  // does not hard-code the hex.
+  discord: '#5865F2',
   brandMuted: '#8A97AB', // the banner's caption grey — inactive on navy (6.3:1)
   brandSeparator: '#374151', // hairline between navy chrome surfaces (1.8:1 vs navy)
 

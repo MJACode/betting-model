@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
+import { FeatureGate } from '@/components/FeatureGate';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { BetslipBooksRow } from '@/components/BetslipBooksRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
@@ -88,7 +89,7 @@ function parseAmerican(text: string): number | null {
  * come from "Add to betslip" (Stats, Picks, pick detail) or a hand-entered
  * custom leg, and every one of them can be removed individually or all at once.
  */
-export function ParlayScreen() {
+function ParlayScreenBody() {
   const navigation = useNavigation<ParlayNav>();
   // One hook owns the slip, the board it resolves against, and the pruning of
   // selections that no longer resolve — so this screen and the persistent
@@ -1036,6 +1037,15 @@ function SlipBody({
         <Text style={styles.clearBtnText}>Clear betslip</Text>
       </Pressable>
     </View>
+  );
+}
+
+/** Headerless stack screen. The gate supplies Back while the slip is locked. */
+export function ParlayScreen() {
+  return (
+    <FeatureGate heading="Parlay" chrome>
+      <ParlayScreenBody />
+    </FeatureGate>
   );
 }
 

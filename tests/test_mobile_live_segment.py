@@ -306,17 +306,19 @@ def test_the_empty_live_board_does_not_blink_to_a_spinner():
 
 
 def test_the_paywall_card_never_replaces_the_live_empty_state():
-    """SignalLockCard is for picks that EXIST and are hidden, not for an empty board.
+    """A free member's lock is the whole Picks surface, not a sentence about an empty live board.
 
-    At count 0 it says the models "haven't found a bet that clears the line yet
-    today" -- on a sport with no in-play model that is a promise the app cannot
-    keep, which is the sentence lib/liveSports.ts exists to prevent, and it pitches
-    a trial on a board that is structurally empty there (UX review, 2026-09-12).
+    The 2026-09-12 card at count 0 said the models "haven't found a bet that
+    clears the line yet today" — a promise the app cannot keep on a sport with
+    no in-play model. A free member can use the Record tab (Matt, 2026-10-27): the lock
+    replaces All, Signals, Live and Lines, and it does not claim the board is
+    empty. An entitled reader still gets the live empty state.
     """
     src = _read(PICKS)
-    assert re.search(
-        r"\{signalsLocked && !\(view === 'live' && liveData\.length === 0\) \?", src
-    ), "an unentitled reader gets the paywall card instead of the live empty state"
+    card = _read(MOBILE / "src" / "components" / "SignalLockCard.tsx")
+    assert "signalsLocked ?" in src, "a free member is not shown the lock instead of the board"
+    assert "haven't found a bet" not in card
+    assert "Unlock with Premium" in card
 
 
 def test_the_selected_segment_can_be_scrolled_into_view():

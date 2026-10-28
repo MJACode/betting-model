@@ -1,4 +1,12 @@
-import { PLANS, TRIAL_DAYS, type Plan, type PlanKey } from './billingConfig';
+import {
+  DEFAULT_PLAN_KEY,
+  EARLY_UNLOCK_PRODUCT_IDS,
+  PLANS,
+  STORE_PRODUCT_IDS,
+  TRIAL_DAYS,
+  type Plan,
+  type PlanKey,
+} from './billingConfig';
 
 /**
  * Pure billing helpers — no React, no react-native, no Supabase, so
@@ -122,25 +130,179 @@ export function describeSubscription(
   return when ? `${planName} — renews ${when}.` : `${planName} — active.`;
 }
 
-/** Marketing line for the paywall header. */
-export function trialCopy(): string {
-  return `${TRIAL_DAYS}-day free trial, then your plan. Cancel anytime.`;
+/**
+ * Shown when Unlock Discord early would purchase the intro product the user
+ * is already trialing. StoreKit does not end a trial by buying that same id.
+ */
+export const SAME_PLAN_PURCHASE_MESSAGE =
+  'Ending the trial would buy the same App Store product you are already trialing. That purchase was refused.';
+
+/** Shown when the convert would change tier or open a second subscription. */
+export const TIER_SWITCH_MESSAGE =
+  'Ending the trial would switch you to a different plan or start a second subscription. That purchase was refused.';
+
+export interface EarlyUnlockTarget {
+  ok: true;
+  plan: PlanKey;
+  productId: string;
+  /** The intro id already on the trial. The convert purchase must not be this. */
+  replacesProductId: string;
+}
+
+export interface EarlyUnlockRefusal {
+  ok: false;
+  reason: string;
+}
+
+/** Same marker order as planForProductId. annual before week before month. */
+function tierOfProductId(productId: string): PlanKey | null {
+  const id = productId.toLowerCase();
+  if (/annual|year/.test(id)) return 'annual';
+  if (/week|wk/.test(id)) return 'weekly';
+  if (/month/.test(id)) return 'monthly';
+  return null;
+}
+
+/**
+ * The product Unlock Discord early purchases.
+ *
+ * A monthly trial converts by buying `…premium.monthly.notrial`. An annual
+ * trial buys `…premium.annual.notrial`. Those ids have no introductory offer
+ * and must share a subscription group with the trial id, so the store
+ * replaces that subscription. Weekly is refused: it is a different tier, and
+ * weekly has no trial to end. The intro id itself is also refused.
+ */
+export function earlyUnlockTarget(trialingPlan: PlanKey): EarlyUnlockTarget | EarlyUnlockRefusal {
+  const replacesProductId = STORE_PRODUCT_IDS[trialingPlan];
+  const productId = EARLY_UNLOCK_PRODUCT_IDS[trialingPlan];
+  if (!productId || trialingPlan === 'weekly') {
+    return { ok: false, reason: TIER_SWITCH_MESSAGE };
+  }
+  if (productId === replacesProductId || productId === STORE_PRODUCT_IDS.weekly) {
+    return { ok: false, reason: productId === replacesProductId ? SAME_PLAN_PURCHASE_MESSAGE : TIER_SWITCH_MESSAGE };
+  }
+  if (tierOfProductId(productId) !== trialingPlan) {
+    return { ok: false, reason: TIER_SWITCH_MESSAGE };
+  }
+  return { ok: true, plan: trialingPlan, productId, replacesProductId };
+}
+
+/** Charge line on Unlock Discord early. Same tier, that tier's price. */
+export function earlyUnlockLine(trialingPlan: PlanKey): string {
+  const target = earlyUnlockTarget(trialingPlan);
+  if (!target.ok) {
+    return 'This trial cannot be ended by switching plans. No invite is shown until a paid plan is active.';
+  }
+  const convert = planForKey(target.plan);
+  return `Ends the ${convert.name} trial. ${formatPrice(convert.price)} today. No invite is shown until that plan is active.`;
+}
+
+function planForKey(key: PlanKey): Plan {
+  const plan = PLANS.find((p) => p.key === key);
+  if (!plan) throw new Error(`Unknown plan: ${key}`);
+  return plan;
+}
+
+/** The plan the paywall selects on open. */
+export function defaultPlan(): Plan {
+  return PLANS.find((p) => p.key === DEFAULT_PLAN_KEY) ?? PLANS[0];
+}
+
+/**
+ * Primary paywall button. Weekly has no trial, so it must not offer one.
+ */
+export function paywallCta(plan: Plan): string {
+  return plan.trialDays > 0 ? `Start ${plan.trialDays}-day free trial` : 'Subscribe';
+}
+
+/**
+ * Header under the title. Depends on the SELECTED plan: the old global
+ * `trialCopy()` promised a 7-day trial while Weekly, which has none, was
+ * selected.
+ */
+export function paywallSubtitle(plan: Plan): string {
+  if (plan.trialDays <= 0) return 'Charged today. Cancel anytime.';
+  return `${TRIAL_DAYS}-day free trial on Monthly and Annual. Cancel anytime.`;
+}
+
+/** Annual per-week equivalent. 149.99/52 = $2.88. Null for the other plans. */
+export function formatPerWeek(plan: Plan): string | null {
+  if (plan.key !== 'annual') return null;
+  return `${formatPrice(plan.price / 52)}/wk`;
+}
+
+/** Right-hand price caption on a plan row. */
+export function planPriceCaption(plan: Plan): string {
+  if (plan.key === 'annual') return `per year · ${formatPerWeek(plan)}`;
+  if (plan.key === 'monthly') return 'per month';
+  return 'per week';
+}
+
+/** Left-hand trial caption on a plan row. */
+export function planTrialLine(plan: Plan): string {
+  return plan.trialDays > 0 ? `${plan.trialDays}-day free trial` : 'No free trial';
+}
+
+export interface PlanStatusCopy {
+  badge: 'Free' | 'Trial' | 'Premium';
+  line: string;
+}
+
+const STATUS_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** UTC, so a status line does not depend on the phone's timezone. */
+function formatStatusDate(iso: string | null, withYear: boolean): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = `${STATUS_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+  return withYear ? `${day}, ${d.getUTCFullYear()}` : day;
+}
+
+/**
+ * Settings plan row. Free, "Free trial ends DATE", or "Annual · renews DATE".
+ * A Discord-paid member with no App Store row is Premium without a renew date.
+ */
+export function planStatusCopy(
+  sub: SubscriptionRow | null | undefined,
+  opts: { discordPaid?: boolean } = {},
+  now: Date = new Date(),
+): PlanStatusCopy {
+  if (sub && isEntitled(sub, now) && sub.status === 'trialing') {
+    const when = formatStatusDate(sub.trial_end ?? sub.current_period_end, false);
+    return { badge: 'Trial', line: when ? `Free trial ends ${when}` : 'Free trial' };
+  }
+  if (sub && isEntitled(sub, now) && sub.status === 'active') {
+    const planName = PLANS.find((p) => p.key === sub.plan)?.name ?? 'Premium';
+    const when = formatStatusDate(sub.current_period_end, true);
+    if (sub.cancel_at_period_end) {
+      return {
+        badge: 'Premium',
+        line: when ? `${planName} · ends ${when}` : `${planName} · cancels at period end`,
+      };
+    }
+    return { badge: 'Premium', line: when ? `${planName} · renews ${when}` : planName };
+  }
+  if (opts.discordPaid) {
+    return { badge: 'Premium', line: 'Included with your Discord membership' };
+  }
+  return { badge: 'Free', line: 'Free plan' };
 }
 
 /**
  * The auto-renewal disclosure App Review expects on the paywall, worded for
- * the selected plan. A plan with no trial must not claim one — that is a
- * rejection under 3.1.2, and it is also just untrue.
+ * the selected plan. A plan with no trial must not offer one — that is a
+ * rejection under 3.1.2, and it is also just untrue. Weekly says there is
+ * no free trial and that the charge is today.
  */
 export function renewalDisclosure(plan: Plan): string {
   const price = formatPrice(plan.price);
   const term = plan.key === 'weekly' ? 'week' : plan.key === 'annual' ? 'year' : 'month';
-  const base =
-    `${price} per ${term}, automatically renewed until cancelled. ` +
-    'Cancel anytime in your App Store account settings.';
-  return plan.trialDays > 0
-    ? `${plan.trialDays}-day free trial, then ${base}`
-    : base;
+  const cancel = 'Cancel anytime in your App Store account settings.';
+  if (plan.trialDays <= 0) {
+    return `${price} per ${term}, charged today. No free trial. Renews every ${term} until you cancel. ${cancel}`;
+  }
+  return `${plan.trialDays}-day free trial, then ${price} per ${term}. Renews every ${term} until you cancel. ${cancel}`;
 }
 
 export function isPlanKey(value: string): value is PlanKey {

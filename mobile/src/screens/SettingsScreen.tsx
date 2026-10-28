@@ -45,20 +45,18 @@ import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { authErrorMessage } from '@/lib/auth';
-import { useSubscription } from '@/hooks/useSubscription';
 import { useAccess } from '@/hooks/useAccess';
-import { useEntitlement } from '@/hooks/useEntitlement';
-import { billingReady } from '@/lib/billingConfig';
+import { useMembership } from '@/hooks/useMembership';
+import { billingReady, planFor } from '@/lib/billingConfig';
 import { discordLinkReady } from '@/lib/discordConfig';
-import { describeDiscordLink, discordErrorMessage } from '@/lib/discord';
+import { describeDiscordLink, discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
 import { DiscordLinkModal } from '@/components/DiscordLinkModal';
-import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
-import { describeSubscription } from '@/lib/billingHelpers';
+import { billingErrorMessage, endTrialEarly, openManageSubscription, restorePurchases } from '@/lib/billing';
+import { earlyUnlockLine, isEntitled, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
   APP_VERSION,
-  DISCORD_URL,
   TWITTER_URL,
   WEBSITE_URL,
   openLink,
@@ -284,14 +282,77 @@ export function SettingsScreen() {
   // Two different questions, deliberately asked of two different hooks:
   // `subscription` DESCRIBES the app subscription (this row is about it), while
   // `entitled` DECIDES access and has to include a Discord-paid member.
-  const { subscription } = useSubscription();
-  const { entitled } = useEntitlement();
+  const { subscription, hold: planHold, refresh: refreshMembership } = useMembership();
   const { access, unlink, busy: discordBusy } = useAccess();
+  const planStatus = planHold
+    ? { badge: 'Free' as const, line: 'Checking your plan…' }
+    : planStatusCopy(subscription, { discordPaid: access.discord_access });
   const [discordSheet, setDiscordSheet] = useState(false);
+  const [endingTrial, setEndingTrial] = useState(false);
+  const storePaid = Boolean(subscription && isEntitled(subscription) && subscription.status === 'active');
+  const whopCovered = planStatus.badge === 'Premium' && !storePaid;
+  const trialPlan = subscription?.plan && isPlanKey(subscription.plan) ? planFor(subscription.plan) : null;
+  const linkedName = access.discord_username ?? 'Discord';
   const openHelpline = () => {
     Linking.openURL('tel:1-800-522-4700').catch(() =>
       Alert.alert('Need help?', 'Call or text 1-800-GAMBLER (1-800-522-4700), available 24/7.'),
     );
+  };
+
+  const onUnlockDiscord = () => {
+    const userId = authUser?.id;
+    const plan = subscription?.plan;
+    if (!userId || !plan || !isPlanKey(plan)) {
+      Alert.alert(
+        'Could not end the trial',
+        'Your trial plan is not on this device yet. Try again in a moment.',
+      );
+      return;
+    }
+    setEndingTrial(true);
+    endTrialEarly(plan, userId)
+      .then((result) => {
+        if (result.outcome !== 'completed') return;
+        return refreshMembership().then(() => {
+          setTimeout(() => {
+            void refreshMembership();
+          }, 4000);
+        });
+      })
+      .catch((e) => Alert.alert('Could not end the trial', billingErrorMessage(e)))
+      .finally(() => setEndingTrial(false));
+  };
+
+  const onRestore = () => {
+    const userId = authUser?.id;
+    if (!userId) return;
+    restorePurchases(userId)
+      .then((restored) => {
+        Alert.alert(
+          restored ? 'Purchases restored' : 'Nothing to restore',
+          restored
+            ? 'Your subscription is active on this device.'
+            : 'No active subscription was found for this App Store account.',
+        );
+      })
+      .catch((e) => Alert.alert('Could not restore', billingErrorMessage(e)));
+  };
+
+  const onManage = () => {
+    if (subscription) {
+      openManageSubscription(authUser?.id ?? null).catch((e) =>
+        Alert.alert('Could not open billing', billingErrorMessage(e)),
+      );
+      return;
+    }
+    if (access.discord_access) {
+      Alert.alert(
+        'Included with Discord',
+        'Your Discord membership covers the app. Manage or cancel it where you bought it — cancelling there ends app access too.',
+      );
+      return;
+    }
+    navigation.navigate('Paywall');
   };
 
   const confirmSignOut = () => {
@@ -374,7 +435,7 @@ export function SettingsScreen() {
             // session-only today. Update when account-scoped data lands.
             <LinkRow
               label="Sign in"
-              sub="Optional. Everything works without an account — your models and tracked bets stay on this device."
+              sub="An account is needed to start a trial, subscribe and restore purchases. Your models and tracked bets stay on this device."
               onPress={() => navigation.navigate('SignIn')}
               right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
             />
@@ -385,45 +446,49 @@ export function SettingsScreen() {
             billingReady() enforces that pairing, since a subscription with no
             account behind it can't survive a reinstall. */}
         {billingReady() ? (
-          <LinkRow
-            label="Subscription"
-            sub={
-              subscription
-                ? `${describeSubscription(subscription)} Tap to manage or cancel.`
-                : access.discord_access
-                  ? 'Included with your Discord membership — nothing to pay here. Manage it where you bought it.'
-                  : 'Signals are locked. Tap to see plans.'
-            }
-            onPress={() => {
-              // A Discord-paid member has no App Store subscription to manage,
-              // and sending them to the paywall would invite them to buy a
-              // second time for something they already have.
-              if (subscription) {
-                openManageSubscription(authUser?.id ?? null).catch((e) =>
-                  Alert.alert('Could not open billing', billingErrorMessage(e)),
-                );
-              } else if (access.discord_access) {
-                Alert.alert(
-                  'Included with Discord',
-                  'Your Discord membership covers the app. Manage or cancel it where you bought it — cancelling there ends app access too.',
-                );
-              } else {
-                navigation.navigate('Paywall');
-              }
-            }}
-            right={
-              entitled ? (
-                <View style={styles.bookPill}>
-                  <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>
-                    {subscription ? 'Active' : 'Discord'}
-                  </Text>
+          <View style={styles.card}>
+            <View style={styles.bookRow}>
+              <Text style={styles.cardLabel}>Plan</Text>
+              {planHold ? null : planStatus.badge === 'Free' ? (
+                <View style={styles.freePill}>
+                  <Text style={styles.freePillText}>{planStatus.badge}</Text>
                 </View>
               ) : (
-                <Text style={styles.bookPillMuted}>Free</Text>
-              )
-            }
-          />
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>{planStatus.badge}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.sub}>{planStatus.line}</Text>
+            {planHold ? null : planStatus.badge === 'Free' ? (
+              <Pressable
+                onPress={() => navigation.navigate('Paywall')}
+                accessibilityRole="button"
+                accessibilityLabel="Upgrade to Premium"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Upgrade to Premium</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={onManage}
+                accessibilityRole="button"
+                accessibilityLabel="Manage subscription"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Manage subscription</Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={onRestore}
+              accessibilityRole="button"
+              accessibilityLabel="Restore purchases"
+              style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.restoreText}>Restore purchases</Text>
+            </Pressable>
+          </View>
         ) : null}
 
         <SectionHeader title="Betting" />
@@ -595,11 +660,136 @@ export function SettingsScreen() {
           icon="logo-x"
         />
 
-        {/* While linking is dark this is exactly today's row: a plain invite
-            link, no account involved. Once it is live the row becomes the
-            connect/disconnect control, because the invite alone can't grant
-            the subscriber role. */}
-        {discordLinkReady() && signedIn ? (
+        {/* No public invite. Join Discord is inside the paid card only. */}
+        {billingReady() ? (
+          !signedIn ? null : planHold ? (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>Discord for members</Text>
+            <Text style={styles.sub}>Checking your plan…</Text>
+          </View>
+          ) : (
+          <>
+          <View style={styles.card}>
+            <View style={styles.bookRow}>
+              <Text style={styles.cardLabel}>Discord for members</Text>
+              {storePaid || whopCovered ? (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Included</Text>
+                </View>
+              ) : (
+                <Ionicons name="lock-closed" size={16} color={colors.textTertiary} />
+              )}
+            </View>
+            <Text style={styles.sub}>
+              {storePaid
+                ? 'Talk picks with other subscribers.'
+                : whopCovered
+                  ? 'Your Discord membership already includes the subscriber Discord.'
+                  : planStatus.badge === 'Trial'
+                    ? 'Unlocks when your paid plan starts, after the free trial. No invite is shown until then.'
+                    : 'Included with a paid plan. No invite is shown until then.'}
+            </Text>
+            {planStatus.badge === 'Trial' && trialPlan ? (
+              <Text style={[styles.sub, styles.chargeLine]}>{earlyUnlockLine(trialPlan.key)}</Text>
+            ) : null}
+            {storePaid ? (
+              <Pressable
+                onPress={() => {
+                  const invite = discordInviteIfPaid(true);
+                  if (invite) void openLink(invite, 'Discord');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Join Discord"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Join Discord</Text>
+              </Pressable>
+            ) : planStatus.badge === 'Trial' ? (
+              <Pressable
+                onPress={onUnlockDiscord}
+                disabled={endingTrial}
+                accessibilityRole="button"
+                accessibilityLabel="Unlock Discord early"
+                accessibilityState={{ busy: endingTrial, disabled: endingTrial }}
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                {endingTrial ? (
+                  <ActivityIndicator color={colors.textInverse} />
+                ) : (
+                  <Text style={styles.manageText}>Unlock Discord early</Text>
+                )}
+              </Pressable>
+            ) : planStatus.badge === 'Free' ? (
+              <Pressable
+                onPress={() => navigation.navigate('Paywall')}
+                accessibilityRole="button"
+                accessibilityLabel="Upgrade to Premium"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Upgrade to Premium</Text>
+              </Pressable>
+            ) : whopCovered && !access.discord_linked ? (
+              <Pressable
+                onPress={() => setDiscordSheet(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Connect Discord"
+                style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.restoreText}>Connect Discord</Text>
+              </Pressable>
+            ) : null}
+            {access.discord_linked ? (
+              <>
+                <Text style={[styles.sub, styles.connectedLine]}>{`Connected as ${linkedName}.`}</Text>
+                <Pressable
+                  onPress={() => {
+                    Alert.alert(
+                      'Disconnect Discord?',
+                      access.discord_access
+                        ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
+                        : "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Disconnect',
+                          style: 'destructive',
+                          onPress: () => {
+                            unlink().catch((e) =>
+                              Alert.alert('Could not disconnect', discordErrorMessage(e)),
+                            );
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Disconnect Discord"
+                  style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.restoreText}>Disconnect Discord</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+          {!access.discord_linked && (planStatus.badge === 'Free' || planStatus.badge === 'Trial') ? (
+            <View style={styles.card}>
+              <Text style={styles.sub}>
+                Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.
+              </Text>
+              <Pressable
+                onPress={() => setDiscordSheet(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Connect Discord"
+                style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.restoreText}>Connect Discord</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          </>
+          )
+        ) : discordLinkReady() && signedIn ? (
           <LinkRow
             label={access.discord_linked ? 'Discord' : 'Connect Discord'}
             sub={describeDiscordLink(access)}
@@ -610,9 +800,6 @@ export function SettingsScreen() {
               }
               Alert.alert(
                 'Disconnect Discord?',
-                // Say plainly what they lose. A Discord-paid member who
-                // disconnects here would lose their free app access, and
-                // finding that out afterwards is the worst way to learn it.
                 access.discord_access
                   ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
                   : "We'll remove the subscriber role we granted you. You'll stay in the server.",
@@ -644,14 +831,7 @@ export function SettingsScreen() {
               )
             }
           />
-        ) : (
-          <LinkRow
-            label="Join our Discord"
-            sub="Talk picks with other users and tell us what to build next."
-            onPress={() => openLink(DISCORD_URL, 'Discord')}
-            icon="logo-discord"
-          />
-        )}
+        ) : null}
 
         <LinkRow
           label="Send feedback"
@@ -799,6 +979,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  chargeLine: {
+    marginTop: spacing.sm,
+  },
+  connectedLine: {
+    marginTop: spacing.md,
   },
   noMargin: {
     marginBottom: 0,
@@ -967,6 +1153,17 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     fontWeight: font.weight.medium,
   },
+  freePill: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  freePillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
   unreadPill: {
     backgroundColor: colors.tint,
     paddingHorizontal: spacing.sm,
@@ -977,6 +1174,30 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textInverse,
     fontWeight: font.weight.semibold,
+  },
+  manageBtn: {
+    marginTop: spacing.md,
+    minHeight: 48,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brandNavy,
+  },
+  manageText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textInverse,
+  },
+  restoreBtn: {
+    marginTop: spacing.sm,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restoreText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   signOutBtn: {
     marginTop: spacing.md,

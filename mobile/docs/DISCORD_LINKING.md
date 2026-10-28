@@ -5,6 +5,15 @@ access to discord and vice versa. If someone has discord they should be able to
 get an account on the app at no additional cost because they will pay via
 discord. If access is removed from one, it should be removed from the other."*
 
+The in-app invite is Apple-paid only (Matt, 2026-10-27). An active App Store
+subscription may open it. Free and trial never see the URL, on any surface,
+including while billing is off. Trial's button is "Unlock Discord early" and
+buys the current plan through StoreKit / RevenueCat, which ends the trial.
+Paid's button is "Join Discord". Free and trial also see "Already in Discord
+via Whop? Connect Discord to link your account. Premium in the app is still
+via Apple." That button is the existing Connect Discord link. There is no
+Whop checkout URL in the app. The Whop webhook stays.
+
 That is now built. Like auth and billing before it, it ships **dark**:
 `DISCORD_LINK_ENABLED` in `src/lib/discordConfig.ts` is `false`, and linking
 also requires `AUTH_ENABLED` — `discordLinkReady()` enforces the pair, because
@@ -74,7 +83,7 @@ app: "Connect Discord"
         /users/@me                          → discord id + verified email
         PUT /guilds/{id}/members/{user}     → one-tap join (guilds.join scope)
         upsert discord_links
-        syncAppRoleForUser()                → grant our role if they're subscribed
+        syncAppRoleForUser()                → grant our role only if status is active (not trialing)
         backfill discord id onto a Whop membership bought with the same email
   → app reads my_access()
 ```
@@ -101,7 +110,7 @@ what stops a client claiming a membership it did not buy.
 | Discord bot API helpers | `supabase/functions/_shared/discord.ts` |
 | The two-way rule, one place | `supabase/functions/_shared/entitlement.ts` |
 | Schema + access RPCs | `data/migrations/add_discord_link_and_whop_memberships.sql` |
-| Verification (44 assertions) | `scripts/verify_discord_link.ts` |
+| Verification (58 assertions) | `scripts/verify_discord_link.ts` |
 
 ### `useEntitlement`, not `useSubscription`
 
@@ -157,9 +166,8 @@ migration revokes `anon`/`authenticated` by name, but that check is the backstop
    - URL `https://vvprgnrmzeekokzkrkfu.supabase.co/functions/v1/whop-webhook`
    - events `membership.went_valid` and `membership.went_invalid`
    - copy the signing secret.
-3. Copy the checkout URL into `EXPO_PUBLIC_WHOP_CHECKOUT_URL` if you want the
-   "Get access on Discord" button on the paywall. Leave it unset and the button
-   simply doesn't render.
+3. The app does not embed a Whop checkout URL. Discord-only buyers pay on
+   Whop, outside the app. App Store buyers subscribe in the app.
 
 ### 4. Secrets
 

@@ -31,7 +31,7 @@ import {
   signInWithProvider,
   verifyEmailCode,
 } from '@/lib/auth';
-import { EMAIL_OTP_LENGTH } from '@/lib/authConfig';
+import { AUTH_ENABLED, EMAIL_OTP_LENGTH } from '@/lib/authConfig';
 import { openManageSubscription } from '@/lib/billing';
 import { isEntitled } from '@/lib/billingHelpers';
 import { billingReady } from '@/lib/billingConfig';
@@ -282,7 +282,11 @@ export function DeleteAccountScreen() {
   }, [navigation]);
 
   const signInAgain = useCallback(() => {
-    navigation.reset({ index: 1, routes: [{ name: 'Tabs' }, { name: 'SignIn' }] });
+    navigation.reset(
+      AUTH_ENABLED
+        ? { index: 0, routes: [{ name: 'SignIn' }] }
+        : { index: 1, routes: [{ name: 'Tabs' }, { name: 'SignIn' }] },
+    );
   }, [navigation]);
 
   if (phase === 'done') {
@@ -303,6 +307,7 @@ export function DeleteAccountScreen() {
           </View>
         </ScrollView>
         <View style={styles.footer}>
+          {AUTH_ENABLED ? null : (
           <Pressable
             onPress={continueWithout}
             accessibilityRole="button"
@@ -311,6 +316,7 @@ export function DeleteAccountScreen() {
           >
             <Text style={styles.quietText}>Continue without an account</Text>
           </Pressable>
+          )}
           <Pressable
             onPress={signInAgain}
             accessibilityRole="button"

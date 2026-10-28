@@ -8,7 +8,7 @@
  * react-native transitively (Supabase → AsyncStorage), which esbuild can't
  * transform. Same split as authHelpers / billingHelpers.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -18,6 +18,7 @@ import {
   assertDiscordLinkEnabled,
   describeDiscordLink,
   discordErrorMessage,
+  discordInviteIfPaid,
   parseAccess,
   parseDiscordCallback,
   type AccessRow,
@@ -27,6 +28,7 @@ import {
   DISCORD_REDIRECT_URL,
   discordLinkReady,
 } from '../src/lib/discordConfig';
+import { subscriptionGrantsDiscordRole } from '../../supabase/functions/_shared/discordRole';
 
 let passed = 0;
 const failures: string[] = [];
@@ -198,6 +200,72 @@ check(
   discordErrorMessage(new Error('kaboom')) === 'kaboom',
 );
 
+// --- invite is paid-only ----------------------------------------------------
+eq('unpaid invite is withheld', discordInviteIfPaid(false, 'https://discord.gg/example'), null);
+eq('blank invite is withheld', discordInviteIfPaid(true, '  '), null);
+eq('paid invite is returned', discordInviteIfPaid(true, ' https://discord.gg/example '), 'https://discord.gg/example');
+eq('unpaid default invite is withheld', discordInviteIfPaid(false), null);
+eq('paid default invite is the apple link', discordInviteIfPaid(true), 'https://discord.gg/JWMUzK9Da');
+function walkSrc(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (name === 'node_modules') continue;
+    try {
+      if (readdirSync(p)) walkSrc(p, out);
+    } catch {
+      if (name.endsWith('.ts') || name.endsWith('.tsx')) out.push(p);
+    }
+  }
+  return out;
+}
+const inviteLeaks = walkSrc(join(__dirname, '..', 'src')).filter((p) => {
+  if (p.endsWith('discordHelpers.ts')) return false;
+  const text = readFileSync(p, 'utf8');
+  return text.includes('discord.gg') || text.includes('DISCORD_URL');
+});
+check('invite url is only in discordHelpers', inviteLeaks.length === 0);
+const publicJoin = walkSrc(join(__dirname, '..', 'src')).filter((p) =>
+  readFileSync(p, 'utf8').includes('Join our Discord'),
+);
+check('no public Join our Discord row', publicJoin.length === 0);
+
+const NOW = Date.parse('2026-09-01T00:00:00Z');
+check(
+  'a trial does not get the paid discord role',
+  subscriptionGrantsDiscordRole(
+    { status: 'trialing', current_period_end: '2026-09-08T00:00:00Z' },
+    NOW,
+  ) === false,
+);
+check(
+  'an active paid row gets the discord role',
+  subscriptionGrantsDiscordRole(
+    { status: 'active', current_period_end: '2026-10-01T00:00:00Z' },
+    NOW,
+  ) === true,
+);
+check(
+  'an ended active row does not keep the discord role',
+  subscriptionGrantsDiscordRole(
+    { status: 'active', current_period_end: '2026-08-01T00:00:00Z' },
+    NOW,
+  ) === false,
+);
+check('no subscription row does not get the discord role', subscriptionGrantsDiscordRole(null, NOW) === false);
+check(
+  'a just-paid active row with no period end still gets the role',
+  subscriptionGrantsDiscordRole({ status: 'active', current_period_end: null }, NOW) === true,
+);
+
+const modalSrc = readFileSync(join(__dirname, '..', 'src', 'components', 'DiscordLinkModal.tsx'), 'utf8');
+check(
+  'connect discord during a trial does not open the invite',
+  modalSrc.includes("subscription.status === 'active'") &&
+    modalSrc.includes('discordInviteIfPaid(applePaid)') &&
+    modalSrc.includes('onPress={onConnect}') &&
+    modalSrc.includes('const linked = await link()'),
+);
+
 // --- source-level guards ----------------------------------------------------
 const libSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'discord.ts'), 'utf8');
 for (const fn of ['linkDiscord', 'unlinkDiscord']) {
@@ -270,6 +338,11 @@ check(
   'the role sync reads only the app subscription',
   shared.includes('.from("subscriptions")') &&
     !shared.includes('.from("whop_memberships")'),
+);
+check(
+  'the role sync grants only an active subscription',
+  shared.includes('subscriptionGrantsDiscordRole(sub)') &&
+    !shared.includes('shouldHold = subscriptionEntitles'),
 );
 check(
   'the role sync never throws into a webhook response',
