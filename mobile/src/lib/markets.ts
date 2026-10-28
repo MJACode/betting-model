@@ -1304,26 +1304,38 @@ export function bestHandoffForPick(
    *  Omitted: every book, as before. */
   allowedBooks?: readonly string[],
 ): BoardHandoff | null {
+  return resolveBoardHandoff(pick, bookRows, hero, priceAge, allowedBooks).handoff;
+}
+
+function resolveBoardHandoff(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero?: HeroAmerican | null,
+  priceAge?: PriceAgeContext,
+  allowedBooks?: readonly string[],
+): { handoff: BoardHandoff | null; quotes: LineQuote[] } {
   if (pick.is_live === true) {
-    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return null;
+    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return { handoff: null, quotes: [] };
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
-      return { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' };
+      return {
+        handoff: { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' },
+        quotes: [],
+      };
     }
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
-    if (price == null) return null;
+    if (price == null) return { handoff: null, quotes: [] };
+    const link = hero?.link ?? pick.dk_bet_link ?? null;
     return {
-      bookmaker: MODEL_BOOK,
-      price,
-      link: hero?.link ?? pick.dk_bet_link ?? null,
-      verb: 'Bet',
+      handoff: { bookmaker: MODEL_BOOK, price, link, verb: 'Bet' },
+      quotes: [loneQuote(MODEL_BOOK, price, link, true)],
     };
   }
   // No hand-off to a book whose newest price is older than the bound
   // (currentLineQuotes; Pick Detail's chips read the same list).
   let quotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
-  if (quotes.length === 0) return null;
+  if (quotes.length === 0) return { handoff: null, quotes: [] };
   let best = quotes.find((q) => q.isBest) ?? quotes[0];
   // The record chip ranks at the STORED price, but the hand-off is a bet
   // placed NOW. Re-rank that book at its current price only while the
@@ -1352,10 +1364,14 @@ export function bestHandoffForPick(
     );
     best = quotes.find((q) => q.isBest) ?? quotes[0];
   }
+  // Sheet rows follow the rank the hand-off uses. `quotes` itself stays put
+  // for the verb: a book dropped because its line moved still counts in
+  // `quotes.length`, which is what "Best" vs "Bet" on the verb has always used.
+  let sheetQuotes = quotes;
   // movedLine is a Now handoff whether or not kind is 'now'. A book still
   // quoting the scored line wins. Otherwise a side link on the current row
-  // is that quote. Signals names the line on its button. Today does not:
-  // todayBoardHandoff turns this Bet into Open, so the button does not
+  // is that quote. The picks card does not name that line on the control.
+  // todayBoardHandoff turns this Bet into Open, so the board button does not
   // read "Bet DK −110" and open the new line. With no current link the
   // button opens the book and does not use the lock's slip.
   if (hero != null && lineMoved && best.isRecord && best.bookmaker === hero.book) {
@@ -1363,12 +1379,16 @@ export function bestHandoffForPick(
     if (stillThere.length > 0) {
       const ranked = rankQuotes(stillThere.map(({ isBest: _isBest, ...q }) => q));
       best = ranked.find((q) => q.isBest) ?? ranked[0];
+      sheetQuotes = ranked;
     } else {
       const currentLink = snapshotSideLink(pick, bookRows, hero.book);
       if (currentLink && hero.price != null) {
-        return { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet' };
+        return {
+          handoff: { bookmaker: hero.book, price: hero.price, link: currentLink, verb: 'Bet' },
+          quotes: [loneQuote(hero.book, hero.price, currentLink, false)],
+        };
       }
-      return { bookmaker: hero.book, price: null, link: null, verb: 'Open' };
+      return { handoff: { bookmaker: hero.book, price: null, link: null, verb: 'Open' }, quotes: [] };
     }
   }
   const verb: 'Best' | 'Bet' =
@@ -1380,19 +1400,47 @@ export function bestHandoffForPick(
   // chip. "Now −115 DK" beside "Bet DK −110" was the lock next to the
   // live number (UX review). Narrow in the branch so price stays `number`.
   if (hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
+    const nowPrice = hero.price;
     return {
-      bookmaker: best.bookmaker,
-      price: hero.price,
-      link: hero.link,
-      verb,
+      handoff: {
+        bookmaker: best.bookmaker,
+        price: nowPrice,
+        link: hero.link,
+        verb,
+      },
+      quotes: sheetQuotes.map((q) =>
+        q.bookmaker === best.bookmaker ? { ...q, price: nowPrice, link: hero.link } : q,
+      ),
     };
   }
   return {
-    bookmaker: best.bookmaker,
-    price: best.price,
-    link: best.link,
-    verb,
+    handoff: {
+      bookmaker: best.bookmaker,
+      price: best.price,
+      link: best.link,
+      verb,
+    },
+    quotes: sheetQuotes,
   };
+}
+
+/**
+ * The quotes `bestHandoffForPick` ranked, best payout first. The picks-card
+ * sheet lists these, then the member's other books with no price. Empty when
+ * the hand-off is Open or absent: there is no price to rank.
+ */
+export function handoffQuotesForPick(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero?: HeroAmerican | null,
+  priceAge?: PriceAgeContext,
+  allowedBooks?: readonly string[],
+): LineQuote[] {
+  return resolveBoardHandoff(pick, bookRows, hero, priceAge, allowedBooks).quotes;
+}
+
+function loneQuote(bookmaker: string, price: number, link: string | null, isRecord: boolean): LineQuote {
+  return { bookmaker, price, link, line: null, isRecord, isBest: true };
 }
 
 /**
@@ -1403,8 +1451,8 @@ export function bestHandoffForPick(
  * a Bet whose link is the current row — the new line, at the old price.
  * Putting that on Today reads "Bet DK −110" and opens a different bet.
  * This case is the existing Open hand-off: no price, and no slip link.
- * A book still at the scored line is unchanged, including "Best now".
- * Signals names the line and does not call this.
+ * A book still at the scored line is unchanged. The picks card does not
+ * call this: it keeps the hand-off and does not put the line on the control.
  */
 export function todayBoardHandoff(
   handoff: BoardHandoff | null,
