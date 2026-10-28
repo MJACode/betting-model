@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, ParlayMatt tracked like Eggz: own channel, author, webhook, ledger keys, and all-time. A parlay is one unit at its stated price. Unset env no-ops. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, pytest comments no longer say Record only. Paywall feature check is tint. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, mobile-tsc TS2322 fixed. `.notrial` rank documented. Stripe cancel confirms the stored subscription and prorates. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Community charge line and Connected-as spacing. Whop-covered Connect Discord sits on the membership card. |
