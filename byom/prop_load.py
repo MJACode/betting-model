@@ -3,9 +3,14 @@
 One game at a time. player_prop_odds is large; a season is not one
 fetch. apply=False counts and writes nothing.
 
-The line is the last DraftKings snapshot at or before kickoff. Rows
-before PROP_HISTORY_START_DATE are not built. Alt-ladder market keys
-are not read. Prices are not read. Does not touch picks.
+The line is the last DraftKings snapshot at or before kickoff. The
+over and under prices are the prices on that same row. A side that
+row does not price is null. Another book is not read. Rows before
+PROP_HISTORY_START_DATE are not built. Alt-ladder market keys are
+not read. Does not touch picks.
+
+No season argument builds every NFL season from PROP_HISTORY_START_SEASON
+whose game_date is on or after PROP_HISTORY_START_DATE.
 """
 from __future__ import annotations
 
@@ -40,6 +45,7 @@ _MARKETS = tuple(MARKET_COLUMNS)
 FACT_COLUMNS = (
     "prop_key", "canonical_key", "sport", "season", "week",
     "player_name", "player_key", "team", "market", "line",
+    "over_price", "under_price",
     "line_basis", "actual", "over_result", "under_result", "log_status",
 )
 
@@ -84,6 +90,7 @@ def _as_quotes(rows) -> list[dict]:
             "bookmaker": row[3], "snapshot_at": row[4],
             "commence_time": row[5], "point": row[6],
             "prop_id": row[7], "captured_at": row[8],
+            "over_price": row[9], "under_price": row[10],
         })
     return out
 
@@ -91,15 +98,17 @@ def _as_quotes(rows) -> list[dict]:
 def _quotes_for_game(conn, game_id: str) -> list[dict]:
     """DraftKings at or before kickoff. One game. The cast sits in a CASE.
 
-    Other books are not read. Prices are not read. created_at is when
-    the row was written; the grader calls that captured_at. prop_id
-    breaks a tie between two lines on the same snapshot.
+    Other books are not read. over_price and under_price are the prices
+    on this row, the same row as the line. created_at is when the row
+    was written; the grader calls that captured_at. prop_id breaks a
+    tie between two lines on the same snapshot.
     """
     sql = f"""
         SELECT p.player_name, p.team, p.market, p.bookmaker,
                {_SNAP} AS snapshot_at,
                {_KICK} AS commence_time,
-               p.line, p.prop_id, p.created_at
+               p.line, p.prop_id, p.created_at,
+               p.over_price, p.under_price
           FROM player_prop_odds p
           JOIN games g ON g.game_id = p.game_id
          WHERE p.game_id = %s

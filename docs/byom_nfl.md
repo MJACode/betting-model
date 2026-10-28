@@ -97,9 +97,14 @@ beside it. The later `created_at` (captured_at) wins, then the higher
 (`PROP_HISTORY_START_DATE`). Seasons before 2023 are refused. The same
 `line_basis` label is stored on the row. The line is not a filter. A
 market key ending in `_alternate` is an alt ladder and is not built.
-There is no price column and no unit column. A rebuild deletes that
-game's prop rows in the same transaction, then inserts the rows this
-pass produced.
+`over_price` and `under_price` are the American prices on the same
+DraftKings quote that supplied the line. A side that quote does not
+price is null. An earlier quote is not used. Another book is not used.
+There is no constant price and no unit column on the row. A rebuild
+deletes that game's prop rows in the same transaction, then inserts
+the rows this pass produced. The columns are
+`data/migrations/byom_prop_facts_dk_prices_2026_10_28.sql`, applied
+by hand. It is not in `ACTIVE_MIGRATIONS`.
 
 The stat is `nfl_player_game_log`. `log_status` says which rule fired:
 
@@ -123,10 +128,18 @@ logged a row. A player who did not play is not an Anytime TD 'No' win.
 The name match does not expand nicknames, so Josh and Joshua do not meet,
 and that miss stays ungraded.
 
-`log_status` is on the facts schema. The job `byom_prop_facts` defaults
-`apply` to false. `jobs/declared_jobs.json` lists `byom-nfl-prop-facts`
-with `enabled` false and `apply` false, so a merge does not enqueue a
-writer. The builder reads one game at a time.
+`log_status` is on the facts schema. The job `byom_prop_facts` still
+defaults `apply` to false when the argument is omitted.
+`jobs/declared_jobs.json` lists `byom-nfl-prop-facts` with `enabled`
+true and `apply` true, and with no season. `sync_declared_jobs`
+enqueues that one backfill: every NFL season from 2023 whose
+`game_date` is on or after `2023-09-01`. Apply the price-column
+migration before that job runs. A failed row keeps dedupe key
+`byom-nfl-prop-facts`, so a retry needs that row gone. The dry run
+is `python -m scripts.byom_prop_facts`. The write is the same command
+with `--apply`. One season is `--season 2024`. The printed JSON has
+one entry per season: `facts`, `written`, and `canonical_keys`. The
+builder reads one game at a time.
 
 ## Backtest
 
@@ -149,9 +162,18 @@ before kickoff. Those bets stay out of wins, losses, pushes, ties, and
 units. There is no screen for that count. A line whose quote had no
 price is priced from the fallback above and is in the record when that
 fallback finds an American price. An unplayed game stays out of the
-record and out of `skipped`. Graded prop legs have
-no price column, so they stay in the win-loss counts, add 0 to units,
-and are not skipped. Unknown filter keys are rejected. The field names `market`, `bets`, `wins`,
+record and out of `skipped`. A graded prop leg uses `over_price` or
+`under_price` on that side. The American check is the same one the
+game legs use. A graded side with no American price is left out of
+wins, losses, pushes, ties, and units, and counted in `skipped`. An
+ungraded prop (null result) stays out of the record and out of
+`skipped`. That function is
+`data/migrations/byom_backtest_prop_dk_prices_2026_10_28.sql`. It is
+not in `ACTIVE_MIGRATIONS`. Matt applies it by hand after the price
+columns. It keeps `byom_backtest_v1` and the return columns. It keeps
+the total-leg side labels from `byom_total_side_2026_10_25.sql`.
+Do not re-apply the older backtest files after it. Unknown filter
+keys are rejected. The field names `market`, `bets`, `wins`,
 `losses`, `pushes`, and `ties` are unchanged.
 Moneyline and spread legs are home and away. Prop markets include the
 over and the under. An empty filter object is the whole season. It is not a model
@@ -174,8 +196,13 @@ replaces `byom_backtest` and labels those legs `over` and `under`, so
 a side filter keeps that one leg. It keeps `byom_backtest_v1` in the
 body, so the registered file's skip still holds. It also replaces
 `byom_save_model` with the one-market side refusals. It is **not** in
-`ACTIVE_MIGRATIONS`. Matt applies it by hand. The function is in
-`RPC_ANON_CALLABLE`. It reads the facts tables, not `picks`.
+`ACTIVE_MIGRATIONS`. Matt applies it by hand.
+`data/migrations/byom_backtest_prop_dk_prices_2026_10_28.sql` is the
+body after that. It keeps the total-leg labels and stakes each prop
+side at `over_price` or `under_price`. Apply the price columns first.
+Do not re-apply `byom_total_side_2026_10_25.sql` after it. The
+function is in `RPC_ANON_CALLABLE`. It reads the facts tables, not
+`picks`.
 
 
 ## Refresh

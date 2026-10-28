@@ -1,9 +1,15 @@
 """Build NFL byom_prop_facts from player_prop_odds and nfl_player_game_log.
 
-Dry run unless --apply. The worker job ships disabled, so a merge does
-not run this against production.
+Dry run unless --apply. No --season builds every NFL season from 2023
+whose game_date is on or after 2023-09-01. The printed JSON is one
+entry per season: facts, written, and canonical_keys.
+
+Apply data/migrations/byom_prop_facts_dk_prices_2026_10_28.sql before
+--apply. The declared job byom-nfl-prop-facts is the same no-season
+write, enqueued once.
 
     python -m scripts.byom_prop_facts
+    python -m scripts.byom_prop_facts --apply
     python -m scripts.byom_prop_facts --season 2024
     python -m scripts.byom_prop_facts --season 2024 --apply
 """
