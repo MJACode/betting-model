@@ -397,7 +397,7 @@ function LockedBoard({
         </View>
         <Text style={styles.lockTitle}>Scoreboard is Premium</Text>
         <Text style={styles.lockBody}>
-          Live scores and DK lines for every game. Free includes Record only.
+          Live scores and DK lines for every game. Free keeps the Record tab.
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -579,6 +579,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
     gap: spacing.sm,
+    minHeight: 44,
   },
   cols: {
     flexDirection: 'row',

@@ -134,7 +134,7 @@ def test_the_app_calls_the_function_by_its_literal_name():
 
 def test_the_matchup_header_fills_its_column_and_large_text_is_one_line():
     """MATCHUP was drawing in the 48pt header style, inside a 66pt column.
-    Large text was a right-aligned tier over the rank."""
+    Large text is the same five bars, left aligned, with no tier line."""
     screen = _read(SCREEN)
     cell = _read(CELL)
     sort_btn = screen.split("atdSortBtn: {", 1)[1].split("},", 1)[0]
@@ -155,13 +155,14 @@ def test_the_matchup_header_fills_its_column_and_large_text_is_one_line():
     stacked_header = screen.split("if (atd && atdStack) {", 1)[1].split("\n  return (", 1)[0]
     assert stacked_header.count("colHeaderStackLine") == 2
     assert "flexWrap: 'nowrap'" in screen.split("atdHeaderMetrics:", 1)[1].split("},", 1)[0]
-    line = cell.split("lineFull: {", 1)[1].split("},", 1)[0]
-    assert "textAlign: 'left'" in line
-    assert "width: '100%'" in line
+    status = cell.split("statusFull: {", 1)[1].split("},", 1)[0]
+    assert "textAlign: 'left'" in status
+    assert "width: '100%'" in status
     full = cell.split("wrapFull: {", 1)[1].split("},", 1)[0]
     assert "alignItems: 'flex-start'" in full
     assert "justifyContent: 'flex-end'" in full
-    assert "stackedMatchupLine(view.tier, view.line)" in cell
+    assert "MatchupStrengthBar" in cell
+    assert "stackedMatchupLine" not in cell
     # 1.3, not the first step above 1. Below that, the header word shrinks.
     # 0.001 covers a font scale that lands at 1.2999999.
     assert "windowFontScale >= ATD_STACK_FONT_SCALE - 0.001" in screen

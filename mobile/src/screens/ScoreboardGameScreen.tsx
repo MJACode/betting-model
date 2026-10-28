@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import type { RouteProp } from '@react-navigation/native';
 import { useRoute } from '@react-navigation/native';
 
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { errorText, isAbortError } from '@/lib/errors';
@@ -156,6 +157,7 @@ export function ScoreboardGameScreen() {
         </View>
       ))}
       <Text style={styles.note}>Game markets only. No bet from here.</Text>
+      <BetslipBarSpacer />
     </ScrollView>
   );
 }

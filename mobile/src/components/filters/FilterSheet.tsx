@@ -188,6 +188,8 @@ export function FilterSection({
   title,
   subtitle,
   summary,
+  summaryNode,
+  summarySpoken,
   defaultOpen = false,
   onClear,
   children,
@@ -196,6 +198,10 @@ export function FilterSection({
   subtitle?: string;
   /** Current value, shown on the collapsed row. Presence makes the row collapsible. */
   summary?: string;
+  /** Drawn instead of `summary` when the value is a mark, not words. */
+  summaryNode?: React.ReactNode;
+  /** Spoken with the title when the visible value is not the words VoiceOver should use. */
+  summarySpoken?: string;
   defaultOpen?: boolean;
   /**
    * Clear THIS section, from its own header. Rendered only when given, so a
@@ -210,7 +216,7 @@ export function FilterSection({
   onClear?: () => void;
   children: React.ReactNode;
 }) {
-  const collapsible = summary !== undefined;
+  const collapsible = summary !== undefined || summaryNode != null;
   const [open, setOpen] = useState(defaultOpen);
   const expanded = !collapsible || open;
 
@@ -229,7 +235,7 @@ export function FilterSection({
       <Pressable
         // 32pt row; 6pt slop each way reaches 44.
         hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
-        accessibilityLabel={title}
+        accessibilityLabel={summarySpoken ? `${title}, ${summarySpoken}` : title}
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
@@ -250,9 +256,11 @@ export function FilterSection({
           ) : null}
           {/* Truncates rather than wrapping, so the collapsed rows keep a
               uniform height and read as one clean column. */}
-          <Text style={styles.rowValue} numberOfLines={1}>
-            {summary}
-          </Text>
+          {summaryNode ?? (
+            <Text style={styles.rowValue} numberOfLines={1}>
+              {summary}
+            </Text>
+          )}
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={18}

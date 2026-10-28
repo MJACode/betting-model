@@ -68,10 +68,12 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
-  // Also the empty Anytime TD meter bar. #C6C6C8 on the white card is
-  // 1.7:1; this gray is 3.26:1 on bgCard, which clears the 3:1 non-text floor
-  // (Designer review of #995).
   none: '#8E8E93', // gray
+  // Unfilled matchup segment. The filled segments carry the contrast
+  // (gradeGood / gradeMid / gradeBad, each ≥4.5:1). The count of filled
+  // segments is the meaning, so the empty one stays this light gray
+  // (Matt, 2026-10-28, Option A).
+  matchupEmpty: '#D1D1D6',
   noneSoft: '#EFEFF4',
 
   // ── Text-safe inks (usability audit H1 / H2 / H8, 2026-09-25) ────────────
@@ -250,18 +252,23 @@ export function heatColor(profit: number, max: number): string {
 }
 
 /**
- * Matchup grade → its colour. Five steps across thirteen letters: the letter
- * separates neighbours, the colour separates tiers.
+ * Filled-segment colour. 5–4 green, 3 gray, 2–1 maroon. `gradeColor` uses
+ * this, so a letter and its bar cannot drift.
  *
- * It lives here rather than in the board because two screens draw a grade —
- * the Stats MATCHUP column and the player's detail header — and a second copy
- * is how they drift apart. (It cannot live in `lib/matchup.ts`: that module is
- * imported by the tsx verify scripts, and this file pulls in `react-native`,
- * which they cannot resolve.)
+ * It lives here rather than in the board because every matchup surface draws
+ * one meter. (It cannot live in `lib/matchup.ts`: that module is imported by
+ * the tsx verify scripts, and this file pulls in `react-native`, which they
+ * cannot resolve.)
  */
+export function strengthColor(filled: number): string {
+  if (filled >= 4) return colors.gradeGood;
+  if (filled === 3) return colors.gradeMid;
+  return colors.gradeBad;
+}
+
+/** Letter → the same ramp `strengthColor` uses. A/B green, C gray, D/F maroon. */
 export function gradeColor(grade: MatchupGrade): string {
   const letter = grade[0];
-  if (letter === 'A' || letter === 'B') return colors.gradeGood;
-  if (letter === 'C') return colors.gradeMid;
-  return colors.gradeBad;
+  const filled = letter === 'A' ? 5 : letter === 'B' ? 4 : letter === 'C' ? 3 : letter === 'D' ? 2 : 1;
+  return strengthColor(filled);
 }

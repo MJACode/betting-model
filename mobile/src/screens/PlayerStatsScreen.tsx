@@ -75,11 +75,12 @@ import { computeHitRate, isHit, type HitDirection } from '@/lib/hitRate';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { colors, font, radii, spacing } from '@/lib/theme';
 import { reachFrame } from '@/lib/a11y';
 import { ErrorBanner } from '@/components/ErrorState';
+import { MatchupStrengthBar } from '@/components/MatchupStrengthBar';
 import { friendlyCause } from '@/lib/errors';
-import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
+import { matchupStrengthPhrase, strengthForGrade, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -127,6 +128,7 @@ export function PlayerStatsScreen() {
   // anywhere else. Typed loosely on the route (a string) and narrowed here.
   const matchupText = route.params.matchupText ?? null;
   const matchupGrade = (route.params.matchupGrade as MatchupGrade | undefined) ?? null;
+  const matchupStrength = strengthForGrade(matchupGrade);
   // Older navigation state (a screen restored from a build before player detail
   // went multi-sport) carries no sport — MLB was the only one that could open it.
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
@@ -593,29 +595,23 @@ export function PlayerStatsScreen() {
             <Text style={styles.playerName}>{playerName}</Text>
             <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
             {/* Tonight's matchup, in full. The Stats board's MATCHUP column is
-                a bare grade as of 2026-09-05, so this is where the FACT behind
-                it lives for a sighted user — Matt's own alternative home for it
-                ("have it be in the player data when you click on a record",
-                2026-09-04). Only present when the board handed it over, so a
-                player opened from anywhere else shows nothing here rather than
-                an empty row. */}
+                the bar, so this is where the FACT behind it lives for a sighted
+                user — Matt's own alternative home for it ("have it be in the
+                player data when you click on a record", 2026-09-04). Only
+                present when the board handed it over, so a player opened from
+                anywhere else shows nothing here rather than an empty row. */}
             {matchupText ? (
-              // Labelled, because VoiceOver drops a bare "+" and would
-              // announce a B+ as a B — gradeSpoken exists for exactly this and
-              // the screen that now OWNS this fact was the one mis-speaking it
-              // (UX review, 2026-09-05).
+              // The letter is gone (Matt, 2026-10-28). The bar is the strength
+              // and this line is the fact behind it. VoiceOver says the count,
+              // then the fact — a bare "+" used to be dropped (UX review, 2026-09-05).
               <View
                 style={styles.matchupRow}
                 accessible
                 accessibilityLabel={`Tonight's matchup, ${
-                  matchupGrade ? `${gradeSpoken(matchupGrade)}, ` : ''
+                  matchupStrength ? `${matchupStrengthPhrase(matchupStrength)}, ` : ''
                 }${matchupText.replace(/ · /g, ', ')}`}
               >
-                {matchupGrade ? (
-                  <Text style={[styles.matchupGrade, { color: gradeColor(matchupGrade) }]}>
-                    {matchupGrade}
-                  </Text>
-                ) : null}
+                {matchupStrength ? <MatchupStrengthBar filled={matchupStrength} grow /> : null}
                 <Text style={styles.matchupLine} numberOfLines={2}>
                   {matchupText}
                 </Text>
@@ -1812,10 +1808,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-  },
-  matchupGrade: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.bold,
   },
   windowRow: {
     paddingHorizontal: spacing.lg,

@@ -514,7 +514,8 @@ export type RootStackParamList = {
     fromParlay?: boolean;
     /**
      * Tonight's matchup in full — "vs LAA · S. Gray 5.90 ERA (R)" — and the
-     * letter the board graded it.
+     * letter the board measured. The screen draws that letter as bars. The
+     * letter is not shown.
      *
      * Carried as params rather than refetched here: the Stats board already
      * holds both, and this screen would otherwise pull the whole matchup view

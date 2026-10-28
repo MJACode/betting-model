@@ -33,8 +33,8 @@ import {
   ranksInGroup,
   toughEndRank,
   matchupHeaderFontSize,
-  stackedMatchupLine,
-  tierFloorLabel,
+  tierBars,
+  tierFloorSpoken,
   tierForRank,
   type DefenseRank,
 } from '../src/lib/anytimeMatchup';
@@ -83,7 +83,13 @@ check(
     && rankLine(1, 32, toughEndRank(1, [{ rank: 1 }, { rank: 1 }, { rank: 1 }])) === '1st easiest',
 );
 check('Very tough is not a filter chip', !TIER_FLOORS.includes('Very tough') && TIER_FLOORS.length === 4);
-check('the Tough chip says Tough or easier', tierFloorLabel('Tough') === 'Tough or easier' && tierFloorLabel('Great') === 'Great or easier');
+check(
+  'a floor chip speaks the bar count, not a tier word',
+  tierBars('Great') === 5 && tierBars('Good') === 4 && tierBars('Average') === 3 && tierBars('Tough') === 2
+    && tierFloorSpoken('Tough') === 'strength 2 or more'
+    && tierFloorSpoken('Great') === 'strength 5 or more'
+    && !tierFloorSpoken('Good').includes('Good'),
+);
 
 check('no floor keeps everyone', meetsTierFloor(null, null));
 check('Great floor keeps only Great', meetsTierFloor('Great', 'Great') && !meetsTierFloor('Good', 'Great'));
@@ -173,18 +179,22 @@ const tiedView = buildAnytimeMatchup({
   status: 'ok',
   placement: place,
   rank: tiedGroup[0],
-  groupRanks: tiedGroup,
 });
 check(
-  'a loaded group of six zeros says 1st toughest',
-  tiedView.kind === 'rank' && tiedView.line === '1st toughest' && tiedView.tier === 'Very tough',
+  'a rank of 27 is one filled bar',
+  tiedView.kind === 'rank' && tiedView.bars === 1 && tiedView.spoken.startsWith('Matchup strength 1 of 5'),
 );
-check('a rank view says the tier and the line', view.kind === 'rank' && view.tier === 'Great' && view.line === '3rd easiest' && view.bars === 5);
 check(
-  'the spoken line names the group and skips the bar count',
+  'a rank view is five bars and a strength label',
+  view.kind === 'rank' && view.bars === 5 && view.spoken === 'Matchup strength 5 of 5, wide receivers.',
+);
+check(
+  'the spoken line names the count and the group, not a tier or a rank word',
   view.kind === 'rank'
-    && view.spoken === matchupSpoken('Great', '3rd easiest', 'WR')
+    && view.spoken === matchupSpoken(5, 'WR')
     && view.spoken.includes('wide receivers')
+    && !view.spoken.includes('Great')
+    && !view.spoken.includes('easiest')
     && !view.spoken.includes('bars'),
 );
 check('loading is not a reason', buildAnytimeMatchup({ status: 'loading', placement: place, rank: null }).kind === 'loading');
@@ -225,19 +235,16 @@ check(
   ATD_COPY.infoBody.includes('per player-game')
     && ATD_COPY.infoBody.includes('Ties share a rank')
     && ATD_COPY.infoBody.includes('short sample')
-    && ATD_COPY.infoBody.includes('1st–6th Great')
-    && ATD_COPY.infoBody.includes('27th–32nd Very tough')
+    && ATD_COPY.infoBody.includes('Five filled is ranks 1–6')
+    && ATD_COPY.infoBody.includes('One is 27–32')
     && ATD_COPY.infoBody.includes('higher hit rate')
-    && ATD_COPY.infoBody.includes('Five bars in the compact column')
-    && ATD_COPY.infoBody.includes('At larger text the tier and the rank are one line'),
+    && ATD_COPY.infoBody.includes('Five bars, filled from the left')
+    && !ATD_COPY.infoBody.includes('Great')
+    && !ATD_COPY.infoBody.includes('easiest')
+    && !ATD_COPY.infoBody.includes('toughest'),
 );
 check('the board fetches only groups its rows use', groupsUsedByBoard(['WR', 'TE', 'K', 'FB']).join(',') === 'RB,WR,TE' && groupsUsedByBoard(['CB']).join(',') === 'DB' && groupsUsedByBoard([null, 'OL']).length === 0);
 check('headers are HIT %, MATCHUP, BEST', ATD_COPY.hitHeader === 'HIT %' && ATD_COPY.header === 'MATCHUP' && ATD_COPY.priceHeader === 'BEST');
-check(
-  'large text joins the tier and the rank on one line',
-  stackedMatchupLine('Great', '5th easiest') === 'Great · 5th easiest'
-    && stackedMatchupLine('Very tough', '1st toughest') === 'Very tough · 1st toughest',
-);
 check('the unavailable note is one sentence', ATD_COPY.unavailableNote === 'Defense ranks didn’t load. Ranked matchups say Unavailable.');
 check('a partial load names the groups that failed', ATD_COPY.partialNote === 'Some defense ranks didn’t load. Those matchups say Unavailable.');
 
