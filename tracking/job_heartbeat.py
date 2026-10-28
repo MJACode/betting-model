@@ -99,6 +99,10 @@ MAX_SILENCE: dict = {
     # to clear that gap, as the NFL in-play worker's does. Inside its hours the
     # tighter bound in ACTIVE_HOURS_ET applies.
     "nhl_goalie_window": 700,
+    # Every five minutes, 24x7, and it beats on the idle ticks too (one read
+    # of ncaab_events, then return, all off-season), so 20 minutes is four
+    # missed ticks: a stopped capture, and opener times going unrecorded.
+    "ncaab_odds_capture": 20,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

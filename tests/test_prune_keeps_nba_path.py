@@ -112,17 +112,31 @@ def test_a_dry_run_counts_and_deletes_nothing():
 def test_the_two_prune_tiers_never_select_a_path_kept_sport():
     params: dict = {}
     pred = po._unprotected(params, "odds")
-    assert "path_kept_sports" in pred and params["path_kept_sports"] == ("NBA",)
+    # NCAAB joined 2026-10-26, for its first season (first game 2026-11-01).
+    assert "path_kept_sports" in pred and params["path_kept_sports"] == ("NBA", "NCAAB")
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE odds (bookmaker, source, sport)")
     db.executemany("INSERT INTO odds VALUES (?, NULL, ?)",
-                   [("fanduel", "NBA"), ("fanduel", "MLB")])
+                   [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "MLB")])
     # the predicate's own SQL, run: only the MLB line-shop row is prunable
     sql = pred
     for k, v in params.items():
         lit = "(" + ", ".join(f"'{x}'" for x in v) + ")" if isinstance(v, tuple) else f"'{v}'"
         sql = sql.replace(f"%({k})s", lit)
     assert [r[0] for r in db.execute(f"SELECT sport FROM odds WHERE {sql}")] == ["MLB"]
+
+
+def test_ncaab_keeps_its_path_like_the_nba():
+    """NCAAB's first season (2026-10-26) keeps every move, thinned only of
+    repeats, beside an MLB game the thinning does not touch."""
+    c = _Conn()
+    c.game("CBB", sport="NCAAB")
+    c.game("MLB", sport="MLB")
+    path = [(-110, -110), (-110, -110), (-110, -110), (-120, 100), (-120, 100), (-120, 100)]
+    cbb = [c.quote("CBB", _ts(i), h, a, sport="NCAAB") for i, (h, a) in enumerate(path)]
+    mlb = {c.quote("MLB", _ts(i), -110, -110, sport="MLB") for i in range(4)}
+    po.thin_repeats(c, today="2026-10-22")
+    assert c.ids() == {cbb[0], cbb[2], cbb[3], cbb[5]} | mlb
 
 
 def test_protected_books_keep_every_repeated_row():
@@ -139,3 +153,25 @@ def test_protected_books_keep_every_repeated_row():
     shop = [c.quote("G", _ts(i), -110, -110, book="fanduel") for i in range(4)]
     po.thin_repeats(c, today="2026-10-22")
     assert c.ids() == keep | {shop[0], shop[-1]}
+
+
+def test_the_two_prune_tiers_leave_every_ncaab_row():
+    """NCAAB rows are skipped by both tiers (the row filter) and its games are
+    not visited by the `odds` prune at all; only the thinning above touches
+    them. An MLB game on the same settled date is pruned, so the run did
+    delete."""
+    from tests.test_prune_bounded import GAMES_INSERT, StandIn
+    conn = StandIn()
+    for gid, sport in (("NCAAB_G", "NCAAB"), ("MLB_G", "MLB")):
+        conn.db.execute(GAMES_INSERT, (gid, sport, "2026-10-10"))
+        for i in range(5):
+            conn.db.execute(
+                f"INSERT INTO odds ({', '.join(COLS)}) VALUES "
+                f"(?, ?, ?, 'h2h', 'fanduel', 'open', ?, ?, 100, NULL, NULL, NULL, "
+                f"NULL, NULL, NULL)",
+                ((100 if sport == "NCAAB" else 200) + i, gid, sport,
+                 f"2026-10-10T0{i}:00:00Z", -110 - i))
+    po.prune_table(conn, "odds", ("game_id", "market"), "%(game_day)s", 2, "2026-10-20",
+                   budget=po.Budget(seconds=60, rows=10**9), floor="2026-10-01")
+    assert conn.ids("odds") == {100, 101, 102, 103, 104, 200, 204}
+    assert not [t for k, t in conn.log if k == "sql" and "'NCAAB_G'" in t]

@@ -143,3 +143,30 @@ def test_prop_table_has_no_source_column_so_no_source_clause():
     params = {}
     pred = _unprotected(params, table="player_prop_odds")
     assert "source" not in pred
+
+
+def test_the_ncaab_history_purchase_sources_are_protected_in_odds():
+    """2026-10-26: the NCAAB history purchase stamps its derivative closes and
+    opens with these two sources. They are named before the writer lands, so
+    its first run is not thinned by the next 6am prune, as the 2026-09-01 MLB
+    backfill was. A settled game's rows under either source all survive,
+    while a live (NULL source) line-shop book beside them is thinned."""
+    from data import prune_odds as po
+    from tests.test_prune_bounded import ODDS_COLS
+    ncaab = ("odds_api_ncaab_derivative_close", "odds_api_ncaab_derivative_open")
+    params: dict = {}
+    po._unprotected(params, table="odds")
+    for src in ncaab:
+        assert src in po.PROTECTED_SOURCES and src in params["protected_sources"], src
+    conn = StandIn()
+    _quotes(conn, "G", "2026-10-10", [(1, "open", 1), (2, "open", 2), (3, "open", 3)])
+    oid = 100
+    for src in ncaab:
+        for hour in range(1, 5):
+            oid += 1
+            conn.db.execute(
+                f"INSERT INTO odds ({', '.join(ODDS_COLS)}) VALUES "
+                f"(?, 'G', 'MLB', 'h2h', 'fanduel', 'open', ?, -110, 100, NULL, NULL, "
+                f"NULL, NULL, NULL, ?)", (oid, f"2026-10-10T{hour:02d}:30:00Z", src))
+    _prune(conn)
+    assert conn.ids("odds") == {1, 3} | set(range(101, oid + 1))

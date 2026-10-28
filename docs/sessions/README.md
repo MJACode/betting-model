@@ -39,6 +39,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, billing display prices locked (Matt): weekly $9.99 no trial, monthly $24.99 and annual $149.99 with 7-day trials. Suggested premium.* product ids documented only. Billing stays off. |
 | 2026-10-27 | [2026-10](./2026-10.md) | 2026-10-27, Whop is Discord-only. Unapplied `my_access` / `has_app_access` are Apple-only on first apply. No flag flip, no production migration |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NBA L-N boards list not-yet-played players under their ESPN roster team (Matt, option a); nba_window_reads_roster_team_2026_10_26.sql replaces the 10-23 migration |
+| 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, NCAAB foundation. ESPN owns the games row; odds resolve onto it; 5-minute opener capture; the clean-up keeps the last price before the start; history purchase and free imports queued on the worker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Hit Rates width on web. Compact tabs size to the label. Marker pads follow the measured marker. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats follow-up review. The marker wing no longer covers the window chip. Header taps no longer share a band. The book line can use two lines. |
 | 2026-10-26 | [2026-10](./2026-10.md) | 2026-10-26, Stats Compact B follow-up. Marker tap is 44pt tall. Filters is a word and 44pt. Book line returns on Teams and an empty board. Hit Rates and Averages stay readable on the window row at 390. |
