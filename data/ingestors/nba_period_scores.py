@@ -123,7 +123,17 @@ def write(conn, rows: list[dict]) -> int:
     return len(keep)
 
 
+COLS = ("game_id", "period", "home_points", "away_points", "source", "fetched_at")
+
+
 def ensure_table(conn) -> None:
+    """Create once. A no-op CREATE still fires PostgREST's schema reload
+    (data/ddl_guard.py), and the worker now calls this every day."""
+    from data.anon_readable import API_ROLES
+    from data.ddl_guard import schema_is_current
+    if schema_is_current(conn, "nba_period_scores", columns=COLS, rls=True,
+                         revoked_from=API_ROLES):
+        return
     conn.execute(DDL)
     lock_down(conn, "nba_period_scores")
     conn.commit()
@@ -133,13 +143,14 @@ def run(start: str, end: str) -> dict:
     conn = get_connection()
     try:
         ensure_table(conn)
-        game_dates = {r[0] for r in conn.execute(
-            "SELECT DISTINCT game_date FROM games WHERE sport = 'NBA' "
-            "AND game_date BETWEEN %s AND %s AND home_score IS NOT NULL", (start, end)).fetchall()}
-        done = {r[0] for r in conn.execute(
-            "SELECT DISTINCT g.game_date FROM nba_period_scores p JOIN games g USING (game_id) "
-            "WHERE g.game_date BETWEEN %s AND %s", (start, end)).fetchall()}
-        todo = sorted(game_dates - done, reverse=True)
+        # Per GAME, not per date: a date with one stored game is not done
+        # while a later game on it still lacks its quarters (an evening pass
+        # runs while the late games are being played).
+        todo = sorted({r[0] for r in conn.execute(
+            "SELECT DISTINCT g.game_date FROM games g WHERE g.sport = 'NBA' "
+            "AND g.game_date BETWEEN %s AND %s AND g.home_score IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM nba_period_scores p WHERE p.game_id = g.game_id)",
+            (start, end)).fetchall()}, reverse=True)
         stats = {"dates": len(todo), "rows": 0}
         for d in todo:
             data = fetch_date(d)

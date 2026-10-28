@@ -15,6 +15,8 @@
  *     the sport stores a closing number per game (NFL today).
  *  3. SPLITS — home / away, favourite / dog, rest, over rate, from the board's
  *     row, captioned as description rather than edge, as the board does.
+ *     NBA adds a FIRST-QUARTER card here: last 5 / 10 / season, home and away,
+ *     and points per 100 possessions (components/NbaFirstQuarterCard).
  *  4. HEAD-TO-HEAD with the next opponent.
  *  5. OUR RECORD betting on and against the team — settled BETs only, units
  *     only, and the unpriced picks named rather than priced at −110.
@@ -38,6 +40,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { GameStatusPill } from '@/components/GameStatusPill';
+import { NbaFirstQuarterCard } from '@/components/NbaFirstQuarterCard';
 import { ReadRow } from '@/components/ReadRow';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
@@ -249,6 +252,31 @@ export function TeamStatsScreen() {
           <Card>
             <Text style={styles.muted}>No season splits stored for {team} yet.</Text>
           </Card>
+        ) : null}
+
+        {/* ── 3b. NBA first quarter (Matt, 2026-10-28) ───────────────────── */}
+        {sport === 'NBA' ? (
+          <>
+            <SectionTitle
+              title="First quarter"
+              tooltip={{
+                title: 'Description, not edge',
+                body:
+                  'First-quarter results only. Last 5 and Last 10 are the team’s last games at the venue you pick, ' +
+                  'and reach into last season early on. Off and Def are points scored and allowed per 100 ' +
+                  'possessions, counted from play-by-play. Like the splits above, these describe what happened; ' +
+                  'they are not a pick.',
+              }}
+            />
+            <NbaFirstQuarterCard
+              team={team}
+              games={d.q1Games.data}
+              gamesLoading={d.q1Games.loading}
+              gamesError={d.q1Games.error}
+              seasonRows={d.q1Season.data}
+              seasonError={d.q1Season.error}
+            />
+          </>
         ) : null}
 
         {/* ── 4. Head-to-head ────────────────────────────────────────────── */}

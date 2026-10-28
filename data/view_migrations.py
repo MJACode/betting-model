@@ -455,6 +455,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Sits before the posted-stake pair so those two files stay adjacent
     # and published_record_units stays last. Not applied until Matt says so.
     "add_ncaaf_scoreboard_latest_2026_10_28.sql",
+    # 2026-10-28 (Matt): NBA first-quarter team stats on the team page.
+    # One table written by data/ingestors/nba_team_q1.py, a SELECT policy,
+    # and one security_invoker view ranking teams per season and venue.
+    # Returns on a catalog read once the table, policy and the view's
+    # marker comment exist. Does not rewrite picks, odds or the record.
+    # Sits before the posted-stake pair so those two stay adjacent.
+    "add_nba_team_q1_2026_10_28.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
