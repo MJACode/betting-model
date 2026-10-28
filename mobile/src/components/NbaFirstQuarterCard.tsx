@@ -3,7 +3,9 @@
  * feedback). Last 5 / Last 10 / Season rows for the first quarter: the record,
  * the average margin, and offensive and defensive rating (points per 100
  * possessions), with All / Home / Away on top and the season's league ranks
- * underneath. Logic and its checks: src/lib/nbaQ1.ts, scripts/verify_nba_q1.ts.
+ * underneath. Last 5 / Last 10 come from the capped game fetch. Season, the
+ * "This season" line, and the ranks come from `v_nba_team_q1_season`.
+ * Logic and its checks: src/lib/nbaQ1.ts, scripts/verify_nba_q1.ts.
  *
  * From 1.5x text the four columns cannot hold "112.4" (48pt each on a 320pt
  * phone), so each window stacks into label-value lines. Below that the cells
@@ -24,6 +26,7 @@ import {
   q1PriorSeasonNote,
   q1RowA11yLabel,
   q1RowSub,
+  q1ThisSeasonLine,
   type NbaQ1Game,
   type NbaQ1SeasonRow,
   type NbaQ1Venue,
@@ -41,16 +44,34 @@ interface Props {
   gamesLoading: boolean;
   gamesError: string | null;
   seasonRows: NbaQ1SeasonRow[];
+  seasonLoading: boolean;
   seasonError: string | null;
 }
 
-export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, seasonRows, seasonError }: Props) {
+export function NbaFirstQuarterCard({
+  team,
+  games,
+  gamesLoading,
+  gamesError,
+  seasonRows,
+  seasonLoading,
+  seasonError,
+}: Props) {
   const [venue, setVenue] = useState<NbaQ1Venue>('all');
   const { fontScale } = useWindowDimensions();
   const stack = Number.isFinite(fontScale) && fontScale >= Q1_STACK_SCALE;
-  const { season, rows } = useMemo(() => nbaQ1Windows(games, venue), [games, venue]);
-  const ranks = seasonRows.find((r) => r.venue === venue) ?? null;
-  const seasonSummary = rows[2].summary;
+  const seasonRow = seasonRows.find((r) => r.venue === venue) ?? null;
+  const { season, rows } = useMemo(() => {
+    const built = nbaQ1Windows(games, venue, seasonRow);
+    if (seasonRow == null && (seasonLoading || seasonError)) {
+      const pending = seasonLoading ? ('loading' as const) : ('error' as const);
+      built.rows = built.rows.map((r) => (r.key === 'season' ? { ...r, pending } : r));
+    }
+    return built;
+  }, [games, venue, seasonRow, seasonLoading, seasonError]);
+  const ranks = seasonRow;
+  const seasonSummary = rows.find((r) => r.key === 'season')?.summary ?? rows[2].summary;
+  const seasonLine = q1ThisSeasonLine(seasonSummary);
   const priorNote = q1PriorSeasonNote(rows, season);
 
   if (gamesLoading && games.length === 0) {
@@ -105,14 +126,11 @@ export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, sea
           Net {ordinal(ranks.net_rank)} of {ranks.teams}
         </Text>
       ) : seasonError ? (
-        <Text style={styles.legend}>Couldn’t load league ranks. Pull down to retry.</Text>
-      ) : null}
-      {seasonSummary.ptsFor != null && seasonSummary.ptsAgainst != null ? (
-        <Text style={styles.legend}>
-          This season: {seasonSummary.ptsFor.toFixed(1)} scored, {seasonSummary.ptsAgainst.toFixed(1)} allowed per first
-          quarter.
+        <Text style={styles.ranks}>
+          Couldn’t load season totals. {friendlyCause(seasonError)} Pull down to retry.
         </Text>
       ) : null}
+      {seasonLine ? <Text style={styles.legend}>{seasonLine}</Text> : null}
       <Text style={styles.legend}>
         Off and Def are points scored and allowed per 100 possessions, counted from play-by-play. Lower Def is better.
         Net is Off minus Def.{priorNote ? ` ${priorNote}` : ''}
