@@ -46,6 +46,7 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  chartGames,
   openingChip,
   pagePlayerId,
   playerSubtitle,
@@ -377,6 +378,12 @@ export function PlayerStatsScreen() {
     [values, gameWindow],
   );
 
+  // The same games as `windowed`, each with its date and opponent, so every
+  // bar on the chart says which game it is (Matt, 2026-10-28).
+  const windowedGames = useMemo(() => {
+    const all = chartGames(games, (r) => logStatValue(r, stat));
+    return gameWindow === 'all' ? all : all.slice(0, gameWindow);
+  }, [games, stat, gameWindow]);
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
@@ -898,6 +905,8 @@ export function PlayerStatsScreen() {
 
               <HitRateChart
                 values={windowed}
+                games={windowedGames}
+                unit={statLabel}
                 line={selection.line}
                 side={selection.side}
                 lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}

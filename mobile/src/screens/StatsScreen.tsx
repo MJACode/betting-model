@@ -202,6 +202,10 @@ import {
   pointInBubble,
   previewTypedLine,
   compactRulerHeight,
+  rulerMarkHeight,
+  stopUnderOffset,
+  RULER_MARK_H,
+  RULER_TICKS_H,
   markerBoxInGesture,
   markerHitOverhang,
   programmaticPick,
@@ -3727,6 +3731,42 @@ function LineRuler({
 
   const offsetFor = (v: number) => stopIndexOf(v, scale) * tickW;
 
+  // The stop under the pointer WHILE a finger moves the strip (Matt,
+  // 2026-10-28: "The line should show where I'm heading"). The bubble draws
+  // it live; the board itself still re-filters once, when the strip settles,
+  // so the list does not jump under the thumb. Only a finger drag (and the
+  // fling after it) previews: a programmatic scroll — a tick tap, a typed
+  // line parking on the nearest stop — must not show a stop the value is not.
+  const [preview, setPreview] = useState<number | null>(null);
+  const previewRef = useRef<number | null>(null);
+  const fingerRef = useRef(false);
+  const fingerEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endPreview = () => {
+    fingerRef.current = false;
+    if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+    fingerEndTimer.current = null;
+    previewRef.current = null;
+    setPreview(null);
+  };
+  useEffect(() => () => {
+    if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+  }, []);
+  // An outside change (stat switch, a settle that moved the value) ends any
+  // preview, so the bubble never keeps a stale number.
+  useEffect(() => {
+    if (!fingerRef.current) {
+      previewRef.current = null;
+      setPreview(null);
+    }
+  }, [value]);
+  const onLiveScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!fingerRef.current) return;
+    const v = stopUnderOffset(e.nativeEvent.contentOffset.x, tickW, scale);
+    if (v === previewRef.current) return;
+    previewRef.current = v;
+    setPreview(v);
+  };
+
   // Position the strip once the viewport is measured (contentOffset alone is
   // unreliable on Android), and again whenever the value changes from outside.
   useEffect(() => {
@@ -3893,10 +3933,9 @@ function LineRuler({
   // as wide as the pill, so a neighbouring tick still receives its own tap.
   const overhang = fieldOpen ? 0 : markerHitOverhang(visualH);
   const hitH = visualH + overhang * 2;
-  // The resting marker draws with the text, and stops at 1.3× so a 2×
-  // setting does not turn the short strip back into the old bubble.
-  const markScale = Math.min(Math.max(fontScale, 1), 1.3);
-  const markH = Math.round(22 * markScale);
+  // The resting marker draws with the text, and stops at 1.6× so a 2×
+  // setting does not swallow the strip (lib/lineRuler.ts rulerMarkHeight).
+  const markH = rulerMarkHeight(fontScale);
   useEffect(() => {
     if (Platform.OS === 'ios' || !onEditBar) return;
     if (!fieldOpen) {
@@ -4082,9 +4121,28 @@ function LineRuler({
                 decelerationRate="fast"
                 contentOffset={{ x: offsetFor(value), y: 0 }}
                 contentContainerStyle={{ paddingHorizontal: sidePad }}
-                onMomentumScrollEnd={settle}
-                onScrollEndDrag={settle}
+                onScroll={onLiveScroll}
+                scrollEventThrottle={16}
+                onMomentumScrollBegin={() => {
+                  // The fling keeps previewing; cancel the no-fling fallback.
+                  if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+                  fingerEndTimer.current = null;
+                }}
+                onMomentumScrollEnd={(e) => {
+                  settle(e);
+                  endPreview();
+                }}
+                onScrollEndDrag={(e) => {
+                  settle(e);
+                  // A drag released without a fling gets no momentum events.
+                  // If none begins shortly, the preview ends here.
+                  if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+                  fingerEndTimer.current = setTimeout(endPreview, 250);
+                }}
                 onScrollBeginDrag={() => {
+                  fingerRef.current = true;
+                  if (fingerEndTimer.current != null) clearTimeout(fingerEndTimer.current);
+                  fingerEndTimer.current = null;
                   // A drag is the finger taking the strip. Drop an open draft
                   // so the settle lands on the dragged stop, and so the blur
                   // that follows does not commit the half-typed number.
@@ -4119,9 +4177,24 @@ function LineRuler({
                       accessible={false}
                       accessibilityElementsHidden
                       importantForAccessibility="no-hide-descendants"
-                      style={[styles.tickCol, styles.tickColCompact, { width: tickW }]}
+                      style={[
+                        styles.tickCol,
+                        styles.tickColCompact,
+                        { width: tickW, height: visualH, paddingTop: fieldOpen ? visualH - RULER_TICKS_H : markH },
+                      ]}
                     >
                       <View style={[styles.tick, styles.tickCompact, labeled && styles.tickMajorCompact]} />
+                      {/* The number under a major tick, so the values passing
+                          the pointer can be read mid-drag (Matt, 2026-10-28). */}
+                      {labeled ? (
+                        <Text
+                          style={[styles.tickNumber, { left: (tickW - LABEL_W) / 2 }]}
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={1.3}
+                        >
+                          {faceOf(v)}
+                        </Text>
+                      ) : null}
                     </Pressable>
                   );
                 })}
@@ -4156,21 +4229,32 @@ function LineRuler({
                   accessibilityLabel={`Type a ${a11yLabel}, now ${describeOf(value)}`}
                 />
               ) : (
-                <View
-                  pointerEvents="none"
-                  style={[
-                    styles.thresholdMark,
-                    { height: markH, minWidth: markH, borderRadius: markH / 2 },
-                    bubblePressed && styles.pressed,
-                  ]}
-                  onLayout={onBubbleLayout}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no-hide-descendants"
-                >
-                  <Text style={styles.thresholdMarkText} maxFontSizeMultiplier={1.3}>
-                    {faceOf(value)}
-                  </Text>
-                </View>
+                <>
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      styles.thresholdMark,
+                      { height: markH, minWidth: markH * 2, borderRadius: markH / 2 },
+                      preview != null && preview !== value && styles.thresholdMarkMoving,
+                      bubblePressed && styles.pressed,
+                    ]}
+                    onLayout={onBubbleLayout}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    {/* Live while dragging: the stop under the pointer. */}
+                    <Text style={styles.thresholdMarkText} maxFontSizeMultiplier={1.3}>
+                      {faceOf(preview ?? value)}
+                    </Text>
+                    {/* Says the number can be tapped and typed. Part of the
+                        marker, not a separate button (verify_line_ruler). */}
+                    {parseTyped ? (
+                      <Ionicons name="pencil" size={12} color={colors.textInverse} style={styles.thresholdMarkIcon} />
+                    ) : null}
+                  </View>
+                  {/* Pointer from the bubble onto the exact stop. */}
+                  <View pointerEvents="none" style={styles.markPointer} />
+                </>
               )}
             </View>
             </View>
@@ -5482,11 +5566,20 @@ const styles = StyleSheet.create({
   // face is the marker. tickCol's 44pt floor is for the old labeled strip.
   tickColCompact: {
     minHeight: 28,
-    paddingTop: 0,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   tickCompact: {
-    height: 12,
+    height: 10,
+  },
+  // Under a major tick. Wider than the tick (LABEL_W), centred on it.
+  tickNumber: {
+    position: 'absolute',
+    bottom: 2,
+    width: LABEL_W,
+    fontSize: font.size.nano,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
   tickMajorCompact: {
     width: 2,
@@ -5494,22 +5587,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.separatorOpaque,
   },
   centerMarkerCompact: {
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingTop: 0,
   },
   thresholdMark: {
-    minWidth: 22,
-    height: 22,
-    paddingHorizontal: 6,
-    borderRadius: 11,
+    minWidth: 60,
+    height: RULER_MARK_H,
+    paddingHorizontal: spacing.md,
+    borderRadius: RULER_MARK_H / 2,
     backgroundColor: colors.tint,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+  },
+  // Mid-drag, the bubble names a stop the board is not on yet: a lighter fill
+  // says "heading to", and it snaps back to solid when the board catches up.
+  thresholdMarkMoving: {
+    opacity: 0.85,
   },
   thresholdMarkText: {
-    fontSize: font.size.footnote,
+    fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textInverse,
+    fontVariant: ['tabular-nums'],
+  },
+  thresholdMarkIcon: {
+    opacity: 0.85,
+  },
+  // From the bubble down onto the tick row, ending at the selected stop.
+  markPointer: {
+    width: 2,
+    height: 12,
+    borderRadius: 1,
+    backgroundColor: colors.tint,
   },
   tickLabel: {
     width: LABEL_W,

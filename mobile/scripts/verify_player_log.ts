@@ -33,6 +33,10 @@ import {
   detailStatForPropModel,
   filledChipCounts,
   gameContextLine,
+  attachGameSides,
+  opponentLabel,
+  shortGameDate,
+  chartGames,
   groupsOfChips,
   ipToOuts,
   lineStepFor,
@@ -634,6 +638,45 @@ check('the pick-threshold lookup keys on the resolved id',
 // games among them (NFL is the card's sport, and its rule picks have no id).
 check('the same-position card excludes the player by the resolved id',
   /<PositionVsOpponentCard[\s\S]*?playerId=\{pageId\}/.test(playerScreen));
+
+// ── Chart labels: opponent and date on every bar (Matt, 2026-10-28) ────────
+{
+  const base = { player_id: 'p', player_name: 'K', season: 2026 } as const;
+  const log = [
+    { ...base, team: 'NYK', game_id: 'g3', game_date: '2026-10-26', points: 27 },
+    { ...base, team: 'NYK', game_id: 'g2', game_date: '2026-10-24', points: null },
+    { ...base, team: 'NYK', game_id: 'g1', game_date: '2026-10-22', points: 22 },
+    { ...base, team: 'NYK', game_id: 'gX', game_date: '2026-10-20', points: 19 },
+  ];
+  const sided = attachGameSides(log as never, [
+    { game_id: 'g3', home_team: 'CHI', away_team: 'NYK' },
+    { game_id: 'g2', home_team: 'NYK', away_team: 'BOS' },
+    { game_id: 'g1', home_team: 'NYK', away_team: 'ORL' },
+  ]);
+  check('an away game reads @CHI, a home game vs ORL',
+    opponentLabel(sided[0]!) === '@CHI' && opponentLabel(sided[2]!) === 'vs ORL'
+      && opponentLabel(sided[2]!, true) === 'vORL');
+  check('a game missing from games keeps no opponent and no venue',
+    opponentLabel(sided[3]!) === null && sided[3]!.venue == null);
+  check('a stored football opponent is kept, venue still added',
+    attachGameSides([{ ...base, team: 'Ohio State', opponent: 'Michigan', game_id: 'f', game_date: '2026-11-28' }] as never,
+      [{ game_id: 'f', home_team: 'Michigan', away_team: 'Ohio State' }])[0]!.venue === 'away');
+  check('a long school name is shortened under a bar, whole in the caption',
+    opponentLabel({ opponent: 'Ohio State', venue: 'away' }, true) === '@OHIO'
+      && opponentLabel({ opponent: 'Ohio State', venue: 'away' }) === '@Ohio State');
+  check('dates print as 10/26, junk as empty',
+    shortGameDate('2026-10-26') === '10/26' && shortGameDate('2026-01-05') === '1/5' && shortGameDate(null) === '');
+  // logValues DROPS a game with no value. The labels must drop the same game,
+  // or every bar after the gap carries the previous game's opponent.
+  const cg = chartGames(sided, (r) => (r.points == null ? null : Number(r.points)));
+  check('chart labels skip the same games the values skip, in the same order',
+    cg.length === 3 && cg[0]!.value === 27 && cg[0]!.opp === '@CHI' && cg[0]!.date === '10/26'
+      && cg[1]!.value === 22 && cg[1]!.opp === 'vORL' && cg[2]!.value === 19 && cg[2]!.opp === null);
+  check('the Recent games row names the opponent in basketball too',
+    gameContextLine('NBA', { ...sided[0]!, minutes: 34 } as never) === 'NYK · @CHI · 34 min');
+  check('the player chart is handed the labelled games',
+    /<HitRateChart[\s\S]*?games=\{windowedGames\}/.test(playerScreen));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

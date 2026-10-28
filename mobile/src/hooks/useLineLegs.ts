@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { lineLegsAfterAdd } from '@/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '@/lib/injuryStatus';
 import { injuryIndexForSport } from '@/lib/injuryLookup';
-import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
+import { isGameSpec, lineLegKey, lineLegsAfterReplace, type LineLegSpec } from '@/lib/lineLegs';
 
 /**
  * The betslip's LINE legs — Stats-board lines the user asked to add (Matt,
@@ -136,9 +136,19 @@ export function useLineLegs() {
     );
   }, []);
 
+  /** Swap a leg for its edited version in place (the betslip's Edit). False
+   *  when the edit is a no-op or would duplicate another leg. Same player, so
+   *  no second injury lookup. */
+  const replace = useCallback((oldKey: string, next: LineLegSpec): boolean => {
+    const updated = lineLegsAfterReplace(cached ?? [], oldKey, next);
+    if (!updated) return false;
+    save(updated).catch((err) => console.warn('[lineLegs] replace failed', err));
+    return true;
+  }, []);
+
   const clear = useCallback(() => {
     save([]).catch((err) => console.warn('[lineLegs] clear failed', err));
   }, []);
 
-  return { specs, count: specs.length, ready, has, add, remove, clear };
+  return { specs, count: specs.length, ready, has, add, remove, replace, clear };
 }

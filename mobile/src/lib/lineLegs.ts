@@ -387,3 +387,78 @@ export function teamLineSheetInput(quote: TeamLineQuote, sport: string): LineShe
   const prices = bettablePrices(quote.bookRows, (r) => priceForSide(r, side));
   return { spec, prices };
 }
+
+// ── Editing a prop line leg (Matt, 2026-10-28) ───────────────────────────────
+//
+// "If I select 10+ points for someone I should be able to edit and change it to
+// 15." A line leg is the user's own research bet, not a pick (§1c does not
+// apply to it — see the header), so changing its line is changing which bet
+// they want. Only numbers a bettable book actually POSTS are offered: a line
+// no book hangs could not be priced, and the slip would prune it on the next
+// resolve.
+
+/** The best bettable price for one side of one line. */
+export interface LineOptionPrice {
+  price: number;
+  book: string;
+}
+
+/** One number the books post for this player and market, with each side. */
+export interface LineOption {
+  line: number;
+  over: LineOptionPrice | null;
+  under: LineOptionPrice | null;
+}
+
+/**
+ * Every line the bettable books post for the spec's player and market, lowest
+ * first, with the best price on each side. `rows` is what fetchPropLineRows
+ * returns (main and alternate markets already folded into one).
+ */
+export function lineOptionsFromRows(
+  spec: PropLineLegSpec,
+  rows: readonly PropOddsByBookRow[],
+): LineOption[] {
+  const byLine = new Map<number, LineOption>();
+  const better = (cur: LineOptionPrice | null, price: number | null, book: string) =>
+    price == null ? cur : cur == null || price > cur.price ? { price, book } : cur;
+  for (const r of rows) {
+    if (r.game_id !== spec.game_id || r.market !== spec.market || r.player_name !== spec.player_name) continue;
+    if (!isBettableBook(r.bookmaker)) continue;
+    const line = num(r.line);
+    if (line == null) continue;
+    const opt = byLine.get(line) ?? { line, over: null, under: null };
+    opt.over = better(opt.over, num(r.over_price), r.bookmaker);
+    opt.under = better(opt.under, num(r.under_price), r.bookmaker);
+    byLine.set(line, opt);
+  }
+  return [...byLine.values()]
+    .filter((o) => o.over != null || o.under != null)
+    .sort((a, b) => a.line - b.line);
+}
+
+/** The same leg at another number and/or side. */
+export function withLine(spec: PropLineLegSpec, line: number, side: LineSide): PropLineLegSpec {
+  return { ...spec, line, side };
+}
+
+/**
+ * The specs after swapping one leg for its edited version, in the SAME place
+ * in the slip. Null when nothing should change: the old leg is gone, or the
+ * edit names a bet that is already a different leg on the slip (two copies of
+ * one bet is the duplicate the add path already refuses).
+ */
+export function lineLegsAfterReplace(
+  specs: readonly LineLegSpec[],
+  oldKey: string,
+  next: LineLegSpec,
+): LineLegSpec[] | null {
+  const at = specs.findIndex((s) => lineLegKey(s) === oldKey);
+  if (at < 0) return null;
+  const newKey = lineLegKey(next);
+  if (newKey === oldKey) return null;
+  if (specs.some((s, i) => i !== at && lineLegKey(s) === newKey)) return null;
+  const out = specs.slice();
+  out[at] = next;
+  return out;
+}

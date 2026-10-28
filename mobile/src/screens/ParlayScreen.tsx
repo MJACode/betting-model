@@ -30,7 +30,8 @@ import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { betslipPlayerFromPick, slipKeysAfterAdd } from '@/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX, type InjuryIndex } from '@/lib/injuryStatus';
 import { injuryIndexForSport } from '@/lib/injuryLookup';
-import { isLineLeg } from '@/lib/lineLegs';
+import { EditLineLegSheet } from '@/components/EditLineLegSheet';
+import { isGameSpec, isLineLeg, lineLegKey, type PropLineLegSpec } from '@/lib/lineLegs';
 import {
   setEditingParlayId,
   setManualCustomLegs,
@@ -45,6 +46,7 @@ import {
   isValidCombo,
   lineShopParlay,
   makeCustomLeg,
+  CUSTOM_MODEL_ID,
   parlayRecommendedUnits,
   slipKeyForPick,
   type LineShop,
@@ -142,6 +144,10 @@ function ParlayScreenBody() {
   // under it, the way every native stack header in this app behaves.
   const [scrolled, setScrolled] = useState<boolean>(false);
   const [customOpen, setCustomOpen] = useState<boolean>(false);
+  // The custom leg the form is editing (its pickId), or null when it adds one.
+  const [editingCustomId, setEditingCustomId] = useState<number | null>(null);
+  // The Stats line leg whose line is being changed (Matt, 2026-10-28).
+  const [editingLine, setEditingLine] = useState<PropLineLegSpec | null>(null);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [customOddsText, setCustomOddsText] = useState<string>('');
 
@@ -203,6 +209,51 @@ function ParlayScreenBody() {
     [slip, slipLegs, lineLegs],
   );
 
+  // Edit a leg (Matt, 2026-10-28: "if I select 10 points … I should be able
+  // to edit and change it to 15"). A Stats prop line opens the line picker; a
+  // custom leg reopens its form. Model picks and game lines have no edit: a
+  // pick is a bet of record at its own line, and game lines carry no alternate
+  // numbers to choose from.
+  const editableSpec = useCallback(
+    (leg: ParlayLeg): PropLineLegSpec | null => {
+      if (!isLineLeg(leg)) return null;
+      const spec = lineLegs.specs.find((s) => lineLegKey(s) === leg.slipKey);
+      return spec && !isGameSpec(spec) ? spec : null;
+    },
+    [lineLegs.specs],
+  );
+  const canEdit = useCallback(
+    (leg: ParlayLeg) => editableSpec(leg) != null || leg.modelId === CUSTOM_MODEL_ID,
+    [editableSpec],
+  );
+  const handleEdit = useCallback(
+    (pickId: number) => {
+      const leg = legs.find((l) => l.pickId === pickId);
+      if (!leg) return;
+      const spec = editableSpec(leg);
+      if (spec) {
+        setEditingLine(spec);
+        return;
+      }
+      if (leg.modelId === CUSTOM_MODEL_ID) {
+        setEditingCustomId(leg.pickId);
+        setCustomLabel(leg.label);
+        setCustomOddsText(formatAmerican(leg.americanOdds).replace(/\u2212/g, '-'));
+        setCustomOpen(true);
+      }
+    },
+    [legs, editableSpec],
+  );
+  const saveEditedLine = useCallback(
+    (next: PropLineLegSpec): boolean => {
+      if (!editingLine) return false;
+      const ok = lineLegs.replace(lineLegKey(editingLine), next);
+      if (ok) showToast('Leg updated');
+      return ok;
+    },
+    [editingLine, lineLegs],
+  );
+
   const handleClear = useCallback(() => {
     slip.clear();
     lineLegs.clear();
@@ -220,12 +271,16 @@ function ParlayScreenBody() {
   }, [staleKeys, slip, lineLegs]);
 
   const openCustom = useCallback(() => {
+    setEditingCustomId(null);
     setCustomLabel('');
     setCustomOddsText('');
     setCustomOpen(true);
   }, []);
 
-  const closeCustom = useCallback(() => setCustomOpen(false), []);
+  const closeCustom = useCallback(() => {
+    setCustomOpen(false);
+    setEditingCustomId(null);
+  }, []);
 
   // Send the user to the Stats tab to browse players; adding one brings them
   // back here automatically (fromParlay flag handled in StatsScreen). This
@@ -289,11 +344,25 @@ function ParlayScreenBody() {
   const handleSaveCustom = useCallback(() => {
     const odds = parseAmerican(customOddsText);
     if (customLabel.trim().length === 0 || odds == null) return;
-    setManualCustomLegs((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
+    if (editingCustomId != null) {
+      // Same place in the slip, same id; the snapshot it may have been
+      // restored from no longer describes it, so it is dropped.
+      setManualCustomLegs((prev) =>
+        prev.map((l) => {
+          if (l.pickId !== editingCustomId) return l;
+          const fresh = makeCustomLeg(customLabel, odds);
+          return { ...fresh, pickId: l.pickId, slipKey: l.slipKey, gameId: l.gameId };
+        }),
+      );
+      showToast('Leg updated');
+    } else {
+      setManualCustomLegs((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
+    }
+    setEditingCustomId(null);
     setCustomLabel('');
     setCustomOddsText('');
     setCustomOpen(false);
-  }, [customLabel, customOddsText]);
+  }, [customLabel, customOddsText, editingCustomId]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -378,6 +447,8 @@ function ParlayScreenBody() {
             removedCount={removedCount}
             sport={sport}
             onRemove={handleRemove}
+            onEdit={handleEdit}
+            canEdit={canEdit}
             onAddCustom={openCustom}
             onFindPlayers={goFindPlayers}
             onClear={handleClear}
@@ -387,6 +458,8 @@ function ParlayScreenBody() {
           />
         )}
       </ScrollView>
+
+      <EditLineLegSheet spec={editingLine} onClose={() => setEditingLine(null)} onSave={saveEditedLine} />
 
       {/* ── Custom-leg form ─────────────────────────────────────────── */}
       <Modal visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
@@ -398,7 +471,7 @@ function ParlayScreenBody() {
         >
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Custom leg</Text>
+              <Text style={styles.modalTitle}>{editingCustomId != null ? 'Edit custom leg' : 'Custom leg'}</Text>
               <Pressable
                 onPress={closeCustom}
                 hitSlop={8}
@@ -440,7 +513,7 @@ function ParlayScreenBody() {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Add leg"
+              accessibilityLabel={editingCustomId != null ? 'Update leg' : 'Add leg'}
               accessibilityState={{ disabled: !customValid }}
               onPress={handleSaveCustom}
               disabled={!customValid}
@@ -451,7 +524,7 @@ function ParlayScreenBody() {
               ]}
             >
               <Ionicons name="checkmark" size={18} color={colors.textInverse} />
-              <Text style={styles.buildBtnText}>Add leg</Text>
+              <Text style={styles.buildBtnText}>{editingCustomId != null ? 'Update leg' : 'Add leg'}</Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -756,6 +829,8 @@ function SlipBody({
   removedCount,
   sport,
   onRemove,
+  onEdit,
+  canEdit,
   onAddCustom,
   onFindPlayers,
   onClear,
@@ -770,6 +845,8 @@ function SlipBody({
   removedCount: number;
   sport: string;
   onRemove: (pickId: number) => void;
+  onEdit: (pickId: number) => void;
+  canEdit: (leg: ParlayLeg) => boolean;
   onAddCustom: () => void;
   onFindPlayers: () => void;
   onClear: () => void;
@@ -959,7 +1036,12 @@ function SlipBody({
 
         <View style={styles.legsList}>
           {legs.map((leg) => (
-            <ParlayLegCard key={leg.pickId} leg={leg} onRemove={() => onRemove(leg.pickId)} />
+            <ParlayLegCard
+              key={leg.pickId}
+              leg={leg}
+              onRemove={() => onRemove(leg.pickId)}
+              onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}
+            />
           ))}
         </View>
       </View>
