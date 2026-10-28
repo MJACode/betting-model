@@ -436,6 +436,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # nba_window_reads_span_seasons_2026_10_23.sql, deleted so the two never
     # rewrite each other on a pass. Same signatures; guards on its property.
     "nba_window_reads_roster_team_2026_10_26.sql",
+    # 2026-10-28: ParlayMatt shares the capper tables. capper_key separates
+    # his rows from Eggz (existing rows backfill to eggz). parlay_id marks
+    # a leg of one parlay so the leg is not a second unit. Nullable until
+    # this file sets the default. Does not rewrite picks or the record views.
+    # Returns before ALTER once the columns are NOT NULL with the eggz default.
+    "capper_parlaymatt_2026_10_28.sql",
     # 2026-10-16: byom_backtest, SECURITY INVOKER, one season. Catalog
     # return when the function body already has the marker. Unapplied.
     # Does not touch picks or the record views. Win, loss, or push.

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Grade, manually settle, or restate an Eggz day. Dry-run unless --apply.
+"""Grade, manually settle, or restate one capper's day. Dry-run unless --apply.
 
 Does not read Discord. Does not post unless `restate --apply`. Does not
-delete a push_sent row. A dry run writes nothing.
+delete a push_sent row. A dry run writes nothing. `--capper` defaults to
+eggz, so the commands below are unchanged. It may sit before or after the
+command.
 
     python -m scripts.eggz_record grade
     python -m scripts.eggz_record grade --apply
@@ -10,6 +12,8 @@ delete a push_sent row. A dry run writes nothing.
     python -m scripts.eggz_record settle --id 12 --result LOSS --note "log: 11 points" --apply
     python -m scripts.eggz_record restate 2026-10-22
     python -m scripts.eggz_record restate 2026-10-22 --apply
+    python -m scripts.eggz_record --capper parlaymatt grade --apply
+    python -m scripts.eggz_record --capper parlaymatt restate 2026-10-22 --apply
 
 `grade` re-reads stored messages and grades finals. Run it before settle,
 then list the rows still open and settle those. Do not reuse an id from
@@ -30,12 +34,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tracking.eggz_picks import (  # noqa: E402
+    CAPPERS,
+    EGGZ,
     EggzSettleError,
     grade_pending,
     open_legs,
     restate_eggz_day,
     settle_manual,
 )
+
+
+def _capper(name: str):
+    key = (name or "eggz").strip().lower()
+    if key not in CAPPERS:
+        raise SystemExit(f"unknown capper {name!r}; use eggz or parlaymatt")
+    return CAPPERS[key]
 
 
 def _print_open(rows) -> None:
@@ -54,27 +67,32 @@ def _print_open(rows) -> None:
         )
 
 
-def cmd_grade(apply: bool) -> int:
+def cmd_grade(apply: bool, capper=EGGZ) -> int:
     from data.db import get_connection
     conn = get_connection()
     try:
         if not apply:
-            _print_open(open_legs(conn))
+            rows = open_legs(conn) if capper is EGGZ else open_legs(conn, capper)
+            _print_open(rows)
             print("dry-run: nothing graded. Pass --apply to grade.")
             return 0
-        n = grade_pending(conn)
+        n = grade_pending(conn) if capper is EGGZ else grade_pending(conn, capper)
         print(f"graded {n}")
-        _print_open(open_legs(conn))
+        rows = open_legs(conn) if capper is EGGZ else open_legs(conn, capper)
+        _print_open(rows)
         return 0
     finally:
         conn.close()
 
 
-def cmd_settle(pick_id: int, result: str, note: str, apply: bool) -> int:
+def cmd_settle(pick_id: int, result: str, note: str, apply: bool, capper=EGGZ) -> int:
     from data.db import get_connection
     conn = get_connection()
     try:
-        out = settle_manual(conn, pick_id, result, note, apply=apply)
+        if capper is EGGZ:
+            out = settle_manual(conn, pick_id, result, note, apply=apply)
+        else:
+            out = settle_manual(conn, pick_id, result, note, apply=apply, capper=capper)
     except EggzSettleError as exc:
         print(f"refused: {exc}")
         return 1
@@ -90,8 +108,11 @@ def cmd_settle(pick_id: int, result: str, note: str, apply: bool) -> int:
     return 0
 
 
-def cmd_restate(game_date: str, apply: bool) -> int:
-    n = restate_eggz_day(game_date, dry_run=not apply)
+def cmd_restate(game_date: str, apply: bool, capper=EGGZ) -> int:
+    if capper is EGGZ:
+        n = restate_eggz_day(game_date, dry_run=not apply)
+    else:
+        n = restate_eggz_day(game_date, dry_run=not apply, capper=capper)
     if apply:
         print(f"restate {game_date}: posted {n}")
     elif n:
@@ -104,7 +125,27 @@ def cmd_restate(game_date: str, apply: bool) -> int:
     return 0
 
 
+def _take_capper(argv: list[str]) -> tuple[str, list[str]]:
+    """Pull `--capper name` from anywhere. The rest of the CLI is unchanged."""
+    name = "eggz"
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--capper":
+            if i + 1 >= len(argv):
+                raise SystemExit("--capper needs a name: eggz or parlaymatt")
+            name = argv[i + 1]
+            i += 2
+            continue
+        out.append(argv[i])
+        i += 1
+    return name, out
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    capper_name, raw = _take_capper(raw)
+    capper = _capper(capper_name)
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--apply", action="store_true",
@@ -122,13 +163,13 @@ def main(argv: list[str] | None = None) -> int:
     restate = sub.add_parser("restate", parents=[common], help="post a Corrected day recap")
     restate.add_argument("game_date")
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw)
     if args.command == "grade":
-        return cmd_grade(args.apply)
+        return cmd_grade(args.apply, capper)
     if args.command == "settle":
-        return cmd_settle(args.id, args.result, args.note, args.apply)
+        return cmd_settle(args.id, args.result, args.note, args.apply, capper)
     if args.command == "restate":
-        return cmd_restate(args.game_date, args.apply)
+        return cmd_restate(args.game_date, args.apply, capper)
     parser.error(f"unknown command {args.command}")
     return 2
 
