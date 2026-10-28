@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, DK prices on NFL BYOM prop facts. Hand-applied columns and backtest. Job enabled with apply. Backfill from 2023-09-01. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard replaces the Lines segment. DK game markets. MLB and NCAAF live from stored feeds. NFL, NBA, and NHL do not invent a score. Free soft-lock. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Matchup strength is five bars. No Good/Great/Average or Nth easiest. VoiceOver says Matchup strength N of 5. Parlay EV pills unchanged. Draft, not merged. |

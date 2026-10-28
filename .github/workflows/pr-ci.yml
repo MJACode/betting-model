@@ -110,6 +110,7 @@ jobs:
         run: |
           python -m pytest -q -rs \
             tests/test_config.py \
+            tests/test_claude_settings_allowlist.py \
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
             tests/test_mobile_threshold_parity.py \
