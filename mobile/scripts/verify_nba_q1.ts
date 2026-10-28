@@ -19,6 +19,9 @@ import {
   formatSigned1,
   nbaQ1Windows,
   nbaSeasonLabel,
+  q1PriorSeasonNote,
+  q1RowA11yLabel,
+  q1RowSub,
   summarizeQ1,
   type NbaQ1Game,
 } from '../src/lib/nbaQ1';
@@ -109,6 +112,25 @@ check('signed margin uses a real minus', formatSigned1(-2.5) === '−2.5', forma
 check('positive margin carries a plus', formatSigned1(1) === '+1.0');
 check('season label is the ending year', nbaSeasonLabel(2027) === '2026-27', nbaSeasonLabel(2027));
 check('record omits zero ties', formatQ1Record({ wins: 3, losses: 2, ties: 0 }) === '3-2');
+
+console.log('row text and VoiceOver');
+{
+  const home = nbaQ1Windows(games, 'home');
+  // Home last 5 holds the 10-23 game, which has no possessions.
+  check('subline names the rated count when short', q1RowSub(home.rows[0]) === 'Off/Def from 4', q1RowSub(home.rows[0]));
+  check('season subline gives the count', q1RowSub(home.rows[2]) === '3 games · Off/Def from 2', q1RowSub(home.rows[2]));
+  const a11y = q1RowA11yLabel(home.rows[0]);
+  check('spoken record uses words', a11y.includes('3 wins, 1 loss, 1 tie'), a11y);
+  check('spoken label never reads a dash', !a11y.includes('\u2014'), a11y);
+  const blank = summarizeQ1([g('2026-10-27', 2027, true, 30, 20, null, null)], 2027);
+  const lbl = q1RowA11yLabel({ key: 'l5', label: 'Last 5', summary: blank });
+  check('a missing rating is spoken as not available', lbl.includes('offensive rating not available'), lbl);
+  const note = q1PriorSeasonNote(home.rows, home.season);
+  check('prior-season note covers Last 5 and Last 10',
+    note === 'Last 5 includes 2 games from 2025-26. Last 10 includes 4 games from 2025-26.', note);
+  check('no note when nothing reaches back',
+    q1PriorSeasonNote(nbaQ1Windows(games.filter((x) => x.season === 2027), 'all').rows, 2027) === null);
+}
 
 if (failed) {
   console.log(`\n${failed} check(s) failed`);

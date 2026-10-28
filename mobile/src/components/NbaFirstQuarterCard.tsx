@@ -4,11 +4,16 @@
  * the average margin, and offensive and defensive rating (points per 100
  * possessions), with All / Home / Away on top and the season's league ranks
  * underneath. Logic and its checks: src/lib/nbaQ1.ts, scripts/verify_nba_q1.ts.
+ *
+ * At 2x text and up the four columns cannot hold "112.4" (48pt each on a
+ * 320pt phone), so each window stacks into label-value lines, the threshold
+ * LinesBoard uses (UX review, 2026-10-28).
  */
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { friendlyCause } from '@/lib/errors';
+import { linesMarketsStack } from '@/lib/linesBoard';
 import {
   formatQ1Record,
   formatRating,
@@ -17,6 +22,9 @@ import {
   NBA_Q1_VENUES,
   nbaQ1Windows,
   nbaSeasonLabel,
+  q1PriorSeasonNote,
+  q1RowA11yLabel,
+  q1RowSub,
   type NbaQ1Game,
   type NbaQ1SeasonRow,
   type NbaQ1Venue,
@@ -31,14 +39,17 @@ interface Props {
   gamesLoading: boolean;
   gamesError: string | null;
   seasonRows: NbaQ1SeasonRow[];
+  seasonError: string | null;
 }
 
-export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, seasonRows }: Props) {
+export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, seasonRows, seasonError }: Props) {
   const [venue, setVenue] = useState<NbaQ1Venue>('all');
+  const { fontScale } = useWindowDimensions();
+  const stack = linesMarketsStack(fontScale);
   const { season, rows } = useMemo(() => nbaQ1Windows(games, venue), [games, venue]);
   const ranks = seasonRows.find((r) => r.venue === venue) ?? null;
   const seasonSummary = rows[2].summary;
-  const prior = rows[1].summary.priorSeasonGames;
+  const priorNote = q1PriorSeasonNote(rows, season);
 
   if (gamesLoading && games.length === 0) {
     return <ActivityIndicator style={styles.loading} />;
@@ -66,23 +77,33 @@ export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, sea
         second
       />
 
-      <View style={[styles.row, styles.headRow]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Text style={[styles.cellLabel, styles.head]} />
-        <Text style={[styles.cell, styles.head]}>Record</Text>
-        <Text style={[styles.cell, styles.head]}>Margin</Text>
-        <Text style={[styles.cell, styles.head]}>Off</Text>
-        <Text style={[styles.cell, styles.head]}>Def</Text>
-      </View>
-      {rows.map((r) => (
-        <WindowRow key={r.key} row={r} />
-      ))}
+      {stack ? null : (
+        <View style={[styles.row, styles.headRow]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Text style={[styles.cellLabel, styles.head]} />
+          {['Record', 'Margin', 'Off', 'Def'].map((h) => (
+            <Text
+              key={h}
+              style={[styles.cell, styles.head]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+            >
+              {h}
+            </Text>
+          ))}
+        </View>
+      )}
+      {rows.map((r) => (stack ? <StackedRow key={r.key} row={r} /> : <WindowRow key={r.key} row={r} />))}
 
       {ranks && ranks.rated_games > 0 && ranks.ortg != null ? (
         <Text style={styles.ranks}>
           {season != null ? `${nbaSeasonLabel(season)} ranks` : 'Season ranks'}
-          {venue === 'all' ? '' : ` (${NBA_Q1_VENUE_LABEL[venue].toLowerCase()})`}: Off {ordinal(ranks.ortg_rank)} · Def{' '}
-          {ordinal(ranks.drtg_rank)} · Net {ordinal(ranks.net_rank)} of {ranks.teams}
+          {venue === 'all' ? '' : ` (${NBA_Q1_VENUE_LABEL[venue].toLowerCase()})`}, after {ranks.rated_games}{' '}
+          {ranks.rated_games === 1 ? 'game' : 'games'}: Off {ordinal(ranks.ortg_rank)} · Def {ordinal(ranks.drtg_rank)} ·
+          Net {ordinal(ranks.net_rank)} of {ranks.teams}
         </Text>
+      ) : seasonError ? (
+        <Text style={styles.legend}>Couldn’t load league ranks. Pull down to retry.</Text>
       ) : null}
       {seasonSummary.ptsFor != null && seasonSummary.ptsAgainst != null ? (
         <Text style={styles.legend}>
@@ -92,39 +113,61 @@ export function NbaFirstQuarterCard({ team, games, gamesLoading, gamesError, sea
       ) : null}
       <Text style={styles.legend}>
         Off and Def are points scored and allowed per 100 possessions, counted from play-by-play. Lower Def is better.
-        {prior > 0 && season != null
-          ? ` Last 10 includes ${prior} ${prior === 1 ? 'game' : 'games'} from ${nbaSeasonLabel(season - 1)}.`
-          : ''}
+        Net is Off minus Def.{priorNote ? ` ${priorNote}` : ''}
       </Text>
     </View>
   );
 }
 
-const WINDOW_SIZE: Record<NbaQ1WindowRow['key'], number> = { l5: 5, l10: 10, season: 0 };
-
 function WindowRow({ row }: { row: NbaQ1WindowRow }) {
   const s = row.summary;
   const empty = s.games === 0;
-  const label = empty
-    ? `${row.label}: no games`
-    : `${row.label}, ${s.games} games: first-quarter record ${formatQ1Record(s)}, average margin ${formatSigned1(
-        s.margin,
-      )}, offensive rating ${formatRating(s.ortg)}, defensive rating ${formatRating(s.drtg)}`;
+  const sub = q1RowSub(row);
   return (
-    <View style={styles.row} accessible accessibilityLabel={label}>
+    <View style={styles.row} accessible accessibilityLabel={q1RowA11yLabel(row)}>
       <View style={styles.cellLabel}>
-        <Text style={styles.rowLabel}>{row.label}</Text>
-        {/* The count shows on Season, and on a last-N window that is short of N. */}
-        {!empty && (row.key === 'season' || s.games < WINDOW_SIZE[row.key]) ? (
-          <Text style={styles.rowSub}>
-            {s.games} {s.games === 1 ? 'game' : 'games'}
-          </Text>
-        ) : null}
+        <Text style={styles.rowLabel} numberOfLines={1}>
+          {row.label}
+        </Text>
+        {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
-      <Text style={styles.cell}>{empty ? '—' : formatQ1Record(s)}</Text>
-      <Text style={[styles.cell, marginTint(s.margin)]}>{empty ? '—' : formatSigned1(s.margin)}</Text>
-      <Text style={styles.cell}>{formatRating(s.ortg)}</Text>
-      <Text style={styles.cell}>{formatRating(s.drtg)}</Text>
+      <Text style={styles.cell} numberOfLines={1}>
+        {empty ? '—' : formatQ1Record(s)}
+      </Text>
+      <Text style={[styles.cell, marginTint(s.margin)]} numberOfLines={1}>
+        {empty ? '—' : formatSigned1(s.margin)}
+      </Text>
+      <Text style={styles.cell} numberOfLines={1}>
+        {formatRating(s.ortg)}
+      </Text>
+      <Text style={styles.cell} numberOfLines={1}>
+        {formatRating(s.drtg)}
+      </Text>
+    </View>
+  );
+}
+
+/** The 2x-and-up layout: the window's label, then one label-value line per stat. */
+function StackedRow({ row }: { row: NbaQ1WindowRow }) {
+  const s = row.summary;
+  const empty = s.games === 0;
+  const sub = q1RowSub(row);
+  const lines: [string, string, object | null][] = [
+    ['Record', empty ? '—' : formatQ1Record(s), null],
+    ['Margin', empty ? '—' : formatSigned1(s.margin), marginTint(s.margin)],
+    ['Off', formatRating(s.ortg), null],
+    ['Def', formatRating(s.drtg), null],
+  ];
+  return (
+    <View style={styles.stackBlock} accessible accessibilityLabel={q1RowA11yLabel(row)}>
+      <Text style={styles.rowLabel}>{row.label}</Text>
+      {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
+      {lines.map(([k, v, tint]) => (
+        <View key={k} style={styles.stackLine}>
+          <Text style={styles.stackKey}>{k}</Text>
+          <Text style={[styles.stackValue, tint]}>{v}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -137,6 +180,8 @@ function marginTint(m: number | null) {
   return null;
 }
 
+// card and legend match TeamStatsScreen's own (its Card is file-local);
+// paddingTop is smaller because the tab row carries its own top space.
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.bgCard,
@@ -174,6 +219,14 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
+  stackBlock: {
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  stackLine: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs },
+  stackKey: { fontSize: font.size.body, color: colors.textSecondary },
+  stackValue: { fontSize: font.size.body, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   ranks: {
     fontSize: font.size.footnote,
     color: colors.textPrimary,

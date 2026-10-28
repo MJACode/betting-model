@@ -274,6 +274,7 @@ export function TeamStatsScreen() {
               gamesLoading={d.q1Games.loading}
               gamesError={d.q1Games.error}
               seasonRows={d.q1Season.data}
+              seasonError={d.q1Season.error}
             />
           </>
         ) : null}

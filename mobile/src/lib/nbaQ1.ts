@@ -179,3 +179,57 @@ export function formatRating(x: number | null): string {
 export function nbaSeasonLabel(season: number): string {
   return `${season - 1}-${String(season % 100).padStart(2, '0')}`;
 }
+
+const WINDOW_SIZE: Record<NbaQ1WindowRow['key'], number> = { l5: 5, l10: 10, season: 0 };
+
+/**
+ * The small line under a row's label. The count shows on Season and on a
+ * last-N window short of N. When some games carry no possession count, the
+ * ratings rest on fewer games than the record, and the line says so (UX
+ * review, 2026-10-28).
+ */
+export function q1RowSub(row: NbaQ1WindowRow): string | null {
+  const s = row.summary;
+  if (s.games === 0) return null;
+  const parts: string[] = [];
+  if (row.key === 'season' || s.games < WINDOW_SIZE[row.key]) {
+    parts.push(`${s.games} ${s.games === 1 ? 'game' : 'games'}`);
+  }
+  if (s.ratedGames < s.games) parts.push(`Off/Def from ${s.ratedGames}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+function spokenRecord(s: Pick<NbaQ1Summary, 'wins' | 'losses' | 'ties'>): string {
+  const w = `${s.wins} ${s.wins === 1 ? 'win' : 'wins'}, ${s.losses} ${s.losses === 1 ? 'loss' : 'losses'}`;
+  return s.ties ? `${w}, ${s.ties} ${s.ties === 1 ? 'tie' : 'ties'}` : w;
+}
+
+function spoken(x: number | null, signed = false): string {
+  if (x == null) return 'not available';
+  return signed ? (x > 0 ? `plus ${x.toFixed(1)}` : x < 0 ? `minus ${Math.abs(x).toFixed(1)}` : '0') : x.toFixed(1);
+}
+
+/** What VoiceOver reads for one row: words, never "—" or "3-2". */
+export function q1RowA11yLabel(row: NbaQ1WindowRow): string {
+  const s = row.summary;
+  if (s.games === 0) return `${row.label}: no games`;
+  const rated = s.ratedGames < s.games ? `, ratings from ${s.ratedGames} of them` : '';
+  return (
+    `${row.label}, ${s.games} ${s.games === 1 ? 'game' : 'games'}${rated}: first-quarter record ${spokenRecord(s)}, ` +
+    `average margin ${spoken(s.margin, true)}, offensive rating ${spoken(s.ortg)}, defensive rating ${spoken(s.drtg)}`
+  );
+}
+
+/** "Last 5 and Last 10 include 3 games from 2025-26", or null when neither reaches back. */
+export function q1PriorSeasonNote(rows: readonly NbaQ1WindowRow[], season: number | null): string | null {
+  if (season == null) return null;
+  const reach = rows.filter((r) => r.key !== 'season' && r.summary.priorSeasonGames > 0);
+  if (reach.length === 0) return null;
+  const from = nbaSeasonLabel(season - 1);
+  return reach
+    .map((r) => {
+      const n = r.summary.priorSeasonGames;
+      return `${r.label} includes ${n} ${n === 1 ? 'game' : 'games'} from ${from}.`;
+    })
+    .join(' ');
+}
