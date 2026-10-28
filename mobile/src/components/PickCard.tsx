@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -10,6 +10,7 @@ import {
 import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
+  handoffQuotesForPick,
   bookLabel,
   bookLabelShort,
   bookName,
@@ -28,6 +29,7 @@ import {
   storedQuoteBook,
   todayBoardHandoff,
   MODEL_BOOK,
+  type BoardHandoff,
   type HeroAmerican,
   type Movement,
 } from '@/lib/markets';
@@ -37,7 +39,9 @@ import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
 import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
-import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
+import { openBookBetslip } from '@/lib/sportsbookLinks';
+import { pickSportsbookRows } from '@/lib/pickBooks';
+import { PickBooksSheet } from './PickBooksSheet';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   foundAtText,
@@ -116,6 +120,41 @@ interface Props {
   teamAbbrevs?: ReadonlyMap<string, string> | null;
 }
 
+function BookControl({
+  label,
+  speech,
+  sheet,
+  onPress,
+}: {
+  label: string;
+  speech: string;
+  sheet: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={speech}
+      accessibilityHint={sheet ? 'Opens your sportsbooks, best price first' : undefined}
+      style={({ pressed }) => [styles.bookControl, pressed && styles.pressed]}
+    >
+      <Text style={styles.bookControlText} numberOfLines={1}>
+        {label}
+      </Text>
+      {sheet ? (
+        <Ionicons
+          name="chevron-down"
+          size={14}
+          color={colors.textSecondary}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        />
+      ) : null}
+    </Pressable>
+  );
+}
+
 export function PickCard({
   item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
   showSignalBadge = false,
@@ -127,6 +166,10 @@ export function PickCard({
   // The member's own books (Matt, 2026-10-19). Display only: what this card
   // SHOWS, never what the pick is (lib/myBooks.ts).
   const { books: myBooks, ready: myBooksReady } = usePreferredBooks();
+  const [booksOpen, setBooksOpen] = useState(false);
+  useEffect(() => {
+    setBooksOpen(false);
+  }, [pick.pick_id]);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -298,13 +341,32 @@ export function PickCard({
   const quietHeadline = signalsMuted || (signals && demoteEdge);
   // None of their books has it: no hand-off, no slip, no stake.
   const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted && !notAtMyBooks;
-  const handoff = offersBook && cta.handoff
+  // Until the member's books have loaded, a pre-game card does not name a
+  // shop book or open the sheet (the default set is every book, for one
+  // frame). A live pick stays the DraftKings quote.
+  const handoff = offersBook && cta.handoff && (myBooksReady || pick.is_live === true)
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : null;
-  // Today prints the lock and does not name a line. A line-only move with
-  // no book left at the picked line is Open: no "Bet DK −110", and no slip
-  // at the new line. Signals names the line, so it keeps `handoff`.
+  // The board layout does not open a moved line at the locked price.
+  // todayBoardHandoff turns that Bet into Open. The signals layout keeps
+  // the hand-off. Neither control prints the line — it stays in the hero.
   const boardHandoff = todayBoardHandoff(handoff, heroPrice);
+  const shopQuotes = handoff
+    ? handoffQuotesForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
+    : [];
+  // Live is DraftKings only. A dash on another book would pretend we shopped it.
+  const sheetRows = pickSportsbookRows(
+    shopQuotes,
+    pick.is_live === true || !myBooksReady ? null : myBooks,
+  );
+  const pricedRows = sheetRows.filter((row) => row.price != null);
+  const leadRow = pricedRows[0] ?? null;
+  const sheetBetLabel = leadRow?.price != null
+    ? signalsCtaLabel(leadRow.short, formatAmerican(leadRow.price))
+    : null;
+  const sheetBetSpeech = leadRow?.price != null
+    ? signalsCtaSpeech(leadRow.name, formatAmerican(leadRow.price))
+    : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
   // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
@@ -359,6 +421,13 @@ export function PickCard({
   const contextSport = game?.sport ?? pick.sport;
   const contextWhen = game?.commence_time ?? pick.game_time;
   const contextTime = signalsContextTime(gameDayLabelET(contextWhen), formatGameTimeET(contextWhen));
+  const contextLine = signalsContextLine({
+    sport: contextSport,
+    away: game?.away_team ?? '',
+    home: game?.home_team ?? '',
+    timeLabel: contextTime,
+    abbrevs: teamAbbrevs,
+  });
   const decisionPrice = decisionOdds(pick);
   // One formatted decision price for the 22pt number and for VoiceOver.
   // hero.lockedPrice is decisionOdds; the book is the hero's book when we
@@ -397,46 +466,37 @@ export function PickCard({
         book: bookName(quoteBookKey),
       })
     : null;
-  // The button names the line when it is a bet at the deciding book's
-  // current line (same book, that price). movedLine is enough: a line-only
-  // move stays kind decision. Open, and a book still at the scored line, do not.
-  const ctaAtMovedLine = Boolean(
-    signalsMovedLineText &&
-    handoff &&
-    heroPrice &&
-    !heroPrice.stale &&
-    !heroPrice.untracked &&
-    handoff.bookmaker === heroPrice.book &&
-    handoff.price != null &&
-    handoff.price === heroPrice.price,
-  );
-  // Open (no price) is not a different bet. A different book, a different
-  // price, or a line this button names that is not the lock is "Best now".
-  // A line-only move keeps the locked price, so the named line is the difference.
-  const buttonDiffers = Boolean(
-    handoff &&
-    handoff.price != null &&
-    heroPrice &&
-    (handoff.bookmaker !== heroPrice.book ||
-      handoff.price !== heroPrice.lockedPrice ||
-      ctaAtMovedLine),
-  );
-  const signalsCta = handoff
-    ? signalsCtaLabel(
-        bookLabel(handoff.bookmaker),
-        handoff.price == null ? null : formatAmerican(handoff.price),
-        ctaAtMovedLine ? signalsMovedLineText : null,
-        { bestNow: buttonDiffers },
-      )
-    : null;
-  const signalsCtaSpoken = handoff
-    ? signalsCtaSpeech(
-        bookName(handoff.bookmaker),
-        handoff.price == null ? null : formatAmerican(handoff.price),
-        ctaAtMovedLine ? signalsMovedLineText : null,
-        { bestNow: buttonDiffers },
-      )
-    : null;
+  // Several bettable books: "Best DK −115". One: "Bet FD −105".
+  // No "now", and no line — the hero already shows the line.
+  const bookControlFor = (h: BoardHandoff | null): { label: string; speech: string; sheet: boolean } | null => {
+    if (!h) return null;
+    if (h.price == null) {
+      return {
+        label: signalsCtaLabel(bookLabel(h.bookmaker), null),
+        speech: `Open ${bookName(h.bookmaker)} to check the live price`,
+        sheet: false,
+      };
+    }
+    if (leadRow?.price == null) {
+      const priceText = formatAmerican(h.price);
+      return {
+        label: signalsCtaLabel(bookLabel(h.bookmaker), priceText),
+        speech: signalsCtaSpeech(bookName(h.bookmaker), priceText),
+        sheet: false,
+      };
+    }
+    const best = pricedRows.length >= 2;
+    const priceText = formatAmerican(leadRow.price);
+    return {
+      label: signalsCtaLabel(leadRow.short, priceText, null, { best }),
+      speech: signalsCtaSpeech(leadRow.name, priceText, null, { best }),
+      sheet: true,
+    };
+  };
+  const signalsControl = bookControlFor(handoff);
+  const boardControl = bookControlFor(boardHandoff);
+  const signalsCta = signalsControl?.label ?? null;
+  const signalsCtaSpoken = signalsControl?.speech ?? null;
   const signalsRiskUnits = formatUnits(stake.risk);
   const signalsWinUnits = formatUnits(stake.win);
   const signalsStakeShown = stakeCaption ? signalsStakeLine(signalsRiskUnits, signalsWinUnits) : null;
@@ -537,20 +597,14 @@ export function PickCard({
   // Today uses boardHandoff, which is Open when the slip would be a
   // different line from the lock the button would otherwise quote.
   const actionHandoff = signals ? handoff : boardHandoff;
+  const actionControl = signals ? signalsControl : boardControl;
   const a11yActions = [
-    ...(actionHandoff
+    ...(actionHandoff && actionControl
       ? [{
           name: 'book',
-          label: signals && signalsCtaSpoken
-            ? signalsCtaSpoken
-            : actionHandoff.price == null
-              ? `Open ${bookName(actionHandoff.bookmaker)} to check the live price`
-              : signalsCtaSpeech(
-                  bookName(actionHandoff.bookmaker),
-                  formatAmerican(actionHandoff.price),
-                  null,
-                  { bestNow: actionHandoff.verb === 'Best' },
-                ),
+          label: actionControl.sheet
+            ? `${actionControl.speech}. Opens your sportsbooks`
+            : actionControl.speech,
         }]
       : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
@@ -569,7 +623,10 @@ export function PickCard({
       accessibilityActions={a11yActions.length > 0 ? a11yActions : undefined}
       onAccessibilityAction={(e) => {
         const name = e.nativeEvent.actionName;
-        if (name === 'book' && actionHandoff) void openBookBetslip(actionHandoff.bookmaker, actionHandoff.link);
+        if (name === 'book' && actionHandoff) {
+          if (actionControl?.sheet) setBooksOpen(true);
+          else void openBookBetslip(actionHandoff.bookmaker, actionHandoff.link);
+        }
         else if (name === 'slip' && canSlip) onToggleSlip!();
         else if (name === 'track' && canTrack) onToggleTrack!();
       }}
@@ -842,41 +899,16 @@ export function PickCard({
                 {startedText}
               </Text>
             </View>
-          ) : boardHandoff ? (
-            <Pressable
+          ) : boardHandoff && boardControl ? (
+            <BookControl
+              label={boardControl.label}
+              speech={boardControl.speech}
+              sheet={boardControl.sheet}
               onPress={() => {
-                void openBookBetslip(boardHandoff.bookmaker, boardHandoff.link);
+                if (boardControl.sheet) setBooksOpen(true);
+                else void openBookBetslip(boardHandoff.bookmaker, boardHandoff.link);
               }}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-              accessibilityRole="button"
-              accessibilityLabel={
-                boardHandoff.price == null
-                  ? `Open ${bookName(boardHandoff.bookmaker)} to check the live price`
-                  : signalsCtaSpeech(
-                      bookName(boardHandoff.bookmaker),
-                      formatAmerican(boardHandoff.price),
-                      null,
-                      { bestNow: boardHandoff.verb === 'Best' },
-                    )
-              }
-              style={({ pressed }) => [
-                styles.handoff,
-                boardHandoff.bookmaker === 'draftkings' && styles.handoffDk,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[styles.handoffText, boardHandoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
-                numberOfLines={1}
-              >
-                {signalsCtaLabel(
-                  bookLabel(boardHandoff.bookmaker),
-                  boardHandoff.price == null ? null : formatAmerican(boardHandoff.price),
-                  null,
-                  { bestNow: boardHandoff.verb === 'Best' },
-                )}
-              </Text>
-            </Pressable>
+            />
           ) : (
             <View />
           )}
@@ -930,13 +962,7 @@ export function PickCard({
           </View>
         )}
         <Text style={styles.matchupLine}>
-          {signalsContextLine({
-            sport: contextSport,
-            away: game?.away_team ?? '',
-            home: game?.home_team ?? '',
-            timeLabel: contextTime,
-            abbrevs: teamAbbrevs,
-          })}
+          {contextLine}
         </Text>
         {flagged || (showSharp && sharp && !signalsMuted) || (showTier && pick.confidence_tier) || gameStatus(game, liveState).kind !== 'pre' ? (
         <View style={styles.contextTrail}>
@@ -1165,19 +1191,16 @@ export function PickCard({
                 {trueMinus(startedText)}
               </Text>
             </View>
-          ) : signalsCta && handoff ? (
-            <Pressable
+          ) : signalsCta && handoff && signalsControl ? (
+            <BookControl
+              label={signalsCta}
+              speech={signalsCtaSpoken ?? signalsCta}
+              sheet={signalsControl.sheet}
               onPress={() => {
-                void openBookBetslip(handoff.bookmaker, handoff.link);
+                if (signalsControl.sheet) setBooksOpen(true);
+                else void openBookBetslip(handoff.bookmaker, handoff.link);
               }}
-              accessibilityRole="button"
-              accessibilityLabel={signalsCtaSpoken ?? signalsCta}
-              style={({ pressed }) => [styles.handoffNavy, pressed && styles.pressed]}
-            >
-              <Text style={styles.handoffNavyText}>
-                {signalsCta}
-              </Text>
-            </Pressable>
+            />
           ) : (
             <View />
           )}
@@ -1214,6 +1237,30 @@ export function PickCard({
       <Text style={styles.modelCaption}>{modelCaption}</Text>
       </>
       )}
+      {leadRow && sheetBetLabel ? (
+        <PickBooksSheet
+          visible={booksOpen}
+          title={betHeadline}
+          subtitle={contextLine}
+          lineNote={
+            heroPrice?.movedLine != null && leadRow.bookmaker === heroPrice.book
+              ? signalsNow
+              : null
+          }
+          rows={sheetRows}
+          betLabel={sheetBetLabel}
+          betSpeech={sheetBetSpeech}
+          onBet={() => {
+            setBooksOpen(false);
+            void openBookBetslip(leadRow.bookmaker, leadRow.link, { sameBookOnly: true });
+          }}
+          onRow={(row) => {
+            setBooksOpen(false);
+            void openBookBetslip(row.bookmaker, row.link, { sameBookOnly: true });
+          }}
+          onClose={() => setBooksOpen(false)}
+        />
+      ) : null}
     </Pressable>
   );
 }
@@ -1528,26 +1575,26 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     flexShrink: 0,
   },
-  handoff: {
+  // Gray bet-type control: Lines-cell fill, hairline, chevron. Not a filled bar.
+  bookControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flexShrink: 1,
-    minHeight: 36,
+    gap: spacing.xs,
+    minHeight: 44,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgGrouped,
-    justifyContent: 'center',
+    borderRadius: radii.md,
+    backgroundColor: colors.bg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separatorOpaque,
   },
-  handoffDk: {
-    backgroundColor: DK_GREEN,
-  },
-  handoffText: {
-    fontSize: font.size.caption,
+  bookControlText: {
+    flexShrink: 1,
+    fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
-  },
-  handoffTextDk: {
-    color: colors.textPrimary,
   },
   // The post-time footer: last line of the card, under the action buttons.
   timingRow: {
@@ -1709,23 +1756,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
     marginTop: spacing.xs,
-  },
-  // Filled navy. tint on its own is the mark's ink; the label is textInverse.
-  // Not the DraftKings green and not colors.info.
-  handoffNavy: {
-    flexGrow: 1,
-    flexShrink: 1,
-    minHeight: 44,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    backgroundColor: colors.tint,
-    justifyContent: 'center',
-  },
-  handoffNavyText: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textInverse,
-    fontVariant: ['tabular-nums'],
   },
 });
