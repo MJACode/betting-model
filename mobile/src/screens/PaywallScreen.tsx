@@ -203,7 +203,7 @@ export function PaywallScreen() {
               : 'The subscriber Discord, included with this plan',
           ].map((line) => (
             <View key={line} style={styles.includedRow}>
-              <Ionicons name="checkmark" size={16} color={colors.bet} />
+              <Ionicons name="checkmark-circle" size={16} color={colors.tint} />
               <Text style={styles.includedText}>{line}</Text>
             </View>
           ))}

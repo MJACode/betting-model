@@ -343,8 +343,8 @@ export function PicksHomeScreen() {
   // switch tabs and land on whatever segment was already showing. The param is
   // cleared after use so a second tap works and a back-navigation does not
   // re-trigger it.
-  // Free is Record only (Matt, 2026-10-27). Today, Signals, Live and Lines
-  // all lock. `contentLocked` is false while billing is dark, and while the
+  // A free member can use the Record tab (Matt, 2026-10-27). Today, Signals,
+  // Live and Lines all lock. `contentLocked` is false while billing is dark, and while the
   // subscription row is still loading, so a subscriber does not flash the lock.
   const { contentLocked: signalsLocked, hold: picksHold, entitled } = useMembership();
   const openPaywall = useCallback(() => {

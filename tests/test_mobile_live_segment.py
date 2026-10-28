@@ -310,7 +310,7 @@ def test_the_paywall_card_never_replaces_the_live_empty_state():
 
     The 2026-09-12 card at count 0 said the models "haven't found a bet that
     clears the line yet today" — a promise the app cannot keep on a sport with
-    no in-play model. Free is Record only now (Matt, 2026-10-27): the lock
+    no in-play model. A free member can use the Record tab (Matt, 2026-10-27): the lock
     replaces All, Signals, Live and Lines, and it does not claim the board is
     empty. An entitled reader still gets the live empty state.
     """
