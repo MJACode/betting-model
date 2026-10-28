@@ -284,7 +284,7 @@ export function HitRateChart({
         <Text style={styles.captionText} numberOfLines={1}>
           {caption}
         </Text>
-        <Text style={[styles.captionResult, { color: selHit ? colors.bet : colors.avoid }]}>
+        <Text style={[styles.captionResult, { color: selHit ? colors.betInk : colors.avoidInk }]}>
           {selHit ? 'Hit' : 'Miss'}
         </Text>
       </View>

@@ -42,7 +42,7 @@ export function EditLineLegSheet({
   onSave: (next: PropLineLegSpec) => boolean;
 }) {
   const [options, setOptions] = useState<LineOption[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const [side, setSide] = useState<LineSide>('over');
   const [line, setLine] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -55,14 +55,14 @@ export function EditLineLegSheet({
     setLine(spec.line);
     setNote(null);
     setOptions(null);
-    setError(null);
+    setFailed(false);
     let alive = true;
     fetchPropLineRows(spec.game_id, spec.market, spec.player_name)
       .then((rows) => {
         if (alive) setOptions(lineOptionsFromRows(spec, rows));
       })
       .catch(() => {
-        if (alive) setError('Could not load the lines. Check your connection and try again.');
+        if (alive) setFailed(true);
       });
     return () => {
       alive = false;
@@ -120,6 +120,7 @@ export function EditLineLegSheet({
                     setNote(null);
                   }}
                   accessibilityRole="tab"
+                  accessibilityLabel={s === 'over' ? 'Over' : 'Under'}
                   accessibilityState={{ selected: active }}
                   style={({ pressed }) => [styles.segBtn, active && styles.segBtnActive, pressed && styles.pressed]}
                 >
@@ -129,9 +130,9 @@ export function EditLineLegSheet({
             })}
           </View>
 
-          {error ? (
+          {failed ? (
             <View style={styles.state}>
-              <Text style={styles.stateText}>{error}</Text>
+              <Text style={styles.stateText}>Couldn’t load the lines. Check your connection and try again.</Text>
               <Pressable
                 onPress={() => setNonce((n) => n + 1)}
                 accessibilityRole="button"
@@ -292,7 +293,7 @@ const styles = StyleSheet.create({
   },
   segBtn: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
@@ -384,7 +385,7 @@ const styles = StyleSheet.create({
   note: {
     marginTop: spacing.sm,
     fontSize: font.size.footnote,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   primary: {
     marginTop: spacing.md,

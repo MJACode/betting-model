@@ -4163,6 +4163,7 @@ function LineRuler({
                 }}
               >
                 {Array.from({ length: count }, (_, i) => {
+                  const tickColBox = { width: tickW, height: visualH, paddingTop: fieldOpen ? visualH - RULER_TICKS_H : markH };
                   const v = stopAt(i, scale);
                   const labeled = v % labelUnits === 0 || v === min || v === hi;
                   return (
@@ -4177,11 +4178,7 @@ function LineRuler({
                       accessible={false}
                       accessibilityElementsHidden
                       importantForAccessibility="no-hide-descendants"
-                      style={[
-                        styles.tickCol,
-                        styles.tickColCompact,
-                        { width: tickW, height: visualH, paddingTop: fieldOpen ? visualH - RULER_TICKS_H : markH },
-                      ]}
+                      style={[styles.tickCol, styles.tickColCompact, tickColBox]}
                     >
                       <View style={[styles.tick, styles.tickCompact, labeled && styles.tickMajorCompact]} />
                       {/* The number under a major tick, so the values passing
