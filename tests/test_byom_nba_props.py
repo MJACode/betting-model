@@ -99,6 +99,7 @@ def test_the_nba_migration_is_not_registered_and_does_not_drop():
     assert "player_double_double" in sql
     assert "player_triple_double" in sql
     assert "unknown sport" in sql
+    assert "name is saved on another sport" in sql
     lowered = sql.lower()
     assert "insert into picks" not in lowered
     from tracking.job_queue import _validate_byom_prop_facts
@@ -322,6 +323,43 @@ def test_scratch_nba_backtest_is_its_own_sport_and_save_stores_it():
         cur.fetchone()
         cur.execute("SELECT sport FROM byom_models WHERE name = 'yes'")
         assert cur.fetchone()[0] == "NBA"
+
+        cur.execute(
+            """
+            SELECT model_id FROM byom_save_model(
+              'shared',
+              '{"markets":["player_pass_yds"],"prop_side":"over"}'::jsonb,
+              2026)
+            """
+        )
+        cur.fetchone()
+        with pytest.raises(psycopg2.errors.RaiseException, match="name is saved on another sport"):
+            cur.execute(
+                """
+                SELECT model_id FROM byom_save_model(
+                  'shared',
+                  '{"markets":["player_points"],"prop_side":"over","sport":"NBA"}'::jsonb,
+                  2027)
+                """
+            )
+        cur.execute("SELECT sport, filters FROM byom_models WHERE name = 'shared'")
+        shared_sport, shared_filters = cur.fetchone()
+        assert shared_sport == "NFL"
+        assert shared_filters["markets"] == ["player_pass_yds"]
+        cur.execute(
+            """
+            SELECT model_id FROM byom_save_model(
+              'points over',
+              '{"markets":["player_rebounds"],"prop_side":"under","sport":"NBA"}'::jsonb,
+              2027)
+            """
+        )
+        cur.fetchone()
+        cur.execute("SELECT count(*), max(sport), max(filters->>'prop_side') FROM byom_models WHERE name = 'points over'")
+        count, replaced_sport, replaced_side = cur.fetchone()
+        assert count == 1
+        assert replaced_sport == "NBA"
+        assert replaced_side == "under"
     finally:
         if raw is not None:
             raw.close()

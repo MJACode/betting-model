@@ -54,6 +54,13 @@ ANON_READABLE: tuple[str, ...] = (
     # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
     # Declared now that a `.from()` names it. A miss stays the school name.
     "ncaaf_teams",
+    # Scoreboard live scores for NFL, NBA and NHL (2026-10-29), one row per
+    # game from data/ingestors/live_scoreboard.py. Policy and grant:
+    # add_live_scoreboard_2026_10_29.sql.
+    "live_scoreboard",
+    # Scoreboard % bets / % money (2026-10-29), display only; policy and
+    # grant in add_scoreboard_splits_2026_10_29.sql.
+    "scoreboard_splits",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
@@ -75,10 +82,9 @@ ANON_READABLE: tuple[str, ...] = (
     # NO policy -- deny-all -- so the grant alone read as an empty screen.
     # The policy is data/migrations/anon_read_public_betting_2026_09_20.sql.
     "public_betting",
-    # Build Your Own Model facts (2026-10-16). Granted before the screen
-    # exists: an undeclared table arrives with no SELECT and the first read
-    # is an empty error. Nothing in mobile/src names these yet, so they are
-    # also AHEAD_OF_THE_APP. Display data only: no picks, no stakes.
+    # Build Your Own Model facts (2026-10-16). Display data only: no picks,
+    # no stakes. The NBA builder reads byom_game_facts. byom_prop_facts is
+    # still unread, so it stays on AHEAD_OF_THE_APP.
     "byom_game_facts",
     "byom_prop_facts",
     "tracked_bets",
@@ -141,9 +147,9 @@ ANON_READABLE: tuple[str, ...] = (
 
 # In ANON_READABLE, and not yet named by a mobile `.from()`. The stale-entry
 # test subtracts this tuple and fails if anything else is granted unread.
-# Build Your Own Model facts: the NFL tables land before the screen.
+# byom_prop_facts is granted and the app does not .from() it yet.
+# byom_game_facts left this list when the NBA builder started reading it.
 AHEAD_OF_THE_APP: tuple[str, ...] = (
-    "byom_game_facts",
     "byom_prop_facts",
 )
 
@@ -620,6 +626,10 @@ RPC_LEFT_ALONE: tuple[str, ...] = (
 # docs/followups.md.
 RPC_MISSING_IN_PROD: tuple[str, ...] = (
     "my_access",
+    # Distinct BYOM player names for the matchup sheet. Granted inside
+    # byom_prop_phase_a_filters_2026_10_29.sql, which is hand-applied and
+    # not in ACTIVE_MIGRATIONS. The grant sweep must not name it first.
+    "byom_player_names",
 )
 
 # Authenticated RPCs whose migrations are not in ACTIVE_MIGRATIONS.

@@ -15,10 +15,12 @@ import { Skeleton } from '@/components/Skeleton';
 import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSavedModel } from '@/hooks/useByomSavedModel';
 import { useByomSeason } from '@/hooks/useByomSeason';
+import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
-import { isWholeSeason, marketLabel, showsUnits, type ByomSport } from '@/lib/byomRecord';
+import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport } from '@/lib/byomRecord';
+import { propFilterSummary } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -32,6 +34,11 @@ export function ByomDetailScreen() {
   const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
   const graded = model != null && !isWholeSeason(model.filters);
   const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const filterMarket = model?.filters.markets?.[0] ?? null;
+  const filterLine = model == null || !isPropMarket(filterMarket)
+    ? null
+    : propFilterSummary(model.filters, sport, filterMarket);
+  const facts = useNbaGameFacts(model == null ? null : sport);
   const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
 
   useFocusEffect(useCallback(() => {
@@ -113,6 +120,7 @@ export function ByomDetailScreen() {
             />
           ) : null}
           <Text style={styles.market}>{marketLabel(model.filters)}</Text>
+          {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
           <ByomSeasonToggle />
           <ByomPreviewCard
             record={preview.record}
@@ -120,7 +128,7 @@ export function ByomDetailScreen() {
             error={graded ? preview.error : null}
             onRetry={() => void preview.reload()}
             showsUnits={showsUnits(model.filters)}
-            emptyLabel={graded ? 'No games match' : '—'}
+            emptyLabel={graded && model ? byomEmptyLabel(sport, facts.status, model.filters) : '—'}
           />
           <ByomUnitsNote />
           <Pressable
@@ -146,8 +154,13 @@ const styles = StyleSheet.create({
   banner: { marginHorizontal: 0 },
   market: {
     marginTop: spacing.xs,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.sm,
     fontSize: font.size.body,
+    color: colors.textSecondary,
+  },
+  filters: {
+    marginBottom: spacing.lg,
+    fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
   delete: {

@@ -1,0 +1,444 @@
+{
+ "events": [
+  {
+   "id": "401892585",
+   "date": "2026-10-27T23:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final/OT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "15",
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "id": "15",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia Flyers"
+       }
+      },
+      {
+       "id": "29",
+       "homeAway": "away",
+       "score": "4",
+       "team": {
+        "id": "29",
+        "abbreviation": "CBJ",
+        "displayName": "Columbus Blue Jackets"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892586",
+   "date": "2026-10-28T00:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "7",
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "id": "7",
+        "abbreviation": "CAR",
+        "displayName": "Carolina Hurricanes"
+       }
+      },
+      {
+       "id": "1",
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "id": "1",
+        "abbreviation": "BOS",
+        "displayName": "Boston Bruins"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892587",
+   "date": "2026-10-28T00:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "4",
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "id": "4",
+        "abbreviation": "CHI",
+        "displayName": "Chicago Blackhawks"
+       }
+      },
+      {
+       "id": "8",
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "id": "8",
+        "abbreviation": "LA",
+        "displayName": "Los Angeles Kings"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892588",
+   "date": "2026-10-28T00:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "19",
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "19",
+        "abbreviation": "STL",
+        "displayName": "St. Louis Blues"
+       }
+      },
+      {
+       "id": "10",
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "id": "10",
+        "abbreviation": "MTL",
+        "displayName": "Montreal Canadiens"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892589",
+   "date": "2026-10-28T00:00Z",
+   "status": {
+    "period": 5,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final/SO"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "27",
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "id": "27",
+        "abbreviation": "NSH",
+        "displayName": "Nashville Predators"
+       }
+      },
+      {
+       "id": "12",
+       "homeAway": "away",
+       "score": "4",
+       "team": {
+        "id": "12",
+        "abbreviation": "NYI",
+        "displayName": "New York Islanders"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892590",
+   "date": "2026-10-28T00:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "9",
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "id": "9",
+        "abbreviation": "DAL",
+        "displayName": "Dallas Stars"
+       }
+      },
+      {
+       "id": "11",
+       "homeAway": "away",
+       "score": "5",
+       "team": {
+        "id": "11",
+        "abbreviation": "NJ",
+        "displayName": "New Jersey Devils"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892591",
+   "date": "2026-10-28T00:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "28",
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "id": "28",
+        "abbreviation": "WPG",
+        "displayName": "Winnipeg Jets"
+       }
+      },
+      {
+       "id": "26",
+       "homeAway": "away",
+       "score": "5",
+       "team": {
+        "id": "26",
+        "abbreviation": "FLA",
+        "displayName": "Florida Panthers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892592",
+   "date": "2026-10-28T01:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "129764",
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "id": "129764",
+        "abbreviation": "UTA",
+        "displayName": "Utah Mammoth"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "score": "3",
+       "team": {
+        "id": "30",
+        "abbreviation": "MIN",
+        "displayName": "Minnesota Wild"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892593",
+   "date": "2026-10-28T02:00Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "37",
+       "homeAway": "home",
+       "score": "4",
+       "team": {
+        "id": "37",
+        "abbreviation": "VGK",
+        "displayName": "Vegas Golden Knights"
+       }
+      },
+      {
+       "id": "14",
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "id": "14",
+        "abbreviation": "OTT",
+        "displayName": "Ottawa Senators"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892594",
+   "date": "2026-10-28T02:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final/OT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "home",
+       "score": "5",
+       "team": {
+        "id": "25",
+        "abbreviation": "ANA",
+        "displayName": "Anaheim Ducks"
+       }
+      },
+      {
+       "id": "22",
+       "homeAway": "away",
+       "score": "6",
+       "team": {
+        "id": "22",
+        "abbreviation": "VAN",
+        "displayName": "Vancouver Canucks"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892595",
+   "date": "2026-10-28T02:30Z",
+   "status": {
+    "period": 3,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "18",
+        "abbreviation": "SJ",
+        "displayName": "San Jose Sharks"
+       }
+      },
+      {
+       "id": "2",
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "id": "2",
+        "abbreviation": "BUF",
+        "displayName": "Buffalo Sabres"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

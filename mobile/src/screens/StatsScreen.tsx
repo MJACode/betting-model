@@ -495,6 +495,8 @@ export function StatsScreen() {
   const [failedGroups, setFailedGroups] = useState<ReadonlySet<string>>(new Set());
   const [rankReload, setRankReload] = useState(0);
   const [matchupInfoOpen, setMatchupInfoOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const openPickerAfterNotes = useRef(false);
   // Default ON: a dash means we hold no rating for that defence, not that the
   // spot is bad, and on an NCAAF Saturday the ungraded rows are the FCS
   // visitors — the softest spots on the board. Excluding them by default made
@@ -2607,6 +2609,47 @@ export function StatsScreen() {
     </FilterSection>
   );
 
+  // BOARD NOTES live behind ONE ⓘ at the end of the window strip (Matt,
+  // 2026-10-29: "way too much room at the top… language we feel we need to
+  // have should be on a tool tip"). Each was a full-width caption row; on the
+  // Anytime TD board two of them pushed the first player below the fold. The
+  // retry row is NOT here — it is a control, not a note. Same strings, same
+  // conditions as the captions they replace.
+  const boardNotes: string[] = [];
+  if (positionNote) boardNotes.push(positionNote);
+  if (effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0) {
+    boardNotes.push(
+      'H2H · each player against their next opponent, last 2 seasons. Many are a single meeting — the count is under every rate.',
+    );
+  }
+  if (noLinesNote) boardNotes.push(noLinesNote.text);
+  if (atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values())) {
+    boardNotes.push(ATD_COPY.earlySeason);
+  }
+  const notesCanSwitch = noLinesNote?.canSwitch === true;
+  // The notes can empty while the sheet is open (a stat change, a refetch);
+  // close it then, or it would pop back open on the next note.
+  // Not an effect: this sits below the `!stat` early return, so a hook here
+  // would change the hook count. A same-render state reset is allowed.
+  if (notesOpen && boardNotes.length === 0) setNotesOpen(false);
+  const windowStripHidden =
+    sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0;
+  const notesButton =
+    boardNotes.length > 0 ? (
+      <Pressable
+        onPress={() => setNotesOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`About this board, ${boardNotes.length} note${boardNotes.length > 1 ? 's' : ''}`}
+        accessibilityHint="Opens notes about this board"
+        style={({ pressed }) => [styles.notesBtn, pressed && styles.pressed]}
+      >
+        <Ionicons name="information-circle-outline" size={20} color={colors.tint} />
+        {/* A dot when a note explains missing prices: the column of dashes
+            is otherwise the only sign anything is behind the ⓘ. */}
+        {noLinesNote ? <View style={styles.notesDot} importantForAccessibility="no" /> : null}
+      </Pressable>
+    ) : null;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -2700,21 +2743,13 @@ export function StatsScreen() {
           The pill does not also say the snapshot is old. Prop rows carry
           snapshot_at, and the game-line age rule (markets.priceAgeApplies)
           does not cover props — their normal age is hours. A second caption
-          on this shared cell would be a new flag on every sport's board. */}
+          on this shared cell would be a new flag on every sport's board.
+          It stays INLINE when the other notes moved behind the ⓘ: it names
+          the bet, it is not an explanation (UX review, 2026-10-29). */}
       {!canHitRate && showOdds && lineHeadline ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{lineHeadline}</Text>
-        </View>
-      ) : null}
-
-      {/* The position row picked a position the board cannot filter by: say
-          so once, in the same quiet caption as the no-lines note, rather than
-          label a list of every position "QB" (Designer + Reviewer, #830). */}
-      {positionNote ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{positionNote}</Text>
+          <Text style={styles.noLinesText} numberOfLines={1}>{lineHeadline}</Text>
         </View>
       ) : null}
 
@@ -2855,7 +2890,9 @@ export function StatsScreen() {
           and the chips scroll; a content-sized basis measured "Hit Rates" and
           "Averages" down to their padding at 390×1. The FlatList below stays
           the one flexible region. */}
-      {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
+      {windowStripHidden ? (
+        notesButton ? <View style={styles.notesFallbackRow}>{notesButton}</View> : null
+      ) : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
           horizontal
@@ -2889,7 +2926,7 @@ export function StatsScreen() {
             whole strip to its natural height and the FlatList stays the one
             flexible child of the screen column. */}
         {canHitRate && !stackModeTabs ? (
-          <View style={styles.modeSeg}>
+          <View style={[styles.modeSeg, notesButton ? styles.modeSegBeforeNotes : null]}>
             <SegmentTabs
               items={MODES}
               active={effectiveMode}
@@ -2899,6 +2936,7 @@ export function StatsScreen() {
             />
           </View>
         ) : null}
+        {notesButton}
       </View>
       )}
       {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
@@ -2978,49 +3016,6 @@ export function StatsScreen() {
             </Pressable>
           ))}
         </ScrollView>
-      ) : null}
-
-      {/* WHAT THE COLUMN IS COUNTING. The chip says it in three characters and
-          nothing else on the board expands them: under H2H the percentage is
-          against ONE opponent over two seasons, not a recent-form window, and a
-          reader who has not tapped through to a player has no way to know that.
-          Same quiet caption idiom as the no-lines note below it. */}
-      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0 ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>
-            H2H · each player against their next opponent, last 2 seasons. Many are a
-            single meeting — the count is under every rate.
-          </Text>
-        </View>
-      ) : null}
-
-      {noLinesNote ? (
-        <Pressable
-          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
-          onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
-          disabled={!noLinesNote.canSwitch}
-          accessibilityRole={noLinesNote.canSwitch ? 'button' : undefined}
-          accessibilityLabel={
-            noLinesNote.canSwitch ? `${noLinesNote.text} Switch sportsbook` : noLinesNote.text
-          }
-          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
-        >
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>
-            {noLinesNote.text}
-            {noLinesNote.canSwitch ? (
-              <Text style={styles.noLinesLink}> Change your sportsbooks ›</Text>
-            ) : null}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values()) ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{ATD_COPY.earlySeason}</Text>
-        </View>
       ) : null}
 
       {atdOn && (rankStatus === 'error' || rankStatus === 'partial') ? (
@@ -3194,6 +3189,31 @@ export function StatsScreen() {
         />
       )}
 
+      <InfoSheet
+        visible={notesOpen}
+        title="About this board"
+        body={boardNotes.join('\n\n')}
+        onClose={() => setNotesOpen(false)}
+        onDismiss={() => {
+          if (!openPickerAfterNotes.current) return;
+          openPickerAfterNotes.current = false;
+          setPickerOpen(true);
+        }}
+        action={
+          notesCanSwitch
+            ? {
+                label: 'Change your sportsbooks',
+                onPress: () => {
+                  // iOS will not present a Modal while another is still
+                  // fading out, so the picker opens from onDismiss there.
+                  if (Platform.OS === 'ios') openPickerAfterNotes.current = true;
+                  else setPickerOpen(true);
+                  setNotesOpen(false);
+                },
+              }
+            : null
+        }
+      />
       <InfoSheet
         visible={matchupInfoOpen}
         title={ATD_COPY.infoTitle}
@@ -5767,6 +5787,33 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  // The board-notes ⓘ: 20pt glyph + 12pt slop each side = 44pt target.
+  notesBtn: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 44,
+    minHeight: 44,
+    marginRight: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notesDot: {
+    position: 'absolute',
+    top: 10,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.tint,
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  modeSegBeforeNotes: { paddingRight: spacing.xs },
+  notesFallbackRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingVertical: spacing.xs,
+  },
   modeSeg: {
     flexGrow: 0,
     flexShrink: 0,
@@ -6001,8 +6048,8 @@ const styles = StyleSheet.create({
   // Inside the row the label gives up its own fixed width and shrinks instead,
   // so the arrow beside it can never be truncated away.
   colHeaderSortLabel: { width: undefined, flexShrink: 1 },
-  // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
-  // where a column of dashes would otherwise read as a broken screen.
+  // Caption text on the defense-rank retry row. The board's info notes
+  // moved behind the ⓘ in the window strip (boardNotes).
   noLinesRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -6016,7 +6063,6 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     lineHeight: font.size.caption * 1.35,
   },
-  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   atdRetryRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

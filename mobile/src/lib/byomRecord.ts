@@ -7,6 +7,12 @@
  */
 
 import { byomFilters, type ByomFilters } from './byomFilters';
+import {
+  applyPropFilterKeys,
+  EMPTY_PROP_FILTERS,
+  propStateFromFilters,
+  type ByomPropFilterState,
+} from './byomPropFilters';
 
 /** Same bound as byom.constants.DK_HISTORY_START_SEASON. */
 export const BYOM_NFL_FIRST_SEASON = 2020;
@@ -139,6 +145,8 @@ export interface ByomDraft {
    * rest2 is two or more. Null is any schedule.
    */
   rest?: 'b2b' | 'rest2' | null;
+  /** Phase A prop filters. Absent on a game-market draft. */
+  propFilters?: ByomPropFilterState;
 }
 
 /** Matt, 2026-10-24: require a side or a favorite/underdog choice. */
@@ -431,7 +439,8 @@ export function filtersForDraft(
     const team = sideForMarket(draft.market, draft.side);
     if (team === 'home' || team === 'away') next.side = team;
     else delete next.side;
-    delete next.role;
+    if (draft.role === 'favorite' || draft.role === 'underdog') next.role = draft.role;
+    else delete next.role;
     const direction = propSideForMarket(draft.market, draft.propSide);
     if (direction) next.prop_side = direction;
     else delete next.prop_side;
@@ -461,6 +470,13 @@ export function filtersForDraft(
   } else {
     next.primetime = draft.primetime;
   }
+  applyPropFilterKeys(next, draft.propFilters ?? EMPTY_PROP_FILTERS, {
+    prop: isPropMarket(draft.market),
+    sport,
+    yesOnly: isYesOnlyProp(draft.market),
+    marketCount: 1,
+    primetime: draft.primetime,
+  });
   return byomFilters(next);
 }
 
@@ -477,19 +493,23 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
       primetime: parsed.primetime ?? null,
       propSide: null,
       rest: restChoice(parsed),
+      propFilters: propStateFromFilters(parsed),
     };
   }
   if (!isPropMarket(market)) return null;
   const stored = parsed.prop_side === 'over' || parsed.prop_side === 'under'
     ? parsed.prop_side
     : null;
+  const propFilters = propStateFromFilters(parsed);
+  const role = parsed.role === 'favorite' || parsed.role === 'underdog' ? parsed.role : null;
   return {
     market,
     side: sideForMarket(market, parsed.side ?? null),
-    role: null,
+    role,
     primetime: parsed.primetime ?? null,
     propSide: propSideForMarket(market, stored),
     rest: restChoice(parsed),
+    propFilters,
   };
 }
 
@@ -507,12 +527,80 @@ export function assertByomSide(filters: ByomFilters | null | undefined): void {
   if (reason != null) throw new Error(reason);
 }
 
-/** The side sentence inside a save error, when the save was refused for that. */
+/** Shown when byom_save_model refuses a name that belongs to the other sport. */
+export const OTHER_SPORT_NAME =
+  'This name is saved on the other sport. Choose another name.';
+
+/** Preview copy when NBA game facts have not been built yet. */
+export const NBA_NO_HISTORY = 'No history yet';
+
+/** The sentence inside a save error, when the save was refused for that. */
 export function sideBlockFromError(raw: string): string | null {
   if (raw.includes(ANYTIME_YES_REQUIRED)) return ANYTIME_YES_REQUIRED;
   if (raw.includes(TEAM_OR_ROLE_REQUIRED)) return TEAM_OR_ROLE_REQUIRED;
   if (raw.includes(TOTAL_SIDE_REQUIRED)) return TOTAL_SIDE_REQUIRED;
+  if (raw.includes('name is saved on another sport')) return OTHER_SPORT_NAME;
   return null;
+}
+
+/**
+ * The saved model with this name on a different sport. Same-sport names
+ * are a replace, not this. A missing sport is NFL, matching the row default.
+ */
+export function nameTakenOnOtherSport<T extends { model_id: string; name: string; sport?: string }>(
+  models: readonly T[],
+  name: string,
+  sport: string,
+  exceptId?: string,
+): T | null {
+  const taken = otherModelWithName(models, name, exceptId);
+  if (taken == null) return null;
+  const theirs = (taken.sport ?? 'NFL').trim().toUpperCase();
+  const mine = sport.trim().toUpperCase();
+  if (theirs === mine) return null;
+  return taken;
+}
+
+/** Moneyline, spread, total, or a rest chip. Those read byom_game_facts. */
+export function filtersNeedGameFacts(filters: ByomFilters | null | undefined): boolean {
+  if (filters == null) return false;
+  const markets = filters.markets ?? [];
+  for (const market of markets) {
+    if (market === 'h2h' || market === 'spreads' || market === 'totals') return true;
+  }
+  return filters.min_rest_days != null || filters.max_rest_days != null;
+}
+
+/** One sentence under Game bets when the NBA read finished with no row. */
+export const NBA_GAME_BETS_WHEN =
+  'Game bets show up once NBA results are in.';
+
+export function otherSportName(sport: ByomSport): ByomSport {
+  return sport === 'NBA' ? 'NFL' : 'NBA';
+}
+
+export function otherSportAlert(name: string, theirs: string): { title: string; body: string } {
+  const label = theirs.trim() || 'NFL';
+  return {
+    title: `Already saved on ${label}`,
+    body: `“${name}” is saved on ${label}. Choose another name.`,
+  };
+}
+
+/**
+ * NBA game markets and rest chips with no game-fact row are not a
+ * real 0-0. Only a finished empty read says so. A prop with no rest
+ * chip keeps the ordinary empty label.
+ */
+export function byomEmptyLabel(
+  sport: ByomSport,
+  factsStatus: 'ready' | 'loading' | 'missing' | 'error',
+  filters: ByomFilters | null | undefined,
+): string {
+  if (sport === 'NBA' && factsStatus === 'missing' && filtersNeedGameFacts(filters)) {
+    return NBA_NO_HISTORY;
+  }
+  return 'No games match';
 }
 
 /**
