@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1086 M1–M3. Scoreboard splits test is on the PR subset. A percent shows only for the line on the card, and not beside a live DK quote. NFL/NHL ESPN scoreboards are parsed; UTAH maps to UTA. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing only when the same sport still has a game more than 24 hours out that a book is pricing. Same-day prices do not hide a dead early-lines pass. The 15:25Z NBA 7 of 13 CRIT was the pulled Friday slate. Outage replays stay CRIT. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H review lows from #1075. Fallback remembered. Meetings sorted newest first. H2H retry is H2H only. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Scoreboard one list per sport (status chips removed), live NFL / NBA / NHL scores from ESPN every minute into `live_scoreboard`, and % bets / % money per market into display-only `scoreboard_splits`. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1083 M1–M2. Main-market filter on the unfiltered odds reads. FETCH_ALT_GAME_LINES and skip started games. Draft stays draft. |

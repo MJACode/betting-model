@@ -246,4 +246,5 @@ jobs:
             tests/test_live_scoreboard.py \
             tests/test_scoreboard_splits.py \
             tests/test_pregame_insert_cutoff.py \
+            tests/test_health_pregame_prices_current.py \
             tests/test_web_site.py
