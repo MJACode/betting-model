@@ -21,6 +21,45 @@
 
 ---
 
+## [ ] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29)
+
+`ncaab_odds_unmatched` holds 137,007 bought event snapshots (11,857 events)
+that the game-lines purchase could not place on an ESPN game (worker job
+805227). Branch `fix/ncaab-odds-team-names` places 80 more feed names and adds
+the replay (`docs/sports/ncaab.md`, "Replaying the kept raw events"). After it
+merges, queue job `ncaab_odds_history` with `{"mode": "replay_unmatched",
+"dry_run": true}`, read the counts it prints, then queue `{"mode":
+"replay_unmatched"}` to store. It buys nothing, writes only `odds`, and a
+second run stores nothing new. Expected (Supabase connector, 2026-10-29):
+11,349 events on 11,300 games over the six seasons; 2025-26 alone is 24,705
+event snapshots on 1,956 games. The dry run could not run from this machine:
+the local database password is refused (`password authentication failed`,
+2026-10-29 21:08Z).
+
+## [ ] NCAAB feed events whose two teams resolve but match no ESPN game (2026-10-29)
+
+Even with every name placed, 500 kept events (3,789 event snapshots, 462 team
+pairs) match no ESPN game within a day of the feed's start (Supabase
+connector, 2026-10-29); the purchase reported 302 such pairs before the name
+fix. The replay leaves them raw. A sample of 10 read the same day:
+
+- 2 are games ESPN has a few days later: William & Mary at Elon, feed
+  2021-02-18 ET, ESPN 2021-02-22; Tarleton State at UT-Arlington, feed
+  2023-02-01, ESPN 2023-02-06 with the note "MAKEUP FROM FEB. 1".
+- 1 pair met three weeks later with the other team at home: Pittsburgh at
+  Duke, feed 2020-12-29, ESPN Duke at Pittsburgh 2021-01-19.
+- 4 have no ESPN game for either team within a day: Cal Poly at UC San Diego
+  (2023-03-02), Southern Miss at Western Kentucky (2020-12-06, Western
+  Kentucky played Mississippi Valley State that day), Western Kentucky at
+  Florida Atlantic (2021-02-05), Charleston at Rhode Island (2021-12-19).
+- 3 are matchups the feed listed that were never played: Ohio State at UConn
+  (2021-02-28), North Carolina at Villanova (2022-04-02, when ESPN has
+  Villanova v Kansas and North Carolina v Duke), Texas at Arizona
+  (2026-03-28, when ESPN has Arizona v Purdue).
+
+Next: classify all 462 pairs the same way before changing how a feed event
+is matched to a date; a matchup that was never played stays raw.
+
 ## [ ] KenPom API: mike buys it, then the key and the daily pull (2026-10-28)
 
 $145.00 for 12 months, web access included (live page read 2026-10-28). mike
