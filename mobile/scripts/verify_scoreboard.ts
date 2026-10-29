@@ -14,6 +14,7 @@ import {
   orderScoreboard,
   pctText,
   presentScoreboard,
+  shownSplitLine,
   splitsFor,
   splitsSpeech,
   scoreboardPhase,
@@ -75,19 +76,13 @@ check('a started game with no live row says so, not its start time', startedBare
 const notYet = presentScoreboard({ game: game({ commence_time: '2026-10-30T00:15:00Z' }), pregame: [], inplay: [], feed: null, now: Date.parse('2026-10-29T20:00:00Z') });
 check('a game before its start keeps its start time', notYet.footerText !== 'Started · no live score yet' && notYet.accessibilityLabel.includes('not started'));
 // % bets / % money: one market at a time (Matt, 2026-10-29).
+// line_value is the number the percent was measured at.
 const splitRows = [
-  { game_id: 'G', market: 'spreads', side: 'away', bet_pct: 47, money_pct: '53.0' },
-  { game_id: 'G', market: 'spreads', side: 'home', bet_pct: 53, money_pct: 47 },
-  { game_id: 'G', market: 'totals', side: 'over', bet_pct: 60, money_pct: 70 },
-  { game_id: 'G', market: 'totals', side: 'under', bet_pct: 40, money_pct: 30 },
+  { game_id: 'G', market: 'spreads', side: 'away', bet_pct: 47, money_pct: '53.0', line_value: 3.5 },
+  { game_id: 'G', market: 'spreads', side: 'home', bet_pct: 53, money_pct: 47, line_value: -3.5 },
+  { game_id: 'G', market: 'totals', side: 'over', bet_pct: 60, money_pct: 70, line_value: 46.5 },
+  { game_id: 'G', market: 'totals', side: 'under', bet_pct: 40, money_pct: 30, line_value: 46.5 },
 ];
-const spreadSplit = splitsFor(splitRows, 'spreads');
-check('spread splits land on their team rows', spreadSplit.away.bets === 47 && spreadSplit.away.money === 53
-  && spreadSplit.home.bets === 53 && spreadSplit.home.money === 47);
-const totalSplit = splitsFor(splitRows, 'totals');
-check('total splits put Over on the away row, Under on the home row', totalSplit.away.bets === 60 && totalSplit.home.money === 30);
-const mlSplit = splitsFor(splitRows, 'h2h');
-check('a market with no stored split is a dash, not 0%', mlSplit.away.bets === null && pctText(mlSplit.away.bets) === '—');
 check('no rows at all is a dash', splitsFor(undefined, 'spreads').home.money === null);
 check('pct reads as a whole percent', pctText(47) === '47%');
 const cellCard = presentScoreboard({
@@ -100,10 +95,66 @@ const cellCard = presentScoreboard({
   inplay: [],
   feed: null,
 });
+const spreadSplit = splitsFor(splitRows, 'spreads', shownSplitLine(cellCard, 'spreads'));
+check('spread splits land on their team rows when the line matches', spreadSplit.away.bets === 47 && spreadSplit.away.money === 53
+  && spreadSplit.home.bets === 53 && spreadSplit.home.money === 47);
+const totalSplit = splitsFor(splitRows, 'totals', shownSplitLine(cellCard, 'totals'));
+check('total splits put Over on the away row, Under on the home row', totalSplit.away.bets === 60 && totalSplit.home.money === 30);
+const mlSplit = splitsFor(splitRows, 'h2h', shownSplitLine(cellCard, 'h2h'));
+check('a market with no stored split is a dash, not 0%', mlSplit.away.bets === null && pctText(mlSplit.away.bets) === '—');
 check('the odds cell follows the market', marketCell(cellCard.away, 'spreads').value === '+3.5'
   && marketCell(cellCard.away, 'totals').value === 'o46.5' && marketCell(cellCard.home, 'h2h').value === `${SCOREBOARD_MINUS}192`);
 check('a market with no split says nothing extra', splitsSpeech(cellCard, 'h2h', mlSplit) === '');
 check('splits are spoken per side', splitsSpeech(cellCard, 'spreads', spreadSplit).includes('47 percent of bets, 53 percent of money'));
+const movedLine = presentScoreboard({
+  game: game({ commence_time: '2099-01-01T00:00:00Z' }),
+  pregame: [{ market: 'spreads', spread_home: -3, home_price: -110, away_price: -110 }],
+  inplay: [],
+  feed: null,
+});
+const movedSplit = splitsFor(splitRows, 'spreads', shownSplitLine(movedLine, 'spreads'));
+check('a percent measured at -3.5 is not shown next to DK -3',
+  movedLine.home.spread === `${SCOREBOARD_MINUS}3` && movedSplit.home.bets === null && movedSplit.away.bets === null);
+const noMeasuredLine = splitRows.map((r) => (r.market === 'spreads' ? { ...r, line_value: null } : r));
+check('a spread percent with no measured line is a dash',
+  splitsFor(noMeasuredLine, 'spreads', shownSplitLine(cellCard, 'spreads')).home.bets === null);
+const liveSameNumber = presentScoreboard({
+  game: game({ sport: 'NFL', away_team: 'CAR', home_team: 'GB' }),
+  pregame: [{ market: 'spreads', spread_home: -3.5, home_price: -112, away_price: -108 }],
+  inplay: [{ market: 'spreads', spread_home: -3.5, home_price: -140, away_price: 120 }],
+  feed: espnLive,
+});
+const liveSameSplit = splitsFor(splitRows, 'spreads', shownSplitLine(liveSameNumber, 'spreads'));
+check('a live DK spread does not keep the pre-game percent at the same number',
+  liveSameNumber.home.spread === `${SCOREBOARD_MINUS}3.5`
+  && liveSameSplit.home.bets === null && liveSameSplit.away.money === null);
+const liveSpreadOnly = presentScoreboard({
+  game: game({ sport: 'NFL', away_team: 'CAR', home_team: 'GB' }),
+  pregame: [
+    { market: 'spreads', spread_home: -3.5, home_price: -112, away_price: -108 },
+    { market: 'totals', total_line: 46.5, over_price: -120, under_price: 100 },
+  ],
+  inplay: [{ market: 'spreads', spread_home: -2.5, home_price: -130, away_price: 110 }],
+  feed: espnLive,
+});
+check('a pre-game total still shows when only the spread is the live DK line',
+  splitsFor(splitRows, 'totals', shownSplitLine(liveSpreadOnly, 'totals')).away.bets === 60
+  && splitsFor(splitRows, 'spreads', shownSplitLine(liveSpreadOnly, 'spreads')).home.bets === null);
+const mlRows = [
+  { game_id: 'G', market: 'h2h', side: 'away', bet_pct: 40, money_pct: 30, line_value: null },
+  { game_id: 'G', market: 'h2h', side: 'home', bet_pct: 60, money_pct: 70, line_value: null },
+];
+check('moneyline has no point line, so the pre-game percent shows',
+  splitsFor(mlRows, 'h2h', shownSplitLine(cellCard, 'h2h')).home.bets === 60);
+const liveMl = presentScoreboard({
+  game: game({ sport: 'NFL', away_team: 'CAR', home_team: 'GB' }),
+  pregame: [{ market: 'h2h', home_price: -192, away_price: 160 }],
+  inplay: [{ market: 'h2h', home_price: -150, away_price: 130 }],
+  feed: espnLive,
+});
+check('a live DK moneyline does not keep the pre-game percent',
+  splitsFor(mlRows, 'h2h', shownSplitLine(liveMl, 'h2h')).home.bets === null
+  && splitsFor(mlRows, 'h2h', shownSplitLine(liveMl, 'h2h')).away.money === null);
 check('the board orders live, upcoming, final', ordered.map((c) => c.gameId).join(',') === 'L,U1,U2,F');
 
 const kicked = game();
