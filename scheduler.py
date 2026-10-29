@@ -143,6 +143,10 @@ RUN_DK_DIRECT_FEED = os.environ.get("RUN_DK_DIRECT_FEED", "0") != "0"
 RUN_BOVADA_FEED = os.environ.get("RUN_BOVADA_FEED", "0") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
+# Scoreboard live scores for NFL, NBA and NHL (data/ingestors/live_scoreboard.py).
+# Free ESPN reads, no Odds API credits. RUN_LIVE_SCOREBOARD=0 stops it
+# without a deploy.
+RUN_LIVE_SCOREBOARD = os.environ.get("RUN_LIVE_SCOREBOARD", "1") != "0"
 
 # NFL wind-totals card (the standalone nfl/ package, docs/sports/nfl.md) — set
 # RUN_NFL_WIND_CARD=0 to disable without a redeploy. The card itself exits 0 with
@@ -753,6 +757,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 # either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
 # or the poller service gets its own volume.
 _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                # Scoreboard live scores: free ESPN reads, writes Supabase only.
+                "live_scoreboard",
                 # Writes only to Supabase (picks, odds) and needs no volume,
                 # so it sits with the other live loops -- unlike
                 # nfl_live_worker above.
@@ -846,6 +852,15 @@ def run_ncaaf_live_loop() -> None:
         [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
         "ncaaf-live-loop",
     )
+
+
+def run_live_scoreboard() -> None:
+    # One tick of the Scoreboard's live scores for NFL, NBA and NHL (Matt,
+    # 2026-10-29). In process, not a subprocess: an idle tick is one
+    # database read, and a tick with live games is one ESPN call per live
+    # sport. Raises on a database error so the heartbeat marks it failed.
+    from data.ingestors.live_scoreboard import run_once
+    run_once()
 
 
 def run_nfl_live_leader() -> None:
@@ -2252,6 +2267,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NCAAF_LIVE=0 — NCAAF live loop NOT scheduled.")
+
+    # Scoreboard live scores, every minute, 24x7: NFL London kickoffs are
+    # 9:30am ET and NBA west-coast games run past 1am. An idle tick is one
+    # database read and no HTTP call.
+    if RUN_LIVE_SCOREBOARD:
+        sched.add_job(
+            run_live_scoreboard,
+            CronTrigger(minute="*", timezone=TIMEZONE),
+            id="live_scoreboard",
+            name="Scoreboard live scores, NFL/NBA/NHL (every minute, 24x7)",
+            max_instances=1, coalesce=True, misfire_grace_time=30,
+        )
+    else:
+        log.info("RUN_LIVE_SCOREBOARD=0 — Scoreboard live scores NOT scheduled.")
 
     # The pre-game line watcher (data/ingestors/pregame_line_poller.py).
     # Registered unconditionally so the kill switch lives in ONE place —

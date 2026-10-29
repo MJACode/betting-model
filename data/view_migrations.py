@@ -462,6 +462,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # marker comment exist. Does not rewrite picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_nba_team_q1_2026_10_28.sql",
+    # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
+    # One table, written by data/ingestors/live_scoreboard.py, with a
+    # SELECT policy and a SELECT-only grant. Returns on a catalog read once
+    # the table, policy and grant exist. Does not touch picks, odds or the
+    # record. Sits before the posted-stake pair so those two stay adjacent.
+    "add_live_scoreboard_2026_10_29.sql",
+    # 2026-10-29 (Matt): Scoreboard % bets / % money, display only.
+    # One table written by data/ingestors/scoreboard_splits.py, SELECT
+    # policy and SELECT-only grant; catalog return once all three exist.
+    # Not public_betting, which the scorer copies onto every pick.
+    "add_scoreboard_splits_2026_10_29.sql",
     # 2026-10-29 (Matt): alternate spreads and totals, the current ladder per
     # game, for the betslip's game-line edit. One table written by
     # data/ingestors/alt_game_lines.py, RLS on with a SELECT policy. Returns on

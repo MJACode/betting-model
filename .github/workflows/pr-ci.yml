@@ -237,5 +237,6 @@ jobs:
             tests/test_alternate_game_lines.py \
             tests/test_latest_line_state.py \
             tests/test_mobile_scoreboard.py \
+            tests/test_live_scoreboard.py \
             tests/test_pregame_insert_cutoff.py \
             tests/test_web_site.py
