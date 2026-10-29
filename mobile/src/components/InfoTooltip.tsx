@@ -42,17 +42,24 @@ export function InfoSheet({
   body,
   onClose,
   warn = false,
+  action,
+  onDismiss,
 }: {
   visible: boolean;
   title: string;
   body: string;
   onClose: () => void;
   warn?: boolean;
+  /** One optional follow-up, drawn as a text link above "Got it" — for a note
+   *  whose fix is a tap away ("Change your sportsbooks"). The caller closes. */
+  action?: { label: string; onPress: () => void } | null;
+  /** iOS: fires after the fade-out, when another Modal may be presented. */
+  onDismiss?: () => void;
 }) {
   const accent = warn ? colors.gradeBad : colors.tint;
   const insets = useSafeAreaInsets();
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={onDismiss}>
       <View style={styles.backdrop}>
         <Pressable
           style={StyleSheet.absoluteFill}
@@ -77,6 +84,16 @@ export function InfoSheet({
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} bounces={false}>
             <Text style={styles.cardBody}>{body}</Text>
           </ScrollView>
+          {action ? (
+            <Pressable
+              onPress={action.onPress}
+              accessibilityRole="button"
+              accessibilityLabel={action.label}
+              style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.actionText}>{action.label} ›</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
             onPress={onClose}
@@ -243,6 +260,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     lineHeight: 21,
     color: colors.textSecondary,
+  },
+  actionBtn: {
+    marginTop: spacing.md,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   dismissBtn: {
     marginTop: spacing.lg,
