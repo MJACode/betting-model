@@ -220,13 +220,21 @@ export function isWholeSeason(filters: ByomFilters | null | undefined): boolean 
 }
 
 /**
- * A named game market or one of the twelve NFL props. An empty market
- * list is every market, and that blend stays hidden.
+ * Units are one side of a market. Named game markets show them. A prop
+ * shows them only when the list is exactly that one market and
+ * prop_side is over or under. Anytime TD shows them only for over,
+ * which is Yes. An empty list, a mix, two props, or a prop with no
+ * side stays hidden. A missing prop_side counts the over and the
+ * under, and that total is not one bet.
  */
 export function showsUnits(filters: ByomFilters | null | undefined): boolean {
-  const markets = byomFilters(filters).markets;
+  const parsed = byomFilters(filters);
+  const markets = parsed.markets;
   if (markets == null || markets.length === 0) return false;
-  return markets.every((market) => GAME_MARKETS.has(market) || isPropMarket(market));
+  if (markets.every((market) => GAME_MARKETS.has(market))) return true;
+  if (markets.length !== 1 || !isPropMarket(markets[0])) return false;
+  if (markets[0] === ANYTIME_TD_MARKET) return parsed.prop_side === 'over';
+  return parsed.prop_side === 'over' || parsed.prop_side === 'under';
 }
 
 export function gameMarket(filters: ByomFilters | null | undefined): ByomGameMarket | null {
@@ -452,7 +460,8 @@ function byName(a: Rankable, b: Rankable): number {
 
 /**
  * Models with a real unit total rank first, highest units first.
- * A model whose units are hidden (an unknown market, or units missing) ranks after those.
+ * A model whose units are hidden (an unsided or mixed prop, an unknown
+ * market, or units missing) ranks after those.
  * Zero included bets are unranked and sort last.
  */
 export function rankByUnits<T extends Rankable>(items: readonly T[]): Array<T & { rank: number | null }> {
