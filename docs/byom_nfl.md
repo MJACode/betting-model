@@ -55,9 +55,12 @@ false and apply false, so a merge does not backfill production. No NFL
 game-facts row is declared.
 
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
-NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. Other
-sports are not. For each game it takes the latest DraftKings spread and
-the latest DraftKings total whose snapshot is at or before game start.
+NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. NBA
+seasons before `NBA_DK_HISTORY_START_SEASON` (2021) are refused.
+Measured 2026-10-29: the first NBA season with a DraftKings h2h,
+spread, or total is 2021. For each game it takes the latest DraftKings
+spread and the latest DraftKings total whose snapshot is at or before
+game start.
 NFL reads `nfl_odds_history` and `odds` together. Every sport reads
 `odds`, matched on `games.game_id`. Measured 2026-10-23 on two NFL
 games in each season 2020–2026: DraftKings h2h, spread, and total rows
@@ -85,7 +88,9 @@ three counts. A queued `byom_game_facts` job with `sport` null builds
 NFL and still does not write unless `apply` is true.
 `byom-nfl-refresh` stays off. The worker job `byom_game_facts` accepts
 NFL and NBA. A missing sport is NFL. An NFL season before 2020 is
-still refused. The NBA declaration stays enabled false.
+still refused. An NBA season before 2021 is refused. The NBA
+declarations stay enabled false. Enable `byom-nba-game-facts` before
+`byom-nba-prop-facts`.
 
 ## Prop facts
 

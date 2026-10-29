@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from byom.constants import DK_HISTORY_START_SEASON, LINE_BASIS
+from byom.constants import (
+    DK_HISTORY_START_SEASON,
+    LINE_BASIS,
+    NBA_DK_HISTORY_START_SEASON,
+)
 from byom.game_facts import (
     assemble_game,
     grade_ats,
@@ -86,6 +90,7 @@ def test_the_line_basis_is_a_label():
     text = (ROOT / "byom" / "constants.py").read_text(encoding="utf-8")
     assert LINE_BASIS == "DraftKings line at game start"
     assert DK_HISTORY_START_SEASON == 2020
+    assert NBA_DK_HISTORY_START_SEASON == 2021
     assert "LOCK_WINDOW" not in text
     assert "SHOP_LAG" not in text
     assert "120" not in text
@@ -299,13 +304,19 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
     # NBA is the same runner. The validator's stored args are what a
     # queued row carries, and the job forwards that sport.
     seen.clear()
-    stored_nba = validate({"sport": "nba", "apply": False})
+    stored_nba = validate({"sport": " nba ", "apply": False})
     out = fn(**stored_nba)
     assert stored_nba["sport"] == "NBA"
     assert seen["sport"] == "NBA"
     assert seen["apply"] is False
     assert seen["seasons"] is None
     assert seen["closed"] is True
+    assert out["sport"] == "NBA"
+    # The runner strips the same way the validator does, so a hand edit
+    # that skips validation still builds NBA.
+    seen.clear()
+    out = fn(sport=" nba ", season=None, apply=False)
+    assert seen["sport"] == "NBA"
     assert out["sport"] == "NBA"
 
 
@@ -319,9 +330,13 @@ def test_the_job_defaults_to_not_writing_and_nba_stays_off():
         "sport": "NBA", "season": None, "apply": False}
     with pytest.raises(ValueError):
         _validate_byom_game_facts({"season": 2019})
-    # NBA is not on the NFL DraftKings-history floor.
+    # NBA DraftKings game lines start in 2021. 2019 and 2020 have none.
+    with pytest.raises(ValueError):
+        _validate_byom_game_facts({"sport": "NBA", "season": 2019})
+    with pytest.raises(ValueError):
+        _validate_byom_game_facts({"sport": "NBA", "season": 2020})
     assert _validate_byom_game_facts(
-        {"sport": "NBA", "season": 2019})["season"] == 2019
+        {"sport": "NBA", "season": 2021})["season"] == 2021
     with pytest.raises(ValueError):
         _validate_byom_game_facts({"sport": "MLB"})
     declared = json.loads(
@@ -335,10 +350,50 @@ def test_the_job_defaults_to_not_writing_and_nba_stays_off():
     assert "season" not in game[0]["args"]
     assert "byom_nba_props_2026_10_29.sql" in game[0]["note"]
     assert "byom-nba-prop-facts" in game[0]["note"]
+    assert "own change" in game[0]["note"]
+    assert "from 2021" in game[0]["note"]
     assert all(entry["key"] != "byom-nfl-game-facts" for entry in declared)
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert "byom_game_facts_units_2026_10_16.sql" not in ACTIVE_MIGRATIONS
     assert not (ROOT / "data" / "migrations" / "byom_game_facts_units_2026_10_16.sql").exists()
+
+
+def test_an_nba_season_before_draftkings_history_is_not_built():
+    from byom.load import build_season, seasons_in_games
+    from scripts.byom_game_facts import main
+
+    early = build_season(None, 2020, apply=True, sport="NBA")
+    assert early["sport"] == "NBA"
+    assert early["facts"] == 0
+    assert early["written"] == 0
+    assert early["skipped"] == "before DraftKings history"
+    nfl = build_season(None, 2019, sport="NFL")
+    assert nfl["skipped"] == "before DraftKings history"
+
+    class Conn:
+        def __init__(self):
+            self.params = None
+
+        def execute(self, sql, params=None):
+            self.params = params
+            return self
+
+        def fetchall(self):
+            return []
+
+    conn = Conn()
+    assert seasons_in_games(conn, "NBA") == []
+    assert conn.params == ("NBA", NBA_DK_HISTORY_START_SEASON)
+    nfl_conn = Conn()
+    assert seasons_in_games(nfl_conn, "NFL") == []
+    assert nfl_conn.params == ("NFL", DK_HISTORY_START_SEASON)
+
+    with pytest.raises(SystemExit) as nba_exit:
+        main(["--sport", "NBA", "--season", "2020"])
+    assert "2021" in str(nba_exit.value)
+    with pytest.raises(SystemExit) as nfl_exit:
+        main(["--sport", "NFL", "--season", "2019"])
+    assert "2020" in str(nfl_exit.value)
 
 
 def test_build_on_scratch_postgres_grades_the_stored_lines():
