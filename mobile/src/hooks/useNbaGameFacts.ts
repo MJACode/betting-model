@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchNbaGameFactsReady, nbaGameFactsAreKnown } from '@/lib/byom';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { ByomSport } from '@/lib/byomRecord';
 
 export type NbaGameFactsStatus = 'ready' | 'loading' | 'missing' | 'error';
@@ -48,9 +48,9 @@ export function useNbaGameFacts(sport: ByomSport | null) {
         setStatus(next === 'ready' ? 'ready' : 'missing');
       })
       .catch((e: unknown) => {
-        if (!live) return;
+        if (!live || isAbortError(e)) return;
         setStatus('error');
-        setError(errorText(e));
+        if (!isAbortError(e)) setError(errorText(e));
       });
     return () => {
       live = false;
