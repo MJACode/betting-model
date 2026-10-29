@@ -2451,3 +2451,36 @@ the bands; the choosing seasons' return above the 95th percentile of 200 placebo
 - **Expected passes by chance:** 64 × 0.025 ≈ 1.6 cells clear bar 2 alone, before correlation.
 - **A pass is built live** (§2) with its own EV floor and the prices it lays stated before it
   ships, once first-quarter lines are captured for 2026-27.
+
+### 12.5 Counts before grading (2026-10-28)
+
+Counted by `python -m scripts.nba_game8_q1_trends --smoke`, before any cell was graded: the games
+each cell would bet with a deciding offer at or above the price floor. No result of a bet game
+was read.
+
+**Found by the first count, fixed before grading:** every check cell counted 0 bets. The
+season-average and pace inputs were attached to each game by row label instead of by position,
+so almost every game read as having no averages. Fixed in the lab, and
+`test_each_team_reads_its_record_at_todays_venue` now passes a filtered index (it fails on the
+old code).
+
+Games with a decision: 1,225 / 1,224 / 1,218 (2023-24 / 2024-25 / 2025-26). A last-5 venue
+record exists for 1,075 of 2023-24's games and a last-10 record for 925; both exist for every
+game of the two later seasons.
+
+| Cell | 2023-24 | 2024-25 | 2025-26 | Pooled |
+|---|---|---|---|---|
+| **mike's rule: last 5, k ≥ 3, no check** | 71 | 84 | 82 | **237** |
+| last 5, k ≥ 3, the spread check | 41 | 51 | 39 | 131 |
+| last 5, k ≥ 1 / k ≥ 5, no check | 480 / 6 | 574 / 2 | 595 / 0 | 1,649 / 8 |
+| **last 10, k ≥ 4 (7-3 against 3-7), no check** | 41 | 68 | 69 | **178** |
+| last 10, k ≥ 4, the spread check | 25 | 41 | 40 | 106 |
+| last 10, k ≥ 2 / k ≥ 6, no check | 222 / 4 | 311 / 5 | 351 / 11 | 884 / 20 |
+| the last-10 step, k ≥ 2 / k ≥ 4, no check | 35 / 8 | 45 / 14 | 64 / 13 | 144 / 35 |
+| totals, last 5, k ≥ 3, over / under, no check | 20 / 38 | 31 / 51 | 46 / 31 | 97 / 120 |
+| totals, last 10, k ≥ 4, over / under, no check | 9 / 29 | 27 / 36 | 36 / 21 | 72 / 86 |
+
+So mike's own last-5 rule clears the 200-bet bar (237); with his season-average check it does
+not (131), and neither does his last-10 rule (178). Every first-quarter total cell at k ≥ 3
+(last 5) or k ≥ 4 (last 10) is under 200. Those cells are graded and printed in full; by 12.4
+their answer is "too few games to tell". The full table is in the lab's output.
