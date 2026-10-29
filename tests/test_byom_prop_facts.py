@@ -522,13 +522,22 @@ def test_the_job_is_enabled_and_the_price_migrations_are_hand_applied():
     assert PROP_HISTORY_START_SEASON == 2023
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    found = [e for e in declared if e["job_type"] == "byom_prop_facts"]
+    found = [e for e in declared if e["key"] == "byom-nfl-prop-facts"]
     assert len(found) == 1
-    assert found[0]["key"] == "byom-nfl-prop-facts"
+    assert found[0]["job_type"] == "byom_prop_facts"
     assert found[0]["enabled"] is True
     assert found[0]["args"]["apply"] is True
     assert found[0]["args"]["sport"] == "NFL"
     assert "season" not in found[0]["args"]
+    nba = [e for e in declared if e["key"] == "byom-nba-prop-facts"]
+    assert len(nba) == 1
+    assert nba[0]["job_type"] == "byom_prop_facts"
+    assert nba[0]["enabled"] is False
+    assert nba[0]["requested_by"] == "owner"
+    assert nba[0]["args"] == {"sport": "NBA", "apply": False}
+    assert "season" not in nba[0]["args"]
+    assert "byom_nba_props_2026_10_29.sql" in nba[0]["note"]
+    assert "byom-nba-game-facts" in nba[0]["note"]
     assert all(e["key"] != "byom-nfl-game-facts-shop" for e in declared)
     assert not (ROOT / "tests" / "test_byom_lock_shop.py").exists()
     assert not (ROOT / "data" / "migrations" / "byom_lock_shop_2026_10_16.sql").exists()

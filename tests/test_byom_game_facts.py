@@ -296,21 +296,46 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
     assert seen["apply"] is False
     assert seen["closed"] is True
     assert out["sport"] == "NFL"
+    # NBA is the same runner. The validator's stored args are what a
+    # queued row carries, and the job forwards that sport.
+    seen.clear()
+    stored_nba = validate({"sport": "nba", "apply": False})
+    out = fn(**stored_nba)
+    assert stored_nba["sport"] == "NBA"
+    assert seen["sport"] == "NBA"
+    assert seen["apply"] is False
+    assert seen["seasons"] is None
+    assert seen["closed"] is True
+    assert out["sport"] == "NBA"
 
 
-def test_the_job_defaults_to_not_writing_and_is_not_declared():
+def test_the_job_defaults_to_not_writing_and_nba_stays_off():
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
     assert "byom_game_facts" in JOBS
     assert _validate_byom_game_facts({}) == {
         "sport": "NFL", "season": None, "apply": False}
+    assert _validate_byom_game_facts({"sport": "NBA", "apply": False}) == {
+        "sport": "NBA", "season": None, "apply": False}
     with pytest.raises(ValueError):
         _validate_byom_game_facts({"season": 2019})
+    # NBA is not on the NFL DraftKings-history floor.
+    assert _validate_byom_game_facts(
+        {"sport": "NBA", "season": 2019})["season"] == 2019
     with pytest.raises(ValueError):
-        _validate_byom_game_facts({"sport": "NBA"})
+        _validate_byom_game_facts({"sport": "MLB"})
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    assert all(entry["job_type"] != "byom_game_facts" for entry in declared)
+    game = [entry for entry in declared if entry["job_type"] == "byom_game_facts"]
+    assert len(game) == 1
+    assert game[0]["key"] == "byom-nba-game-facts"
+    assert game[0]["enabled"] is False
+    assert game[0]["requested_by"] == "owner"
+    assert game[0]["args"] == {"sport": "NBA", "apply": False}
+    assert "season" not in game[0]["args"]
+    assert "byom_nba_props_2026_10_29.sql" in game[0]["note"]
+    assert "byom-nba-prop-facts" in game[0]["note"]
+    assert all(entry["key"] != "byom-nfl-game-facts" for entry in declared)
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert "byom_game_facts_units_2026_10_16.sql" not in ACTIVE_MIGRATIONS
     assert not (ROOT / "data" / "migrations" / "byom_game_facts_units_2026_10_16.sql").exists()

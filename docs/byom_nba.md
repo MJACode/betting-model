@@ -53,11 +53,16 @@ It is not in `ACTIVE_MIGRATIONS`. Apply it by hand, after
 rows. Any other sport is refused. Do not re-apply the older backtest
 files after it.
 
-The job validator accepts NBA. No NBA row is in
-`jobs/declared_jobs.json`, so a merge does not enqueue a backfill.
-Rest filters need `byom_game_facts` for that game
-(`python -m scripts.byom_game_facts --sport NBA`). The game-facts job
-still accepts NFL only.
+The prop-facts job validator accepts NBA. `byom-nba-prop-facts` is in
+`jobs/declared_jobs.json` with enabled false and apply false, so a
+merge does not enqueue a backfill. Apply
+`data/migrations/byom_nba_props_2026_10_29.sql` by hand first. Matt
+confirms that production apply, then CPO sets enabled true and apply
+true. Run `byom-nba-game-facts` before it. Rest filters need
+`byom_game_facts` for that game. The game-facts job accepts NBA. A
+missing sport is still NFL. An NFL season before 2020 is still
+refused; NBA is not. `byom-nba-game-facts` is the same off
+declaration. Rest chips stay empty until those game facts exist.
 
 ## Backtest and save
 

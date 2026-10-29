@@ -1079,6 +1079,28 @@
     }
   },
   {
+    "key": "byom-nba-game-facts",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF. CPO, 2026-10-29: enabled is false and apply is false, so sync_declared_jobs does not enqueue this. Apply data/migrations/byom_nba_props_2026_10_29.sql by hand first. Matt confirms that production apply, then CPO sets enabled true and apply true. Run this game-facts job before byom-nba-prop-facts. Rest chips stay empty until these game facts exist. No season arg: every NBA season in games. A missing sport on this job type is still NFL, so this row sets sport NBA. NFL seasons before 2020 stay refused. Does not write picks.",
+    "args": {
+      "sport": "NBA",
+      "apply": false
+    }
+  },
+  {
+    "key": "byom-nba-prop-facts",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF. CPO, 2026-10-29: enabled is false and apply is false, so sync_declared_jobs does not enqueue this. Apply data/migrations/byom_nba_props_2026_10_29.sql by hand first. Matt confirms that production apply, then CPO sets enabled true and apply true. Run byom-nba-game-facts before this job. Rest chips stay empty until those game facts exist. No season arg: every NBA season from 2023 whose game_date is on or after 2023-09-01. Week is null. The line is the last DraftKings snapshot at or before tip. over_price and under_price are the American prices on that same quote. Does not write picks.",
+    "args": {
+      "sport": "NBA",
+      "apply": false
+    }
+  },
+  {
     "key": "nba-alt-history-2024-2026",
     "job_type": "nba_odds_history",
     "requested_by": "mike",
