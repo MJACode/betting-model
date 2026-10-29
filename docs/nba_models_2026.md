@@ -2484,3 +2484,70 @@ So mike's own last-5 rule clears the 200-bet bar (237); with his season-average 
 not (131), and neither does his last-10 rule (178). Every first-quarter total cell at k ≥ 3
 (last 5) or k ≥ 4 (last 10) is under 200. Those cells are graded and printed in full; by 12.4
 their answer is "too few games to tell". The full table is in the lab's output.
+
+### 12.6 Results (graded 2026-10-28)
+
+Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
+`python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
+build machine under `%TEMP%/q1trend/results/`. **They are not in Supabase yet.**
+`python -m scripts.nba_game2_store --results <folder> --run 2026-10-28-eighth` failed with
+"password authentication failed for user postgres": the local login has been stale since the
+database password changed on 2026-10-24. Storing the run is the first step once it works.
+
+**0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
+1.6 expected by chance. Six of those hold a single bet each. One cell with a real sample clears
+(the last row below).
+
+mike's method, the spread cells (first-quarter spread, the hot team, best deciding price):
+
+| Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | DraftKings alone, 2023-24 and 2024-25 | Fails |
+|---|---|---|---|---|---|---|---|
+| **Last 5, 4-1 or better against 1-4 or worse (k ≥ 3)** | 237 | +15.6 | +6.1% | −6.0% to +18.5% | +11.9% / −12.0% / +20.0% | −0.6% | interval, bands, placebo |
+| same, with the season-average check | 131 | +19.3 | +13.7% | −2.8% to +30.6% | +14.7% / +0.8% / +30.1% | +9.1% | bets, interval, bands, placebo |
+| **Last 10, 7-3 or better against 3-7 or worse (k ≥ 4)** | 178 | −7.7 | −4.0% | −19.0% to +10.5% | −10.6% / −4.4% / +0.2% | −9.2% | bets, interval, seasons, bands, placebo |
+| same, with the season-average check | 106 | −1.7 | −1.5% | −20.9% to +17.8% | −5.5% / +3.2% / −3.9% | −3.1% | bets, interval, blind, bands, placebo |
+| **"Bump it out to L10"** (last 5: 4-1 against 2-3; last 10: k ≥ 2) | 144 | +19.3 | +12.2% | −2.7% to +27.7% | +12.5% / +31.5% / −1.4% | +22.8% | bets, interval, bands |
+| same, with the season-average check | 88 | +26.3 | +27.4% | +8.9% to +44.8% | +21.5% / +49.6% / +11.1% | +36.6% | bets, bands |
+
+- **mike's main rule is not shown to work.** Its pooled +6.1% has an interval from −6.0% to
+  +18.5%. On 2023-24 and 2024-25 together it returned −1.2%. The 200 shuffled versions (each
+  game given another game's records from the same night) have a 95th percentile of +6.2%, so the
+  real records did no better than shuffled ones. The positive pool comes from 2025-26.
+- **Its band below lost.** Games at k 1 to 3 (3-2 against 2-3 and similar) returned −1.3% on
+  1,412 bets. The 5-0 against 0-5 games are 8 bets.
+- **Fading it lost more.** The cold team in the same 237 games returned −13.9% (interval −26.3%
+  to −1.5%). Betting both sides of the same games at the best price averages −4.0%, which is
+  the price of the bet. The hot side sits 10 points above that and the cold side 10 below. The
+  interval's half-width is 12 points, so that is about 1.6 standard errors, and the placebo
+  above says it is ordinary.
+- **The last-10 version loses** (−4.0% on 178).
+- **The one cell whose interval clears zero** is the narrowest: the "bump it out to L10" step
+  with the season-average check, 88 bets in three seasons, 58-29-1, +27.4%, every season
+  positive, ahead of its placebo. DraftKings alone over the three seasons: 86 bets, +24.9%
+  (+5.8% to +44.0%); the table's +36.6% is its first two seasons only. It fails the 200-bet
+  bar, and the band just below it (last-10 k from 0 to 2) lost 5.9% on 88 bets. By 12.4 its
+  answer is **too few games to tell**. An independent stress test (workflow
+  `nba-q1-trend-postgrade-verify`, scripts under `%TEMP%/q1trend/verify/stress0008/`) found:
+  - it is not one team, date or book: leaving any one team out keeps it above +22%;
+  - it clears zero only at the best of the books' numbers: at the worst deciding offer the
+    interval is −1% to +35%, and 17 bets at a number no other book hung went 15-1-1 for
+    +13.9 of its +26.3 units;
+  - it is fading: its first 44 bets by date made +42.7%, its last 44 +12.7%;
+  - all 88 bets sit inside the last-10 spread-check cell at k ≥ 2 (507 bets, +2.5%), whose
+    other 419 bets lost 2.8%;
+  - across the 39 cells with 30 or more bets (the other six that clear the interval hold one
+    bet each), a cell this far above its own placebo appeared in 12 of 200 shuffled runs
+    (about 6.5%);
+  - at about 29 bets a season, telling a true +5% from zero would take about 2,530 bets,
+    roughly 86 seasons. More seasons cannot settle it on any useful timescale.
+- **Closing-line value cannot be measured** for any first-quarter cell: one first-quarter quote
+  is stored per game (median 54 minutes before tip), so the decision quote is the last one.
+
+**Totals: nothing.** The best total cell with 200 or more bets is last 10, over, with the scoring
+check, k ≥ 2: 202 bets, +13.0 units, +5.8%, interval −6.4% to +18.1%. The 17 cells with 200 or
+more bets have a median return of −0.4%; 6 are positive. Both-teams-trending at k ≥ 3 (last 5)
+is 97 overs (+3.6%) and 120 unders (+1.9%).
+
+**Closed for 2026-27: the first-quarter cover-record and over/under-record method.** Nothing is
+built. The step-with-check cell is recorded, not built: it is too thin to decide and too rare
+to become decidable.

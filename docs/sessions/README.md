@@ -21,6 +21,7 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, merged origin/master into the player H2H chip. Range row kept. Chart dates kept. H2H bars labelled from the meeting. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA eighth search: mike's first-quarter cover-record and over/under-record method, 64 cells pre-registered and graded, 0 pass. Last-5 rule 237 bets +6.1% (interval through zero). Alternate-line and injury-news grades blocked on the stale local database login. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM prop units show only for exactly one prop with Over or Under set. Anytime TD only for Yes. Mix and unsided props stay hidden. SQL lows not taken. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard Medium follow-ups from #1065. NCAAF by game id. One in-play DK row per market. Sheet polls only while focused. Index migration is hand-applied, not on prod. |
