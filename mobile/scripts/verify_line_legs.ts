@@ -26,8 +26,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { gameEditMenu, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
+import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
 import { buildTeamLineIndex, type StatsOddsQuote } from '../src/lib/statsOdds';
 import { marketClassForModel } from '../src/lib/markets';
 import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
@@ -308,11 +310,68 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('editing a leg that is gone does nothing',
     lineLegsAfterReplace([b], lineLegKey(spec), a) === null);
   const slipScreen = readFileSync(join(ROOT, 'src/screens/ParlayScreen.tsx'), 'utf-8');
-  check('the betslip offers edit only on Stats prop lines and custom legs, never on a model pick',
+  // Matt, 2026-10-29: game lines get the pencil too. Still never a model pick.
+  check('the betslip offers edit on every Stats line leg and custom legs, never on a model pick',
     slipScreen.includes('onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}') &&
       /if \(!isLineLeg\(leg\)\) return null;/.test(slipScreen) &&
-      slipScreen.includes('!isGameSpec(spec)') &&
+      !slipScreen.includes('!isGameSpec(spec)') &&
       slipScreen.includes('lineLegs.replace(lineLegKey(editingLine), next)'));
+}
+
+// ── Editing a GAME line leg (Matt, 2026-10-29: "Yes") ───────────────────────
+{
+  const g = (bookmaker: string, market: string, o: Partial<OddsByBookRow>): OddsByBookRow => ({
+    game_id: 'KC@BUF', game_date: '2026-11-01', market, bookmaker,
+    home_price: null, away_price: null, over_price: null, under_price: null,
+    spread_home: null, total_line: null, home_link: null, away_link: null,
+    over_link: null, under_link: null, snapshot_at: '', ...o,
+  });
+  // BUF home. DK and FD hang BUF -3.5; MGM hangs BUF -2.5; a non-US book -4.5.
+  const spreadRows = [
+    g('draftkings', 'spreads', { spread_home: -3.5, home_price: -110, away_price: -110 }),
+    g('fanduel', 'spreads', { spread_home: -3.5, home_price: -105, away_price: -115 }),
+    g('betmgm', 'spreads', { spread_home: -2.5, home_price: -130, away_price: 110 }),
+    g('notabook', 'spreads', { spread_home: -4.5, home_price: 120, away_price: -140 }),
+  ];
+  const kc: GameLineLegSpec = { kind: 'game', game_id: 'KC@BUF', sport: 'NFL', market: 'spreads', team: 'KC', opponent: 'BUF', isHome: false, line: 3.5, side: null };
+  const menu = gameEditMenu(kc, spreadRows);
+  const kcLines = menu.choices.filter((c) => c.segment === 'KC').map((c) => (c.spec as GameLineLegSpec).line);
+  const bufLines = menu.choices.filter((c) => c.segment === 'BUF').map((c) => (c.spec as GameLineLegSpec).line);
+  check('spread edit: each team at every number a bettable book hangs, signed for that team',
+    kcLines.join(',') === '2.5,3.5' && bufLines.join(',') === '-3.5,-2.5', `${kcLines} | ${bufLines}`);
+  const bufChoice = menu.choices.find((c) => c.segment === 'BUF' && (c.spec as GameLineLegSpec).line === -3.5)!;
+  const bufSpec = bufChoice.spec as GameLineLegSpec;
+  check('spread edit: switching team flips home/away and opponent, not the game',
+    bufSpec.team === 'BUF' && bufSpec.opponent === 'KC' && bufSpec.isHome === true && bufSpec.market === 'spreads'
+      && bufChoice.title === 'BUF -3.5');
+  check('spread edit: priced the way the slip prices it (DraftKings first)',
+    bufChoice.book === 'draftkings' && bufChoice.price === -110
+      && gameLineLegFromRows(bufSpec, spreadRows, null)!.americanOdds === bufChoice.price);
+  const kc25 = menu.choices.find((c) => c.segment === 'KC' && (c.spec as GameLineLegSpec).line === 2.5)!;
+  check('spread edit: a number DraftKings does not hang is priced at the book that does',
+    kc25.book === 'betmgm' && kc25.price === 110
+      && gameLineLegFromRows(kc25.spec as GameLineLegSpec, spreadRows, null)!.americanOdds === 110);
+
+  const totalRows = [
+    g('draftkings', 'totals', { total_line: 47.5, over_price: -110, under_price: -110 }),
+    g('fanduel', 'totals', { total_line: 48.5, over_price: -105, under_price: -115 }),
+  ];
+  const over: GameLineLegSpec = { ...kc, market: 'totals', line: 47.5, side: 'over' };
+  const tm = gameEditMenu(over, totalRows);
+  check('total edit: Over and Under at every posted total',
+    tm.segments.map((x) => x.key).join() === 'over,under'
+      && tm.choices.filter((c) => c.segment === 'under').map((c) => (c.spec as GameLineLegSpec).line).join() === '47.5,48.5');
+  const under485 = tm.choices.find((c) => c.segment === 'under' && (c.spec as GameLineLegSpec).line === 48.5)!;
+  check('total edit: the chosen side and number are what the slip prices',
+    (under485.spec as GameLineLegSpec).side === 'under'
+      && gameLineLegFromRows(under485.spec as GameLineLegSpec, totalRows, null)!.americanOdds === under485.price);
+
+  const mlRows = [g('draftkings', 'h2h', { home_price: -180, away_price: 150 })];
+  const mm = gameEditMenu({ ...kc, market: 'h2h', line: null }, mlRows);
+  check('moneyline edit: the two teams, each at its own price',
+    mm.choices.map((c) => `${c.title}:${c.price}`).join() === 'KC ML:150,BUF ML:-180');
+  check('a game edit is never refused as sidelined (no player to look up)',
+    lineLegsAfterEdit([kc], lineLegKey(kc), bufSpec, EMPTY_INJURY_INDEX).outcome === 'ok');
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

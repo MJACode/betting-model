@@ -481,3 +481,122 @@ export function lineLegsAfterReplace(
   out[at] = next;
   return out;
 }
+
+// ── The edit sheet's menu, for every kind of line leg ────────────────────────
+//
+// Matt, 2026-10-29, on game lines: "Yes" to an edit button on moneyline,
+// spread and total legs too. One menu shape for both kinds, so the sheet does
+// not branch: a row of segments (Over/Under, or the two teams), and under each
+// the bets a bettable book posts right now, each priced by anchorRow — the
+// leg's own rule — so the price picked is the price the slip shows.
+//
+// Game lines offer what the books POST: the main number each book hangs.
+// Alternate game lines (other numbers) are not fetched as of 2026-10-29 —
+// measured: none stored since 2026-10-01 — so a game often has one or two
+// numbers to choose from. Fetching alternates costs Odds API credits, which
+// is Matt's call, not this code's.
+
+/** One bet the sheet can switch the leg to. */
+export interface EditChoice {
+  /** Which segment it lists under ('over', 'under', or a team). */
+  segment: string;
+  /** The leg it becomes. */
+  spec: LineLegSpec;
+  /** "Over 14.5", "KC −3.5", "KC ML". */
+  title: string;
+  /** "15 or more" under a half-point prop line; null elsewhere. */
+  hint: string | null;
+  price: number;
+  book: string;
+}
+
+export interface EditMenu {
+  segments: { key: string; label: string }[];
+  choices: EditChoice[];
+}
+
+/** "15 or more" for Over 14.5, "14 or fewer" for Under 14.5. Whole-number
+ *  lines (a push is possible) get no hint. */
+export function countHint(line: number, side: LineSide): string | null {
+  if (!Number.isFinite(line) || Number.isInteger(line) || Math.abs((line % 1) - 0.5) > 1e-9) return null;
+  return side === 'over' ? `${Math.ceil(line)} or more` : `${Math.floor(line)} or fewer`;
+}
+
+const SIDE_SEGMENTS = [
+  { key: 'over', label: 'Over' },
+  { key: 'under', label: 'Under' },
+];
+
+/** A prop leg's menu: every posted line, Over and Under. */
+export function propEditMenu(spec: PropLineLegSpec, rows: readonly PropOddsByBookRow[]): EditMenu {
+  const choices: EditChoice[] = [];
+  for (const o of lineOptionsFromRows(spec, rows)) {
+    for (const side of ['over', 'under'] as const) {
+      const p = side === 'over' ? o.over : o.under;
+      if (!p) continue;
+      choices.push({
+        segment: side,
+        spec: withLine(spec, o.line, side),
+        title: `${side === 'over' ? 'Over' : 'Under'} ${o.line}`,
+        hint: countHint(o.line, side),
+        price: p.price,
+        book: p.book,
+      });
+    }
+  }
+  return { segments: SIDE_SEGMENTS, choices };
+}
+
+/** The same game leg from the other team's side, at that team's number. */
+function asTeam(spec: GameLineLegSpec, team: string, line: number | null): GameLineLegSpec {
+  if (team === spec.team) return { ...spec, line };
+  return { ...spec, team: spec.opponent, opponent: spec.team, isHome: !spec.isHome, line };
+}
+
+/**
+ * A game leg's menu. Moneyline: the two teams. Spread: the two teams, each at
+ * every number a book hangs (the home number h is the away team's −h).
+ * Total: Over and Under at every total a book hangs. The market itself does
+ * not change — a spread stays a spread.
+ */
+export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow[]): EditMenu {
+  const at = rows.filter(
+    (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker),
+  );
+  const choices: EditChoice[] = [];
+  const push = (segment: string, next: GameLineLegSpec, list: OddsByBookRow[]) => {
+    const side = gameLegSide(next);
+    const priceOf = (r: OddsByBookRow) => priceForSide(r, side);
+    const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
+    if (!a) return;
+    choices.push({ segment, spec: next, title: lineLegLabel(next), hint: null, price: priceOf(a) as number, book: a.bookmaker });
+  };
+  const teams = [spec.team, spec.opponent];
+  const teamSegments = teams.map((t) => ({ key: t, label: t }));
+
+  if (spec.market === 'h2h') {
+    for (const t of teams) push(t, asTeam(spec, t, null), at);
+    return { segments: teamSegments, choices };
+  }
+  if (spec.market === 'spreads') {
+    const homeNumbers = [...new Set(at.map((r) => num(r.spread_home)).filter((n): n is number => n != null))];
+    for (const t of teams) {
+      const teamIsHome = t === spec.team ? spec.isHome : !spec.isHome;
+      // This team's numbers, favourite (most negative) first.
+      const lines = homeNumbers.map((h) => (teamIsHome ? h : -h)).sort((a, b) => a - b);
+      for (const line of lines) {
+        const next = asTeam(spec, t, line);
+        push(t, next, at.filter((r) => gameRowAtNumber(r, next)));
+      }
+    }
+    return { segments: teamSegments, choices };
+  }
+  const totals = [...new Set(at.map((r) => num(r.total_line)).filter((n): n is number => n != null))].sort((a, b) => a - b);
+  for (const side of ['over', 'under'] as const) {
+    for (const line of totals) {
+      const next: GameLineLegSpec = { ...spec, line, side };
+      push(side, next, at.filter((r) => gameRowAtNumber(r, next)));
+    }
+  }
+  return { segments: SIDE_SEGMENTS, choices };
+}
