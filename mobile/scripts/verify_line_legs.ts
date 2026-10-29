@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { canSaveEdit, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { canSaveEdit, foldAltGameRows, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
 import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
@@ -389,7 +389,50 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('game menus say what is missing in game words',
     menu.segments[0]!.empty === 'No sportsbook has a KC spread right now.'
       && tm.segments[0]!.empty === 'No sportsbook posts the Over for this game right now.'
-      && /Alternate lines aren/.test(menu.subtitle) && /Switch sides/.test(mm.subtitle));
+      && /hanging right now/.test(menu.subtitle) && /Switch sides/.test(mm.subtitle));
+  // Alternate ladder (2026-10-29): folded into the main market's name, main
+  // row wins a tie, and an alternate number is then a real edit choice that
+  // the slip prices at the same row.
+  const altRows = [
+    g('draftkings', 'alternate_spreads', { spread_home: -3.5, home_price: -999, away_price: -999 }),
+    g('draftkings', 'alternate_spreads', { spread_home: -6.5, home_price: 160, away_price: -190 }),
+    g('fanduel', 'alternate_spreads', { spread_home: -6.5, home_price: 165, away_price: -200 }),
+    g('draftkings', 'alternate_totals', { total_line: 51.5, over_price: 150, under_price: -180 }),
+  ];
+  const folded = foldAltGameRows('spreads', spreadRows, altRows);
+  check('alternate rungs join the main market, and the main row wins its own number',
+    folded.length === spreadRows.length + 2
+      && folded.every((r) => r.market === 'spreads')
+      && !folded.some((r) => r.home_price === -999));
+  check('an alternate total never leaks into a spread menu',
+    !folded.some((r) => r.total_line === 51.5));
+  check('a market with no ladder is untouched', foldAltGameRows('h2h', mlRows, altRows).length === mlRows.length);
+  const altMenu = gameEditMenu(kc, folded);
+  const kc65 = altMenu.choices.find((c) => c.segment === 'KC' && (c.spec as GameLineLegSpec).line === 6.5)!;
+  check('an alternate number is an edit choice, priced as the slip prices it',
+    kc65 != null && kc65.book === 'draftkings' && kc65.price === -190
+      && gameLineLegFromRows(kc65.spec as GameLineLegSpec, folded, null)!.americanOdds === -190);
+  // UX review, 2026-10-29: a day-old DraftKings rung must not beat a fresh
+  // main line another book hangs at the same number. BetMGM's main is
+  // BUF -2.5 (KC +2.5 at +110); DraftKings only has -2.5 on its 6 AM ladder.
+  const staleDk = g('draftkings', 'alternate_spreads', { spread_home: -2.5, home_price: -150, away_price: 125, snapshot_at: '2026-10-29T10:05:00Z' });
+  const mixed = foldAltGameRows('spreads', spreadRows, [staleDk, ...altRows]);
+  const kc25Mixed = gameEditMenu(kc, mixed).choices.find((c) => c.segment === 'KC' && (c.spec as GameLineLegSpec).line === 2.5)!;
+  check('a fresh main price beats a day-old DraftKings alternate at the same number',
+    kc25Mixed.book === 'betmgm' && kc25Mixed.price === 110
+      && gameLineLegFromRows(kc25Mixed.spec as GameLineLegSpec, mixed, null)!.americanOdds === 110
+      && gameLineLegFromRows(kc25Mixed.spec as GameLineLegSpec, mixed, null)!.pricedFromLadder === false);
+  const kc65Leg = gameLineLegFromRows(kc65.spec as GameLineLegSpec, folded, null)!;
+  check('a leg priced from the ladder says so, with the price\'s own stamp',
+    kc65Leg.pricedFromLadder === true && kc65Leg.pricedAsOf === altRows[1]!.snapshot_at);
+  check('ladder rows say how old they are; main rows say they are the main line',
+    /^Alt · /.test(kc65.hint ?? '') && kc25Mixed.hint === 'Main line');
+  check('no ladder, no alternate claim and no "Main line" on every row',
+    !/alternate/.test(menu.subtitle) && menu.choices.every((c) => c.hint === null)
+      && /including alternate lines/.test(altMenu.subtitle));
+  check('the betslip reads the ladder and folds it, and a failed ladder read keeps the main lines',
+    /\.from\('alt_game_lines'\)/.test(readFileSync(join(ROOT, 'src/lib/queries.ts'), 'utf-8'))
+      && /if \(altRes\.error\) \{[\s\S]{0,120}return main;/.test(readFileSync(join(ROOT, 'src/lib/queries.ts'), 'utf-8')));
   check('a game edit is never refused as sidelined (no player to look up)',
     lineLegsAfterEdit([kc], lineLegKey(kc), bufSpec, EMPTY_INJURY_INDEX).outcome === 'ok');
 }

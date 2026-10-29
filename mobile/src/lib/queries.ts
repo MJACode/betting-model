@@ -6,6 +6,7 @@ import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/pro
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
 import { errorText, isAbortError, isNotFoundError } from './errors';
+import { ALT_GAME_MARKET, foldAltGameRows, type GameLineMarket } from './lineLegs';
 import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
@@ -1073,15 +1074,39 @@ export async function fetchPropLineRows(
  * Every book's latest line for ONE game market -- what a Teams-board LINE leg
  * re-prices from each time the betslip resolves (lib/lineLegs.ts
  * gameLineLegFromRows). ~13 rows, bounded by game_id; no paging needed.
+ *
+ * Spreads and totals also carry the day's ALTERNATE ladder (alt_game_lines,
+ * fetched once a day since 2026-10-29), folded into the main market's name by
+ * lib/lineLegs.foldAltGameRows. That read is bounded by one game and one
+ * market: books x rungs, a few hundred rows at most. If it fails (the table
+ * not yet created, a timeout) the main lines still come back, and the cause is
+ * logged rather than thrown, so a missing ladder never empties the slip.
  */
 export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
-  const { data, error } = await supabase
-    .from('v_latest_odds_all_books')
-    .select(ODDS_BY_BOOK_COLUMNS)
-    .eq('game_id', gameId)
-    .eq('market', market);
-  if (error) throw error;
-  return (data ?? []) as unknown as OddsByBookRow[];
+  const altMarket = ALT_GAME_MARKET[market as GameLineMarket];
+  const [mainRes, altRes] = await Promise.all([
+    supabase
+      .from('v_latest_odds_all_books')
+      .select(ODDS_BY_BOOK_COLUMNS)
+      .eq('game_id', gameId)
+      .eq('market', market),
+    altMarket
+      ? supabase
+          .from('alt_game_lines')
+          .select(ODDS_BY_BOOK_COLUMNS)
+          .eq('game_id', gameId)
+          .eq('market', altMarket)
+          .order('bookmaker')
+          .order('point')
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (mainRes.error) throw mainRes.error;
+  const main = (mainRes.data ?? []) as unknown as OddsByBookRow[];
+  if (altRes.error) {
+    console.warn('[gameLines] alternate ladder unavailable', altRes.error);
+    return main;
+  }
+  return foldAltGameRows(market, main, (altRes.data ?? []) as unknown as OddsByBookRow[]);
 }
 
 /** One game row, for a line leg's matchup and start time. */
