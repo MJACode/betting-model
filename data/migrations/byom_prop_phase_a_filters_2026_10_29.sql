@@ -16,7 +16,10 @@
 -- It is not in RPC_ANON_CALLABLE until this file is applied.
 --
 -- NOT in data/view_migrations.ACTIVE_MIGRATIONS. Apply by hand after
--- byom_nba_props_2026_10_29.sql. Do not re-apply an older backtest
+-- byom_nba_props_2026_10_29.sql and after
+-- byom_prop_team_backfill_2026_10_29.sql. A prop row with no team
+-- makes home/away, favorite, spread, rest and opponent match nothing.
+-- Do not re-apply an older backtest
 -- file after this one. It replaces both functions. It does not write
 -- picks. Idempotent: CREATE OR REPLACE, and DROP NOT NULL on week.
 
@@ -734,10 +737,6 @@ FROM byom_prop_facts p
     $body$;
   $save$;
 
-  REVOKE ALL ON FUNCTION public.byom_save_model(text, jsonb, integer)
-    FROM PUBLIC, anon;
-  GRANT EXECUTE ON FUNCTION public.byom_save_model(text, jsonb, integer)
-    TO authenticated;
   REVOKE ALL ON FUNCTION public.byom_save_model(text, jsonb, integer)
     FROM PUBLIC, anon;
   GRANT EXECUTE ON FUNCTION public.byom_save_model(text, jsonb, integer)

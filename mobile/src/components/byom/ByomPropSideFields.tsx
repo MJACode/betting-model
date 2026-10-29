@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
   },
   chevron: {
     fontSize: font.size.title3,
-    color: colors.low,
+    color: colors.textTertiary,
     marginLeft: spacing.sm,
   },
 });

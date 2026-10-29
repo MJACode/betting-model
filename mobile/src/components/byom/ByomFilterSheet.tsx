@@ -685,7 +685,7 @@ function PlayerPicker({
           accessibilityLabel="Retry player search"
           style={styles.team}
         >
-          <Text style={styles.teamText}>{searchError} Retry</Text>
+          <Text style={styles.teamText}>Couldn’t search players. Retry</Text>
         </Pressable>
       ) : null}
       {propFilters.player == null && typed.length < 2 && searchError == null ? (

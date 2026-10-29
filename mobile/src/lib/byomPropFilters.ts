@@ -280,7 +280,7 @@ export function resetSheetFilters(state: ByomPropFilterState): ByomPropFilterSta
 
 export const PRICE_CHOICES: readonly { value: ByomPriceBand | 'any'; label: string }[] = [
   { value: 'any', label: 'Any' },
-  { value: 'plus', label: 'Plus money (+101 or more)' },
+  { value: 'plus', label: 'Plus money (+100 or more)' },
   { value: 'mid', label: `${MINUS}100 to ${MINUS}130` },
   { value: 'heavy', label: `Heavy juice (${MINUS}131 or more)` },
   { value: 'custom', label: 'Custom' },
@@ -304,7 +304,7 @@ export function oddsSummary(state: ByomPropFilterState): FilterSummary {
     const text = `Line ${formatLineNumber(state.lineBand.min)}\u2013${formatLineNumber(state.lineBand.max)}`;
     bits.push({ detail: text, pill: text });
   }
-  if (state.priceBand === 'plus') bits.push({ detail: 'Plus money', pill: '+101 or more' });
+  if (state.priceBand === 'plus') bits.push({ detail: 'Plus money', pill: '+100 or more' });
   else if (state.priceBand === 'mid') {
     const text = `${MINUS}100 to ${MINUS}130`;
     bits.push({ detail: text, pill: text });
@@ -431,6 +431,7 @@ export function propStateFromFilters(filters: ByomFilters): ByomPropFilterState 
   let priceBand: ByomPriceBand | null = null;
   let priceCustom: ByomBand | null = null;
   if (minPrice === 101 && maxPrice == null) priceBand = 'plus';
+  else if (minPrice === 100 && maxPrice == null) priceBand = 'plus';
   else if (minPrice === -130 && maxPrice === -100) priceBand = 'mid';
   else if (minPrice == null && maxPrice === -131) priceBand = 'heavy';
   else if (minPrice != null || maxPrice != null) {
@@ -511,7 +512,7 @@ export function applyPropFilterKeys(
   clearPhaseA(next);
   const oneMarket = opts.marketCount === 1 && !opts.yesOnly;
   if (oneMarket) putBand(next, 'min_line', 'max_line', state.lineBand);
-  if (state.priceBand === 'plus') next.min_price = 101;
+  if (state.priceBand === 'plus') next.min_price = 100;
   else if (state.priceBand === 'mid') {
     next.min_price = -130;
     next.max_price = -100;
@@ -532,10 +533,7 @@ export function applyPropFilterKeys(
     } else {
       next.primetime = opts.primetime;
     }
-    if (state.shortWeek && state.offBye) {
-      next.min_rest_days = 12;
-      next.max_rest_days = 6;
-    } else if (state.shortWeek) {
+    if (state.shortWeek) {
       delete next.min_rest_days;
       next.max_rest_days = 6;
     } else if (state.offBye) {

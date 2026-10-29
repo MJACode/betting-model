@@ -641,7 +641,7 @@ const receptions = filtersForDraft({
   },
 });
 if (receptions.min_line !== 3.5 || receptions.max_line !== 5.5) throw new Error('line ' + JSON.stringify(receptions));
-if (receptions.min_price !== 101 || receptions.max_price != null) throw new Error('plus ' + JSON.stringify(receptions));
+if (receptions.min_price !== 100 || receptions.max_price != null) throw new Error('plus ' + JSON.stringify(receptions));
 if (receptions.min_game_total !== 44.5 || receptions.max_game_total !== 51.5) throw new Error('total');
 if (JSON.stringify(receptions.weekdays) !== '[0,1]') throw new Error('days');
 if (JSON.stringify(receptions.kick_slots) !== '["late"]' || receptions.primetime) throw new Error('slot ' + JSON.stringify(receptions));
@@ -671,7 +671,7 @@ const both = filtersForDraft({
   },
 });
 if (both.min_price !== -130 || both.max_price !== -100) throw new Error('mid');
-if (both.min_rest_days !== 12 || both.max_rest_days !== 6) throw new Error('both rest');
+if (both.min_rest_days != null || both.max_rest_days !== 6) throw new Error('both rest');
 if (JSON.stringify(both.kick_slots) !== '["prime"]' || both.primetime) throw new Error('prime slot');
 
 const atd = filtersForDraft({
@@ -710,7 +710,7 @@ if (!back || !back.propFilters || back.propFilters.priceBand !== 'plus' || back.
 if (back.propFilters.lineBand.min !== 3.5 || back.role !== 'favorite') throw new Error('back line');
 const odds = oddsSummary(back.propFilters);
 if (odds.detail !== 'Line 3.5\u20135.5 · Plus money · Total 44.5\u201351.5') throw new Error('odds ' + odds.detail);
-if (odds.pills[1] !== '+101 or more') throw new Error('pill ' + odds.pills.join('|'));
+if (odds.pills[1] !== '+100 or more') throw new Error('pill ' + odds.pills.join('|'));
 const time = timeSummary(propStateFromFilters(receptions), 'NFL', ['late']);
 if (time.detail !== 'Sun\u2013Mon · Late') throw new Error('time ' + time.detail);
 const match = matchupSummary('home', propStateFromFilters(receptions));

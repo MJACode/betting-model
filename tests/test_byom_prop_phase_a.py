@@ -15,6 +15,7 @@ SQL_NAME = "byom_prop_phase_a_filters_2026_10_29.sql"
 def test_phase_a_migration_is_hand_applied():
     listed = (ROOT / "data/view_migrations.py").read_text(encoding="utf-8")
     assert SQL_NAME not in listed
+    assert "byom_prop_team_backfill_2026_10_29.sql" not in listed
     text = (ROOT / "data/migrations" / SQL_NAME).read_text(encoding="utf-8")
     assert "byom_prop_phase_a" in text
     assert "byom_backtest_v1" in text
@@ -163,6 +164,46 @@ def test_scratch_phase_a_filters_narrow_the_same_stake():
             )
         cur.execute("SELECT player_name FROM byom_player_names('NFL', 'lam')")
         assert cur.fetchall() == [("Lamar Jackson",)]
+
+        # A blank team is not a home or away leg. The backfill fills it
+        # from the log; a name on both teams stays blank.
+        cur.execute("""
+            CREATE TABLE nfl_player_game_log (
+              player_id text, player_name text, team text,
+              game_id text, game_date text, season int)
+        """)
+        cur.execute("""
+            INSERT INTO byom_prop_facts (
+              prop_key, canonical_key, sport, season, week, player_name, player_key,
+              team, market, line, line_basis, log_status,
+              over_result, under_result, over_price, under_price)
+            VALUES
+              ('blank', 'sun', 'NFL', 2026, 1, 'Mark Andrews', 'mark andrews',
+               NULL, 'player_receptions', 4.5, 'DraftKings line at game start', 'logged',
+               'win', 'loss', -110, -110),
+              ('split', 'sun', 'NFL', 2026, 1, 'Josh Allen', 'josh allen',
+               NULL, 'player_receptions', 3.5, 'DraftKings line at game start', 'logged',
+               'loss', 'win', -110, -110)
+        """)
+        cur.execute("""
+            INSERT INTO nfl_player_game_log
+              (player_id, player_name, team, game_id, game_date, season)
+            VALUES
+              ('m1', 'Mark Andrews', 'BAL', 'sun', '2026-09-13', 2026),
+              ('j1', 'Josh Allen', 'BAL', 'sun', '2026-09-13', 2026),
+              ('j2', 'Josh Allen', 'KC', 'sun', '2026-09-13', 2026)
+        """)
+        assert bets(
+            '{"markets":["player_receptions"],"prop_side":"over","side":"away"}'
+        )[0] == 0
+        cur.execute((ROOT / "data/migrations" / "byom_prop_team_backfill_2026_10_29.sql").read_text(encoding="utf-8"))
+        cur.execute("SELECT prop_key, team FROM byom_prop_facts WHERE prop_key IN ('blank', 'split') ORDER BY prop_key")
+        assert cur.fetchall() == [("blank", "BAL"), ("split", None)]
+        assert bets(
+            '{"markets":["player_receptions"],"prop_side":"over","side":"away"}'
+        )[0] == 1
+        cur.execute("SELECT to_regprocedure('public.byom_norm_player_name(text)')")
+        assert cur.fetchone()[0] is None
     finally:
         if raw is not None:
             raw.close()
