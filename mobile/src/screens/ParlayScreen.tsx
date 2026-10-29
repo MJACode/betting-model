@@ -31,7 +31,7 @@ import { betslipPlayerFromPick, slipKeysAfterAdd } from '@/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX, type InjuryIndex } from '@/lib/injuryStatus';
 import { injuryIndexForSport } from '@/lib/injuryLookup';
 import { EditLineLegSheet } from '@/components/EditLineLegSheet';
-import { isGameSpec, isLineLeg, lineLegKey, type PropLineLegSpec } from '@/lib/lineLegs';
+import { isLineLeg, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
 import {
   setEditingParlayId,
   setManualCustomLegs,
@@ -147,7 +147,7 @@ function ParlayScreenBody() {
   // The custom leg the form is editing (its pickId), or null when it adds one.
   const [editingCustomId, setEditingCustomId] = useState<number | null>(null);
   // The Stats line leg whose line is being changed (Matt, 2026-10-28).
-  const [editingLine, setEditingLine] = useState<PropLineLegSpec | null>(null);
+  const [editingLine, setEditingLine] = useState<LineLegSpec | null>(null);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [customOddsText, setCustomOddsText] = useState<string>('');
 
@@ -210,15 +210,15 @@ function ParlayScreenBody() {
   );
 
   // Edit a leg (Matt, 2026-10-28: "if I select 10 points … I should be able
-  // to edit and change it to 15"). A Stats prop line opens the line picker; a
-  // custom leg reopens its form. Model picks and game lines have no edit: a
-  // pick is a bet of record at its own line, and game lines carry no alternate
-  // numbers to choose from.
+  // to edit and change it to 15"; 2026-10-29: game lines too). Any Stats line
+  // leg -- a prop, a moneyline, a spread, a total -- opens the line picker; a
+  // custom leg reopens its form. Model picks have no edit: a pick is a bet of
+  // record at its own line (CLAUDE.md §1c).
   const editableSpec = useCallback(
-    (leg: ParlayLeg): PropLineLegSpec | null => {
+    (leg: ParlayLeg): LineLegSpec | null => {
       if (!isLineLeg(leg)) return null;
       const spec = lineLegs.specs.find((s) => lineLegKey(s) === leg.slipKey);
-      return spec && !isGameSpec(spec) ? spec : null;
+      return spec ?? null;
     },
     [lineLegs.specs],
   );
@@ -245,7 +245,7 @@ function ParlayScreenBody() {
     [legs, editableSpec],
   );
   const saveEditedLine = useCallback(
-    async (next: PropLineLegSpec): Promise<'ok' | 'duplicate' | 'sidelined'> => {
+    async (next: LineLegSpec): Promise<'ok' | 'duplicate' | 'sidelined'> => {
       if (!editingLine) return 'duplicate';
       const outcome = await lineLegs.replace(lineLegKey(editingLine), next);
       if (outcome === 'ok') showToast('Leg updated');

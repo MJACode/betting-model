@@ -481,3 +481,167 @@ export function lineLegsAfterReplace(
   out[at] = next;
   return out;
 }
+
+// ── The edit sheet's menu, for every kind of line leg ────────────────────────
+//
+// Matt, 2026-10-29, on game lines: "Yes" to an edit button on moneyline,
+// spread and total legs too. One menu shape for both kinds, so the sheet does
+// not branch: a row of segments (Over/Under, or the two teams), and under each
+// the bets a bettable book posts right now, each priced by anchorRow — the
+// leg's own rule — so the price picked is the price the slip shows.
+//
+// Game lines offer what the books POST: the main number each book hangs.
+// Alternate game lines (other numbers) are not fetched as of 2026-10-29 —
+// measured: none stored since 2026-10-01 — so a game often has one or two
+// numbers to choose from. Fetching alternates costs Odds API credits, which
+// is Matt's call, not this code's.
+
+/** One bet the sheet can switch the leg to. */
+export interface EditChoice {
+  /** Which segment it lists under ('over', 'under', or a team). */
+  segment: string;
+  /** The leg it becomes. */
+  spec: LineLegSpec;
+  /** "Over 14.5", "KC −3.5", "KC ML". */
+  title: string;
+  /** "15 or more" under a half-point prop line; null elsewhere. */
+  hint: string | null;
+  price: number;
+  book: string;
+}
+
+export interface EditMenu {
+  /** The tabs. One segment (key 'all') means no tab row is drawn. */
+  segments: { key: string; label: string; empty: string }[];
+  choices: EditChoice[];
+  /** The line under the sheet's title, per market. */
+  subtitle: string;
+}
+
+const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
+const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
+// True as measured 2026-10-29 (no alternate game lines stored since
+// 2026-10-01). Remove the second sentence if alternates are ever fetched.
+const GAME_LINE_SUBTITLE =
+  'Every number a sportsbook is hanging right now. Alternate lines aren’t listed for game lines.';
+/** The whole game is off the board. */
+export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
+
+/**
+ * When no tab would hold more than one row (a moneyline, a spread or total
+ * every book hangs at one number), the tabs only hide the comparison: one
+ * flat list of both sides reads "KC −150 / BUF +130" at a glance (UX review,
+ * 2026-10-29). Order is kept, segment by segment.
+ */
+function collapseThinMenu(menu: EditMenu): EditMenu {
+  const thin = menu.segments.every((g) => menu.choices.filter((c) => c.segment === g.key).length <= 1);
+  if (!thin || menu.choices.length === 0) return menu;
+  const order = new Map(menu.segments.map((g, i) => [g.key, i]));
+  const choices = [...menu.choices]
+    .sort((a, b) => (order.get(a.segment) ?? 0) - (order.get(b.segment) ?? 0))
+    .map((c) => ({ ...c, segment: 'all' }));
+  return { ...menu, segments: [{ key: 'all', label: '', empty: GAME_OFF_BOARD }], choices };
+}
+
+/** The segment to show first: the leg's own, else the first one there is. */
+export function initialEditSegment(menu: EditMenu, spec: LineLegSpec): string {
+  const own = isGameSpec(spec) ? (spec.market === 'totals' ? spec.side ?? 'over' : spec.team) : spec.side;
+  return menu.segments.some((g) => g.key === own) ? own : menu.segments[0]?.key ?? own;
+}
+
+/**
+ * Whether Update may save. Only a choice on the VISIBLE tab counts: picking
+ * BUF +3.5, then switching to the KC tab, must not leave Update saving a bet
+ * that is no longer on screen (UX review, 2026-10-29).
+ */
+export function canSaveEdit(menu: EditMenu | null, segment: string, picked: string | null, currentKey: string | null): boolean {
+  if (!menu || picked == null || picked === currentKey) return false;
+  return menu.choices.some((c) => c.segment === segment && lineLegKey(c.spec) === picked);
+}
+
+/** "15 or more" for Over 14.5, "14 or fewer" for Under 14.5. Whole-number
+ *  lines (a push is possible) get no hint. */
+export function countHint(line: number, side: LineSide): string | null {
+  if (!Number.isFinite(line) || Number.isInteger(line) || Math.abs((line % 1) - 0.5) > 1e-9) return null;
+  return side === 'over' ? `${Math.ceil(line)} or more` : `${Math.floor(line)} or fewer`;
+}
+
+const sideSegments = (what: string) => [
+  { key: 'over', label: 'Over', empty: `No sportsbook posts the Over for ${what} right now.` },
+  { key: 'under', label: 'Under', empty: `No sportsbook posts the Under for ${what} right now.` },
+];
+
+/** A prop leg's menu: every posted line, Over and Under. */
+export function propEditMenu(spec: PropLineLegSpec, rows: readonly PropOddsByBookRow[]): EditMenu {
+  const choices: EditChoice[] = [];
+  for (const o of lineOptionsFromRows(spec, rows)) {
+    for (const side of ['over', 'under'] as const) {
+      const p = side === 'over' ? o.over : o.under;
+      if (!p) continue;
+      choices.push({
+        segment: side,
+        spec: withLine(spec, o.line, side),
+        title: `${side === 'over' ? 'Over' : 'Under'} ${o.line}`,
+        hint: countHint(o.line, side),
+        price: p.price,
+        book: p.book,
+      });
+    }
+  }
+  return { segments: sideSegments('this player'), choices, subtitle: PROP_SUBTITLE };
+}
+
+/** The same game leg from the other team's side, at that team's number. */
+function asTeam(spec: GameLineLegSpec, team: string, line: number | null): GameLineLegSpec {
+  if (team === spec.team) return { ...spec, line };
+  return { ...spec, team: spec.opponent, opponent: spec.team, isHome: !spec.isHome, line };
+}
+
+/**
+ * A game leg's menu. Moneyline: the two teams. Spread: the two teams, each at
+ * every number a book hangs (the home number h is the away team's −h).
+ * Total: Over and Under at every total a book hangs. The market itself does
+ * not change — a spread stays a spread.
+ */
+export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow[]): EditMenu {
+  const at = rows.filter(
+    (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker),
+  );
+  const choices: EditChoice[] = [];
+  const push = (segment: string, next: GameLineLegSpec, list: OddsByBookRow[], title = lineLegLabel(next)) => {
+    const side = gameLegSide(next);
+    const priceOf = (r: OddsByBookRow) => priceForSide(r, side);
+    const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
+    if (!a) return;
+    choices.push({ segment, spec: next, title, hint: null, price: priceOf(a) as number, book: a.bookmaker });
+  };
+  const teams = [spec.team, spec.opponent];
+  const teamSegments = (kind: string) =>
+    teams.map((t) => ({ key: t, label: t, empty: `No sportsbook has a ${t} ${kind} right now.` }));
+
+  if (spec.market === 'h2h') {
+    for (const t of teams) push(t, asTeam(spec, t, null), at);
+    return collapseThinMenu({ segments: teamSegments('moneyline'), choices, subtitle: ML_SUBTITLE });
+  }
+  if (spec.market === 'spreads') {
+    const homeNumbers = [...new Set(at.map((r) => num(r.spread_home)).filter((n): n is number => n != null))];
+    for (const t of teams) {
+      const teamIsHome = t === spec.team ? spec.isHome : !spec.isHome;
+      // This team's numbers, favourite (most negative) first.
+      const lines = homeNumbers.map((h) => (teamIsHome ? h : -h)).sort((a, b) => a - b);
+      for (const line of lines) {
+        const next = asTeam(spec, t, line);
+        push(t, next, at.filter((r) => gameRowAtNumber(r, next)));
+      }
+    }
+    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: GAME_LINE_SUBTITLE });
+  }
+  const totals = [...new Set(at.map((r) => num(r.total_line)).filter((n): n is number => n != null))].sort((a, b) => a - b);
+  for (const side of ['over', 'under'] as const) {
+    for (const line of totals) {
+      const next: GameLineLegSpec = { ...spec, line, side };
+      push(side, next, at.filter((r) => gameRowAtNumber(r, next)), `${side === 'over' ? 'Over' : 'Under'} ${fmtLine(line)}`);
+    }
+  }
+  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: GAME_LINE_SUBTITLE });
+}

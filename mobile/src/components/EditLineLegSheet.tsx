@@ -4,31 +4,38 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { formatAmerican, MINUS } from '@/lib/format';
 import {
+  canSaveEdit,
+  gameEditMenu,
+  GAME_OFF_BOARD,
+  initialEditSegment,
+  isGameSpec,
   lineLegKey,
   lineLegLabel,
-  lineOptionsFromRows,
-  withLine,
-  type LineOption,
-  type LineSide,
-  type PropLineLegSpec,
+  propEditMenu,
+  type EditMenu,
+  type LineLegSpec,
 } from '@/lib/lineLegs';
 import { SegmentTabs } from '@/components/GroupTabs';
 import { bookLabelShort } from '@/lib/markets';
-import { fetchPropLineRows } from '@/lib/queries';
+import { fetchGameLineRows, fetchPropLineRows } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * Edit a betslip leg's line — the pencil on a "Your line" leg.
+ * Edit a betslip leg — the pencil on a "Your line" leg.
  *
  * Matt, 2026-10-28: "When you add players to the parlay feature, allow the
  * user to edit a bet. So example if I select 10 points for someone I should be
- * able to edit and change it to 15." The sheet lists every number a bettable
- * book posts for that player and stat (main and alternate lines), on the side
- * chosen at the top, each priced the way the leg will be (DraftKings when it
- * posts the side, else the best book — lineLegs.anchorRow). Picking one and tapping
- * Update swaps the leg in place; the slip then re-prices it like any line leg.
+ * able to edit and change it to 15." And 2026-10-29: game lines too.
  *
- * Model picks are not editable here (Matt, same day): a pick is a bet of
+ * A prop lists every number a bettable book posts for that player and stat
+ * (main and alternate lines), Over or Under. A game line lists the other team
+ * (moneyline), each team at every number a book hangs (spread), or Over/Under
+ * at every total a book hangs (total). Each row is priced the way the leg will
+ * be (DraftKings when it posts the side, else the best book —
+ * lineLegs.anchorRow). Picking one and tapping Update swaps the leg in place;
+ * the slip then re-prices it like any line leg.
+ *
+ * Model picks are not editable here (Matt, 2026-10-28): a pick is a bet of
  * record at its own line (CLAUDE.md §1c). Only the user's own line legs are.
  */
 export function EditLineLegSheet({
@@ -37,31 +44,37 @@ export function EditLineLegSheet({
   onSave,
 }: {
   /** The leg being edited; null closes the sheet. */
-  spec: PropLineLegSpec | null;
+  spec: LineLegSpec | null;
   onClose: () => void;
   /** 'ok' closes the sheet. 'duplicate' (that bet is already a leg) and
    *  'sidelined' (the player is ruled out) keep it open with a note. */
-  onSave: (next: PropLineLegSpec) => Promise<'ok' | 'duplicate' | 'sidelined'>;
+  onSave: (next: LineLegSpec) => Promise<'ok' | 'duplicate' | 'sidelined'>;
 }) {
-  const [options, setOptions] = useState<LineOption[] | null>(null);
+  const [menu, setMenu] = useState<EditMenu | null>(null);
   const [failed, setFailed] = useState(false);
-  const [side, setSide] = useState<LineSide>('over');
-  const [line, setLine] = useState<number | null>(null);
+  const [segment, setSegment] = useState<string>('');
+  const [picked, setPicked] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
   const specKey = spec ? lineLegKey(spec) : null;
   useEffect(() => {
     if (!spec) return;
-    setSide(spec.side);
-    setLine(spec.line);
+    setSegment(isGameSpec(spec) ? (spec.market === 'totals' ? spec.side ?? 'over' : spec.team) : spec.side);
+    setPicked(lineLegKey(spec));
     setNote(null);
-    setOptions(null);
+    setMenu(null);
     setFailed(false);
     let alive = true;
-    fetchPropLineRows(spec.game_id, spec.market, spec.player_name)
-      .then((rows) => {
-        if (alive) setOptions(lineOptionsFromRows(spec, rows));
+    const load: Promise<EditMenu> = isGameSpec(spec)
+      ? fetchGameLineRows(spec.game_id, spec.market).then((rows) => gameEditMenu(spec, rows))
+      : fetchPropLineRows(spec.game_id, spec.market, spec.player_name).then((rows) => propEditMenu(spec, rows));
+    load
+      .then((m) => {
+        if (!alive) return;
+        setMenu(m);
+        // A collapsed menu has one segment ('all'), not the leg's own side.
+        setSegment(initialEditSegment(m, spec));
       })
       .catch(() => {
         if (alive) setFailed(true);
@@ -73,16 +86,28 @@ export function EditLineLegSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specKey, nonce]);
 
-  const rows = useMemo(
-    () => (options ?? []).filter((o) => (side === 'over' ? o.over : o.under) != null),
-    [options, side],
+  const rows = useMemo(() => (menu?.choices ?? []).filter((c) => c.segment === segment), [menu, segment]);
+  const chosen = useMemo(
+    () => (menu?.choices ?? []).find((c) => lineLegKey(c.spec) === picked) ?? null,
+    [menu, picked],
   );
-  const unchanged = spec != null && line === spec.line && side === spec.side;
-  const canSave = spec != null && line != null && !unchanged && rows.some((o) => o.line === line);
+  const canSave = spec != null && chosen != null && canSaveEdit(menu, segment, picked, specKey);
+  // A game with nothing posted is off the board; a prop keeps its own
+  // segment's sentence ("…for this player"), whatever else is missing.
+  const segmentEmpty = menu?.segments.find((g) => g.key === segment)?.empty ?? null;
+  const emptyText =
+    spec && !isGameSpec(spec)
+      ? segmentEmpty ?? 'No sportsbook posts a line for this player right now.'
+      : menu && menu.choices.length === 0
+        ? GAME_OFF_BOARD
+        : segmentEmpty ?? GAME_OFF_BOARD;
+  // The leg's own bet is not on the board any more (line moved, book pulled
+  // it): say so, rather than leave the list with no row marked current.
+  const ownMissing = menu != null && specKey != null && !menu.choices.some((c) => lineLegKey(c.spec) === specKey);
 
   const save = () => {
-    if (!spec || line == null || !canSave) return;
-    void onSave(withLine(spec, line, side)).then((outcome) => {
+    if (!chosen || !canSave) return;
+    void onSave(chosen.spec).then((outcome) => {
       if (outcome === 'ok') onClose();
       else if (outcome === 'sidelined') setNote('This player is ruled out, so the leg can’t be changed.');
       else setNote('That bet is already on your betslip.');
@@ -111,19 +136,26 @@ export function EditLineLegSheet({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
-          <Text style={styles.subtitle}>Pick a new line. Only lines a sportsbook posts are listed.</Text>
+          <Text style={styles.subtitle}>
+            {menu?.subtitle ?? (spec && isGameSpec(spec) ? '' : 'Pick a new line. Only lines a sportsbook posts are listed.')}
+          </Text>
+          {ownMissing && spec ? (
+            <Text style={styles.ownMissing}>Your line, {lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t posted right now.</Text>
+          ) : null}
 
-          <View style={styles.segmentWrap}>
-            <SegmentTabs
-              items={['over', 'under'] as const}
-              active={side}
-              onChange={(s) => {
-                setSide(s);
-                setNote(null);
-              }}
-              labelFor={(s) => (s === 'over' ? 'Over' : 'Under')}
-            />
-          </View>
+          {menu && menu.segments.length > 1 ? (
+            <View style={styles.segmentWrap}>
+              <SegmentTabs
+                items={menu.segments.map((g) => g.key)}
+                active={segment}
+                onChange={(k) => {
+                  setSegment(k);
+                  setNote(null);
+                }}
+                labelFor={(k) => menu.segments.find((g) => g.key === k)?.label ?? k}
+              />
+            </View>
+          ) : null}
 
           {failed ? (
             <View style={styles.state}>
@@ -137,36 +169,33 @@ export function EditLineLegSheet({
                 <Text style={styles.retryText}>Try again</Text>
               </Pressable>
             </View>
-          ) : options == null ? (
+          ) : menu == null ? (
             <View style={styles.state}>
               <ActivityIndicator />
             </View>
           ) : rows.length === 0 ? (
             <View style={styles.state}>
-              <Text style={styles.stateText}>
-                No sportsbook posts the {side === 'over' ? 'Over' : 'Under'} for this player right now.
-              </Text>
+              <Text style={styles.stateText}>{emptyText}</Text>
             </View>
           ) : (
             <ScrollView style={styles.list} bounces={false}>
               <View style={styles.listCard}>
-                {rows.map((o, i) => {
-                  const p = (side === 'over' ? o.over : o.under)!;
-                  const selected = line === o.line;
-                  const isCurrent = spec != null && o.line === spec.line && side === spec.side;
-                  const word = side === 'over' ? 'Over' : 'Under';
-                  const hint = countHint(o.line, side);
-                  const priceText = formatAmerican(p.price).replace(/-/g, MINUS);
+                {rows.map((c, i) => {
+                  const key = lineLegKey(c.spec);
+                  const selected = picked === key;
+                  const isCurrent = key === specKey;
+                  const priceText = formatAmerican(c.price).replace(/-/g, MINUS);
+                  const titleText = c.title.replace(/-/g, MINUS);
                   return (
                     <Pressable
-                      key={o.line}
+                      key={key}
                       onPress={() => {
-                        setLine(o.line);
+                        setPicked(key);
                         setNote(null);
                       }}
                       accessibilityRole="radio"
                       accessibilityState={{ selected }}
-                      accessibilityLabel={`${word} ${o.line}${hint ? `, ${hint}` : ''}, ${priceText} at ${bookLabelShort(p.book)}${isCurrent ? ', current line' : ''}`}
+                      accessibilityLabel={`${titleText.replace(/ ML$/, ' moneyline')}${c.hint ? `, ${c.hint}` : ''}, ${priceText} at ${bookLabelShort(c.book)}${isCurrent ? ', current line' : ''}`}
                       style={({ pressed }) => [
                         styles.row,
                         i > 0 && styles.rowDivider,
@@ -181,12 +210,12 @@ export function EditLineLegSheet({
                       />
                       <View style={styles.rowBody}>
                         <Text style={styles.rowLine}>
-                          {word} {o.line}
+                          {titleText}
                           {isCurrent ? <Text style={styles.current}>  · current</Text> : null}
                         </Text>
-                        {hint ? <Text style={styles.rowHint}>{hint}</Text> : null}
+                        {c.hint ? <Text style={styles.rowHint}>{c.hint}</Text> : null}
                       </View>
-                      <Text style={styles.rowBook}>{bookLabelShort(p.book)}</Text>
+                      <Text style={styles.rowBook}>{bookLabelShort(c.book)}</Text>
                       <Text style={styles.rowPrice}>{priceText}</Text>
                     </Pressable>
                   );
@@ -220,13 +249,6 @@ export function EditLineLegSheet({
       </View>
     </Modal>
   );
-}
-
-/** "15 or more" for Over 14.5, "14 or fewer" for Under 14.5. Whole-number
- *  lines (a push is possible) get no hint. */
-export function countHint(line: number, side: LineSide): string | null {
-  if (!Number.isFinite(line) || Number.isInteger(line) || Math.abs((line % 1) - 0.5) > 1e-9) return null;
-  return side === 'over' ? `${Math.ceil(line)} or more` : `${Math.floor(line)} or fewer`;
 }
 
 const styles = StyleSheet.create({
@@ -320,6 +342,12 @@ const styles = StyleSheet.create({
   rowDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
+  },
+  ownMissing: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
   },
   rowSelected: {
     // The radio carries the state; no fill, so the price column stays legible.
