@@ -786,6 +786,26 @@ def step_nba_results(run_date: str) -> bool:
         return False
 
 
+def step_alt_game_lines(run_date: str) -> bool:
+    """Alternate spreads and totals for games in the next 3 days (Matt,
+    2026-10-29: "yes", once a day). One per-event Odds API call per game; each
+    call's credits are recorded in alt_game_line_fetches. Stores every rung in
+    `odds` and the current ladder in alt_game_lines, which the betslip's
+    game-line edit reads (data/ingestors/alt_game_lines.py). Runs after the
+    opening odds so today's games exist. A failed game is logged and the rest
+    stand; the step reports failure so the pass shows it."""
+    try:
+        from data.ingestors.alt_game_lines import run as alt_run
+        summary = alt_run()
+    except Exception as exc:
+        logger.error(f"✗ Alternate game lines failed: {exc}")
+        return False
+    logger.info(f"Alternate game lines: {summary.get('games')} games, {summary.get('rows')} rungs, "
+                f"{summary.get('failed')} failed, {summary.get('credits')} credits reported "
+                f"({summary.get('credits_unreported')} calls unreported)")
+    return not summary.get("failed")
+
+
 def step_nba_quarters(run_date: str) -> bool:
     """NBA first-quarter team stats for the Stats tab (Matt, 2026-10-28).
 
@@ -2206,6 +2226,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["odds"] = step_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
+    # ── Step 2-alt: Alternate spreads and totals (once a day) ─────────────────
+    # The betslip's game-line edit offers every number a book hangs, and the
+    # main fetch above stores one per book. Matt approved the daily cost
+    # (2026-10-29); each call's credits land in alt_game_line_fetches.
+    logger.info("Step 2-alt: Alternate spreads and totals (next 3 days)...")
+    results["alt_game_lines"] = step_alt_game_lines(run_date)
+
     # ── Step 2a: NHL totals ────────────────────────────────────────────────────
     # Prices Pinnacle against the bettable books in the fetch just stored, so it
     # runs while that fetch is the newest (scripts/nhl_totals_card.py).
@@ -2591,7 +2618,7 @@ Examples:
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nba-results", "nba-quarters", "nba-schedule", "nfl-results",
+                                 "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
@@ -2688,6 +2715,7 @@ Examples:
             "wnba-results": lambda: step_wnba_results(run_date),
             "nba-results":  lambda: step_nba_results(run_date),
             "nba-quarters": lambda: step_nba_quarters(run_date),
+            "alt-game-lines": lambda: step_alt_game_lines(run_date),
             "nba-schedule": lambda: step_nba_schedule(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),

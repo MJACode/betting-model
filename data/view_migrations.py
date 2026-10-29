@@ -473,6 +473,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # policy and SELECT-only grant; catalog return once all three exist.
     # Not public_betting, which the scorer copies onto every pick.
     "add_scoreboard_splits_2026_10_29.sql",
+    # 2026-10-29 (Matt): alternate spreads and totals, the current ladder per
+    # game, for the betslip's game-line edit. One table written by
+    # data/ingestors/alt_game_lines.py, RLS on with a SELECT policy. Returns on
+    # a catalog read once both exist. Does not rewrite picks, odds or the
+    # record. Sits before the posted-stake pair so those two stay adjacent.
+    "add_alt_game_lines_2026_10_29.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

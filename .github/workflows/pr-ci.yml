@@ -55,6 +55,13 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_paused_catalog.ts
 
+      # Same reason as the step above: the pytest job does not npm ci, so a
+      # verify script it shells out to skips there. This one has to fail the
+      # PR. verify_line_legs exits 1 on any failed check.
+      - name: Line legs
+        working-directory: mobile
+        run: npx tsx scripts/verify_line_legs.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -227,6 +234,8 @@ jobs:
             tests/test_ddl_guard.py \
             tests/test_nfl_wind_stability.py \
             tests/test_mobile_lines_board.py \
+            tests/test_alternate_game_lines.py \
+            tests/test_latest_line_state.py \
             tests/test_mobile_scoreboard.py \
             tests/test_live_scoreboard.py \
             tests/test_pregame_insert_cutoff.py \
