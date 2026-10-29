@@ -572,6 +572,30 @@ PREGAME_CURRENT_WINDOW_HOURS: int = 36
 PREGAME_STALE_SHARE: float = 0.5
 PREGAME_STALE_MIN_GAMES: int = 2
 PREGAME_SAME_GAME_HOURS: int = 6
+# A PULLED FUTURE SLATE IS NOT A DEAD FETCH (2026-10-29 15:25Z). The stored
+# row was CRIT, "NBA 7 of 13" (NCAAF 0 of 5, NHL 0 of 11, WNBA 0 of 1). The
+# seven were ORL@TOR, NYK@PHI, LAC@MIN, HOU@DAL, IND@MIA, LAL@GSW and DEN@PHX,
+# tips 23:40Z Oct 30 to 02:10Z Oct 31 (32.2 to 34.8 hours out). On `odds`,
+# each game's newest h2h/spread/total from any book was 2026-10-22 or
+# 2026-10-23; the other six NBA games had a DraftKings price at 15:16:48Z
+# (tips 8.7 to 10.8 hours out, plus three Friday games the books had
+# relisted). latest_odds for ORL@TOR matches that odds read (Fanatics
+# 2026-10-23 02:20Z). The books listed the Friday games early and pulled
+# them. The 3-hour price rule already refuses those rows. 24 hours is the
+# line between that slate and a game close enough that a missing price is
+# the board emptying.
+#
+# A stale game is left out of the share only when all three hold: no book has
+# a main-market price inside the bound, it starts more than
+# PREGAME_PULLED_LEAD_HOURS away, and the same sport has another game in the
+# window that a book is still pricing. The any-book stamp is that game's own
+# newest h2h/spread/total in latest_odds, so a trickle of alternate totals
+# (the 09-29 and 09-30 outage) cannot mark it listed. The 09-27 to 09-30
+# outage has no game a book is still pricing, so the share is unchanged
+# (11 of 11, 6 of 6, 9 of 9, 11 of 11). A sport whose every game went quiet
+# stays in the share too, including when every one of them is far out. A game
+# inside the lead stays in even when no book lists it.
+PREGAME_PULLED_LEAD_HOURS: int = 24
 # The newest of the three main markets: DraftKings pulls a lopsided game's
 # moneyline and keeps its spread and total (a moneyline-only read called one
 # 10-09 NCAAF game stale that was not). One LIMIT 1 read per market rides
@@ -641,12 +665,20 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                 AND o.bookmaker = ? AND o.snapshot_type <> 'in_play'
               ORDER BY o.snapshot_at DESC LIMIT 1)"""
         for m in _PREGAME_CURRENT_MARKETS)
+    # One row per (game, market, book), so this is a short index read. A
+    # MAX over `odds` is the 11s scan the DraftKings reads above were written
+    # to avoid. Main markets only: alternate totals are not "a book lists it".
+    any_book_col = """(SELECT lo.snapshot_at FROM latest_odds lo
+              WHERE lo.game_id = g.game_id
+                AND lo.market IN ('h2h', 'spreads', 'totals')
+              ORDER BY lo.snapshot_at DESC LIMIT 1)"""
     try:
         # NFL and golf are left out: the scorer runs no NFL game model and
         # golf is retired, so this bound never refuses a price for either.
         rows = conn.execute(f"""
             SELECT g.game_id, g.sport, g.commence_time, g.home_team, g.away_team,
-                   {newest_cols}
+                   {newest_cols},
+                   {any_book_col}
             FROM games g
             WHERE g.game_date >= ? AND g.game_date <= ?
               AND g.sport NOT IN ('GOLF', 'NFL')
@@ -662,16 +694,22 @@ def check_pregame_prices_current(conn, r: "HealthReport",
         return
 
     # Every fetched row, in the window or not: a leftover's live id can start
-    # just outside it.
+    # just outside it. Columns after the names are the three DraftKings
+    # markets, then the newest main-market stamp from any book. The any-book
+    # stamp must not fold into the DraftKings max: a fresh other book is how
+    # a game stays "behind" rather than "pulled".
     info: dict = {}                      # game_id -> (sport, start, names, newest)
+    any_at: dict = {}
     window: list = []
     for row in rows:
         game_id, sport, commence, home, away = row[:5]
-        stamps = [t for t in (_parse_ts(c) for c in row[5:]) if t is not None]
+        dk_cols = row[5:8] if len(row) > 8 else row[5:]
+        stamps = [t for t in (_parse_ts(c) for c in dk_cols) if t is not None]
         start = _parse_ts(commence)
         names = frozenset(str(n).strip().lower() for n in (home, away)
                           if n is not None and str(n).strip())
         info[game_id] = (sport, start, names, max(stamps) if stamps else None)
+        any_at[game_id] = _parse_ts(row[8]) if len(row) > 8 else None
         if start is not None and now < start <= horizon:
             window.append(game_id)
 
@@ -724,17 +762,54 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     groups: dict = {}
     for g in stale_ids:
         groups.setdefault(_root(g), []).append(g)
+    # A sport is still being priced when any in-window game has a main-market
+    # price inside the bound from DraftKings or from any book. The newer of
+    # the two stamps is the one that counts, so a latest_odds row sitting
+    # behind the odds read cannot hide that DraftKings price, and a missing
+    # any-book stamp cannot turn a dead fetch into a pulled slate.
+    def _listed_at(game_id: str):
+        stamps = [t for t in (any_at.get(game_id), info[game_id][3]) if t is not None]
+        return max(stamps) if stamps else None
+
+    sport_listed = set()
+    for game_id in window:
+        listed = _listed_at(game_id)
+        if listed is not None and listed >= floor:
+            sport_listed.add(info[game_id][0])
+    pulled: dict = {}
+    lead = timedelta(hours=PREGAME_PULLED_LEAD_HOURS)
     for members in groups.values():
         sport = info[members[0]][0]
+        dk_last = max(info[g][3] for g in members)
+        listed_last = max(_listed_at(g) or dk_last for g in members)
+        start = min(info[g][1] for g in members)
+        far = start is not None and (start - now) > lead
+        if listed_last < floor and far and sport in sport_listed:
+            pulled[sport] = pulled.get(sport, 0) + 1
+            continue
         priced[sport] = priced.get(sport, 0) + 1
-        stale.setdefault(sport, []).append(max(info[g][3] for g in members))
+        stale.setdefault(sport, []).append(dk_last)
     merged = len(stale_ids) - len(groups)
+    pulled_n = sum(pulled.values())
+
+    def _pulled_note(lead_in: str) -> str:
+        if not pulled_n:
+            return ""
+        who = ", ".join(f"{s} {pulled[s]}" for s in sorted(pulled))
+        noun = "game" if pulled_n == 1 else "games"
+        return (f"{lead_in}{pulled_n} {noun} more than "
+                f"{PREGAME_PULLED_LEAD_HOURS} hours from start, with no price "
+                f"from any book in the last {limit} minutes, left out ({who}): "
+                f"the same sport is still being priced, so this is a slate the "
+                f"books pulled, not a dead fetch")
 
     hours = PREGAME_CURRENT_WINDOW_HOURS
     n_priced = sum(priced.values())
     n_stale = sum(len(v) for v in stale.values())
-    if n_priced < PREGAME_STALE_MIN_GAMES:
+    if n_priced < PREGAME_STALE_MIN_GAMES and not pulled_n:
         # Too few games for the share to mean anything: is the feed alive?
+        # A pulled slate does not take this branch: the same sport is still
+        # being priced, which is what `pulled_n` required.
         try:
             fresh = conn.execute("""
                 SELECT 1 FROM odds
@@ -756,10 +831,16 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                   f"games in the next {hours} hours to judge game by game)",
                   reason=REASON_STALE_DATA, cadence=cadence)
             return
-    if n_priced == 0:
+    if n_priced == 0 and not pulled_n:
         r.add(check, SKIPPED, "CRIT",
               f"no game DraftKings prices kicks off in the next {hours} hours",
               reason=REASON_GATE_SHUT, cadence=cadence)
+        return
+    if n_priced == 0:
+        r.add(check, OK, "CRIT",
+              "no game a book is still listing kicks off in the next "
+              f"{hours} hours" + _pulled_note("; "),
+              reason=REASON_FRESH, cadence=cadence)
         return
 
     def _alarm(n_s: int, n_p: int) -> bool:
@@ -778,7 +859,8 @@ def check_pregame_prices_current(conn, r: "HealthReport",
               f"them, so the board is emptying: check the odds fetch. Raised "
               f"when at least half the priced games (overall or in one sport) "
               f"and at least {PREGAME_STALE_MIN_GAMES} are behind, because a "
-              f"cancelled fight or a pulled game is normal.",
+              f"cancelled fight or a pulled game is normal."
+              + _pulled_note(" "),
               last.isoformat(),
               reason=(f"{late_h:.0f} hours late" if late_h >= 1 else "Just late"),
               cadence=cadence)
@@ -789,6 +871,7 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     if n_stale:
         detail += (f"; {n_stale} do not ({by_sport}), under the alarm level of "
                    f"half the priced games and at least {PREGAME_STALE_MIN_GAMES}")
+    detail += _pulled_note("; ")
     if leftovers or merged:
         detail += (f"; {leftovers + merged} extra ids of a game counted under "
                    f"another id were left out")
