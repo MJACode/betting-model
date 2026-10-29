@@ -11,11 +11,14 @@ import {
   fetchDkInplayForGames,
   fetchDkMarketEnds,
   fetchLiveGameStateById,
+  fetchLiveScoreboard,
   fetchNcaafScoreboard,
   fetchScoreboardDkOddsForGame,
   fetchScoreboardGame,
 } from '@/lib/queries';
 import {
+  ESPN_LIVE_SPORTS,
+  feedFromEspn,
   feedFromMlb,
   feedFromNcaaf,
   mergeDkInplay,
@@ -64,7 +67,7 @@ export function ScoreboardGameScreen() {
         setError('This game isn’t on the board.');
         return;
       }
-      const [dk, ends, inplayRows, mlb, ncaaf] = await Promise.all([
+      const [dk, ends, inplayRows, mlb, ncaaf, espn] = await Promise.all([
         fetchScoreboardDkOddsForGame(gameId).catch(() => []),
         Promise.all(MARKETS.map(async (m) => [m.id, await fetchDkMarketEnds(gameId, m.id)] as const)).catch(
           () => [] as const,
@@ -72,6 +75,9 @@ export function ScoreboardGameScreen() {
         fetchDkInplayForGames([gameId]),
         game.sport === 'MLB' ? fetchLiveGameStateById(gameId).catch(() => null) : Promise.resolve(null),
         game.sport === 'NCAAF' ? fetchNcaafScoreboard([gameId]).catch(() => []) : Promise.resolve([]),
+        ESPN_LIVE_SPORTS.includes(game.sport)
+          ? fetchLiveScoreboard([gameId]).catch(() => [])
+          : Promise.resolve([]),
       ]);
       const merged = mergeDkInplay(
         new Map([[gameId, inplayHold.current]]),
@@ -84,7 +90,9 @@ export function ScoreboardGameScreen() {
         ? feedFromMlb(mlb, now)
         : game.sport === 'NCAAF'
           ? feedFromNcaaf(ncaaf[0], now)
-          : null;
+          : ESPN_LIVE_SPORTS.includes(game.sport)
+            ? feedFromEspn(espn[0], now)
+            : null;
       if (gen !== loadGen.current) return;
       inplayHold.current = inplay;
       setCard(presentScoreboard({ game, pregame: dk, inplay, feed, abbrevs }));

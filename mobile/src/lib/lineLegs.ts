@@ -45,7 +45,7 @@
 import { americanToDecimal, formatStampET } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
 import { nhlOffLineCount } from '@/lib/nhlBoard';
-import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
+import { CUSTOM_MODEL_ID, type LegBookPrice, type ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
 import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '@/types';
@@ -319,6 +319,22 @@ export function isLineLeg(leg: Pick<ParlayLeg, 'modelId'>): boolean {
   return leg.modelId === LINE_LEG_MODEL_ID;
 }
 
+/**
+ * The pencil. A stored Stats line leg (prop or game) and a custom leg. A
+ * model pick is a bet of record at its own line (CLAUDE.md §1c) and is not
+ * editable. One function so the slip cannot give a game line the pencil and
+ * then refuse to open it, or the other way around.
+ */
+export function slipLegCanEdit(
+  leg: { modelId?: string | null; slipKey?: string | null },
+  specs: readonly LineLegSpec[],
+): boolean {
+  if (leg.modelId === CUSTOM_MODEL_ID) return true;
+  if (leg.modelId !== LINE_LEG_MODEL_ID || !leg.slipKey) return false;
+  const key = leg.slipKey;
+  return specs.some((s) => lineLegKey(s) === key);
+}
+
 // ── What the "Add to betslip?" sheet is handed ──────────────────────────────
 
 /** Everything AddLineSheet needs: the proposition, every bettable book's price
@@ -549,6 +565,26 @@ function collapseThinMenu(menu: EditMenu): EditMenu {
     .sort((a, b) => (order.get(a.segment) ?? 0) - (order.get(b.segment) ?? 0))
     .map((c) => ({ ...c, segment: 'all' }));
   return { ...menu, segments: [{ key: 'all', label: '', empty: GAME_OFF_BOARD }], choices };
+}
+
+/**
+ * Which row a tab should open on. The leg's own row when it is on this tab.
+ * Otherwise the other side of the same number: the negated line for the other
+ * team on a spread, the same line for a total or a prop. Null when that rung
+ * is not posted, so the list stays at the top.
+ */
+export function editScrollTarget(menu: EditMenu, segment: string, spec: LineLegSpec): string | null {
+  const inTab = menu.choices.filter((c) => c.segment === segment);
+  const own = lineLegKey(spec);
+  if (inTab.some((c) => lineLegKey(c.spec) === own)) return own;
+  const line = spec.line;
+  if (line == null) return null;
+  const want = isGameSpec(spec) && spec.market === 'spreads' ? -line : line;
+  const pair = inTab.find((c) => {
+    const n = c.spec.line;
+    return n != null && Math.abs(n - want) < 1e-9;
+  });
+  return pair ? lineLegKey(pair.spec) : null;
 }
 
 /** The segment to show first: the leg's own, else the first one there is. */

@@ -19,7 +19,12 @@ import {
   type PlayerLogSport,
 } from './playerLog';
 import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
-import { SCOREBOARD_MARKETS, SCOREBOARD_SPORTS, type InplayChunkResult } from './scoreboard';
+import {
+  SCOREBOARD_MARKETS,
+  SCOREBOARD_SPORTS,
+  type InplayChunkResult,
+  type ScoreboardSplitRow,
+} from './scoreboard';
 import {
   gameMarketForModel,
   lineShopForPick,
@@ -960,6 +965,25 @@ export async function fetchPropLinesForGames(
 }
 
 /**
+ * Game markets the boards and pick reads want from v_latest_odds_all_books.
+ * alternate_spreads and alternate_totals are many rungs per book once
+ * latest_odds.line_key is applied. These reads key and page on
+ * game_id|market|bookmaker, which is one row for a main market and not for
+ * a ladder, so the ladder stays on the edit sheet's own read.
+ */
+const MAIN_GAME_ODDS_MARKETS = [
+  'h2h',
+  'h2h_3way',
+  'spreads',
+  'totals',
+  'h2h_1st_5_innings',
+  'spreads_1st_5_innings',
+  'totals_1st_5_innings',
+  'team_totals_home',
+  'team_totals_away',
+] as const;
+
+/**
  * Every book's latest line for every game market on one date — the Teams
  * board's LINE column. ~15 games x 3 markets x 13 books on a full MLB slate.
  * The caller bounds it to its sport's games, for the same reason as above.
@@ -971,6 +995,7 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
       .from('v_latest_odds_all_books')
       .select(ODDS_BY_BOOK_COLUMNS)
       .eq('game_date', date)
+      .in('market', [...MAIN_GAME_ODDS_MARKETS])
       .order('game_id')
       .order('market')
       .order('bookmaker')
@@ -1200,6 +1225,7 @@ export async function fetchPicksForDate(
               .from('v_latest_odds_all_books')
               .select(ODDS_BY_BOOK_COLUMNS)
               .in('game_id', Array.from(lineGames))
+              .in('market', [...MAIN_GAME_ODDS_MARKETS])
               .order('game_id')
               .order('market')
               .order('bookmaker')
@@ -1326,6 +1352,7 @@ export async function fetchUpcomingUfcPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'UFC_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -1479,6 +1506,7 @@ export async function fetchUpcomingNflPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'NFL_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -1586,6 +1614,7 @@ export async function fetchUpcomingNcaafPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'NCAAF_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -1678,6 +1707,7 @@ export async function fetchUpcomingNhlPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'NHL_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -3223,6 +3253,64 @@ export async function fetchNcaafScoreboard(gameIds: readonly string[]): Promise<
       .in('game_id', [...chunk]);
     if (error) throw error;
     out.push(...((data ?? []) as unknown as NcaafScoreboardRow[]));
+  }
+  return out;
+}
+
+export interface LiveScoreboardRow {
+  game_id: string;
+  snapshot_at: string;
+  state: string;
+  home_score: number | null;
+  away_score: number | null;
+  clock_label: string | null;
+  situation: string | null;
+  possession: string | null;
+}
+
+const LIVE_SCOREBOARD_COLUMNS =
+  'game_id, snapshot_at, state, home_score, away_score, clock_label, situation, possession';
+
+/**
+ * NFL / NBA / NHL live scores, one row per game (live_scoreboard, written
+ * every minute by data/ingestors/live_scoreboard.py). Only started games
+ * have a row. Biggest day: an NHL + NBA + NFL Sunday is under 40 rows; the
+ * read is by id, 80 at a time, like the NCAAF one.
+ */
+export async function fetchLiveScoreboard(gameIds: readonly string[]): Promise<LiveScoreboardRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: LiveScoreboardRow[] = [];
+  const size = 80;
+  for (let i = 0; i < gameIds.length; i += size) {
+    const chunk = gameIds.slice(i, i + size);
+    const { data, error } = await supabase
+      .from('live_scoreboard')
+      .select(LIVE_SCOREBOARD_COLUMNS)
+      .in('game_id', [...chunk]);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as LiveScoreboardRow[]));
+  }
+  return out;
+}
+
+/**
+ * Scoreboard % bets / % money (scoreboard_splits, written each refresh pass
+ * by data/ingestors/scoreboard_splits.py). At most 6 rows per game; the
+ * caller asks for one sport's slate, 80 games a request, so a request stays
+ * under the 1,000-row cap (80 x 6 = 480).
+ */
+export async function fetchScoreboardSplits(gameIds: readonly string[]): Promise<ScoreboardSplitRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: ScoreboardSplitRow[] = [];
+  const size = 80;
+  for (let i = 0; i < gameIds.length; i += size) {
+    const chunk = gameIds.slice(i, i + size);
+    const { data, error } = await supabase
+      .from('scoreboard_splits')
+      .select('game_id, market, side, bet_pct, money_pct')
+      .in('game_id', [...chunk]);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as ScoreboardSplitRow[]));
   }
   return out;
 }

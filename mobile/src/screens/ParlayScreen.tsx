@@ -31,7 +31,7 @@ import { betslipPlayerFromPick, slipKeysAfterAdd } from '@/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX, type InjuryIndex } from '@/lib/injuryStatus';
 import { injuryIndexForSport } from '@/lib/injuryLookup';
 import { EditLineLegSheet } from '@/components/EditLineLegSheet';
-import { isLineLeg, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
+import { isLineLeg, lineLegKey, slipLegCanEdit, type LineLegSpec } from '@/lib/lineLegs';
 import {
   setEditingParlayId,
   setManualCustomLegs,
@@ -216,15 +216,14 @@ function ParlayScreenBody() {
   // record at its own line (CLAUDE.md §1c).
   const editableSpec = useCallback(
     (leg: ParlayLeg): LineLegSpec | null => {
-      if (!isLineLeg(leg)) return null;
-      const spec = lineLegs.specs.find((s) => lineLegKey(s) === leg.slipKey);
-      return spec ?? null;
+      if (!slipLegCanEdit(leg, lineLegs.specs) || leg.modelId === CUSTOM_MODEL_ID) return null;
+      return lineLegs.specs.find((s) => lineLegKey(s) === leg.slipKey) ?? null;
     },
     [lineLegs.specs],
   );
   const canEdit = useCallback(
-    (leg: ParlayLeg) => editableSpec(leg) != null || leg.modelId === CUSTOM_MODEL_ID,
-    [editableSpec],
+    (leg: ParlayLeg) => slipLegCanEdit(leg, lineLegs.specs),
+    [lineLegs.specs],
   );
   const handleEdit = useCallback(
     (pickId: number) => {

@@ -54,6 +54,13 @@ ANON_READABLE: tuple[str, ...] = (
     # (data/migrations/add_team_stats_board.sql, "anon read ncaaf_teams").
     # Declared now that a `.from()` names it. A miss stays the school name.
     "ncaaf_teams",
+    # Scoreboard live scores for NFL, NBA and NHL (2026-10-29), one row per
+    # game from data/ingestors/live_scoreboard.py. Policy and grant:
+    # add_live_scoreboard_2026_10_29.sql.
+    "live_scoreboard",
+    # Scoreboard % bets / % money (2026-10-29), display only; policy and
+    # grant in add_scoreboard_splits_2026_10_29.sql.
+    "scoreboard_splits",
     "odds",
     "parlay_correlations",
     "parlay_track_record",

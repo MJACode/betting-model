@@ -1,11 +1,12 @@
 /**
  * Picks → Scoreboard. One card per game, DraftKings game markets only.
  *
- * Live scores are whatever a stored feed already wrote. A clock that has
- * passed is not a score: NFL has no stored live state (the ESPN read in
- * nfl/live_model/feeds/espn.py is not written to Supabase), and NBA/NHL
- * have no continuous poller. Those games stay Upcoming until `games`
- * has a final score. Nothing here fills a number in.
+ * Live scores are whatever a stored feed already wrote: MLB from
+ * live_game_state, NCAAF from ncaaf_live_states, and NFL / NBA / NHL from
+ * live_scoreboard (data/ingestors/live_scoreboard.py, every minute from
+ * ESPN, Matt 2026-10-29). A clock that has passed is not a score. A game
+ * with no fresh stored row stays Upcoming until `games` has a final score.
+ * Nothing here fills a number in.
  */
 
 import {
@@ -23,10 +24,18 @@ export type ScoreboardSport = (typeof SCOREBOARD_SPORTS)[number];
 
 export type ScoreboardPhase = 'upcoming' | 'live' | 'final';
 
-/** NFL / NCAAF / MLB keep the Live chip. NBA / NHL do not. */
-export function scoreboardLiveEnabled(sport: string): boolean {
-  return sport === 'NFL' || sport === 'NCAAF' || sport === 'MLB';
-}
+/** One list per sport, in this order (Matt, 2026-10-29: no status filter). */
+export const SCOREBOARD_PHASE_ORDER: readonly ScoreboardPhase[] = ['live', 'upcoming', 'final'];
+
+/** Sports whose live score comes from live_scoreboard. */
+export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL'];
+
+/**
+ * How long a live_scoreboard row may still say the game is in progress.
+ * The poller writes every minute while the game is on. Ten minutes covers a
+ * few missed ticks and drops a poller that died.
+ */
+export const ESPN_LIVE_MAX_AGE_MS = 10 * 60 * 1000;
 
 /**
  * How long an NCAAF state row may still say the game is in progress.
@@ -40,11 +49,6 @@ export const NCAAF_LIVE_MAX_AGE_MS = 45 * 60 * 1000;
 export const SCOREBOARD_MARKETS = ['h2h', 'spreads', 'totals'] as const;
 
 export const SCOREBOARD_BOOK_NOTE = 'DK · tap for game ›';
-export const SCOREBOARD_EMPTY_ACTION = 'See Upcoming';
-
-export function livePollerCaption(sport: string): string {
-  return `Live ${sport} scores coming when the poller ships.`;
-}
 
 export interface ScoreboardQuote {
   market: string;
@@ -99,6 +103,8 @@ export interface ScoreboardCard {
   gameId: string;
   sport: string;
   phase: ScoreboardPhase;
+  /** The game's listed start, for ordering. */
+  commenceTime: string | null;
   away: ScoreboardSide;
   home: ScoreboardSide;
   showMl: boolean;
@@ -313,6 +319,46 @@ export function feedFromNcaaf(row: NcaafLiveLike | null | undefined, now: number
   };
 }
 
+export interface EspnLiveLike {
+  snapshot_at: string;
+  state: string;
+  home_score?: number | null;
+  away_score?: number | null;
+  clock_label?: string | null;
+  situation?: string | null;
+  possession?: string | null;
+}
+
+/** live_scoreboard row → feed. A stale in-progress row becomes null. */
+export function feedFromEspn(row: EspnLiveLike | null | undefined, now: number): ScoreboardFeed | null {
+  if (!row) return null;
+  const ended = row.state === 'post';
+  const ts = parseStamp(row.snapshot_at).getTime();
+  const fresh = Number.isFinite(ts) && now - ts >= -60_000 && now - ts <= ESPN_LIVE_MAX_AGE_MS;
+  const inProgress = row.state === 'in' && fresh;
+  if (!inProgress && !ended) return null;
+  return {
+    awayScore: scoreNum(row.away_score),
+    homeScore: scoreNum(row.home_score),
+    inProgress,
+    ended,
+    possession: inProgress ? sideOf(row.possession) : null,
+    clockLabel: row.clock_label ?? '',
+    situation: inProgress ? row.situation ?? null : null,
+    snapshotAt: row.snapshot_at,
+  };
+}
+
+/** Live first, then upcoming, then final; by start time inside each. */
+export function orderScoreboard(cards: readonly ScoreboardCard[]): ScoreboardCard[] {
+  const rank = (c: ScoreboardCard) => SCOREBOARD_PHASE_ORDER.indexOf(c.phase);
+  const start = (c: ScoreboardCard) => {
+    const t = c.commenceTime ? parseStamp(c.commenceTime).getTime() : NaN;
+    return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
+  };
+  return [...cards].sort((a, b) => rank(a) - rank(b) || start(a) - start(b) || a.gameId.localeCompare(b.gameId));
+}
+
 /**
  * Final when a score is stored on the game, or the feed says the game ended.
  * Live only from a fresh in-progress feed. A past start time is not live.
@@ -410,9 +456,16 @@ export function presentScoreboard(input: {
   inplay: readonly ScoreboardQuote[] | undefined;
   feed: ScoreboardFeed | null;
   abbrevs?: ReadonlyMap<string, string> | null;
+  /** Clock for "has it started". Injectable for tests. */
+  now?: number;
 }): ScoreboardCard {
   const { game, feed } = input;
   const phase = scoreboardPhase(game, feed);
+  // Past its start with no live row: a stale or missing feed, not a game
+  // that hasn't begun. Say so instead of printing a start time that passed.
+  const startMs = game.commence_time ? parseStamp(game.commence_time).getTime() : NaN;
+  const startedNoScore = phase === 'upcoming' && Number.isFinite(startMs)
+    && startMs <= (input.now ?? Date.now());
   const lines = mergedQuotes(input.pregame, input.inplay, phase);
   const spread = quoteFor(lines, 'spreads');
   const total = quoteFor(lines, 'totals');
@@ -464,7 +517,7 @@ export function presentScoreboard(input: {
     footerBadge = 'F';
     footerText = ot ? 'Final/OT' : 'Final';
   } else {
-    footerText = formatGameTimeET(game.commence_time);
+    footerText = startedNoScore ? 'Started · no live score yet' : formatGameTimeET(game.commence_time);
   }
 
   const situation = phase === 'live' ? feed?.situation ?? null : null;
@@ -472,9 +525,9 @@ export function presentScoreboard(input: {
     ? `Updated ${formatGameTimeET(feed.snapshotAt)}`
     : null;
   const matchup = `${game.away_team} at ${game.home_team}`;
-  const stateWord = phase === 'live' ? 'live' : phase === 'final' ? 'final' : 'upcoming';
+  const stateWord = phase === 'live' ? 'live' : phase === 'final' ? 'final' : startedNoScore ? 'started' : 'upcoming';
   const scoreSpeech = phase === 'upcoming'
-    ? 'not started'
+    ? startedNoScore ? 'started, no score stored' : 'not started'
     : `${away.score} to ${home.score}`;
   const possTeam = away.possession ? game.away_team : home.possession ? game.home_team : null;
   const possSpeech = possTeam
@@ -490,6 +543,7 @@ export function presentScoreboard(input: {
     gameId: game.game_id,
     sport: game.sport,
     phase,
+    commenceTime: game.commence_time ?? null,
     away,
     home,
     showMl: phase === 'upcoming',
@@ -510,32 +564,6 @@ function lineSpeechSide(team: string, side: ScoreboardSide, showMl: boolean): st
   if (side.total !== '—') bits.push(`total ${side.total} ${side.totalPrice}`);
   if (showMl && side.ml !== '—') bits.push(`moneyline ${side.ml}`);
   return bits.join(', ');
-}
-
-export function scoreboardEmptyTitle(sport: string, phase: ScoreboardPhase): string {
-  if (phase === 'live') return `No live ${sport} scores right now`;
-  if (phase === 'final') return `No ${sport} finals yet`;
-  return `No ${sport} games today`;
-}
-
-export function scoreboardEmptyBody(input: {
-  sport: string;
-  phase: ScoreboardPhase;
-  /** The day has games, and none of them are in this filter. */
-  dayHasGames: boolean;
-  /** NFL live has no stored feed. Copy says so instead of implying a quiet slate. */
-  nflLiveUnstored: boolean;
-  nextSlate: string | null;
-}): string {
-  if (input.phase === 'live' && input.nflLiveUnstored) {
-    return 'Scores show up here once they’re stored. Nothing is filled in before that. Upcoming and Final still list the slate.';
-  }
-  if (input.phase === 'live' && input.dayHasGames) {
-    return 'No game has a live score stored right now. Upcoming and Final still list the slate.';
-  }
-  if (!input.dayHasGames && input.nextSlate) return `Next slate: ${input.nextSlate}`;
-  if (input.phase === 'final') return 'Finals show up once the score is stored. Nothing is filled in before that.';
-  return 'Today’s games show up here once they’re on the board.';
 }
 
 export function nextSlateText(
@@ -601,3 +629,80 @@ function leg(q: ScoreboardQuote | null, market: 'h2h' | 'spreads' | 'totals'): s
 
 /** The minus the cards print. Exported so a test can see it is U+2212. */
 export const SCOREBOARD_MINUS = MINUS;
+
+// ── % bets / % money (Matt, 2026-10-29) ─────────────────────────────────────
+// The board shows one market at a time: Odds, % Bets and % Money per side,
+// from scoreboard_splits (data/ingestors/scoreboard_splits.py, Action
+// Network, display only). A side with no stored split shows a dash.
+
+export type ScoreboardMarket = 'spreads' | 'totals' | 'h2h';
+export const SCOREBOARD_MARKET_ORDER: readonly ScoreboardMarket[] = ['spreads', 'totals', 'h2h'];
+
+export function scoreboardMarketLabel(market: ScoreboardMarket, sport: string): string {
+  if (market === 'totals') return 'Total';
+  if (market === 'h2h') return 'ML';
+  return sport === 'NHL' ? 'Puck line' : 'Spread';
+}
+
+export interface ScoreboardSplitRow {
+  game_id: string;
+  market: string;
+  side: string;
+  bet_pct: number | string | null;
+  money_pct: number | string | null;
+}
+
+export interface SideSplit {
+  bets: number | null;
+  money: number | null;
+}
+
+/**
+ * The two rows of a card for one market. Totals follow the card's own
+ * layout: Over on the away row, Under on the home row.
+ */
+export function splitsFor(
+  rows: readonly ScoreboardSplitRow[] | undefined,
+  market: ScoreboardMarket,
+): { away: SideSplit; home: SideSplit } {
+  const pick = (side: string): SideSplit => {
+    const row = rows?.find((r) => r.market === market && r.side === side);
+    const pct = (v: number | string | null | undefined) => {
+      const n = num(v);
+      return n == null || n < 0 || n > 100 ? null : Math.round(n);
+    };
+    return { bets: pct(row?.bet_pct), money: pct(row?.money_pct) };
+  };
+  return market === 'totals'
+    ? { away: pick('over'), home: pick('under') }
+    : { away: pick('away'), home: pick('home') };
+}
+
+export function pctText(n: number | null): string {
+  return n == null ? '—' : `${n}%`;
+}
+
+/** The odds cell of one card row for one market. */
+export function marketCell(side: ScoreboardSide, market: ScoreboardMarket): { value: string; price: string } {
+  if (market === 'totals') return { value: side.total, price: side.totalPrice };
+  if (market === 'h2h') return { value: side.ml, price: '' };
+  return { value: side.spread, price: side.spreadPrice };
+}
+
+/** What VoiceOver reads for one card's splits in one market. */
+export function splitsSpeech(
+  card: ScoreboardCard,
+  market: ScoreboardMarket,
+  splits: { away: SideSplit; home: SideSplit },
+): string {
+  const label = market === 'totals' ? 'Total' : market === 'h2h' ? 'Moneyline' : 'Spread';
+  const empty = (s: SideSplit) => s.bets == null && s.money == null;
+  if (empty(splits.away) && empty(splits.home)) return '';
+  const side = (name: string, s: SideSplit) =>
+    empty(s)
+      ? `${name} no split`
+      : `${name} ${s.bets ?? 'no'} percent of bets, ${s.money ?? 'no'} percent of money`;
+  const awayName = market === 'totals' ? 'Over' : card.awayFull;
+  const homeName = market === 'totals' ? 'Under' : card.homeFull;
+  return `${label}: ${side(awayName, splits.away)}; ${side(homeName, splits.home)}.`;
+}
