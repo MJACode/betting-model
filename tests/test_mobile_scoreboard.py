@@ -31,12 +31,46 @@ def test_scoreboard_reads_name_the_relation_at_from():
     odds = src[src.index("export async function fetchScoreboardDkOdds") : src.index("export async function fetchNcaafScoreboard")]
     assert ".from('v_latest_dk_odds')" in odds
     assert "SCOREBOARD_MARKETS" in odds
-    ncaaf = src[src.index("export async function fetchNcaafScoreboard") : src.index("export async function fetchDkInplayForGame")]
+    assert "fetchScoreboardDkOddsForGame" in odds
+    assert ".eq('game_id', gameId)" in odds
+    ncaaf = src[src.index("export async function fetchNcaafScoreboard") : src.index("export async function fetchDkInplayForGames")]
     assert ".from('v_ncaaf_scoreboard_latest')" in ncaaf
-    live = src[src.index("export async function fetchDkInplayForGame") : src.index("export async function fetchNextScoreboardGame")]
-    assert ".from('odds')" in live
+    assert ".in('game_id'" in ncaaf
+    assert ".in('game_date'" not in ncaaf
+    live = src[src.index("export async function fetchDkInplayForGames") : src.index("export async function fetchNextScoreboardGame")]
+    assert "v_latest_inplay_odds_all_books" not in live
     assert "draftkings" in live
     assert "in_play" in live
+    assert ".limit(1," in live
+    assert ".limit(12)" not in live
+    assert "fetchDkInplayForGame(" not in src.replace("fetchDkInplayForGames(", "")
+
+
+def test_scoreboard_poll_is_one_game_and_stops_when_hidden():
+    sheet = _read(MOBILE / "src" / "screens" / "ScoreboardGameScreen.tsx")
+    hook = _read(MOBILE / "src" / "hooks" / "useScoreboard.ts")
+    assert "useFocusEffect" in sheet
+    assert "fetchScoreboardDkOdds([" not in sheet
+    assert "fetchScoreboardDkOddsForGame" in sheet
+    assert "fetchLiveGameStates(" not in sheet
+    assert "fetchLiveGameStateById" in sheet
+    assert "fetchNcaafScoreboard([gameId])" in sheet
+    assert "fetchDkInplayForGames" in sheet
+    assert "fetchDkInplayForGames" in hook
+    assert "fetchNcaafScoreboard(ncaafIds)" in hook
+    assert "fetchDkInplayForGame(" not in hook.replace("fetchDkInplayForGames(", "")
+
+
+def test_ncaaf_scoreboard_index_is_hand_applied():
+    # Read the list as text. Importing data.view_migrations pulls loguru,
+    # which the scoreboard pin does not need.
+    migrations = (ROOT / "data" / "view_migrations.py").read_text(encoding="utf-8")
+    name = "ncaaf_scoreboard_game_index_2026_10_28.sql"
+    assert name not in migrations
+    sql = (ROOT / "data" / "migrations" / name).read_text(encoding="utf-8")
+    assert "CREATE INDEX IF NOT EXISTS ncaaf_live_states_scoreboard_idx" in sql
+    assert "(game_id, seen_at DESC, state_id DESC)" in sql
+    assert "CREATE OR REPLACE VIEW" not in sql
 
 
 def test_the_ncaaf_view_is_declared_and_not_last():

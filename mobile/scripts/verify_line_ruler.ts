@@ -40,6 +40,10 @@ import {
   previewTypedLine,
   programmaticPick,
   compactRulerHeight,
+  rulerMarkHeight,
+  stopUnderOffset,
+  RULER_MARK_H,
+  RULER_TICKS_H,
   MARKER_HIT_H,
   markerBoxInGesture,
   markerHitOverhang,
@@ -373,9 +377,12 @@ for (const def of STAT_CATALOG) {
       !screen.includes('Below one stop is refused'),
   );
   check(
-    'the marker is the field and the separate pencil button is gone',
+    // The 2026-10-09 review removed a SEPARATE pencil button. Matt,
+    // 2026-10-28, wanted the tap-to-edit visible, so the pencil is back as a
+    // glyph INSIDE the marker — still one target, not a second button.
+    'the marker is the field, and the pencil is inside it, not a separate button',
     !screen.includes('typeLineBtn') &&
-      !screen.includes('name="pencil"') &&
+      /styles\.thresholdMark,[\s\S]{0,1400}name="pencil"/.test(screen) &&
       screen.includes('styles.thresholdBubble') &&
       screen.includes('styles.thresholdMark') &&
       screen.includes('borderColor: colors.tint') &&
@@ -545,25 +552,59 @@ for (const def of STAT_CATALOG) {
   check('landscape scrolls the line control', thresholdControlsScroll(1, 844, 390));
   check('portrait at 1x does not', !thresholdControlsScroll(1, 390, 844));
   check('the bubble has room to grow at 2x', rulerChromeHeight(2) > rulerChromeHeight(1));
+  // Matt, 2026-10-28: the 28pt strip was "too small". Bubble + pointer +
+  // numbered tick row, still shorter than the open typing field.
   check(
-    'the resting ruler is the short compact strip',
-    compactRulerHeight(1) === 28 && compactRulerHeight(1) < rulerChromeHeight(1),
+    'the resting ruler is the bubble plus a numbered tick row',
+    compactRulerHeight(1) === RULER_MARK_H + RULER_TICKS_H &&
+      compactRulerHeight(1) === 62 &&
+      compactRulerHeight(1) < rulerChromeHeight(1) &&
+      rulerMarkHeight(1) === 30 &&
+      rulerMarkHeight(2) === 48 &&
+      compactRulerHeight(1.3) > compactRulerHeight(1),
+  );
+  // Live number while dragging: the stop under the pointer at an offset.
+  const dragScale: RulerScale = { min: 1, max: 30, step: 1 };
+  const yards: RulerScale = { min: 5, max: 300, step: 5 };
+  check(
+    'the bubble names the stop under the pointer mid-drag',
+    stopUnderOffset(0, 26, dragScale) === 1 &&
+      stopUnderOffset(26 * 14, 26, dragScale) === 15 &&
+      stopUnderOffset(26 * 14 + 12, 26, dragScale) === 15 &&
+      stopUnderOffset(26 * 14 + 14, 26, dragScale) === 16 &&
+      stopUnderOffset(18 * 44, 18, yards) === 225,
+  );
+  check(
+    'an overscroll bounce never names a stop past either end',
+    stopUnderOffset(-80, 26, dragScale) === 1 &&
+      stopUnderOffset(26 * 500, 26, dragScale) === rulerHi(dragScale) &&
+      stopUnderOffset(Number.NaN, 26, dragScale) === 1,
+  );
+  const liveScreen = readFileSync(join(import.meta.dirname, '../src/screens/StatsScreen.tsx'), 'utf-8');
+  check(
+    'the screen previews only a finger drag, and numbers the major ticks',
+    liveScreen.includes('onScroll={onLiveScroll}') &&
+      liveScreen.includes('if (!fingerRef.current) return;') &&
+      liveScreen.includes('fingerRef.current = true;') &&
+      liveScreen.includes('faceOf(preview ?? value)') &&
+      liveScreen.includes('styles.tickNumber'),
   );
   // The 44pt box used to exist only inside pointInBubble. The gesture view
   // was the 28pt strip, so a tap in that grown box never arrived. The wings
   // are the band past the strip, and they are only as wide as the pill.
-  const atRest = compactRulerHeight(1);
-  const at13 = compactRulerHeight(1.3);
+  // The overhang math still holds for any strip shorter than 44pt; the
+  // resting ruler is now taller than that, so it hangs no wings at all.
+  const shortStrip = 28;
   check(
-    'the resting marker target is 44pt and the strip stays short',
+    'a strip shorter than 44pt hangs wings up to 44pt; the resting ruler needs none',
     MARKER_HIT_H === 44 &&
-      markerHitOverhang(atRest) === 8 &&
-      atRest + 2 * markerHitOverhang(atRest) === MARKER_HIT_H &&
-      markerHitOverhang(at13) === 4.5 &&
-      at13 + 2 * markerHitOverhang(at13) === MARKER_HIT_H &&
+      markerHitOverhang(shortStrip) === 8 &&
+      shortStrip + 2 * markerHitOverhang(shortStrip) === MARKER_HIT_H &&
+      markerHitOverhang(35) === 4.5 &&
+      markerHitOverhang(compactRulerHeight(1)) === 0 &&
       markerHitOverhang(rulerChromeHeight(1)) === 0,
   );
-  const shifted = markerBoxInGesture({ x: 40, y: 3, width: 22, height: 22 }, markerHitOverhang(atRest));
+  const shifted = markerBoxInGesture({ x: 40, y: 3, width: 22, height: 22 }, markerHitOverhang(shortStrip));
   check('a tap in the top wing hits the marker', pointInBubble(51, 1, shifted));
   check('a tap in the bottom wing hits the marker', pointInBubble(51, 43, shifted));
   check('a neighbouring tick misses the marker', !pointInBubble(39, 20, shifted));

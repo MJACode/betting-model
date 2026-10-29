@@ -231,7 +231,9 @@ check(
   check('and the ruler prints the stop in that same idiom',
     screen.includes('format={(n) => rulerValueLabel(n, hitMode)}')
       && screen.includes('const faceOf = format ?? String;')
-      && screen.includes('{faceOf(value)}')
+      // Live while dragging (2026-10-28): the face of the stop under the
+      // pointer, falling back to the committed value — same idiom either way.
+      && screen.includes('{faceOf(preview ?? value)}')
       && screen.includes('styles.thresholdMarkText'));
 
   // ── the UX review's fixes, 2026-09-06 ───────────────────────────────────

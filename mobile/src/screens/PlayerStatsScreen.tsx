@@ -28,6 +28,7 @@ import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -46,6 +47,9 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  chartGames,
+  opponentLabel,
+  shortGameDate,
   openingChip,
   pagePlayerId,
   playerSubtitle,
@@ -384,6 +388,9 @@ export function PlayerStatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
+  // NCAAF school → short code, so "Michigan State" is not cut to MICH.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
+
   // H2H is offered only where there is an opponent to read against and the
   // server holds the stat (detail.h2hOpponent), and only while there is a
   // meeting to chart (or the read is still out, or failed and can be retried):
@@ -405,16 +412,28 @@ export function PlayerStatsScreen() {
     gameWindow === 'h2h' && !h2hOffered && !h2hPending ? defaultWindow(windows) : gameWindow;
   const isH2H = range === 'h2h';
 
-  // Values come most-recent-first. Window slices the most recent N; H2H is
-  // the meetings, newest first, the same rows the head-to-head card lists.
-  const windowed = useMemo(
-    () =>
-      range === 'h2h'
-        ? (detail.h2hMeetings ?? []).map((m) => m.value)
-        : range === 'all' ? values : values.slice(0, range),
-    [values, range, detail.h2hMeetings],
-  );
-
+  // The windowed games, most recent first, each with its date and opponent so
+  // every bar on the chart says which game it is (Matt, 2026-10-28). A number
+  // or All slices the log. H2H charts the meetings, newest first — the same
+  // rows the head-to-head card lists. That row has a date and a value and no
+  // venue, so the label is the bare opponent name: opponentLabel will not
+  // print "vs" without a home game it can vouch for.
+  const windowedGames = useMemo(() => {
+    if (range === 'h2h') {
+      const row = { opponent: h2hOpponent, venue: null };
+      return (detail.h2hMeetings ?? []).map((m) => ({
+        value: m.value,
+        date: shortGameDate(m.date),
+        opp: opponentLabel(row, true, ncaafAbbrevs),
+        oppFull: opponentLabel(row, false),
+      }));
+    }
+    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
+    return range === 'all' ? all : all.slice(0, range);
+  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs]);
+  // The values ARE the labelled games' values, so the chart's bars and labels
+  // cannot fall out of step (review, 2026-10-28).
+  const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
@@ -956,6 +975,8 @@ export function PlayerStatsScreen() {
 
               <HitRateChart
                 values={windowed}
+                games={windowedGames}
+                unit={statLabel}
                 line={selection.line}
                 side={selection.side}
                 lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
@@ -1237,8 +1258,10 @@ function GameRow({
         ) : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.gameDate}>{row.game_date}</Text>
-        <Text style={styles.gameMeta}>{gameContextLine(sport, row)}</Text>
+        {/* The chart's own date idiom ("10/26"), so the bar and the row
+            name the game the same way. */}
+        <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
+        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>

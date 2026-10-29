@@ -12,6 +12,8 @@ export interface ByomFilters {
   max_rest_days?: number;
   primetime?: boolean;
   markets?: string[];
+  /** Over or under on a prop. The player's team stays on side. */
+  prop_side?: 'over' | 'under';
 }
 
 const FILTER_KEYS: (keyof ByomFilters)[] = [
@@ -22,6 +24,7 @@ const FILTER_KEYS: (keyof ByomFilters)[] = [
   'max_rest_days',
   'primetime',
   'markets',
+  'prop_side',
 ];
 
 const FILTER_KEY_SET = new Set<string>(FILTER_KEYS);

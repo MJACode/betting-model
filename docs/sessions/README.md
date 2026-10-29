@@ -19,7 +19,13 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, merged origin/master into the player H2H chip. Range row kept. Chart dates kept. H2H bars labelled from the meeting. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM prop units show only for exactly one prop with Over or Under set. Anytime TD only for Yes. Mix and unsided props stay hidden. SQL lows not taken. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard Medium follow-ups from #1065. NCAAF by game id. One in-play DK row per market. Sheet polls only while focused. Index migration is hand-applied, not on prod. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter Season row reads `v_nba_team_q1_season`. Last 5 / Last 10 stay on the 40-game fetch. Follow-up to #1069. Draft, not merged. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM NFL props in the guided builder. Twelve markets. Over or Under required. Anytime TD is Yes. Units at the stored DraftKings price. `prop_side` is hand-applied. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter stats on the team page. Stats only, free. New `nba-quarters` step backfills quarter scores and play-by-play the 2026-27 season was missing. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, DK prices on NFL BYOM prop facts. Hand-applied columns and backtest. Job enabled with apply. Backfill from 2023-09-01. Draft, not merged. |
