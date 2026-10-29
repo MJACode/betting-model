@@ -24,7 +24,7 @@ import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
 import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
-import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
+import { logStatValue, type GameWindow, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
 import { modelLong, modelShort, sportOfModel } from '@/lib/modelMeta';
 import type { GameRow, PropOddsByBookRow, PropOddsSnapshotRow, SettledPick } from '@/types';
@@ -255,6 +255,11 @@ export interface PlayerHeadToHead {
  * The meetings alone, newest first: no line, no side. The page's H2H range
  * chip charts these, and it cannot wait on a line, because the line's own
  * default is the median of whatever the chip charts.
+ *
+ * Sorted here. The RPC aggregates newest-first, and the chart assumes that
+ * the same way `chartGames` does — newest bar on the right. A row that
+ * arrived oldest-first would put the latest meeting on the left. Same-day
+ * meetings keep their incoming order (the RPC's game-id order).
  */
 export function h2hMeetings(values: readonly number[], dates: readonly string[]): H2HMeeting[] {
   const n = Math.min(values.length, dates.length);
@@ -264,7 +269,33 @@ export function h2hMeetings(values: readonly number[], dates: readonly string[])
     if (!Number.isFinite(v)) continue;
     meetings.push({ date: dates[i]!, value: v });
   }
+  meetings.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   return meetings;
+}
+
+/** A recent-games span, or every meeting with tonight's opponent. */
+export type PlayerRange = GameWindow | 'h2h';
+
+/** This screen's opening span: L10 where the sport offers it, else the first. */
+export function defaultPlayerWindow(windows: readonly { value: GameWindow }[]): GameWindow {
+  return windows.some((w) => w.value === 10) ? 10 : windows[0]!.value;
+}
+
+/**
+ * The span to remember. Asked-for H2H that the chip does not offer falls
+ * back to the default once that answer has settled (`pending` is false).
+ * Leaving the state at `'h2h'` makes the next stat that does have meetings
+ * jump back to H2H, even though the chip the reader last saw selected was
+ * the default span.
+ */
+export function rangeToRemember(
+  gameWindow: PlayerRange,
+  h2hOffered: boolean,
+  h2hPending: boolean,
+  windows: readonly { value: GameWindow }[],
+): PlayerRange {
+  if (gameWindow === 'h2h' && !h2hOffered && !h2hPending) return defaultPlayerWindow(windows);
+  return gameWindow;
 }
 
 /**
