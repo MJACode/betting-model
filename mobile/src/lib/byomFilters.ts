@@ -14,6 +14,28 @@ export interface ByomFilters {
   markets?: string[];
   /** Over or under on a prop. The player's team stays on side. */
   prop_side?: 'over' | 'under';
+  /** Player prop line at game start. Both ends, or neither. */
+  min_line?: number;
+  max_line?: number;
+  /** DraftKings American price on the chosen side at game start. */
+  min_price?: number;
+  max_price?: number;
+  /** Player's team spread at game start. Negative is the favorite. */
+  min_team_spread?: number;
+  max_team_spread?: number;
+  /** Game total at game start. */
+  min_game_total?: number;
+  max_game_total?: number;
+  /** Calendar month in America/New_York. 1 is January. */
+  months?: number[];
+  /** Kickoff weekday in America/New_York. 0 is Sunday. */
+  weekdays?: number[];
+  /** Kickoff hour bands in America/New_York: early, late, prime. */
+  kick_slots?: ('early' | 'late' | 'prime')[];
+  /** Opponent abbrev. The other team in the game. */
+  opponents?: string[];
+  /** One player, matched to the stored name. */
+  player?: string;
 }
 
 const FILTER_KEYS: (keyof ByomFilters)[] = [
@@ -25,6 +47,19 @@ const FILTER_KEYS: (keyof ByomFilters)[] = [
   'primetime',
   'markets',
   'prop_side',
+  'min_line',
+  'max_line',
+  'min_price',
+  'max_price',
+  'min_team_spread',
+  'max_team_spread',
+  'min_game_total',
+  'max_game_total',
+  'months',
+  'weekdays',
+  'kick_slots',
+  'opponents',
+  'player',
 ];
 
 const FILTER_KEY_SET = new Set<string>(FILTER_KEYS);

@@ -616,6 +616,10 @@ RPC_LEFT_ALONE: tuple[str, ...] = (
 # docs/followups.md.
 RPC_MISSING_IN_PROD: tuple[str, ...] = (
     "my_access",
+    # Distinct BYOM player names for the matchup sheet. Granted inside
+    # byom_prop_phase_a_filters_2026_10_29.sql, which is hand-applied and
+    # not in ACTIVE_MIGRATIONS. The grant sweep must not name it first.
+    "byom_player_names",
 )
 
 # Authenticated RPCs whose migrations are not in ACTIVE_MIGRATIONS.

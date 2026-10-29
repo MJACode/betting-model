@@ -7,6 +7,12 @@
  */
 
 import { byomFilters, type ByomFilters } from './byomFilters';
+import {
+  applyPropFilterKeys,
+  EMPTY_PROP_FILTERS,
+  propStateFromFilters,
+  type ByomPropFilterState,
+} from './byomPropFilters';
 
 /** Same bound as byom.constants.DK_HISTORY_START_SEASON. */
 export const BYOM_NFL_FIRST_SEASON = 2020;
@@ -139,6 +145,8 @@ export interface ByomDraft {
    * rest2 is two or more. Null is any schedule.
    */
   rest?: 'b2b' | 'rest2' | null;
+  /** Phase A prop filters. Absent on a game-market draft. */
+  propFilters?: ByomPropFilterState;
 }
 
 /** Matt, 2026-10-24: require a side or a favorite/underdog choice. */
@@ -431,7 +439,8 @@ export function filtersForDraft(
     const team = sideForMarket(draft.market, draft.side);
     if (team === 'home' || team === 'away') next.side = team;
     else delete next.side;
-    delete next.role;
+    if (draft.role === 'favorite' || draft.role === 'underdog') next.role = draft.role;
+    else delete next.role;
     const direction = propSideForMarket(draft.market, draft.propSide);
     if (direction) next.prop_side = direction;
     else delete next.prop_side;
@@ -461,6 +470,13 @@ export function filtersForDraft(
   } else {
     next.primetime = draft.primetime;
   }
+  applyPropFilterKeys(next, draft.propFilters ?? EMPTY_PROP_FILTERS, {
+    prop: isPropMarket(draft.market),
+    sport,
+    yesOnly: isYesOnlyProp(draft.market),
+    marketCount: 1,
+    primetime: draft.primetime,
+  });
   return byomFilters(next);
 }
 
@@ -477,19 +493,23 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
       primetime: parsed.primetime ?? null,
       propSide: null,
       rest: restChoice(parsed),
+      propFilters: propStateFromFilters(parsed),
     };
   }
   if (!isPropMarket(market)) return null;
   const stored = parsed.prop_side === 'over' || parsed.prop_side === 'under'
     ? parsed.prop_side
     : null;
+  const propFilters = propStateFromFilters(parsed);
+  const role = parsed.role === 'favorite' || parsed.role === 'underdog' ? parsed.role : null;
   return {
     market,
     side: sideForMarket(market, parsed.side ?? null),
-    role: null,
+    role,
     primetime: parsed.primetime ?? null,
     propSide: propSideForMarket(market, stored),
     rest: restChoice(parsed),
+    propFilters,
   };
 }
 

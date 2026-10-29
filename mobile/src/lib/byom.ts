@@ -169,6 +169,45 @@ function rpcFilters(
   return checked;
 }
 
+export interface ByomPlayerSearch {
+  names: string[];
+  /** The name RPC is not on this database yet. */
+  missing: boolean;
+}
+
+/**
+ * Distinct player names on byom_prop_facts. Two characters minimum.
+ * A database without byom_player_names returns missing, not a throw.
+ */
+export async function searchByomPlayerNames(
+  sport: ByomSport,
+  query: string,
+): Promise<ByomPlayerSearch> {
+  const q = query.trim().replace(/[%_\\]/g, '');
+  if (q.length < 2) return { names: [], missing: false };
+  const { data, error } = await supabase.rpc('byom_player_names', {
+    p_sport: sport,
+    p_query: q,
+  });
+  if (error) {
+    const code = typeof error.code === 'string' ? error.code : '';
+    const message = typeof error.message === 'string' ? error.message : '';
+    if (code === 'PGRST202' || /could not find the function/i.test(message)) {
+      return { names: [], missing: true };
+    }
+    throw error;
+  }
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const row of asRows(data)) {
+    const name = text(row.player_name);
+    if (name === '' || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return { names, missing: false };
+}
+
 export async function fetchByomBacktest(
   season: number | null,
   filters?: ByomFilters,

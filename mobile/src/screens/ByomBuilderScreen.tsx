@@ -16,8 +16,15 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { ByomBetCount } from '@/components/byom/ByomBetCount';
 import { ByomMarketField, ByomSideFields } from '@/components/byom/ByomFields';
+import { ByomFilterSheet } from '@/components/byom/ByomFilterSheet';
 import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
+import {
+  ByomMoreFiltersCard,
+  ByomPropSideFields,
+  type ByomSheetTab,
+} from '@/components/byom/ByomPropSideFields';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { useAuth } from '@/hooks/useAuth';
@@ -37,12 +44,12 @@ import {
   showsUnits,
   sideForMarket,
   suggestedName,
-  isYesOnlyProp,
   type ByomDraft,
   type ByomMarket,
   type ByomPropSide,
   type ByomSport,
 } from '@/lib/byomRecord';
+import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -62,6 +69,8 @@ export function ByomBuilderScreen() {
   const [primetime, setPrimetime] = useState<boolean | null>(null);
   const [propSide, setPropSide] = useState<ByomPropSide | null>(null);
   const [rest, setRest] = useState<'b2b' | 'rest2' | null>(null);
+  const [propFilters, setPropFilters] = useState<ByomPropFilterState>(EMPTY_PROP_FILTERS);
+  const [sheet, setSheet] = useState<ByomSheetTab | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -70,7 +79,15 @@ export function ByomBuilderScreen() {
 
   const draft: ByomDraft | null = market == null
     ? null
-    : { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null };
+    : {
+      market,
+      side,
+      role,
+      primetime,
+      propSide,
+      rest: sport === 'NBA' ? rest : null,
+      propFilters,
+    };
   const sideReason = draft == null ? null : saveBlockReason(draft);
   const filters = draft == null ? null : filtersForDraft(draft, {}, sport);
   const previewFilters = step === 1 || sideReason != null ? null : filters;
@@ -99,17 +116,21 @@ export function ByomBuilderScreen() {
   useEffect(() => {
     if (step !== 3 || market == null || sideReason != null) return;
     const next = suggestedName({
-      market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null,
+      market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null, propFilters,
     });
     setName((current) => (current.trim() === '' || current === suggestion.current ? next : current));
     suggestion.current = next;
-  }, [step, market, side, role, primetime, propSide, rest, sideReason, sport]);
+  }, [step, market, side, role, primetime, propSide, rest, propFilters, sideReason, sport]);
 
   const chooseMarket = (next: ByomMarket) => {
     setMarket(next);
     setSide((current) => sideForMarket(next, current));
     setPropSide((current) => propSideAfterMarketChange(market, next, current));
-    if (next === 'totals' || isPropMarket(next)) setRole(null);
+    setPropFilters((current) => ({ ...current, lineBand: null }));
+    if (next === 'totals') setRole(null);
+    else if (isPropMarket(next)) {
+      setRole((current) => (current === 'favorite' || current === 'underdog' ? current : null));
+    }
   };
 
   const goNext = () => {
@@ -173,6 +194,17 @@ export function ByomBuilderScreen() {
     && previewFilters != null
     && preview.record == null
     && preview.error == null;
+  const matchedBets = preview.record?.bets ?? 0;
+  const nextLabel = step === 2
+    && market != null
+    && isPropMarket(market)
+    && sideReason == null
+    && !preview.loading
+    && !previewWaiting
+    && preview.error == null
+    && matchedBets > 0
+    ? `Next · ${matchedBets} bet${matchedBets === 1 ? '' : 's'}`
+    : 'Next';
   const saveDisabled = saving
     || sideReason != null
     || name.trim().length < 1
@@ -191,32 +223,53 @@ export function ByomBuilderScreen() {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.step}>Step {step} of 3</Text>
+      <View style={styles.progressRow}>
+        <View style={styles.progress}>
+          {[1, 2, 3].map((n) => (
+            <View key={n} style={[styles.progressSeg, n <= step && styles.progressOn]} />
+          ))}
+        </View>
+        <Text style={styles.step}>Step {step} of 3</Text>
+      </View>
       {step === 1 ? (
         <>
           <Text style={styles.title}>What do you want to bet?</Text>
           <ByomMarketField market={market} onChange={chooseMarket} sport={sport} />
         </>
       ) : null}
-      {step === 2 && market != null ? (
+      {step === 2 && market != null && isPropMarket(market) ? (
         <>
-          {sport === 'NBA' && isPropMarket(market) && !isYesOnlyProp(market) ? (
-            <>
-              <Text style={styles.title}>Which side?</Text>
-              <Text style={styles.lead}>
-                {betTypeLabel(market)} · every NBA player line that fits.
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text style={[styles.title, isYesOnlyProp(market) ? null : styles.titleTight]}>
-                {betTypeLabel(market)}
-              </Text>
-              {isYesOnlyProp(market) ? null : (
-                <Text style={styles.lead}>Which side?</Text>
-              )}
-            </>
-          )}
+          <Text style={styles.title}>Which side?</Text>
+          <Text style={styles.lead}>
+            {betTypeLabel(market)} · every DK-priced {sport} player line that fits.
+          </Text>
+          <ByomPropSideFields
+            market={market}
+            propSide={propSide}
+            role={role}
+            primetime={primetime}
+            sport={sport}
+            rest={rest}
+            propFilters={propFilters}
+            onPropSide={setPropSide}
+            onRole={setRole}
+            onPrimetime={setPrimetime}
+            onRest={setRest}
+            onPropFilters={setPropFilters}
+          />
+          <ByomMoreFiltersCard
+            sport={sport}
+            side={side}
+            primetime={primetime}
+            propFilters={propFilters}
+            onOpen={setSheet}
+          />
+        </>
+      ) : null}
+      {step === 2 && market != null && !isPropMarket(market) ? (
+        <>
+          <Text style={[styles.title, styles.titleTight]}>{betTypeLabel(market)}</Text>
+          <Text style={styles.lead}>Which side?</Text>
           <ByomSideFields
             market={market}
             side={side}
@@ -251,13 +304,23 @@ export function ByomBuilderScreen() {
       {step > 1 && filters != null && sideReason == null ? (
         <>
           <ByomSeasonToggle />
-          <ByomPreviewCard
-            record={preview.record}
-            loading={preview.loading || previewWaiting}
-            error={preview.error}
-            onRetry={() => void preview.reload()}
-            showsUnits={showsUnits(filters)}
-          />
+          {step === 2 && market != null && isPropMarket(market) ? (
+            <ByomBetCount
+              record={preview.record}
+              loading={preview.loading || previewWaiting}
+              error={preview.error}
+              onRetry={() => void preview.reload()}
+              showsUnits={showsUnits(filters)}
+            />
+          ) : (
+            <ByomPreviewCard
+              record={preview.record}
+              loading={preview.loading || previewWaiting}
+              error={preview.error}
+              onRetry={() => void preview.reload()}
+              showsUnits={showsUnits(filters)}
+            />
+          )}
           <ByomUnitsNote />
         </>
       ) : null}
@@ -283,12 +346,12 @@ export function ByomBuilderScreen() {
             onPress={goNext}
             disabled={nextDisabled}
             accessibilityRole="button"
-            accessibilityLabel="Next"
+            accessibilityLabel={nextLabel}
             accessibilityHint={sideReason ?? undefined}
             accessibilityState={{ disabled: nextDisabled }}
             style={[styles.primary, nextDisabled && styles.primaryDisabled]}
           >
-            <Text style={[styles.primaryText, nextDisabled && styles.primaryTextDisabled]}>Next</Text>
+            <Text style={[styles.primaryText, nextDisabled && styles.primaryTextDisabled]}>{nextLabel}</Text>
           </Pressable>
         ) : (
           <Pressable
@@ -308,6 +371,28 @@ export function ByomBuilderScreen() {
       </View>
       <BetslipBarSpacer />
     </KeyboardAvoidingView>
+    {market != null && isPropMarket(market) ? (
+      <ByomFilterSheet
+        tab={sheet}
+        sport={sport}
+        market={market}
+        propSide={propSide}
+        side={side}
+        primetime={primetime}
+        propFilters={propFilters}
+        record={preview.record}
+        loading={preview.loading || previewWaiting}
+        error={sideReason == null ? preview.error : null}
+        showsUnits={filters != null && showsUnits(filters)}
+        blocked={sideReason}
+        onRetry={() => void preview.reload()}
+        onClose={() => setSheet(null)}
+        onTab={setSheet}
+        onSide={setSide}
+        onPrimetime={setPrimetime}
+        onPropFilters={setPropFilters}
+      />
+    ) : null}
     </SafeAreaView>
   );
 }
@@ -323,11 +408,29 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
   },
-  step: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  progress: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  progressSeg: {
+    flex: 1,
+    height: 4,
+    borderRadius: radii.xs,
+    backgroundColor: colors.separatorOpaque,
+  },
+  progressOn: {
+    backgroundColor: colors.tint,
+  },
+  step: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
   },
   title: {
     fontSize: font.size.title3,
