@@ -12,7 +12,9 @@ import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { useByomLeaderboard } from '@/hooks/useByomLeaderboard';
 import { useByomSeason } from '@/hooks/useByomSeason';
+import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
+import { byomEmptyLabel } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Sport } from '@/hooks/useSportFilter';
 import type { RootStackParamList } from '@/types';
@@ -23,6 +25,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
   const navigation = useNavigation<Nav>();
   const { scope } = useByomSeason();
   const built = sport === 'NFL' || sport === 'NBA';
+  const facts = useNbaGameFacts(sport === 'NBA' ? 'NBA' : 'NFL');
   const { rows, loading, error, reload, signedIn, authReady } = useByomLeaderboard(sport, scope);
   const busy = built && (!authReady || (signedIn && loading && rows.length === 0));
   const failedRefresh = error != null && rows.length > 0;
@@ -79,6 +82,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           showsUnits={item.showsUnits}
           ungraded={item.ungraded}
           failed={item.failed}
+          emptyLabel={byomEmptyLabel(sport === 'NBA' ? 'NBA' : 'NFL', facts.status, item.model.filters)}
           onPress={() => navigation.navigate('ByomDetail', { modelId: item.model.model_id })}
         />
       )}

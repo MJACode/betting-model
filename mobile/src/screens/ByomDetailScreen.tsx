@@ -15,10 +15,11 @@ import { Skeleton } from '@/components/Skeleton';
 import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSavedModel } from '@/hooks/useByomSavedModel';
 import { useByomSeason } from '@/hooks/useByomSeason';
+import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
-import { isPropMarket, isWholeSeason, marketLabel, showsUnits, type ByomSport } from '@/lib/byomRecord';
+import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport } from '@/lib/byomRecord';
 import { propFilterSummary } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -37,6 +38,7 @@ export function ByomDetailScreen() {
   const filterLine = model == null || !isPropMarket(filterMarket)
     ? null
     : propFilterSummary(model.filters, sport, filterMarket);
+  const facts = useNbaGameFacts(model == null ? null : sport);
   const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
 
   useFocusEffect(useCallback(() => {
@@ -126,7 +128,7 @@ export function ByomDetailScreen() {
             error={graded ? preview.error : null}
             onRetry={() => void preview.reload()}
             showsUnits={showsUnits(model.filters)}
-            emptyLabel={graded ? 'No games match' : '—'}
+            emptyLabel={graded && model ? byomEmptyLabel(sport, facts.status, model.filters) : '—'}
           />
           <ByomUnitsNote />
           <Pressable

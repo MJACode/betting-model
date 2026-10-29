@@ -30,14 +30,20 @@ import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { useAuth } from '@/hooks/useAuth';
 import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSeason } from '@/hooks/useByomSeason';
+import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { fetchByomModels, saveByomModel } from '@/lib/byom';
 import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
 import {
   betTypeLabel,
+  byomEmptyLabel,
   filtersForDraft,
   isPropMarket,
+  nameTakenOnOtherSport,
+  OTHER_SPORT_NAME,
   otherModelWithName,
+  otherSportAlert,
+  otherSportName,
   propSideAfterMarketChange,
   saveBlockReason,
   sideBlockFromError,
@@ -62,6 +68,7 @@ export function ByomBuilderScreen() {
   const sport: ByomSport = route.params?.sport === 'NBA' ? 'NBA' : 'NFL';
   const { signedIn } = useAuth();
   const { scope } = useByomSeason();
+  const facts = useNbaGameFacts(sport);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [market, setMarket] = useState<ByomMarket | null>(null);
   const [side, setSide] = useState<'home' | 'away' | 'over' | 'under' | null>(null);
@@ -161,7 +168,14 @@ export function ByomBuilderScreen() {
     setSaveMessage(null);
     try {
       if (!replaceExisting) {
-        const taken = otherModelWithName(await fetchByomModels(), trimmed);
+        const models = await fetchByomModels();
+        const otherSport = nameTakenOnOtherSport(models, trimmed, sport);
+        if (otherSport) {
+          const notice = otherSportAlert(trimmed, otherSport.sport || otherSportName(sport));
+          Alert.alert(notice.title, notice.body, [{ text: 'OK' }]);
+          return;
+        }
+        const taken = otherModelWithName(models, trimmed);
         if (taken) {
           Alert.alert(
             'Replace this model?',
@@ -180,6 +194,11 @@ export function ByomBuilderScreen() {
       if (isAbortError(e)) return;
       const raw = errorText(e);
       const blocked = sideBlockFromError(raw);
+      if (blocked === OTHER_SPORT_NAME) {
+        const notice = otherSportAlert(trimmed, otherSportName(sport));
+        Alert.alert(notice.title, notice.body, [{ text: 'OK' }]);
+        return;
+      }
       setSaveMessage(blocked
         ?? (/cap is 25/.test(raw)
           ? 'You can save 25 models.'
@@ -234,7 +253,15 @@ export function ByomBuilderScreen() {
       {step === 1 ? (
         <>
           <Text style={styles.title}>What do you want to bet?</Text>
-          <ByomMarketField market={market} onChange={chooseMarket} sport={sport} />
+          <ByomMarketField
+            market={market}
+            onChange={chooseMarket}
+            sport={sport}
+            factsStatus={facts.status}
+            factsError={facts.error}
+            onRetryFacts={facts.retry}
+            explainMissing
+          />
         </>
       ) : null}
       {step === 2 && market != null && isPropMarket(market) ? (
@@ -278,6 +305,7 @@ export function ByomBuilderScreen() {
             propSide={propSide}
             sport={sport}
             rest={rest}
+            factsStatus={facts.status}
             onSide={setSide}
             onRole={setRole}
             onPrimetime={setPrimetime}
@@ -319,6 +347,7 @@ export function ByomBuilderScreen() {
               error={preview.error}
               onRetry={() => void preview.reload()}
               showsUnits={showsUnits(filters)}
+              emptyLabel={byomEmptyLabel(sport, facts.status, filters)}
             />
           )}
           <ByomUnitsNote />

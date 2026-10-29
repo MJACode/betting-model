@@ -156,8 +156,9 @@ def test_byom_record_rank_roi_and_filters(tmp_path):
 import {
   assertByomSide, byomRoi, byomWinRate, currentNbaSeason, currentNflSeason, draftFromFilters,
   filtersForDraft, formatByomRecord, isWholeSeason, marketLabel, nbaSeasonList, nflSeasonList,
+  byomEmptyLabel, filtersNeedGameFacts, nameTakenOnOtherSport, otherSportAlert,
   otherModelWithName, propSideAfterMarketChange, rankByUnits, recordFromRows,
-  saveBlockReason, showsUnits, sideForMarket, suggestedName,
+  saveBlockReason, showsUnits, sideBlockFromError, sideForMarket, suggestedName,
 } from './byomRecord.ts';
 
 const summed = recordFromRows([
@@ -420,6 +421,48 @@ if (!taken || taken.model_id !== 'b') throw new Error('taken ' + JSON.stringify(
 if (otherModelWithName(models, 'Primetime', 'b') !== null) throw new Error('self');
 if (otherModelWithName(models, 'primetime') !== null) throw new Error('case');
 if (otherModelWithName(models, 'Road') !== null) throw new Error('missing');
+const named = [
+  { model_id: 'nfl', name: 'Rebounds over', sport: 'NFL' },
+  { model_id: 'nba', name: 'Points over', sport: 'NBA' },
+];
+const cross = nameTakenOnOtherSport(named, 'Rebounds over', 'NBA');
+if (!cross || cross.model_id !== 'nfl') throw new Error('cross ' + JSON.stringify(cross));
+if (nameTakenOnOtherSport(named, 'Points over', 'NBA') !== null) throw new Error('same sport');
+if (nameTakenOnOtherSport(named, 'Points over', 'NBA', 'nba') !== null) throw new Error('self sport');
+if (nameTakenOnOtherSport(named, 'New name', 'NBA') !== null) throw new Error('free name');
+if (sideBlockFromError('name is saved on another sport') == null) throw new Error('server name');
+if (!filtersNeedGameFacts({ markets: ['h2h'] })) throw new Error('h2h needs facts');
+if (!filtersNeedGameFacts({ markets: ['player_points'], min_rest_days: 1, max_rest_days: 1 })) {
+  throw new Error('rest needs facts');
+}
+if (filtersNeedGameFacts({ markets: ['player_points'], prop_side: 'over' })) {
+  throw new Error('prop does not need facts');
+}
+if (byomEmptyLabel('NBA', 'missing', { markets: ['spreads'], side: 'home' }) !== 'No history yet') {
+  throw new Error('spread empty');
+}
+if (byomEmptyLabel('NBA', 'loading', { markets: ['spreads'], side: 'home' }) !== 'No games match') {
+  throw new Error('loading empty');
+}
+if (byomEmptyLabel('NBA', 'error', { markets: ['spreads'], side: 'home' }) !== 'No games match') {
+  throw new Error('error empty');
+}
+if (byomEmptyLabel('NBA', 'missing', { markets: ['player_points'], prop_side: 'over', min_rest_days: 2 }) !== 'No history yet') {
+  throw new Error('rest empty');
+}
+if (byomEmptyLabel('NBA', 'missing', { markets: ['player_points'], prop_side: 'over' }) !== 'No games match') {
+  throw new Error('prop empty');
+}
+if (byomEmptyLabel('NBA', 'ready', { markets: ['h2h'], side: 'home' }) !== 'No games match') {
+  throw new Error('ready empty');
+}
+if (byomEmptyLabel('NFL', 'missing', { markets: ['h2h'], side: 'home' }) !== 'No games match') {
+  throw new Error('nfl empty');
+}
+const notice = otherSportAlert('Rebounds over', 'NFL');
+if (notice.title !== 'Already saved on NFL' || !notice.body.includes('Rebounds over')) {
+  throw new Error('alert ' + notice.title);
+}
 
 const octNba = new Date('2026-10-29T16:00:00Z');
 const septNba = new Date('2026-09-15T16:00:00Z');
@@ -534,7 +577,23 @@ def test_a_rename_saves_the_new_name_before_it_removes_the_old_row():
     assert "Replace this model?" in builder
     assert "Replace overwrites that model" in builder
     assert "otherModelWithName" in builder
+    assert "nameTakenOnOtherSport" in builder
+    assert "nameTakenOnOtherSport" in edit
+    assert builder.index("nameTakenOnOtherSport") < builder.index("Replace this model?")
+    assert edit.index("nameTakenOnOtherSport") < edit.index("Replace this model?")
+    assert "otherSportAlert" in builder
+    assert "otherSportAlert" in edit
+    assert "OTHER_SPORT_NAME" in builder
+    assert "OTHER_SPORT_NAME" in edit
+    record = (ROOT / "mobile/src/lib/byomRecord.ts").read_text(encoding="utf-8")
+    assert "Already saved on" in record
     assert "deleteByomModel" not in builder
+    fields = (ROOT / "mobile/src/components/byom/ByomFields.tsx").read_text(encoding="utf-8")
+    assert "NBA_NO_HISTORY" in fields
+    assert "NBA_GAME_BETS_WHEN" in fields
+    assert "factsStatus" in fields
+    assert "savedGameMarket" in fields
+    assert "styles.history" in fields
     leaderboard = (ROOT / "mobile/src/hooks/useByomLeaderboard.ts").read_text(encoding="utf-8")
     assert "async function pool" not in leaderboard
     assert "failed: true" in leaderboard

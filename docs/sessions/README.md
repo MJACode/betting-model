@@ -20,6 +20,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM Phase A prop filters. NFL boards 01–05 and the same NBA sheet without kickoff slots. Hand-applied migration. Draft, not merged. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA CI. Abort skips setError. byom_game_facts left AHEAD_OF_THE_APP. Jobs stay off. Migration not applied. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA follow-up to review 5691932690. Cross-sport names are refused. Game bets and rest chips wait on an NBA game-fact row. Migration not applied. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1086 M1–M3. Scoreboard splits test is on the PR subset. A percent shows only for the line on the card, and not beside a live DK quote. NFL/NHL ESPN scoreboards are parsed; UTAH maps to UTA. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing only when the same sport still has a game more than 24 hours out that a book is pricing. Same-day prices do not hide a dead early-lines pass. The 15:25Z NBA 7 of 13 CRIT was the pulled Friday slate. Outage replays stay CRIT. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H review lows from #1075. Fallback remembered. Meetings sorted newest first. H2H retry is H2H only. |

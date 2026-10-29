@@ -290,6 +290,30 @@ export async function fetchByomModels(): Promise<ByomModel[]> {
   return asRows(data).map(parseByomModel);
 }
 
+/** True once this process has seen one NBA byom_game_facts row. */
+let nbaGameFactsKnown = false;
+
+export function nbaGameFactsAreKnown(): boolean {
+  return nbaGameFactsKnown;
+}
+
+/**
+ * Whether NBA game facts exist. An empty table is 'missing'. A hit stays
+ * 'ready' for the rest of this process. A failed read throws.
+ */
+export async function fetchNbaGameFactsReady(): Promise<'ready' | 'missing'> {
+  if (nbaGameFactsKnown) return 'ready';
+  const { data, error } = await supabase
+    .from('byom_game_facts')
+    .select('canonical_key')
+    .eq('sport', 'NBA')
+    .limit(1);
+  if (error) throw error;
+  if (!Array.isArray(data) || data.length === 0) return 'missing';
+  nbaGameFactsKnown = true;
+  return 'ready';
+}
+
 export async function deleteByomModel(modelId: string): Promise<void> {
   const { error } = await supabase.rpc('byom_delete_model', {
     p_model_id: modelId,

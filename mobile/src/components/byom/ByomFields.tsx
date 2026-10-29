@@ -2,9 +2,14 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ByomChoiceGroup } from '@/components/byom/ByomChoiceGroup';
+import { ErrorBanner } from '@/components/ErrorState';
+import { Skeleton } from '@/components/Skeleton';
+import type { NbaGameFactsStatus } from '@/hooks/useNbaGameFacts';
 import {
   isPropMarket,
   isYesOnlyProp,
+  NBA_GAME_BETS_WHEN,
+  NBA_NO_HISTORY,
   NBA_PROP_MARKETS,
   NFL_PROP_MARKETS,
   type ByomMarket,
@@ -65,22 +70,70 @@ function MarketTile({
   );
 }
 
+function isGameMarket(market: ByomMarket | null): market is 'h2h' | 'spreads' | 'totals' {
+  return market === 'h2h' || market === 'spreads' || market === 'totals';
+}
+
 export function ByomMarketField({
   market,
   onChange,
   sport = 'NFL',
+  factsStatus = 'ready',
+  factsError = null,
+  onRetryFacts,
+  savedGameMarket = null,
+  explainMissing = false,
 }: {
   market: ByomMarket | null;
   onChange: (market: ByomMarket) => void;
   sport?: ByomSport;
+  /** NBA Moneyline, Spread, and Over/Under need byom_game_facts. */
+  factsStatus?: NbaGameFactsStatus;
+  factsError?: string | null;
+  onRetryFacts?: () => void;
+  /** The game bet this edit opened on. Stays visible so it can be put back. */
+  savedGameMarket?: ByomMarket | null;
+  /** Builder only. One line under the kicker when the read found no row. */
+  explainMissing?: boolean;
 }) {
   const props = sport === 'NBA' ? NBA_PROP_MARKETS : NFL_PROP_MARKETS;
   const propKicker = sport === 'NBA' ? 'NBA player props' : 'NFL player props';
+  const nbaFacts = sport === 'NBA' ? factsStatus : 'ready';
+  const kept = isGameMarket(savedGameMarket)
+    ? savedGameMarket
+    : isGameMarket(market)
+      ? market
+      : null;
+  const keptLabel = GAME_MARKETS.find((option) => option.value === kept)?.label ?? null;
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel="Bet type">
       <View style={styles.block}>
         <Text style={styles.kicker}>Game bets</Text>
-        {sport === 'NBA' ? (
+        {nbaFacts === 'loading' ? (
+          <Skeleton label="game bets">
+            <View style={styles.skel} />
+          </Skeleton>
+        ) : nbaFacts === 'error' ? (
+          <ErrorBanner
+            what="NBA game bets"
+            error={factsError ?? 'Couldn’t load NBA game bets.'}
+            onRetry={onRetryFacts ?? (() => {})}
+            style={styles.banner}
+          />
+        ) : nbaFacts === 'missing' && kept != null && keptLabel != null ? (
+          <MarketTile
+            label={keptLabel}
+            selected={market === kept}
+            onPress={() => onChange(kept)}
+          />
+        ) : nbaFacts === 'missing' ? (
+          <View>
+            <Text style={styles.history}>{NBA_NO_HISTORY}</Text>
+            {explainMissing ? (
+              <Text style={styles.historyLead}>{NBA_GAME_BETS_WHEN}</Text>
+            ) : null}
+          </View>
+        ) : sport === 'NBA' ? (
           <View style={styles.grid}>
             {GAME_MARKETS.map((option) => (
               <MarketTile
@@ -138,6 +191,7 @@ export function ByomSideFields({
   propSide,
   sport = 'NFL',
   rest = null,
+  factsStatus = 'ready',
   onSide,
   onRole,
   onPrimetime,
@@ -151,6 +205,8 @@ export function ByomSideFields({
   propSide: ByomPropSide | null;
   sport?: ByomSport;
   rest?: 'b2b' | 'rest2' | null;
+  /** NBA rest chips need byom_game_facts. A chip already set stays so it can be cleared. */
+  factsStatus?: NbaGameFactsStatus;
   onSide: (side: 'home' | 'away' | 'over' | 'under' | null) => void;
   onRole: (role: 'favorite' | 'underdog' | 'pickem' | null) => void;
   onPrimetime: (primetime: boolean | null) => void;
@@ -159,6 +215,7 @@ export function ByomSideFields({
 }) {
   const prop = isPropMarket(market);
   const yesOnly = isYesOnlyProp(market);
+  const showNbaRest = sport === 'NBA' && (factsStatus === 'ready' || rest != null);
   return (
     <View>
       {market === 'totals' ? (
@@ -225,7 +282,7 @@ export function ByomSideFields({
           />
         </>
       )}
-      {sport === 'NBA' ? (
+      {showNbaRest ? (
         <ByomChoiceGroup
           label="Quick filters"
           value={rest ?? ''}
@@ -236,7 +293,7 @@ export function ByomSideFields({
             { value: 'rest2', label: '2+ days rest' },
           ]}
         />
-      ) : (
+      ) : sport === 'NBA' ? null : (
         <ByomChoiceGroup
           label="Kickoff"
           value={primetime == null ? 'any' : primetime ? 'prime' : 'other'}
@@ -290,6 +347,25 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     marginBottom: spacing.lg,
+  },
+  history: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  historyLead: {
+    marginTop: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  skel: {
+    height: 48,
+    borderRadius: radii.md,
+    backgroundColor: colors.noneSoft,
+  },
+  banner: {
+    marginHorizontal: 0,
   },
   grid: {
     flexDirection: 'row',
