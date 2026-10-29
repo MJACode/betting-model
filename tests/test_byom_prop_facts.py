@@ -506,6 +506,33 @@ def test_the_builder_reads_one_game_and_casts_inside_a_case():
         assert banned not in lowered, banned
 
 
+def test_prop_facts_normalizes_sport_the_same_way_as_game_facts(monkeypatch):
+    from tracking.job_queue import JOBS
+
+    seen = {}
+
+    def build_seasons(conn, seasons, apply=False, sport="NFL"):
+        seen["sport"] = sport
+        return {"apply": apply, "sport": sport, "seasons": []}
+
+    class Conn:
+        def close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr("byom.prop_load.build_seasons", build_seasons)
+    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    fn, validate = JOBS["byom_prop_facts"]
+    stored = validate({"sport": " nba ", "apply": False})
+    out = fn(**stored)
+    assert stored["sport"] == "NBA"
+    assert seen["sport"] == "NBA"
+    assert seen["closed"] is True
+    assert out["sport"] == "NBA"
+    seen.clear()
+    fn(sport="nba", season=None, apply=False)
+    assert seen["sport"] == "NBA"
+
+
 def test_the_job_is_enabled_and_the_price_migrations_are_hand_applied():
     from data.view_migrations import ACTIVE_MIGRATIONS
     from tracking.job_queue import JOBS, _validate_byom_prop_facts
@@ -538,6 +565,10 @@ def test_the_job_is_enabled_and_the_price_migrations_are_hand_applied():
     assert "season" not in nba[0]["args"]
     assert "byom_nba_props_2026_10_29.sql" in nba[0]["note"]
     assert "byom-nba-game-facts" in nba[0]["note"]
+    assert "own change" in nba[0]["note"]
+    assert "Do not enable both" in nba[0]["note"]
+    assert _validate_byom_prop_facts({"sport": " nba "})["sport"] == "NBA"
+    assert _validate_byom_prop_facts({"sport": "nfl"})["sport"] == "NFL"
     assert all(e["key"] != "byom-nfl-game-facts-shop" for e in declared)
     assert not (ROOT / "tests" / "test_byom_lock_shop.py").exists()
     assert not (ROOT / "data" / "migrations" / "byom_lock_shop_2026_10_16.sql").exists()

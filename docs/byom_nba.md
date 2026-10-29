@@ -57,12 +57,18 @@ The prop-facts job validator accepts NBA. `byom-nba-prop-facts` is in
 `jobs/declared_jobs.json` with enabled false and apply false, so a
 merge does not enqueue a backfill. Apply
 `data/migrations/byom_nba_props_2026_10_29.sql` by hand first. Matt
-confirms that production apply, then CPO sets enabled true and apply
-true. Run `byom-nba-game-facts` before it. Rest filters need
+confirms that production apply, then enable `byom-nba-game-facts`
+first: set enabled true and apply true on that row, in its own change,
+and leave `byom-nba-prop-facts` off until that job has been queued.
+Do not enable both in the same change. Rest filters need
 `byom_game_facts` for that game. The game-facts job accepts NBA. A
 missing sport is still NFL. An NFL season before 2020 is still
-refused; NBA is not. `byom-nba-game-facts` is the same off
-declaration. Rest chips stay empty until those game facts exist.
+refused. An NBA season before 2021 is refused. Measured 2026-10-29:
+DraftKings h2h, spreads, and totals on NBA games start in season 2021
+(1080 of 1080). Seasons 2019 and 2020 are in `games` and have none.
+`byom-nba-game-facts` is the same off declaration. Rest chips stay
+empty until those game facts exist. A hand-edited sport is stripped
+and uppercased on both jobs.
 
 ## Backtest and save
 

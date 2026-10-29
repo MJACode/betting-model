@@ -1,15 +1,18 @@
 """Build byom_prop_facts from player_prop_odds and the sport's game log.
 
-Dry run unless --apply. No --season builds every season of that sport
-from 2023 whose game_date is on or after 2023-09-01. The printed JSON
-is one entry per season: facts, written, and canonical_keys. Default
-sport is NFL. NBA reads nba_player_game_log and the fourteen markets.
+Dry run unless --apply. This script declares nothing. The NFL row
+byom-nfl-prop-facts is declared and on. The NBA row byom-nba-prop-facts
+exists in jobs/declared_jobs.json and is off (enabled false, apply
+false). Enable byom-nba-game-facts first, in its own change, then this
+NBA row. No --season builds every season of that sport from 2023 whose
+game_date is on or after 2023-09-01. The printed JSON is one entry per
+season: facts, written, and canonical_keys. Default sport is NFL. NBA
+reads nba_player_game_log and the fourteen markets. Sport is stripped
+and uppercased, the same as the game-facts job.
 
 Apply data/migrations/byom_prop_facts_dk_prices_2026_10_28.sql before
 --apply. NBA also needs
 data/migrations/byom_nba_props_2026_10_29.sql so week may be null.
-The declared job byom-nfl-prop-facts is the NFL no-season write,
-enqueued once. NBA is not declared. Run it here.
 
     python -m scripts.byom_prop_facts
     python -m scripts.byom_prop_facts --apply
