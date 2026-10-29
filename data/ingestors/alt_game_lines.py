@@ -32,6 +32,12 @@ WHAT ONE RUN STORES, per game starting within LOOKAHEAD_DAYS that is already in
 SOURCE is in data/prune_odds.PROTECTED_SOURCES: the pruner keeps one row per
 (game, market, book), which would thin a paid ladder to an arbitrary rung.
 
+EVERY PASS TOO (Matt, 2026-10-29, option B). The refresh pass's odds step
+buys the same markets for games starting in the next 24 hours
+(odds_ingestor._fetch_alternate_game_lines) and hands them to
+store_pass_ladders, which replaces those games' rows here and ledgers the
+pass (endpoint 'pass'). This daily run is the 3-day look-ahead.
+
 COST BOUND. One call per game in the window, nothing else; a game that has
 started is never fetched. There is no credit ceiling constant here on purpose:
 a ceiling not derived from a measurement is decoration (.claude/rules/
@@ -282,6 +288,82 @@ def _replace_state(conn, game_id: str, game_date: str, rows: list[dict]) -> None
     """, [{**r, "game_date": game_date,
            "point": r["spread_home"] if r["market"] == "alternate_spreads" else r["total_line"]}
           for r in rows])
+
+
+def store_pass_ladders(conn, sport: str, rows: list[dict], meter: dict | None,
+                       asked_at: datetime) -> dict:
+    """The refresh pass's half (option B, Matt 2026-10-29: every pass, games in
+    the next 24 hours). The pass has already written `rows` to `odds`
+    (odds_ingestor._fetch_alternate_game_lines); this replaces those games'
+    ladders in alt_game_lines, which the app reads, and writes one ledger row
+    for the pass with the credits the feed reported.
+
+    Runs inside a SAVEPOINT on the pass's own connection: a failure here rolls
+    back only this, never the pass's main odds rows, and is logged, not
+    raised. A game the pass bought nothing for keeps its daily ladder (whose
+    rows say how old they are)."""
+    out = {"games": 0, "rows": 0}
+    meter = meter or {}
+    if not rows and not meter.get("calls"):
+        return out
+    # The ledger and the ladder are separate: a ledger that cannot be created
+    # must not stop the app's ladder refreshing, and a ladder refresh that
+    # fails must still leave a row saying what the pass spent (review of
+    # #1093, M1). Before any savepoint: the first call creates the ledger and
+    # commits, which would end a savepoint opened first.
+    ledger_ok = True
+    try:
+        ensure_ledger(conn)
+    except Exception as exc:  # noqa: BLE001
+        ledger_ok = False
+        logger.error(f"{sport} alt ledger unavailable, the pass's spend is not ledgered: {exc!r}")
+    failed: str | None = None
+    stored_books: set[str] = set()
+    try:
+        conn.execute("SAVEPOINT alt_pass_ladders")
+        if _state_table_exists(conn):
+            by_game: dict[str, list[dict]] = {}
+            for r in rows:
+                if r.get("market") in API_MARKETS:
+                    by_game.setdefault(r["game_id"], []).append(r)
+            dates = {}
+            if by_game:
+                dates = {gid: str(gd) for gid, gd in conn.execute(
+                    "SELECT game_id, game_date FROM games WHERE game_id = ANY(%s)",
+                    (list(by_game),)).fetchall()}
+            for gid, game_rows in by_game.items():
+                if gid not in dates:
+                    continue
+                _replace_state(conn, gid, dates[gid], game_rows)
+                out["games"] += 1
+                out["rows"] += len(game_rows)
+                stored_books |= {r["bookmaker"] for r in game_rows}
+        else:
+            failed = f"{STATE_TABLE} does not exist"
+        conn.execute("RELEASE SAVEPOINT alt_pass_ladders")
+    except Exception as exc:  # noqa: BLE001 - never takes the pass's odds down
+        failed = f"ladder refresh failed: {exc!r}"
+        out = {"games": 0, "rows": 0}
+        stored_books = set()
+        try:
+            conn.execute("ROLLBACK TO SAVEPOINT alt_pass_ladders")
+        except Exception:  # noqa: BLE001
+            pass
+        logger.error(f"{sport} alt ladder refresh failed (main odds kept): {exc!r}")
+    if ledger_ok:
+        # Outside the savepoint, so a failed refresh still records the spend
+        # (ok = False), and a stale ladder shows up in the ledger.
+        try:
+            _ledger(conn, asked_at, sport, "pass", ok=failed is None,
+                    rows_stored=out["rows"], books=stored_books,
+                    credits=meter.get("credits"),
+                    detail=(f"{failed}; " if failed else "")
+                    + f"{meter.get('calls', 0)} calls, {out['games']} games, "
+                      f"{meter.get('unreported', 0)} calls with no credit header"
+                    + (f", fetch failed: {meter['error']}" if meter.get("error") else ""))
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"{sport} alt pass ledger write failed: {exc!r}")
+    return out
 
 
 def plan(conn, sports=SPORTS, days: int = LOOKAHEAD_DAYS, now: datetime | None = None
