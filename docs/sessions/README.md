@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA full 14 player props in the builder. Hand-applied migration. No declared backfill. Draft, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, merged origin/master into the player H2H chip. Range row kept. Chart dates kept. H2H bars labelled from the meeting. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |

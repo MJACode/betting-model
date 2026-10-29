@@ -18,7 +18,7 @@ import { useByomSeason } from '@/hooks/useByomSeason';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
-import { isWholeSeason, marketLabel, showsUnits } from '@/lib/byomRecord';
+import { isWholeSeason, marketLabel, showsUnits, type ByomSport } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -31,7 +31,8 @@ export function ByomDetailScreen() {
   const { scope } = useByomSeason();
   const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
   const graded = model != null && !isWholeSeason(model.filters);
-  const preview = useByomRecord(scope, graded && model ? model.filters : null);
+  const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const preview = useByomRecord(scope, graded && model ? model.filters : null, sport);
 
   useFocusEffect(useCallback(() => {
     void reload();

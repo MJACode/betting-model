@@ -20,7 +20,7 @@ from byom.constants import (
     SPORT,
 )
 from byom.game_facts import parse_date, parse_game_id
-from byom.prop_facts import MARKET_COLUMNS, facts_for_game
+from byom.prop_facts import MARKET_COLUMNS, NBA_MARKET_COLUMNS, facts_for_game
 
 # Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
 # and the cast then aborts the game. A value that fails this pattern is
@@ -40,8 +40,6 @@ def _ts_case(expr: str) -> str:
 _SNAP = _ts_case("p.snapshot_at")
 _KICK = _ts_case("g.commence_time")
 
-_MARKETS = tuple(MARKET_COLUMNS)
-
 FACT_COLUMNS = (
     "prop_key", "canonical_key", "sport", "season", "week",
     "player_name", "player_key", "team", "market", "line",
@@ -57,20 +55,40 @@ _LOG_COLS = (
     "def_sacks", "def_tackles_solo", "def_tackle_assists",
 )
 
+_NBA_LOG_COLS = (
+    "player_name", "team",
+    "points", "rebounds", "assists", "steals", "blocks", "turnovers",
+    "fg3_made",
+)
+
+_SPORTS = frozenset({"NFL", "NBA"})
+
+
+def _markets(sport: str) -> dict:
+    if sport == "NBA":
+        return NBA_MARKET_COLUMNS
+    return MARKET_COLUMNS
+
+
+def _log_table(sport: str) -> tuple[str, tuple[str, ...]]:
+    if sport == "NBA":
+        return "nba_player_game_log", _NBA_LOG_COLS
+    return "nfl_player_game_log", _LOG_COLS
+
 
 def _fetch(conn, sql, params):
     cur = conn.execute(sql, params)
     return cur.fetchall()
 
 
-def _games(conn, season: int) -> list[dict]:
+def _games(conn, season: int, sport: str = SPORT) -> list[dict]:
     rows = _fetch(conn, """
         SELECT game_id, season, game_date, home_team, away_team,
                home_score, away_score, commence_time
           FROM games
          WHERE sport = %s AND season = %s
            AND game_date >= %s
-    """, (SPORT, season, PROP_HISTORY_START_DATE))
+    """, (sport, season, PROP_HISTORY_START_DATE))
     out = []
     for row in rows:
         out.append({
@@ -78,6 +96,7 @@ def _games(conn, season: int) -> list[dict]:
             "home_team": row[3], "away_team": row[4],
             "home_score": row[5], "away_score": row[6],
             "commence_time": row[7],
+            "sport": sport,
         })
     return out
 
@@ -95,7 +114,7 @@ def _as_quotes(rows) -> list[dict]:
     return out
 
 
-def _quotes_for_game(conn, game_id: str) -> list[dict]:
+def _quotes_for_game(conn, game_id: str, sport: str = SPORT) -> list[dict]:
     """DraftKings at or before kickoff. One game. The cast sits in a CASE.
 
     Other books are not read. over_price and under_price are the prices
@@ -119,45 +138,52 @@ def _quotes_for_game(conn, game_id: str) -> list[dict]:
            AND {_SNAP} IS NOT NULL
            AND {_SNAP} <= {_KICK}
     """
-    return _as_quotes(_fetch(conn, sql, (game_id, list(_MARKETS))))
+    return _as_quotes(_fetch(conn, sql, (game_id, list(_markets(sport)))))
 
 
-def _log_for_game(conn, game_id: str) -> list[dict]:
-    cols = ", ".join(_LOG_COLS)
+def _log_for_game(conn, game_id: str, sport: str = SPORT) -> list[dict]:
+    table, cols = _log_table(sport)
+    listed = ", ".join(cols)
     rows = _fetch(conn, f"""
-        SELECT {cols}
-          FROM nfl_player_game_log
+        SELECT {listed}
+          FROM {table}
          WHERE game_id = %s
     """, (game_id,))
     out = []
     for row in rows:
-        out.append(dict(zip(_LOG_COLS, row)))
+        out.append(dict(zip(cols, row)))
     return out
 
 
 def facts_for_season(conn, season: int,
-                     game_ids: list[str] | None = None) -> tuple[list[dict], list[str]]:
+                     game_ids: list[str] | None = None,
+                     sport: str = SPORT) -> tuple[list[dict], list[str]]:
     """Facts, and the canonical keys of the games this read considered.
 
     `game_ids` None reads every game. A list reads only those games.
     A game with no line is still in the key list so a rebuild can delete
     the rows a previous pass wrote.
     """
-    if season < PROP_HISTORY_START_SEASON:
+    if sport not in _SPORTS or season < PROP_HISTORY_START_SEASON:
         return [], []
-    games = _games(conn, season)
+    games = _games(conn, season, sport)
     if game_ids is not None:
         wanted = set(game_ids)
         games = [game for game in games if game["game_id"] in wanted]
     facts = []
     keys = []
     for game in games:
-        parsed = parse_game_id(game["game_id"])
-        if parsed is None or parse_date(game.get("game_date")) is None:
-            continue
-        keys.append(parsed[0])
-        quotes = _quotes_for_game(conn, game["game_id"])
-        log_rows = _log_for_game(conn, game["game_id"])
+        if sport == "NFL":
+            parsed = parse_game_id(game["game_id"])
+            if parsed is None or parse_date(game.get("game_date")) is None:
+                continue
+            keys.append(parsed[0])
+        else:
+            if parse_date(game.get("game_date")) is None or not game.get("game_id"):
+                continue
+            keys.append(str(game["game_id"]))
+        quotes = _quotes_for_game(conn, game["game_id"], sport)
+        log_rows = _log_for_game(conn, game["game_id"], sport)
         facts.extend(facts_for_game(game, quotes, log_rows))
     return facts, keys
 
@@ -190,33 +216,47 @@ def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:
 
 
 def build_season(conn, season: int, apply: bool = False,
-                 game_ids: list[str] | None = None) -> dict:
+                 game_ids: list[str] | None = None,
+                 sport: str = SPORT) -> dict:
     """One season. apply=False writes nothing. `game_ids` limits the read."""
+    if sport not in _SPORTS:
+        return {
+            "season": season, "sport": sport, "facts": 0, "written": 0,
+            "canonical_keys": [],
+            "skipped": "sport is NFL or NBA",
+        }
     if season < PROP_HISTORY_START_SEASON:
         return {
-            "season": season, "facts": 0, "written": 0,
+            "season": season, "sport": sport, "facts": 0, "written": 0,
             "canonical_keys": [],
             "skipped": "before player_prop_odds history",
         }
-    facts, keys = facts_for_season(conn, season, game_ids=game_ids)
+    facts, keys = facts_for_season(conn, season, game_ids=game_ids, sport=sport)
     written = _upsert(conn, facts, keys) if apply else 0
     return {
-        "season": season, "facts": len(facts), "written": written,
+        "season": season, "sport": sport, "facts": len(facts), "written": written,
         "canonical_keys": keys,
     }
 
 
-def build_seasons(conn, seasons, apply: bool = False) -> dict:
+def build_seasons(conn, seasons, apply: bool = False, sport: str = SPORT) -> dict:
+    if sport not in _SPORTS:
+        return {
+            "apply": apply, "sport": sport, "seasons": [],
+            "skipped": "sport is NFL or NBA",
+        }
     if seasons is None:
         rows = _fetch(conn, """
             SELECT DISTINCT season FROM games
              WHERE sport = %s AND season >= %s
              ORDER BY season
-        """, (SPORT, PROP_HISTORY_START_SEASON))
+        """, (sport, PROP_HISTORY_START_SEASON))
         seasons = [int(row[0]) for row in rows]
     elif isinstance(seasons, int):
         seasons = [seasons]
-    built = [build_season(conn, int(s), apply=apply) for s in seasons]
+    built = [
+        build_season(conn, int(s), apply=apply, sport=sport) for s in seasons
+    ]
     if apply:
         conn.commit()
-    return {"apply": apply, "seasons": built}
+    return {"apply": apply, "sport": sport, "seasons": built}

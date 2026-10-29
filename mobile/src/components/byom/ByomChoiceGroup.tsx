@@ -8,11 +8,14 @@ export function ByomChoiceGroup<T extends string>({
   value,
   options,
   onChange,
+  clearOnReselect = false,
 }: {
   label: string;
   value: T;
   options: { value: T; label: string }[];
   onChange: (value: T) => void;
+  /** A second tap on the selected chip clears it. The parent treats '' as none. */
+  clearOnReselect?: boolean;
 }) {
   return (
     <View style={styles.group} accessibilityRole="radiogroup" accessibilityLabel={label}>
@@ -23,7 +26,7 @@ export function ByomChoiceGroup<T extends string>({
           return (
             <Pressable
               key={option.value}
-              onPress={() => onChange(option.value)}
+              onPress={() => onChange(selected && clearOnReselect ? ('' as T) : option.value)}
               accessibilityRole="radio"
               accessibilityState={{ selected }}
               accessibilityLabel={`${label}, ${option.label}`}

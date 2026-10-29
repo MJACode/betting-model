@@ -13,9 +13,14 @@ import {
   recordFromRows,
   type ByomRecord,
   type ByomSeasonScope,
+  type ByomSport,
 } from '@/lib/byomRecord';
 
-export function useByomRecord(scope: ByomSeasonScope, filters: ByomFilters | null) {
+export function useByomRecord(
+  scope: ByomSeasonScope,
+  filters: ByomFilters | null,
+  sport: ByomSport = 'NFL',
+) {
   const [record, setRecord] = useState<ByomRecord | null>(null);
   const [loading, setLoading] = useState(filters != null);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +41,7 @@ export function useByomRecord(scope: ByomSeasonScope, filters: ByomFilters | nul
     setRecord(null);
     try {
       const parsed = JSON.parse(filterKey) as ByomFilters;
-      const rows = await fetchByomScopedBacktest(scope, parsed);
+      const rows = await fetchByomScopedBacktest(scope, parsed, new Date(), sport);
       if (seq.current !== id) return;
       setRecord(recordFromRows(rows));
     } catch (e: unknown) {
@@ -45,7 +50,7 @@ export function useByomRecord(scope: ByomSeasonScope, filters: ByomFilters | nul
     } finally {
       if (seq.current === id) setLoading(false);
     }
-  }, [scope, filterKey]);
+  }, [scope, filterKey, sport]);
 
   useEffect(() => {
     void load();

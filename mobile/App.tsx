@@ -354,7 +354,10 @@ export default function App() {
           <Stack.Screen
             name="ByomBuilder"
             component={GatedByomBuilder}
-            options={{ title: 'New NFL model', headerBackTitle: 'Cancel' }}
+            options={({ route }) => ({
+              title: route.params?.sport === 'NBA' ? 'New NBA model' : 'New NFL model',
+              headerBackTitle: 'Cancel',
+            })}
           />
           <Stack.Screen
             name="ByomEdit"
