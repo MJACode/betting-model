@@ -49,9 +49,10 @@ sport stores null.
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
 empty until someone runs the builder with `--apply`. That job is
-`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false,
-and the job is not in `jobs/declared_jobs.json`, so a merge does not
-backfill production.
+`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false.
+A missing sport is NFL. `byom-nba-game-facts` is declared with enabled
+false and apply false, so a merge does not backfill production. No NFL
+game-facts row is declared.
 
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
 NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. Other
@@ -82,8 +83,9 @@ another point, and how many graded lines still have no American price.
 Each of those four sides is one count. Moneyline sides are not in the
 three counts. A queued `byom_game_facts` job with `sport` null builds
 NFL and still does not write unless `apply` is true.
-`byom-nfl-refresh` stays off. The worker job `byom_game_facts` still
-accepts NFL only and is still undeclared.
+`byom-nfl-refresh` stays off. The worker job `byom_game_facts` accepts
+NFL and NBA. A missing sport is NFL. An NFL season before 2020 is
+still refused. The NBA declaration stays enabled false.
 
 ## Prop facts
 

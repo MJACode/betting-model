@@ -2037,20 +2037,22 @@ def _job_mlb_over_under_retrain_sweep(**kw):
 
 
 def _validate_byom_game_facts(args: dict) -> dict:
-    """NFL game facts. apply defaults false so a queued job writes nothing
-    until someone asks. Seasons before DraftKings history are refused.
+    """NFL or NBA game facts. apply defaults false so a queued job writes
+    nothing until someone asks. A missing sport is NFL. An NFL season
+    before DraftKings history is refused. NBA is not: the builder does
+    not apply that floor to other sports.
     """
     from byom.constants import DK_HISTORY_START_SEASON
 
-    sport = str(args.get("sport") or "NFL")
-    if sport != "NFL":
-        raise ValueError(f"byom_game_facts builds NFL only, got {sport!r}")
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA"):
+        raise ValueError(f"byom_game_facts builds NFL or NBA, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
     else:
         season = int(season)
-        if season < DK_HISTORY_START_SEASON:
+        if sport == "NFL" and season < DK_HISTORY_START_SEASON:
             raise ValueError(
                 f"season {season} is before DraftKings history "
                 f"({DK_HISTORY_START_SEASON})")
@@ -2238,8 +2240,9 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not listed
-    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # NFL or NBA game facts. apply defaults false. A missing sport is NFL.
+    # jobs/declared_jobs.json lists byom-nba-game-facts with enabled
+    # false and apply false, so a merge does not enqueue a writer.
     # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
     # NFL prop facts. apply defaults false when the arg is omitted.
