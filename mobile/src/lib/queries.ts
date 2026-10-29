@@ -960,6 +960,25 @@ export async function fetchPropLinesForGames(
 }
 
 /**
+ * Game markets the boards and pick reads want from v_latest_odds_all_books.
+ * alternate_spreads and alternate_totals are many rungs per book once
+ * latest_odds.line_key is applied. These reads key and page on
+ * game_id|market|bookmaker, which is one row for a main market and not for
+ * a ladder, so the ladder stays on the edit sheet's own read.
+ */
+const MAIN_GAME_ODDS_MARKETS = [
+  'h2h',
+  'h2h_3way',
+  'spreads',
+  'totals',
+  'h2h_1st_5_innings',
+  'spreads_1st_5_innings',
+  'totals_1st_5_innings',
+  'team_totals_home',
+  'team_totals_away',
+] as const;
+
+/**
  * Every book's latest line for every game market on one date — the Teams
  * board's LINE column. ~15 games x 3 markets x 13 books on a full MLB slate.
  * The caller bounds it to its sport's games, for the same reason as above.
@@ -971,6 +990,7 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
       .from('v_latest_odds_all_books')
       .select(ODDS_BY_BOOK_COLUMNS)
       .eq('game_date', date)
+      .in('market', [...MAIN_GAME_ODDS_MARKETS])
       .order('game_id')
       .order('market')
       .order('bookmaker')
@@ -1200,6 +1220,7 @@ export async function fetchPicksForDate(
               .from('v_latest_odds_all_books')
               .select(ODDS_BY_BOOK_COLUMNS)
               .in('game_id', Array.from(lineGames))
+              .in('market', [...MAIN_GAME_ODDS_MARKETS])
               .order('game_id')
               .order('market')
               .order('bookmaker')
@@ -1326,6 +1347,7 @@ export async function fetchUpcomingUfcPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'UFC_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -1479,6 +1501,7 @@ export async function fetchUpcomingNflPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'NFL_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -1586,6 +1609,7 @@ export async function fetchUpcomingNcaafPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'NCAAF_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')
@@ -1678,6 +1702,7 @@ export async function fetchUpcomingNhlPicks(
         .from('v_latest_odds_all_books')
         .select(ODDS_BY_BOOK_COLUMNS)
         .like('game_id', 'NHL_%')
+        .in('market', [...MAIN_GAME_ODDS_MARKETS])
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('game_id')

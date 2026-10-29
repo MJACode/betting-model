@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1083 M1–M2. Main-market filter on the unfiltered odds reads. FETCH_ALT_GAME_LINES and skip started games. Draft stays draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA facts follow-up. NBA game-facts floor is 2021. Docstrings match the off declarations. Enable game facts before prop facts. Jobs stay off. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA game-facts and prop-facts jobs declared off. Game-facts validator accepts NBA. Migration stays hand-applied. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA full 14 player props in the builder. Hand-applied migration. No declared backfill. Draft, not merged. |
