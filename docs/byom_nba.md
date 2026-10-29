@@ -66,8 +66,11 @@ missing sport is still NFL. An NFL season before 2020 is still
 refused. An NBA season before 2021 is refused. Measured 2026-10-29:
 DraftKings h2h, spreads, and totals on NBA games start in season 2021
 (1080 of 1080). Seasons 2019 and 2020 are in `games` and have none.
-`byom-nba-game-facts` is the same off declaration. Rest chips stay
-empty until those game facts exist. A hand-edited sport is stripped
+`byom-nba-game-facts` is the same off declaration. Until a finished read of `byom_game_facts` finds an NBA row, the
+builder hides Moneyline, Spread, and Over/Under, and the rest chips.
+That empty read says No history yet. A read still in flight is a
+skeleton. A failed read is a retry. A saved game bet stays as one
+tile so it can be put back. A hand-edited sport is stripped
 and uppercased on both jobs.
 
 ## Backtest and save
@@ -90,9 +93,18 @@ A prop save requires `prop_side` over or under. The screen does not
 offer under on a double-double or a triple-double.
 
 `byom_save_model` writes `byom_models.sport` and strips `sport` out of
-the stored filters. Units on the screen follow the NFL rule: one prop
-market, and `prop_side` over or under. A yes-only market shows units
-only for over.
+the stored filters. A name already saved on the other sport is refused
+(`name is saved on another sport`). The same name on the same sport
+still replaces that model. The app asks before a same-sport replace
+and does not offer replace across sports. Units on the screen follow
+the NFL rule: one prop market, and `prop_side` over or under. A
+yes-only market shows units only for over.
+
+Moneyline, Spread, Over/Under, and the two rest chips stay off the
+builder until `byom_game_facts` has an NBA row. Until then those
+previews say "No history yet". A prop with no rest chip still
+previews. The NBA facts jobs stay off until the migration above is
+applied by hand and Matt confirms it.
 
 The list on My models, when the Models tab is NBA, is that user's NBA
 rows. Other sports still have no builder.

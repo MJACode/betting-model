@@ -26,23 +26,29 @@ import { Skeleton } from '@/components/Skeleton';
 import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSavedModel } from '@/hooks/useByomSavedModel';
 import { useByomSeason } from '@/hooks/useByomSeason';
+import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { deleteByomModel, fetchByomModels, saveByomModel, type ByomFilters } from '@/lib/byom';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import {
+  byomEmptyLabel,
   draftFromFilters,
   filtersForDraft,
   BYOM_MODEL_CAP,
   isPropMarket,
   isWholeSeason,
+  type ByomMarket,
   type ByomSport,
   marketLabel,
+  nameTakenOnOtherSport,
+  OTHER_SPORT_NAME,
   otherModelWithName,
+  otherSportAlert,
+  otherSportName,
   propSideAfterMarketChange,
   saveBlockReason,
   sideBlockFromError,
   showsUnits,
   sideForMarket,
-  type ByomMarket,
   type ByomPropSide,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -81,6 +87,7 @@ export function ByomEditScreen() {
   }, [model, seeded]);
 
   const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const facts = useNbaGameFacts(model == null ? null : sport);
   const edited = market == null
     ? null
     : filtersForDraft(
@@ -89,6 +96,10 @@ export function ByomEditScreen() {
       sport,
     );
   const loadedDraft = model == null ? null : draftFromFilters(model.filters);
+  const savedGameMarket: ByomMarket | null = loadedDraft != null
+    && (loadedDraft.market === 'h2h' || loadedDraft.market === 'spreads' || loadedDraft.market === 'totals')
+    ? loadedDraft.market
+    : null;
   const formDraft = market == null
     ? null
     : { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null };
@@ -128,6 +139,12 @@ export function ByomEditScreen() {
     try {
       if (!replaceExisting) {
         const models = await fetchByomModels();
+        const otherSport = nameTakenOnOtherSport(models, trimmed, sport, model.model_id);
+        if (otherSport) {
+          const notice = otherSportAlert(trimmed, otherSport.sport || otherSportName(sport));
+          Alert.alert(notice.title, notice.body, [{ text: 'OK' }]);
+          return;
+        }
         const taken = otherModelWithName(models, trimmed, model.model_id);
         if (taken) {
           Alert.alert(
@@ -167,6 +184,11 @@ export function ByomEditScreen() {
       if (isAbortError(e)) return;
       const raw = errorText(e);
       const blocked = sideBlockFromError(raw);
+      if (blocked === OTHER_SPORT_NAME) {
+        const notice = otherSportAlert(trimmed, otherSportName(sport));
+        Alert.alert(notice.title, notice.body, [{ text: 'OK' }]);
+        return;
+      }
       setSaveMessage(blocked
         ?? (renaming && /cap is 25/.test(raw)
           ? 'You have 25 models. Delete one before renaming.'
@@ -235,6 +257,7 @@ export function ByomEditScreen() {
               propSide={propSide}
               sport={sport}
               rest={rest}
+              factsStatus={facts.status}
               onSide={setSide}
               onRole={setRole}
               onPrimetime={setPrimetime}
@@ -242,7 +265,15 @@ export function ByomEditScreen() {
               onRest={setRest}
             />
           ) : null}
-          <ByomMarketField market={market} onChange={chooseMarket} sport={sport} />
+          <ByomMarketField
+            market={market}
+            onChange={chooseMarket}
+            sport={sport}
+            factsStatus={facts.status}
+            factsError={facts.error}
+            onRetryFacts={facts.retry}
+            savedGameMarket={savedGameMarket}
+          />
           {sideReason == null ? (
             <>
               <ByomSeasonToggle />
@@ -252,7 +283,7 @@ export function ByomEditScreen() {
                 error={previewFilters != null ? preview.error : null}
                 onRetry={() => void preview.reload()}
                 showsUnits={unitsVisible}
-                emptyLabel={previewFilters == null ? '—' : 'No games match'}
+                emptyLabel={previewFilters == null ? '—' : byomEmptyLabel(sport, facts.status, previewFilters)}
               />
               <ByomUnitsNote />
             </>
