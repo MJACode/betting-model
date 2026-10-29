@@ -15,7 +15,13 @@
  *
  * Last 5 / Last 10 are the team's last N games AT THAT VENUE ("last 5 home"),
  * and they reach back into last season early on, as every NBA last-N read does
- * (Matt, 2026-10-23). Season is this season only.
+ * (Matt, 2026-10-23). Those two rows are the only readers of the fetched
+ * games, and that fetch is capped at NBA_Q1_FETCH_GAMES.
+ *
+ * Season is this season only, and it is the season view (`v_nba_team_q1_season`),
+ * the same rows the league ranks use. A team past the fetch cap (about
+ * mid-January) would otherwise show a "Season" that is only the last 40 games
+ * under a rank line counted on the full season.
  *
  * These are stats, not picks. The first-quarter model was tested and closed
  * (docs/nba_models_2026.md §9).
@@ -36,12 +42,20 @@ export interface NbaQ1Game {
   poss_against: number | null;
 }
 
-/** One row of `v_nba_team_q1_season`: the season-long ranks for one venue. */
+/**
+ * One row of `v_nba_team_q1_season`: the season-long record, points and ranks
+ * for one venue. `pts_for` and `pts_against` are season sums.
+ */
 export interface NbaQ1SeasonRow {
   season: number;
   team: string;
   venue: NbaQ1Venue;
   games: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  pts_for: number;
+  pts_against: number;
   rated_games: number;
   ortg: number | null;
   drtg: number | null;
@@ -51,6 +65,10 @@ export interface NbaQ1SeasonRow {
   net_rank: number;
   teams: number;
 }
+
+/** Columns the season read must select. The Season row is this row, not a sum of the capped game list. */
+export const NBA_Q1_SEASON_COLUMNS =
+  'season,team,venue,games,wins,losses,ties,pts_for,pts_against,rated_games,ortg,drtg,net_rtg,ortg_rank,drtg_rank,net_rank,teams';
 
 export type NbaQ1Venue = 'all' | 'home' | 'away';
 export const NBA_Q1_VENUES: readonly NbaQ1Venue[] = ['all', 'home', 'away'];
@@ -138,25 +156,62 @@ export interface NbaQ1WindowRow {
   key: 'l5' | 'l10' | 'season';
   label: string;
   summary: NbaQ1Summary;
+  /**
+   * Set when the season view has not arrived. An empty summary then means
+   * "not loaded", not "no games".
+   */
+  pending?: 'loading' | 'error';
+}
+
+/** The Season row, from one `v_nba_team_q1_season` row. Ratings are the view's, already per 100 possessions. */
+export function summaryFromSeasonRow(row: NbaQ1SeasonRow): NbaQ1Summary {
+  const games = Number(row.games);
+  const pf = Number(row.pts_for);
+  const pa = Number(row.pts_against);
+  return {
+    games,
+    wins: Number(row.wins),
+    losses: Number(row.losses),
+    ties: Number(row.ties),
+    margin: games ? round1((pf - pa) / games) : null,
+    ptsFor: games ? round1(pf / games) : null,
+    ptsAgainst: games ? round1(pa / games) : null,
+    ortg: row.ortg == null ? null : Number(row.ortg),
+    drtg: row.drtg == null ? null : Number(row.drtg),
+    ratedGames: Number(row.rated_games),
+    priorSeasonGames: 0,
+  };
 }
 
 /**
- * The three rows the card draws for one venue. `games` may arrive in any
- * order and from two seasons; the current season is the newest game's.
+ * The three rows the card draws for one venue.
+ *
+ * `games` may arrive in any order and from two seasons. It is the capped
+ * fetch, and only Last 5 / Last 10 read it. `seasonRow` is the venue's row
+ * from `v_nba_team_q1_season` (null while that read is in flight, or when the
+ * team has no games at this venue). Season is that row. It is never a sum of
+ * `games`.
  */
-export function nbaQ1Windows(games: readonly NbaQ1Game[], venue: NbaQ1Venue): {
+export function nbaQ1Windows(
+  games: readonly NbaQ1Game[],
+  venue: NbaQ1Venue,
+  seasonRow: NbaQ1SeasonRow | null = null,
+): {
   season: number | null;
   rows: NbaQ1WindowRow[];
 } {
   const sorted = newestFirst(games).filter((g) => atVenue(g, venue));
-  const season = newestFirst(games)[0]?.season ?? null;
-  const thisSeason = sorted.filter((g) => g.season === season);
+  const season = seasonRow?.season ?? newestFirst(games)[0]?.season ?? null;
   return {
     season,
     rows: [
       { key: 'l5', label: 'Last 5', summary: summarizeQ1(sorted.slice(0, 5), season) },
       { key: 'l10', label: 'Last 10', summary: summarizeQ1(sorted.slice(0, 10), season) },
-      { key: 'season', label: 'Season', summary: summarizeQ1(thisSeason, season) },
+      {
+        key: 'season',
+        label: 'Season',
+        summary: seasonRow ? summaryFromSeasonRow(seasonRow) : summarizeQ1([], season),
+      },
     ],
   };
 }
@@ -189,6 +244,8 @@ const WINDOW_SIZE: Record<NbaQ1WindowRow['key'], number> = { l5: 5, l10: 10, sea
  * review, 2026-10-28).
  */
 export function q1RowSub(row: NbaQ1WindowRow): string | null {
+  if (row.pending === 'loading') return 'Loading';
+  if (row.pending === 'error') return 'Couldn’t load';
   const s = row.summary;
   if (s.games === 0) return null;
   const parts: string[] = [];
@@ -211,6 +268,8 @@ function spoken(x: number | null, signed = false): string {
 
 /** What VoiceOver reads for one row: words, never "—" or "3-2". */
 export function q1RowA11yLabel(row: NbaQ1WindowRow): string {
+  if (row.pending === 'loading') return `${row.label}, loading`;
+  if (row.pending === 'error') return `${row.label}, couldn’t load`;
   const s = row.summary;
   if (s.games === 0) return `${row.label}: no games`;
   const rated = s.ratedGames < s.games ? `, ratings from ${s.ratedGames} of them` : '';
@@ -218,6 +277,12 @@ export function q1RowA11yLabel(row: NbaQ1WindowRow): string {
     `${row.label}, ${s.games} ${s.games === 1 ? 'game' : 'games'}${rated}: first-quarter record ${spokenRecord(s)}, ` +
     `average margin ${spoken(s.margin, true)}, offensive rating ${spoken(s.ortg)}, defensive rating ${spoken(s.drtg)}`
   );
+}
+
+/** The card's "This season: X scored, Y allowed" line, from the Season row. Null until that row has points. */
+export function q1ThisSeasonLine(summary: NbaQ1Summary): string | null {
+  if (summary.ptsFor == null || summary.ptsAgainst == null) return null;
+  return `This season: ${summary.ptsFor.toFixed(1)} scored, ${summary.ptsAgainst.toFixed(1)} allowed per first quarter.`;
 }
 
 /** "Last 5 and Last 10 include 3 games from 2025-26", or null when neither reaches back. */

@@ -238,8 +238,9 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   );
 
   // ── NBA first quarter (Matt, 2026-10-28) ────────────────────────────────
-  // The team's last 40 team-games, then its season ranks for the newest
-  // game's season. NBA only; every other sport skips both reads.
+  // The team's last 40 team-games (Last 5 / Last 10 only), then the season
+  // view for the newest game's season (the Season row and the ranks). NBA
+  // only; every other sport skips both reads.
   const q1Games = useSection<NbaQ1Game[]>(
     [],
     sport === 'NBA' ? () => fetchNbaTeamQ1Games(team) : null,

@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { gameLineLegFromRows, isLineLeg, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
 import { buildTeamLineIndex, type StatsOddsQuote } from '../src/lib/statsOdds';
 import { marketClassForModel } from '../src/lib/markets';
@@ -260,6 +260,59 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the partial banner is one sentence with one reason and hides while reloading', picks.includes('{!error && !loading && partial ? (') && picks.includes('numberOfLines={3}') && picks.includes('accessibilityHint="Reloads today’s picks"'));
   const hook = read('src/hooks/useTodayPicks.ts');
   check('a look-ahead failure is named for what it is', hook.includes("swallow('the upcoming UFC card')") && !hook.includes("'UFC picks'"));
+}
+
+// ── Editing a line leg (Matt, 2026-10-28: "change it to 15") ────────────────
+{
+  const spec: PropLineLegSpec = {
+    kind: 'prop', game_id: 'G', sport: 'NBA', market: 'player_points',
+    player_name: 'Jaylen Brown', team: 'BOS', line: 9.5, side: 'over', statLabel: 'Points',
+  };
+  const row = (bookmaker: string, line: number | null, over: number | null, under: number | null, player = 'Jaylen Brown'): PropOddsByBookRow => ({
+    game_id: 'G', game_date: '2026-10-28', market: 'player_points', player_name: player, team: 'BOS',
+    bookmaker, line, over_price: over, under_price: under, over_link: null, under_link: null, snapshot_at: '',
+  });
+  const opts = lineOptionsFromRows(spec, [
+    row('draftkings', 14.5, -490, null),
+    row('fanduel', 14.5, -450, 320),
+    row('draftkings', 9.5, -2000, null),
+    row('draftkings', 19.5, -150, 115),
+    row('notabook', 24.5, 200, -260),
+    row('draftkings', 29.5, 400, null, 'Someone Else'),
+    row('draftkings', null, -110, -110),
+  ]);
+  check('edit options: every posted line, lowest first, one per number',
+    opts.map((o) => o.line).join(',') === '9.5,14.5,19.5', opts.map((o) => o.line).join(','));
+  // DraftKings when it posts the side, else the best book — the leg's own
+  // rule, so the sheet never shows a price the slip will not use.
+  check('edit options: priced the way the leg is (DraftKings first, else the best book)',
+    opts[1]!.over!.price === -490 && opts[1]!.over!.book === 'draftkings'
+      && opts[1]!.under!.price === 320 && opts[1]!.under!.book === 'fanduel');
+  check('edit options: a side nobody posts is empty, not invented',
+    opts[0]!.under === null);
+  const sheetRows = [row('draftkings', 14.5, -490, null), row('fanduel', 14.5, -450, 320)];
+  const picked = lineOptionsFromRows(spec, sheetRows)[0]!;
+  check('the price picked in the sheet is the price the slip then shows',
+    lineLegFromRows(withLine(spec, 14.5, 'over'), sheetRows, null)!.americanOdds === picked.over!.price
+      && lineLegFromRows(withLine(spec, 14.5, 'under'), sheetRows, null)!.americanOdds === picked.under!.price);
+  const a = withLine(spec, 14.5, 'over');
+  const b: PropLineLegSpec = { ...spec, player_name: 'Franz Wagner', team: 'ORL' };
+  const specs = [spec, b];
+  const after = lineLegsAfterReplace(specs, lineLegKey(spec), a);
+  check('edit keeps the leg in its place in the slip',
+    after != null && lineLegKey(after[0]!) === lineLegKey(a) && lineLegKey(after[1]!) === lineLegKey(b) && after.length === 2);
+  check('editing to the same bet is a no-op',
+    lineLegsAfterReplace(specs, lineLegKey(spec), withLine(spec, 9.5, 'over')) === null);
+  check('editing onto a bet already on the slip is refused, not duplicated',
+    lineLegsAfterReplace([spec, a], lineLegKey(spec), withLine(spec, 14.5, 'over')) === null);
+  check('editing a leg that is gone does nothing',
+    lineLegsAfterReplace([b], lineLegKey(spec), a) === null);
+  const slipScreen = readFileSync(join(ROOT, 'src/screens/ParlayScreen.tsx'), 'utf-8');
+  check('the betslip offers edit only on Stats prop lines and custom legs, never on a model pick',
+    slipScreen.includes('onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}') &&
+      /if \(!isLineLeg\(leg\)\) return null;/.test(slipScreen) &&
+      slipScreen.includes('!isGameSpec(spec)') &&
+      slipScreen.includes('lineLegs.replace(lineLegKey(editingLine), next)'));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

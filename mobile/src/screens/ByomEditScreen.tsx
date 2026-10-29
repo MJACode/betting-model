@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -32,14 +32,18 @@ import {
   draftFromFilters,
   filtersForDraft,
   BYOM_MODEL_CAP,
+  isPropMarket,
   isWholeSeason,
+  type ByomSport,
   marketLabel,
   otherModelWithName,
+  propSideAfterMarketChange,
   saveBlockReason,
   sideBlockFromError,
   showsUnits,
   sideForMarket,
-  type ByomGameMarket,
+  type ByomMarket,
+  type ByomPropSide,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -54,14 +58,16 @@ export function ByomEditScreen() {
   const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
   const [name, setName] = useState('');
   const [seeded, setSeeded] = useState(false);
-  const [market, setMarket] = useState<ByomGameMarket | null>(null);
+  const [market, setMarket] = useState<ByomMarket | null>(null);
   const [side, setSide] = useState<'home' | 'away' | 'over' | 'under' | null>(null);
   const [role, setRole] = useState<'favorite' | 'underdog' | 'pickem' | null>(null);
   const [primetime, setPrimetime] = useState<boolean | null>(null);
+  const [propSide, setPropSide] = useState<ByomPropSide | null>(null);
+  const [rest, setRest] = useState<'b2b' | 'rest2' | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (model == null || seeded) return;
     const draft = draftFromFilters(model.filters);
     setName(model.name);
@@ -69,20 +75,29 @@ export function ByomEditScreen() {
     setSide(draft?.side ?? null);
     setRole(draft?.role ?? null);
     setPrimetime(draft?.primetime ?? null);
+    setPropSide(draft?.propSide ?? null);
+    setRest(draft?.rest ?? null);
     setSeeded(true);
   }, [model, seeded]);
 
+  const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
   const edited = market == null
     ? null
-    : filtersForDraft({ market, side, role, primetime }, model?.filters ?? {});
+    : filtersForDraft(
+      { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null },
+      model?.filters ?? {},
+      sport,
+    );
   const loadedDraft = model == null ? null : draftFromFilters(model.filters);
-  const formDraft = market == null ? null : { market, side, role, primetime };
+  const formDraft = market == null
+    ? null
+    : { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null };
   const activeDraft = seeded ? formDraft : loadedDraft;
   const sideReason = activeDraft == null ? null : saveBlockReason(activeDraft);
   const previewFilters: ByomFilters | null = sideReason != null
     ? null
     : edited ?? (model != null && !isWholeSeason(model.filters) ? model.filters : null);
-  const preview = useByomRecord(scope, previewFilters);
+  const preview = useByomRecord(scope, previewFilters, sport);
   const unitsVisible = previewFilters != null && showsUnits(previewFilters);
   const previewWaiting = sideReason == null
     && previewFilters != null
@@ -97,10 +112,11 @@ export function ByomEditScreen() {
 
   // A new name is a new row. Save it first. Delete the old id only when
   // that save wrote a different row. A cap failure leaves the original.
-  const chooseMarket = (next: ByomGameMarket) => {
+  const chooseMarket = (next: ByomMarket) => {
     setMarket(next);
     setSide((current) => sideForMarket(next, current));
-    if (next === 'totals') setRole(null);
+    setPropSide((current) => propSideAfterMarketChange(market, next, current));
+    if (next === 'totals' || isPropMarket(next)) setRole(null);
   };
 
   const save = async (replaceExisting = false) => {
@@ -131,7 +147,7 @@ export function ByomEditScreen() {
           return;
         }
       }
-      const saved = await saveByomModel(trimmed, filters, null);
+      const saved = await saveByomModel(trimmed, filters, null, sport);
       const savedId = saved.model_id;
       if (renaming && savedId !== '' && savedId !== model.model_id) {
         try {
@@ -207,21 +223,26 @@ export function ByomEditScreen() {
             autoCorrect={false}
             style={styles.input}
           />
-          {market == null ? (
-            <Text style={styles.current}>{marketLabel(model.filters)}</Text>
-          ) : null}
-          <ByomMarketField market={market} onChange={chooseMarket} />
+          <Text style={styles.current}>
+            {market != null && edited ? marketLabel(edited) : marketLabel(model.filters)}
+          </Text>
           {market != null ? (
             <ByomSideFields
               market={market}
               side={side}
               role={role}
               primetime={primetime}
+              propSide={propSide}
+              sport={sport}
+              rest={rest}
               onSide={setSide}
               onRole={setRole}
               onPrimetime={setPrimetime}
+              onPropSide={setPropSide}
+              onRest={setRest}
             />
           ) : null}
+          <ByomMarketField market={market} onChange={chooseMarket} sport={sport} />
           {sideReason == null ? (
             <>
               <ByomSeasonToggle />

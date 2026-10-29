@@ -387,15 +387,40 @@ export function rulerChromeHeight(fontScale: number): number {
 }
 
 /**
- * Resting height of the Stats compact ruler (Compact B).
+ * Resting height of the Stats ruler.
  *
- * The selected face sits on a marker over the ticks. The 44pt typing field
- * still uses `rulerChromeHeight` once that marker opens. Capped under the
- * old bubble so the resting row stays short even as text grows; 2× text
- * scrolls the control (`thresholdControlsScroll`).
+ * Matt, 2026-10-28: the 28pt "Compact B" strip "looks too small and I cannot
+ * tell what I'm dragging to". It is now three bands: the selected number on a
+ * marker bubble (RULER_MARK_H), a pointer from that bubble onto the ticks,
+ * and the tick row with its numbers printed under it (RULER_TICKS_H), so the
+ * values passing under the pointer are readable while dragging. Taller than
+ * the 44pt tap target, so the marker needs no overhang wings at rest. The
+ * marker scales with text up to 1.6x; 2x text scrolls the control
+ * (`thresholdControlsScroll`).
  */
-export function compactRulerHeight(fontScale: number): number {
+export const RULER_MARK_H = 30;
+/** Tick marks plus the number row printed under them. */
+export const RULER_TICKS_H = 32;
+
+/** Marker bubble height at a text scale (capped at 1.6x). */
+export function rulerMarkHeight(fontScale: number): number {
   const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
-  const mark = Math.round(22 * Math.min(scale, 1.6));
-  return Math.max(28, mark + 6);
+  return Math.round(RULER_MARK_H * Math.min(Math.max(scale, 1), 1.6));
+}
+
+export function compactRulerHeight(fontScale: number): number {
+  return rulerMarkHeight(fontScale) + RULER_TICKS_H;
+}
+
+/**
+ * The stop sitting under the centre pointer at a scroll offset — what the
+ * bubble shows WHILE the strip is moving, before it settles. Clamped to the
+ * strip's ends so an overscroll bounce never names a stop that does not
+ * exist.
+ */
+export function stopUnderOffset(offsetX: number, tickW: number, s: RulerScale): number {
+  if (!Number.isFinite(offsetX) || !(tickW > 0)) return s.min;
+  const last = stopCount(s) - 1;
+  const i = Math.min(Math.max(Math.round(offsetX / tickW), 0), Math.max(last, 0));
+  return stopAt(i, s);
 }

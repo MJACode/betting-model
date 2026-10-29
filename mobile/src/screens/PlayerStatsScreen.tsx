@@ -28,6 +28,7 @@ import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
+import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -46,6 +47,9 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  chartGames,
+  opponentLabel,
+  shortGameDate,
   openingChip,
   pagePlayerId,
   playerSubtitle,
@@ -109,6 +113,17 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
+/** A recent-games span, or every meeting with tonight's opponent over the last
+ *  two seasons — the Stats board's H2H, offered here too (Matt, 2026-10-28:
+ *  "H2H is on the main screen but when you click on a player is not
+ *  available"). */
+type RangeChoice = GameWindow | 'h2h';
+
+/** This screen's opening span: L10 where the sport offers it, else the first. */
+function defaultWindow(windows: { value: GameWindow }[]): GameWindow {
+  return windows.some((w) => w.value === 10) ? 10 : windows[0]!.value;
+}
+
 /** The keyboard bar under the typed line field. */
 const LINE_ACCESSORY_ID = 'player-line-input';
 
@@ -157,7 +172,7 @@ export function PlayerStatsScreen() {
     () => requested ?? defaultChipForPlayer(sport, playerType),
   );
   const windows = useMemo(() => windowOptionsFor(sport), [sport]);
-  const [gameWindow, setGameWindow] = useState<GameWindow>(10);
+  const [gameWindow, setGameWindow] = useState<RangeChoice>(10);
   // The "at least" threshold. null = auto-default to the rounded median once data loads.
   const [line, setLine] = useState<number | null>(null);
   // At Least / Over / Under — the SAME control the Stats board has had since
@@ -178,13 +193,15 @@ export function PlayerStatsScreen() {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
     // The board's window when this screen offers that span (Stats L3 → L3
-    // here); else this screen's own default. 'Season' and H2H have no
-    // equivalent span here, so they fall back rather than guess one.
+    // here, H2H → H2H); else this screen's own default. 'Season' has no
+    // equivalent span here, so it falls back rather than guess one.
     const asked = route.params.gameWindow;
     setGameWindow(
-      asked != null && windows.some((w) => w.value === asked)
-        ? (asked as GameWindow)
-        : windows.some((w) => w.value === 10) ? 10 : windows[0]!.value,
+      asked === 'h2h'
+        ? 'h2h'
+        : asked != null && windows.some((w) => w.value === asked)
+          ? (asked as GameWindow)
+          : defaultWindow(windows),
     );
   }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
@@ -371,12 +388,52 @@ export function PlayerStatsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
-  // Values come most-recent-first. Window slices the most recent N.
-  const windowed = useMemo(
-    () => (gameWindow === 'all' ? values : values.slice(0, gameWindow)),
-    [values, gameWindow],
-  );
+  // NCAAF school → short code, so "Michigan State" is not cut to MICH.
+  const ncaafAbbrevs = useNcaafAbbrevs(sport === 'NCAAF');
 
+  // H2H is offered only where there is an opponent to read against and the
+  // server holds the stat (detail.h2hOpponent), and only while there is a
+  // meeting to chart (or the read is still out, or failed and can be retried):
+  // a chip with nothing behind it would swap the hit card, stepper and
+  // tonight's price for an empty card. The board's H2H list likewise only
+  // holds players who have met the opponent (UX review, 2026-10-29). Asked for
+  // from the board where it is not available, the range falls back to the
+  // default span once the reads have answered, rather than charting nothing.
+  const h2hOpponent = detail.h2hOpponent;
+  const h2hOffered =
+    h2hOpponent != null
+    && (detail.h2hLoading || detail.h2hError != null || (detail.h2hMeetings?.length ?? 0) > 0);
+  const rangeOptions = useMemo(
+    () => (h2hOffered ? [...windows, { value: 'h2h' as const, label: 'H2H' }] : windows),
+    [windows, h2hOffered],
+  );
+  const h2hPending = detail.slateLoading && h2hOpponent == null;
+  const range: RangeChoice =
+    gameWindow === 'h2h' && !h2hOffered && !h2hPending ? defaultWindow(windows) : gameWindow;
+  const isH2H = range === 'h2h';
+
+  // The windowed games, most recent first, each with its date and opponent so
+  // every bar on the chart says which game it is (Matt, 2026-10-28). A number
+  // or All slices the log. H2H charts the meetings, newest first — the same
+  // rows the head-to-head card lists. That row has a date and a value and no
+  // venue, so the label is the bare opponent name: opponentLabel will not
+  // print "vs" without a home game it can vouch for.
+  const windowedGames = useMemo(() => {
+    if (range === 'h2h') {
+      const row = { opponent: h2hOpponent, venue: null };
+      return (detail.h2hMeetings ?? []).map((m) => ({
+        value: m.value,
+        date: shortGameDate(m.date),
+        opp: opponentLabel(row, true, ncaafAbbrevs),
+        oppFull: opponentLabel(row, false),
+      }));
+    }
+    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
+    return range === 'all' ? all : all.slice(0, range);
+  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs]);
+  // The values ARE the labelled games' values, so the chart's bars and labels
+  // cannot fall out of step (review, 2026-10-28).
+  const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
@@ -497,7 +554,9 @@ export function PlayerStatsScreen() {
   // The stat keeps its own capitalisation: lower-casing a label that is half
   // acronym renders "No rush+rec tds in 10 games", which reads as a typo on
   // the one sentence a reader who tapped that stat came for (UX review).
-  const noEvidenceText = `No ${statLabel} in the last ${hitTotal} games`;
+  const noEvidenceText = isH2H
+    ? `No ${statLabel} in ${hitTotal} games vs ${h2hOpponent}`
+    : `No ${statLabel} in the last ${hitTotal} games`;
   const hitColor = noEvidence
     ? colors.none
     : hitPct >= HIT_RATE_GOOD
@@ -532,7 +591,9 @@ export function PlayerStatsScreen() {
     setLine(result.line);
   };
 
-  const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
+  const windowLabel = isH2H
+    ? `vs ${h2hOpponent} · last 2 seasons`
+    : range === 'all' ? `${windowed.length} games` : `last ${range}`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
@@ -711,8 +772,8 @@ export function PlayerStatsScreen() {
           style={rangeReach.frame}
           contentContainerStyle={[styles.windowRow, rangeReach.content]}
         >
-          {windows.map((w) => {
-            const active = w.value === gameWindow;
+          {rangeOptions.map((w) => {
+            const active = w.value === range;
             return (
               <Pressable
                 // In-bounds only: the row's 4pt padding (4 above is its half of
@@ -723,7 +784,9 @@ export function PlayerStatsScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={
-                  w.value === 'all' ? 'All games' : `Last ${w.value} games`
+                  w.value === 'h2h'
+                    ? `Head to head with ${h2hOpponent}, last 2 seasons`
+                    : w.value === 'all' ? 'All games' : `Last ${w.value} games`
                 }
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
@@ -745,8 +808,20 @@ export function PlayerStatsScreen() {
           />
         ) : null}
 
-        {loading && games.length === 0 ? (
-          <ActivityIndicator style={styles.loading} accessibilityLabel="Loading recent games" />
+        {(loading && games.length === 0)
+          || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null)) ? (
+          <ActivityIndicator
+            style={styles.loading}
+            accessibilityLabel={isH2H ? `Loading games against ${h2hOpponent}` : 'Loading recent games'}
+          />
+        ) : isH2H && windowed.length === 0 && detail.h2hError ? (
+          <ErrorBanner
+            what={`games against ${h2hOpponent}`}
+            error={detail.h2hError}
+            onRetry={detail.reload}
+            retrying={detail.h2hLoading}
+            style={styles.errorBannerInset}
+          />
         ) : windowed.length === 0 ? (
           <View style={styles.emptyCard}>
             {/* Two different nothings: no games at all, or games with no value
@@ -755,7 +830,9 @@ export function PlayerStatsScreen() {
                 a populated Recent games list made the screen contradict
                 itself (UX review, 2026-09-20). */}
             <Text style={styles.emptyText}>
-              {games.length === 0
+              {isH2H
+                ? `No meetings with ${h2hOpponent} in the last 2 seasons.`
+                : games.length === 0
                 ? 'No recent games on file.'
                 : `No ${statLabel.toLowerCase()} in the last ${games.length} games.`}
             </Text>
@@ -898,6 +975,8 @@ export function PlayerStatsScreen() {
 
               <HitRateChart
                 values={windowed}
+                games={windowedGames}
+                unit={statLabel}
                 line={selection.line}
                 side={selection.side}
                 lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
@@ -1179,8 +1258,10 @@ function GameRow({
         ) : null}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.gameDate}>{row.game_date}</Text>
-        <Text style={styles.gameMeta}>{gameContextLine(sport, row)}</Text>
+        {/* The chart's own date idiom ("10/26"), so the bar and the row
+            name the game the same way. */}
+        <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
+        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>

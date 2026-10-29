@@ -498,7 +498,7 @@ export type RootStackParamList = {
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
-  ByomBuilder: undefined;
+  ByomBuilder: { sport?: 'NFL' | 'NBA' } | undefined;
   ByomEdit: { modelId: string };
   ByomDetail: { modelId: string };
   // playerType is MLB-only (it picks batter vs pitcher chips); every other
@@ -565,9 +565,10 @@ export type RootStackParamList = {
      * is the board's whole-number ruler stop, the same "N+" threshold this
      * screen's stepper holds (lib/hitMode selectionFor). `gameWindow` is used
      * only when the screen offers that span; otherwise it keeps its default.
+     * 'h2h' is the board's H2H window: every meeting with tonight's opponent.
      */
     line?: number;
-    gameWindow?: number;
+    gameWindow?: number | 'h2h';
     /** The pick's own scored line when `line` came from a pick (Pick Detail),
      *  raw — the caption under the hit card names it "pick Under 10.5". */
     pickScoredLine?: number;

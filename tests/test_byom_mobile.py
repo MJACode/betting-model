@@ -154,10 +154,10 @@ def test_byom_record_rank_roi_and_filters(tmp_path):
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
 import {
-  assertByomSide, byomRoi, byomWinRate, currentNflSeason, draftFromFilters,
-  filtersForDraft, formatByomRecord, isWholeSeason, marketLabel, nflSeasonList,
-  otherModelWithName, rankByUnits, recordFromRows, saveBlockReason, showsUnits,
-  sideForMarket, suggestedName,
+  assertByomSide, byomRoi, byomWinRate, currentNbaSeason, currentNflSeason, draftFromFilters,
+  filtersForDraft, formatByomRecord, isWholeSeason, marketLabel, nbaSeasonList, nflSeasonList,
+  otherModelWithName, propSideAfterMarketChange, rankByUnits, recordFromRows,
+  saveBlockReason, showsUnits, sideForMarket, suggestedName,
 } from './byomRecord.ts';
 
 const summed = recordFromRows([
@@ -201,12 +201,43 @@ if (seasons[0] !== 2020 || seasons[seasons.length - 1] !== 2026 || seasons.lengt
 
 if (!isWholeSeason({})) throw new Error('empty');
 if (isWholeSeason({ markets: ['h2h'] })) throw new Error('market is not the whole season');
-if (showsUnits({}) || showsUnits({ markets: ['player_pass_yds'] })) throw new Error('props show units');
+if (showsUnits({})) throw new Error('empty shows units');
+if (showsUnits({ markets: ['player_pass_yds'] })) throw new Error('unsided prop shows units');
+if (showsUnits({ markets: ['h2h', 'player_pass_yds'] })) throw new Error('mix shows units');
+if (showsUnits({ markets: ['h2h', 'player_pass_yds'], prop_side: 'over' })) {
+  throw new Error('sided mix shows units');
+}
+if (showsUnits({ markets: ['player_pass_yds', 'player_rush_yds'], prop_side: 'over' })) {
+  throw new Error('two props show units');
+}
+if (showsUnits({ markets: ['not_a_market'] })) throw new Error('unknown shows units');
+if (showsUnits({ markets: ['player_anytime_td'] })) throw new Error('unsided atd shows units');
+if (showsUnits({ markets: ['player_anytime_td'], prop_side: 'under' })) {
+  throw new Error('atd under shows units');
+}
 if (!showsUnits({ markets: ['h2h', 'spreads'] })) throw new Error('game markets hide units');
+if (!showsUnits({ markets: ['h2h'] })) throw new Error('moneyline hides units');
+if (!showsUnits({ markets: ['totals'], side: 'over' })) throw new Error('total hides units');
+if (!showsUnits({ markets: ['player_pass_yds'], prop_side: 'over' })) throw new Error('over hides units');
+if (!showsUnits({ markets: ['player_pass_yds'], prop_side: 'under', side: 'away' })) {
+  throw new Error('under hides units');
+}
+if (!showsUnits({ markets: ['player_anytime_td'], prop_side: 'over' })) {
+  throw new Error('atd over hides units');
+}
 if (marketLabel({}) !== '\u2014') throw new Error('empty label');
-if (marketLabel({ markets: ['h2h', 'player_pass_yds'] }) !== 'Moneyline \u00b7 Props') {
+if (marketLabel({ markets: ['h2h', 'player_pass_yds'] }) !== 'Moneyline \u00b7 Passing yards') {
   throw new Error('label ' + marketLabel({ markets: ['h2h', 'player_pass_yds'] }));
 }
+if (marketLabel({ markets: ['player_anytime_td'] }) !== 'Anytime TD') throw new Error('atd label');
+if (marketLabel({ markets: ['player_sacks'] }) !== 'Sacks') throw new Error('sacks label');
+if (marketLabel({ markets: ['player_sacks'], prop_side: 'under' }) !== 'Sacks \u00b7 Under') {
+  throw new Error('sacks side ' + marketLabel({ markets: ['player_sacks'], prop_side: 'under' }));
+}
+if (marketLabel({ markets: ['player_anytime_td'], prop_side: 'over' }) !== 'Anytime TD') {
+  throw new Error('atd side label');
+}
+if (marketLabel({ markets: ['mystery_market'] }) !== 'Props') throw new Error('unknown label');
 
 const kept = filtersForDraft(
   { market: 'totals', side: 'home', role: 'underdog', primetime: true },
@@ -228,7 +259,10 @@ const back = draftFromFilters(spread);
 if (!back || back.market !== 'spreads' || back.side !== 'home' || back.role !== 'underdog') {
   throw new Error('draft ' + JSON.stringify(back));
 }
-if (draftFromFilters({ markets: ['player_pass_yds'] }) !== null) throw new Error('prop draft');
+const bareProp = draftFromFilters({ markets: ['player_pass_yds'] });
+if (!bareProp || bareProp.market !== 'player_pass_yds' || bareProp.propSide || bareProp.side) {
+  throw new Error('bare prop ' + JSON.stringify(bareProp));
+}
 if (suggestedName({ market: 'spreads', side: 'home', role: 'underdog', primetime: null }) !== 'Home underdogs') {
   throw new Error('name');
 }
@@ -243,6 +277,45 @@ if (suggestedName({ market: 'totals', side: 'over', role: null, primetime: null 
 }
 if (suggestedName({ market: 'totals', side: 'under', role: null, primetime: true }) !== 'Primetime under') {
   throw new Error('under name');
+}
+if (suggestedName({ market: 'player_pass_yds', side: null, role: null, primetime: null, propSide: 'over' }) !== 'Passing yards over') {
+  throw new Error('prop name');
+}
+if (suggestedName({ market: 'player_rush_yds', side: 'home', role: null, primetime: true, propSide: 'under' }) !== 'Primetime home rushing yards under') {
+  throw new Error('prop home name');
+}
+if (suggestedName({ market: 'player_anytime_td', side: null, role: null, primetime: null, propSide: 'over' }) !== 'Anytime TD') {
+  throw new Error('atd name');
+}
+if (suggestedName({ market: 'player_anytime_td', side: 'away', role: null, primetime: null, propSide: 'over' }) !== 'Away anytime TD') {
+  throw new Error('atd away name');
+}
+const propKept = filtersForDraft(
+  { market: 'player_pass_yds', side: 'away', role: 'favorite', primetime: true, propSide: 'over' },
+  { weeks: [4], prop_side: 'under', role: 'underdog' },
+);
+if (propKept.prop_side !== 'over' || propKept.side !== 'away' || propKept.role || propKept.primetime !== true) {
+  throw new Error('prop kept ' + JSON.stringify(propKept));
+}
+if (JSON.stringify(propKept.weeks) !== '[4]' || JSON.stringify(propKept.markets) !== '["player_pass_yds"]') {
+  throw new Error('prop weeks ' + JSON.stringify(propKept));
+}
+const atdUnder = filtersForDraft(
+  { market: 'player_anytime_td', side: 'home', role: null, primetime: null, propSide: 'under' },
+);
+if (atdUnder.prop_side !== 'over' || atdUnder.side !== 'home') throw new Error('atd under ' + JSON.stringify(atdUnder));
+const atdYes = filtersForDraft(
+  { market: 'player_anytime_td', side: null, role: 'favorite', primetime: false, propSide: 'over' },
+);
+if (atdYes.prop_side !== 'over' || atdYes.side || atdYes.role || atdYes.primetime !== false) {
+  throw new Error('atd yes ' + JSON.stringify(atdYes));
+}
+const gameDropsProp = filtersForDraft(
+  { market: 'h2h', side: 'home', role: 'favorite', primetime: null, propSide: 'over' },
+  { prop_side: 'under' },
+);
+if (gameDropsProp.prop_side || gameDropsProp.side !== 'home' || gameDropsProp.role !== 'favorite') {
+  throw new Error('game drop ' + JSON.stringify(gameDropsProp));
 }
 const over = filtersForDraft(
   { market: 'totals', side: 'over', role: 'favorite', primetime: null },
@@ -261,6 +334,21 @@ if (sideForMarket('totals', 'home') !== null || sideForMarket('spreads', 'over')
 }
 if (sideForMarket('h2h', 'away') !== 'away' || sideForMarket('totals', 'under') !== 'under') {
   throw new Error('side kept');
+}
+if (sideForMarket('player_pass_yds', 'over') !== null || sideForMarket('player_pass_yds', 'home') !== 'home') {
+  throw new Error('prop team side');
+}
+if (propSideAfterMarketChange('player_anytime_td', 'player_pass_yds', 'over') !== null) {
+  throw new Error('leaving anytime should clear over');
+}
+if (propSideAfterMarketChange('player_pass_yds', 'player_sacks', 'under') !== 'under') {
+  throw new Error('other props should keep under');
+}
+if (propSideAfterMarketChange('player_pass_yds', 'player_anytime_td', 'under') !== 'over') {
+  throw new Error('anytime is yes');
+}
+if (propSideAfterMarketChange('player_anytime_td', 'h2h', 'over') !== null) {
+  throw new Error('game clears prop side');
 }
 const block = (market, side, role) => saveBlockReason({ market, side, role, primetime: null });
 if (!block('h2h', null, null) || !block('h2h', null, null).includes('team')) throw new Error('ml any');
@@ -296,8 +384,21 @@ assertByomSide({ markets: ['h2h'], side: 'home', role: 'underdog' });
 assertByomSide({ markets: ['totals'], side: 'over' });
 assertByomSide({ markets: ['totals'], side: 'under' });
 assertByomSide({});
-assertByomSide({ markets: ['player_pass_yds'] });
+mustThrow({ markets: ['player_pass_yds'] }, 'over or under');
+mustThrow({ markets: ['player_anytime_td'] }, 'yes');
+mustThrow({ markets: ['player_anytime_td'], prop_side: 'under' }, 'yes');
+assertByomSide({ markets: ['player_pass_yds'], prop_side: 'over' });
+assertByomSide({ markets: ['player_pass_yds'], prop_side: 'under', side: 'away' });
+assertByomSide({ markets: ['player_anytime_td'], prop_side: 'over', side: 'home' });
 assertByomSide({ markets: ['h2h', 'spreads'] });
+const propBlock = saveBlockReason({
+  market: 'player_receptions', side: null, role: null, primetime: null, propSide: null,
+});
+if (!propBlock || !propBlock.includes('over or under')) throw new Error('prop block ' + propBlock);
+const anyBlock = saveBlockReason({
+  market: 'player_pass_yds', side: null, role: 'favorite', primetime: null, propSide: 'over',
+});
+if (anyBlock != null) throw new Error('any team should save ' + anyBlock);
 
 const ranked = rankByUnits([
   { id: 'c', name: 'Zero', bets: 0, units: 0, showsUnits: true },
@@ -319,6 +420,87 @@ if (!taken || taken.model_id !== 'b') throw new Error('taken ' + JSON.stringify(
 if (otherModelWithName(models, 'Primetime', 'b') !== null) throw new Error('self');
 if (otherModelWithName(models, 'primetime') !== null) throw new Error('case');
 if (otherModelWithName(models, 'Road') !== null) throw new Error('missing');
+
+const octNba = new Date('2026-10-29T16:00:00Z');
+const septNba = new Date('2026-09-15T16:00:00Z');
+const janNba = new Date('2027-01-15T16:00:00Z');
+if (currentNbaSeason(octNba) !== 2027) throw new Error('nba oct ' + currentNbaSeason(octNba));
+if (currentNbaSeason(septNba) !== 2026) throw new Error('nba sept ' + currentNbaSeason(septNba));
+if (currentNbaSeason(janNba) !== 2027) throw new Error('nba jan ' + currentNbaSeason(janNba));
+const nbaSeasons = nbaSeasonList(octNba);
+if (nbaSeasons[0] !== 2023 || nbaSeasons[nbaSeasons.length - 1] !== 2027) {
+  throw new Error('nba seasons ' + nbaSeasons.join(','));
+}
+
+if (showsUnits({ markets: ['player_points'] })) throw new Error('unsided points shows units');
+if (!showsUnits({ markets: ['player_points'], prop_side: 'over' })) throw new Error('points over hides');
+if (!showsUnits({ markets: ['player_points'], prop_side: 'under' })) throw new Error('points under hides');
+if (showsUnits({ markets: ['player_double_double'], prop_side: 'under' })) {
+  throw new Error('dd under shows units');
+}
+if (!showsUnits({ markets: ['player_double_double'], prop_side: 'over' })) {
+  throw new Error('dd yes hides units');
+}
+if (!showsUnits({ markets: ['player_triple_double'], prop_side: 'over' })) {
+  throw new Error('td yes hides units');
+}
+if (showsUnits({ markets: ['player_points', 'player_rebounds'], prop_side: 'over' })) {
+  throw new Error('two nba props show units');
+}
+if (marketLabel({ markets: ['player_points'], prop_side: 'over' }) !== 'Points · Over') {
+  throw new Error('points label ' + marketLabel({ markets: ['player_points'], prop_side: 'over' }));
+}
+if (marketLabel({ markets: ['player_points'], prop_side: 'over', min_rest_days: 1, max_rest_days: 1 }) !== 'Points · Over · Back-to-back') {
+  throw new Error('b2b label ' + marketLabel({ markets: ['player_points'], prop_side: 'over', min_rest_days: 1, max_rest_days: 1 }));
+}
+if (marketLabel({ markets: ['player_assists'], prop_side: 'under', min_rest_days: 2 }) !== 'Assists · Under · 2+ days rest') {
+  throw new Error('rest label');
+}
+if (marketLabel({ markets: ['player_double_double'], prop_side: 'over' }) !== 'Double-double') {
+  throw new Error('dd label ' + marketLabel({ markets: ['player_double_double'], prop_side: 'over' }));
+}
+if (marketLabel({ markets: ['player_points_rebounds'] }) !== 'Points + Reb') {
+  throw new Error('pr label');
+}
+
+const points = filtersForDraft(
+  { market: 'player_points', side: 'home', role: null, primetime: true, propSide: 'over', rest: 'b2b' },
+  {},
+  'NBA',
+);
+if (points.prop_side !== 'over' || points.side !== 'home' || points.primetime || points.min_rest_days !== 1 || points.max_rest_days !== 1) {
+  throw new Error('b2b points ' + JSON.stringify(points));
+}
+const rested = filtersForDraft(
+  { market: 'player_assists', side: null, role: null, primetime: null, propSide: 'under', rest: 'rest2' },
+  { primetime: true, min_rest_days: 1, max_rest_days: 1 },
+  'NBA',
+);
+if (rested.min_rest_days !== 2 || rested.max_rest_days != null || rested.primetime) {
+  throw new Error('rest2 ' + JSON.stringify(rested));
+}
+const dd = draftFromFilters({ markets: ['player_double_double'], prop_side: 'over', min_rest_days: 1, max_rest_days: 1 });
+if (!dd || dd.market !== 'player_double_double' || dd.propSide !== 'over' || dd.rest !== 'b2b') {
+  throw new Error('dd draft ' + JSON.stringify(dd));
+}
+if (saveBlockReason({ market: 'player_triple_double', side: null, role: null, primetime: null, propSide: null }) !== 'Choose yes.') {
+  throw new Error('td needs yes');
+}
+if (saveBlockReason({ market: 'player_blocks', side: null, role: null, primetime: null, propSide: 'under' }) !== null) {
+  throw new Error('blocks under should save');
+}
+if (propSideAfterMarketChange('player_double_double', 'player_points', 'over') !== null) {
+  throw new Error('leaving yes-only should clear over');
+}
+if (propSideAfterMarketChange('player_points', 'player_triple_double', 'under') !== 'over') {
+  throw new Error('entering triple-double should be yes');
+}
+if (suggestedName({ market: 'player_points', side: 'away', role: null, primetime: null, propSide: 'over', rest: 'b2b' }) !== 'Back-to-back away points over') {
+  throw new Error('name ' + suggestedName({ market: 'player_points', side: 'away', role: null, primetime: null, propSide: 'over', rest: 'b2b' }));
+}
+if (suggestedName({ market: 'player_double_double', side: null, role: null, primetime: null, propSide: 'over', rest: 'rest2' }) !== '2+ days rest double-double') {
+  throw new Error('dd name');
+}
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
@@ -378,6 +560,24 @@ def test_save_requires_a_side_or_a_favorite():
     assert "When is kickoff?" not in builder
     assert "{ value: 'over', label: 'Over' }" in fields
     assert "{ value: 'under', label: 'Under' }" in fields
+    assert "NFL player props" in fields
+    assert "Player\u2019s team" in fields
+    assert 'accessibilityLabel="Side, Yes"' in fields
+    assert "{ value: 'yes', label: 'Yes' }" not in fields
+    assert "Choose yes." in record
+    for label in (
+        "Passing yards", "Passing TDs", "Pass attempts", "Completions",
+        "Rushing yards", "Rush attempts", "Receiving yards", "Receptions",
+        "Rush + rec yards", "Anytime TD", "Tackles + assists", "Sacks",
+    ):
+        assert label in record
+    assert "prop_side" in (ROOT / "mobile/src/lib/byomFilters.ts").read_text(encoding="utf-8")
+    assert "propSide" in builder
+    assert "onPropSide={setPropSide}" in builder
+    assert "propSide" in edit
+    assert "onPropSide={setPropSide}" in edit
+    assert "Position" not in fields
+    assert "line range" not in fields.lower()
     byom = (ROOT / "mobile/src/lib/byom.ts").read_text(encoding="utf-8")
     assert byom.index("assertByomSide(checked)") < byom.index("supabase.rpc('byom_save_model'")
     forward = (ROOT / "data/migrations/byom_total_side_2026_10_25.sql").read_text(encoding="utf-8")
