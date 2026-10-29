@@ -468,6 +468,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # the table, policy and grant exist. Does not touch picks, odds or the
     # record. Sits before the posted-stake pair so those two stay adjacent.
     "add_live_scoreboard_2026_10_29.sql",
+    # 2026-10-29 (Matt): Scoreboard % bets / % money, display only.
+    # One table written by data/ingestors/scoreboard_splits.py, SELECT
+    # policy and SELECT-only grant; catalog return once all three exist.
+    # Not public_betting, which the scorer copies onto every pick.
+    "add_scoreboard_splits_2026_10_29.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

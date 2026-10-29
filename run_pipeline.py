@@ -1400,6 +1400,23 @@ def step_nba_public_splits(run_date: str) -> bool:
         return False
 
 
+def step_scoreboard_splits(run_date: str) -> bool:
+    """
+    % of bets and % of money for the app's Scoreboard (Action Network, free),
+    every sport with an unstarted game today or tomorrow. Writes
+    scoreboard_splits only -- never public_betting, which the scorer copies
+    onto every pick. Best-effort.
+    """
+    try:
+        from data.ingestors.scoreboard_splits import run
+        result = run()
+        logger.success(f"✓ Scoreboard splits: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Scoreboard splits failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher + batter props across the look-ahead window.
 
@@ -2564,7 +2581,7 @@ Examples:
                                  "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news", "player-positions",
                                  "player-news-refresh",
-                                 "umpires", "public-betting", "nba-public-splits", "scoring",
+                                 "umpires", "public-betting", "nba-public-splits", "scoreboard-splits", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
@@ -2638,6 +2655,7 @@ Examples:
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
             "nba-public-splits": lambda: step_nba_public_splits(run_date),
+            "scoreboard-splits": lambda: step_scoreboard_splits(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
             "game-log-today": lambda: step_game_log(run_date, run_date),

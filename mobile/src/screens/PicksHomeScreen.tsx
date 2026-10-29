@@ -761,6 +761,7 @@ export function PicksHomeScreen() {
           quotes={board.quotes}
           feeds={board.feeds}
           inplay={board.inplay}
+          splits={board.splits}
           nextGame={board.nextGame}
           sport={sbSport}
           onSport={setSbSport}

@@ -18,7 +18,12 @@ import {
   type PlayerLogSport,
 } from './playerLog';
 import { LINES_ODDS_MARKETS, LINES_SPORTS } from './linesBoard';
-import { SCOREBOARD_MARKETS, SCOREBOARD_SPORTS, type InplayChunkResult } from './scoreboard';
+import {
+  SCOREBOARD_MARKETS,
+  SCOREBOARD_SPORTS,
+  type InplayChunkResult,
+  type ScoreboardSplitRow,
+} from './scoreboard';
 import {
   gameMarketForModel,
   lineShopForPick,
@@ -3234,6 +3239,28 @@ export async function fetchLiveScoreboard(gameIds: readonly string[]): Promise<L
       .in('game_id', [...chunk]);
     if (error) throw error;
     out.push(...((data ?? []) as unknown as LiveScoreboardRow[]));
+  }
+  return out;
+}
+
+/**
+ * Scoreboard % bets / % money (scoreboard_splits, written each refresh pass
+ * by data/ingestors/scoreboard_splits.py). At most 6 rows per game; the
+ * caller asks for one sport's slate, 80 games a request, so a request stays
+ * under the 1,000-row cap (80 x 6 = 480).
+ */
+export async function fetchScoreboardSplits(gameIds: readonly string[]): Promise<ScoreboardSplitRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: ScoreboardSplitRow[] = [];
+  const size = 80;
+  for (let i = 0; i < gameIds.length; i += size) {
+    const chunk = gameIds.slice(i, i + size);
+    const { data, error } = await supabase
+      .from('scoreboard_splits')
+      .select('game_id, market, side, bet_pct, money_pct')
+      .in('game_id', [...chunk]);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as ScoreboardSplitRow[]));
   }
   return out;
 }

@@ -10,6 +10,7 @@ import {
   fetchNextScoreboardGame,
   fetchScoreboardDkOdds,
   fetchScoreboardGames,
+  fetchScoreboardSplits,
   type LiveScoreboardRow,
   type NcaafScoreboardRow,
 } from '@/lib/queries';
@@ -22,6 +23,7 @@ import {
   scoreboardPhase,
   type ScoreboardFeed,
   type ScoreboardQuote,
+  type ScoreboardSplitRow,
 } from '@/lib/scoreboard';
 import type { GameRow, LatestDkOddsRow, LiveGameStateRow } from '@/types';
 
@@ -53,6 +55,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
   const [quotes, setQuotes] = useState<Map<string, ScoreboardQuote[]>>(new Map());
   const [feeds, setFeeds] = useState<Map<string, ScoreboardFeed>>(new Map());
   const [inplay, setInplay] = useState<Map<string, ScoreboardQuote[]>>(new Map());
+  const [splits, setSplits] = useState<Map<string, ScoreboardSplitRow[]>>(new Map());
   const [nextGame, setNextGame] = useState<GameRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -83,7 +86,9 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
           return Number.isFinite(t) && t <= Date.now() + 10 * 60 * 1000;
         })
         .map((game) => game.game_id);
-      const [oddsRes, mlbRes, ncaafRes, espnRes, nextRes] = await Promise.all([
+      // Splits for the open sport only: at most 6 rows a game.
+      const sportIds = gs.filter((game) => game.sport === sport).map((game) => game.game_id);
+      const [oddsRes, mlbRes, ncaafRes, espnRes, splitRes, nextRes] = await Promise.all([
         fetchScoreboardDkOdds(slate).then(
           (rows) => ({ rows, error: null as string | null }),
           (e: unknown) => ({ rows: [] as LatestDkOddsRow[], error: isAbortError(e) ? null : errorText(e) }),
@@ -111,6 +116,9 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
             error: isAbortError(e) || missingRelation(e) ? null : errorText(e),
           }),
         ),
+        // A missing table or a failed read leaves the columns as dashes; the
+        // board is still usable, so this does not raise a banner.
+        fetchScoreboardSplits(sportIds).catch(() => [] as ScoreboardSplitRow[]),
         gs.some((g) => g.sport === sport && g.game_date === anchorDate)
           ? Promise.resolve(null)
           : fetchNextScoreboardGame(sport, anchorDate).catch(() => null),
@@ -142,6 +150,13 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
 
       setGames(gs);
       setQuotes(groupQuotes(oddsRes.rows));
+      const bySplit = new Map<string, ScoreboardSplitRow[]>();
+      for (const row of splitRes) {
+        const list = bySplit.get(row.game_id) ?? [];
+        list.push(row);
+        bySplit.set(row.game_id, list);
+      }
+      setSplits(bySplit);
       setFeeds(feedMap);
       inplayRef.current = liveLines;
       setInplay(liveLines);
@@ -181,6 +196,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
     quotes,
     feeds,
     inplay,
+    splits,
     nextGame,
     loading,
     loaded,

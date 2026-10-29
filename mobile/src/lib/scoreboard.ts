@@ -629,3 +629,78 @@ function leg(q: ScoreboardQuote | null, market: 'h2h' | 'spreads' | 'totals'): s
 
 /** The minus the cards print. Exported so a test can see it is U+2212. */
 export const SCOREBOARD_MINUS = MINUS;
+
+// ── % bets / % money (Matt, 2026-10-29) ─────────────────────────────────────
+// The board shows one market at a time: Odds, % Bets and % Money per side,
+// from scoreboard_splits (data/ingestors/scoreboard_splits.py, Action
+// Network, display only). A side with no stored split shows a dash.
+
+export type ScoreboardMarket = 'spreads' | 'totals' | 'h2h';
+export const SCOREBOARD_MARKET_ORDER: readonly ScoreboardMarket[] = ['spreads', 'totals', 'h2h'];
+
+export function scoreboardMarketLabel(market: ScoreboardMarket, sport: string): string {
+  if (market === 'totals') return 'Total';
+  if (market === 'h2h') return 'ML';
+  return sport === 'NHL' ? 'Puck line' : 'Spread';
+}
+
+export interface ScoreboardSplitRow {
+  game_id: string;
+  market: string;
+  side: string;
+  bet_pct: number | string | null;
+  money_pct: number | string | null;
+}
+
+export interface SideSplit {
+  bets: number | null;
+  money: number | null;
+}
+
+/**
+ * The two rows of a card for one market. Totals follow the card's own
+ * layout: Over on the away row, Under on the home row.
+ */
+export function splitsFor(
+  rows: readonly ScoreboardSplitRow[] | undefined,
+  market: ScoreboardMarket,
+): { away: SideSplit; home: SideSplit } {
+  const pick = (side: string): SideSplit => {
+    const row = rows?.find((r) => r.market === market && r.side === side);
+    const pct = (v: number | string | null | undefined) => {
+      const n = num(v);
+      return n == null || n < 0 || n > 100 ? null : Math.round(n);
+    };
+    return { bets: pct(row?.bet_pct), money: pct(row?.money_pct) };
+  };
+  return market === 'totals'
+    ? { away: pick('over'), home: pick('under') }
+    : { away: pick('away'), home: pick('home') };
+}
+
+export function pctText(n: number | null): string {
+  return n == null ? '—' : `${n}%`;
+}
+
+/** The odds cell of one card row for one market. */
+export function marketCell(side: ScoreboardSide, market: ScoreboardMarket): { value: string; price: string } {
+  if (market === 'totals') return { value: side.total, price: side.totalPrice };
+  if (market === 'h2h') return { value: side.ml, price: '' };
+  return { value: side.spread, price: side.spreadPrice };
+}
+
+/** What VoiceOver reads for one card's splits in one market. */
+export function splitsSpeech(
+  card: ScoreboardCard,
+  market: ScoreboardMarket,
+  splits: { away: SideSplit; home: SideSplit },
+): string {
+  const label = market === 'totals' ? 'Total' : market === 'h2h' ? 'Moneyline' : 'Spread';
+  const side = (name: string, s: SideSplit) =>
+    s.bets == null && s.money == null
+      ? `${name} no split stored`
+      : `${name} ${s.bets ?? 'no'} percent of bets, ${s.money ?? 'no'} percent of money`;
+  const awayName = market === 'totals' ? 'Over' : card.awayFull;
+  const homeName = market === 'totals' ? 'Under' : card.homeFull;
+  return `${label}: ${side(awayName, splits.away)}; ${side(homeName, splits.home)}.`;
+}

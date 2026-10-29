@@ -19,16 +19,25 @@ import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { addDays, dayLabelET } from '@/lib/format';
 import {
   SCOREBOARD_BOOK_NOTE,
+  SCOREBOARD_MARKET_ORDER,
   SCOREBOARD_SPORTS,
+  marketCell,
   nextSlateText,
   orderScoreboard,
+  pctText,
   presentScoreboard,
+  scoreboardMarketLabel,
   scoreboardSwitchLine,
+  splitsFor,
+  splitsSpeech,
   type ScoreboardCard,
   type ScoreboardFeed,
+  type ScoreboardMarket,
   type ScoreboardPhase,
   type ScoreboardQuote,
+  type ScoreboardSplitRow,
   type ScoreboardSport,
+  type SideSplit,
 } from '@/lib/scoreboard';
 import { colors, font, radii, spacing, teamDisc } from '@/lib/theme';
 import type { GameRow } from '@/types';
@@ -57,6 +66,7 @@ export function ScoreboardBoard({
   quotes,
   feeds,
   inplay,
+  splits,
   nextGame,
   sport,
   onSport,
@@ -83,6 +93,8 @@ export function ScoreboardBoard({
   quotes: ReadonlyMap<string, ScoreboardQuote[]>;
   feeds: ReadonlyMap<string, ScoreboardFeed>;
   inplay: ReadonlyMap<string, ScoreboardQuote[]>;
+  /** % bets / % money per game (scoreboard_splits). */
+  splits: ReadonlyMap<string, ScoreboardSplitRow[]>;
   nextGame: GameRow | null;
   sport: ScoreboardSport;
   onSport: (sport: ScoreboardSport) => void;
@@ -110,6 +122,8 @@ export function ScoreboardBoard({
   const abbrevs = useNcaafAbbrevs(true);
   const [pulling, setPulling] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
+  // One market at a time: Odds, % Bets, % Money (Matt, 2026-10-29).
+  const [market, setMarket] = useState<ScoreboardMarket>('spreads');
   const dayWord = dayLabelET(date, today);
 
   const dayGames = useMemo(
@@ -186,6 +200,18 @@ export function ScoreboardBoard({
       </ScrollView>
 
       <View style={styles.filters}>
+        <View style={styles.markets} accessibilityRole="tablist">
+          {SCOREBOARD_MARKET_ORDER.map((m) => (
+            <FilterChip
+              key={m}
+              size="sm"
+              label={scoreboardMarketLabel(m, sport)}
+              active={market === m}
+              onPress={() => setMarket(m)}
+              accessibilityLabel={`${m === 'h2h' ? 'Moneyline' : scoreboardMarketLabel(m, sport)} odds and splits`}
+            />
+          ))}
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${dayWord}, DraftKings. Choose a day.`}
@@ -279,8 +305,13 @@ export function ScoreboardBoard({
                   >
                     Score
                   </Text>
-                  <Text style={[styles.colHead, styles.colLine]}>{sport === 'NHL' ? 'Puck line' : 'Spread'}</Text>
-                  <Text style={[styles.colHead, styles.colLine]}>Total</Text>
+                  <Text style={[styles.colHead, styles.colLine]}>Odds</Text>
+                  <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    % Bets
+                  </Text>
+                  <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    % Money
+                  </Text>
                 </View>
               ) : null}
             </View>
@@ -316,7 +347,12 @@ export function ScoreboardBoard({
                   {`${PHASE_LABEL[item.phase]} · ${cards.filter((c) => c.phase === item.phase).length}`}
                 </Text>
               ) : null}
-              <GameCard card={item} onPress={() => onOpenGame(item.gameId)} />
+              <GameCard
+                card={item}
+                market={market}
+                split={splitsFor(splits.get(item.gameId), market)}
+                onPress={() => onOpenGame(item.gameId)}
+              />
             </View>
           )}
         />
@@ -392,18 +428,28 @@ function LockedBoard({
   );
 }
 
-function GameCard({ card, onPress }: { card: ScoreboardCard; onPress: () => void }) {
+function GameCard({
+  card,
+  market,
+  split,
+  onPress,
+}: {
+  card: ScoreboardCard;
+  market: ScoreboardMarket;
+  split: { away: SideSplit; home: SideSplit };
+  onPress: () => void;
+}) {
   const ink = card.linesMuted ? colors.textTertiary : colors.textPrimary;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={card.accessibilityLabel}
+      accessibilityLabel={`${card.accessibilityLabel} ${splitsSpeech(card, market, split)}`}
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <SideRow card={card} side="away" ink={ink} />
-      <SideRow card={card} side="home" ink={ink} />
-      {card.showMl ? (
+      <SideRow card={card} side="away" ink={ink} market={market} split={split.away} />
+      <SideRow card={card} side="home" ink={ink} market={market} split={split.home} />
+      {card.showMl && market !== 'h2h' ? (
         <Text style={styles.mlLine}>
           ML  {card.away.name} {card.away.ml} · {card.home.name} {card.home.ml}
         </Text>
@@ -435,12 +481,17 @@ function SideRow({
   card,
   side,
   ink,
+  market,
+  split,
 }: {
   card: ScoreboardCard;
   side: 'away' | 'home';
   ink: string;
+  market: ScoreboardMarket;
+  split: SideSplit;
 }) {
   const row = card[side];
+  const cell = marketCell(row, market);
   const scoreColor = row.scoreMuted ? colors.textTertiary : colors.textPrimary;
   return (
     <View style={styles.side}>
@@ -460,8 +511,37 @@ function SideRow({
       >
         {row.score}
       </Text>
-      <LineCell value={row.spread} price={row.spreadPrice} ink={ink} />
-      <LineCell value={row.total} price={row.totalPrice} ink={ink} />
+      <LineCell value={cell.value} price={cell.price} ink={ink} single={market === 'h2h'} />
+      <PctCell value={split.bets} />
+      <PctCell value={split.money} />
+    </View>
+  );
+}
+
+/** A percentage over a thin bar; green when this side holds the majority. */
+function PctCell({ value }: { value: number | null }) {
+  const majority = value != null && value > 50;
+  return (
+    <View style={[styles.colPct, styles.pct]}>
+      <Text
+        style={[styles.pctText, value == null && styles.pctEmpty]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        maxFontSizeMultiplier={1.6}
+      >
+        {pctText(value)}
+      </Text>
+      <View style={styles.barTrack}>
+        {value != null ? (
+          <View
+            style={[
+              styles.barFill,
+              { width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: majority ? colors.bet : colors.none },
+            ]}
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -572,10 +652,30 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
   },
-  colMatch: { flex: 1, minWidth: 80 },
+  // 56 keeps the row inside a 320pt-wide phone with four fixed columns.
+  colMatch: { flex: 1, minWidth: 56 },
   // 40 fits a three-digit NBA score and the 'Score' heading on one line.
   colScore: { width: 40, textAlign: 'center' },
-  colLine: { width: 68, alignItems: 'center', textAlign: 'center' },
+  colLine: { width: 64, alignItems: 'center', textAlign: 'center' },
+  colPct: { width: 44, alignItems: 'center', textAlign: 'center' },
+  pct: { gap: 4, justifyContent: 'center' },
+  pctText: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  pctEmpty: { color: colors.textTertiary },
+  barTrack: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.noneSoft,
+    overflow: 'hidden',
+  },
+  barFill: { height: 4, borderRadius: 2 },
+  markets: { flexDirection: 'row', gap: spacing.xs, flexShrink: 1 },
   side: { flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: spacing.xs },
   match: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   disc: {
