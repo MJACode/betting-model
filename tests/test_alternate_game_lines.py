@@ -9,6 +9,7 @@ ACTIVE_MIGRATIONS.
 from __future__ import annotations
 
 import inspect
+from datetime import datetime, timedelta, timezone
 
 from data.ingestors.odds_ingestor import (
     ALT_GAME_LINE_MARKETS,
@@ -19,10 +20,15 @@ from data.ingestors.odds_ingestor import (
 )
 
 
+# Two hours from now: inside the per-pass 24-hour window (Matt, 2026-10-29,
+# option B). A fixed far-future date would now be correctly skipped.
+_SOON = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _event(markets):
     return {
         "id": "evt-1",
-        "commence_time": "2027-06-01T23:00:00Z",
+        "commence_time": _SOON,
         "home_team": "Los Angeles Dodgers",
         "away_team": "New York Yankees",
         "bookmakers": [{
@@ -155,7 +161,56 @@ def test_a_started_game_is_not_asked(monkeypatch):
     _fetch_alternate_game_lines(
         "baseball_mlb", "MLB", [_event([]), started, {"id": "nodate"}],
         "open", "t")
-    assert seen == ["evt-1", "nodate"]
+    # An undatable event is not bought since the 24-hour window (2026-10-29):
+    # every event is a paid call, and one we cannot date we cannot bound.
+    assert seen == ["evt-1"]
+
+
+def test_only_games_inside_the_window_are_asked_each_pass(monkeypatch):
+    import data.ingestors.odds_ingestor as oi
+
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    monkeypatch.delenv("ALT_GAME_LINES_WINDOW_HOURS", raising=False)
+    seen = []
+    monkeypatch.setattr(oi, "_get_event_odds", lambda sport_key, event_id, markets, bookmakers=None: seen.append(event_id) or None)
+    now = datetime(2026, 10, 30, 12, tzinfo=timezone.utc)
+    at = lambda h: (now + timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    evs = [dict(_event([]), id="in23", commence_time=at(23)),
+           dict(_event([]), id="out25", commence_time=at(25))]
+    _fetch_alternate_game_lines("baseball_mlb", "MLB", evs, "open", "t", now=now)
+    assert seen == ["in23"]
+    monkeypatch.setenv("ALT_GAME_LINES_WINDOW_HOURS", "0")      # 0 = no window
+    seen.clear()
+    _fetch_alternate_game_lines("baseball_mlb", "MLB", evs, "open", "t", now=now)
+    assert seen == ["in23", "out25"]
+
+
+def test_the_pass_meters_the_credits_the_feed_reports(monkeypatch):
+    import data.ingestors.odds_ingestor as oi
+    from data.ingestors import odds_quota
+
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    stamps = iter([{"last": 2}, {"last": 2}, None])
+    current = {"v": None}
+
+    def fake_event(sport_key, event_id, markets, bookmakers=None):
+        current["v"] = next(stamps)
+        return None
+
+    monkeypatch.setattr(oi, "_get_event_odds", fake_event)
+    monkeypatch.setattr(odds_quota, "latest", lambda: current["v"])
+    evs = [dict(_event([]), id=f"e{i}") for i in range(3)]
+    meter: dict = {}
+    _fetch_alternate_game_lines("baseball_mlb", "MLB", evs, "open", "t", meter=meter)
+    # Calls 1 and 2 each report 2; call 3 reports nothing new.
+    assert meter == {"calls": 3, "credits": 4.0, "unreported": 1}
+
+
+def test_the_pass_refreshes_the_ladder_the_app_reads():
+    import inspect
+    import data.ingestors.odds_ingestor as oi
+    src = inspect.getsource(oi.run_odds_ingestor)
+    assert "store_pass_ladders(conn, sp, alt_rows, meter, asked_at)" in src
 
 
 def test_the_env_flag_skips_the_alternate_fetch(monkeypatch):

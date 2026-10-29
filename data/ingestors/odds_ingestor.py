@@ -139,10 +139,16 @@ DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB"})
 MARKETS = ["h2h", "spreads", "totals"]
 
 # One row per rung, under these keys, so the main spreads/totals row the
-# models read stays the one number. The edit sheet's ladder is the once-a-day
-# alt_game_lines table. This pass writes the same markets when
-# FETCH_ALT_GAME_LINES is on (default). UFC is absent: its bulk feed is h2h.
+# models read stays the one number. The edit sheet reads the ladder from
+# alt_game_lines: the 6am run fills it for the next 3 days, and this pass
+# (FETCH_ALT_GAME_LINES, default on) refreshes it every pass for games in the
+# next ALT_GAME_LINES_WINDOW_HOURS. UFC is absent: its bulk feed is h2h.
 ALT_GAME_LINE_MARKETS = ["alternate_spreads", "alternate_totals"]
+# Matt, 2026-10-29: option B, every pass, for games starting in the next 24
+# hours (the 6am alt_game_lines run keeps the 3-day look-ahead). Unbounded,
+# this pass bought a ladder for every event the bulk call listed, days out,
+# 53 times a day. ALT_GAME_LINES_WINDOW_HOURS overrides; 0 removes the window.
+ALT_GAME_LINES_WINDOW_HOURS_DEFAULT = 24.0
 ALT_GAME_LINE_SPORTS = frozenset({"MLB", "NHL", "WNBA", "NBA", "NCAAF", "NFL", "NCAAB"})
 
 # Stamped on every row the /historical endpoint writes, and protected by name
@@ -961,9 +967,36 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
     return [r for r in odds_rows if r.get("market") == NHL_3WAY_MARKET]
 
 
+def _alt_window_hours() -> float:
+    try:
+        return float(os.environ.get("ALT_GAME_LINES_WINDOW_HOURS",
+                                    ALT_GAME_LINES_WINDOW_HOURS_DEFAULT))
+    except ValueError:
+        return ALT_GAME_LINES_WINDOW_HOURS_DEFAULT
+
+
+def _within_alt_window(ev: dict, now: datetime, hours: float) -> bool:
+    """Inside the alternate-line window. FAILS CLOSED on a missing or
+    unparseable start: every event here is a paid call, and a game we cannot
+    date is one we cannot bound. hours <= 0 means no window."""
+    if hours <= 0:
+        return True
+    raw = ev.get("commence_time")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts <= now + timedelta(hours=hours)
+
+
 def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
                                 snapshot_type: str, snapshot_at: str,
-                                resolve_game_id=None) -> list[dict]:
+                                resolve_game_id=None, meter: dict | None = None,
+                                now: datetime | None = None) -> list[dict]:
     """Alternate spreads and totals for the events the bulk call already
     listed. Those are the upcoming games this pass is storing main lines
     for. The events endpoint lists a whole future season and is not used
@@ -976,10 +1009,18 @@ def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
     already stored for the slate stay.
     """
     event_responses = []
+    now = now or datetime.now(timezone.utc)
+    hours = _alt_window_hours()
     for ev in events:
         event_id = ev.get("id")
-        if not event_id or _commence_passed(ev):
+        if not event_id or _commence_passed(ev, now) or not _within_alt_window(ev, now, hours):
             continue
+        # The feed's own x-requests-last for this call, summed for the pass
+        # ledger (alt_game_line_fetches): the cost is measured, not assumed.
+        from data.ingestors import odds_quota as _oq
+        before = _oq.latest()
+        if meter is not None:
+            meter["calls"] = meter.get("calls", 0) + 1
         try:
             ev_odds = _get_event_odds(sport_key, event_id, ALT_GAME_LINE_MARKETS)
         except Exception as exc:
@@ -988,7 +1029,9 @@ def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
             if type(exc) is AssertionError:
                 raise
             logger.warning(f"  {sport} alternate lines failed for {event_id}: {exc}")
+            _meter_add(meter, before, _oq.latest())
             continue
+        _meter_add(meter, before, _oq.latest())
         if ev_odds:
             event_responses.append(ev_odds)
         time.sleep(REQUEST_SLEEP)
@@ -1000,6 +1043,17 @@ def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
         event_responses, sport, snapshot_type, snapshot_at,
         resolve_game_id=resolve_game_id)
     return [r for r in odds_rows if r.get("market") in ALT_GAME_LINE_MARKETS]
+
+
+def _meter_add(meter: dict | None, before, after) -> None:
+    """Add one call's x-requests-last to the pass meter; count it as
+    unreported when the call recorded none."""
+    if meter is None:
+        return
+    if after is None or after is before or after.get("last") is None:
+        meter["unreported"] = meter.get("unreported", 0) + 1
+    else:
+        meter["credits"] = meter.get("credits", 0.0) + float(after["last"])
 
 
 def _get_historical_odds(sport_key: str, markets: list[str],
@@ -1516,18 +1570,33 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             # both ladders come back, once per unstarted event per pass.
             # The odds step runs on each refresh (scheduler.py: :17 for hours
             # 0-5 and 7-17 ET, every 10 minutes for hours 18-23 ET) plus the
-            # 6am daily pipeline. alt_game_lines.py buys the same markets
-            # once a day for games inside its 3-day window.
+            # 6am daily pipeline. Only games starting inside
+            # ALT_GAME_LINES_WINDOW_HOURS (24) are bought (Matt, 2026-10-29,
+            # option B); alt_game_lines.py buys the 3-day window at 6am.
             if (sp in ALT_GAME_LINE_SPORTS and events
                     and os.environ.get("FETCH_ALT_GAME_LINES", "1") == "1"):
                 try:
+                    meter: dict = {}
+                    asked_at = datetime.now(timezone.utc)
                     alt_rows = _fetch_alternate_game_lines(
-                        sport_key, sp, events, snapshot_type, snapshot_at, resolve)
+                        sport_key, sp, events, snapshot_type, snapshot_at, resolve,
+                        meter=meter)
                     if alt_rows:
                         n_alt = _insert_odds(conn, alt_rows)
                         total_odds += n_alt
                         logger.success(
                             f"{sp} alternate spreads/totals: {n_alt} odds rows stored")
+                    # The app reads the ladder from alt_game_lines, so the pass
+                    # refreshes it for the games it just bought, and ledgers the
+                    # pass's measured credits beside the daily run's.
+                    # Commit what this pass has stored so far first. The ladder
+                    # refresh's catalog check (data/ddl_guard) rolls the
+                    # connection back if its first query fails, and nothing in
+                    # this pass is committed until every sport is done, so a
+                    # failure there must not be able to discard the main odds.
+                    conn.commit()
+                    from data.ingestors.alt_game_lines import store_pass_ladders
+                    store_pass_ladders(conn, sp, alt_rows, meter, asked_at)
                 except Exception as exc:
                     if type(exc) is AssertionError:
                         raise
