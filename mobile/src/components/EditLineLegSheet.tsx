@@ -92,10 +92,15 @@ export function EditLineLegSheet({
     [menu, picked],
   );
   const canSave = spec != null && chosen != null && canSaveEdit(menu, segment, picked, specKey);
+  // A game with nothing posted is off the board; a prop keeps its own
+  // segment's sentence ("…for this player"), whatever else is missing.
+  const segmentEmpty = menu?.segments.find((g) => g.key === segment)?.empty ?? null;
   const emptyText =
-    menu && menu.choices.length === 0
-      ? GAME_OFF_BOARD
-      : menu?.segments.find((g) => g.key === segment)?.empty ?? GAME_OFF_BOARD;
+    spec && !isGameSpec(spec)
+      ? segmentEmpty ?? 'No sportsbook posts a line for this player right now.'
+      : menu && menu.choices.length === 0
+        ? GAME_OFF_BOARD
+        : segmentEmpty ?? GAME_OFF_BOARD;
   // The leg's own bet is not on the board any more (line moved, book pulled
   // it): say so, rather than leave the list with no row marked current.
   const ownMissing = menu != null && specKey != null && !menu.choices.some((c) => lineLegKey(c.spec) === specKey);
