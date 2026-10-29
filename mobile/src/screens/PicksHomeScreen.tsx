@@ -147,11 +147,7 @@ import { ScoreboardBoard } from '@/components/ScoreboardBoard';
 import { useScoreboard } from '@/hooks/useScoreboard';
 import { useAuth } from '@/hooks/useAuth';
 import { restorePurchases } from '@/lib/billing';
-import {
-  scoreboardLiveEnabled,
-  type ScoreboardPhase,
-  type ScoreboardSport,
-} from '@/lib/scoreboard';
+import { type ScoreboardSport } from '@/lib/scoreboard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
@@ -173,7 +169,6 @@ export function PicksHomeScreen() {
 
   const [view, setView] = useState<PicksView>('today');
   const [sbSport, setSbSport] = useState<ScoreboardSport>('NFL');
-  const [sbPhase, setSbPhase] = useState<ScoreboardPhase>('upcoming');
   const [sbDate, setSbDate] = useState(todayET);
   const sbDates = sbDate === todayET() ? liveSlateDatesET() : [sbDate];
   // School abbreviations for the Signals compact line. Other sports already
@@ -766,14 +761,10 @@ export function PicksHomeScreen() {
           quotes={board.quotes}
           feeds={board.feeds}
           inplay={board.inplay}
+          splits={board.splits}
           nextGame={board.nextGame}
           sport={sbSport}
-          onSport={(next) => {
-            setSbSport(next);
-            if (!scoreboardLiveEnabled(next)) setSbPhase('upcoming');
-          }}
-          phase={sbPhase}
-          onPhase={setSbPhase}
+          onSport={setSbSport}
           date={sbDate}
           today={todayET()}
           onDate={setSbDate}
@@ -783,6 +774,7 @@ export function PicksHomeScreen() {
           linesError={board.linesError}
           liveError={board.liveError}
           ncaafUnavailable={board.ncaafUnavailable}
+          liveScoresUnavailable={board.liveScoresUnavailable}
           retrying={board.loading}
           onRefresh={board.refresh}
           locked={signalsLocked}

@@ -112,7 +112,10 @@ _EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                      # 2026-10-13 (mike): the NFL in-play leader moneyline loop,
                      # Supabase-only and volume-free like ncaaf_live_loop.
                      "nfl_live_leader",
-                     "dk_direct_feed", "bovada_feed"}
+                     "dk_direct_feed", "bovada_feed",
+                     # 2026-10-29 (Matt): Scoreboard live scores, every minute;
+                     # a pipeline deploy must not stop them mid-game.
+                     "live_scoreboard"}
 
 
 def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatch):
