@@ -696,9 +696,11 @@ export function splitsSpeech(
   splits: { away: SideSplit; home: SideSplit },
 ): string {
   const label = market === 'totals' ? 'Total' : market === 'h2h' ? 'Moneyline' : 'Spread';
+  const empty = (s: SideSplit) => s.bets == null && s.money == null;
+  if (empty(splits.away) && empty(splits.home)) return '';
   const side = (name: string, s: SideSplit) =>
-    s.bets == null && s.money == null
-      ? `${name} no split stored`
+    empty(s)
+      ? `${name} no split`
       : `${name} ${s.bets ?? 'no'} percent of bets, ${s.money ?? 'no'} percent of money`;
   const awayName = market === 'totals' ? 'Over' : card.awayFull;
   const homeName = market === 'totals' ? 'Under' : card.homeFull;

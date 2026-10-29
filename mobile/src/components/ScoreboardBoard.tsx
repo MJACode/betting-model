@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -14,6 +15,7 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { LiveDot } from '@/components/LiveDot';
 import { FilterChip } from '@/components/filters/FilterChip';
+import { SegmentTabs } from '@/components/GroupTabs';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { addDays, dayLabelET } from '@/lib/format';
@@ -158,6 +160,20 @@ export function ScoreboardBoard({
   // Every game for the sport in one list (Matt, 2026-10-29): live, then
   // upcoming, then final. A label marks where each group starts.
   const cards = useMemo(() => orderScoreboard(sportCards), [sportCards]);
+  // No split stored for any game in this market: drop the two % columns
+  // rather than draw a board of dashes. Some games with splits: keep the
+  // columns so they stay aligned, and the rest show a dash.
+  const showSplits = useMemo(
+    () => cards.some((c) => {
+      const s = splitsFor(splits.get(c.gameId), market);
+      return [s.away.bets, s.away.money, s.home.bets, s.home.money].some((v) => v != null);
+    }),
+    [cards, splits, market],
+  );
+  // A narrow phone or a large text size leaves no room for the name beside
+  // the disc; the disc already carries the team (UX review, 2026-10-29).
+  const { width: screenWidth, fontScale } = useWindowDimensions();
+  const showName = !showSplits || (screenWidth >= 360 && fontScale <= 1.3);
 
   const refresh = () => {
     setPulling(true);
@@ -200,17 +216,15 @@ export function ScoreboardBoard({
       </ScrollView>
 
       <View style={styles.filters}>
-        <View style={styles.markets} accessibilityRole="tablist">
-          {SCOREBOARD_MARKET_ORDER.map((m) => (
-            <FilterChip
-              key={m}
-              size="sm"
-              label={scoreboardMarketLabel(m, sport)}
-              active={market === m}
-              onPress={() => setMarket(m)}
-              accessibilityLabel={`${m === 'h2h' ? 'Moneyline' : scoreboardMarketLabel(m, sport)} odds and splits`}
-            />
-          ))}
+        <View style={styles.markets}>
+          <SegmentTabs
+            compact
+            items={SCOREBOARD_MARKET_ORDER}
+            active={market}
+            onChange={setMarket}
+            labelFor={(m) => scoreboardMarketLabel(m, sport)}
+            accessibilityLabelFor={(m) => (m === 'h2h' ? 'Moneyline' : scoreboardMarketLabel(m, sport))}
+          />
         </View>
         <Pressable
           accessibilityRole="button"
@@ -306,12 +320,16 @@ export function ScoreboardBoard({
                     Score
                   </Text>
                   <Text style={[styles.colHead, styles.colLine]}>Odds</Text>
-                  <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                    % Bets
-                  </Text>
-                  <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                    % Money
-                  </Text>
+                  {showSplits ? (
+                    <>
+                      <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        % Bets
+                      </Text>
+                      <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        % Money
+                      </Text>
+                    </>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -351,6 +369,8 @@ export function ScoreboardBoard({
                 card={item}
                 market={market}
                 split={splitsFor(splits.get(item.gameId), market)}
+                showSplits={showSplits}
+                showName={showName}
                 onPress={() => onOpenGame(item.gameId)}
               />
             </View>
@@ -432,23 +452,28 @@ function GameCard({
   card,
   market,
   split,
+  showSplits,
+  showName,
   onPress,
 }: {
   card: ScoreboardCard;
   market: ScoreboardMarket;
   split: { away: SideSplit; home: SideSplit };
+  showSplits: boolean;
+  showName: boolean;
   onPress: () => void;
 }) {
   const ink = card.linesMuted ? colors.textTertiary : colors.textPrimary;
+  const speech = splitsSpeech(card, market, split);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${card.accessibilityLabel} ${splitsSpeech(card, market, split)}`}
+      accessibilityLabel={speech ? `${card.accessibilityLabel} ${speech}` : card.accessibilityLabel}
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <SideRow card={card} side="away" ink={ink} market={market} split={split.away} />
-      <SideRow card={card} side="home" ink={ink} market={market} split={split.home} />
+      <SideRow card={card} side="away" ink={ink} market={market} split={split.away} showSplits={showSplits} showName={showName} />
+      <SideRow card={card} side="home" ink={ink} market={market} split={split.home} showSplits={showSplits} showName={showName} />
       {card.showMl && market !== 'h2h' ? (
         <Text style={styles.mlLine}>
           ML  {card.away.name} {card.away.ml} · {card.home.name} {card.home.ml}
@@ -483,12 +508,16 @@ function SideRow({
   ink,
   market,
   split,
+  showSplits,
+  showName,
 }: {
   card: ScoreboardCard;
   side: 'away' | 'home';
   ink: string;
   market: ScoreboardMarket;
   split: SideSplit;
+  showSplits: boolean;
+  showName: boolean;
 }) {
   const row = card[side];
   const cell = marketCell(row, market);
@@ -499,7 +528,9 @@ function SideRow({
         <View style={[styles.disc, { backgroundColor: discColor(row.disc) }]}>
           <Text style={styles.discText} numberOfLines={1}>{row.disc}</Text>
         </View>
-        <Text style={styles.abbr} numberOfLines={1}>{row.name}</Text>
+        {showName ? (
+          <Text style={styles.abbr} numberOfLines={1} maxFontSizeMultiplier={1.6}>{row.name}</Text>
+        ) : null}
         {row.possession ? <Text style={styles.poss}>◀</Text> : null}
       </View>
       <Text
@@ -512,13 +543,17 @@ function SideRow({
         {row.score}
       </Text>
       <LineCell value={cell.value} price={cell.price} ink={ink} single={market === 'h2h'} />
-      <PctCell value={split.bets} />
-      <PctCell value={split.money} />
+      {showSplits ? <PctCell value={split.bets} /> : null}
+      {showSplits ? <PctCell value={split.money} /> : null}
     </View>
   );
 }
 
-/** A percentage over a thin bar; green when this side holds the majority. */
+/**
+ * A percentage over a thin bar; tint when this side holds the majority. Not
+ * the BET green: on a picks board green reads as "the model says bet this",
+ * and the bar only says where the public is (UX review, 2026-10-29).
+ */
 function PctCell({ value }: { value: number | null }) {
   const majority = value != null && value > 50;
   return (
@@ -537,7 +572,7 @@ function PctCell({ value }: { value: number | null }) {
           <View
             style={[
               styles.barFill,
-              { width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: majority ? colors.bet : colors.none },
+              { width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: majority ? colors.tint : colors.none },
             ]}
           />
         ) : null}

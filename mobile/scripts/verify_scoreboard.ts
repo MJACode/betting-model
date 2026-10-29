@@ -102,6 +102,7 @@ const cellCard = presentScoreboard({
 });
 check('the odds cell follows the market', marketCell(cellCard.away, 'spreads').value === '+3.5'
   && marketCell(cellCard.away, 'totals').value === 'o46.5' && marketCell(cellCard.home, 'h2h').value === `${SCOREBOARD_MINUS}192`);
+check('a market with no split says nothing extra', splitsSpeech(cellCard, 'h2h', mlSplit) === '');
 check('splits are spoken per side', splitsSpeech(cellCard, 'spreads', spreadSplit).includes('47 percent of bets, 53 percent of money'));
 check('the board orders live, upcoming, final', ordered.map((c) => c.gameId).join(',') === 'L,U1,U2,F');
 
