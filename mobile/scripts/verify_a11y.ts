@@ -178,7 +178,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
   ['src/screens/SignInScreen.tsx', '', 2], // 17.8, 39.5pt — legal links are 44pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
-  ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
 ];

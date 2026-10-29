@@ -365,8 +365,8 @@ check('StatsScreen: positionEmptied measures across the cut (before/after the po
   const m = stats.match(/const positionEmptied =[\s\S]*?;\n/);
   check('StatsScreen: positionEmptied never reads the banded list', !!m && !/hitRatePlayers|inHitRateBand/.test(m[0]), m ? '' : 'not found');
 }
-check('StatsScreen: the fallback caption reuses the no-lines caption, and only renders when set',
-  /\{positionNote \? \(\s*<View style=\{styles\.noLinesRow\}>\s*<Ionicons name="information-circle-outline" size=\{13\} color=\{colors\.textTertiary\} \/>\s*<Text style=\{styles\.noLinesText\}>\{positionNote\}<\/Text>\s*<\/View>\s*\) : null\}/.test(stats));
+check('StatsScreen: the fallback note joins the board notes behind the ⓘ, and only when set',
+  /if \(positionNote\) boardNotes\.push\(positionNote\);/.test(stats));
 check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed set',
   /positionFallbackNote\(sport, segment, boardMode, segmentPositions\)/.test(stats));
 {

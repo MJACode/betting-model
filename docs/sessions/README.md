@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Stats board notes behind one ⓘ (Anytime TD too tall). Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM Phase A prop filters. NFL boards 01–05 and the same NBA sheet without kickoff slots. Hand-applied migration. Draft, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA CI. Abort skips setError. byom_game_facts left AHEAD_OF_THE_APP. Jobs stay off. Migration not applied. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA follow-up to review 5691932690. Cross-sport names are refused. Game bets and rest chips wait on an NBA game-fact row. Migration not applied. Draft. |
