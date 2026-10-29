@@ -2335,3 +2335,119 @@ Share of games with one, 2023-24 / 2024-25 / 2025-26:
 So the team-total cells (A3) mostly test BetRivers, DraftKings, FanDuel and Caesars. BetMGM's,
 Hard Rock's and Fanatics' alternate team totals are mostly out of scope. A thin A3 result means
 those books were not tested, not that their ladders hold nothing.
+
+
+## 12. Eighth search: the first-quarter trend method (pre-registered 2026-10-28, before any cell was graded)
+
+mike, 2026-10-28, describing how he picks first-quarter bets by hand:
+
+> *"I use EV analytics website for 1Q ATS records and home/away numbers … and team rankings
+> website for 1Q PPG and average 1Q margin. So my process was to go through each game looking
+> for teams with a 4-1/5-0 ATS home/away depending where they're playing L5 games vs Teams
+> 1-4/0-5 ATS home/away, from there would look at average 1Q point for/against both sides and
+> average 1Q points margin … I would also look at L10 games sometimes, a example would be you
+> have a team that 4-1 ATS L5 vs a team that's 2-3 ATS L5, I usually bump it out to L10 to see
+> if there's a edge. I was starting to mess around with 1Q totals also, same kind of concept,
+> looking L5/10 O/U, scoring stats and with the totals I would also look at pace of play."*
+
+**What earlier searches tested on first-quarter markets, and what they did not.** The first
+search's market rules (§4.2), the fourth search's market-anchored model, market rules and
+ratings projection (§8.4; best first-quarter cell: away spread, EV ≥ 0.06, 562 bets, 0.0%) and
+the fifth search's team first-quarter scoring shares (§9.9, 0 of 54 cells). **None of them
+graded a team's recent first-quarter cover record or over/under record.** The 2026-10-28 session
+note that cites §9 as the reason no first-quarter model was built is about a different idea.
+This search grades mike's method as he described it.
+
+**Written before any cell was graded. Nothing below changes after a result is seen; a later
+change gets its own dated line and reason.** Lab: `scripts/nba_game8_q1_trends.py`. Pass/fail:
+`scripts/nba_game2_verdict.py --house5` (§9.1's bars). No data is bought.
+
+### 12.1 Data
+
+- **First-quarter prices:** spreads and totals at each game's one purchase 45-75 minutes before
+  tip (decision point D, `H.per_event_times`), 2023-24, 2024-25 and 2025-26, ten books with
+  Pinnacle (`odds`, `source = 'odds_api_nba_derivative_history'`). The feed holds period
+  markets from 2023-05-03, so **no first-quarter number exists before 2023-24**; a team has no
+  record until it has played enough priced games.
+- **First-quarter scores:** `nba_period_scores`, through the first search's check
+  (`H.with_periods`).
+- **Pace:** possessions per team game from the box score (`models.nba_total_luck.team_box`).
+- Read from the research cache of 2026-10-17/18, which holds every first-quarter price bought
+  (all 1,229-1,230 games of each of the three seasons).
+- **Not inspected:** EVAnalytics and TeamRankings themselves (evanalytics.com was blocked from
+  the 2026-10-28 sandbox). Their records may be kept against a different line, such as the
+  close. This search keeps them against the number a bettor saw 45-75 minutes before tip.
+- **This season:** no first-quarter line is stored for any 2026-27 game. `latest_odds` holds
+  full-game spreads and totals for 98 games from 2026-10-20 and no `spreads_q1` or `totals_q1`
+  row (read 2026-10-29 01:30Z). A passing cell needs a first-quarter capture before it can bet.
+
+### 12.2 Definitions
+
+- **The game's first-quarter number:** at the game's purchase, Pinnacle's main first-quarter
+  spread (the HOME number, §4) or total where Pinnacle quotes it; else the median of the
+  deciding books' main numbers (`models.nba_book_numbers.visible_numbers`), rounded to the
+  nearest half point.
+- **A team's result in a game:** against that number, its first-quarter margin covers (W),
+  fails (L) or lands on it (P). For totals: over (O), under (U) or push.
+- **Venue record, last N:** the team's last N games at the SAME venue it plays at today (home
+  games for the home team, road games for the away team) that have a number and trustworthy
+  first-quarter scores, strictly before today's date. It reaches into the previous season, as
+  every NBA last-N read here does (Matt, 2026-10-23). **net = W − L** (or O − U); a push counts
+  0. A team with fewer than N such games has no record, and the game has no bet.
+- **Spreads, the hot team:** the team with the higher venue net; a tie is no bet. The cold team
+  is the other. **k = min(hot net, −cold net).** mike's rule, 4-1 or 5-0 against 1-4 or 0-5, is
+  k ≥ 3 on the last 5. His last-10 version, 7-3 against 3-7, is k ≥ 4 on the last 10.
+- **Totals:** for the over, k = min(home venue net, away venue net); for the under,
+  k = min(−home venue net, −away venue net).
+- **Season-to-date first-quarter averages** (the "1Q PPG and average 1Q margin" check): each
+  team's average first-quarter points scored (PF) and allowed (PA) in this season's games
+  before today, every venue, at least 5 games each, else the filter cell has no bet.
+  - **Spread check:** projected hot-team margin = ((hot PF + cold PA) − (cold PF + hot PA)) / 2.
+    It passes when the projection covers the game's number from the hot team's side. The
+    average margin is PF − PA, so a separate margin check would repeat this one.
+  - **Total check (scoring):** projected total = (home PF + away PA) / 2 + (away PF + home PA) / 2;
+    the over passes when it is above the game's number, the under when it is below.
+  - **Total check (pace):** the two teams' season-to-date possessions per game, averaged, against
+    the league's over the same season's games before today; the over passes when it is higher,
+    the under when lower. At least 5 games each.
+
+### 12.3 The cells (64)
+
+| Family | Market, side | Window | Cut on k | Checks | Cells |
+|---|---|---|---|---|---|
+| Q1A | first-quarter spread, the hot team (a per-game side) | last 5 | ≥ 1 / 3 / 5 | none; the spread check | 6 |
+| Q1A | same | last 10 | ≥ 2 / 4 / 6 | none; the spread check | 6 |
+| Q1A | same: **mike's "bump it out to L10"**: a last-5 hot team at net ≥ 3 against an opponent at net −1 or −2 (2-3), judged on the last-10 k of the same two teams (the last-5 hot team bet) | last 5 then 10 | last-10 k ≥ 2 / 4 | none; the spread check | 4 |
+| Q1T | first-quarter total, over and under | last 5 | ≥ 1 / 3 / 5 | none; scoring; pace; both | 24 |
+| Q1T | same | last 10 | ≥ 2 / 4 / 6 | none; scoring; pace; both | 24 |
+| **Total** | | | | | **64** |
+
+- **The price:** the best deciding offer on the cell's side, at that book's own main number, under
+  the first-quarter market's fair line (`H.market_fair` priced by §8.3's market pricing): the
+  rule mechanism F4 and F7 used. DraftKings alone is reported beside every cell.
+- **Bands (bar 5)** run along k within one window, side and check. Last 5: from −1, edges 1, 3,
+  5. Last 10: from 0, edges 2, 4, 6. The last-10 step: from 0, edges 2, 4. The band just below
+  the cut and every band from the cut up must be positive where they hold 30 or more bets.
+- **Seasons:** 2023-24, 2024-25 and 2025-26 graded and pooled; 2023-24 and 2024-25 are the
+  choosing seasons the placebo reads (`P3.choosing`). Nothing is fitted, so every season is
+  graded.
+- **Settlement:** first-quarter points (`nba_period_scores`); a push returns the stake.
+
+### 12.4 The bars
+
+§9.1's house standard, unchanged: 200 or more pooled bets; the pooled whole-day bootstrap 95%
+interval above zero; seasons mostly positive; beats the blind bet on its dominant real side;
+the bands; the choosing seasons' return above the 95th percentile of 200 placebo runs.
+
+- **Placebo, 200 runs, seeds 1-200:** each game's trend inputs (both teams' venue records, their
+  season-to-date averages and pace) are moved together to another game on the same date. Each
+  game keeps its own first-quarter number and prices, and the rule is recomputed.
+- **Controls, graded and reported, never judged:** the fade of every unchecked cell (the cold
+  team; the other total side).
+- **A thin cell is still reported.** Two venue records landing on 4-1 against 1-4 is rare. A cell
+  under 200 pooled bets fails bar 1, and its bets, units, return, interval and season split are
+  printed anyway. For such a cell the answer is "too few games to tell", not "it loses" (the
+  §9.9 F8 reading).
+- **Expected passes by chance:** 64 × 0.025 ≈ 1.6 cells clear bar 2 alone, before correlation.
+- **A pass is built live** (§2) with its own EV floor and the prices it lays stated before it
+  ships, once first-quarter lines are captured for 2026-27.
