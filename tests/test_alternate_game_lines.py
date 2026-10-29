@@ -22,7 +22,7 @@ from data.ingestors.odds_ingestor import (
 def _event(markets):
     return {
         "id": "evt-1",
-        "commence_time": "2026-10-30T23:00:00Z",
+        "commence_time": "2027-06-01T23:00:00Z",
         "home_team": "Los Angeles Dodgers",
         "away_team": "New York Yankees",
         "bookmakers": [{
@@ -143,6 +143,46 @@ def test_ufc_and_the_pregame_poller_do_not_ask(monkeypatch):
     oi.run_odds_ingestor(sport="UFC")
     oi.fetch_pregame_rows(["MLB"])
     assert all("alternate_spreads" not in m for m in asked)
+
+
+def test_a_started_game_is_not_asked(monkeypatch):
+    import data.ingestors.odds_ingestor as oi
+
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    seen = []
+    monkeypatch.setattr(oi, "_get_event_odds", lambda sport_key, event_id, markets, bookmakers=None: seen.append(event_id) or None)
+    started = dict(_event([]), id="gone", commence_time="2020-01-01T00:00:00Z")
+    _fetch_alternate_game_lines(
+        "baseball_mlb", "MLB", [_event([]), started, {"id": "nodate"}],
+        "open", "t")
+    assert seen == ["evt-1", "nodate"]
+
+
+def test_the_env_flag_skips_the_alternate_fetch(monkeypatch):
+    import data.ingestors.odds_ingestor as oi
+
+    asked = []
+    monkeypatch.setenv("FETCH_ALT_GAME_LINES", "0")
+    monkeypatch.setattr(oi, "get_connection", lambda: _Conn())
+    monkeypatch.setattr(oi, "persist_quota", lambda conn: None)
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    monkeypatch.delenv("FETCH_F5_LIVE", raising=False)
+    monkeypatch.setattr(oi, "_list_events", lambda sport_key: [])
+    monkeypatch.setattr(oi, "_get_odds", lambda sport_key, markets: [_event([])] if sport_key == "baseball_mlb" else [])
+    monkeypatch.setattr(oi, "_get_event_odds", lambda *a, **k: asked.append(a) or None)
+    oi.run_odds_ingestor(sport="MLB")
+    assert asked == []
+
+
+def test_board_reads_do_not_take_the_ladder():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "mobile" / "src" / "lib" / "queries.ts").read_text(encoding="utf-8")
+    assert text.count(".in('market', [...MAIN_GAME_ODDS_MARKETS])") >= 6
+    start = text.index("const MAIN_GAME_ODDS_MARKETS")
+    block = text[start:text.index("] as const", start)]
+    assert "alternate_spreads" not in block and "alternate_totals" not in block
+    for name in ("h2h", "spreads", "totals", "h2h_3way", "team_totals_home", "h2h_1st_5_innings"):
+        assert f"'{name}'" in block
 
 
 def test_fetch_uses_the_events_it_is_given_and_not_the_season_list(monkeypatch):

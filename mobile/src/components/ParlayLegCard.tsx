@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { formatAmerican, formatPct } from '@/lib/format';
+import { formatAmerican, formatPct, formatStampET } from '@/lib/format';
 import { bookLabel } from '@/lib/markets';
 import { isLineLeg } from '@/lib/lineLegs';
 import { modelShort } from '@/lib/modelMeta';
@@ -62,6 +62,13 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
             {formatAmerican(leg.americanOdds)}
             {leg.dkPriced === false && leg.pricedAt ? ` · ${bookLabel(leg.pricedAt)}` : ''}
           </Text>
+          {/* A price from the once-a-day alternate ladder says how old it is,
+              so it is not read as this hour's number (UX review, 2026-10-29). */}
+          {leg.pricedFromLadder ? (
+            <Text style={styles.ladderAge}>
+              alt price {formatStampET(leg.pricedAsOf) || 'today'}
+            </Text>
+          ) : null}
           {leg.bestBook ? (
             <Text style={styles.bestBook}>
               {bookLabel(leg.bestBook.bookmaker)} {formatAmerican(leg.bestBook.american)}
@@ -176,6 +183,10 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
+  },
+  ladderAge: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
   bestBook: {
     fontSize: font.size.footnote,

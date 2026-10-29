@@ -19,12 +19,13 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate game lines for the betslip edit sheet. Hand-applied latest_odds line_key. verify_line_legs gates in PR CI. Low 2 not built. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1083 M1–M2. Main-market filter on the unfiltered odds reads. FETCH_ALT_GAME_LINES and skip started games. Draft stays draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA facts follow-up. NBA game-facts floor is 2021. Docstrings match the off declarations. Enable game facts before prop facts. Jobs stay off. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA game-facts and prop-facts jobs declared off. Game-facts validator accepts NBA. Migration stays hand-applied. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA full 14 player props in the builder. Hand-applied migration. No declared backfill. Draft, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, merged origin/master into the player H2H chip. Range row kept. Chart dates kept. H2H bars labelled from the meeting. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate spreads and totals fetched once a day (Matt approved the cost); ladder in the betslip's game-line edit. Cost measured by the worker ledger. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Edit moneyline, spread and total legs on the betslip. Main numbers only; alternate game lines need Odds API credits (Matt's call). PR #1081. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM prop units show only for exactly one prop with Over or Under set. Anytime TD only for Yes. Mix and unsided props stay hidden. SQL lows not taken. Draft, not merged. |

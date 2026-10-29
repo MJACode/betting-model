@@ -57,7 +57,6 @@ export function EditLineLegSheet({
   const [picked, setPicked] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
-
   const specKey = spec ? lineLegKey(spec) : null;
   useEffect(() => {
     if (!spec) return;
@@ -90,7 +89,8 @@ export function EditLineLegSheet({
   const rows = useMemo(() => (menu?.choices ?? []).filter((c) => c.segment === segment), [menu, segment]);
   const listRef = useRef<ScrollView>(null);
   // Scroll once per tab. Reset while rendering so a layout from the previous
-  // tab cannot scroll this one after the guard was cleared.
+  // tab cannot scroll this one after the guard was cleared. key={segment}
+  // remounts the list so the other tab does not keep this tab's offset.
   const scrolledFor = useRef<string | null>(null);
   const seenSegment = useRef(segment);
   if (seenSegment.current !== segment) {
@@ -200,6 +200,11 @@ export function EditLineLegSheet({
                   return (
                     <Pressable
                       key={key}
+                      onLayout={key === scrollKey ? (e) => {
+                        if (scrolledFor.current === segment) return;
+                        scrolledFor.current = segment;
+                        listRef.current?.scrollTo({ y: e.nativeEvent.layout.y, animated: false });
+                      } : undefined}
                       onPress={() => {
                         setPicked(key);
                         setNote(null);
@@ -207,11 +212,6 @@ export function EditLineLegSheet({
                       accessibilityRole="radio"
                       accessibilityState={{ selected }}
                       accessibilityLabel={`${titleText.replace(/ ML$/, ' moneyline')}${c.hint ? `, ${c.hint}` : ''}, ${priceText} at ${bookLabelShort(c.book)}${isCurrent ? ', current line' : ''}`}
-                      onLayout={key === scrollKey ? (e) => {
-                        if (scrolledFor.current === segment) return;
-                        scrolledFor.current = segment;
-                        listRef.current?.scrollTo({ y: e.nativeEvent.layout.y, animated: false });
-                      } : undefined}
                       style={({ pressed }) => [
                         styles.row,
                         i > 0 && styles.rowDivider,

@@ -139,10 +139,9 @@ DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB"})
 MARKETS = ["h2h", "spreads", "totals"]
 
 # One row per rung, under these keys, so the main spreads/totals row the
-# models read stays the one number. The betslip edit sheet folds them back
-# onto spreads/totals (mobile/src/lib/lineLegs.ts foldGameAlternateRows).
-# UFC is absent: its bulk feed is h2h, and its round total is a different
-# per-event market.
+# models read stays the one number. The edit sheet's ladder is the once-a-day
+# alt_game_lines table. This pass writes the same markets when
+# FETCH_ALT_GAME_LINES is on (default). UFC is absent: its bulk feed is h2h.
 ALT_GAME_LINE_MARKETS = ["alternate_spreads", "alternate_totals"]
 ALT_GAME_LINE_SPORTS = frozenset({"MLB", "NHL", "WNBA", "NBA", "NCAAF", "NFL", "NCAAB"})
 
@@ -235,6 +234,25 @@ def _within_lookahead(ev: dict, now: datetime | None = None,
         ts = ts.replace(tzinfo=timezone.utc)
     now = now or datetime.now(timezone.utc)
     return ts <= now + timedelta(days=days)
+
+
+def _commence_passed(ev: dict, now: datetime | None = None) -> bool:
+    """True when the event's start is already in the past.
+
+    FAILS OPEN, the same way _within_lookahead does: a missing or unparseable
+    commence_time is not treated as started, so a real game is still fetched.
+    """
+    raw = ev.get("commence_time")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return ts <= now
 
 # UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
 # attempted per-event (like MLB F5) — absent lines are non-fatal and the
@@ -960,7 +978,7 @@ def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
     event_responses = []
     for ev in events:
         event_id = ev.get("id")
-        if not event_id:
+        if not event_id or _commence_passed(ev):
             continue
         try:
             ev_odds = _get_event_odds(sport_key, event_id, ALT_GAME_LINE_MARKETS)
@@ -1490,10 +1508,18 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             )
 
             # Alternate spreads and totals — per-event additional markets.
-            # The events are the ones the bulk call just returned, so this
-            # does not walk a future season. Non-fatal: main lines already
-            # committed for this sport stay if the ladder call fails.
-            if sp in ALT_GAME_LINE_SPORTS and events:
+            # FETCH_ALT_GAME_LINES=0 turns this off (default on: Matt accepted
+            # the cost). Started games are skipped inside the fetch: the
+            # latest view drops in-play rows, so buying them spends credits
+            # for a ladder the sheet will not show. Billing is the per-event
+            # rule measured on F5: one credit per market returned, two when
+            # both ladders come back, once per unstarted event per pass.
+            # The odds step runs on each refresh (scheduler.py: :17 for hours
+            # 0-5 and 7-17 ET, every 10 minutes for hours 18-23 ET) plus the
+            # 6am daily pipeline. alt_game_lines.py buys the same markets
+            # once a day for games inside its 3-day window.
+            if (sp in ALT_GAME_LINE_SPORTS and events
+                    and os.environ.get("FETCH_ALT_GAME_LINES", "1") == "1"):
                 try:
                     alt_rows = _fetch_alternate_game_lines(
                         sport_key, sp, events, snapshot_type, snapshot_at, resolve)
