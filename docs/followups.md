@@ -21,6 +21,35 @@
 
 ---
 
+## [ ] [needs-decision] KenPom access for a commercial picks product (2026-10-28)
+
+mike keeps this as an action item for an outside assistant. The hand-off brief
+(price, terms, API, steps, deliverables, decisions) is the Claude doc
+"College basketball data hand-offs", https://claude.ai/artifact/XoJ3cFxitCaX5dS987byaY.
+What comes back lands here: the licence answer, the key (Railway variable), the
+daily ratings pull into Supabase.
+
+## [ ] [needs-decision] Pre-tip injury / availability feed for NCAAB (2026-10-28)
+
+Same doc, second brief: the official conference availability reports, the
+vendors, the free sources, what to buy and what to hand back. The model needs
+status BEFORE tip with a timestamp; the stored form is a snapshot table keyed
+on (game, team, player, observed_at).
+
+## [ ] Torvik daily pull once the worker holds the cbbdata key (2026-10-28)
+
+`docs/sports/ncaab.md` "Data accounts". The archive is daily 2014-15 → 2024-25
+and EMPTY for 2025-26 as of 2026-10-28; re-check 2026-11-02. Build: the
+11-season archive import (backtest feature and benchmark), then a daily pull of
+the current season when the API serves it. Needs `CBBDATA_*` on Railway.
+
+## [ ] College Basketball Data: measure lines coverage by season, plays, lineups (2026-10-28)
+
+The football key opens it (probe, 2026-10-28). `/lines` carries ESPN BET,
+Bovada, DraftKings and consensus lines; how many seasons, and whether
+play-by-play, lineups and substitutions exist for enough seasons to build
+who-actually-played features, is unmeasured. A probe job, then importers.
+
 ## [ ] NBA totals overs (`nba_total_luck`): first decisions, and the refit before 2027-28 (2026-10-17)
 
 Live from 2026-10-17; the first bet needs both teams at 10 games, so mid-November.

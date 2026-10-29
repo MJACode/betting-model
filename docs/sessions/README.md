@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NCAAB foundation merged (#1057). Purchase floor 300,000 = 3.5 worst organic days; resumes 06:00Z Nov 1. cbbdata account created (re-registered under the sign-up mailbox 2026-10-29), archive 2015-25 daily, 2025-26 empty. The football key opens College Basketball Data. Hand-off doc for KenPom and the injury feed. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter stats on the team page. Stats only, free. New `nba-quarters` step backfills quarter scores and play-by-play the 2026-27 season was missing. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, DK prices on NFL BYOM prop facts. Hand-applied columns and backtest. Job enabled with apply. Backfill from 2023-09-01. Draft, not merged. |
