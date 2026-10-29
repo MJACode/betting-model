@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1084 follow-up. Board reads stay off the ladder. ALT_GAME_LINES_ENABLED and ALT_GAME_LINES_MAX_GAMES. Pre-game ladder hidden after kickoff. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1086 M1–M3. Scoreboard splits test is on the PR subset. A percent shows only for the line on the card, and not beside a live DK quote. NFL/NHL ESPN scoreboards are parsed; UTAH maps to UTA. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing only when the same sport still has a game more than 24 hours out that a book is pricing. Same-day prices do not hide a dead early-lines pass. The 15:25Z NBA 7 of 13 CRIT was the pulled Friday slate. Outage replays stay CRIT. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H review lows from #1075. Fallback remembered. Meetings sorted newest first. H2H retry is H2H only. |
@@ -29,7 +30,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA full 14 player props in the builder. Hand-applied migration. No declared backfill. Draft, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, merged origin/master into the player H2H chip. Range row kept. Chart dates kept. H2H bars labelled from the meeting. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
-| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate spreads and totals fetched once a day (Matt approved the cost); ladder in the betslip's game-line edit. Cost measured by the worker ledger. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate spreads and totals fetched once a day (Matt approved the cost); ladder in the betslip's game-line edit. Cost measured by the worker ledger. Merged as #1084. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Edit moneyline, spread and total legs on the betslip. Main numbers only; alternate game lines need Odds API credits (Matt's call). PR #1081. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM prop units show only for exactly one prop with Over or Under set. Anytime TD only for Yes. Mix and unsided props stay hidden. SQL lows not taken. Draft, not merged. |

@@ -45,7 +45,12 @@ every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
 pruner) and the current ladder in `alt_game_lines`, which the betslip's
 game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
 game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
-one row per call:
+one row per call. Kill switch: `ALT_GAME_LINES_ENABLED=0` (default `1`) buys
+nothing, including the event lists. `ALT_GAME_LINES_MAX_GAMES`, unset by
+default, caps event-odds calls for that process when set to a whole number;
+anything else buys nothing and fails the step. Neither flag is a credit
+budget. The app hides that ladder once `games.commence_time` has passed.
+The measurement query:
 
     SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
            sum(credits_last) AS credits, count(*) FILTER (WHERE NOT ok) AS failed
@@ -306,6 +311,9 @@ Notes:
    - `ODDS_API_KEY`
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
+   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips the daily
+     alternate spreads/totals fetch. `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL,
+     unset means no cap. A whole number caps that step's event-odds calls.
    - `TZ` = `America/New_York`
    - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
      `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put

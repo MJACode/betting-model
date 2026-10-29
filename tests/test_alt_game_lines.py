@@ -114,6 +114,172 @@ def test_the_daily_pipeline_runs_it_after_the_opening_odds():
     odds = src.index('results["odds"] = step_odds(run_date, snapshot_type="open")')
     assert odds < src.index('results["alt_game_lines"] = step_alt_game_lines(run_date)')
     assert '"alt-game-lines": lambda: step_alt_game_lines(run_date)' in src
+    assert "return step_succeeded(summary)" in src
+
+
+def test_one_failed_game_does_not_fail_the_step():
+    assert alt.step_succeeded({"games": 4, "failed": 1})
+    assert not alt.step_succeeded({"games": 0, "failed": 3})
+    assert alt.step_succeeded({"games": 0, "failed": 0, "skipped": "ALT_GAME_LINES_ENABLED=0"})
+    assert alt.step_succeeded({"games": 0, "failed": 0, "skipped": "no state table"})
+    assert not alt.step_succeeded({
+        "games": 0, "failed": 0,
+        "skipped": "ALT_GAME_LINES_MAX_GAMES='no' is not a non-negative integer; nothing bought"})
+
+
+def test_a_duplicate_point_is_logged_and_kept_once():
+    from loguru import logger
+    rows = _rows(SPREADS) + [_rows(SPREADS)[0]]
+    messages = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        payload = alt._state_payload("NFL_2026-11-01_KC_BUF", "2026-11-01", rows)
+    finally:
+        logger.remove(sink)
+    assert len(payload) == len(rows) - 1
+    assert any("duplicate ladder point" in m for m in messages)
+
+
+def test_a_started_game_loses_its_ladder_and_a_future_one_keeps_it():
+    now = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+    seen = []
+
+    class Cur:
+        def fetchall(self):
+            return [
+                ("G1", "2026-10-29T11:00:00Z"),
+                ("G1", "2026-10-29T11:00:00Z"),
+                ("G2", "2099-01-01T00:00:00Z"),
+                ("G3", None),
+                ("G4", "not-a-time"),
+            ]
+
+    class Conn:
+        def execute(self, sql, params=None):
+            seen.append((sql, params))
+            return Cur()
+
+    assert alt.drop_started_ladders(Conn(), now) == 1
+    assert "DELETE" in seen[-1][0] and seen[-1][1] == (["G1"],)
+    assert not alt._started(None, now)
+    assert not alt._started("soon", now)
+    assert alt._started("2026-10-29T12:00:00Z", now)
+
+
+def test_the_flag_buys_nothing(monkeypatch):
+    monkeypatch.setenv("ALT_GAME_LINES_ENABLED", "0")
+    called = []
+    monkeypatch.setattr(alt, "_list_events", lambda *a, **k: called.append("list") or [])
+    monkeypatch.setattr(alt, "_get_event_odds", lambda *a, **k: called.append("odds") or {})
+    summary = alt.run(sports=("NBA",), conn=object())
+    assert called == []
+    assert summary["skipped"] == "ALT_GAME_LINES_ENABLED=0"
+    assert summary["games"] == 0
+    assert alt.step_succeeded(summary)
+    assert alt.plan(object(), ("NBA",)) == {"NBA": []}
+
+
+def test_a_bad_cap_buys_nothing_and_fails_the_step(monkeypatch):
+    monkeypatch.setenv("ALT_GAME_LINES_MAX_GAMES", "no")
+    called = []
+    monkeypatch.setattr(alt, "_list_events", lambda *a, **k: called.append("list") or [])
+    summary = alt.run(sports=("NBA",), conn=object())
+    assert called == []
+    assert str(summary["skipped"]).startswith("ALT_GAME_LINES_MAX_GAMES")
+    assert not alt.step_succeeded(summary)
+
+
+class _RunConn:
+    def execute(self, sql, params=None):
+        class Cur:
+            def fetchall(self):
+                return []
+            def fetchone(self):
+                return None
+        return Cur()
+
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
+
+
+def _patch_run(monkeypatch, match):
+    monkeypatch.setattr(alt, "ensure_ledger", lambda conn: None)
+    monkeypatch.setattr(alt, "_state_table_exists", lambda conn: True)
+    monkeypatch.setattr(alt, "drop_started_ladders", lambda conn, now: 0)
+    monkeypatch.setattr(alt, "_list_events", lambda sport_key: [{"id": "e"}])
+    monkeypatch.setattr(alt, "_match", match)
+    monkeypatch.setattr(alt.odds_quota, "latest", lambda: None)
+    monkeypatch.setattr(alt.time, "sleep", lambda *_: None)
+
+
+def test_the_cap_stops_after_one_game_and_does_not_list_the_next_sport(monkeypatch):
+    monkeypatch.setenv("ALT_GAME_LINES_MAX_GAMES", "1")
+    monkeypatch.delenv("ALT_GAME_LINES_ENABLED", raising=False)
+    listed, fetched = [], []
+
+    def match(conn, sport, events, now):
+        return [("G1", "e1", "Home", "2099-01-01"), ("G2", "e2", "Home", "2099-01-01")]
+
+    _patch_run(monkeypatch, match)
+    monkeypatch.setattr(alt, "_list_events", lambda sport_key: listed.append(sport_key) or [{"id": "e"}])
+
+    def get_event(sport_key, event_id, markets):
+        fetched.append(event_id)
+        return {"bookmakers": []}
+
+    monkeypatch.setattr(alt, "_get_event_odds", get_event)
+    summary = alt.run(sports=("NBA", "NHL"), conn=_RunConn())
+    assert fetched == ["e1"]
+    assert len(listed) == 1
+    assert summary["capped"] == 1
+    assert summary["capped_sports"] == 1
+    assert summary["games"] == 1
+    assert "skipped" not in summary
+
+
+def test_unset_cap_buys_every_game_in_the_window(monkeypatch):
+    monkeypatch.delenv("ALT_GAME_LINES_MAX_GAMES", raising=False)
+    monkeypatch.delenv("ALT_GAME_LINES_ENABLED", raising=False)
+    fetched = []
+
+    def match(conn, sport, events, now):
+        return [("G1", "e1", "Home", "2099-01-01"), ("G2", "e2", "Home", "2099-01-01")]
+
+    _patch_run(monkeypatch, match)
+    monkeypatch.setattr(alt, "_get_event_odds", lambda sport_key, event_id, markets: fetched.append(event_id) or {"bookmakers": []})
+    summary = alt.run(sports=("NBA",), conn=_RunConn())
+    assert fetched == ["e1", "e2"]
+    assert summary["games"] == 2
+    assert summary["capped"] == 0
+
+
+def test_every_all_books_read_names_a_main_market():
+    """#1083 put MAIN_GAME_ODDS_MARKETS on the board reads. #1084's daily
+    insert still lands one alternate rung per book in latest_odds, so a new
+    unfiltered read of the view would page that rung onto a board."""
+    text = (ROOT / "mobile" / "src" / "lib" / "queries.ts").read_text(encoding="utf-8")
+    needle = ".from('v_latest_odds_all_books')"
+    start = 0
+    found = 0
+    while True:
+        i = text.find(needle, start)
+        if i < 0:
+            break
+        found += 1
+        window = text[i:i + 1200]
+        nxt = window.find(".from('", len(needle))
+        block = window if nxt < 0 else window[:nxt]
+        assert ".in('market'" in block or ".eq('market'" in block, block[:240]
+        assert "alternate_spreads" not in block and "alternate_totals" not in block
+        start = i + len(needle)
+    assert found >= 9
+    fn = text[text.index("export async function fetchGameLineRows"):]
+    fn = fn[:fn.index("\nexport ")]
+    assert "pregameLadderVisible" in fn
+    assert fn.index("pregameLadderVisible") < fn.index(".from('alt_game_lines')")
 
 
 # ── scratch Postgres ─────────────────────────────────────────────────────────

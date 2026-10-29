@@ -33,9 +33,19 @@ SOURCE is in data/prune_odds.PROTECTED_SOURCES: the pruner keeps one row per
 (game, market, book), which would thin a paid ladder to an arbitrary rung.
 
 COST BOUND. One call per game in the window, nothing else; a game that has
-started is never fetched. There is no credit ceiling constant here on purpose:
+started is never fetched. There is no credit-count ceiling here on purpose:
 a ceiling not derived from a measurement is decoration (.claude/rules/
-operations.md). The ledger is the measurement; a ceiling can be set from it.
+operations.md). The ledger is the measurement. Two operator switches stop
+the spend without a deploy, and neither is a credit budget:
+
+  ALT_GAME_LINES_ENABLED    default "1". Any other value buys nothing,
+                            including the per-sport event lists.
+  ALT_GAME_LINES_MAX_GAMES  unset means no cap (the run Matt approved). A
+                            non-negative integer caps event-odds calls for
+                            this process, in sport order then game id. A
+                            value that is not a whole number buys nothing
+                            and fails the daily step, so a typo cannot spend
+                            the uncapped slate.
 
     python -m data.ingestors.alt_game_lines              # all sports, 3 days
     python -m data.ingestors.alt_game_lines --sport NBA
@@ -45,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -264,11 +275,31 @@ def _billed(before: dict | None) -> float | None:
     return after.get("last")
 
 
+def _state_payload(game_id: str, game_date: str, rows: list[dict]) -> list[dict]:
+    """One row per (market, book, point). A repeated point is dropped and
+    logged: ON CONFLICT DO NOTHING would otherwise discard it with no trace."""
+    payload: list[dict] = []
+    seen: set[tuple] = set()
+    dupes = 0
+    for r in rows:
+        point = r["spread_home"] if r["market"] == "alternate_spreads" else r["total_line"]
+        key = (r["market"], r["bookmaker"], point)
+        if key in seen:
+            dupes += 1
+            continue
+        seen.add(key)
+        payload.append({**r, "game_id": game_id, "game_date": game_date, "point": point})
+    if dupes:
+        logger.warning(f"{game_id}: dropped {dupes} duplicate ladder point(s)")
+    return payload
+
+
 def _replace_state(conn, game_id: str, game_date: str, rows: list[dict]) -> None:
     """This game's current ladder becomes `rows` (same transaction as the
     odds insert, so the app never reads half a ladder)."""
     conn.execute(f"DELETE FROM {STATE_TABLE} WHERE game_id = %s", (game_id,))
-    if not rows:
+    payload = _state_payload(game_id, game_date, rows)
+    if not payload:
         return
     conn.executemany(f"""
         INSERT INTO {STATE_TABLE} (game_id, game_date, sport, market, bookmaker, point,
@@ -279,21 +310,96 @@ def _replace_state(conn, game_id: str, game_date: str, rows: list[dict]) -> None
             %(over_price)s, %(under_price)s, %(home_link)s, %(away_link)s,
             %(over_link)s, %(under_link)s, %(snapshot_at)s)
         ON CONFLICT (game_id, market, bookmaker, point) DO NOTHING
-    """, [{**r, "game_date": game_date,
-           "point": r["spread_home"] if r["market"] == "alternate_spreads" else r["total_line"]}
-          for r in rows])
+    """, payload)
+
+
+def _started(stamp, now: datetime) -> bool:
+    """True only when the stamp parses and is at or before `now`. A missing
+    or unparseable start is not treated as started."""
+    t = _when(stamp)
+    return t is not None and t <= now
+
+
+def drop_started_ladders(conn, now: datetime) -> int:
+    """Delete ladders whose game has already started. The morning row is a
+    pre-game price; the app also hides it at read time, and this keeps the
+    table from serving it on the next daily run."""
+    rows = conn.execute(
+        f"SELECT a.game_id, g.commence_time FROM {STATE_TABLE} a "
+        "JOIN games g ON g.game_id = a.game_id").fetchall()
+    drop = sorted({gid for gid, stamp in rows if _started(stamp, now)})
+    if not drop:
+        return 0
+    conn.execute(f"DELETE FROM {STATE_TABLE} WHERE game_id = ANY(%s)", (drop,))
+    return len(drop)
+
+
+def _max_games() -> int | None:
+    """Unset means no cap. A non-whole-number value raises, and the run
+    buys nothing."""
+    raw = os.environ.get("ALT_GAME_LINES_MAX_GAMES", "").strip()
+    if raw == "":
+        return None
+    if not raw.isdigit():
+        raise ValueError(
+            f"ALT_GAME_LINES_MAX_GAMES={raw!r} is not a non-negative integer; nothing bought")
+    return int(raw)
+
+
+def _skip_reason() -> str | None:
+    """Why this process must not buy, or None when it may."""
+    if os.environ.get("ALT_GAME_LINES_ENABLED", "1") != "1":
+        return "ALT_GAME_LINES_ENABLED=0"
+    try:
+        _max_games()
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _bounded(games: list, remaining: int | None) -> tuple[list, int | None]:
+    """The games this process may still buy, and the calls left after them.
+    None means no cap."""
+    if remaining is None:
+        return games, None
+    take = games[:remaining]
+    return take, remaining - len(take)
+
+
+def step_succeeded(summary: dict) -> bool:
+    """One game's 422 is logged and does not fail the daily step. The step
+    fails when every game call failed, or when the cap is not a whole number
+    (that skip is a mis-set variable, and it has to be loud)."""
+    skipped = summary.get("skipped") or ""
+    if str(skipped).startswith("ALT_GAME_LINES_MAX_GAMES"):
+        return False
+    failed = summary.get("failed") or 0
+    games = summary.get("games") or 0
+    if failed and games == 0:
+        return False
+    return True
 
 
 def plan(conn, sports=SPORTS, days: int = LOOKAHEAD_DAYS, now: datetime | None = None
          ) -> dict[str, list[tuple[str, str, str, str]]]:
     """{sport: [(game_id, event_id, home_name, game_date), ...]} that a run would buy.
     Listing events is a call, recorded in the ledger by `run`; `plan` alone
-    records nothing."""
+    records nothing. The enable flag and the game cap apply here too, so a
+    plan does not list sports the run would not list."""
     now = now or datetime.now(timezone.utc)
-    out: dict[str, list[tuple[str, str, str]]] = {}
+    out: dict[str, list[tuple[str, str, str, str]]] = {}
+    if os.environ.get("ALT_GAME_LINES_ENABLED", "1") != "1":
+        return {sport: [] for sport in sports}
+    cap = _max_games()
+    remaining: int | None = cap
     for sport in sports:
+        if remaining == 0:
+            out[sport] = []
+            continue
         events = [ev for ev in _list_events(SPORT_KEYS[sport]) if in_window(ev, now, days)]
-        out[sport] = _match(conn, sport, events, now)
+        matched = _match(conn, sport, events, now)
+        take, remaining = _bounded(matched, remaining)
+        out[sport] = take
     return out
 
 
@@ -316,7 +422,17 @@ def run(sports=SPORTS, days: int = LOOKAHEAD_DAYS, conn=None) -> dict:
     -> a summary per sport: games bought, rows stored, failures, and the
     credits the feed reported."""
     out: dict = {"sports": {}, "rows": 0, "games": 0, "failed": 0, "credits": 0.0,
-                 "credits_unreported": 0}
+                 "credits_unreported": 0, "capped": 0, "capped_sports": 0}
+    reason = _skip_reason()
+    if reason:
+        out["skipped"] = reason
+        if str(reason).startswith("ALT_GAME_LINES_MAX_GAMES"):
+            logger.error(f"Alternate game lines: {reason}")
+        else:
+            logger.info(f"Alternate game lines skipped: {reason}")
+        return out
+    cap = _max_games()
+    remaining: int | None = cap
     own = conn is None
     if own:
         from data.db import get_connection
@@ -336,8 +452,15 @@ def run(sports=SPORTS, days: int = LOOKAHEAD_DAYS, conn=None) -> dict:
         conn.execute(f"""DELETE FROM {STATE_TABLE} a USING games g
                          WHERE g.game_id = a.game_id AND g.game_date < %s""",
                      ((now.astimezone(ET) - timedelta(days=1)).strftime("%Y-%m-%d"),))
+        n_started = drop_started_ladders(conn, now)
         conn.commit()
+        if n_started:
+            logger.info(f"alt lines: dropped ladders for {n_started} started game(s)")
         for sport in sports:
+            if remaining == 0:
+                logger.info(f"{sport} alt lines: ALT_GAME_LINES_MAX_GAMES={cap} reached; not listed")
+                out["capped_sports"] += 1
+                continue
             s = {"games": 0, "rows": 0, "failed": [], "credits": {}}
             out["sports"][sport] = s
             asked = datetime.now(timezone.utc)
@@ -356,7 +479,9 @@ def run(sports=SPORTS, days: int = LOOKAHEAD_DAYS, conn=None) -> dict:
                 continue
             games = _match(conn, sport, near, now)
             conn.rollback()   # end the read: created_at is now() at transaction start
-            for gid, ev_id, home_name, game_date in games:
+            take, remaining = _bounded(games, remaining)
+            out["capped"] += len(games) - len(take)
+            for gid, ev_id, home_name, game_date in take:
                 asked = datetime.now(timezone.utc)
                 before = odds_quota.latest()
                 try:
@@ -404,6 +529,9 @@ def run(sports=SPORTS, days: int = LOOKAHEAD_DAYS, conn=None) -> dict:
             out["failed"] += len(s["failed"])
             logger.info(f"{sport} alt lines: {s['games']} games, {s['rows']} rungs, "
                         f"{len(s['failed'])} failed")
+        if out["capped"] or out["capped_sports"]:
+            logger.info(f"alt lines: cap {cap} left {out['capped']} game(s) and "
+                        f"{out['capped_sports']} sport(s) unbought")
         return out
     finally:
         if own:
@@ -421,13 +549,18 @@ def main(argv=None) -> int:
         from data.db import get_connection
         conn = get_connection()
         try:
-            print(json.dumps({k: len(v) for k, v in plan(conn, sports, args.days).items()}))
+            try:
+                planned = plan(conn, sports, args.days)
+            except ValueError as exc:
+                print(exc)
+                return 1
+            print(json.dumps({k: len(v) for k, v in planned.items()}))
         finally:
             conn.close()
         return 0
     summary = run(sports, args.days)
     print(json.dumps({k: v for k, v in summary.items() if k != "sports"}))
-    return 1 if summary.get("failed") else 0
+    return 0 if step_succeeded(summary) else 1
 
 
 if __name__ == "__main__":

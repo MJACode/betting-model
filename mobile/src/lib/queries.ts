@@ -6,7 +6,7 @@ import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/pro
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
 import { errorText, isAbortError, isNotFoundError } from './errors';
-import { ALT_GAME_MARKET, foldAltGameRows, type GameLineMarket } from './lineLegs';
+import { ALT_GAME_MARKET, foldAltGameRows, pregameLadderVisible, type GameLineMarket } from './lineLegs';
 import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
@@ -1106,10 +1106,14 @@ export async function fetchPropLineRows(
  * market: books x rungs, a few hundred rows at most. If it fails (the table
  * not yet created, a timeout) the main lines still come back, and the cause is
  * logged rather than thrown, so a missing ladder never empties the slip.
+ *
+ * The ladder is a morning pre-game price. Once commence_time has passed it is
+ * not read: an in-play leg must not be offered or priced off it. A missing
+ * start still loads the ladder. A failed start-time read hides it.
  */
 export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
   const altMarket = ALT_GAME_MARKET[market as GameLineMarket];
-  const [mainRes, altRes] = await Promise.all([
+  const [mainRes, gameRes] = await Promise.all([
     supabase
       .from('v_latest_odds_all_books')
       .select(ODDS_BY_BOOK_COLUMNS)
@@ -1117,16 +1121,32 @@ export async function fetchGameLineRows(gameId: string, market: string): Promise
       .eq('market', market),
     altMarket
       ? supabase
-          .from('alt_game_lines')
-          .select(ODDS_BY_BOOK_COLUMNS)
+          .from('games')
+          .select('commence_time')
           .eq('game_id', gameId)
-          .eq('market', altMarket)
-          .order('bookmaker')
-          .order('point')
-      : Promise.resolve({ data: [], error: null }),
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
   if (mainRes.error) throw mainRes.error;
   const main = (mainRes.data ?? []) as unknown as OddsByBookRow[];
+  if (!altMarket) return main;
+  const start = (gameRes.data as { commence_time?: string | null } | null)?.commence_time;
+  if (gameRes.error) {
+    console.warn('[gameLines] start time unavailable; ladder hidden', gameRes.error);
+    return main;
+  }
+  if (!pregameLadderVisible(start)) {
+    const hidden = main.slice() as OddsByBookRow[] & { ladderHidden?: 'started' };
+    hidden.ladderHidden = 'started';
+    return hidden;
+  }
+  const altRes = await supabase
+    .from('alt_game_lines')
+    .select(ODDS_BY_BOOK_COLUMNS)
+    .eq('game_id', gameId)
+    .eq('market', altMarket)
+    .order('bookmaker')
+    .order('point');
   if (altRes.error) {
     console.warn('[gameLines] alternate ladder unavailable', altRes.error);
     return main;
