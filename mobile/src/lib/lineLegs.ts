@@ -42,7 +42,7 @@
  * way it would two model game legs.
  */
 
-import { americanToDecimal } from '@/lib/format';
+import { americanToDecimal, formatStampET } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
 import { nhlOffLineCount } from '@/lib/nhlBoard';
 import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
@@ -198,7 +198,7 @@ export function gameRowAtNumber(r: OddsByBookRow, s: GameLineLegSpec): boolean {
  * NO bettable book does -- the leg cannot exist without a price, and the
  * caller prunes it.
  */
-function buildLeg<R extends { bookmaker: string }>(
+function buildLeg<R extends { bookmaker: string; fromLadder?: boolean; snapshot_at?: string | null }>(
   spec: LineLegSpec,
   at: readonly R[],
   priceOf: (r: R) => number | null,
@@ -239,6 +239,8 @@ function buildLeg<R extends { bookmaker: string }>(
     dkPriced: dk != null,
     dkLink: dk ? linkOf(dk) : null,
     pricedAt: anchor.bookmaker,
+    pricedFromLadder: anchor.fromLadder === true,
+    pricedAsOf: anchor.fromLadder ? anchor.snapshot_at ?? null : null,
   };
 }
 
@@ -249,14 +251,20 @@ function buildLeg<R extends { bookmaker: string }>(
  * edit sheet, so the price a user picks in the sheet is the price the slip
  * shows (UX review, 2026-10-28). `at` holds only rows that price the side.
  */
-export function anchorRow<R extends { bookmaker: string }>(
+export function anchorRow<R extends { bookmaker: string; fromLadder?: boolean }>(
   at: readonly R[],
   priceOf: (r: R) => number | null,
 ): R | null {
   if (at.length === 0) return null;
-  const dk = at.find((r) => r.bookmaker === MODEL_BOOK);
+  // A price refreshed this pass before one from the once-a-day alternate
+  // ladder: DraftKings' main, then the best main, then DraftKings' rung,
+  // then the best rung. Without this a 6 AM DraftKings rung beat a fresh
+  // main line another book hangs at the same number (UX review, 2026-10-29).
+  const fresh = at.filter((r) => !r.fromLadder);
+  const pool = fresh.length > 0 ? fresh : at;
+  const dk = pool.find((r) => r.bookmaker === MODEL_BOOK);
   if (dk) return dk;
-  return at.reduce((b, r) => ((priceOf(r) as number) > (priceOf(b) as number) ? r : b), at[0]!);
+  return pool.reduce((b, r) => ((priceOf(r) as number) > (priceOf(b) as number) ? r : b), pool[0]!);
 }
 
 /**
@@ -520,8 +528,10 @@ const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed
 const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
 // Alternate spreads and totals are fetched once a day (Matt, 2026-10-29;
 // data/ingestors/alt_game_lines.py), the main numbers every refresh pass.
-const GAME_LINE_SUBTITLE =
-  'Every number a sportsbook posts, including alternate lines. Alternate prices update once a day.';
+const GAME_LINE_SUBTITLE = 'Every number a sportsbook posts, including alternate lines.';
+// No ladder reached the sheet (not fetched yet for this game, or the read
+// failed): do not claim alternates the user cannot see.
+const MAIN_ONLY_SUBTITLE = 'Every number a sportsbook is hanging right now.';
 /** The whole game is off the board. */
 export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
 
@@ -601,17 +611,28 @@ function asTeam(spec: GameLineLegSpec, team: string, line: number | null): GameL
  * Total: Over and Under at every total a book hangs. The market itself does
  * not change — a spread stays a spread.
  */
-export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow[]): EditMenu {
+export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]): EditMenu {
   const at = rows.filter(
     (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker),
   );
   const choices: EditChoice[] = [];
-  const push = (segment: string, next: GameLineLegSpec, list: OddsByBookRow[], title = lineLegLabel(next)) => {
+  // Whether any alternate rung reached this menu: it decides the subtitle
+  // and whether main rows are labelled (a menu of only main rows needs no
+  // "Main line" on every row).
+  const hasLadder = at.some((r) => r.fromLadder);
+  const push = (segment: string, next: GameLineLegSpec, list: GameLineRow[], title = lineLegLabel(next)) => {
     const side = gameLegSide(next);
-    const priceOf = (r: OddsByBookRow) => priceForSide(r, side);
+    const priceOf = (r: GameLineRow) => priceForSide(r, side);
     const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
     if (!a) return;
-    choices.push({ segment, spec: next, title, hint: null, price: priceOf(a) as number, book: a.bookmaker });
+    // A ladder price says how old it is; a main price says it is the main
+    // number, so a far-out rung one book hangs does not read like it.
+    const hint = a.fromLadder
+      ? `Alt · ${formatStampET(a.snapshot_at) || 'today'}`
+      : hasLadder
+        ? 'Main line'
+        : null;
+    choices.push({ segment, spec: next, title, hint, price: priceOf(a) as number, book: a.bookmaker });
   };
   const teams = [spec.team, spec.opponent];
   const teamSegments = (kind: string) =>
@@ -632,7 +653,7 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow
         push(t, next, at.filter((r) => gameRowAtNumber(r, next)));
       }
     }
-    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: GAME_LINE_SUBTITLE });
+    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : MAIN_ONLY_SUBTITLE });
   }
   const totals = [...new Set(at.map((r) => num(r.total_line)).filter((n): n is number => n != null))].sort((a, b) => a - b);
   for (const side of ['over', 'under'] as const) {
@@ -641,10 +662,13 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow
       push(side, next, at.filter((r) => gameRowAtNumber(r, next)), `${side === 'over' ? 'Over' : 'Under'} ${fmtLine(line)}`);
     }
   }
-  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: GAME_LINE_SUBTITLE });
+  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : MAIN_ONLY_SUBTITLE });
 }
 
 // ── Alternate game lines (Matt, 2026-10-29: "yes", fetched once a day) ──────
+
+/** A game odds row, tagged when it came from the once-a-day alternate ladder. */
+export type GameLineRow = OddsByBookRow & { fromLadder?: boolean };
 
 /** The alternate market a game market's ladder is stored under. */
 export const ALT_GAME_MARKET: Partial<Record<GameLineMarket, string>> = {
@@ -663,18 +687,20 @@ export function foldAltGameRows(
   market: string,
   main: readonly OddsByBookRow[],
   alt: readonly OddsByBookRow[],
-): OddsByBookRow[] {
+): GameLineRow[] {
   const altName = ALT_GAME_MARKET[market as GameLineMarket];
   if (!altName) return [...main];
+  // Rows from the daily ladder carry fromLadder, so pricing prefers a fresh
+  // main row and the sheet can say how old a ladder price is.
   const numberOf = (r: OddsByBookRow) => num(market === 'spreads' ? r.spread_home : r.total_line);
   const have = new Set(main.map((r) => `${r.bookmaker}|${numberOf(r)}`));
-  const out = [...main];
+  const out: GameLineRow[] = [...main];
   for (const r of alt) {
     if (r.market !== altName) continue;
     const n = numberOf(r);
     if (n == null || have.has(`${r.bookmaker}|${n}`)) continue;
     have.add(`${r.bookmaker}|${n}`);
-    out.push({ ...r, market });
+    out.push({ ...r, market, fromLadder: true });
   }
   return out;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -56,6 +56,10 @@ export function EditLineLegSheet({
   const [picked, setPicked] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  // Open on the leg's own row. A ladder lists the favourite's biggest number
+  // first, so "· current" could start below the fold (UX review, 2026-10-29).
+  const listRef = useRef<ScrollView>(null);
+  const [currentY, setCurrentY] = useState<number | null>(null);
 
   const specKey = spec ? lineLegKey(spec) : null;
   useEffect(() => {
@@ -87,6 +91,13 @@ export function EditLineLegSheet({
   }, [specKey, nonce]);
 
   const rows = useMemo(() => (menu?.choices ?? []).filter((c) => c.segment === segment), [menu, segment]);
+  // A new list (load or tab switch) measures its current row afresh.
+  useEffect(() => setCurrentY(null), [rows]);
+  useEffect(() => {
+    if (currentY == null) return;
+    // One row of context above it; 52 is the row's minimum height.
+    listRef.current?.scrollTo({ y: Math.max(0, currentY - 52), animated: false });
+  }, [currentY]);
   const chosen = useMemo(
     () => (menu?.choices ?? []).find((c) => lineLegKey(c.spec) === picked) ?? null,
     [menu, picked],
@@ -178,7 +189,7 @@ export function EditLineLegSheet({
               <Text style={styles.stateText}>{emptyText}</Text>
             </View>
           ) : (
-            <ScrollView style={styles.list} bounces={false}>
+            <ScrollView ref={listRef} style={styles.list} bounces={false}>
               <View style={styles.listCard}>
                 {rows.map((c, i) => {
                   const key = lineLegKey(c.spec);
@@ -189,6 +200,7 @@ export function EditLineLegSheet({
                   return (
                     <Pressable
                       key={key}
+                      onLayout={isCurrent ? (e) => setCurrentY(e.nativeEvent.layout.y) : undefined}
                       onPress={() => {
                         setPicked(key);
                         setNote(null);
