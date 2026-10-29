@@ -62,6 +62,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_line_legs.ts
 
+      # Same skip as the two steps above. The scoreboard checks cover the
+      # live-line split rule; pytest-subset does not npm ci.
+      - name: Scoreboard
+        working-directory: mobile
+        run: npx tsx scripts/verify_scoreboard.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -238,5 +244,7 @@ jobs:
             tests/test_latest_line_state.py \
             tests/test_mobile_scoreboard.py \
             tests/test_live_scoreboard.py \
+            tests/test_scoreboard_splits.py \
             tests/test_pregame_insert_cutoff.py \
+            tests/test_health_pregame_prices_current.py \
             tests/test_web_site.py

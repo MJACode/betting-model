@@ -3307,7 +3307,7 @@ export async function fetchScoreboardSplits(gameIds: readonly string[]): Promise
     const chunk = gameIds.slice(i, i + size);
     const { data, error } = await supabase
       .from('scoreboard_splits')
-      .select('game_id, market, side, bet_pct, money_pct')
+      .select('game_id, market, side, bet_pct, money_pct, line_value')
       .in('game_id', [...chunk]);
     if (error) throw error;
     out.push(...((data ?? []) as unknown as ScoreboardSplitRow[]));

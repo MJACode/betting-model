@@ -19,6 +19,15 @@ So the alarm is a SHARE (at least half of the priced games, overall or within
 one sport, and at least 2 games), and a leftover id of a game the feed now
 prices under another id is not a stale game. Below 2 priced games the check
 asks whether the feed stored any DraftKings pre-game row inside the bound.
+
+A game the books have pulled is not in that share: no book has a main-market
+price inside the bound, it starts more than 24 hours out, and the same sport
+has another game more than 24 hours out that a book is still pricing. A
+same-day game being fresh is not enough. The 2026-10-29 15:25Z board was
+CRIT on that shape (NBA 7 of 13, the seven all Friday games last priced
+Oct 22-23) while three other Friday games were still priced. A fetch that
+has stopped has no far game a book is still pricing, so the 09-27 to 09-30
+outage stays CRIT.
 """
 from __future__ import annotations
 
@@ -74,20 +83,27 @@ class _Conn:
         self.rolled_back = True
 
 
-def _row(gid, sport, kick, h2h, spreads, totals, home=None, away=None):
+def _row(gid, sport, kick, h2h, spreads, totals, home=None, away=None,
+         any_book=None):
     """(game_id, sport, commence_time, home_team, away_team, newest h2h,
-    spreads, totals). Names default to the id's last two parts, which is how
-    every id since 08-01 is built (sport, date, away, home)."""
+    spreads, totals, newest main market from any book). Names default to the
+    id's last two parts, which is how every id since 08-01 is built (sport,
+    date, away, home). any_book defaults to the newest DraftKings stamp: one
+    number means that is the newest price stored."""
     parts = gid.split("_")
     if home is None:
         home = parts[3] if len(parts) == 4 else gid
     if away is None:
         away = parts[2] if len(parts) == 4 else gid
-    return (gid, sport, kick, home, away, h2h, spreads, totals)
+    if any_book is None:
+        stamps = [t for t in (h2h, spreads, totals) if t is not None]
+        any_book = max(stamps) if stamps else None
+    return (gid, sport, kick, home, away, h2h, spreads, totals, any_book)
 
 
-def _game(gid, sport, newest, kick=KICK, home=None, away=None):
-    return _row(gid, sport, kick, newest, newest, newest, home=home, away=away)
+def _game(gid, sport, newest, kick=KICK, home=None, away=None, any_book=None):
+    return _row(gid, sport, kick, newest, newest, newest, home=home, away=away,
+                any_book=any_book)
 
 
 def _run(rows, now=NOW, **kw):
@@ -134,8 +150,12 @@ def test_a_ufc_fight_the_feed_moved_to_its_swapped_id_is_not_stale():
 def test_a_cancelled_fight_and_a_pulled_game_do_not_raise_the_alarm():
     rows = [_game(f"NHL_2026-10-10_A{i}_B{i}", "NHL", FRESH) for i in range(8)]
     rows += [_game(f"UFC_2026-10-10_x{i}_y{i}", "UFC", FRESH) for i in range(10)]
-    rows += [_game("UFC_2026-10-10_mickey-gall_sedriques-dumas", "UFC", OLD),
-             _game("NHL_2026-10-10_PUL_LED", "NHL", OLD)]
+    # Still listed by another book, so they stay in the share (under half).
+    # A game no book lists, more than 24 hours out, is the pulled-slate case
+    # below and is left out entirely.
+    rows += [_game("UFC_2026-10-10_mickey-gall_sedriques-dumas", "UFC", OLD,
+                   any_book=FRESH),
+             _game("NHL_2026-10-10_PUL_LED", "NHL", OLD, any_book=FRESH)]
     res, _ = _run(rows)
     assert res["status"] == "OK", res["detail"]
     assert "2 do not" in res["detail"]
@@ -318,7 +338,10 @@ def test_the_09_02_renamed_ncaaf_ids_are_not_an_alarm():
     now = datetime(2026, 9, 2, 11, 30, tzinfo=timezone.utc)
 
     def g(gid, home, away, kick, newest):
-        return _game(gid, "NCAAF", newest, kick=kick, home=home, away=away)
+        # The two ids that stay stale start ~34 hours out. Another book still
+        # lists them, so they are behind, not a slate the books pulled.
+        return _game(gid, "NCAAF", newest, kick=kick, home=home, away=away,
+                     any_book="2026-09-02T11:16:33Z")
 
     rows = [
         g("NCAAF_2026-09-03_massachusetts_rutgers", "Rutgers", "Massachusetts",
@@ -384,8 +407,176 @@ def test_a_shared_name_more_than_6_hours_apart_is_another_game():
     """NYY's 17:00Z price is current and its 23:30Z game's is not: 6.5 hours
     apart, so the second game is not a leftover of the first."""
     rows = [_game("MLB_2026-10-10_NYY_BOS", "MLB", FRESH, kick="2026-10-10T17:00:00Z"),
-            _game("MLB_2026-10-10_NYY_TOR", "MLB", OLD, kick="2026-10-10T23:30:00Z"),
-            _game("MLB_2026-10-10_SEA_KC", "MLB", OLD, kick="2026-10-10T23:30:00Z")]
+            _game("MLB_2026-10-10_NYY_TOR", "MLB", OLD, kick="2026-10-10T23:30:00Z",
+                  any_book=FRESH),
+            _game("MLB_2026-10-10_SEA_KC", "MLB", OLD, kick="2026-10-10T23:30:00Z",
+                  any_book=FRESH)]
     res, _ = _run(rows)
     assert res["status"] == "STALE", res["detail"]
     assert "MLB 2 of 3" in res["detail"]
+
+
+# ── a slate the books pulled (2026-10-29 15:25Z) ────────────────────────────
+#
+# The stored row was CRIT, "NBA 7 of 13". Those seven Friday games had no
+# main-market price from any book since Oct 22-23, while the same sport's
+# other games were priced at 15:16Z. The first test failed before a pulled
+# slate was left out of the share. The outage tests above still have to CRIT:
+# a stopped fetch has no game a book is still pricing.
+
+TODAY = datetime(2026, 10, 29, 15, 25, tzinfo=timezone.utc)
+TODAY_FRESH = "2026-10-29T15:16:48Z"
+
+
+def _kick(now, hours):
+    return (now + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_the_2026_10_29_pulled_friday_slate_is_not_a_crit():
+    """ORL@TOR, NYK@PHI, LAC@MIN, HOU@DAL, IND@MIA, LAL@GSW, DEN@PHX, tips
+    32.2 to 34.8 hours out, newest any-book price Oct 22-23. Six other NBA
+    games plus NHL 11, NCAAF 5 and WNBA 1 priced at 15:16Z. Before: CRIT,
+    'the board is emptying'."""
+    fresh = [
+        ("NBA_2026-10-29_CLE_ATL", "2026-10-30T00:10:00Z"),
+        ("NBA_2026-10-29_SAC_NOP", "2026-10-30T00:10:00Z"),
+        ("NBA_2026-10-29_MEM_POR", "2026-10-30T02:10:00Z"),
+        ("NBA_2026-10-30_CHA_WAS", "2026-10-30T23:10:00Z"),
+        ("NBA_2026-10-30_CHI_BOS", "2026-10-30T23:40:00Z"),
+        ("NBA_2026-10-30_DET_BKN", "2026-10-30T23:40:00Z"),
+    ]
+    pulled = [
+        ("NBA_2026-10-30_NYK_PHI", "2026-10-30T23:40:00Z",
+         "2026-10-23T02:08:09Z", "2026-10-23T02:08:09Z"),
+        ("NBA_2026-10-30_ORL_TOR", "2026-10-30T23:40:00Z",
+         "2026-10-23T02:10:00Z", "2026-10-23T02:20:17Z"),
+        ("NBA_2026-10-30_HOU_DAL", "2026-10-31T00:10:00Z",
+         "2026-10-22T02:09:32Z", "2026-10-22T02:09:32Z"),
+        ("NBA_2026-10-30_LAC_MIN", "2026-10-31T00:10:00Z",
+         "2026-10-23T02:10:42Z", "2026-10-23T02:20:17Z"),
+        ("NBA_2026-10-30_IND_MIA", "2026-10-31T00:10:00Z",
+         "2026-10-23T02:10:00Z", "2026-10-23T02:20:17Z"),
+        ("NBA_2026-10-30_LAL_GSW", "2026-10-31T02:10:00Z",
+         "2026-10-23T02:10:42Z", "2026-10-23T02:10:42Z"),
+        ("NBA_2026-10-30_DEN_PHX", "2026-10-31T02:10:00Z",
+         "2026-10-23T02:10:42Z", "2026-10-23T02:10:42Z"),
+    ]
+    rows = [_game(gid, "NBA", TODAY_FRESH, kick=kick) for gid, kick in fresh]
+    rows += [_game(gid, "NBA", dk, kick=kick, any_book=any_b)
+             for gid, kick, dk, any_b in pulled]
+    rows += [_game(f"NHL_2026-10-29_A{i}_B{i}", "NHL", TODAY_FRESH,
+                   kick="2026-10-30T00:00:00Z") for i in range(11)]
+    rows += [_game(f"NCAAF_2026-10-29_C{i}_D{i}", "NCAAF", TODAY_FRESH,
+                   kick="2026-10-30T00:00:00Z") for i in range(5)]
+    rows += [_game("WNBA_2026-10-29_E_F", "WNBA", TODAY_FRESH,
+                   kick="2026-10-30T00:00:00Z")]
+    res, conn = _run(rows, now=TODAY)
+    assert res["status"] == "OK", res["detail"]
+    assert "23 of 23" in res["detail"]
+    assert "NBA 7" in res["detail"]
+    assert "books pulled" in res["detail"]
+    assert "board is emptying" not in res["detail"]
+    sql = conn.sql[0]
+    assert "latest_odds" in sql
+    assert "h2h" in sql and "spreads" in sql and "totals" in sql
+    assert "alternate" not in sql
+
+
+def test_games_close_to_start_with_no_book_still_crit_when_a_far_slate_is_pulled():
+    """Four NBA games 6 hours out have no price from any book. One game 33
+    hours out is still priced, so six others at that lead are a slate the
+    books pulled and stay out of the share. The four games about to start
+    stay in. With the six counted, the row is 10 of 13."""
+    close = _kick(TODAY, 6)
+    far = _kick(TODAY, 33)
+    rows = [_game(f"NBA_2026-10-29_C{i}_D{i}", "NBA", OLD, kick=close, any_book=OLD)
+            for i in range(4)]
+    rows += [_game(f"NBA_2026-10-29_F{i}_G{i}", "NBA", TODAY_FRESH, kick=close)
+             for i in range(2)]
+    rows += [_game("NBA_2026-10-30_L_M", "NBA", TODAY_FRESH, kick=far)]
+    rows += [_game(f"NBA_2026-10-30_P{i}_Q{i}", "NBA", OLD, kick=far, any_book=OLD)
+             for i in range(6)]
+    res, _ = _run(rows, now=TODAY)
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "4 of 7" in res["detail"]
+    assert "10 of 13" not in res["detail"]
+    assert "6 games more than 24 hours" in res["detail"]
+
+
+def test_a_sport_whose_feed_stopped_still_crits_when_every_game_is_far():
+    """Every NBA game is 33 hours out and no book has priced one inside the
+    bound. NHL is fresh. Treating 'far and unlisted' as pulled whenever any
+    sport is alive would hide a sport whose feed stopped."""
+    far = _kick(TODAY, 33)
+    rows = [_game(f"NHL_2026-10-29_A{i}_B{i}", "NHL", TODAY_FRESH, kick=far)
+            for i in range(8)]
+    rows += [_game(f"NBA_2026-10-30_C{i}_D{i}", "NBA", OLD, kick=far, any_book=OLD)
+             for i in range(4)]
+    res, _ = _run(rows, now=TODAY)
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 4 of 4" in res["detail"]
+    assert "books pulled" not in res["detail"]
+
+
+def test_a_far_game_another_book_still_lists_stays_behind():
+    """33 hours out, DraftKings is old, another book priced it inside the
+    bound. That is DraftKings behind on a game the feed is returning, not a
+    slate the books pulled."""
+    far = _kick(TODAY, 33)
+    rows = [_game(f"NBA_2026-10-30_F{i}_G{i}", "NBA", TODAY_FRESH, kick=far)
+            for i in range(3)]
+    rows += [_game(f"NBA_2026-10-30_S{i}_T{i}", "NBA", OLD, kick=far,
+                   any_book=TODAY_FRESH) for i in range(3)]
+    res, _ = _run(rows, now=TODAY)
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 3 of 6" in res["detail"]
+    assert "books pulled" not in res["detail"]
+
+
+def test_a_fresh_draftkings_price_lists_the_sport_when_latest_odds_lags():
+    """The any-book stamp is read from latest_odds and the DraftKings stamp
+    from odds. A game more than 24 hours out whose latest_odds row is behind
+    still lists the sport when DraftKings priced it inside the bound, and the
+    pulled games stay out of the share."""
+    far = _kick(TODAY, 33)
+    rows = [_game(f"NBA_2026-10-30_F{i}_G{i}", "NBA", TODAY_FRESH, kick=far,
+                  any_book=OLD) for i in range(2)]
+    rows += [_game(f"NBA_2026-10-30_P{i}_Q{i}", "NBA", OLD, kick=far, any_book=OLD)
+             for i in range(3)]
+    res, _ = _run(rows, now=TODAY)
+    assert res["status"] == "OK", res["detail"]
+    assert "2 of 2" in res["detail"]
+    assert "NBA 3" in res["detail"]
+
+
+def test_a_game_exactly_24_hours_out_with_no_book_is_still_behind():
+    """The lead is 'more than 24 hours'. At 24 hours a missing price is the
+    board, even when the same sport is still being priced."""
+    kick = _kick(NOW, 24)
+    rows = [_game(f"NBA_2026-10-10_F{i}_G{i}", "NBA", FRESH, kick=kick)
+            for i in range(2)]
+    rows += [_game(f"NBA_2026-10-10_S{i}_T{i}", "NBA", OLD, kick=kick, any_book=OLD)
+             for i in range(2)]
+    res, _ = _run(rows)
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "2 of 4" in res["detail"]
+    assert "books pulled" not in res["detail"]
+
+
+def test_fresh_same_day_games_do_not_hide_a_dead_early_lines_pass():
+    """Near games are fresh. Every game more than 24 hours out in this sport
+    has no price from any book. Today's board must not turn that into a slate
+    the books pulled: the early-lines pass can die on its own. A fresh far
+    game in another sport does not cover this one."""
+    close = _kick(TODAY, 8)
+    far = _kick(TODAY, 33)
+    rows = [_game(f"NBA_2026-10-29_N{i}_M{i}", "NBA", TODAY_FRESH, kick=close)
+            for i in range(4)]
+    rows += [_game(f"NBA_2026-10-30_F{i}_G{i}", "NBA", OLD, kick=far, any_book=OLD)
+             for i in range(6)]
+    rows += [_game(f"NHL_2026-10-30_A{i}_B{i}", "NHL", TODAY_FRESH, kick=far)
+             for i in range(2)]
+    res, _ = _run(rows, now=TODAY)
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 6 of 10" in res["detail"]
+    assert "books pulled" not in res["detail"]

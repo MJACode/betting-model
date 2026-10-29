@@ -55,6 +55,10 @@ def test_rows_carry_bets_and_money_per_side_on_our_game_id():
     assert got[("spreads", "away")] == (47.0, 53.0)
     assert got[("spreads", "home")] == (53.0, 47.0)
     assert got[("totals", "over")] == (60.0, 70.0)
+    by = {(r["market"], r["side"]): r["line_value"] for r in rows}
+    assert by[("spreads", "home")] == -3.5
+    assert by[("spreads", "away")] == 3.5
+    assert by[("totals", "over")] == 46.5
     assert all(r["game_id"] == "NFL_2026_08_CAR_GB" for r in rows)
     assert counts == {"games": 1}
 
