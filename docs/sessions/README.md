@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing when the same sport is still being priced. The 15:25Z NBA 7 of 13 CRIT was that. Outage replays stay CRIT. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing only when the same sport still has a game more than 24 hours out that a book is pricing. Same-day prices do not hide a dead early-lines pass. The 15:25Z NBA 7 of 13 CRIT was the pulled Friday slate. Outage replays stay CRIT. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Scoreboard one list per sport (status chips removed), live NFL / NBA / NHL scores from ESPN every minute into `live_scoreboard`, and % bets / % money per market into display-only `scoreboard_splits`. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1083 M1–M2. Main-market filter on the unfiltered odds reads. FETCH_ALT_GAME_LINES and skip started games. Draft stays draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA facts follow-up. NBA game-facts floor is 2021. Docstrings match the off declarations. Enable game facts before prop facts. Jobs stay off. |

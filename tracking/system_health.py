@@ -587,14 +587,16 @@ PREGAME_SAME_GAME_HOURS: int = 6
 #
 # A stale game is left out of the share only when all three hold: no book has
 # a main-market price inside the bound, it starts more than
-# PREGAME_PULLED_LEAD_HOURS away, and the same sport has another game in the
-# window that a book is still pricing. The any-book stamp is that game's own
-# newest h2h/spread/total in latest_odds, so a trickle of alternate totals
-# (the 09-29 and 09-30 outage) cannot mark it listed. The 09-27 to 09-30
-# outage has no game a book is still pricing, so the share is unchanged
-# (11 of 11, 6 of 6, 9 of 9, 11 of 11). A sport whose every game went quiet
-# stays in the share too, including when every one of them is far out. A game
-# inside the lead stays in even when no book lists it.
+# PREGAME_PULLED_LEAD_HOURS away, and the same sport has another game more
+# than that far out that a book is still pricing. A same-day game being fresh
+# is not that. The early-lines pass can stop while today's games stay priced,
+# and those games would otherwise turn every far game into "a slate the books
+# pulled" (review 5700672772). The any-book stamp is that game's own newest
+# h2h/spread/total in latest_odds, so a trickle of alternate totals (the
+# 09-29 and 09-30 outage) cannot mark it listed. The 09-27 to 09-30 outage
+# has no game a book is still pricing, so the share is unchanged (11 of 11,
+# 6 of 6, 9 of 9, 11 of 11). A sport whose every far game went quiet stays in
+# the share too. A game inside the lead stays in even when no book lists it.
 PREGAME_PULLED_LEAD_HOURS: int = 24
 # The newest of the three main markets: DraftKings pulls a lopsided game's
 # moneyline and keeps its spread and total (a moneyline-only read called one
@@ -762,29 +764,34 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     groups: dict = {}
     for g in stale_ids:
         groups.setdefault(_root(g), []).append(g)
-    # A sport is still being priced when any in-window game has a main-market
-    # price inside the bound from DraftKings or from any book. The newer of
-    # the two stamps is the one that counts, so a latest_odds row sitting
-    # behind the odds read cannot hide that DraftKings price, and a missing
-    # any-book stamp cannot turn a dead fetch into a pulled slate.
+    # The newer of the DraftKings stamp and the any-book stamp is the one
+    # that counts, so a latest_odds row sitting behind the odds read cannot
+    # hide that DraftKings price, and a missing any-book stamp cannot turn a
+    # dead fetch into a pulled slate.
     def _listed_at(game_id: str):
         stamps = [t for t in (any_at.get(game_id), info[game_id][3]) if t is not None]
         return max(stamps) if stamps else None
 
-    sport_listed = set()
+    # A far game is "books pulled" only when the same sport still has a far
+    # game a book is pricing. Today's games stay fresh through an early-lines
+    # outage, so they must not be what lists the sport.
+    lead = timedelta(hours=PREGAME_PULLED_LEAD_HOURS)
+    sport_far_listed = set()
     for game_id in window:
+        start = info[game_id][1]
+        if start is None or (start - now) <= lead:
+            continue
         listed = _listed_at(game_id)
         if listed is not None and listed >= floor:
-            sport_listed.add(info[game_id][0])
+            sport_far_listed.add(info[game_id][0])
     pulled: dict = {}
-    lead = timedelta(hours=PREGAME_PULLED_LEAD_HOURS)
     for members in groups.values():
         sport = info[members[0]][0]
         dk_last = max(info[g][3] for g in members)
         listed_last = max(_listed_at(g) or dk_last for g in members)
         start = min(info[g][1] for g in members)
         far = start is not None and (start - now) > lead
-        if listed_last < floor and far and sport in sport_listed:
+        if listed_last < floor and far and sport in sport_far_listed:
             pulled[sport] = pulled.get(sport, 0) + 1
             continue
         priced[sport] = priced.get(sport, 0) + 1
@@ -800,16 +807,17 @@ def check_pregame_prices_current(conn, r: "HealthReport",
         return (f"{lead_in}{pulled_n} {noun} more than "
                 f"{PREGAME_PULLED_LEAD_HOURS} hours from start, with no price "
                 f"from any book in the last {limit} minutes, left out ({who}): "
-                f"the same sport is still being priced, so this is a slate the "
-                f"books pulled, not a dead fetch")
+                f"the same sport still has a game more than "
+                f"{PREGAME_PULLED_LEAD_HOURS} hours out that a book is pricing, "
+                f"so this is a slate the books pulled, not a dead fetch")
 
     hours = PREGAME_CURRENT_WINDOW_HOURS
     n_priced = sum(priced.values())
     n_stale = sum(len(v) for v in stale.values())
     if n_priced < PREGAME_STALE_MIN_GAMES and not pulled_n:
         # Too few games for the share to mean anything: is the feed alive?
-        # A pulled slate does not take this branch: the same sport is still
-        # being priced, which is what `pulled_n` required.
+        # A pulled slate does not take this branch: the same sport still has
+        # a far game a book is pricing, which is what `pulled_n` required.
         try:
             fresh = conn.execute("""
                 SELECT 1 FROM odds
