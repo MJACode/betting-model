@@ -159,6 +159,12 @@ class _Conn:
         cur.executemany(sql, rows)
         return cur
 
+    def commit(self):
+        pass        # autocommit
+
+    def rollback(self):
+        pass
+
 
 @pytest.fixture(scope="module")
 def db():
@@ -213,3 +219,74 @@ def test_a_second_pass_of_the_migration_is_a_no_op(db):
     assert cur.fetchone()[0] == before
     cur.execute("SELECT count(*) FROM pg_policies WHERE tablename = 'alt_game_lines'")
     assert cur.fetchone()[0] == 1
+
+
+def test_the_refresh_pass_replaces_the_ladder_and_ledgers_its_credits(db):
+    """store_pass_ladders on a transactional connection, the shape the odds
+    pass hands it: the ladder for the bought game is replaced, the pass is
+    ledgered with the measured credits, and nothing commits until the pass
+    does."""
+    import psycopg2
+    # The ledger first, on the autocommit connection. On this sandbox's
+    # Postgres 16, ddl_guard's first catalog query (PG17's MAINTAIN) fails and
+    # rolls the connection back, which on a transactional connection would
+    # undo the CREATE before lock_down runs; production is Postgres 17.
+    alt.ensure_ledger(_Conn(db))
+    dsn = db.get_dsn_parameters()
+    raw = psycopg2.connect(host=dsn.get("host"), port=dsn.get("port"),
+                           user=dsn.get("user"), dbname=dsn.get("dbname"))
+    try:
+        class _TxConn(_Conn):
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        c = _TxConn(raw)
+        rows = [dict(r, source=None) for r in _rows(SPREADS)]
+        out = alt.store_pass_ladders(c, "NFL", rows, {"calls": 1, "credits": 2.0},
+                                     datetime(2026, 10, 30, 12, tzinfo=timezone.utc))
+        raw.commit()
+        assert out == {"games": 1, "rows": len(rows)}
+        cur = raw.cursor()
+        cur.execute("SELECT count(*) FROM alt_game_lines WHERE game_id = 'NFL_2026-11-01_KC_BUF'")
+        assert cur.fetchone()[0] == len(rows)
+        cur.execute("SELECT endpoint, credits_last, rows_stored FROM alt_game_line_fetches "
+                    "WHERE endpoint = 'pass'")
+        assert cur.fetchall() == [("pass", 2.0, len(rows))]
+    finally:
+        raw.close()
+
+
+def test_a_failed_refresh_still_ledgers_the_spend(db, monkeypatch):
+    """Review of #1093, M1: the ladder refresh fails, the ladder rows roll
+    back, and the pass's credits are still ledgered, as ok = False."""
+    import psycopg2
+    alt.ensure_ledger(_Conn(db))
+    dsn = db.get_dsn_parameters()
+    raw = psycopg2.connect(host=dsn.get("host"), port=dsn.get("port"),
+                           user=dsn.get("user"), dbname=dsn.get("dbname"))
+    try:
+        class _TxConn(_Conn):
+            def commit(self):
+                self.raw.commit()
+
+            def rollback(self):
+                self.raw.rollback()
+
+        def broken(*a, **k):
+            raise RuntimeError("disk full")
+        monkeypatch.setattr(alt, "_replace_state", broken)
+        rows = [dict(r, source=None) for r in _rows(SPREADS)]
+        out = alt.store_pass_ladders(_TxConn(raw), "NFL", rows, {"calls": 1, "credits": 2.0},
+                                     datetime(2026, 10, 30, 13, tzinfo=timezone.utc))
+        raw.commit()
+        assert out == {"games": 0, "rows": 0}
+        cur = raw.cursor()
+        cur.execute("SELECT ok, credits_last, detail FROM alt_game_line_fetches "
+                    "WHERE endpoint = 'pass' AND requested_at = '2026-10-30T13:00:00Z'")
+        ok, credits, detail = cur.fetchone()
+        assert ok is False and credits == 2.0 and "disk full" in detail
+    finally:
+        raw.close()
