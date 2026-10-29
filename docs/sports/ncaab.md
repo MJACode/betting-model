@@ -74,11 +74,19 @@ run.
   no current-season Torvik data as of 2026-10-28, the package's issue tracker
   has had "No Bart Torvik Data for 2025-26 Season" open since 2025-11-11 with
   no maintainer reply, and two independent projects report the API stopped
-  updating after June 2025, so nothing says it will return. Re-check on
-  2026-11-02; until it appears the archive serves backtests only. Terms of
-  use: none exist in writing for cbbdata or for Torvik's data (his data page
-  says "get in touch"); whether to ask him is mike's call, and the hand-off
-  doc carries the question.
+  updating after June 2025, so nothing says it will return. The archive serves
+  backtests; current-season ratings come from Torvik's own season file
+  (`https://barttorvik.com/2027_team_results.csv`, HTTP 200 on 2026-10-28),
+  which his robots.txt lets general agents fetch (Load-bearing facts below).
+  Terms of use: none exist in writing for cbbdata or for Torvik's data; mike,
+  2026-10-29: no permission requests to any data source.
+- **KenPom.** The API subscription is $145.00 for 12 months with web access;
+  web-only is $24.95 and has no data feed (live pages read 2026-10-28 23:34Z;
+  the API page read $95.00 in June 2026). mike buys it in his own browser
+  under the sign-up mailbox; the key then goes into the local `.env` and the
+  worker as `KENPOM_API_KEY`, and the checks in the hand-off doc run. Eleven
+  endpoints, the daily archive and preseason ratings included; no player
+  availability. No permission request (mike, 2026-10-29).
 - **College Basketball Data (api.collegebasketballdata.com).** Matt's
   question, answered by the feed probe on the worker (`ncaab-feed-probe-2026-10-26`,
   2026-10-28 23:25Z): **the football data key opens it.** `/teams` season
@@ -113,7 +121,11 @@ run.
   markets, never in first-half ones.
 - **Player availability** has no free structured feed. Official reports exist
   for Big 12, ACC and SEC conference games (and the NCAA tournament pilot).
-- **Torvik's site** bans AI crawlers in robots.txt; his data comes only through
-  the cbbdata API. The headline projection in his schedule files is rewritten
-  after games (61.8% against the line in 2025-26) and must never be used.
+- **Torvik's robots.txt** (read 2026-10-29) bars six named crawlers, ClaudeBot
+  and anthropic-ai among them, from the whole site, and every agent from the
+  time-machine pages, `db.php`, `box.php`, `results.php`, `playerstat.php`
+  and `.json` files; general agents may fetch the season CSVs with a
+  10-second crawl delay. cbbdata holds nothing after 2024-25. The headline
+  projection in his schedule files is rewritten after games (61.8% against
+  the line in 2025-26) and must never be used.
 - **College player props** are barred in 13 states (Unabated, 2026-07-29).

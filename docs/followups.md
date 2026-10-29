@@ -21,27 +21,34 @@
 
 ---
 
-## [ ] [needs-decision] KenPom access for a commercial picks product (2026-10-28)
+## [ ] KenPom API: mike buys it, then the key and the daily pull (2026-10-28)
 
-mike keeps this as an action item for an outside assistant. The hand-off brief
-(price, terms, API, steps, deliverables, decisions) is the Claude doc
-"College basketball data hand-offs", https://claude.ai/artifact/XoJ3cFxitCaX5dS987byaY.
-What comes back lands here: the licence answer, the key (Railway variable), the
-daily ratings pull into Supabase.
+$145.00 for 12 months, web access included (live page read 2026-10-28). mike
+buys it in his own browser under the sign-up mailbox; no permission request
+(mike, 2026-10-29). Then: the key into the local `.env` and Railway as
+`KENPOM_API_KEY`, the acceptance checks in the Claude doc "College basketball
+data hand-offs" (https://claude.ai/artifact/XoJ3cFxitCaX5dS987byaY), the
+archive import into Supabase, and a daily ratings pull stored with the time
+pulled.
 
 ## [ ] [needs-decision] Pre-tip injury / availability feed for NCAAB (2026-10-28)
 
-Same doc, second brief: the official conference availability reports, the
-vendors, the free sources, what to buy and what to hand back. The model needs
+Same doc, second brief, for an outside assistant: price requests to
+SportsDataIO and RotoWire signed Signalbase (neither publishes a price), the
+official conference reports, what to buy and what to hand back. The model needs
 status BEFORE tip with a timestamp; the stored form is a snapshot table keyed
 on (game, team, player, observed_at).
 
-## [ ] Torvik daily pull once the worker holds the cbbdata key (2026-10-28)
+## [ ] Torvik: the archive import and a daily season-file pull (2026-10-28)
 
-`docs/sports/ncaab.md` "Data accounts". The archive is daily 2014-15 → 2024-25
-and EMPTY for 2025-26 as of 2026-10-28; re-check 2026-11-02. Build: the
-11-season archive import (backtest feature and benchmark), then a daily pull of
-the current season when the API serves it. Needs `CBBDATA_*` on Railway.
+`docs/sports/ncaab.md` "Data accounts". cbbdata's archive is daily 2014-15 →
+2024-25 and EMPTY after (the maintainer's last reply on any issue was
+2024-01-18); the import (backtest feature and benchmark) needs `CBBDATA_*` on
+Railway, which waits on the Railway connector's login. Current-season ratings
+come from Torvik's own `2027_team_results.csv`, which his robots.txt lets
+general agents fetch with a 10-second crawl delay: pull it once a day before
+the first tip and store every pull with the time pulled, so the as-of history
+builds from opening night.
 
 ## [ ] College Basketball Data: measure lines coverage by season, plays, lineups (2026-10-28)
 
