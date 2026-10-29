@@ -52,6 +52,63 @@ run.
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 
+## Data accounts and sources (measured 2026-10-28)
+
+- **cbbdata (Torvik's API).** Account created 2026-10-28 (mike: "articulate the
+  cbbdata sign-up with your email") and re-registered 2026-10-29 under the
+  dedicated sign-up mailbox (mike: "change email for signups"): username
+  `signalbaseskinny`, no confirmation e-mail required; the first account
+  (`malkatrazz`, personal Gmail) is superseded and its values are kept as
+  `CBBDATA_OLD_*`. The password and API key are in the local `.env` as
+  `CBBDATA_USER`, `CBBDATA_EMAIL`, `CBBDATA_PASSWORD`, `CBBDATA_API_KEY`; they
+  are NOT on the worker yet (Railway variable, mike's or an OAuth grant). Calls are
+  `https://www.cbbdata.com/api/<endpoint>?key=<key>&year=2025&team=Duke` and
+  return Parquet. Measured: `torvik/ratings/archive` holds daily T-Rank
+  ratings for 364 teams per date for the seasons 2014-15 → 2024-25 (2024-25:
+  232 dates, 2024-11-02 → 2025-06-30, 84,383 rows; columns rank, team, conf,
+  record, barthag, adj_o, adj_d, adj_tempo, wab, proj_record, date, year);
+  `torvik/ratings` holds season-end ratings 2008 → 2025; `torvik/game/stats`,
+  `torvik/game/factors` and `torvik/player/game` answer for 2024-25;
+  `torvik/team/schedule` is 404 and `torvik/game/prediction` 500. **The
+  2025-26 season (`year` 2026) returned zero rows everywhere** — the API has
+  no current-season Torvik data as of 2026-10-28, the package's issue tracker
+  has had "No Bart Torvik Data for 2025-26 Season" open since 2025-11-11 with
+  no maintainer reply, and two independent projects report the API stopped
+  updating after June 2025, so nothing says it will return. The archive serves
+  backtests; current-season ratings come from Torvik's own season file
+  (`https://barttorvik.com/2027_team_results.csv`, HTTP 200 on 2026-10-28),
+  which his robots.txt lets general agents fetch (Load-bearing facts below).
+  Terms of use: none exist in writing for cbbdata or for Torvik's data; mike,
+  2026-10-29: no permission requests to any data source.
+- **KenPom.** The API subscription is $145.00 for 12 months with web access;
+  web-only is $24.95 and has no data feed (live pages read 2026-10-28 23:34Z;
+  the API page read $95.00 in June 2026). mike buys it in his own browser
+  under the sign-up mailbox; the key then goes into the local `.env` and the
+  worker as `KENPOM_API_KEY`, and the checks in the hand-off doc run. Eleven
+  endpoints, the daily archive and preseason ratings included; no player
+  availability. No permission request (mike, 2026-10-29).
+- **College Basketball Data (api.collegebasketballdata.com).** Matt's
+  question, answered by the feed probe on the worker (`ncaab-feed-probe-2026-10-26`,
+  2026-10-28 23:25Z): **the football data key opens it.** `/teams` season
+  2027 → 365 records; `/games` 2026 Duke → 38; `/lines` 2026 Duke → 38 with
+  providers ESPN BET, Bovada, DraftKings, consensus, teamrankings,
+  numberfire; `X-CallLimit-Remaining` 121,421. Lines coverage by season,
+  plays, lineups and substitutions are unmeasured — the next probe.
+- **The odds feed, first look (same probe).** 7 NCAAB events listed for
+  2026-11-01 → 11-03; every one of 7 books prices h2h, spreads and totals;
+  FanDuel also listed first-half, second-half, team-total, alternate and
+  player-points markets on one game; BetRivers and Hard Rock alternate lines
+  and odd/even; William Hill first basket. 14 of 14 feed names were
+  unresolved only because the ESPN registry was still empty (the schedule
+  job runs after the probe).
+- **First night, measured 2026-10-28 23:36Z.** 747 ESPN teams and 3,491 games were stored within six minutes of the schedule job starting; the 5-minute capture resolved all 7 listed feed events onto ESPN rows (one of them flipped: the feed's "High Point @ Liberty" is ESPN's `NCAAB_2026-11-01_liberty_high-point`) and `latest_odds` held 143 prices from 7 books.
+- **The purchase floor is 300,000 credits** (lowered from 500,000 on
+  2026-10-28, mike: "dont stop the spend"): 3.5 of October's worst organic
+  days (84,534 on 2026-10-04, `odds_api_quota`). The refill lands between
+  the last day's 23:50Z reading and roughly 01:00Z on the 1st (Sept and Oct
+  both show a full day's burn by the 1st's 23:40Z reading), so the resumes
+  fire at 06:00Z–06:20Z on 2026-11-01 with 2026-11-02 copies as backstops.
+
 ## Load-bearing facts
 
 - **Sign conventions.** `scored_line` / `spread_home` is the HOME number
@@ -64,7 +121,11 @@ run.
   markets, never in first-half ones.
 - **Player availability** has no free structured feed. Official reports exist
   for Big 12, ACC and SEC conference games (and the NCAA tournament pilot).
-- **Torvik's site** bans AI crawlers in robots.txt; his data comes only through
-  the cbbdata API. The headline projection in his schedule files is rewritten
-  after games (61.8% against the line in 2025-26) and must never be used.
+- **Torvik's robots.txt** (read 2026-10-29) bars six named crawlers, ClaudeBot
+  and anthropic-ai among them, from the whole site, and every agent from the
+  time-machine pages, `db.php`, `box.php`, `results.php`, `playerstat.php`
+  and `.json` files; general agents may fetch the season CSVs with a
+  10-second crawl delay. cbbdata holds nothing after 2024-25. The headline
+  projection in his schedule files is rewritten after games (61.8% against
+  the line in 2025-26) and must never be used.
 - **College player props** are barred in 13 states (Unabated, 2026-07-29).
