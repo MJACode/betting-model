@@ -490,11 +490,9 @@ export function lineLegsAfterReplace(
 // the bets a bettable book posts right now, each priced by anchorRow — the
 // leg's own rule — so the price picked is the price the slip shows.
 //
-// Game lines offer what the books POST: the main number each book hangs.
-// Alternate game lines (other numbers) are not fetched as of 2026-10-29 —
-// measured: none stored since 2026-10-01 — so a game often has one or two
-// numbers to choose from. Fetching alternates costs Odds API credits, which
-// is Matt's call, not this code's.
+// Game lines offer what the books POST: the main number each book hangs,
+// plus the alternate ladder fetched once a day (Matt approved the cost
+// 2026-10-29), folded in by foldAltGameRows.
 
 /** One bet the sheet can switch the leg to. */
 export interface EditChoice {
@@ -520,10 +518,10 @@ export interface EditMenu {
 
 const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
 const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
-// True as measured 2026-10-29 (no alternate game lines stored since
-// 2026-10-01). Remove the second sentence if alternates are ever fetched.
+// Alternate spreads and totals are fetched once a day (Matt, 2026-10-29;
+// data/ingestors/alt_game_lines.py), the main numbers every refresh pass.
 const GAME_LINE_SUBTITLE =
-  'Every number a sportsbook is hanging right now. Alternate lines aren’t listed for game lines.';
+  'Every number a sportsbook posts, including alternate lines. Alternate prices update once a day.';
 /** The whole game is off the board. */
 export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
 
@@ -644,4 +642,39 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow
     }
   }
   return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: GAME_LINE_SUBTITLE });
+}
+
+// ── Alternate game lines (Matt, 2026-10-29: "yes", fetched once a day) ──────
+
+/** The alternate market a game market's ladder is stored under. */
+export const ALT_GAME_MARKET: Partial<Record<GameLineMarket, string>> = {
+  spreads: 'alternate_spreads',
+  totals: 'alternate_totals',
+};
+
+/**
+ * A game market's main rows plus its alternate ladder (alt_game_lines), as
+ * one list in the MAIN market's name, so the edit menu and the slip's
+ * re-pricing (gameEditMenu, gameLineLegFromRows) see every number a book
+ * hangs. Where a book's alternate rung repeats its main number, the main row
+ * wins: it is refreshed every pass, the ladder once a day.
+ */
+export function foldAltGameRows(
+  market: string,
+  main: readonly OddsByBookRow[],
+  alt: readonly OddsByBookRow[],
+): OddsByBookRow[] {
+  const altName = ALT_GAME_MARKET[market as GameLineMarket];
+  if (!altName) return [...main];
+  const numberOf = (r: OddsByBookRow) => num(market === 'spreads' ? r.spread_home : r.total_line);
+  const have = new Set(main.map((r) => `${r.bookmaker}|${numberOf(r)}`));
+  const out = [...main];
+  for (const r of alt) {
+    if (r.market !== altName) continue;
+    const n = numberOf(r);
+    if (n == null || have.has(`${r.bookmaker}|${n}`)) continue;
+    have.add(`${r.bookmaker}|${n}`);
+    out.push({ ...r, market });
+  }
+  return out;
 }

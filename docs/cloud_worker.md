@@ -37,7 +37,21 @@ Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
 See `docs/social_posts.md`.
 
-Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
+**Alternate spreads and totals (2026-10-29, Matt approved the cost).** The
+daily full pipeline's Step 2-alt (`--step alt-game-lines`,
+`data/ingestors/alt_game_lines.py`) makes one per-event call per game starting
+in the next 3 days, for NFL, NCAAF, NBA, NHL, MLB, WNBA and NCAAB, and stores
+every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
+pruner) and the current ladder in `alt_game_lines`, which the betslip's
+game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
+game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
+one row per call:
+
+    SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
+           sum(credits_last) AS credits, count(*) FILTER (WHERE NOT ok) AS failed
+      FROM alt_game_line_fetches GROUP BY 1, 2 ORDER BY 1 DESC, 2;
+
+Pre-game Odds-API credit burn is otherwise unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
 instead of double-fetching.
 

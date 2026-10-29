@@ -275,6 +275,9 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nba_alt_history",
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live",
+                     # Alternate spread/total ladders (2026-10-29): many rungs per
+                     # (game, market, book), which the keepers would thin.
+                     "odds_api_alt_game_lines_live",
                      "odds_api_ncaab_derivative_close",
                      "odds_api_ncaab_derivative_open")
 
