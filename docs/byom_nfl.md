@@ -299,7 +299,8 @@ Over or Under is set. Anytime TD shows units only for Yes, which is
 over. A mix, two props, a prop with no side, and an empty market list
 do not.
 There is no recommended stake. `package.json` is unchanged. Sign-in
-is unchanged. NBA props are not in this builder.
+is unchanged. NBA props are a separate sport on the same builder.
+`docs/byom_nba.md`.
 
 `mobile/src/lib/byom.ts` types the rows and calls `byom_backtest`,
 `byom_save_model`, `byom_list_models`, and `byom_delete_model`.

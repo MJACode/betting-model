@@ -2061,13 +2061,13 @@ def _validate_byom_game_facts(args: dict) -> dict:
 
 
 def _validate_byom_prop_facts(args: dict) -> dict:
-    """NFL prop facts. apply defaults false. Seasons before the prop
-    history start are refused."""
+    """NFL or NBA prop facts. apply defaults false. Seasons before the
+    prop history start are refused. A missing sport is NFL."""
     from byom.constants import PROP_HISTORY_START_SEASON
 
-    sport = str(args.get("sport") or "NFL")
-    if sport != "NFL":
-        raise ValueError(f"byom_prop_facts builds NFL only, got {sport!r}")
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA"):
+        raise ValueError(f"byom_prop_facts builds NFL or NBA, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
@@ -2090,7 +2090,9 @@ def _job_byom_prop_facts(**kw):
 
     conn = get_connection()
     try:
-        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+        return build_seasons(
+            conn, kw.get("season"), apply=bool(kw.get("apply")),
+            sport=str(kw.get("sport") or "NFL").strip().upper())
     finally:
         conn.close()
 

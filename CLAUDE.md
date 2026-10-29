@@ -630,6 +630,7 @@ to be known BEFORE deciding which file to open.
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
+| **Build Your Own Model, NBA props (not picks)** | `docs/byom_nba.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —

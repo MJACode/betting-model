@@ -154,8 +154,8 @@ def test_byom_record_rank_roi_and_filters(tmp_path):
         (tmp_path / name).write_text(src, encoding="utf-8")
     script = r"""
 import {
-  assertByomSide, byomRoi, byomWinRate, currentNflSeason, draftFromFilters,
-  filtersForDraft, formatByomRecord, isWholeSeason, marketLabel, nflSeasonList,
+  assertByomSide, byomRoi, byomWinRate, currentNbaSeason, currentNflSeason, draftFromFilters,
+  filtersForDraft, formatByomRecord, isWholeSeason, marketLabel, nbaSeasonList, nflSeasonList,
   otherModelWithName, propSideAfterMarketChange, rankByUnits, recordFromRows,
   saveBlockReason, showsUnits, sideForMarket, suggestedName,
 } from './byomRecord.ts';
@@ -420,6 +420,87 @@ if (!taken || taken.model_id !== 'b') throw new Error('taken ' + JSON.stringify(
 if (otherModelWithName(models, 'Primetime', 'b') !== null) throw new Error('self');
 if (otherModelWithName(models, 'primetime') !== null) throw new Error('case');
 if (otherModelWithName(models, 'Road') !== null) throw new Error('missing');
+
+const octNba = new Date('2026-10-29T16:00:00Z');
+const septNba = new Date('2026-09-15T16:00:00Z');
+const janNba = new Date('2027-01-15T16:00:00Z');
+if (currentNbaSeason(octNba) !== 2027) throw new Error('nba oct ' + currentNbaSeason(octNba));
+if (currentNbaSeason(septNba) !== 2026) throw new Error('nba sept ' + currentNbaSeason(septNba));
+if (currentNbaSeason(janNba) !== 2027) throw new Error('nba jan ' + currentNbaSeason(janNba));
+const nbaSeasons = nbaSeasonList(octNba);
+if (nbaSeasons[0] !== 2023 || nbaSeasons[nbaSeasons.length - 1] !== 2027) {
+  throw new Error('nba seasons ' + nbaSeasons.join(','));
+}
+
+if (showsUnits({ markets: ['player_points'] })) throw new Error('unsided points shows units');
+if (!showsUnits({ markets: ['player_points'], prop_side: 'over' })) throw new Error('points over hides');
+if (!showsUnits({ markets: ['player_points'], prop_side: 'under' })) throw new Error('points under hides');
+if (showsUnits({ markets: ['player_double_double'], prop_side: 'under' })) {
+  throw new Error('dd under shows units');
+}
+if (!showsUnits({ markets: ['player_double_double'], prop_side: 'over' })) {
+  throw new Error('dd yes hides units');
+}
+if (!showsUnits({ markets: ['player_triple_double'], prop_side: 'over' })) {
+  throw new Error('td yes hides units');
+}
+if (showsUnits({ markets: ['player_points', 'player_rebounds'], prop_side: 'over' })) {
+  throw new Error('two nba props show units');
+}
+if (marketLabel({ markets: ['player_points'], prop_side: 'over' }) !== 'Points · Over') {
+  throw new Error('points label ' + marketLabel({ markets: ['player_points'], prop_side: 'over' }));
+}
+if (marketLabel({ markets: ['player_points'], prop_side: 'over', min_rest_days: 1, max_rest_days: 1 }) !== 'Points · Over · Back-to-back') {
+  throw new Error('b2b label ' + marketLabel({ markets: ['player_points'], prop_side: 'over', min_rest_days: 1, max_rest_days: 1 }));
+}
+if (marketLabel({ markets: ['player_assists'], prop_side: 'under', min_rest_days: 2 }) !== 'Assists · Under · 2+ days rest') {
+  throw new Error('rest label');
+}
+if (marketLabel({ markets: ['player_double_double'], prop_side: 'over' }) !== 'Double-double') {
+  throw new Error('dd label ' + marketLabel({ markets: ['player_double_double'], prop_side: 'over' }));
+}
+if (marketLabel({ markets: ['player_points_rebounds'] }) !== 'Points + Reb') {
+  throw new Error('pr label');
+}
+
+const points = filtersForDraft(
+  { market: 'player_points', side: 'home', role: null, primetime: true, propSide: 'over', rest: 'b2b' },
+  {},
+  'NBA',
+);
+if (points.prop_side !== 'over' || points.side !== 'home' || points.primetime || points.min_rest_days !== 1 || points.max_rest_days !== 1) {
+  throw new Error('b2b points ' + JSON.stringify(points));
+}
+const rested = filtersForDraft(
+  { market: 'player_assists', side: null, role: null, primetime: null, propSide: 'under', rest: 'rest2' },
+  { primetime: true, min_rest_days: 1, max_rest_days: 1 },
+  'NBA',
+);
+if (rested.min_rest_days !== 2 || rested.max_rest_days != null || rested.primetime) {
+  throw new Error('rest2 ' + JSON.stringify(rested));
+}
+const dd = draftFromFilters({ markets: ['player_double_double'], prop_side: 'over', min_rest_days: 1, max_rest_days: 1 });
+if (!dd || dd.market !== 'player_double_double' || dd.propSide !== 'over' || dd.rest !== 'b2b') {
+  throw new Error('dd draft ' + JSON.stringify(dd));
+}
+if (saveBlockReason({ market: 'player_triple_double', side: null, role: null, primetime: null, propSide: null }) !== 'Choose yes.') {
+  throw new Error('td needs yes');
+}
+if (saveBlockReason({ market: 'player_blocks', side: null, role: null, primetime: null, propSide: 'under' }) !== null) {
+  throw new Error('blocks under should save');
+}
+if (propSideAfterMarketChange('player_double_double', 'player_points', 'over') !== null) {
+  throw new Error('leaving yes-only should clear over');
+}
+if (propSideAfterMarketChange('player_points', 'player_triple_double', 'under') !== 'over') {
+  throw new Error('entering triple-double should be yes');
+}
+if (suggestedName({ market: 'player_points', side: 'away', role: null, primetime: null, propSide: 'over', rest: 'b2b' }) !== 'Back-to-back away points over') {
+  throw new Error('name ' + suggestedName({ market: 'player_points', side: 'away', role: null, primetime: null, propSide: 'over', rest: 'b2b' }));
+}
+if (suggestedName({ market: 'player_double_double', side: null, role: null, primetime: null, propSide: 'over', rest: 'rest2' }) !== '2+ days rest double-double') {
+  throw new Error('dd name');
+}
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],

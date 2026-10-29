@@ -22,6 +22,7 @@ import {
   showsUnits,
   type ByomRecord,
   type ByomSeasonScope,
+  type ByomSport,
 } from '@/lib/byomRecord';
 
 export interface ByomLeaderboardRow {
@@ -42,7 +43,9 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
   const seenScope = useRef(scope);
-  const enabled = sport === 'NFL' && ready && signedIn;
+  const built = sport === 'NFL' || sport === 'NBA';
+  const byomSport: ByomSport = sport === 'NBA' ? 'NBA' : 'NFL';
+  const enabled = built && ready && signedIn;
 
   const load = useCallback(async () => {
     if (!enabled) {
@@ -60,14 +63,19 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
     setLoading(true);
     setError(null);
     try {
-      const models = (await fetchByomModels()).filter((model) => model.sport === 'NFL');
+      const models = (await fetchByomModels()).filter((model) => model.sport === byomSport);
       if (seq.current !== id) return;
       const graded = await pool(models, 3, async (model) => {
         if (isWholeSeason(model.filters)) {
           return { model, record: null as ByomRecord | null, ungraded: true, failed: false };
         }
         try {
-          const backtest = await fetchByomScopedBacktest(scope, model.filters);
+          const backtest = await fetchByomScopedBacktest(
+            scope,
+            model.filters,
+            new Date(),
+            model.sport === 'NBA' ? 'NBA' : 'NFL',
+          );
           return { model, record: recordFromRows(backtest), ungraded: false, failed: false };
         } catch (e: unknown) {
           if (isAbortError(e)) throw e;
@@ -102,7 +110,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
     } finally {
       if (seq.current === id) setLoading(false);
     }
-  }, [enabled, scope]);
+  }, [enabled, scope, byomSport]);
 
   useEffect(() => {
     void load();

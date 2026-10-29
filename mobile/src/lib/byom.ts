@@ -13,7 +13,13 @@
  */
 
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
-import { assertByomSide, nflSeasonList, type ByomSeasonScope } from './byomRecord';
+import {
+  assertByomSide,
+  nbaSeasonList,
+  nflSeasonList,
+  type ByomSeasonScope,
+  type ByomSport,
+} from './byomRecord';
 import { supabase } from './supabase';
 
 export { byomFilters, type ByomFilters };
@@ -150,13 +156,27 @@ export function parseByomModel(value: unknown): ByomModel {
  * deployed function has that column. It does not suggest a stake.
  * The line label is LINE_BASIS.
  */
+function rpcFilters(
+  filters: ByomFilters | undefined,
+  sport: ByomSport,
+): ByomFilters & { sport?: ByomSport } {
+  const checked = byomFilters(filters);
+  // NFL omits sport. Production byom_backtest rejects an unknown key
+  // until byom_nba_props_2026_10_29.sql is applied, and a missing
+  // sport there is NFL. Sending it on every NFL call would break the
+  // live builder before that file is applied.
+  if (sport === 'NBA') return { ...checked, sport: 'NBA' };
+  return checked;
+}
+
 export async function fetchByomBacktest(
   season: number | null,
   filters?: ByomFilters,
+  sport: ByomSport = 'NFL',
 ): Promise<ByomBacktestRow[]> {
   const { data, error } = await supabase.rpc('byom_backtest', {
     p_season: season,
-    p_filters: byomFilters(filters),
+    p_filters: rpcFilters(filters, sport),
   });
   if (error) throw error;
   return asRows(data).map(parseBacktestRow);
@@ -191,11 +211,12 @@ export async function fetchByomScopedBacktest(
   scope: ByomSeasonScope,
   filters?: ByomFilters,
   now: Date = new Date(),
+  sport: ByomSport = 'NFL',
 ): Promise<ByomBacktestRow[]> {
   const parsed = byomFilters(filters);
-  if (scope === 'current') return fetchByomBacktest(null, parsed);
-  const seasons = nflSeasonList(now);
-  const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed));
+  if (scope === 'current') return fetchByomBacktest(null, parsed, sport);
+  const seasons = sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+  const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed, sport));
   return groups.flat();
 }
 
@@ -204,12 +225,13 @@ export async function saveByomModel(
   name: string,
   filters?: ByomFilters,
   season: number | null = null,
+  sport: ByomSport = 'NFL',
 ): Promise<ByomBacktestRow & { model_id: string; season: number }> {
   const checked = byomFilters(filters);
   assertByomSide(checked);
   const { data, error } = await supabase.rpc('byom_save_model', {
     p_name: name,
-    p_filters: checked,
+    p_filters: rpcFilters(filters, sport),
     p_season: season,
   });
   if (error) throw error;
