@@ -206,11 +206,33 @@ def test_the_pass_meters_the_credits_the_feed_reports(monkeypatch):
     assert meter == {"calls": 3, "credits": 4.0, "unreported": 1}
 
 
-def test_the_pass_refreshes_the_ladder_the_app_reads():
-    import inspect
+def test_the_pass_refreshes_the_ladder_the_app_reads(monkeypatch):
+    """A real pass, network faked: the rows it bought and its meter reach
+    store_pass_ladders, and a fetch that raises is still handed over so its
+    billed calls are ledgered (review of #1093, L2 and L4)."""
     import data.ingestors.odds_ingestor as oi
-    src = inspect.getsource(oi.run_odds_ingestor)
-    assert "store_pass_ladders(conn, sp, alt_rows, meter, asked_at)" in src
+    import data.ingestors.alt_game_lines as agl
+
+    monkeypatch.setattr(oi, "get_connection", lambda: _Conn())
+    monkeypatch.setattr(oi, "persist_quota", lambda conn: None)
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    monkeypatch.delenv("FETCH_F5_LIVE", raising=False)
+    monkeypatch.delenv("FETCH_ALT_GAME_LINES", raising=False)
+    monkeypatch.setattr(oi, "_list_events", lambda sport_key: [])
+    monkeypatch.setattr(oi, "_get_odds", lambda sport_key, markets: [_event([])] if sport_key == "baseball_mlb" else [])
+    monkeypatch.setattr(oi, "_get_event_odds", lambda *a, **k: None)
+    handed = []
+    monkeypatch.setattr(agl, "store_pass_ladders",
+                        lambda conn, sport, rows, meter, asked_at: handed.append((sport, list(rows), dict(meter))))
+    oi.run_odds_ingestor(sport="MLB")
+    assert [(sp, rows, m.get("calls")) for sp, rows, m in handed] == [("MLB", [], 1)]
+
+    handed.clear()
+    def boom(*a, **k):
+        raise RuntimeError("feed down")
+    monkeypatch.setattr(oi, "_fetch_alternate_game_lines", boom)
+    oi.run_odds_ingestor(sport="MLB")
+    assert handed and handed[0][1] == [] and "feed down" in handed[0][2]["error"]
 
 
 def test_the_env_flag_skips_the_alternate_fetch(monkeypatch):

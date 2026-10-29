@@ -1578,9 +1578,18 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 try:
                     meter: dict = {}
                     asked_at = datetime.now(timezone.utc)
-                    alt_rows = _fetch_alternate_game_lines(
-                        sport_key, sp, events, snapshot_type, snapshot_at, resolve,
-                        meter=meter)
+                    try:
+                        alt_rows = _fetch_alternate_game_lines(
+                            sport_key, sp, events, snapshot_type, snapshot_at, resolve,
+                            meter=meter)
+                    except Exception as fetch_exc:
+                        # The calls already made were billed: keep the meter
+                        # and still ledger them below (review of #1093, L4).
+                        if type(fetch_exc) is AssertionError:
+                            raise
+                        meter["error"] = repr(fetch_exc)[:200]
+                        alt_rows = []
+                        logger.warning(f"{sp} alternate game lines fetch failed: {fetch_exc}")
                     if alt_rows:
                         n_alt = _insert_odds(conn, alt_rows)
                         total_odds += n_alt
