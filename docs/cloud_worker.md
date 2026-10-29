@@ -141,6 +141,12 @@ tick is one database read and no HTTP call. `RUN_LIVE_SCOREBOARD=0` stops it.
 week before 2026-10-29 (`api_call_log`); older notes calling it 403 from the
 worker are out of date. MLB and NCAAF keep their own live tables.
 
+The Scoreboard's % bets / % money come from the `scoreboard-splits`
+refresh-pass step (`data/ingestors/scoreboard_splits.py`) into
+`public.scoreboard_splits`: Action Network's free v2 scoreboard, every sport
+with an unstarted game today or tomorrow, display only (never
+`public_betting`, which the scorer reads).
+
 ### NHL player props
 
 `data/ingestors/nhl_prop_odds_ingestor.py`, 2026-10-01 (mike). Step
