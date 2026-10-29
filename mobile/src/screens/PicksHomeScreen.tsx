@@ -773,6 +773,7 @@ export function PicksHomeScreen() {
           linesError={board.linesError}
           liveError={board.liveError}
           ncaafUnavailable={board.ncaafUnavailable}
+          liveScoresUnavailable={board.liveScoresUnavailable}
           retrying={board.loading}
           onRefresh={board.refresh}
           locked={signalsLocked}

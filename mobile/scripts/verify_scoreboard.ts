@@ -65,6 +65,11 @@ const ordered = orderScoreboard([
   presentScoreboard({ game: game({ game_id: 'L', sport: 'NFL' }), pregame: [], inplay: [], feed: espnLive }),
   presentScoreboard({ game: game({ game_id: 'U1', commence_time: '2026-10-30T00:00:00Z' }), pregame: [], inplay: [], feed: null }),
 ]);
+const startedBare = presentScoreboard({ game: game({ commence_time: '2026-10-30T00:15:00Z' }), pregame: [], inplay: [], feed: null, now: Date.parse('2026-10-30T01:00:00Z') });
+check('a started game with no live row says so, not its start time', startedBare.phase === 'upcoming'
+  && startedBare.footerText === 'Started · no live score yet' && startedBare.accessibilityLabel.includes('started, no score stored'));
+const notYet = presentScoreboard({ game: game({ commence_time: '2026-10-30T00:15:00Z' }), pregame: [], inplay: [], feed: null, now: Date.parse('2026-10-29T20:00:00Z') });
+check('a game before its start keeps its start time', notYet.footerText !== 'Started · no live score yet' && notYet.accessibilityLabel.includes('not started'));
 check('the board orders live, upcoming, final', ordered.map((c) => c.gameId).join(',') === 'L,U1,U2,F');
 
 const kicked = game();

@@ -456,9 +456,16 @@ export function presentScoreboard(input: {
   inplay: readonly ScoreboardQuote[] | undefined;
   feed: ScoreboardFeed | null;
   abbrevs?: ReadonlyMap<string, string> | null;
+  /** Clock for "has it started". Injectable for tests. */
+  now?: number;
 }): ScoreboardCard {
   const { game, feed } = input;
   const phase = scoreboardPhase(game, feed);
+  // Past its start with no live row: a stale or missing feed, not a game
+  // that hasn't begun. Say so instead of printing a start time that passed.
+  const startMs = game.commence_time ? parseStamp(game.commence_time).getTime() : NaN;
+  const startedNoScore = phase === 'upcoming' && Number.isFinite(startMs)
+    && startMs <= (input.now ?? Date.now());
   const lines = mergedQuotes(input.pregame, input.inplay, phase);
   const spread = quoteFor(lines, 'spreads');
   const total = quoteFor(lines, 'totals');
@@ -510,7 +517,7 @@ export function presentScoreboard(input: {
     footerBadge = 'F';
     footerText = ot ? 'Final/OT' : 'Final';
   } else {
-    footerText = formatGameTimeET(game.commence_time);
+    footerText = startedNoScore ? 'Started · no live score yet' : formatGameTimeET(game.commence_time);
   }
 
   const situation = phase === 'live' ? feed?.situation ?? null : null;
@@ -518,9 +525,9 @@ export function presentScoreboard(input: {
     ? `Updated ${formatGameTimeET(feed.snapshotAt)}`
     : null;
   const matchup = `${game.away_team} at ${game.home_team}`;
-  const stateWord = phase === 'live' ? 'live' : phase === 'final' ? 'final' : 'upcoming';
+  const stateWord = phase === 'live' ? 'live' : phase === 'final' ? 'final' : startedNoScore ? 'started' : 'upcoming';
   const scoreSpeech = phase === 'upcoming'
-    ? 'not started'
+    ? startedNoScore ? 'started, no score stored' : 'not started'
     : `${away.score} to ${home.score}`;
   const possTeam = away.possession ? game.away_team : home.possession ? game.home_team : null;
   const possSpeech = possTeam

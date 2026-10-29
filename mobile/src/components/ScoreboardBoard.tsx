@@ -69,6 +69,7 @@ export function ScoreboardBoard({
   linesError,
   liveError,
   ncaafUnavailable,
+  liveScoresUnavailable,
   retrying,
   onRefresh,
   locked,
@@ -95,6 +96,8 @@ export function ScoreboardBoard({
   /** The selected sport's live feed failed. Null when that sport has no feed. */
   liveError: string | null;
   ncaafUnavailable: boolean;
+  /** live_scoreboard is not readable yet (migration not applied). */
+  liveScoresUnavailable: boolean;
   retrying: boolean;
   onRefresh: () => Promise<void>;
   locked: boolean;
@@ -159,7 +162,9 @@ export function ScoreboardBoard({
   const nudge = (counts[sport] ?? 0) === 0 ? scoreboardSwitchLine(counts, sport) : null;
   const ncaafNote = sport === 'NCAAF' && ncaafUnavailable
     ? 'Live NCAAF scores aren’t available in this build yet.'
-    : null;
+    : (sport === 'NFL' || sport === 'NBA' || sport === 'NHL') && liveScoresUnavailable
+      ? `Live ${sport} scores aren’t available yet. Finals show once stored.`
+      : null;
 
   return (
     <View style={styles.fill}>
@@ -266,7 +271,14 @@ export function ScoreboardBoard({
               {cards.length > 0 ? (
                 <View style={styles.cols}>
                   <Text style={[styles.colHead, styles.colMatch]}>Matchup</Text>
-                  <Text style={[styles.colHead, styles.colScore]}>Score</Text>
+                  <Text
+                    style={[styles.colHead, styles.colScore]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.7}
+                  >
+                    Score
+                  </Text>
                   <Text style={[styles.colHead, styles.colLine]}>{sport === 'NHL' ? 'Puck line' : 'Spread'}</Text>
                   <Text style={[styles.colHead, styles.colLine]}>Total</Text>
                 </View>
@@ -300,8 +312,8 @@ export function ScoreboardBoard({
           renderItem={({ item, index }) => (
             <View>
               {index === 0 || cards[index - 1]?.phase !== item.phase ? (
-                <Text style={styles.group} accessibilityRole="header">
-                  {PHASE_LABEL[item.phase]}
+                <Text style={[styles.group, index > 0 && styles.groupGap]} accessibilityRole="header">
+                  {`${PHASE_LABEL[item.phase]} · ${cards.filter((c) => c.phase === item.phase).length}`}
                 </Text>
               ) : null}
               <GameCard card={item} onPress={() => onOpenGame(item.gameId)} />
@@ -439,7 +451,15 @@ function SideRow({
         <Text style={styles.abbr} numberOfLines={1}>{row.name}</Text>
         {row.possession ? <Text style={styles.poss}>◀</Text> : null}
       </View>
-      <Text style={[styles.score, styles.colScore, { color: scoreColor }]}>{row.score}</Text>
+      <Text
+        style={[styles.score, styles.colScore, { color: scoreColor }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        maxFontSizeMultiplier={1.6}
+      >
+        {row.score}
+      </Text>
       <LineCell value={row.spread} price={row.spreadPrice} ink={ink} />
       <LineCell value={row.total} price={row.totalPrice} ink={ink} />
     </View>
@@ -493,9 +513,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginBottom: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
+  groupGap: { marginTop: spacing.sm },
   today: {
     marginLeft: 'auto',
     minHeight: 44,

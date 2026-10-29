@@ -60,6 +60,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
   const [linesError, setLinesError] = useState<string | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [ncaafUnavailable, setNcaafUnavailable] = useState(false);
+  const [liveScoresUnavailable, setLiveScoresUnavailable] = useState(false);
   const loadGen = useRef(0);
   const inplayRef = useRef<Map<string, ScoreboardQuote[]>>(new Map());
   const dateKey = dates.join(',');
@@ -103,9 +104,10 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
           }),
         ),
         fetchLiveScoreboard(startedIds).then(
-          (rows) => ({ rows, error: null as string | null }),
+          (rows) => ({ rows, missing: false, error: null as string | null }),
           (e: unknown) => ({
             rows: [] as LiveScoreboardRow[],
+            missing: missingRelation(e),
             error: isAbortError(e) || missingRelation(e) ? null : errorText(e),
           }),
         ),
@@ -146,6 +148,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       setNextGame(nextRes);
       setLinesError(oddsRes.error ?? inplayError);
       setNcaafUnavailable(ncaafRes.missing);
+      setLiveScoresUnavailable(espnRes.missing);
       setLiveError(
         sport === 'MLB'
           ? mlbRes.error
@@ -185,6 +188,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
     linesError,
     liveError,
     ncaafUnavailable,
+    liveScoresUnavailable,
     refresh: load,
   };
 }
