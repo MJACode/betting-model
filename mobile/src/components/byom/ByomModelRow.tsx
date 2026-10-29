@@ -22,6 +22,7 @@ export function ByomModelRow({
   showsUnits: unitsVisible,
   ungraded = false,
   failed = false,
+  emptyLabel = 'No games match',
   onPress,
 }: {
   rank: number | null;
@@ -32,6 +33,8 @@ export function ByomModelRow({
   ungraded?: boolean;
   /** The backtest for this row failed. Show a dash, not “No games match”. */
   failed?: boolean;
+  /** Shown when the row has no bets. NBA game facts use “No history yet”. */
+  emptyLabel?: string;
   onPress: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
@@ -52,7 +55,7 @@ export function ByomModelRow({
   const label = unknown
     ? `${name}. ${market}.`
     : noGames
-    ? `${name}. ${market}. No games match.`
+    ? `${name}. ${market}. ${emptyLabel}.`
     : [
       rank != null ? `Rank ${rank}` : null,
       name,
@@ -86,7 +89,7 @@ export function ByomModelRow({
           {unknown ? (
             <Text style={styles.noGames}>—</Text>
           ) : noGames ? (
-            <Text style={styles.noGames}>No games match</Text>
+            <Text style={styles.noGames}>{emptyLabel}</Text>
           ) : (
             <>
               {unitsText != null ? (
