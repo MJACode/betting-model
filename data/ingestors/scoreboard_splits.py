@@ -25,7 +25,9 @@ dash.
 
 Only games that have not reached their listed start are written, so the row
 kept for a game is its last pre-start split (v2's in-progress entries read
-0/0, which is missing, not 0%).
+0/0, which is missing, not 0%). The app shows that percent only when
+line_value is the number in the odds cell, and not at all next to an
+in-play DraftKings quote.
 """
 from __future__ import annotations
 

@@ -30,6 +30,7 @@ import {
   presentScoreboard,
   scoreboardMarketLabel,
   scoreboardSwitchLine,
+  shownSplitLine,
   splitsFor,
   splitsSpeech,
   type ScoreboardCard,
@@ -165,7 +166,7 @@ export function ScoreboardBoard({
   // columns so they stay aligned, and the rest show a dash.
   const showSplits = useMemo(
     () => cards.some((c) => {
-      const s = splitsFor(splits.get(c.gameId), market);
+      const s = splitsFor(splits.get(c.gameId), market, shownSplitLine(c, market));
       return [s.away.bets, s.away.money, s.home.bets, s.home.money].some((v) => v != null);
     }),
     [cards, splits, market],
@@ -368,7 +369,7 @@ export function ScoreboardBoard({
               <GameCard
                 card={item}
                 market={market}
-                split={splitsFor(splits.get(item.gameId), market)}
+                split={splitsFor(splits.get(item.gameId), market, shownSplitLine(item, market))}
                 showSplits={showSplits}
                 showName={showName}
                 onPress={() => onOpenGame(item.gameId)}
