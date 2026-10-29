@@ -45,7 +45,7 @@
 import { americanToDecimal } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
 import { nhlOffLineCount } from '@/lib/nhlBoard';
-import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
+import { CUSTOM_MODEL_ID, type LegBookPrice, type ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
 import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '@/types';
@@ -311,6 +311,22 @@ export function isLineLeg(leg: Pick<ParlayLeg, 'modelId'>): boolean {
   return leg.modelId === LINE_LEG_MODEL_ID;
 }
 
+/**
+ * The pencil. A stored Stats line leg (prop or game) and a custom leg. A
+ * model pick is a bet of record at its own line (CLAUDE.md §1c) and is not
+ * editable. One function so the slip cannot give a game line the pencil and
+ * then refuse to open it, or the other way around.
+ */
+export function slipLegCanEdit(
+  leg: { modelId?: string | null; slipKey?: string | null },
+  specs: readonly LineLegSpec[],
+): boolean {
+  if (leg.modelId === CUSTOM_MODEL_ID) return true;
+  if (leg.modelId !== LINE_LEG_MODEL_ID || !leg.slipKey) return false;
+  const key = leg.slipKey;
+  return specs.some((s) => lineLegKey(s) === key);
+}
+
 // ── What the "Add to betslip?" sheet is handed ──────────────────────────────
 
 /** Everything AddLineSheet needs: the proposition, every bettable book's price
@@ -490,11 +506,11 @@ export function lineLegsAfterReplace(
 // the bets a bettable book posts right now, each priced by anchorRow — the
 // leg's own rule — so the price picked is the price the slip shows.
 //
-// Game lines offer what the books POST: the main number each book hangs.
-// Alternate game lines (other numbers) are not fetched as of 2026-10-29 —
-// measured: none stored since 2026-10-01 — so a game often has one or two
-// numbers to choose from. Fetching alternates costs Odds API credits, which
-// is Matt's call, not this code's.
+// Game lines offer what the books POST. Main rows are market 'spreads' or
+// 'totals'. Alternate rungs are stored as 'alternate_spreads' /
+// 'alternate_totals' and folded onto the main market before this menu runs
+// (foldGameAlternateRows), the same way prop alternates fold. A rung the
+// main row already has for that book is dropped.
 
 /** One bet the sheet can switch the leg to. */
 export interface EditChoice {
@@ -520,10 +536,53 @@ export interface EditMenu {
 
 const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
 const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
-// True as measured 2026-10-29 (no alternate game lines stored since
-// 2026-10-01). Remove the second sentence if alternates are ever fetched.
-const GAME_LINE_SUBTITLE =
-  'Every number a sportsbook is hanging right now. Alternate lines aren’t listed for game lines.';
+// True before and after the hand-applied ladder migration: the sheet lists
+// the numbers the latest-line view returns, which is every rung only once
+// latest_odds.line_key is applied. It does not claim the book’s whole board
+// while that view still keeps one row per book.
+const GAME_LINE_SUBTITLE = 'Only numbers a sportsbook posts are listed.';
+
+/** Markets one game-line read asks for. Alternates fold onto the main key. */
+export function gameLineMarkets(market: string): string[] {
+  if (market === 'spreads') return ['spreads', 'alternate_spreads'];
+  if (market === 'totals') return ['totals', 'alternate_totals'];
+  return [market];
+}
+
+const GAME_ALT_MARKET: Record<string, 'spreads' | 'totals'> = {
+  alternate_spreads: 'spreads',
+  alternate_totals: 'totals',
+};
+
+function gameRungKey(r: Pick<OddsByBookRow, 'game_id' | 'bookmaker' | 'market' | 'spread_home' | 'total_line'>): string {
+  const canonical = GAME_ALT_MARKET[r.market] ?? r.market;
+  const n = canonical === 'totals' ? num(r.total_line) : canonical === 'spreads' ? num(r.spread_home) : null;
+  return `${r.game_id}|${r.bookmaker}|${canonical}|${n ?? ''}`;
+}
+
+/**
+ * Rewrite alternate game rows onto spreads or totals. A rung that duplicates
+ * the same book's main row at that number is dropped — the main row is the
+ * one the models read. Order is preserved. h2h is unchanged.
+ */
+export function foldGameAlternateRows<T extends OddsByBookRow>(rows: readonly T[]): T[] {
+  const standard = new Set<string>();
+  for (const r of rows) {
+    if (r.market === 'spreads' || r.market === 'totals') standard.add(gameRungKey(r));
+  }
+  const out: T[] = [];
+  for (const r of rows) {
+    const canonical = GAME_ALT_MARKET[r.market];
+    if (!canonical) {
+      out.push(r);
+      continue;
+    }
+    const folded = { ...r, market: canonical };
+    if (standard.has(gameRungKey(folded))) continue;
+    out.push(folded);
+  }
+  return out;
+}
 /** The whole game is off the board. */
 export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
 
@@ -541,6 +600,26 @@ function collapseThinMenu(menu: EditMenu): EditMenu {
     .sort((a, b) => (order.get(a.segment) ?? 0) - (order.get(b.segment) ?? 0))
     .map((c) => ({ ...c, segment: 'all' }));
   return { ...menu, segments: [{ key: 'all', label: '', empty: GAME_OFF_BOARD }], choices };
+}
+
+/**
+ * Which row a tab should open on. The leg's own row when it is on this tab.
+ * Otherwise the other side of the same number: the negated line for the other
+ * team on a spread, the same line for a total or a prop. Null when that rung
+ * is not posted, so the list stays at the top.
+ */
+export function editScrollTarget(menu: EditMenu, segment: string, spec: LineLegSpec): string | null {
+  const inTab = menu.choices.filter((c) => c.segment === segment);
+  const own = lineLegKey(spec);
+  if (inTab.some((c) => lineLegKey(c.spec) === own)) return own;
+  const line = spec.line;
+  if (line == null) return null;
+  const want = isGameSpec(spec) && spec.market === 'spreads' ? -line : line;
+  const pair = inTab.find((c) => {
+    const n = c.spec.line;
+    return n != null && Math.abs(n - want) < 1e-9;
+  });
+  return pair ? lineLegKey(pair.spec) : null;
 }
 
 /** The segment to show first: the leg's own, else the first one there is. */

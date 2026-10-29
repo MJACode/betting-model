@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { formatAmerican, MINUS } from '@/lib/format';
 import {
   canSaveEdit,
+  editScrollTarget,
   gameEditMenu,
   GAME_OFF_BOARD,
   initialEditSegment,
@@ -87,6 +88,16 @@ export function EditLineLegSheet({
   }, [specKey, nonce]);
 
   const rows = useMemo(() => (menu?.choices ?? []).filter((c) => c.segment === segment), [menu, segment]);
+  const listRef = useRef<ScrollView>(null);
+  // Scroll once per tab. Reset while rendering so a layout from the previous
+  // tab cannot scroll this one after the guard was cleared.
+  const scrolledFor = useRef<string | null>(null);
+  const seenSegment = useRef(segment);
+  if (seenSegment.current !== segment) {
+    seenSegment.current = segment;
+    scrolledFor.current = null;
+  }
+  const scrollKey = spec && menu ? editScrollTarget(menu, segment, spec) : null;
   const chosen = useMemo(
     () => (menu?.choices ?? []).find((c) => lineLegKey(c.spec) === picked) ?? null,
     [menu, picked],
@@ -178,7 +189,7 @@ export function EditLineLegSheet({
               <Text style={styles.stateText}>{emptyText}</Text>
             </View>
           ) : (
-            <ScrollView style={styles.list} bounces={false}>
+            <ScrollView key={segment} ref={listRef} style={styles.list} bounces={false}>
               <View style={styles.listCard}>
                 {rows.map((c, i) => {
                   const key = lineLegKey(c.spec);
@@ -196,6 +207,11 @@ export function EditLineLegSheet({
                       accessibilityRole="radio"
                       accessibilityState={{ selected }}
                       accessibilityLabel={`${titleText.replace(/ ML$/, ' moneyline')}${c.hint ? `, ${c.hint}` : ''}, ${priceText} at ${bookLabelShort(c.book)}${isCurrent ? ', current line' : ''}`}
+                      onLayout={key === scrollKey ? (e) => {
+                        if (scrolledFor.current === segment) return;
+                        scrolledFor.current = segment;
+                        listRef.current?.scrollTo({ y: e.nativeEvent.layout.y, animated: false });
+                      } : undefined}
                       style={({ pressed }) => [
                         styles.row,
                         i > 0 && styles.rowDivider,

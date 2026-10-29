@@ -2,6 +2,7 @@ import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
 import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
+import { foldGameAlternateRows, gameLineMarkets } from '@/lib/lineLegs';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -1075,13 +1076,16 @@ export async function fetchPropLineRows(
  * gameLineLegFromRows). ~13 rows, bounded by game_id; no paging needed.
  */
 export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
+  // One game. Main row plus the alternate ladder, folded onto the main market
+  // so the edit sheet and the re-price see every posted number. Well under
+  // the 1,000-row cap (a ladder is tens of rungs, not thousands).
   const { data, error } = await supabase
     .from('v_latest_odds_all_books')
     .select(ODDS_BY_BOOK_COLUMNS)
     .eq('game_id', gameId)
-    .eq('market', market);
+    .in('market', gameLineMarkets(market));
   if (error) throw error;
-  return (data ?? []) as unknown as OddsByBookRow[];
+  return foldGameAlternateRows((data ?? []) as unknown as OddsByBookRow[]);
 }
 
 /** One game row, for a line leg's matchup and start time. */
