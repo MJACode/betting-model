@@ -8,7 +8,10 @@ These rows are not picks. Nothing here writes `picks`.
 ## Markets
 
 One standard DraftKings line per player per game. An alt ladder
-(`*_alternate`) is not a fact. No position chip, no line range, no EV.
+(`*_alternate`) is not a fact. No position chip and no EV.
+The Phase A sheet adds a line range, a DraftKings price band, spread,
+total, month, and day. There is no Early/Late/Primetime slot. Rest
+and back-to-back stay on the Step 2 quick filters.
 
 | Screen | Odds API market | Actual |
 |---|---|---|

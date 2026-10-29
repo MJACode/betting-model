@@ -16,8 +16,15 @@ import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { ByomBetCount } from '@/components/byom/ByomBetCount';
 import { ByomMarketField, ByomSideFields } from '@/components/byom/ByomFields';
+import { ByomFilterSheet } from '@/components/byom/ByomFilterSheet';
 import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
+import {
+  ByomMoreFiltersCard,
+  ByomPropSideFields,
+  type ByomSheetTab,
+} from '@/components/byom/ByomPropSideFields';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
@@ -51,6 +58,7 @@ import {
   sideForMarket,
   type ByomPropSide,
 } from '@/lib/byomRecord';
+import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -70,6 +78,8 @@ export function ByomEditScreen() {
   const [primetime, setPrimetime] = useState<boolean | null>(null);
   const [propSide, setPropSide] = useState<ByomPropSide | null>(null);
   const [rest, setRest] = useState<'b2b' | 'rest2' | null>(null);
+  const [propFilters, setPropFilters] = useState<ByomPropFilterState>(EMPTY_PROP_FILTERS);
+  const [sheet, setSheet] = useState<ByomSheetTab | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
@@ -83,6 +93,7 @@ export function ByomEditScreen() {
     setPrimetime(draft?.primetime ?? null);
     setPropSide(draft?.propSide ?? null);
     setRest(draft?.rest ?? null);
+    setPropFilters(draft?.propFilters ?? EMPTY_PROP_FILTERS);
     setSeeded(true);
   }, [model, seeded]);
 
@@ -91,7 +102,15 @@ export function ByomEditScreen() {
   const edited = market == null
     ? null
     : filtersForDraft(
-      { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null },
+      {
+        market,
+        side,
+        role,
+        primetime,
+        propSide,
+        rest: sport === 'NBA' ? rest : null,
+        propFilters,
+      },
       model?.filters ?? {},
       sport,
     );
@@ -102,7 +121,15 @@ export function ByomEditScreen() {
     : null;
   const formDraft = market == null
     ? null
-    : { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null };
+    : {
+      market,
+      side,
+      role,
+      primetime,
+      propSide,
+      rest: sport === 'NBA' ? rest : null,
+      propFilters,
+    };
   const activeDraft = seeded ? formDraft : loadedDraft;
   const sideReason = activeDraft == null ? null : saveBlockReason(activeDraft);
   const previewFilters: ByomFilters | null = sideReason != null
@@ -127,7 +154,11 @@ export function ByomEditScreen() {
     setMarket(next);
     setSide((current) => sideForMarket(next, current));
     setPropSide((current) => propSideAfterMarketChange(market, next, current));
-    if (next === 'totals' || isPropMarket(next)) setRole(null);
+    setPropFilters((current) => ({ ...current, lineBand: null }));
+    if (next === 'totals') setRole(null);
+    else if (isPropMarket(next)) {
+      setRole((current) => (current === 'favorite' || current === 'underdog' ? current : null));
+    }
   };
 
   const save = async (replaceExisting = false) => {
@@ -248,7 +279,32 @@ export function ByomEditScreen() {
           <Text style={styles.current}>
             {market != null && edited ? marketLabel(edited) : marketLabel(model.filters)}
           </Text>
-          {market != null ? (
+          {market != null && isPropMarket(market) ? (
+            <>
+              <ByomPropSideFields
+                market={market}
+                propSide={propSide}
+                role={role}
+                primetime={primetime}
+                sport={sport}
+                rest={rest}
+                propFilters={propFilters}
+                onPropSide={setPropSide}
+                onRole={setRole}
+                onPrimetime={setPrimetime}
+                onRest={setRest}
+                onPropFilters={setPropFilters}
+              />
+              <ByomMoreFiltersCard
+                sport={sport}
+                side={side}
+                primetime={primetime}
+                propFilters={propFilters}
+                onOpen={setSheet}
+              />
+            </>
+          ) : null}
+          {market != null && !isPropMarket(market) ? (
             <ByomSideFields
               market={market}
               side={side}
@@ -277,6 +333,15 @@ export function ByomEditScreen() {
           {sideReason == null ? (
             <>
               <ByomSeasonToggle />
+              {market != null && isPropMarket(market) ? (
+                <ByomBetCount
+                  record={preview.record}
+                  loading={preview.loading || previewWaiting}
+                  error={previewFilters != null ? preview.error : null}
+                  onRetry={() => void preview.reload()}
+                  showsUnits={unitsVisible}
+                />
+              ) : (
               <ByomPreviewCard
                 record={preview.record}
                 loading={preview.loading || previewWaiting}
@@ -285,6 +350,7 @@ export function ByomEditScreen() {
                 showsUnits={unitsVisible}
                 emptyLabel={previewFilters == null ? '—' : byomEmptyLabel(sport, facts.status, previewFilters)}
               />
+              )}
               <ByomUnitsNote />
             </>
           ) : null}
@@ -317,6 +383,28 @@ export function ByomEditScreen() {
     ) : null}
     <BetslipBarSpacer />
     </KeyboardAvoidingView>
+    {market != null && isPropMarket(market) ? (
+      <ByomFilterSheet
+        tab={sheet}
+        sport={sport}
+        market={market}
+        propSide={propSide}
+        side={side}
+        primetime={primetime}
+        propFilters={propFilters}
+        record={preview.record}
+        loading={preview.loading || previewWaiting}
+        error={sideReason == null ? preview.error : null}
+        showsUnits={unitsVisible}
+        blocked={sideReason}
+        onRetry={() => void preview.reload()}
+        onClose={() => setSheet(null)}
+        onTab={setSheet}
+        onSide={setSide}
+        onPrimetime={setPrimetime}
+        onPropFilters={setPropFilters}
+      />
+    ) : null}
     </SafeAreaView>
   );
 }

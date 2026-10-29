@@ -157,7 +157,10 @@ August stay on the previous year's label. A caller can pass an older
 season. Filters are side (home/away on a moneyline or spread, over/under
 on a total, and the player's team on a prop), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
-is left out. There is no spread-size, price, or line filter. Each
+is left out. Phase A prop filters (player line, DraftKings price band,
+team spread, game total, month, weekday, kickoff slot, opponent, player)
+are in `byom_prop_phase_a_filters_2026_10_29.sql`, applied by hand.
+Stake and kelly are still rejected. Each
 market row counts wins, losses, pushes, and ties, plus `units` and
 `skipped`. Staking is 1u to win at the stored DraftKings price. A win
 is +1. A loss is `-abs(price)/100` on minus odds and `-100/price` on
@@ -253,7 +256,8 @@ user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
 moment. The snapshot totals and the per-market summary are that one
 read. The snapshot stores wins, losses, pushes, and ties. A
-stake, kelly, price, line, or spread-size filter is rejected. An
+stake or kelly filter is rejected. Phase A line and price keys are
+accepted by `byom_prop_phase_a_filters_2026_10_29.sql`. An
 allowlisted key in the wrong case is rejected. There
 is no recommended stake.
 
