@@ -117,6 +117,11 @@ export interface ScoreboardCard {
   homeFull: string;
   linesMuted: boolean;
   accessibilityLabel: string;
+  /**
+   * Markets whose odds cell is an in-play DraftKings quote.
+   * A pre-game % is not shown on those cells.
+   */
+  liveQuotes: ReadonlySet<string>;
 }
 
 interface FeedRaw {
@@ -467,6 +472,12 @@ export function presentScoreboard(input: {
   const startedNoScore = phase === 'upcoming' && Number.isFinite(startMs)
     && startMs <= (input.now ?? Date.now());
   const lines = mergedQuotes(input.pregame, input.inplay, phase);
+  const liveQuotes = new Set<string>();
+  if (phase === 'live') {
+    for (const row of input.inplay ?? []) {
+      if (row.market) liveQuotes.add(row.market);
+    }
+  }
   const spread = quoteFor(lines, 'spreads');
   const total = quoteFor(lines, 'totals');
   const ml = quoteFor(lines, 'h2h');
@@ -554,6 +565,7 @@ export function presentScoreboard(input: {
     linesMuted: phase === 'final',
     awayFull: game.away_team,
     homeFull: game.home_team,
+    liveQuotes,
     accessibilityLabel: `${matchup}, ${stateWord}, ${scoreSpeech}. ${possSpeech}${footerText}. ${situationSpeech}${lineSpeech}. ${updatedLabel ? `${updatedLabel}. ` : ''}DraftKings. Opens the game.`,
   };
 }
@@ -634,6 +646,9 @@ export const SCOREBOARD_MINUS = MINUS;
 // The board shows one market at a time: Odds, % Bets and % Money per side,
 // from scoreboard_splits (data/ingestors/scoreboard_splits.py, Action
 // Network, display only). A side with no stored split shows a dash.
+// The percent is the one measured at line_value. It is shown only when that
+// number is the line in the odds cell. An in-play DraftKings quote is a
+// different line, so the frozen pre-game percent is a dash there too.
 
 export type ScoreboardMarket = 'spreads' | 'totals' | 'h2h';
 export const SCOREBOARD_MARKET_ORDER: readonly ScoreboardMarket[] = ['spreads', 'totals', 'h2h'];
@@ -650,6 +665,15 @@ export interface ScoreboardSplitRow {
   side: string;
   bet_pct: number | string | null;
   money_pct: number | string | null;
+  /** The number the percent was measured at. Null on a moneyline. */
+  line_value?: number | string | null;
+}
+
+/** The line on the card for one market, and whether that cell is in-play. */
+export interface ShownSplitLine {
+  away: number | null;
+  home: number | null;
+  live: boolean;
 }
 
 export interface SideSplit {
@@ -657,16 +681,47 @@ export interface SideSplit {
   money: number | null;
 }
 
+function lineNumber(text: string): number | null {
+  if (!text || text === '—') return null;
+  const cleaned = text.replace(/^[ou]/, '').split(MINUS).join('-').trim();
+  return num(cleaned);
+}
+
+function sameLine(measured: number | string | null | undefined, displayed: number | null): boolean {
+  const m = num(measured);
+  if (m == null || displayed == null) return false;
+  return Math.abs(m - displayed) < 0.001;
+}
+
+/** The number in each odds cell, and whether that cell is an in-play quote. */
+export function shownSplitLine(card: ScoreboardCard, market: ScoreboardMarket): ShownSplitLine {
+  if (market === 'h2h') {
+    return { away: null, home: null, live: card.liveQuotes.has(market) };
+  }
+  return {
+    away: lineNumber(marketCell(card.away, market).value),
+    home: lineNumber(marketCell(card.home, market).value),
+    live: card.liveQuotes.has(market),
+  };
+}
+
 /**
  * The two rows of a card for one market. Totals follow the card's own
  * layout: Over on the away row, Under on the home row.
+ * Spread and total percents show only when line_value is the number in
+ * that cell. A live DraftKings quote shows neither, even at the same number:
+ * the stored row is the last pre-start split.
  */
 export function splitsFor(
   rows: readonly ScoreboardSplitRow[] | undefined,
   market: ScoreboardMarket,
+  shown?: ShownSplitLine,
 ): { away: SideSplit; home: SideSplit } {
-  const pick = (side: string): SideSplit => {
+  const blank: SideSplit = { bets: null, money: null };
+  const pick = (side: string, displayed: number | null): SideSplit => {
+    if (shown?.live) return blank;
     const row = rows?.find((r) => r.market === market && r.side === side);
+    if (market !== 'h2h' && !sameLine(row?.line_value, displayed)) return blank;
     const pct = (v: number | string | null | undefined) => {
       const n = num(v);
       return n == null || n < 0 || n > 100 ? null : Math.round(n);
@@ -674,8 +729,8 @@ export function splitsFor(
     return { bets: pct(row?.bet_pct), money: pct(row?.money_pct) };
   };
   return market === 'totals'
-    ? { away: pick('over'), home: pick('under') }
-    : { away: pick('away'), home: pick('home') };
+    ? { away: pick('over', shown?.away ?? null), home: pick('under', shown?.home ?? null) }
+    : { away: pick('away', shown?.away ?? null), home: pick('home', shown?.home ?? null) };
 }
 
 export function pctText(n: number | null): string {

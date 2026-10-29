@@ -181,6 +181,98 @@ def test_scheduler_runs_it_on_the_poller_service():
     assert 'id="live_scoreboard"' in src
 
 
+def _load(name: str) -> dict:
+    return json.loads((ROOT / "tests" / "fixtures" / name).read_text(encoding="utf-8"))
+
+
+def test_real_nfl_scoreboards_map_to_our_codes_and_scores():
+    """Fetched 2026-10-29 from site.api.espn.com. LAR is our LA, WSH is our WAS.
+    Scores are the games rows for those dates."""
+    sunday = _load("espn_nfl_scoreboard_2026-10-18.json")
+    rows = ls.parse_scoreboard("NFL", sunday)
+    assert len(rows) == len(sunday["events"])
+    by = {(r["away"], r["home"], r["event_date"]): r for r in rows}
+    assert (by[("ARI", "LA", "2026-10-18")]["away_score"],
+            by[("ARI", "LA", "2026-10-18")]["home_score"]) == (18, 16)
+    assert by[("ARI", "LA", "2026-10-18")]["clock_label"] == "Final"
+    assert (by[("HOU", "JAX", "2026-10-18")]["away_score"],
+            by[("HOU", "JAX", "2026-10-18")]["home_score"]) == (34, 31)
+    ot = next(r for r in rows if r["clock_label"] == "Final/OT")
+    assert ot["period"] == 5 and (ot["away"], ot["home"]) == ("PIT", "TB")
+    monday = _load("espn_nfl_scoreboard_2026-10-19.json")
+    [wsh] = ls.parse_scoreboard("NFL", monday)
+    assert (wsh["away"], wsh["home"], wsh["event_date"]) == ("WAS", "SF", "2026-10-19")
+    assert (wsh["away_score"], wsh["home_score"]) == (17, 23)
+    games = [
+        {"game_id": "NFL_2026_06_ARI_LA", "sport": "NFL", "game_date": "2026-10-18",
+         "home_team": "LA", "away_team": "ARI"},
+        {"game_id": "NFL_2026_06_HOU_JAX", "sport": "NFL", "game_date": "2026-10-18",
+         "home_team": "JAX", "away_team": "HOU"},
+        {"game_id": "NFL_2026_06_WAS_SF", "sport": "NFL", "game_date": "2026-10-19",
+         "home_team": "SF", "away_team": "WAS"},
+    ]
+    matched = ls.match_games("NFL", rows + [wsh], games)
+    assert {r["game_id"] for r in matched} == {
+        "NFL_2026_06_ARI_LA", "NFL_2026_06_HOU_JAX", "NFL_2026_06_WAS_SF"}
+
+
+def test_real_nhl_scoreboards_map_the_abbreviations_espn_does_not_share():
+    """Fetched 2026-10-29. Scoreboard spelling is LA/NJ/SJ/TB/UTA, not ours.
+    Final/SO is period 5. Scores are the games rows for those dates."""
+    day = _load("espn_nhl_scoreboard_2026-10-24.json")
+    rows = ls.parse_scoreboard("NHL", day)
+    assert len(rows) == len(day["events"])
+    by = {(r["away"], r["home"]): r for r in rows}
+    assert (by[("LAK", "NJD")]["away_score"], by[("LAK", "NJD")]["home_score"]) == (1, 3)
+    assert by[("LAK", "NJD")]["event_date"] == "2026-10-24"
+    assert (by[("SJS", "BOS")]["away_score"], by[("SJS", "BOS")]["home_score"]) == (4, 6)
+    assert (by[("TBL", "UTA")]["away_score"], by[("TBL", "UTA")]["home_score"]) == (4, 5)
+    assert by[("TBL", "UTA")]["clock_label"] == "Final/OT"
+    assert by[("TBL", "UTA")]["event_date"] == "2026-10-24"
+    assert (by[("BUF", "WSH")]["away_score"], by[("BUF", "WSH")]["home_score"]) == (3, 4)
+    later = _load("espn_nhl_scoreboard_2026-10-27.json")
+    rows2 = ls.parse_scoreboard("NHL", later)
+    assert len(rows2) == len(later["events"])
+    so = next(r for r in rows2 if r["clock_label"] == "Final/SO")
+    assert (so["away"], so["home"], so["period"], so["event_date"]) == ("NYI", "NSH", 5, "2026-10-27")
+    uta = next(r for r in rows2 if (r["away"], r["home"]) == ("MIN", "UTA"))
+    assert (uta["away_score"], uta["home_score"], uta["event_date"]) == (3, 1, "2026-10-27")
+    bare = json.loads(json.dumps(day))
+    for ev in bare["events"]:
+        for c in ev["competitions"][0]["competitors"]:
+            c["team"]["displayName"] = None
+    assert len(ls.parse_scoreboard("NHL", bare)) == len(day["events"])
+
+
+def test_abbreviation_only_maps_both_utah_spellings_and_drops_unknowns():
+    assert ls.team_code("NHL", "UTAH", None) == "UTA"
+    assert ls.team_code("NHL", "UTA", None) == "UTA"
+    assert ls.team_code("NHL", "LA", None) == "LAK"
+    assert ls.team_code("NHL", "NJ", None) == "NJD"
+    assert ls.team_code("NHL", "SJ", None) == "SJS"
+    assert ls.team_code("NHL", "TB", None) == "TBL"
+    assert ls.team_code("NFL", "LAR", None) == "LA"
+    assert ls.team_code("NFL", "WSH", None) == "WAS"
+    assert ls.team_code("NFL", "JAX", None) == "JAX"
+    assert ls.team_code("NFL", "XYZ", None) is None
+    assert ls.team_code("NHL", "ZZZ", None) is None
+
+
+def test_an_abbreviation_that_is_not_ours_is_dropped_and_warned():
+    from loguru import logger
+
+    ev = _event("post", home=("XYZ", "Not A Club", "1"), away=("GB", "Green Bay Packers", "9"),
+                completed=True, name="STATUS_FINAL", short="Final")
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        rows = ls.parse_scoreboard("NFL", {"events": [ev]})
+    finally:
+        logger.remove(sink)
+    assert rows == []
+    assert any("XYZ" in m for m in messages)
+
+
 def test_migration_is_declared_before_the_posted_stake_pair_and_grants_select_only():
     mig = (ROOT / "data" / "view_migrations.py").read_text(encoding="utf-8")
     assert mig.index("add_live_scoreboard_2026_10_29.sql") < mig.index('"published_pick_units_2026_10_17.sql"')

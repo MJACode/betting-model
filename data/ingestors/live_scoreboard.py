@@ -20,12 +20,14 @@ The table holds one row per game, the latest state, upserted every tick
 .claude/rules/data-integrity.md). Only in-progress and completed games are
 written. A pre-game event writes nothing.
 
-Shape read here (the NBA half is pinned by the saved ESPN payloads under
-tests/fixtures/espn_nba_scoreboard_*.json; NFL and NHL use the same site
-scoreboard document): events[].{id, date, status.{period, displayClock,
-type.{state, name, completed, shortDetail}}, competitions[0].{competitors[].
-{id, homeAway, score, team.{id, abbreviation, displayName}}, situation.
-{possession, downDistanceText, shortDownDistanceText}}}.
+Shape read here, pinned by saved ESPN payloads: NBA under
+tests/fixtures/espn_nba_scoreboard_*.json, NFL under
+espn_nfl_scoreboard_2026-10-18.json and 2026-10-19.json, NHL under
+espn_nhl_scoreboard_2026-10-24.json and 2026-10-27.json.
+events[].{id, date, status.{period, displayClock, type.{state, name,
+completed, shortDetail}}, competitions[0].{competitors[].{id, homeAway,
+score, team.{id, abbreviation, displayName}}, situation.{possession,
+downDistanceText, shortDownDistanceText}}}.
 """
 from __future__ import annotations
 
@@ -53,8 +55,10 @@ TAIL = timedelta(hours=7)
 _ET = ZoneInfo("America/New_York")
 
 # ESPN abbreviations that are not ours. Names are tried first.
+# NHL scoreboards say UTA (measured 2026-10-24 and 2026-10-27). The teams
+# list says UTAH (measured the same day). Both have to become UTA.
 _NFL_ABBREV = {"WSH": "WAS", "LAR": "LA", "JAC": "JAX"}
-_NHL_ABBREV = {"LA": "LAK", "TB": "TBL", "SJ": "SJS", "NJ": "NJD"}
+_NHL_ABBREV = {"LA": "LAK", "TB": "TBL", "SJ": "SJS", "NJ": "NJD", "UTAH": "UTA"}
 
 
 def _dig(obj: Any, *path: Any) -> Any:
@@ -78,6 +82,12 @@ def _int(v: Any) -> int | None:
         return None
 
 
+def _known(code: str, ours: set[str]) -> str | None:
+    """An ESPN abbreviation that is not one of our ids is not a team id.
+    Passing LAR or UTAH through made match_games drop the game."""
+    return code if code in ours else None
+
+
 def team_code(sport: str, abbrev: str | None, name: str | None) -> str | None:
     """Our team id for an ESPN team, or None when it is not one of ours."""
     a = (abbrev or "").upper().strip()
@@ -87,11 +97,19 @@ def team_code(sport: str, abbrev: str | None, name: str | None) -> str | None:
         return nba_team(a, n)
     if sport == "NFL":
         from config import NFL_ODDS_API_MAP
-        return NFL_ODDS_API_MAP.get(n) or _NFL_ABBREV.get(a) or (a or None)
+        code = NFL_ODDS_API_MAP.get(n) or _NFL_ABBREV.get(a) or a
+        return _known(code, set(NFL_ODDS_API_MAP.values()))
     if sport == "NHL":
         from data.ingestors.odds_ingestor import NHL_ODDS_API_MAP
-        return NHL_ODDS_API_MAP.get(n) or _NHL_ABBREV.get(a) or (a or None)
+        code = NHL_ODDS_API_MAP.get(n) or _NHL_ABBREV.get(a) or a
+        return _known(code, set(NHL_ODDS_API_MAP.values()))
     return None
+
+
+def _side_label(side: dict | None) -> str:
+    if not side:
+        return "?"
+    return f"{side.get('abbrev') or '?'} ({side.get('name') or 'no name'})"
 
 
 def clock_label(sport: str, status: dict) -> str:
@@ -152,11 +170,17 @@ def parse_scoreboard(sport: str, data: dict) -> list[dict]:
             team = c.get("team") or {}
             sides[side] = {
                 "code": team_code(sport, team.get("abbreviation"), team.get("displayName")),
+                "abbrev": team.get("abbreviation"),
+                "name": team.get("displayName"),
                 "ids": {str(x) for x in (c.get("id"), team.get("id")) if x is not None},
                 "score": _int(c.get("score")),
             }
         home, away = sides.get("home"), sides.get("away")
         if not home or not away or not home["code"] or not away["code"]:
+            logger.warning(
+                f"live_scoreboard {sport}: unmapped ESPN team "
+                f"{_side_label(away)} @ {_side_label(home)}"
+            )
             continue
         situation = comp.get("situation") or {}
         poss_id = situation.get("possession")
