@@ -5,13 +5,17 @@ import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchDkInplayForGames,
   fetchLiveGameStates,
+  fetchLiveScoreboard,
   fetchNcaafScoreboard,
   fetchNextScoreboardGame,
   fetchScoreboardDkOdds,
   fetchScoreboardGames,
+  type LiveScoreboardRow,
   type NcaafScoreboardRow,
 } from '@/lib/queries';
 import {
+  ESPN_LIVE_SPORTS,
+  feedFromEspn,
   feedFromMlb,
   feedFromNcaaf,
   mergeDkInplay,
@@ -41,8 +45,8 @@ function groupQuotes(rows: readonly LatestDkOddsRow[]): Map<string, ScoreboardQu
 /**
  * Games, DK lines and stored live state for the Scoreboard segment.
  * Fetches only while the segment is open and the screen is focused.
- * A missing NCAAF view leaves that sport without live scores. It does
- * not invent them.
+ * A missing NCAAF view, or a live_scoreboard table that is not created
+ * yet, leaves that sport without live scores. It does not invent them.
  */
 export function useScoreboard(enabled: boolean, dates: readonly string[], sport: string, anchorDate: string) {
   const [games, setGames] = useState<GameRow[]>([]);
@@ -70,7 +74,15 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       const gs = await fetchScoreboardGames(slate);
       if (gen !== loadGen.current) return;
       const ncaafIds = gs.filter((game) => game.sport === 'NCAAF').map((game) => game.game_id);
-      const [oddsRes, mlbRes, ncaafRes, nextRes] = await Promise.all([
+      // Only games that have started can have a live row.
+      const startedIds = gs
+        .filter((game) => ESPN_LIVE_SPORTS.includes(game.sport))
+        .filter((game) => {
+          const t = game.commence_time ? Date.parse(game.commence_time) : NaN;
+          return Number.isFinite(t) && t <= Date.now() + 10 * 60 * 1000;
+        })
+        .map((game) => game.game_id);
+      const [oddsRes, mlbRes, ncaafRes, espnRes, nextRes] = await Promise.all([
         fetchScoreboardDkOdds(slate).then(
           (rows) => ({ rows, error: null as string | null }),
           (e: unknown) => ({ rows: [] as LatestDkOddsRow[], error: isAbortError(e) ? null : errorText(e) }),
@@ -90,6 +102,13 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
             error: isAbortError(e) || missingRelation(e) ? null : errorText(e),
           }),
         ),
+        fetchLiveScoreboard(startedIds).then(
+          (rows) => ({ rows, error: null as string | null }),
+          (e: unknown) => ({
+            rows: [] as LiveScoreboardRow[],
+            error: isAbortError(e) || missingRelation(e) ? null : errorText(e),
+          }),
+        ),
         gs.some((g) => g.sport === sport && g.game_date === anchorDate)
           ? Promise.resolve(null)
           : fetchNextScoreboardGame(sport, anchorDate).catch(() => null),
@@ -99,13 +118,16 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       const now = Date.now();
       const mlbById = new Map(mlbRes.rows.map((row) => [row.game_id, row]));
       const ncaafById = new Map(ncaafRes.rows.map((row) => [row.game_id, row]));
+      const espnById = new Map(espnRes.rows.map((row) => [row.game_id, row]));
       const feedMap = new Map<string, ScoreboardFeed>();
       for (const game of gs) {
         const feed = game.sport === 'MLB'
           ? feedFromMlb(mlbById.get(game.game_id), now)
           : game.sport === 'NCAAF'
             ? feedFromNcaaf(ncaafById.get(game.game_id), now)
-            : null;
+            : ESPN_LIVE_SPORTS.includes(game.sport)
+              ? feedFromEspn(espnById.get(game.game_id), now)
+              : null;
         if (feed) feedMap.set(game.game_id, feed);
       }
       const liveIds = gs
@@ -124,7 +146,15 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       setNextGame(nextRes);
       setLinesError(oddsRes.error ?? inplayError);
       setNcaafUnavailable(ncaafRes.missing);
-      setLiveError(sport === 'MLB' ? mlbRes.error : sport === 'NCAAF' ? ncaafRes.error : null);
+      setLiveError(
+        sport === 'MLB'
+          ? mlbRes.error
+          : sport === 'NCAAF'
+            ? ncaafRes.error
+            : ESPN_LIVE_SPORTS.includes(sport)
+              ? espnRes.error
+              : null,
+      );
       setLoaded(true);
     } catch (e: unknown) {
       if (gen !== loadGen.current) return;

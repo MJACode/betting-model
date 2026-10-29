@@ -462,6 +462,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # marker comment exist. Does not rewrite picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_nba_team_q1_2026_10_28.sql",
+    # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
+    # One table, written by data/ingestors/live_scoreboard.py, with a
+    # SELECT policy and a SELECT-only grant. Returns on a catalog read once
+    # the table, policy and grant exist. Does not touch picks, odds or the
+    # record. Sits before the posted-stake pair so those two stay adjacent.
+    "add_live_scoreboard_2026_10_29.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

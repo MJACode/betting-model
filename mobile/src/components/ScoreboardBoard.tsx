@@ -20,10 +20,9 @@ import { addDays, dayLabelET } from '@/lib/format';
 import {
   SCOREBOARD_BOOK_NOTE,
   SCOREBOARD_SPORTS,
-  livePollerCaption,
   nextSlateText,
+  orderScoreboard,
   presentScoreboard,
-  scoreboardLiveEnabled,
   scoreboardSwitchLine,
   type ScoreboardCard,
   type ScoreboardFeed,
@@ -34,11 +33,11 @@ import {
 import { colors, font, radii, spacing, teamDisc } from '@/lib/theme';
 import type { GameRow } from '@/types';
 
-const PHASES: readonly { id: ScoreboardPhase; label: string }[] = [
-  { id: 'upcoming', label: 'Upcoming' },
-  { id: 'live', label: 'Live' },
-  { id: 'final', label: 'Final' },
-];
+const PHASE_LABEL: Record<ScoreboardPhase, string> = {
+  live: 'Live',
+  upcoming: 'Upcoming',
+  final: 'Final',
+};
 
 function discColor(label: string): string {
   let h = 0;
@@ -61,8 +60,6 @@ export function ScoreboardBoard({
   nextGame,
   sport,
   onSport,
-  phase,
-  onPhase,
   date,
   today,
   onDate,
@@ -88,8 +85,6 @@ export function ScoreboardBoard({
   nextGame: GameRow | null;
   sport: ScoreboardSport;
   onSport: (sport: ScoreboardSport) => void;
-  phase: ScoreboardPhase;
-  onPhase: (phase: ScoreboardPhase) => void;
   date: string;
   today: string;
   onDate: (date: string) => void;
@@ -112,7 +107,6 @@ export function ScoreboardBoard({
   const abbrevs = useNcaafAbbrevs(true);
   const [pulling, setPulling] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
-  const liveOn = scoreboardLiveEnabled(sport);
   const dayWord = dayLabelET(date, today);
 
   const dayGames = useMemo(
@@ -144,52 +138,26 @@ export function ScoreboardBoard({
     }
     return rows;
   }, [locked, games, sport, quotes, inplay, feeds, abbrevs, date, today]);
-  const cards = sportCards.filter((c) => c.phase === phase);
-  const phaseCounts = {
-    upcoming: sportCards.filter((c) => c.phase === 'upcoming').length,
-    live: sportCards.filter((c) => c.phase === 'live').length,
-    final: sportCards.filter((c) => c.phase === 'final').length,
-  };
+  // Every game for the sport in one list (Matt, 2026-10-29): live, then
+  // upcoming, then final. A label marks where each group starts.
+  const cards = useMemo(() => orderScoreboard(sportCards), [sportCards]);
 
   const refresh = () => {
     setPulling(true);
     void onRefresh().finally(() => setPulling(false));
   };
 
-  const choosePhase = (next: ScoreboardPhase) => {
-    if (next === 'live' && !liveOn) return;
-    onPhase(next);
-  };
-
-  const offDay = (counts[sport] ?? 0) === 0;
-  const emptyTitle = offDay
-    ? `No ${sport} games today`
-    : phase === 'live'
-      ? `No live ${sport} scores right now`
-      : phase === 'final'
-        ? `No ${sport} finals yet`
-        : `No upcoming ${sport} games`;
-  const otherPhase: ScoreboardPhase | null = offDay
-    ? null
-    : (['live', 'final', 'upcoming'] as const).find((p) => p !== phase && phaseCounts[p] > 0 && (p !== 'live' || liveOn)) ?? null;
-  const emptyBody = offDay
-    ? (nextSlateText(nextGame, abbrevs) ? `Next slate: ${nextSlateText(nextGame, abbrevs)}` : 'Today’s games show up here once they’re on the board.')
-    : phase === 'live' && sport === 'NFL'
-      ? 'Scores show up here once they’re stored. Nothing is filled in before that. Upcoming and Final still list the slate.'
-      : otherPhase
-        ? `They’re on ${otherPhase === 'live' ? 'Live' : otherPhase === 'final' ? 'Final' : 'Upcoming'}.`
-        : 'Nothing in this filter has a stored score.';
-  const emptyAction = offDay && nextGame
+  const dayPhrase = dayWord === 'Today' || dayWord === 'Tomorrow' || dayWord === 'Yesterday'
+    ? dayWord.toLowerCase()
+    : `on ${dayWord}`;
+  const emptyTitle = `No ${sport} games ${dayPhrase}`;
+  const next = nextSlateText(nextGame, abbrevs);
+  const emptyBody = next ? `Next slate: ${next}` : 'Games show up here once they’re on the board.';
+  const emptyAction = nextGame && nextGame.game_date !== date
     ? `See ${dayLabelET(nextGame.game_date, today)}`
-    : otherPhase === 'live'
-      ? 'See Live'
-      : otherPhase === 'final'
-        ? 'See Final'
-        : otherPhase === 'upcoming'
-          ? 'See Upcoming'
-          : null;
-  const nudge = offDay ? scoreboardSwitchLine(counts, sport) : null;
-  const ncaafNote = sport === 'NCAAF' && phase === 'live' && ncaafUnavailable
+    : null;
+  const nudge = (counts[sport] ?? 0) === 0 ? scoreboardSwitchLine(counts, sport) : null;
+  const ncaafNote = sport === 'NCAAF' && ncaafUnavailable
     ? 'Live NCAAF scores aren’t available in this build yet.'
     : null;
 
@@ -198,6 +166,7 @@ export function ScoreboardBoard({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.sportScroll}
         contentContainerStyle={styles.sports}
       >
         {SCOREBOARD_SPORTS.map((id) => (
@@ -212,27 +181,6 @@ export function ScoreboardBoard({
       </ScrollView>
 
       <View style={styles.filters}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.phaseScroll}
-          contentContainerStyle={styles.phases}
-        >
-          {PHASES.map((p) => {
-            const disabled = p.id === 'live' && !liveOn;
-            return (
-              <FilterChip
-                key={p.id}
-                label={p.label}
-                active={phase === p.id}
-                disabled={disabled}
-                onPress={() => choosePhase(p.id)}
-                accessibilityLabel={disabled ? `${p.label}, unavailable` : p.label}
-                accessibilityHint={disabled ? livePollerCaption(sport) : undefined}
-              />
-            );
-          })}
-        </ScrollView>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${dayWord}, DraftKings. Choose a day.`}
@@ -261,9 +209,6 @@ export function ScoreboardBoard({
             );
           })}
         </View>
-      ) : null}
-      {!liveOn ? (
-        <Text style={styles.caption}>{livePollerCaption(sport)}</Text>
       ) : null}
       {ncaafNote ? <Text style={styles.caption}>{ncaafNote}</Text> : null}
       {linesError && loaded ? (
@@ -342,12 +287,7 @@ export function ScoreboardBoard({
                 accessibilityRole="button"
                 accessibilityLabel={emptyAction}
                 onPress={() => {
-                  if (offDay && nextGame) {
-                    onDate(nextGame.game_date);
-                    onPhase('upcoming');
-                    return;
-                  }
-                  if (otherPhase) onPhase(otherPhase);
+                  if (nextGame) onDate(nextGame.game_date);
                 }}
                 style={({ pressed }) => [styles.emptyBtn, pressed && styles.pressed]}
               >
@@ -357,8 +297,15 @@ export function ScoreboardBoard({
               {nudge ? <Text style={styles.nudge}>{nudge}</Text> : null}
             </View>
           }
-          renderItem={({ item }) => (
-            <GameCard card={item} onPress={() => onOpenGame(item.gameId)} />
+          renderItem={({ item, index }) => (
+            <View>
+              {index === 0 || cards[index - 1]?.phase !== item.phase ? (
+                <Text style={styles.group} accessibilityRole="header">
+                  {PHASE_LABEL[item.phase]}
+                </Text>
+              ) : null}
+              <GameCard card={item} onPress={() => onOpenGame(item.gameId)} />
+            </View>
           )}
         />
       )}
@@ -527,6 +474,9 @@ function LineCell({
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  // A horizontal ScrollView in a column grows to fill the height it is
+  // given, which stretched every sport pill (Matt's screenshot, 2026-10-29).
+  sportScroll: { flexGrow: 0 },
   sports: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -538,8 +488,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
-  phaseScroll: { flexGrow: 1, flexShrink: 1 },
-  phases: { flexDirection: 'row', gap: spacing.xs, paddingRight: spacing.sm },
+  group: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
   today: {
     marginLeft: 'auto',
     minHeight: 44,
@@ -594,7 +550,8 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   colMatch: { flex: 1, minWidth: 80 },
-  colScore: { width: 32, textAlign: 'center' },
+  // 40 fits a three-digit NBA score and the 'Score' heading on one line.
+  colScore: { width: 40, textAlign: 'center' },
   colLine: { width: 68, alignItems: 'center', textAlign: 'center' },
   side: { flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: spacing.xs },
   match: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

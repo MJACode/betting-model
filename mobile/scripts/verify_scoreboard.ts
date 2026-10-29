@@ -6,12 +6,12 @@
 import {
   SCOREBOARD_MINUS,
   feedFromMlb,
+  feedFromEspn,
   feedFromNcaaf,
-  livePollerCaption,
   mergeDkInplay,
   movementText,
+  orderScoreboard,
   presentScoreboard,
-  scoreboardLiveEnabled,
   scoreboardPhase,
   type ScoreboardGame,
 } from '../src/lib/scoreboard';
@@ -41,9 +41,31 @@ const game = (over: Partial<ScoreboardGame> = {}): ScoreboardGame => ({
   ...over,
 });
 
-check('NBA and NHL live chips stay off', !scoreboardLiveEnabled('NBA') && !scoreboardLiveEnabled('NHL'));
-check('NFL NCAAF MLB live chips stay on', scoreboardLiveEnabled('NFL') && scoreboardLiveEnabled('NCAAF') && scoreboardLiveEnabled('MLB'));
-check('poller caption names the sport', livePollerCaption('NBA') === 'Live NBA scores coming when the poller ships.');
+// NFL / NBA / NHL live scores from live_scoreboard (Matt, 2026-10-29).
+const espnNow = Date.parse('2026-10-30T01:00:00Z');
+const espnLive = feedFromEspn({
+  snapshot_at: '2026-10-30T00:59:10Z', state: 'in', home_score: 17, away_score: 10,
+  clock_label: 'Q3 7:42', situation: '2nd & 7 at CAR 35', possession: 'home',
+}, espnNow);
+check('a fresh live_scoreboard row is in progress', espnLive?.inProgress === true && espnLive.homeScore === 17);
+const espnCard = presentScoreboard({ game: game({ sport: 'NFL', away_team: 'CAR', home_team: 'GB' }), pregame: [], inplay: [], feed: espnLive });
+check('an ESPN live row makes the card live with its score and clock', espnCard.phase === 'live'
+  && espnCard.home.score === '17' && espnCard.away.score === '10' && espnCard.footerText === 'Q3 7:42'
+  && espnCard.home.possession && espnCard.situation === '2nd & 7 at CAR 35');
+const espnStale = feedFromEspn({ snapshot_at: '2026-10-30T00:40:00Z', state: 'in', home_score: 3, away_score: 0 }, espnNow);
+check('a live_scoreboard row older than 10 minutes is not live', espnStale === null);
+const espnFinal = feedFromEspn({ snapshot_at: '2026-10-29T20:00:00Z', state: 'post', home_score: 101, away_score: 99, clock_label: 'Final' }, espnNow);
+check('a completed ESPN row is final however old', espnFinal?.ended === true && espnFinal.inProgress === false);
+check('no live_scoreboard row is no feed', feedFromEspn(null, espnNow) === null);
+
+// One list: live first, then upcoming, then final; start time inside each.
+const ordered = orderScoreboard([
+  presentScoreboard({ game: game({ game_id: 'F', home_score: 3, away_score: 1, commence_time: '2026-10-29T23:00:00Z' }), pregame: [], inplay: [], feed: null }),
+  presentScoreboard({ game: game({ game_id: 'U2', commence_time: '2026-10-30T02:00:00Z' }), pregame: [], inplay: [], feed: null }),
+  presentScoreboard({ game: game({ game_id: 'L', sport: 'NFL' }), pregame: [], inplay: [], feed: espnLive }),
+  presentScoreboard({ game: game({ game_id: 'U1', commence_time: '2026-10-30T00:00:00Z' }), pregame: [], inplay: [], feed: null }),
+]);
+check('the board orders live, upcoming, final', ordered.map((c) => c.gameId).join(',') === 'L,U1,U2,F');
 
 const kicked = game();
 check('a past kickoff with no feed is not live', scoreboardPhase(kicked, null) === 'upcoming');

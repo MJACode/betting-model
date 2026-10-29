@@ -3202,6 +3202,42 @@ export async function fetchNcaafScoreboard(gameIds: readonly string[]): Promise<
   return out;
 }
 
+export interface LiveScoreboardRow {
+  game_id: string;
+  snapshot_at: string;
+  state: string;
+  home_score: number | null;
+  away_score: number | null;
+  clock_label: string | null;
+  situation: string | null;
+  possession: string | null;
+}
+
+const LIVE_SCOREBOARD_COLUMNS =
+  'game_id, snapshot_at, state, home_score, away_score, clock_label, situation, possession';
+
+/**
+ * NFL / NBA / NHL live scores, one row per game (live_scoreboard, written
+ * every minute by data/ingestors/live_scoreboard.py). Only started games
+ * have a row. Biggest day: an NHL + NBA + NFL Sunday is under 40 rows; the
+ * read is by id, 80 at a time, like the NCAAF one.
+ */
+export async function fetchLiveScoreboard(gameIds: readonly string[]): Promise<LiveScoreboardRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: LiveScoreboardRow[] = [];
+  const size = 80;
+  for (let i = 0; i < gameIds.length; i += size) {
+    const chunk = gameIds.slice(i, i + size);
+    const { data, error } = await supabase
+      .from('live_scoreboard')
+      .select(LIVE_SCOREBOARD_COLUMNS)
+      .in('game_id', [...chunk]);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as LiveScoreboardRow[]));
+  }
+  return out;
+}
+
 const INPLAY_QUOTE =
   'market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price';
 

@@ -1,11 +1,12 @@
 /**
  * Picks → Scoreboard. One card per game, DraftKings game markets only.
  *
- * Live scores are whatever a stored feed already wrote. A clock that has
- * passed is not a score: NFL has no stored live state (the ESPN read in
- * nfl/live_model/feeds/espn.py is not written to Supabase), and NBA/NHL
- * have no continuous poller. Those games stay Upcoming until `games`
- * has a final score. Nothing here fills a number in.
+ * Live scores are whatever a stored feed already wrote: MLB from
+ * live_game_state, NCAAF from ncaaf_live_states, and NFL / NBA / NHL from
+ * live_scoreboard (data/ingestors/live_scoreboard.py, every minute from
+ * ESPN, Matt 2026-10-29). A clock that has passed is not a score. A game
+ * with no fresh stored row stays Upcoming until `games` has a final score.
+ * Nothing here fills a number in.
  */
 
 import {
@@ -23,10 +24,18 @@ export type ScoreboardSport = (typeof SCOREBOARD_SPORTS)[number];
 
 export type ScoreboardPhase = 'upcoming' | 'live' | 'final';
 
-/** NFL / NCAAF / MLB keep the Live chip. NBA / NHL do not. */
-export function scoreboardLiveEnabled(sport: string): boolean {
-  return sport === 'NFL' || sport === 'NCAAF' || sport === 'MLB';
-}
+/** One list per sport, in this order (Matt, 2026-10-29: no status filter). */
+export const SCOREBOARD_PHASE_ORDER: readonly ScoreboardPhase[] = ['live', 'upcoming', 'final'];
+
+/** Sports whose live score comes from live_scoreboard. */
+export const ESPN_LIVE_SPORTS: readonly string[] = ['NFL', 'NBA', 'NHL'];
+
+/**
+ * How long a live_scoreboard row may still say the game is in progress.
+ * The poller writes every minute while the game is on. Ten minutes covers a
+ * few missed ticks and drops a poller that died.
+ */
+export const ESPN_LIVE_MAX_AGE_MS = 10 * 60 * 1000;
 
 /**
  * How long an NCAAF state row may still say the game is in progress.
@@ -40,11 +49,6 @@ export const NCAAF_LIVE_MAX_AGE_MS = 45 * 60 * 1000;
 export const SCOREBOARD_MARKETS = ['h2h', 'spreads', 'totals'] as const;
 
 export const SCOREBOARD_BOOK_NOTE = 'DK · tap for game ›';
-export const SCOREBOARD_EMPTY_ACTION = 'See Upcoming';
-
-export function livePollerCaption(sport: string): string {
-  return `Live ${sport} scores coming when the poller ships.`;
-}
 
 export interface ScoreboardQuote {
   market: string;
@@ -99,6 +103,8 @@ export interface ScoreboardCard {
   gameId: string;
   sport: string;
   phase: ScoreboardPhase;
+  /** The game's listed start, for ordering. */
+  commenceTime: string | null;
   away: ScoreboardSide;
   home: ScoreboardSide;
   showMl: boolean;
@@ -313,6 +319,46 @@ export function feedFromNcaaf(row: NcaafLiveLike | null | undefined, now: number
   };
 }
 
+export interface EspnLiveLike {
+  snapshot_at: string;
+  state: string;
+  home_score?: number | null;
+  away_score?: number | null;
+  clock_label?: string | null;
+  situation?: string | null;
+  possession?: string | null;
+}
+
+/** live_scoreboard row → feed. A stale in-progress row becomes null. */
+export function feedFromEspn(row: EspnLiveLike | null | undefined, now: number): ScoreboardFeed | null {
+  if (!row) return null;
+  const ended = row.state === 'post';
+  const ts = parseStamp(row.snapshot_at).getTime();
+  const fresh = Number.isFinite(ts) && now - ts >= -60_000 && now - ts <= ESPN_LIVE_MAX_AGE_MS;
+  const inProgress = row.state === 'in' && fresh;
+  if (!inProgress && !ended) return null;
+  return {
+    awayScore: scoreNum(row.away_score),
+    homeScore: scoreNum(row.home_score),
+    inProgress,
+    ended,
+    possession: inProgress ? sideOf(row.possession) : null,
+    clockLabel: row.clock_label ?? '',
+    situation: inProgress ? row.situation ?? null : null,
+    snapshotAt: row.snapshot_at,
+  };
+}
+
+/** Live first, then upcoming, then final; by start time inside each. */
+export function orderScoreboard(cards: readonly ScoreboardCard[]): ScoreboardCard[] {
+  const rank = (c: ScoreboardCard) => SCOREBOARD_PHASE_ORDER.indexOf(c.phase);
+  const start = (c: ScoreboardCard) => {
+    const t = c.commenceTime ? parseStamp(c.commenceTime).getTime() : NaN;
+    return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
+  };
+  return [...cards].sort((a, b) => rank(a) - rank(b) || start(a) - start(b) || a.gameId.localeCompare(b.gameId));
+}
+
 /**
  * Final when a score is stored on the game, or the feed says the game ended.
  * Live only from a fresh in-progress feed. A past start time is not live.
@@ -490,6 +536,7 @@ export function presentScoreboard(input: {
     gameId: game.game_id,
     sport: game.sport,
     phase,
+    commenceTime: game.commence_time ?? null,
     away,
     home,
     showMl: phase === 'upcoming',
@@ -510,32 +557,6 @@ function lineSpeechSide(team: string, side: ScoreboardSide, showMl: boolean): st
   if (side.total !== '—') bits.push(`total ${side.total} ${side.totalPrice}`);
   if (showMl && side.ml !== '—') bits.push(`moneyline ${side.ml}`);
   return bits.join(', ');
-}
-
-export function scoreboardEmptyTitle(sport: string, phase: ScoreboardPhase): string {
-  if (phase === 'live') return `No live ${sport} scores right now`;
-  if (phase === 'final') return `No ${sport} finals yet`;
-  return `No ${sport} games today`;
-}
-
-export function scoreboardEmptyBody(input: {
-  sport: string;
-  phase: ScoreboardPhase;
-  /** The day has games, and none of them are in this filter. */
-  dayHasGames: boolean;
-  /** NFL live has no stored feed. Copy says so instead of implying a quiet slate. */
-  nflLiveUnstored: boolean;
-  nextSlate: string | null;
-}): string {
-  if (input.phase === 'live' && input.nflLiveUnstored) {
-    return 'Scores show up here once they’re stored. Nothing is filled in before that. Upcoming and Final still list the slate.';
-  }
-  if (input.phase === 'live' && input.dayHasGames) {
-    return 'No game has a live score stored right now. Upcoming and Final still list the slate.';
-  }
-  if (!input.dayHasGames && input.nextSlate) return `Next slate: ${input.nextSlate}`;
-  if (input.phase === 'final') return 'Finals show up once the score is stored. Nothing is filled in before that.';
-  return 'Today’s games show up here once they’re on the board.';
 }
 
 export function nextSlateText(
