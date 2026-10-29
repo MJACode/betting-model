@@ -1,0 +1,44 @@
+{
+ "events": [
+  {
+   "id": "401873008",
+   "date": "2026-10-20T00:15Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "home",
+       "score": "23",
+       "team": {
+        "id": "25",
+        "abbreviation": "SF",
+        "displayName": "San Francisco 49ers"
+       }
+      },
+      {
+       "id": "28",
+       "homeAway": "away",
+       "score": "17",
+       "team": {
+        "id": "28",
+        "abbreviation": "WSH",
+        "displayName": "Washington Commanders"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

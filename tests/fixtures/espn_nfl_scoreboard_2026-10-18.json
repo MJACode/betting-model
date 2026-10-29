@@ -1,0 +1,484 @@
+{
+ "events": [
+  {
+   "id": "401872996",
+   "date": "2026-10-18T13:30Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "30",
+       "homeAway": "home",
+       "score": "31",
+       "team": {
+        "id": "30",
+        "abbreviation": "JAX",
+        "displayName": "Jacksonville Jaguars"
+       }
+      },
+      {
+       "id": "34",
+       "homeAway": "away",
+       "score": "34",
+       "team": {
+        "id": "34",
+        "abbreviation": "HOU",
+        "displayName": "Houston Texans"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401872999",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "home",
+       "score": "23",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL",
+        "displayName": "Atlanta Falcons"
+       }
+      },
+      {
+       "id": "3",
+       "homeAway": "away",
+       "score": "31",
+       "team": {
+        "id": "3",
+        "abbreviation": "CHI",
+        "displayName": "Chicago Bears"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401872997",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "5",
+       "homeAway": "home",
+       "score": "13",
+       "team": {
+        "id": "5",
+        "abbreviation": "CLE",
+        "displayName": "Cleveland Browns"
+       }
+      },
+      {
+       "id": "33",
+       "homeAway": "away",
+       "score": "10",
+       "team": {
+        "id": "33",
+        "abbreviation": "BAL",
+        "displayName": "Baltimore Ravens"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873003",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "11",
+       "homeAway": "home",
+       "score": "20",
+       "team": {
+        "id": "11",
+        "abbreviation": "IND",
+        "displayName": "Indianapolis Colts"
+       }
+      },
+      {
+       "id": "10",
+       "homeAway": "away",
+       "score": "26",
+       "team": {
+        "id": "10",
+        "abbreviation": "TEN",
+        "displayName": "Tennessee Titans"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873001",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "17",
+       "homeAway": "home",
+       "score": "26",
+       "team": {
+        "id": "17",
+        "abbreviation": "NE",
+        "displayName": "New England Patriots"
+       }
+      },
+      {
+       "id": "20",
+       "homeAway": "away",
+       "score": "19",
+       "team": {
+        "id": "20",
+        "abbreviation": "NYJ",
+        "displayName": "New York Jets"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873000",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "19",
+       "homeAway": "home",
+       "score": "27",
+       "team": {
+        "id": "19",
+        "abbreviation": "NYG",
+        "displayName": "New York Giants"
+       }
+      },
+      {
+       "id": "18",
+       "homeAway": "away",
+       "score": "34",
+       "team": {
+        "id": "18",
+        "abbreviation": "NO",
+        "displayName": "New Orleans Saints"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401872998",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "home",
+       "score": "14",
+       "team": {
+        "id": "21",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia Eagles"
+       }
+      },
+      {
+       "id": "29",
+       "homeAway": "away",
+       "score": "25",
+       "team": {
+        "id": "29",
+        "abbreviation": "CAR",
+        "displayName": "Carolina Panthers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873002",
+   "date": "2026-10-18T17:00Z",
+   "status": {
+    "period": 5,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final/OT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "27",
+       "homeAway": "home",
+       "score": "19",
+       "team": {
+        "id": "27",
+        "abbreviation": "TB",
+        "displayName": "Tampa Bay Buccaneers"
+       }
+      },
+      {
+       "id": "23",
+       "homeAway": "away",
+       "score": "26",
+       "team": {
+        "id": "23",
+        "abbreviation": "PIT",
+        "displayName": "Pittsburgh Steelers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873004",
+   "date": "2026-10-18T20:05Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "home",
+       "score": "16",
+       "team": {
+        "id": "14",
+        "abbreviation": "LAR",
+        "displayName": "Los Angeles Rams"
+       }
+      },
+      {
+       "id": "22",
+       "homeAway": "away",
+       "score": "18",
+       "team": {
+        "id": "22",
+        "abbreviation": "ARI",
+        "displayName": "Arizona Cardinals"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873006",
+   "date": "2026-10-18T20:25Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "12",
+       "homeAway": "home",
+       "score": "22",
+       "team": {
+        "id": "12",
+        "abbreviation": "KC",
+        "displayName": "Kansas City Chiefs"
+       }
+      },
+      {
+       "id": "24",
+       "homeAway": "away",
+       "score": "6",
+       "team": {
+        "id": "24",
+        "abbreviation": "LAC",
+        "displayName": "Los Angeles Chargers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873005",
+   "date": "2026-10-18T20:25Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "home",
+       "score": "30",
+       "team": {
+        "id": "13",
+        "abbreviation": "LV",
+        "displayName": "Las Vegas Raiders"
+       }
+      },
+      {
+       "id": "2",
+       "homeAway": "away",
+       "score": "33",
+       "team": {
+        "id": "2",
+        "abbreviation": "BUF",
+        "displayName": "Buffalo Bills"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401873007",
+   "date": "2026-10-19T00:20Z",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "id": "9",
+       "homeAway": "home",
+       "score": "23",
+       "team": {
+        "id": "9",
+        "abbreviation": "GB",
+        "displayName": "Green Bay Packers"
+       }
+      },
+      {
+       "id": "6",
+       "homeAway": "away",
+       "score": "13",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL",
+        "displayName": "Dallas Cowboys"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
