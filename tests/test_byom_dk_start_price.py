@@ -458,7 +458,9 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         assert nba["cross_point"] == 0
         assert nba["line_no_price"] == 0
         old = build_season(conn, 2018, apply=True, sport="NBA")
-        assert old["written"] == 1
+        assert old["written"] == 0
+        assert old["facts"] == 0
+        assert old["skipped"] == "before DraftKings history"
         cur = raw.cursor()
         cur.execute("""
             SELECT week, dk_spread_home, dk_spread_home_price, dk_spread_away_price,
@@ -478,13 +480,10 @@ def test_scratch_units_skipped_shape_unknown_keys_and_a_non_nfl_game():
         assert Decimal(str(row[7])) == Decimal("-115")
         assert Decimal(str(row[8])) == Decimal("220.5")
         cur.execute("""
-            SELECT dk_ml_home_price, dk_ml_away_price
-              FROM byom_game_facts
+            SELECT count(*) FROM byom_game_facts
              WHERE canonical_key = 'NBA_2018-10-16_OKC_GSW'
         """)
-        early = cur.fetchone()
-        assert Decimal(str(early[0])) == Decimal("-130")
-        assert Decimal(str(early[1])) == Decimal("110")
+        assert cur.fetchone()[0] == 0
 
         cur.execute("SET ROLE anon")
         cur.execute("""
