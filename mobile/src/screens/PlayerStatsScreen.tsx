@@ -95,10 +95,12 @@ import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
 import { sportHasLivePropModel } from '@/lib/modelMeta';
 import {
+  defaultPlayerWindow,
   formatRecordLine,
   playerLineNote,
   HIT_RATE_GOOD,
   HIT_RATE_WEAK,
+  rangeToRemember,
   thresholdFromBookLine,
   type PlayerPickRecord,
   type PropLineMove,
@@ -118,11 +120,6 @@ type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
  *  "H2H is on the main screen but when you click on a player is not
  *  available"). */
 type RangeChoice = GameWindow | 'h2h';
-
-/** This screen's opening span: L10 where the sport offers it, else the first. */
-function defaultWindow(windows: { value: GameWindow }[]): GameWindow {
-  return windows.some((w) => w.value === 10) ? 10 : windows[0]!.value;
-}
 
 /** The keyboard bar under the typed line field. */
 const LINE_ACCESSORY_ID = 'player-line-input';
@@ -201,7 +198,7 @@ export function PlayerStatsScreen() {
         ? 'h2h'
         : asked != null && windows.some((w) => w.value === asked)
           ? (asked as GameWindow)
-          : defaultWindow(windows),
+          : defaultPlayerWindow(windows),
     );
   }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
@@ -399,6 +396,21 @@ export function PlayerStatsScreen() {
   // holds players who have met the opponent (UX review, 2026-10-29). Asked for
   // from the board where it is not available, the range falls back to the
   // default span once the reads have answered, rather than charting nothing.
+  //
+  // `loaded` flips in an effect, so the frame a new player arrives still holds
+  // the previous player's rows. Remember who that settled log belongs to and
+  // do not treat H2H as answered until it is this player's — otherwise the
+  // fallback below would commit against the previous player and a row opened
+  // from the board's H2H window would land on L10.
+  const logOwner = useRef<string | null>(null);
+  if (!loaded) {
+    logOwner.current = null;
+  } else if (playerId !== '' && games.length > 0 && games[0]!.player_id !== playerId) {
+    logOwner.current = null;
+  } else if (logOwner.current == null) {
+    logOwner.current = playerId;
+  }
+  const logSettled = loaded && logOwner.current === playerId;
   const h2hOpponent = detail.h2hOpponent;
   const h2hOffered =
     h2hOpponent != null
@@ -407,9 +419,17 @@ export function PlayerStatsScreen() {
     () => (h2hOffered ? [...windows, { value: 'h2h' as const, label: 'H2H' }] : windows),
     [windows, h2hOffered],
   );
-  const h2hPending = detail.slateLoading && h2hOpponent == null;
-  const range: RangeChoice =
-    gameWindow === 'h2h' && !h2hOffered && !h2hPending ? defaultWindow(windows) : gameWindow;
+  const h2hPending =
+    !logSettled
+    || detail.h2hLoading
+    || (detail.slateLoading && h2hOpponent == null);
+  const range: RangeChoice = rangeToRemember(gameWindow, h2hOffered, h2hPending, windows);
+  // Remember the fallback. Charting the default span while `gameWindow` stays
+  // `'h2h'` makes the next server-held stat that has meetings jump back to
+  // H2H, even though the chip last shown selected was the default span.
+  useEffect(() => {
+    if (range !== gameWindow) setGameWindow(range);
+  }, [range, gameWindow]);
   const isH2H = range === 'h2h';
 
   // The windowed games, most recent first, each with its date and opponent so
@@ -809,16 +829,22 @@ export function PlayerStatsScreen() {
         ) : null}
 
         {(loading && games.length === 0)
-          || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null)) ? (
+          || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null || !logSettled)) ? (
           <ActivityIndicator
             style={styles.loading}
-            accessibilityLabel={isH2H ? `Loading games against ${h2hOpponent}` : 'Loading recent games'}
+            accessibilityLabel={
+              isH2H
+                ? h2hOpponent
+                  ? `Loading games against ${h2hOpponent}`
+                  : 'Loading head to head'
+                : 'Loading recent games'
+            }
           />
         ) : isH2H && windowed.length === 0 && detail.h2hError ? (
           <ErrorBanner
             what={`games against ${h2hOpponent}`}
             error={detail.h2hError}
-            onRetry={detail.reload}
+            onRetry={detail.reloadH2h}
             retrying={detail.h2hLoading}
             style={styles.errorBannerInset}
           />
@@ -1076,6 +1102,8 @@ export function PlayerStatsScreen() {
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}
                 selection={selection}
                 loading={detail.h2hLoading}
+                error={detail.h2hError}
+                onRetry={detail.reloadH2h}
               />
             ) : null}
 
@@ -1298,6 +1326,8 @@ function HeadToHeadCard({
   betLabel,
   selection,
   loading,
+  error,
+  onRetry,
 }: {
   h2h: PlayerHeadToHead;
   statLabel: string;
@@ -1307,6 +1337,9 @@ function HeadToHeadCard({
    *  so one meeting cannot be green in one list and red in the other. */
   selection: { line: number; side: HitDirection };
   loading: boolean;
+  /** A failed read is not "they have not met". Null when the read settled. */
+  error: string | null;
+  onRetry: () => void;
 }) {
   const b = h2h.bucket;
   const [showAll, setShowAll] = useState(false);
@@ -1332,6 +1365,14 @@ function HeadToHeadCard({
         <View style={styles.card}>
           <ActivityIndicator style={styles.loadingInline} />
         </View>
+      ) : error ? (
+        <ErrorBanner
+          what={`games against ${h2h.opponent}`}
+          error={error}
+          onRetry={onRetry}
+          retrying={loading}
+          style={styles.errorBannerInset}
+        />
       ) : b.games === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>No meetings with {h2h.opponent} in the last 2 seasons.</Text>
