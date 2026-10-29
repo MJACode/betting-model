@@ -511,8 +511,52 @@ export interface EditChoice {
 }
 
 export interface EditMenu {
-  segments: { key: string; label: string }[];
+  /** The tabs. One segment (key 'all') means no tab row is drawn. */
+  segments: { key: string; label: string; empty: string }[];
   choices: EditChoice[];
+  /** The line under the sheet's title, per market. */
+  subtitle: string;
+}
+
+const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
+const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
+// True as measured 2026-10-29 (no alternate game lines stored since
+// 2026-10-01). Remove the second sentence if alternates are ever fetched.
+const GAME_LINE_SUBTITLE =
+  'Every number a sportsbook is hanging right now. Alternate lines aren’t listed for game lines.';
+/** The whole game is off the board. */
+export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
+
+/**
+ * When no tab would hold more than one row (a moneyline, a spread or total
+ * every book hangs at one number), the tabs only hide the comparison: one
+ * flat list of both sides reads "KC −150 / BUF +130" at a glance (UX review,
+ * 2026-10-29). Order is kept, segment by segment.
+ */
+function collapseThinMenu(menu: EditMenu): EditMenu {
+  const thin = menu.segments.every((g) => menu.choices.filter((c) => c.segment === g.key).length <= 1);
+  if (!thin || menu.choices.length === 0) return menu;
+  const order = new Map(menu.segments.map((g, i) => [g.key, i]));
+  const choices = [...menu.choices]
+    .sort((a, b) => (order.get(a.segment) ?? 0) - (order.get(b.segment) ?? 0))
+    .map((c) => ({ ...c, segment: 'all' }));
+  return { ...menu, segments: [{ key: 'all', label: '', empty: GAME_OFF_BOARD }], choices };
+}
+
+/** The segment to show first: the leg's own, else the first one there is. */
+export function initialEditSegment(menu: EditMenu, spec: LineLegSpec): string {
+  const own = isGameSpec(spec) ? (spec.market === 'totals' ? spec.side ?? 'over' : spec.team) : spec.side;
+  return menu.segments.some((g) => g.key === own) ? own : menu.segments[0]?.key ?? own;
+}
+
+/**
+ * Whether Update may save. Only a choice on the VISIBLE tab counts: picking
+ * BUF +3.5, then switching to the KC tab, must not leave Update saving a bet
+ * that is no longer on screen (UX review, 2026-10-29).
+ */
+export function canSaveEdit(menu: EditMenu | null, segment: string, picked: string | null, currentKey: string | null): boolean {
+  if (!menu || picked == null || picked === currentKey) return false;
+  return menu.choices.some((c) => c.segment === segment && lineLegKey(c.spec) === picked);
 }
 
 /** "15 or more" for Over 14.5, "14 or fewer" for Under 14.5. Whole-number
@@ -522,9 +566,9 @@ export function countHint(line: number, side: LineSide): string | null {
   return side === 'over' ? `${Math.ceil(line)} or more` : `${Math.floor(line)} or fewer`;
 }
 
-const SIDE_SEGMENTS = [
-  { key: 'over', label: 'Over' },
-  { key: 'under', label: 'Under' },
+const sideSegments = (what: string) => [
+  { key: 'over', label: 'Over', empty: `No sportsbook posts the Over for ${what} right now.` },
+  { key: 'under', label: 'Under', empty: `No sportsbook posts the Under for ${what} right now.` },
 ];
 
 /** A prop leg's menu: every posted line, Over and Under. */
@@ -544,7 +588,7 @@ export function propEditMenu(spec: PropLineLegSpec, rows: readonly PropOddsByBoo
       });
     }
   }
-  return { segments: SIDE_SEGMENTS, choices };
+  return { segments: sideSegments('this player'), choices, subtitle: PROP_SUBTITLE };
 }
 
 /** The same game leg from the other team's side, at that team's number. */
@@ -564,19 +608,20 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow
     (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker),
   );
   const choices: EditChoice[] = [];
-  const push = (segment: string, next: GameLineLegSpec, list: OddsByBookRow[]) => {
+  const push = (segment: string, next: GameLineLegSpec, list: OddsByBookRow[], title = lineLegLabel(next)) => {
     const side = gameLegSide(next);
     const priceOf = (r: OddsByBookRow) => priceForSide(r, side);
     const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
     if (!a) return;
-    choices.push({ segment, spec: next, title: lineLegLabel(next), hint: null, price: priceOf(a) as number, book: a.bookmaker });
+    choices.push({ segment, spec: next, title, hint: null, price: priceOf(a) as number, book: a.bookmaker });
   };
   const teams = [spec.team, spec.opponent];
-  const teamSegments = teams.map((t) => ({ key: t, label: t }));
+  const teamSegments = (kind: string) =>
+    teams.map((t) => ({ key: t, label: t, empty: `No sportsbook has a ${t} ${kind} right now.` }));
 
   if (spec.market === 'h2h') {
     for (const t of teams) push(t, asTeam(spec, t, null), at);
-    return { segments: teamSegments, choices };
+    return collapseThinMenu({ segments: teamSegments('moneyline'), choices, subtitle: ML_SUBTITLE });
   }
   if (spec.market === 'spreads') {
     const homeNumbers = [...new Set(at.map((r) => num(r.spread_home)).filter((n): n is number => n != null))];
@@ -589,14 +634,14 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly OddsByBookRow
         push(t, next, at.filter((r) => gameRowAtNumber(r, next)));
       }
     }
-    return { segments: teamSegments, choices };
+    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: GAME_LINE_SUBTITLE });
   }
   const totals = [...new Set(at.map((r) => num(r.total_line)).filter((n): n is number => n != null))].sort((a, b) => a - b);
   for (const side of ['over', 'under'] as const) {
     for (const line of totals) {
       const next: GameLineLegSpec = { ...spec, line, side };
-      push(side, next, at.filter((r) => gameRowAtNumber(r, next)));
+      push(side, next, at.filter((r) => gameRowAtNumber(r, next)), `${side === 'over' ? 'Over' : 'Under'} ${fmtLine(line)}`);
     }
   }
-  return { segments: SIDE_SEGMENTS, choices };
+  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: GAME_LINE_SUBTITLE });
 }

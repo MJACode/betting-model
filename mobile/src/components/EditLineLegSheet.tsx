@@ -4,7 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { formatAmerican, MINUS } from '@/lib/format';
 import {
+  canSaveEdit,
   gameEditMenu,
+  GAME_OFF_BOARD,
+  initialEditSegment,
   isGameSpec,
   lineLegKey,
   lineLegLabel,
@@ -68,7 +71,10 @@ export function EditLineLegSheet({
       : fetchPropLineRows(spec.game_id, spec.market, spec.player_name).then((rows) => propEditMenu(spec, rows));
     load
       .then((m) => {
-        if (alive) setMenu(m);
+        if (!alive) return;
+        setMenu(m);
+        // A collapsed menu has one segment ('all'), not the leg's own side.
+        setSegment(initialEditSegment(m, spec));
       })
       .catch(() => {
         if (alive) setFailed(true);
@@ -85,9 +91,14 @@ export function EditLineLegSheet({
     () => (menu?.choices ?? []).find((c) => lineLegKey(c.spec) === picked) ?? null,
     [menu, picked],
   );
-  const canSave = spec != null && chosen != null && picked !== specKey;
-  // The segment's name in the empty-state sentence.
-  const segmentLabel = menu?.segments.find((g) => g.key === segment)?.label ?? '';
+  const canSave = spec != null && chosen != null && canSaveEdit(menu, segment, picked, specKey);
+  const emptyText =
+    menu && menu.choices.length === 0
+      ? GAME_OFF_BOARD
+      : menu?.segments.find((g) => g.key === segment)?.empty ?? GAME_OFF_BOARD;
+  // The leg's own bet is not on the board any more (line moved, book pulled
+  // it): say so, rather than leave the list with no row marked current.
+  const ownMissing = menu != null && specKey != null && !menu.choices.some((c) => lineLegKey(c.spec) === specKey);
 
   const save = () => {
     if (!chosen || !canSave) return;
@@ -120,7 +131,12 @@ export function EditLineLegSheet({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
-          <Text style={styles.subtitle}>Pick a new line. Only lines a sportsbook posts are listed.</Text>
+          <Text style={styles.subtitle}>
+            {menu?.subtitle ?? (spec && isGameSpec(spec) ? '' : 'Pick a new line. Only lines a sportsbook posts are listed.')}
+          </Text>
+          {ownMissing && spec ? (
+            <Text style={styles.ownMissing}>Your line, {lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t posted right now.</Text>
+          ) : null}
 
           {menu && menu.segments.length > 1 ? (
             <View style={styles.segmentWrap}>
@@ -154,7 +170,7 @@ export function EditLineLegSheet({
             </View>
           ) : rows.length === 0 ? (
             <View style={styles.state}>
-              <Text style={styles.stateText}>No sportsbook posts {segmentLabel} right now.</Text>
+              <Text style={styles.stateText}>{emptyText}</Text>
             </View>
           ) : (
             <ScrollView style={styles.list} bounces={false}>
@@ -174,7 +190,7 @@ export function EditLineLegSheet({
                       }}
                       accessibilityRole="radio"
                       accessibilityState={{ selected }}
-                      accessibilityLabel={`${c.title}${c.hint ? `, ${c.hint}` : ''}, ${priceText} at ${bookLabelShort(c.book)}${isCurrent ? ', current line' : ''}`}
+                      accessibilityLabel={`${titleText.replace(/ ML$/, ' moneyline')}${c.hint ? `, ${c.hint}` : ''}, ${priceText} at ${bookLabelShort(c.book)}${isCurrent ? ', current line' : ''}`}
                       style={({ pressed }) => [
                         styles.row,
                         i > 0 && styles.rowDivider,
@@ -321,6 +337,12 @@ const styles = StyleSheet.create({
   rowDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
+  },
+  ownMissing: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
   },
   rowSelected: {
     // The radio carries the state; no fill, so the price column stays legible.

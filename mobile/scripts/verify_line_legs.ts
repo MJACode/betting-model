@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { gameEditMenu, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { canSaveEdit, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
 import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
@@ -370,6 +370,26 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const mm = gameEditMenu({ ...kc, market: 'h2h', line: null }, mlRows);
   check('moneyline edit: the two teams, each at its own price',
     mm.choices.map((c) => `${c.title}:${c.price}`).join() === 'KC ML:150,BUF ML:-180');
+  // UX review, 2026-10-29.
+  check('a moneyline is one flat list, no tabs',
+    mm.segments.length === 1 && mm.segments[0]!.key === 'all' && mm.choices.every((c) => c.segment === 'all'));
+  const oneNumber = gameEditMenu(kc, [spreadRows[0]!]);
+  check('a spread every book hangs at one number is one flat list of both sides',
+    oneNumber.segments.length === 1 && oneNumber.choices.map((c) => c.title).join() === 'KC +3.5,BUF -3.5');
+  check('a spread with several numbers keeps the team tabs', menu.segments.map((x) => x.key).join() === 'KC,BUF');
+  check('total rows read "Over 47.5", not the repeated matchup',
+    tm.choices.find((c) => c.segment === 'over')!.title === 'Over 47.5');
+  check('the sheet opens on the leg\'s own tab, or the only one there is',
+    initialEditSegment(menu, kc) === 'KC' && initialEditSegment(mm, { ...kc, market: 'h2h' as const, line: null }) === 'all');
+  const bufKey = lineLegKey(bufSpec);
+  check('Update saves only a choice on the visible tab',
+    canSaveEdit(menu, 'BUF', bufKey, lineLegKey(kc)) && !canSaveEdit(menu, 'KC', bufKey, lineLegKey(kc)));
+  check('Update is off for the leg as it already is',
+    !canSaveEdit(menu, 'KC', lineLegKey(kc), lineLegKey(kc)));
+  check('game menus say what is missing in game words',
+    menu.segments[0]!.empty === 'No sportsbook has a KC spread right now.'
+      && tm.segments[0]!.empty === 'No sportsbook posts the Over for this game right now.'
+      && /Alternate lines aren/.test(menu.subtitle) && /Switch sides/.test(mm.subtitle));
   check('a game edit is never refused as sidelined (no player to look up)',
     lineLegsAfterEdit([kc], lineLegKey(kc), bufSpec, EMPTY_INJURY_INDEX).outcome === 'ok');
 }
