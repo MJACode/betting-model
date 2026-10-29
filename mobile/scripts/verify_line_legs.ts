@@ -26,8 +26,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
+import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
+import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
 import { buildTeamLineIndex, type StatsOddsQuote } from '../src/lib/statsOdds';
 import { marketClassForModel } from '../src/lib/markets';
 import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
@@ -150,7 +152,8 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the hold note names the exception', screen.includes('Priced at DraftKings, except ${exception}'));
   check('the header count includes line legs', screen.includes('{slipCount}'));
   check('stale line legs clear through their own store', screen.includes("key.startsWith('line:') ? lineLegs.remove(key) : slip.remove(key)"));
-  check('a partial hand-off says how many legs the book prices', screen.includes('prices {handoff.priced} of {handoff.total} legs'));
+  const booksRow = read('src/components/BetslipBooksRow.tsx');
+  check('a partial hand-off says how many legs the book prices', booksRow.includes('prices ${q.priced} of ${q.total} legs'));
   const handoff = read('src/components/ParlayDkHandoff.tsx');
   check('the hand-off row says "not posted" rather than "add manually" for an unposted line', handoff.includes('Not posted at {name}'));
   const teams = read('src/components/TeamsBoard.tsx');
@@ -250,11 +253,18 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the sheet takes the shared input and builds no prop spec of its own', sheet.includes('input: LineSheetInput | null') && !sheet.includes('player_name: quote.playerName'));
   const resolved = read('src/hooks/useResolvedSlip.ts');
   check('the slip re-prices a game leg from its market\'s latest lines', resolved.includes('fetchGameLineRows(spec.game_id, spec.market)') && resolved.includes('gameLineLegFromRows('));
+  const queries = read('src/lib/queries.ts');
+  check('that read asks for the alternate ladder and folds it onto the main market',
+    queries.includes("from('alt_game_lines')") && queries.includes('foldAltGameRows'));
   const store = read('src/hooks/useLineLegs.ts');
   check('the store accepts a stored game spec', store.includes("if (s.kind === 'game')"));
   check('the sheet warns before a second game line on one game', sheet.includes('A parlay takes one game line per game.'));
   const teamsSrc = read('src/components/TeamsBoard.tsx');
-  check('the Teams board bounces back to the betslip like Players', teamsSrc.includes('onAdded={onAdded}') && read('src/screens/StatsScreen.tsx').includes("<TeamsBoard sport={sport} onAdded={fromParlay"));
+  const statsScreen = read('src/screens/StatsScreen.tsx');
+  const teamsAt = statsScreen.indexOf('<TeamsBoard');
+  const teamsChunk = teamsAt >= 0 ? statsScreen.slice(teamsAt, teamsAt + 700) : '';
+  check('the Teams board bounces back to the betslip like Players',
+    teamsSrc.includes('onAdded={onAdded}') && teamsChunk.includes("navigation.navigate('Betslip')") && teamsChunk.includes('fromParlay'));
   check('VoiceOver hears the side of a total, not "o8.5"', teamsSrc.includes('`total over ${quote.line}`'));
   const picks = read('src/screens/PicksHomeScreen.tsx');
   check('the partial banner is one sentence with one reason and hides while reloading', picks.includes('{!error && !loading && partial ? (') && picks.includes('numberOfLines={3}') && picks.includes('accessibilityHint="Reloads today’s picks"'));
@@ -308,11 +318,175 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('editing a leg that is gone does nothing',
     lineLegsAfterReplace([b], lineLegKey(spec), a) === null);
   const slipScreen = readFileSync(join(ROOT, 'src/screens/ParlayScreen.tsx'), 'utf-8');
-  check('the betslip offers edit only on Stats prop lines and custom legs, never on a model pick',
+  const propSpec: PropLineLegSpec = spec;
+  const gameSpec: GameLineLegSpec = {
+    kind: 'game', game_id: 'G', sport: 'NBA', market: 'spreads',
+    team: 'BOS', opponent: 'ORL', isHome: true, line: -3.5, side: null,
+  };
+  check('a stored game line gets the pencil',
+    slipLegCanEdit({ modelId: LINE_LEG_MODEL_ID, slipKey: lineLegKey(gameSpec) }, [gameSpec]));
+  check('a stored prop line gets the pencil',
+    slipLegCanEdit({ modelId: LINE_LEG_MODEL_ID, slipKey: lineLegKey(propSpec) }, [propSpec]));
+  check('a model pick does not get the pencil, even beside a stored game line',
+    !slipLegCanEdit({ modelId: 'nba_spread', slipKey: 'pick:1' }, [gameSpec, propSpec]));
+  check('a custom leg gets the pencil with no stored spec',
+    slipLegCanEdit({ modelId: 'custom', slipKey: 'custom:1' }, []));
+  check('a line leg whose spec is gone does not get the pencil',
+    !slipLegCanEdit({ modelId: LINE_LEG_MODEL_ID, slipKey: lineLegKey(gameSpec) }, []));
+  // The screen calls that function for both the pencil and the editor. A
+  // local `isGameSpec` exclusion would fail this without the function's
+  // own checks having to know how the JSX is wrapped.
+  check('the betslip offers edit through that rule, and saves the replacement in place',
     slipScreen.includes('onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}') &&
-      /if \(!isLineLeg\(leg\)\) return null;/.test(slipScreen) &&
-      slipScreen.includes('!isGameSpec(spec)') &&
+      /canEdit = useCallback\(\s*\(leg: ParlayLeg\) => slipLegCanEdit\(leg, lineLegs\.specs\)/.test(slipScreen) &&
+      /if \(!slipLegCanEdit\(leg, lineLegs\.specs\) \|\| leg\.modelId === CUSTOM_MODEL_ID\) return null;/.test(slipScreen) &&
       slipScreen.includes('lineLegs.replace(lineLegKey(editingLine), next)'));
+}
+
+// ── Editing a GAME line leg (Matt, 2026-10-29: "Yes") ───────────────────────
+{
+  const g = (bookmaker: string, market: string, o: Partial<OddsByBookRow>): OddsByBookRow => ({
+    game_id: 'KC@BUF', game_date: '2026-11-01', market, bookmaker,
+    home_price: null, away_price: null, over_price: null, under_price: null,
+    spread_home: null, total_line: null, home_link: null, away_link: null,
+    over_link: null, under_link: null, snapshot_at: '', ...o,
+  });
+  // BUF home. DK and FD hang BUF -3.5; MGM hangs BUF -2.5; a non-US book -4.5.
+  const spreadRows = [
+    g('draftkings', 'spreads', { spread_home: -3.5, home_price: -110, away_price: -110 }),
+    g('fanduel', 'spreads', { spread_home: -3.5, home_price: -105, away_price: -115 }),
+    g('betmgm', 'spreads', { spread_home: -2.5, home_price: -130, away_price: 110 }),
+    g('notabook', 'spreads', { spread_home: -4.5, home_price: 120, away_price: -140 }),
+  ];
+  const kc: GameLineLegSpec = { kind: 'game', game_id: 'KC@BUF', sport: 'NFL', market: 'spreads', team: 'KC', opponent: 'BUF', isHome: false, line: 3.5, side: null };
+  const menu = gameEditMenu(kc, spreadRows);
+  const kcLines = menu.choices.filter((c) => c.segment === 'KC').map((c) => (c.spec as GameLineLegSpec).line);
+  const bufLines = menu.choices.filter((c) => c.segment === 'BUF').map((c) => (c.spec as GameLineLegSpec).line);
+  check('spread edit: each team at every number a bettable book hangs, signed for that team',
+    kcLines.join(',') === '2.5,3.5' && bufLines.join(',') === '-3.5,-2.5', `${kcLines} | ${bufLines}`);
+  const bufChoice = menu.choices.find((c) => c.segment === 'BUF' && (c.spec as GameLineLegSpec).line === -3.5)!;
+  const bufSpec = bufChoice.spec as GameLineLegSpec;
+  check('spread edit: switching team flips home/away and opponent, not the game',
+    bufSpec.team === 'BUF' && bufSpec.opponent === 'KC' && bufSpec.isHome === true && bufSpec.market === 'spreads'
+      && bufChoice.title === 'BUF -3.5');
+  check('spread edit: priced the way the slip prices it (DraftKings first)',
+    bufChoice.book === 'draftkings' && bufChoice.price === -110
+      && gameLineLegFromRows(bufSpec, spreadRows, null)!.americanOdds === bufChoice.price);
+  const kc25 = menu.choices.find((c) => c.segment === 'KC' && (c.spec as GameLineLegSpec).line === 2.5)!;
+  check('spread edit: a number DraftKings does not hang is priced at the book that does',
+    kc25.book === 'betmgm' && kc25.price === 110
+      && gameLineLegFromRows(kc25.spec as GameLineLegSpec, spreadRows, null)!.americanOdds === 110);
+
+  const totalRows = [
+    g('draftkings', 'totals', { total_line: 47.5, over_price: -110, under_price: -110 }),
+    g('fanduel', 'totals', { total_line: 48.5, over_price: -105, under_price: -115 }),
+  ];
+  const over: GameLineLegSpec = { ...kc, market: 'totals', line: 47.5, side: 'over' };
+  const tm = gameEditMenu(over, totalRows);
+  check('total edit: Over and Under at every posted total',
+    tm.segments.map((x) => x.key).join() === 'over,under'
+      && tm.choices.filter((c) => c.segment === 'under').map((c) => (c.spec as GameLineLegSpec).line).join() === '47.5,48.5');
+  const under485 = tm.choices.find((c) => c.segment === 'under' && (c.spec as GameLineLegSpec).line === 48.5)!;
+  check('total edit: the chosen side and number are what the slip prices',
+    (under485.spec as GameLineLegSpec).side === 'under'
+      && gameLineLegFromRows(under485.spec as GameLineLegSpec, totalRows, null)!.americanOdds === under485.price);
+
+  const mlRows = [g('draftkings', 'h2h', { home_price: -180, away_price: 150 })];
+  const mm = gameEditMenu({ ...kc, market: 'h2h', line: null }, mlRows);
+  check('moneyline edit: the two teams, each at its own price',
+    mm.choices.map((c) => `${c.title}:${c.price}`).join() === 'KC ML:150,BUF ML:-180');
+  // UX review, 2026-10-29.
+  check('a moneyline is one flat list, no tabs',
+    mm.segments.length === 1 && mm.segments[0]!.key === 'all' && mm.choices.every((c) => c.segment === 'all'));
+  const oneNumber = gameEditMenu(kc, [spreadRows[0]!]);
+  check('a spread every book hangs at one number is one flat list of both sides',
+    oneNumber.segments.length === 1 && oneNumber.choices.map((c) => c.title).join() === 'KC +3.5,BUF -3.5');
+  check('a spread with several numbers keeps the team tabs', menu.segments.map((x) => x.key).join() === 'KC,BUF');
+  check('total rows read "Over 47.5", not the repeated matchup',
+    tm.choices.find((c) => c.segment === 'over')!.title === 'Over 47.5');
+  check('the sheet opens on the leg\'s own tab, or the only one there is',
+    initialEditSegment(menu, kc) === 'KC' && initialEditSegment(mm, { ...kc, market: 'h2h' as const, line: null }) === 'all');
+  const bufKey = lineLegKey(bufSpec);
+  check('Update saves only a choice on the visible tab',
+    canSaveEdit(menu, 'BUF', bufKey, lineLegKey(kc)) && !canSaveEdit(menu, 'KC', bufKey, lineLegKey(kc)));
+  check('Update is off for the leg as it already is',
+    !canSaveEdit(menu, 'KC', lineLegKey(kc), lineLegKey(kc)));
+  const altSpread = g('betmgm', 'alternate_spreads', { spread_home: -7.5, home_price: -110, away_price: -110 });
+  const dupMain = g('draftkings', 'alternate_spreads', { spread_home: -3.5, home_price: -110, away_price: -110 });
+  const folded = foldAltGameRows('spreads', spreadRows, [altSpread, dupMain]);
+  const wide = gameEditMenu(kc, folded);
+  const wideKc = wide.choices.filter((c) => c.segment === 'KC').map((c) => (c.spec as GameLineLegSpec).line);
+  check('an alternate spread rung is a choice, and the main number is not listed twice',
+    wideKc.join(',') === '2.5,3.5,7.5' && folded.filter((r) => r.bookmaker === 'draftkings' && r.spread_home === -3.5).length === 1,
+    wideKc.join(','));
+  const altChoice = wide.choices.find((c) => c.segment === 'BUF' && (c.spec as GameLineLegSpec).line === -7.5)!;
+  check('an alternate rung is priced the way the slip prices it',
+    altChoice.book === 'betmgm' && altChoice.price === -110
+      && gameLineLegFromRows(altChoice.spec as GameLineLegSpec, folded, null)!.americanOdds === -110);
+  check('game menus say what is missing in game words',
+    menu.segments[0]!.empty === 'No sportsbook has a KC spread right now.'
+      && tm.segments[0]!.empty === 'No sportsbook posts the Over for this game right now.'
+      && /hanging right now/.test(menu.subtitle) && /Switch sides/.test(mm.subtitle));
+  const editSheet = read('src/components/EditLineLegSheet.tsx');
+  check('a long ladder opens with the current line scrolled into view',
+    editSheet.includes('key={segment}') && editSheet.includes('listRef.current?.scrollTo(') && editSheet.includes('editScrollTarget('));
+  check('the other spread tab opens on the other side of the same number',
+    editScrollTarget(menu, 'KC', kc) === lineLegKey(kc)
+      && editScrollTarget(menu, 'BUF', kc) === lineLegKey(bufSpec));
+  const under475 = tm.choices.find((c) => c.segment === 'under' && (c.spec as GameLineLegSpec).line === 47.5)!;
+  check('a total’s other side opens on the same number',
+    editScrollTarget(tm, 'under', over) === lineLegKey(under475.spec as GameLineLegSpec));
+  check('a tab with no paired rung does not invent one',
+    editScrollTarget(menu, 'BUF', { ...kc, line: 99 }) === null);
+  // Alternate ladder (2026-10-29): folded into the main market's name, main
+  // row wins a tie, and an alternate number is then a real edit choice that
+  // the slip prices at the same row.
+  const altRows = [
+    g('draftkings', 'alternate_spreads', { spread_home: -3.5, home_price: -999, away_price: -999 }),
+    g('draftkings', 'alternate_spreads', { spread_home: -6.5, home_price: 160, away_price: -190 }),
+    g('fanduel', 'alternate_spreads', { spread_home: -6.5, home_price: 165, away_price: -200 }),
+    g('draftkings', 'alternate_totals', { total_line: 51.5, over_price: 150, under_price: -180 }),
+  ];
+  const ladder = foldAltGameRows('spreads', spreadRows, altRows);
+  check('alternate rungs join the main market, and the main row wins its own number',
+    ladder.length === spreadRows.length + 2
+      && ladder.every((r) => r.market === 'spreads')
+      && !ladder.some((r) => r.home_price === -999));
+  check('an alternate total never leaks into a spread menu',
+    !ladder.some((r) => r.total_line === 51.5));
+  check('a market with no ladder is untouched', foldAltGameRows('h2h', mlRows, altRows).length === mlRows.length);
+  const altMenu = gameEditMenu(kc, ladder);
+  const kc65 = altMenu.choices.find((c) => c.segment === 'KC' && (c.spec as GameLineLegSpec).line === 6.5)!;
+  check('an alternate number is an edit choice, priced as the slip prices it',
+    kc65 != null && kc65.book === 'draftkings' && kc65.price === -190
+      && gameLineLegFromRows(kc65.spec as GameLineLegSpec, ladder, null)!.americanOdds === -190);
+  // UX review, 2026-10-29: a day-old DraftKings rung must not beat a fresh
+  // main line another book hangs at the same number. BetMGM's main is
+  // BUF -2.5 (KC +2.5 at +110); DraftKings only has -2.5 on its 6 AM ladder.
+  const staleDk = g('draftkings', 'alternate_spreads', { spread_home: -2.5, home_price: -150, away_price: 125, snapshot_at: '2026-10-29T10:05:00Z' });
+  const mixed = foldAltGameRows('spreads', spreadRows, [staleDk, ...altRows]);
+  const kc25Mixed = gameEditMenu(kc, mixed).choices.find((c) => c.segment === 'KC' && (c.spec as GameLineLegSpec).line === 2.5)!;
+  check('a fresh main price beats a day-old DraftKings alternate at the same number',
+    kc25Mixed.book === 'betmgm' && kc25Mixed.price === 110
+      && gameLineLegFromRows(kc25Mixed.spec as GameLineLegSpec, mixed, null)!.americanOdds === 110
+      && gameLineLegFromRows(kc25Mixed.spec as GameLineLegSpec, mixed, null)!.pricedFromLadder === false);
+  const kc65Leg = gameLineLegFromRows(kc65.spec as GameLineLegSpec, ladder, null)!;
+  check('a leg priced from the ladder says so, with the price\'s own stamp',
+    kc65Leg.pricedFromLadder === true && kc65Leg.pricedAsOf === altRows[1]!.snapshot_at);
+  check('ladder rows say how old they are; main rows say they are the main line',
+    /^Alt · /.test(kc65.hint ?? '') && kc25Mixed.hint === 'Main line');
+  check('no ladder, no alternate claim and no "Main line" on every row',
+    !/alternate/.test(menu.subtitle) && menu.choices.every((c) => c.hint === null)
+      && /including alternate lines/.test(altMenu.subtitle));
+  check('the betslip reads the ladder and folds it, and a failed ladder read keeps the main lines',
+    /\.from\('alt_game_lines'\)/.test(readFileSync(join(ROOT, 'src/lib/queries.ts'), 'utf-8'))
+      && /if \(altRes\.error\) \{[\s\S]{0,120}return main;/.test(readFileSync(join(ROOT, 'src/lib/queries.ts'), 'utf-8')));
+  const queries = read('src/lib/queries.ts');
+  check('board and pick reads ask for main markets, not the alternate ladder',
+    (queries.match(/\.in\('market', \[\.\.\.MAIN_GAME_ODDS_MARKETS\]\)/g) ?? []).length >= 6
+      && !/MAIN_GAME_ODDS_MARKETS = \[[^\]]*alternate_spreads/.test(queries));
+  check('a game edit is never refused as sidelined (no player to look up)',
+    lineLegsAfterEdit([kc], lineLegKey(kc), bufSpec, EMPTY_INJURY_INDEX).outcome === 'ok');
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

@@ -19,4 +19,11 @@ PROP_HISTORY_START_DATE = "2023-09-01"
 # 'draftkings' is 2020. games holds 2015-2019. Those seasons are not built.
 DK_HISTORY_START_SEASON = 2020
 
+# Measured 2026-10-29 on games joined to odds (bookmaker draftkings,
+# market h2h/spreads/totals): season 2021 is the first NBA season with
+# a DraftKings game line (1080 of 1080). Seasons 2019 and 2020 are in
+# games and have zero of those rows. NBA season is the ending year, so
+# 2021 is 2020-21. The in-progress season stays above this floor.
+NBA_DK_HISTORY_START_SEASON = 2021
+
 SPORT = "NFL"

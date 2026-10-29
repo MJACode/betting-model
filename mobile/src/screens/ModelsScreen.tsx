@@ -99,8 +99,8 @@ export function ModelsScreen() {
         <Text style={styles.subtitle}>
           {tab === 'builtin'
             ? `How each model has performed since ${LIVE_RECORD_START_LABEL}, our live date. Tap one to see today’s picks.`
-            : sport === 'NFL'
-              ? 'Your NFL models, ranked by units won.'
+            : sport === 'NFL' || sport === 'NBA'
+              ? `Your ${sport} models, ranked by units won.`
               : 'Your models for this sport.'}
         </Text>
 

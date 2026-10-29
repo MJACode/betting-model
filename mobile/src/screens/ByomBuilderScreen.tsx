@@ -11,7 +11,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -26,7 +27,6 @@ import { AUTH_ENABLED } from '@/lib/authConfig';
 import { fetchByomModels, saveByomModel } from '@/lib/byom';
 import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
 import {
-  ANYTIME_TD_MARKET,
   betTypeLabel,
   filtersForDraft,
   isPropMarket,
@@ -37,17 +37,22 @@ import {
   showsUnits,
   sideForMarket,
   suggestedName,
+  isYesOnlyProp,
   type ByomDraft,
   type ByomMarket,
   type ByomPropSide,
+  type ByomSport,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Route = RouteProp<RootStackParamList, 'ByomBuilder'>;
 
 export function ByomBuilderScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<Route>();
+  const sport: ByomSport = route.params?.sport === 'NBA' ? 'NBA' : 'NFL';
   const { signedIn } = useAuth();
   const { scope } = useByomSeason();
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -56,6 +61,7 @@ export function ByomBuilderScreen() {
   const [role, setRole] = useState<'favorite' | 'underdog' | 'pickem' | null>(null);
   const [primetime, setPrimetime] = useState<boolean | null>(null);
   const [propSide, setPropSide] = useState<ByomPropSide | null>(null);
+  const [rest, setRest] = useState<'b2b' | 'rest2' | null>(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -64,15 +70,15 @@ export function ByomBuilderScreen() {
 
   const draft: ByomDraft | null = market == null
     ? null
-    : { market, side, role, primetime, propSide };
+    : { market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null };
   const sideReason = draft == null ? null : saveBlockReason(draft);
-  const filters = draft == null ? null : filtersForDraft(draft);
+  const filters = draft == null ? null : filtersForDraft(draft, {}, sport);
   const previewFilters = step === 1 || sideReason != null ? null : filters;
-  const preview = useByomRecord(step === 1 ? 'current' : scope, previewFilters);
+  const preview = useByomRecord(step === 1 ? 'current' : scope, previewFilters, sport);
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: 'New NFL model',
+      title: sport === 'NBA' ? 'New NBA model' : 'New NFL model',
       headerLeft: () => (
         <Pressable
           onPress={() => navigation.goBack()}
@@ -84,7 +90,7 @@ export function ByomBuilderScreen() {
         </Pressable>
       ),
     });
-  }, [navigation]);
+  }, [navigation, sport]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -92,10 +98,12 @@ export function ByomBuilderScreen() {
 
   useEffect(() => {
     if (step !== 3 || market == null || sideReason != null) return;
-    const next = suggestedName({ market, side, role, primetime, propSide });
+    const next = suggestedName({
+      market, side, role, primetime, propSide, rest: sport === 'NBA' ? rest : null,
+    });
     setName((current) => (current.trim() === '' || current === suggestion.current ? next : current));
     suggestion.current = next;
-  }, [step, market, side, role, primetime, propSide, sideReason]);
+  }, [step, market, side, role, primetime, propSide, rest, sideReason, sport]);
 
   const chooseMarket = (next: ByomMarket) => {
     setMarket(next);
@@ -145,7 +153,7 @@ export function ByomBuilderScreen() {
           return;
         }
       }
-      await saveByomModel(trimmed, filtersForDraft(draft), null);
+      await saveByomModel(trimmed, filtersForDraft(draft, {}, sport), null, sport);
       navigation.goBack();
     } catch (e: unknown) {
       if (isAbortError(e)) return;
@@ -187,16 +195,27 @@ export function ByomBuilderScreen() {
       {step === 1 ? (
         <>
           <Text style={styles.title}>What do you want to bet?</Text>
-          <ByomMarketField market={market} onChange={chooseMarket} />
+          <ByomMarketField market={market} onChange={chooseMarket} sport={sport} />
         </>
       ) : null}
       {step === 2 && market != null ? (
         <>
-          <Text style={[styles.title, market === ANYTIME_TD_MARKET ? null : styles.titleTight]}>
-            {betTypeLabel(market)}
-          </Text>
-          {market === ANYTIME_TD_MARKET ? null : (
-            <Text style={styles.lead}>Which side?</Text>
+          {sport === 'NBA' && isPropMarket(market) && !isYesOnlyProp(market) ? (
+            <>
+              <Text style={styles.title}>Which side?</Text>
+              <Text style={styles.lead}>
+                {betTypeLabel(market)} · every NBA player line that fits.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.title, isYesOnlyProp(market) ? null : styles.titleTight]}>
+                {betTypeLabel(market)}
+              </Text>
+              {isYesOnlyProp(market) ? null : (
+                <Text style={styles.lead}>Which side?</Text>
+              )}
+            </>
           )}
           <ByomSideFields
             market={market}
@@ -204,10 +223,13 @@ export function ByomBuilderScreen() {
             role={role}
             primetime={primetime}
             propSide={propSide}
+            sport={sport}
+            rest={rest}
             onSide={setSide}
             onRole={setRole}
             onPrimetime={setPrimetime}
             onPropSide={setPropSide}
+            onRest={setRest}
           />
         </>
       ) : null}

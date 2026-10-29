@@ -498,7 +498,7 @@ export type RootStackParamList = {
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
-  ByomBuilder: undefined;
+  ByomBuilder: { sport?: 'NFL' | 'NBA' } | undefined;
   ByomEdit: { modelId: string };
   ByomDetail: { modelId: string };
   // playerType is MLB-only (it picks batter vs pitcher chips); every other

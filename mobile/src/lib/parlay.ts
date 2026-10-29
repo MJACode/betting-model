@@ -87,6 +87,12 @@ export interface ParlayLeg {
   /** The book `americanOdds` came from, for a line leg DraftKings did not
    * post — so its card can say "−115 · FD" rather than imply DraftKings. */
   pricedAt?: string;
+  /** True when that price came from the once-a-day alternate ladder
+   *  (lib/lineLegs.foldAltGameRows), so the leg card can say how old it is. */
+  pricedFromLadder?: boolean;
+  /** The ladder price's own stamp (the book's last_update), when
+   *  pricedFromLadder. */
+  pricedAsOf?: string | null;
   /**
    * The snapshot this leg was rebuilt from (savedLegToParlayLeg), when it came
    * out of a SavedParlay rather than off today's board.

@@ -2037,23 +2037,26 @@ def _job_mlb_over_under_retrain_sweep(**kw):
 
 
 def _validate_byom_game_facts(args: dict) -> dict:
-    """NFL game facts. apply defaults false so a queued job writes nothing
-    until someone asks. Seasons before DraftKings history are refused.
+    """NFL or NBA game facts. apply defaults false so a queued job writes
+    nothing until someone asks. A missing sport is NFL. Sport is stripped
+    and uppercased. An NFL season before 2020, and an NBA season before
+    2021, are refused. Those seasons have no DraftKings game lines.
     """
-    from byom.constants import DK_HISTORY_START_SEASON
+    from byom.constants import DK_HISTORY_START_SEASON, NBA_DK_HISTORY_START_SEASON
 
-    sport = str(args.get("sport") or "NFL")
-    if sport != "NFL":
-        raise ValueError(f"byom_game_facts builds NFL only, got {sport!r}")
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA"):
+        raise ValueError(f"byom_game_facts builds NFL or NBA, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
     else:
         season = int(season)
-        if season < DK_HISTORY_START_SEASON:
+        floor = (DK_HISTORY_START_SEASON if sport == "NFL"
+                 else NBA_DK_HISTORY_START_SEASON)
+        if season < floor:
             raise ValueError(
-                f"season {season} is before DraftKings history "
-                f"({DK_HISTORY_START_SEASON})")
+                f"season {season} is before DraftKings history ({floor})")
     apply = args.get("apply", False)
     if not isinstance(apply, bool):
         raise ValueError(f"apply must be true or false, got {apply!r}")
@@ -2061,13 +2064,14 @@ def _validate_byom_game_facts(args: dict) -> dict:
 
 
 def _validate_byom_prop_facts(args: dict) -> dict:
-    """NFL prop facts. apply defaults false. Seasons before the prop
-    history start are refused."""
+    """NFL or NBA prop facts. apply defaults false. Seasons before the
+    prop history start are refused. A missing sport is NFL. Sport is
+    stripped and uppercased, the same as byom_game_facts."""
     from byom.constants import PROP_HISTORY_START_SEASON
 
-    sport = str(args.get("sport") or "NFL")
-    if sport != "NFL":
-        raise ValueError(f"byom_prop_facts builds NFL only, got {sport!r}")
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA"):
+        raise ValueError(f"byom_prop_facts builds NFL or NBA, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
@@ -2090,7 +2094,9 @@ def _job_byom_prop_facts(**kw):
 
     conn = get_connection()
     try:
-        return build_seasons(conn, kw.get("season"), apply=bool(kw.get("apply")))
+        return build_seasons(
+            conn, kw.get("season"), apply=bool(kw.get("apply")),
+            sport=str(kw.get("sport") or "NFL").strip().upper())
     finally:
         conn.close()
 
@@ -2132,7 +2138,7 @@ def _job_byom_game_facts(**kw):
     try:
         return build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
-            sport=(kw.get("sport") or "nfl").upper())
+            sport=str(kw.get("sport") or "NFL").strip().upper())
     finally:
         conn.close()
 
@@ -2236,14 +2242,19 @@ JOBS = {
     # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
     # unreachable from the dev sandbox. See _job_player_positions.
     "player_positions": (_job_player_positions, _validate_player_positions),
-    # NFL Build Your Own Model game facts. apply defaults false. Not listed
-    # in jobs/declared_jobs.json, so a merge does not backfill production.
+    # NFL or NBA game facts. apply defaults false. A missing sport is NFL.
+    # jobs/declared_jobs.json lists byom-nba-game-facts with enabled
+    # false and apply false, so a merge does not enqueue a writer.
+    # Enable that row before byom-nba-prop-facts. There is no runtime
+    # lock; the prop-facts note says the same order.
     # The 120h and 24h windows are UNCONFIRMED (byom/constants.py).
     "byom_game_facts": (_job_byom_game_facts, _validate_byom_game_facts),
-    # NFL prop facts. apply defaults false when the arg is omitted.
-    # jobs/declared_jobs.json lists byom-nfl-prop-facts with enabled
-    # true and apply true, and with no season, so sync enqueues one
-    # backfill from 2023-09-01. The price columns have to exist first.
+    # NFL or NBA prop facts. apply defaults false when the arg is omitted.
+    # byom-nfl-prop-facts is enabled with apply true and no season, so
+    # sync enqueues one backfill from 2023-09-01. byom-nba-prop-facts is
+    # enabled false and apply false. Enable byom-nba-game-facts first,
+    # in its own change, then this NBA row. Sport is stripped and
+    # uppercased, the same as byom_game_facts.
     "byom_prop_facts": (_job_byom_prop_facts, _validate_byom_prop_facts),
     # Current-season refresh. apply defaults false. Listed in
     # declared_jobs.json with enabled false and apply false, so a merge
