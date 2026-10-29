@@ -44,11 +44,13 @@ import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
   playerHeadToHead,
+  h2hMeetings,
   playerPickRecord,
   propLineMove,
   statSplits,
   tonightLine,
   type PlayerHeadToHead,
+  type H2HMeeting,
   type PlayerPickRecord,
   type PropLineMove,
   type StatSplits,
@@ -239,6 +241,16 @@ export function usePlayerDetail(args: {
     return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
   }, [h2hRow.data, opponent, threshold, selection.line, selection.side, serverStat]);
 
+  // The same meetings with no line attached, for the page's H2H range chip.
+  // Null when there is no opponent to read against, or the stat is one the
+  // server does not hold (the chip is not offered then); [] while it loads
+  // or when they have never met.
+  const h2hValues: H2HMeeting[] | null = useMemo(() => {
+    if (!opponent || !serverStat) return null;
+    const row = h2hRow.data;
+    return h2hMeetings(row?.values ?? [], row?.dates ?? []);
+  }, [h2hRow.data, opponent, serverStat]);
+
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
     [] as Awaited<ReturnType<typeof fetchSettledPropPicksForPlayer>>,
@@ -371,6 +383,10 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    h2hOpponent: opponent && serverStat ? opponent : null,
+    h2hMeetings: h2hValues,
+    // A failed read is not "never met": the H2H chip shows this with a retry.
+    h2hError: h2hRow.error,
     // Blocks+Steals or Reb+Ast with an opponent to read against: the two
     // cards above are not shown, and the page says why in their place.
     serverReadsSkipped: !serverStat && stat != null && opponent != null,

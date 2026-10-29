@@ -2276,7 +2276,7 @@ export function StatsScreen() {
       // not open as "69+ over L10" (Matt, 2026-09-25). Hit Rate mode only,
       // for the same reason as the side: an Averages row asked no line.
       line: effectiveMode === 'hitRate' ? lineN : undefined,
-      gameWindow: typeof timeWindow === 'number' ? timeWindow : undefined,
+      gameWindow: typeof timeWindow === 'number' || timeWindow === 'h2h' ? timeWindow : undefined,
     });
   };
 

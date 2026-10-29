@@ -252,6 +252,22 @@ export interface PlayerHeadToHead {
 }
 
 /**
+ * The meetings alone, newest first: no line, no side. The page's H2H range
+ * chip charts these, and it cannot wait on a line, because the line's own
+ * default is the median of whatever the chip charts.
+ */
+export function h2hMeetings(values: readonly number[], dates: readonly string[]): H2HMeeting[] {
+  const n = Math.min(values.length, dates.length);
+  const meetings: H2HMeeting[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = Number(values[i]);
+    if (!Number.isFinite(v)) continue;
+    meetings.push({ date: dates[i]!, value: v });
+  }
+  return meetings;
+}
+
+/**
  * The H2H card's numbers, off one player_h2h_stat_values_* row.
  *
  * THIS REPLACED A `vsOpponent` SPLIT COMPUTED OVER THE LOADED LOG, and the
@@ -273,13 +289,7 @@ export function playerHeadToHead(
   line: number,
   side: HitDirection,
 ): PlayerHeadToHead {
-  const n = Math.min(values.length, dates.length);
-  const meetings: H2HMeeting[] = [];
-  for (let i = 0; i < n; i++) {
-    const v = Number(values[i]);
-    if (!Number.isFinite(v)) continue;
-    meetings.push({ date: dates[i]!, value: v });
-  }
+  const meetings = h2hMeetings(values, dates);
   const nums = meetings.map((m) => m.value);
   // `computeHitRate`, not `>=`: the board's H2H branch uses it, and two
   // surfaces of one feature disagreeing about which side won is worse than
