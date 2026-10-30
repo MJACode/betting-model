@@ -2407,6 +2407,68 @@ Hard Rock's and Fanatics' alternate team totals are mostly out of scope. A thin 
 those books were not tested, not that their ladders hold nothing.
 
 
+### 11.7 Results (graded 2026-10-30, run `2026-10-30-seventh`)
+
+Graded on the research cache refreshed 2026-10-29: the ledger holds all 8,810 injury-report
+requests the plan called for; 9 fetches are filed by the snapshot the feed returned rather than the
+one asked for (11.6, item 2). Of the plan's 1,927 events, 1,894 have a window at R+5 and R+10 and
+1,888 at R+15, on 1,328 games. Stored in Supabase as run `2026-10-30-seventh`.
+
+**0 of the 26 cells pass.** The verdict counts 10 that clear the 95% interval; every one holds 1 to
+4 bets.
+
+**N1, the stale book: almost never a bet.** 0 to 4 bets per cell over two seasons (3 spread bets at
+R+5). An independent recount from the raw quotes (workflow `nba-injury-news-verify`, scripts under
+`%TEMP%/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
+saw every stale quote the data holds. What it showed instead:
+- After Pinnacle's number moves a point or more, a deciding book's quote is often unchanged: 18% to
+  41% of the time, by book.
+- But 89% to 93% of those unchanged books were already on the number Pinnacle then moved to (median
+  distance from Pinnacle's new number: 0 points). Pinnacle was catching up to them. Bet, they carry
+  a median EV of −4% to −5%: the price of the bet.
+- A book truly left on Pinnacle's old number, still unmoved and fresh: 5 to 25 games per market and
+  offset over two seasons (an upper bound), and even those average slightly negative EV, because a
+  1-point move is about the size of the vig.
+- Five minutes after a report, Pinnacle's spread had not moved at all about two-thirds of the time,
+  and had moved a full point after about one report in thirty.
+
+**N2, nobody has moved: loses.**
+
+| Cell | Bets | Units | Return | 95% interval | 2024-25 / 2025-26 |
+|---|---|---|---|---|---|
+| R+5, spread, EV ≥ 0.02 | 222 | −14.2 | −6.0% | −18.9% to +7.2% | −10.9% / −0.8% |
+| R+5, moneyline, EV ≥ 0.02 | 243 | −8.0 | −4.9% | −20.1% to +10.0% | −4.4% / −5.3% |
+| R+10, spread, EV ≥ 0.02 | 197 | −17.3 | −8.2% | −20.7% to +4.4% | −15.8% / −1.2% |
+| R+10, moneyline, EV ≥ 0.02 | 218 | −13.2 | −9.1% | −25.2% to +7.5% | −9.9% / −8.3% |
+
+The EV ≥ 0.04 cells (72 spread bets +2.6%, 150 moneyline bets +2.4%) are under 200 with intervals
+through zero. The rule picks exactly the games where the move never came: Pinnacle's close moved
+about 0.2 points toward the news after an R+5 decision, against the 0.65 the rule assumed. It did no
+better than bets on shuffled sides. Over all events the market does price the news at about the
+size assumed: roughly 30% in the hour before the report, about a fifth more by five minutes after,
+most of the rest over the next 20 minutes.
+
+**Verification.** All 880 bets of the four N2 cells above settled again from final scores and found
+in their fetch at that book, number and price, fresh: 0 differ. 22 R+10 bets were priced from an
+hourly or gap-fill fetch at the same five-minute mark (the purchase did not re-buy marks the archive
+held); without them R+10 spreads is −11.1% and R+10 moneyline −8.1%.
+
+**Flagged, not fixed (none changes a result):**
+- **The N1 placebo is not a null on the real data.** Most N1 candidates are the only event on their
+  date in that market and offset, so the within-date shuffle has nothing to swap: in the four R+5
+  and R+10 spread cells all 200 runs reproduce the real return. Those cells could not have passed
+  bar 6. They fail on bet count anyway. The synthetic world put 4 events on every date, so its check
+  could not see this.
+- The share of Pinnacle's move before R is blank on the N2 cells (the column the lab reads exists
+  only on N1 candidates), and the DraftKings-alone returns carry no count.
+- The first `--full` ran 9 hours without finishing: each candidate pass looked Pinnacle's centres up
+  one key at a time, and N2's placebo repeats the pass 200 times. The lookup now uses a dictionary
+  built once; old and new candidates are identical on 400 real windows (n1 222 s to 9 s, n2 76 s to
+  7 s). The second run took 41 minutes.
+
+**Closed for 2026-27: the minutes after an injury report.** Nothing is built, and the live report
+poller 11.4 named is not needed.
+
 ## 12. Eighth search: the first-quarter trend method (pre-registered 2026-10-28, before any cell was graded)
 
 mike, 2026-10-28, describing how he picks first-quarter bets by hand:
