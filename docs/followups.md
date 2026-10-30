@@ -21,7 +21,7 @@
 
 ---
 
-## [ ] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29)
+## [x] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29) — DONE 2026-10-30
 
 `ncaab_odds_unmatched` holds the events the game-lines purchase could not
 place on an ESPN game (worker job 805227). Branch `fix/ncaab-odds-team-names`
@@ -29,12 +29,11 @@ places 80 more feed names and adds the replay; `docs/sports/ncaab.md`,
 "Replaying the kept raw events", says what it does and the counts to expect.
 #1094 merged 2026-10-30 00:26Z. Queued: worker job 827393 `{"mode":
 "replay_unmatched", "dry_run": true}`, then 827394 `{"mode":
-"replay_unmatched"}` with run_after 04:00Z. Compare 827393's printout with
-that section before 827394 runs. 827393 ran 00:45-01:07Z: 1,201,028 rows
-would be inserted, 0 already stored (session log, 2026-10-29/30 evening).
-Close this when 827394 is done. It buys nothing.
-It writes `odds`, and through that table's insert trigger `latest_odds`; a
-second run stores nothing new.
+"replay_unmatched"}` with run_after 04:00Z. 827393 ran 00:45-01:07Z: 1,201,028
+rows would be inserted, 0 already stored. 827394 ran 04:00-04:40Z on
+2026-10-30 and stored all 1,201,028, with 0 instants failed to write; the
+rows read back from `odds` (session log, 2026-10-29/30 evening). It bought
+nothing. A second run stores nothing new.
 
 ## [ ] NCAAB: a second feed listing a day off still lands on the real game (2026-10-29)
 
