@@ -363,6 +363,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # bet or not, with the reason (scripts/nba_total_luck_card.py, which
     # creates it on demand). Read by the card, never by the app.
     "nba_total_luck_decisions",
+    # The NCAAB totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaab_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaab_total_decisions",
     # The NBA home team-total model's two: its decisions ledger, one row per
     # decided game with the home team's part of the gap and the best under
     # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one

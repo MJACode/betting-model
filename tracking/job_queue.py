@@ -1279,6 +1279,44 @@ def _job_discord_probe(**kw):
     return out
 
 
+def _job_discord_create_channel(**kw):
+    """Create a sport's Discord channel as a copy of another sport's
+    (scripts/discord_create_sport_channel.py): the same category, the position
+    after it, the same permission overwrites. The worker holds
+    DISCORD_BOT_TOKEN and no laptop does, so it runs here. apply defaults
+    false: a dry run reads the guild's channels and prints the body it would
+    send. The printout carries the new channel's id (not a secret) and never
+    the token."""
+    argv = ["--name", kw["name"], "--like", kw["like"]]
+    if kw.get("guild"):
+        argv += ["--guild", kw["guild"]]
+    if not kw["apply"]:
+        argv.append("--dry-run")
+    return _run_script_main("scripts.discord_create_sport_channel", argv)[-3000:]
+
+
+def _validate_discord_create_channel(args: dict) -> dict:
+    import re
+    extra = sorted(set(args) - {"name", "like", "guild", "apply"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes name, like, guild, apply")
+    out = {}
+    for k in ("name", "like"):
+        v = str(args.get(k) or "").strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v):
+            raise ValueError(f"{k} must be a channel name like 'ncaab', got {v!r}")
+        out[k] = v
+    guild = str(args.get("guild") or "").strip()
+    if guild and not guild.isdigit():
+        raise ValueError("guild must be a numeric id")
+    out["guild"] = guild or None
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError("apply must be true or false")
+    out["apply"] = apply
+    return out
+
+
 def _validate_publish_x_results(args: dict) -> dict:
     game_date = str(args.get("game_date") or "").strip()
     if len(game_date) != 10 or game_date.count("-") != 2:
@@ -2259,6 +2297,10 @@ JOBS = {
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
+    # One-off: a sport's channel cloned from another's (NCAAB from NCAAF,
+    # 2026-10-30). apply defaults false. See _job_discord_create_channel.
+    "discord_create_channel": (_job_discord_create_channel,
+                               _validate_discord_create_channel),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),

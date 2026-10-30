@@ -42,6 +42,29 @@ Railway variables on BOTH services: the NFL in-play worker runs on `worker`
 each as `live:{SPORT}`, so a live webhook pasted from the pre-game channel
 shows up as a collision.
 
+**A channel id can stand in for a webhook (2026-10-30, NCAAB).** NCAAB went
+live with no channel and no `DISCORD_WEBHOOK_NCAAB`. `NCAAB` is now in
+`config.DISCORD_SPORTS`, and a sport with no webhook variable may instead set
+`DISCORD_CHANNEL_<SPORT>` to its channel id (`config.DISCORD_CHANNELS`; an id is
+not a secret). `_webhook_for_sport` then asks `_channel_webhook`, which uses
+`DISCORD_BOT_TOKEN` to list the channel's webhooks, reuses the one the bot
+itself created, or creates one ("Signalbase picks"), and caches the URL in
+memory for the life of the process. The URL is never logged or stored; a
+failure is logged by status code only and returns nothing, so the sport is
+skipped exactly as an unset webhook is and its picks post once the channel
+resolves. A webhook variable, when set, still wins. The bot needs Manage
+Webhooks on that channel. The delivery health check counts a sport as wired
+when it has either (`config.discord_sports_wired`).
+
+The channel itself is made once by `scripts/discord_create_sport_channel.py`
+(`--name ncaab --like ncaaf`), run on the worker where the bot token lives. It
+copies `#ncaaf`'s category, puts the new channel right after it, and copies
+its permission overwrites role by role, so exactly the members who can see
+`#ncaaf` can see `#ncaab`. It prints the new channel's id, which goes into
+`DISCORD_CHANNEL_NCAAB` on the worker and the pollers (then redeploy).
+`--dry-run` prints what it would create. It refuses when `#ncaab` already
+exists and prints that channel's id instead. The bot needs Manage Channels.
+
 ### Producers (`tracking/discord_notifier.py`)
 
 | Function | Source of truth | Called from |
