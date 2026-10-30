@@ -748,8 +748,8 @@ def main() -> None:
         a.results.mkdir(parents=True, exist_ok=True)
         cells.to_parquet(a.results / "cells_A.parquet")
         if len(bets):
-            # a price-shape object (sigma) cannot be stored; every other column can
-            bets.drop(columns=[c for c in ("sigma",) if c in bets]).to_parquet(a.results / "bets_A.parquet")
+            # price-shape objects (sigma, sigma1) cannot be stored; every other column can
+            bets.drop(columns=[c for c in ("sigma", "sigma1") if c in bets]).to_parquet(a.results / "bets_A.parquet")
         print(f"wrote {len(cells)} rows to {a.results}")
         return
     ap.error("give --synthetic, --cache-alt or --full")
