@@ -10302,9 +10302,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_odds_history.py": {
-    "mtime": 1793381455.308535,
-    "seen": 1793382594.5700364,
-    "ast_hash": "e35cf124b57105e9dea8bbfb85dc630d",
+    "mtime": 1793383471.537174,
+    "seen": 1793384249.7302299,
+    "ast_hash": "aeec91f3e47d4df9458da7b40d276142",
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_sdv_import.py": {
@@ -10674,9 +10674,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaab.md": {
-    "mtime": 1793382013.5158935,
-    "seen": 1793382594.614157,
-    "ast_hash": "e270ca69359621709a532762bd84ebc2",
+    "mtime": 1793383471.6018524,
+    "seen": 1793384249.7396965,
+    "ast_hash": "e2c47ddfb8265ad65a2da7b74ff36a59",
     "semantic_hash": ""
   },
   "data/ingestors/alt_game_lines.py": {

@@ -89,7 +89,7 @@ every event it cannot place raw in `ncaab_odds_unmatched`, which then held
 
 `python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2021 2026 --apply`
 re-reads the events the purchase kept raw and stores the ones that resolve
-now, as the purchase would have stored them: ESPN's game, ESPN's home number,
+now, as the game-line purchase would have stored them: ESPN's game, ESPN's home number,
 the in-play label from ESPN's tip, and the same filter of what is kept (the
 first quote, the evening-before and morning anchors, and the three hours
 before the tip). It makes no paid call, never writes the pull ledger, never
@@ -179,7 +179,12 @@ approval before a `worker_jobs` row is added.
   is not stored, and an in-play price never is. Each row's time is the
   market's own last update, as the feed sends it, so the first row of a book
   is when that book posted. Events that resolve onto no ESPN game are kept
-  raw in `ncaab_odds_unmatched`, as the game-line purchase keeps them.
+  raw in `ncaab_odds_unmatched`, as the game-line purchase keeps them. The
+  replay stores those with the game-line purchase's filter, which keeps every
+  snapshot in the three hours before the tip, so a replay of grid events can
+  store repeats there that the grid itself did not. How many rows the grid
+  stores is not measured; at most it is one row per game, market, book and
+  distinct quote.
 - **The pull ledger now records the minute.** `odds_history_pulls` was keyed
   on (sport, date, hour), so 22:30 would have read as 22:00 already bought,
   or overwritten 22:00's row and been bought again on every re-run. The key

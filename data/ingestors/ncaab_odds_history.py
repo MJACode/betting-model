@@ -57,7 +57,9 @@ WHAT IS BOUGHT
 
   --replay-unmatched  No paid call. Re-reads the raw events kept in
            `ncaab_odds_unmatched` and stores the ones that resolve now (after a
-           fix to the team names), as the purchase would have stored them,
+           fix to the team names), as the game-line purchase would have
+           stored them (its QuoteKeeper filter, also for raw events the
+           opener grid kept, which the grid itself thins with ChangeKeeper),
            with two differences: a listing whose start is 12 hours or more
            from the ESPN game it lands on is not stored, and an hour the feed
            answered with an earlier hour's snapshot is replayed only at the
