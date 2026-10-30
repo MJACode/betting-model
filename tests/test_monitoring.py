@@ -69,12 +69,14 @@ def test_scrub_keeps_the_useful_part():
 # ── credits ──────────────────────────────────────────────────────────────────
 
 class _Resp:
-    def __init__(self, used=None, remaining=None):
+    def __init__(self, used=None, remaining=None, last=None):
         self.headers = {}
         if used is not None:
             self.headers["x-requests-used"] = str(used)
         if remaining is not None:
             self.headers["x-requests-remaining"] = str(remaining)
+        if last is not None:
+            self.headers["x-requests-last"] = str(last)
 
 
 def test_credits_are_the_delta_of_requests_used(monkeypatch):
@@ -93,6 +95,26 @@ def test_billing_reset_reports_no_credits_rather_than_a_negative(monkeypatch):
 def test_missing_headers_are_not_an_error(monkeypatch):
     monkeypatch.setattr(probe, "_last_used", None, raising=False)
     assert probe._credits_from(_Resp()) == (None, None)
+
+
+def test_a_call_is_charged_its_own_bill_not_the_accounts_other_spend(monkeypatch):
+    """2026-10-29: the NCAAB purchase spent ~140 credits on the worker between
+    two 3-credit pregame-poller calls. The account counter moved by both; the
+    poller's row must carry only its own 3, or its daily cap (summed from this
+    column) switches the poller off, as it did at 200,280."""
+    monkeypatch.setattr(probe, "_last_used", 1000.0, raising=False)
+    assert probe._credits_from(_Resp(1143, 857, last=3)) == (3.0, 857.0)
+
+
+def test_the_first_call_of_a_process_is_charged_its_bill(monkeypatch):
+    monkeypatch.setattr(probe, "_last_used", None, raising=False)
+    assert probe._credits_from(_Resp(100, 900, last=2)) == (2.0, 900.0)
+
+
+def test_a_reply_without_its_bill_still_falls_back_to_the_delta(monkeypatch):
+    monkeypatch.setattr(probe, "_last_used", None, raising=False)
+    assert probe._credits_from(_Resp(100, 900, last=2)) == (2.0, 900.0)
+    assert probe._credits_from(_Resp(105, 895)) == (5.0, 895.0)   # baseline kept current
 
 
 # ── the patch ────────────────────────────────────────────────────────────────
