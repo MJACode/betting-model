@@ -10,7 +10,7 @@ orientation), and the worker jobs that run it.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -980,10 +980,12 @@ def test_seasons_run_newest_first_and_each_season_oldest_first():
 
 # ── the replay of kept raw events (2026-10-29) ───────────────────────────────
 #
-# Job 805227 kept 137,007 bought event snapshots raw because their names did
-# not resolve. The replay stores the ones that resolve now, on the purchase's
-# own path, without buying, without touching the ledger or the raw store, and
-# never twice. A real-Postgres run of the same is tests/test_ncaab_odds_replay_pg.py.
+# Job 805227 kept bought event snapshots raw (137,007 rows in
+# ncaab_odds_unmatched; the job counted 137,083), nearly all because their
+# names did not resolve. The replay stores the ones that resolve now, on the
+# purchase's own path, without buying, without touching the ledger or the raw
+# store, and never twice. A real-Postgres run of the same is
+# tests/test_ncaab_odds_replay_pg.py.
 
 REPLAY_TEAMS = [
     (150, "Duke", "duke", "Blue Devils", "Duke Blue Devils", "Duke", "DUKE", True, None),
@@ -1116,6 +1118,84 @@ def test_the_replay_stores_what_the_purchase_would_have_and_a_second_apply_store
     second = _replay(monkeypatch, conn)
     assert second["rows_kept"] == 9 and second["rows_already_stored"] == 9
     assert second.get("rows_inserted", 0) == 0 and len(conn.odds) == 9
+
+
+def _quote_keys(rows) -> Counter:
+    return Counter(h._row_key(r["game_id"], r["market"], r["bookmaker"], r["snapshot_at"],
+                              *(r.get(c) for c in h._ROW_VALUES)) for r in rows)
+
+
+@pytest.mark.parametrize("server_committed", [True, False])
+def test_a_commit_lost_in_flight_stores_each_quote_once(monkeypatch, server_committed):
+    """data.db raises ConnectionLost when the connection drops at COMMIT, and
+    _write_with_retry runs the unit again. The server may have committed (only
+    the acknowledgement was lost) or not; the retry must read `odds` back
+    inside the unit, so either way every quote is stored exactly once. With
+    the read-back before the retry loop (the 2026-10-29 review), this world
+    stored 3 quotes twice."""
+    from data.db import ConnectionLost
+    conn = ReplayConn()
+    monkeypatch.setattr(nba_odds_history.time, "sleep", lambda s: None)
+    state = {"failed": False, "landed": 0}
+
+    def commit():
+        conn.commits += 1
+        if not state["failed"]:
+            state["failed"] = True
+            if not server_committed:
+                del conn.odds[state["landed"]:]       # the server rolled the unit back
+            raise ConnectionLost("connection lost at commit")
+        state["landed"] = len(conn.odds)
+    monkeypatch.setattr(conn, "commit", commit)
+    out = _replay(monkeypatch, conn)
+    keys = _quote_keys(conn.odds)
+    assert len(conn.odds) == 9 and set(keys.values()) == {1}
+    assert out["rows_inserted"] == 9 and out.get("write_errors", 0) == 0
+
+
+def test_a_listing_placed_on_a_game_twelve_hours_or_more_from_its_tip_is_not_stored(monkeypatch):
+    """ncaab_teams.match_event takes the nearest game within a day either side,
+    so a second feed listing of the same pair a day later lands on the same
+    ESPN game: 24 kept feed events (144 event snapshots) did, every one on a
+    game that also has a listing within the hour (Supabase connector,
+    2026-10-29). The replay stores none of a far listing's quotes, not even at
+    an anchor the keeper would otherwise keep, and counts it apart."""
+    far = _raw("e5", "2025-11-19T21:55:38Z", "2025-11-19T21:40:00Z", tip="2025-11-21T17:00:00Z")
+    conn = ReplayConn(raw=REPLAY_RAW + [far])
+    out = _replay(monkeypatch, conn)
+    assert out["event_snapshots_far_from_tip"] == 1 and out["events_far_from_tip"] == 1
+    assert "2025-11-19T21:40:00Z" not in {r["snapshot_at"] for r in conn.odds}
+    assert out["rows_inserted"] == 9                       # the real listing's, as before
+    assert (out["events_resolved"], out["events_unresolved"]) == (1, 1)
+    # 12 hours to the second is far; a minute under is not
+    assert h._far_from_tip({"commence_time": "2025-11-21T05:00:00Z"}, (KSU_DUKE["game_id"], False),
+                           {KSU_DUKE["game_id"]: KSU_TIP})
+    assert not h._far_from_tip({"commence_time": "2025-11-21T04:59:00Z"},
+                               (KSU_DUKE["game_id"], False), {KSU_DUKE["game_id"]: KSU_TIP})
+    # no ESPN tip, no feed start, or no game: nothing to compare, nothing refused
+    assert not h._far_from_tip({"commence_time": "2025-11-23T00:00:00Z"},
+                               (KSU_DUKE["game_id"], False), {KSU_DUKE["game_id"]: None})
+    assert not h._far_from_tip({}, (KSU_DUKE["game_id"], False), {KSU_DUKE["game_id"]: KSU_TIP})
+    assert not h._far_from_tip({"commence_time": KSU_TIP}, None, {})
+
+
+def test_the_keeper_judges_a_replayed_snapshot_at_the_hour_that_was_bought(monkeypatch):
+    """Kentucky-Duke tips 2025-11-19 00:30Z, game date 11-18. Its 11-18 15Z
+    snapshot is kept only because 15Z is one of its anchors: the tip is 9.5
+    hours away, outside the three-hour window, and the quote was seen the day
+    before. The raw row carries the feed's own time, 14:55:12Z; judged at that
+    time instead of the hour bought, it would be dropped as a repeat."""
+    tip = "2025-11-19T00:30:00Z"
+    ledger = [("2025-11-17", 15), ("2025-11-18", 15)]
+    raw = [("e3", "2025-11-17T14:55:00Z", _event("e3", "Kentucky Wildcats", "Duke Blue Devils",
+                                                 tip, last_update="2025-11-17T14:50:00Z")),
+           ("e3", "2025-11-18T14:55:12Z", _event("e3", "Kentucky Wildcats", "Duke Blue Devils",
+                                                 tip, last_update="2025-11-18T14:52:00Z"))]
+    conn = ReplayConn(ledger=ledger, raw=raw)
+    out = _replay(monkeypatch, conn)
+    assert sorted({r["snapshot_at"] for r in conn.odds}) == ["2025-11-17T14:50:00Z",
+                                                             "2025-11-18T14:52:00Z"]
+    assert out["rows_kept"] == 6 and out["rows_inserted"] == 6
 
 
 def test_the_replay_never_buys_never_writes_the_ledger_and_never_deletes_a_raw_row(monkeypatch):

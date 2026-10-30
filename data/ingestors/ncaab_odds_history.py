@@ -41,9 +41,13 @@ WHAT IS BOUGHT
 
   --replay-unmatched  No paid call. Re-reads the raw events kept in
            `ncaab_odds_unmatched` and stores the ones that resolve now (after a
-           fix to the team names), exactly as the purchase would have stored
-           them. A read-only dry run unless --apply; never writes the ledger,
-           never deletes a raw row, and a second --apply stores nothing new.
+           fix to the team names), as the purchase would have stored them,
+           with two differences: a listing whose start is 12 hours or more
+           from the ESPN game it lands on is not stored, and an hour the feed
+           answered with an earlier hour's snapshot is replayed only at the
+           earlier hour (the raw table kept that snapshot once). A read-only
+           dry run unless --apply; never writes the ledger, never deletes a raw
+           row, and a second --apply stores nothing new.
 
 WHO OWNS THE GAME. ESPN's schedule (data/ingestors/ncaab_teams.py). The feed
 never mints an NCAAB game: every event resolves onto an ESPN game by its team
@@ -932,15 +936,24 @@ def probe(conn, meter: Meter, season: int) -> dict:
 # ── the replay: kept raw events that resolve now ─────────────────────────────
 #
 # WHY. ncaab_odds_unmatched holds every event the purchase bought and could
-# not place on an ESPN game: 137,007 event snapshots after the lines job
-# (worker job 805227, 2026-10-29), nearly all because the feed's shortened
-# school names ("Michigan St Spartans") placed no team. Those snapshots are
-# ledgered as bought, so the purchase never asks for them again. Once the
-# names resolve, this stores them from the raw JSON on the purchase's own path
+# not place on an ESPN game: 137,007 rows after the lines job (worker job
+# 805227, 2026-10-29; the job counted 137,083, and the table keeps one row per
+# event and feed time), nearly all because the feed's shortened school names
+# ("Michigan St Spartans") placed no team. Those snapshots are ledgered as
+# bought, so the purchase never asks for them again. Once the names resolve,
+# this stores them from the raw JSON on the purchase's own path
 # (_parse_snapshot, one QuoteKeeper, seasons in season_order). It makes no
 # paid call, never writes odds_history_pulls, never deletes a raw row, and a
 # quote already in `odds` is never stored twice, so a second --apply stores
 # nothing new.
+#
+# TWO DIFFERENCES FROM THE PURCHASE. (1) A listing placed on an ESPN game
+# whose tip is REPLAY_MAX_TIP_GAP or more from the listing's own start is not
+# stored (_far_from_tip). (2) When the feed answered several bought hours
+# with the same stale snapshot, the raw table kept it once, under the first
+# of them, so it is replayed at that hour only: a later hour's pre-tip copy of
+# the same quote is not stored again (2020-11-27 18Z-20Z, measured by the
+# 2026-10-29 review).
 #
 # THE STAMP. _buy_snapshot keyed each raw row on the feed's own timestamp
 # (21:55:38Z for the 22Z snapshot), not on the instant it asked for. The
@@ -951,6 +964,7 @@ def probe(conn, meter: Meter, season: int) -> dict:
 
 REPLAY_BATCH_ROWS = 500                     # rows per fetch, never more
 REPLAY_MAX_STAMP_GAP = timedelta(minutes=60)
+REPLAY_MAX_TIP_GAP = timedelta(hours=12)
 _CURSOR_IDS = itertools.count(1)
 
 _UNMATCHED_KEYS_SQL = ("SELECT event_id, snapshot_at FROM ncaab_odds_unmatched "
@@ -971,6 +985,25 @@ def planned_instant(stamp: datetime, instants: list[datetime]) -> datetime | Non
     if i < len(instants) and instants[i] - stamp <= REPLAY_MAX_STAMP_GAP:
         return instants[i]
     return None
+
+
+def _far_from_tip(ev: dict, hit, tips: dict[str, str]) -> bool:
+    """Is this feed listing placed on an ESPN game whose tip is
+    REPLAY_MAX_TIP_GAP or more from the listing's own start?
+
+    match_event takes the nearest game within a day either side of the
+    listing's date, so a second listing of the same pair a day later lands on
+    the same game, and at that game's anchors the keeper would store its
+    quotes beside the real listing's. Among the kept raw events, 24 feed
+    events (144 event snapshots) landed 12 to 29 hours from their game's tip,
+    and every one of those games also has a listing within the hour; below
+    12 hours the widest was 9.0 (SQL on the Supabase connector, 2026-10-29).
+    False when the game, its tip or the listing's start is unknown: nothing
+    to compare, so the purchase's answer stands."""
+    if not hit:
+        return False
+    espn, feed = _utc(tips.get(hit[0])), _utc(ev.get("commence_time"))
+    return bool(espn and feed and abs(espn - feed) >= REPLAY_MAX_TIP_GAP)
 
 
 def _ledger_instants(conn) -> list[datetime]:
@@ -1073,12 +1106,15 @@ def replay_unmatched(conn, first: int, last: int, apply: bool) -> dict:
     Pass 1 reads only the raw rows' keys (event id, stamp) through one
     server-side cursor and maps each stamp to its planned instant. Pass 2 walks
     the instants in season_order; for each it reads that instant's payloads
-    by primary key, resolves them over ESPN's stored games, parses and labels
-    them through _parse_snapshot exactly as _buy_snapshot does, filters them
-    through ONE QuoteKeeper for the run, drops any quote already stored, and
-    with `apply` inserts the rest with _insert_odds (source
-    odds_api_historical), committing per instant. Without `apply` it writes
-    nothing; main() also hands it a read-only connection. Returns the counts.
+    by primary key, sets aside any listing _far_from_tip refuses, resolves
+    the rest over ESPN's stored games, parses and labels them through
+    _parse_snapshot exactly as _buy_snapshot does, filters them through ONE
+    QuoteKeeper for the run, drops any quote already stored, and with `apply`
+    inserts the rest with _insert_odds (source odds_api_historical),
+    committing per instant. The read-back of `odds` is repeated inside each
+    write, so a retry after a commit whose acknowledgement was lost stores
+    nothing twice. Without `apply` it writes nothing; main() also hands it a
+    read-only connection. Returns the counts.
     """
     st: Counter = Counter()
     instants = _ledger_instants(conn)
@@ -1112,7 +1148,7 @@ def replay_unmatched(conn, first: int, last: int, apply: bool) -> dict:
     st["stamps_unmapped"] = sum(1 for w in mapped.values() if w is None)
     st["instants"] = len(by_instant)
 
-    seen, placed = set(), set()
+    seen, placed, far_events = set(), set(), set()
     taken: set = set()
     season = None
     for when in season_order(list(by_instant)):
@@ -1123,6 +1159,11 @@ def replay_unmatched(conn, first: int, last: int, apply: bool) -> dict:
         events = _payloads(conn, wanted)
         st["event_snapshots"] += len(events)
         st["payloads_missing"] += len(wanted) - len(events)
+        far = {id(ev) for ev in events if _far_from_tip(ev, resolver(*_event_key(ev)), tips)}
+        if far:
+            st["event_snapshots_far_from_tip"] += len(far)
+            far_events.update(str(ev.get("id")) for ev in events if id(ev) in far)
+            events = [ev for ev in events if id(ev) not in far]
         _, unmatched, odds_rows, dropped, marked = _parse_snapshot(events, when, resolver, tips)
         missed = {str(ev.get("id")) for ev in unmatched}
         for ev in events:
@@ -1145,16 +1186,22 @@ def replay_unmatched(conn, first: int, last: int, apply: bool) -> dict:
             _end_read(conn)
             continue
 
-        def _write(rows=[r for _, r in fresh]):
-            _insert_odds(conn, rows)
+        def _write(kept=kept):
+            # Read `odds` back INSIDE the unit: data.db raises ConnectionLost
+            # at a commit whose acknowledgement was lost, although the server
+            # may have committed, and _write_with_retry then runs this again.
+            now = _not_yet_stored(conn, kept, taken)
+            if now:
+                _insert_odds(conn, [r for _, r in now])
             conn.commit()
         if _write_with_retry(conn, _write, f"replay {_stamp(when)}"):
-            taken.update(k for k, _ in fresh)
+            taken.update(k for k, _ in fresh)       # stored now, by one attempt or another
             st["rows_inserted"] += len(fresh)
         else:
             st["write_errors"] += 1
     st["events_resolved"] = len(placed)
     st["events_unresolved"] = len(seen - placed)
+    st["events_far_from_tip"] = len(far_events)
 
     mode = "applied" if apply else "dry run, read only, nothing written"
     print(f"replay seasons {first}-{last} ({mode})")
@@ -1166,6 +1213,10 @@ def replay_unmatched(conn, first: int, last: int, apply: bool) -> dict:
           f"(event snapshots: {st['event_snapshots_resolved']:,} resolved, "
           f"{st['event_snapshots_unresolved']:,} unresolved, {st['payloads_missing']:,} "
           f"payloads missing)")
+    print(f"  far: {st['events_far_from_tip']:,} events ({st['event_snapshots_far_from_tip']:,} "
+          f"event snapshots) placed on an ESPN game whose tip is "
+          f"{REPLAY_MAX_TIP_GAP.total_seconds() / 3600:g} hours or more from their own start, "
+          f"not stored")
     print(f"  rows: {st['rows_parsed']:,} parsed, {st['rows_marked_in_play']:,} marked in-play, "
           f"{st['rows_kept']:,} kept by the keeper, {st['rows_already_stored']:,} already stored, "
           + (f"{st['rows_inserted']:,} inserted, {st['write_errors']:,} instants failed to write"

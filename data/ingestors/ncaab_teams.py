@@ -211,8 +211,7 @@ def _fold(v: str) -> str:
 
     Cached: every resolve_team_name call folds the registry's 1,348 rows
     several times over, and the 5-minute capture resolves each event's two
-    names twice (measured 2026-10-29: 14-127 ms a call uncached, 1-9 ms
-    cached).
+    names twice.
     """
     v = unicodedata.normalize("NFKD", (v or "").strip().lower())
     v = "".join(c for c in v if not unicodedata.combining(c))
@@ -292,10 +291,11 @@ def _rest_is_mascot(rest: str, mascot: str | None) -> bool:
 # The odds feed shortens school names that ESPN spells out. "Michigan St
 # Spartans" is ESPN's Michigan State, "CSU Fullerton Titans" is Cal State
 # Fullerton, "Loyola (Chi) Ramblers" is Loyola Chicago. No earlier step places
-# them: the 2026-10-29 history purchase (worker job 805227) stored 137,007
-# event snapshots raw in ncaab_odds_unmatched because 82 feed names resolved
-# to no team. This step runs only after every earlier step has returned None,
-# so a name that resolved before it existed resolves to the same team now.
+# them: the 2026-10-29 history purchase (worker job 805227) kept bought event
+# snapshots raw (137,007 rows in ncaab_odds_unmatched; the job counted
+# 137,083), nearly all because 82 feed names resolved to no team. This step
+# runs only after every earlier step has returned None, so a name that
+# resolved before it existed resolves to the same team now.
 
 # A feed abbreviation (folded) -> what it may stand for. Each token is also
 # tried as written, so the "St" of "Mt. St. Mary's" can stay "St". Every entry
@@ -389,7 +389,8 @@ def resolve_team_name(name: str, registry: list[dict]) -> int | None:
     Titans"), tried only when every step before it found nothing. Ambiguity at
     any step (two teams claim the same folded name) resolves to None, never to
     a guess: an unresolved event is dropped and counted, a mis-resolved one
-    settles on the wrong game.
+    settles on the wrong game. Two schools of the same length that both prefix
+    the name are such an ambiguity, so the last step is not tried for them.
     """
     if not name:
         return None
@@ -435,7 +436,9 @@ def resolve_team_name(name: str, registry: list[dict]) -> int | None:
             best, best_len, tie = t["espn_id"], len(sl), False
         elif len(sl) == best_len and t["espn_id"] != best:
             tie = True
-    if best is not None and not tie:
+    if tie:
+        return None        # two schools of the same length fit: no answer, never a guess
+    if best is not None:
         return best
     return _resolve_shortened_school(key, registry)
 

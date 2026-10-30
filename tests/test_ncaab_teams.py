@@ -206,8 +206,9 @@ def test_an_empty_registry_read_is_not_cached():
 
 # ── the feed's shortened school names (2026-10-29) ───────────────────────────
 #
-# The 2026-10-29 history purchase (worker job 805227) kept 137,007 event
-# snapshots raw in ncaab_odds_unmatched because 82 feed names placed no team.
+# The 2026-10-29 history purchase (worker job 805227) kept bought event
+# snapshots raw (137,007 rows in ncaab_odds_unmatched; the job counted
+# 137,083), nearly all because 82 feed names placed no team.
 # These rows are copied from production ncaab_teams as read on 2026-10-29:
 # every team those names belong to, and every row the resolver could weigh
 # against them (a school that starts the name, a school or short name equal
@@ -477,6 +478,10 @@ def test_a_spelling_two_teams_share_is_skipped_when_only_one_carries_the_mascot(
     # 'Wright State' is 2750's school AND 134850's short name ('Wright State -');
     # the short name 'Wright St' is 2750's alone, and only 2750 are the Raiders
     assert nt.resolve_team_name("Wright St Raiders", PRODUCTION_ROWS) == 2750
+    # A name only the shared spelling could place stays unplaced, although one
+    # of the two teams carries its mascot (134850 are the Lakers): a spelling
+    # must belong to exactly one team before its mascot is weighed.
+    assert nt.resolve_team_name("Wright State - Lakers", PRODUCTION_ROWS) is None
 
 
 def test_a_name_that_resolved_before_keeps_its_team_where_the_new_rule_disagrees():
@@ -492,6 +497,22 @@ def test_a_name_that_resolved_before_keeps_its_team_where_the_new_rule_disagrees
     assert nt.resolve_team_name(name, reg) == 2115
     assert nt.resolve_team_name("Kansas State Wildcats", reg) == 2306
     assert nt.resolve_team_name("Duke Blue Devils", reg) == 150
+
+
+def test_a_tie_at_the_school_prefix_step_is_no_answer_and_skips_the_last_step():
+    """Two schools of the same length that both fit the name are an ambiguity,
+    and ambiguity resolves to None: the shortened-school step, which runs only
+    when every earlier step found nothing, must not answer it. A synthetic
+    registry, not production rows: two 'Union' rows are the Bulldogs, and a
+    third row's short name is 'Union Tenn' (2026-10-29 review)."""
+    reg = [_row(990011, "Union", "Bulldogs", "Union Bulldogs", "Union", None, False),
+           _row(990012, "Union", "Bulldogs", "Union Bulldogs", "Union (KY)", None, False),
+           _row(990013, "Union University", "Bulldogs", "Union University Bulldogs",
+                "Union Tenn", None, False)]
+    name = "Union Tenn Bulldogs"
+    assert nt._resolve_shortened_school(nt._fold(name), reg) == 990013   # alone it would answer
+    assert nt.resolve_team_name(name, reg) is None
+    assert nt.resolve_team_name("Union University Bulldogs", reg) == 990013
 
 
 def test_a_mascot_alias_belongs_to_its_own_team_only():

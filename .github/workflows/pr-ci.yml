@@ -222,6 +222,9 @@ jobs:
             tests/test_results_recap_message_id.py \
             tests/test_backfill_results_recap.py \
             tests/test_job_queue.py \
+            tests/test_ncaab_teams.py \
+            tests/test_ncaab_odds_history.py \
+            tests/test_ncaab_odds_replay_pg.py \
             tests/test_idle_read_transaction.py \
             tests/test_view_migration_lock_noop.py \
             tests/test_record_correction_post.py \

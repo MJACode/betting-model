@@ -23,18 +23,42 @@
 
 ## [ ] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29)
 
-`ncaab_odds_unmatched` holds 137,007 bought event snapshots (11,857 events)
-that the game-lines purchase could not place on an ESPN game (worker job
-805227). Branch `fix/ncaab-odds-team-names` places 80 more feed names and adds
-the replay (`docs/sports/ncaab.md`, "Replaying the kept raw events"). After it
-merges, queue job `ncaab_odds_history` with `{"mode": "replay_unmatched",
-"dry_run": true}`, read the counts it prints, then queue `{"mode":
-"replay_unmatched"}` to store. It buys nothing, writes only `odds`, and a
-second run stores nothing new. Expected (Supabase connector, 2026-10-29):
-11,349 events on 11,300 games over the six seasons; 2025-26 alone is 24,705
-event snapshots on 1,956 games. The dry run could not run from this machine:
-the local database password is refused (`password authentication failed`,
-2026-10-29 21:08Z).
+`ncaab_odds_unmatched` holds the events the game-lines purchase could not
+place on an ESPN game (worker job 805227). Branch `fix/ncaab-odds-team-names`
+places 80 more feed names and adds the replay; `docs/sports/ncaab.md`,
+"Replaying the kept raw events", says what it does and the counts to expect.
+After it merges, queue job `ncaab_odds_history` with `{"mode":
+"replay_unmatched", "dry_run": true}`, compare what it prints with that
+section, then queue `{"mode": "replay_unmatched"}` to store. It buys nothing.
+It writes `odds`, and through that table's insert trigger `latest_odds`; a
+second run stores nothing new.
+
+## [ ] NCAAB: a second feed listing a day off still lands on the real game (2026-10-29)
+
+`ncaab_teams.match_event` places a feed event on the nearest ESPN game of the
+same two teams within a day either side of its date. In the kept raw events,
+24 feed events (144 event snapshots) landed 12 to 29 hours from their game's
+tip, and every one of those games also has a listing within the hour (SQL on
+the Supabase connector, 2026-10-29). The replay refuses them. The lines
+purchase and the live capture use the same matcher and still accept them, so
+stored history can hold a second listing's quotes beside the real one at a
+game's anchors. Next: measure how often it happens in what is already stored
+and in the live capture, then decide whether the shared matcher should refuse
+such listings. A real game must never be refused there.
+
+## [ ] Knowledge-graph community names after the 2026-10-29 rebuild
+
+`graphify update .` on branch `fix/ncaab-odds-team-names` rebuilt master's
+committed graph, which was missing 171 files master now has (most of
+`data/migrations/`, and `data/ingestors/alt_game_lines.py`,
+`live_scoreboard.py` and `scoreboard_splits.py` among them), so its
+communities moved. graphify keeps a hand-written community name only where a
+strict majority of the community's members stayed together. After the
+review round's rebuild: 1,110 communities, 514 with a hand-written name and
+596 waiting for one (master's committed graph: 933 communities, 623 named,
+310 waiting). Next: name the waiting communities
+(`graphify-out/.graphify_labels.pending.json`) from a per-community digest
+and re-sign `.graphify_labels.json.sig`, as on 2026-10-16.
 
 ## [ ] NCAAB feed events whose two teams resolve but match no ESPN game (2026-10-29)
 
