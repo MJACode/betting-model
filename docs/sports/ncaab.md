@@ -154,6 +154,43 @@ second run stores nothing new. Each insert into `odds` also updates
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 | Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
 
+## In the app (2026-10-30)
+
+- **NCAAB is a sport chip beside NCAAF** on the Picks, Models and Stats tabs
+  (`mobile/src/hooks/useSportFilter.ts`). A push that names NCAAB opens its
+  board, because the push router accepts only the sports on that list.
+- **A model whose id starts `ncaab` is filed under NCAAB.** Before this, the
+  app had no `ncaab` prefix and filed every such model under MLB
+  (`modelMeta.sportOfModel`, and its copy in `ModelsScreen`).
+- **The totals model's label is "NCAAB Totals", badge O/U, under the id
+  `ncaab_over_under`.** That is the id in the model's build plan. The model's
+  own pull request must register the same id in `config.py`: if config scores
+  an id the app has no label for, `tests/test_mobile_pick_categories.py` fails.
+  An id with `over_under` in it is priced off the `totals` rows; an id without
+  it falls to the moneyline rows (`markets.gameMarketForModel`).
+- **The Today board reads NCAAB picks up to 7 days ahead**
+  (`fetchUpcomingNcaabPicks`), because the totals model is planned to decide
+  the evening before the game. It reads the picks first, then only those
+  picks' games and lines, 80 game ids per request. Reading the whole window
+  instead would have been too big: over 2025-26 the biggest day held 4,417
+  main-market rows across all books, and the biggest seven days held 10,424
+  (Supabase, read only, 2026-10-30).
+- **Today's DraftKings lines are read in pages, main markets only.** The
+  same-day read was one request, and a full college basketball day went past
+  the 1,000-row response cap: 1,132 DraftKings rows for 2026-01-10, of which
+  743 were in the markets a pick reads. Past the cap the server returns an
+  arbitrary 1,000 rows without saying so, which could blank any sport's line
+  pill.
+- **When a game leaves the board.** Three hours after the tip if ESPN's final
+  has not landed by then (`format.GAME_DURATION_HOURS`); it stops reading
+  LIVE on the clock alone after four (`BLIND_LIVE_WINDOW_MS`).
+- **Not in the app yet.** NCAAB player and team stats (the Stats tab shows its
+  "No player leaderboard" state, and every Stats read returns nothing for
+  NCAAB before it asks the server). School abbreviations: cards show the
+  school name, because the app cannot read `ncaab_teams` (anon has no SELECT
+  on it). Live scores and the Scoreboard: the live scoreboard poller
+  (`data/ingestors/live_scoreboard.py`) does not cover NCAAB.
+
 ## Data accounts and sources (measured 2026-10-28)
 
 - **cbbdata (Torvik's API).** Account created 2026-10-28 (mike: "articulate the

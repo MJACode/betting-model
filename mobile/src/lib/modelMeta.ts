@@ -577,6 +577,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // ── NCAAB ─────────────────────────────────────────────────────────────────
+  // Men's college basketball, full-game totals. Named like the other totals
+  // ("NCAAB Totals", badge O/U). The id is the one in the model's build plan;
+  // config.py registers it in the model's own pull request, and
+  // tests/test_mobile_pick_categories.py fails if the two ever differ.
+  ncaab_over_under: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAAB Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -893,7 +905,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -908,6 +920,7 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('nhl')) return 'NHL';
@@ -945,6 +958,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NBA',
   'NFL',
   'NCAAF',
+  'NCAAB',
   'UFC',
   'NHL',
   'GOLF',
