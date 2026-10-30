@@ -381,12 +381,13 @@ run holds its lock.
 
 ## [x] The injury reader counts every snapshot of the day (found 2026-10-13, fixed 2026-10-30)
 
-`query_injuries_for_game` keeps one row per player: his latest snapshot on the
-latest report that already existed at tip-off (`games.commence_time`). A game
-that has not started has its tip in the future, so the latest copy stored so
-far is the one that counts. The training reader uses the same rule. Ottawa at
-22:23Z on 2026-10-13 was 53.900 summed and is 3.500 this way (STL the same
-minute, 79.800 summed, 4.200 once each). No threshold, stake, or pause change.
+`query_injuries_for_game` keeps the newest ingest that already existed at
+tip-off (`games.commence_time`), and only the players on that pull. A name
+an earlier copy the same day listed, and that pull left off, does not count
+(mike, 2026-10-30). The training reader uses the same rule. Ottawa at 22:23Z
+on 2026-10-13 was 53.900 summed and is 2.800 on the 22:10Z pull (Harrison
+Scott is off it). STL the same minute was 79.800 summed and is 4.200. No
+threshold, stake, or pause change.
 
 `injuries` gets a full copy of each team's list on every ingest run
 (report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per

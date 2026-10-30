@@ -1806,14 +1806,21 @@ def _commence_by_game(conn: DBConnection, sport: str) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
+def _injury_day_rows(bulk: dict, report: str) -> list[dict]:
+    rows: list[dict] = []
+    for by_date in bulk.get("injuries", {}).values():
+        rows.extend(by_date.get(report, []))
+    return rows
+
+
 def _choose_injury_report_date(bulk: dict, game_date: str,
                                as_of: str | None) -> str | None:
-    """Latest report date on or before the game that has a snapshot by `as_of`.
+    """Latest report date on or before the game that has a pull by `as_of`.
 
-    Sport-wide, same as the live reader: a team missing from that report is
-    healthy. A report whose every snapshot is after tip is not that date.
+    Sport-wide, same as the live reader. A report whose every pull is after
+    tip is not that date.
     """
-    from data.ingestors.injury_ingestor import latest_injury_rows
+    from data.ingestors.injury_ingestor import snapshot_instant
 
     dates = set()
     for by_date in bulk.get("injuries", {}).values():
@@ -1822,19 +1829,21 @@ def _choose_injury_report_date(bulk: dict, game_date: str,
     for report in reversed(ordered):
         if not as_of:
             return report
-        for by_date in bulk["injuries"].values():
-            if latest_injury_rows(by_date.get(report, []), as_of=as_of):
-                return report
+        if snapshot_instant(_injury_day_rows(bulk, report), as_of=as_of) is not None:
+            return report
     return None
 
 
 def _blk_injuries(bulk: dict, team: str, game_date: str,
                   as_of: str | None = None) -> list[dict]:
-    """One row per player from the report `query_injuries_for_game` would use.
+    """Players on the newest pre-tip pull, the same rule as the live reader.
 
-    `as_of` is tip-off. Each player keeps his latest snapshot at or before it.
+    The pull is sport-wide. A team with no rows on it is healthy, including
+    a player that team's earlier copy the same day still listed.
     """
-    from data.ingestors.injury_ingestor import latest_injury_rows
+    from data.ingestors.injury_ingestor import (
+        _parse_injury_ts, latest_injury_rows, snapshot_instant,
+    )
 
     cache = bulk.setdefault("_injury_report_date", {})
     key = (game_date, as_of or "")
@@ -1843,8 +1852,13 @@ def _blk_injuries(bulk: dict, team: str, game_date: str,
     report = cache[key]
     if not report:
         return []
-    rows = bulk.get("injuries", {}).get(team, {}).get(report, [])
-    return latest_injury_rows(rows, as_of=as_of)
+    day = _injury_day_rows(bulk, report)
+    instant = snapshot_instant(day, as_of=as_of)
+    team_rows = bulk.get("injuries", {}).get(team, {}).get(report, [])
+    if instant is None:
+        return latest_injury_rows(team_rows, as_of=as_of)
+    on_pull = [r for r in team_rows if _parse_injury_ts(r.get("created_at")) == instant]
+    return latest_injury_rows(on_pull, as_of=as_of)
 
 
 def _build_mlb_features_from_bulk(bulk: dict,

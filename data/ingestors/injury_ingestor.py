@@ -842,8 +842,8 @@ def fetch_return_ramp_players(conn: sqlite3.Connection, sport: str,
 def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
     """
     Insert injury rows. We insert fresh rows each run (append-only log).
-    A day holds one full copy of the list per run. The reader keeps one row
-    per player from the latest copy as of tip-off.
+    A day holds one full copy of the list per run. The reader uses the
+    newest copy that existed at tip-off, and only the players on it.
     Returns number of rows inserted.
     """
     if not injuries:
@@ -1106,7 +1106,7 @@ def _player_key(row: dict) -> str | None:
 
 
 def _snapshot_rank(row: dict) -> tuple:
-    """Later snapshot wins; the same clock keeps the later insert."""
+    """The same clock keeps the later insert."""
     ts = _parse_injury_ts(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
     try:
         iid = int(row.get("injury_id"))
@@ -1115,24 +1115,32 @@ def _snapshot_rank(row: dict) -> tuple:
     return (ts, iid)
 
 
-def latest_injury_rows(rows: list[dict], as_of=None) -> list[dict]:
-    """One row per player: that player's latest snapshot at or before `as_of`.
+def snapshot_instant(rows: list[dict], as_of=None) -> datetime | None:
+    """The newest `created_at` in `rows` that is still at or before `as_of`.
 
-    Each ingest writes a fresh copy of the whole list under the same
-    `report_date`, so the same player is in the table once per run. Summing
-    those copies counts him once per snapshot. A row taken after `as_of`
-    (tip-off, for a game already started) is not his latest eligible
-    snapshot. A row with no clock stays eligible: a backfill that never
-    stored `created_at` cannot be shown to be after tip. A row with no
-    player id and no name is kept as its own row.
+    `rows` is the pool that defines the pull: the sport's copies of one
+    report, not one team's private history. No `as_of` means the newest
+    stamp in the pool.
     """
     cutoff = _parse_injury_ts(as_of) if as_of else None
+    best: datetime | None = None
+    for row in rows:
+        stamp = _parse_injury_ts(row.get("created_at"))
+        if stamp is None:
+            continue
+        if cutoff is not None and stamp > cutoff:
+            continue
+        if best is None or stamp > best:
+            best = stamp
+    return best
+
+
+def _one_player_per_row(rows: list[dict]) -> list[dict]:
+    """One row per player inside a single pull. A row with no id and no name
+    stays, so two nameless rows are not treated as the same person."""
     best: dict[str, dict] = {}
     anonymous: list[dict] = []
     for row in rows:
-        stamp = _parse_injury_ts(row.get("created_at"))
-        if cutoff is not None and stamp is not None and stamp > cutoff:
-            continue
         key = _player_key(row)
         if key is None:
             anonymous.append(row)
@@ -1141,6 +1149,26 @@ def latest_injury_rows(rows: list[dict], as_of=None) -> list[dict]:
         if prev is None or _snapshot_rank(row) >= _snapshot_rank(prev):
             best[key] = row
     return list(best.values()) + anonymous
+
+
+def latest_injury_rows(rows: list[dict], as_of=None) -> list[dict]:
+    """Players on the single newest pull in `rows` at or before `as_of`.
+
+    Each ingest writes a full copy of the list. The copy that counts is the
+    newest one already stored at tip-off. A player who is missing from that
+    pull does not count, including one an earlier copy the same day listed.
+    Inside the pull, a player stored twice keeps the later insert. A pull
+    taken after `as_of` is ignored. When nothing in the pool has a clock,
+    the undated rows are that one pull.
+    """
+    instant = snapshot_instant(rows, as_of=as_of)
+    if instant is not None:
+        pool = [r for r in rows if _parse_injury_ts(r.get("created_at")) == instant]
+        return _one_player_per_row(pool)
+    if any(_parse_injury_ts(r.get("created_at")) is not None for r in rows):
+        # Every stamped copy is after tip.
+        return []
+    return _one_player_per_row(list(rows))
 
 
 _INJURY_ROW_COLS = [
@@ -1192,8 +1220,21 @@ def _report_date_as_of(conn, sport: str, game_date: str, as_of) -> str | None:
     return None
 
 
+def _snapshot_rows(conn, sport: str, report_date: str) -> list[dict]:
+    """One dict per stored `created_at` on this report, so the newest pull
+    is the sport's, not whichever team happens to be asked first."""
+    rows = conn.execute("""
+        SELECT DISTINCT created_at
+        FROM injuries
+        WHERE sport = ?
+          AND report_date = ?
+          AND created_at IS NOT NULL
+    """, (sport, report_date)).fetchall()
+    return [{"created_at": r[0]} for r in rows]
+
+
 def _team_injury_rows(conn, sport: str, team: str, report_date: str,
-                      as_of) -> list[dict]:
+                      as_of, instant: datetime | None) -> list[dict]:
     rows = conn.execute("""
         SELECT player_name, player_id, status, injury_type,
                scenario, severity_weight, return_ramp_factor,
@@ -1205,7 +1246,10 @@ def _team_injury_rows(conn, sport: str, team: str, report_date: str,
           AND report_date = ?
     """, (sport, team, report_date)).fetchall()
     parsed = [dict(zip(_INJURY_ROW_COLS, r)) for r in rows]
-    return latest_injury_rows(parsed, as_of=as_of)
+    if instant is None:
+        return latest_injury_rows(parsed, as_of=as_of)
+    on_pull = [r for r in parsed if _parse_injury_ts(r.get("created_at")) == instant]
+    return _one_player_per_row(on_pull)
 
 
 def query_injuries_for_game(conn: sqlite3.Connection,
@@ -1218,14 +1262,15 @@ def query_injuries_for_game(conn: sqlite3.Connection,
     """
     Injury rows for one game: home_injuries, away_injuries.
 
-    The report is the latest `report_date` on or before `game_date` that
-    already had a snapshot by tip-off. Each player is in that report once,
-    on his latest snapshot by then. `as_of` is that tip when the caller
-    passes it; otherwise `game_id` is looked up on `games.commence_time`.
-    A game that has not started has its tip in the future, so every snapshot
-    stored so far is eligible. A game already started does not read a
-    snapshot taken after tip. No tip on the game means the latest report
-    date, still one row per player.
+    The list is the newest ingest on the latest `report_date` that already
+    had a copy at tip-off. Only the players on that one pull count. A name
+    an earlier copy the same day listed, and that this pull left off, is
+    not injured for this game. `as_of` is that tip when the caller passes
+    it; otherwise `game_id` is looked up on `games.commence_time`. A game
+    that has not started has its tip in the future, so the newest copy
+    stored so far is the pull. A game already started does not read a copy
+    taken after tip. No tip on the game means the newest copy of the latest
+    report date.
     """
     if as_of is None and game_id:
         tip = conn.execute(
@@ -1238,9 +1283,12 @@ def query_injuries_for_game(conn: sqlite3.Connection,
     if not latest_date:
         return {"home_injuries": [], "away_injuries": []}
 
+    instant = snapshot_instant(_snapshot_rows(conn, sport, latest_date), as_of=as_of)
     return {
-        "home_injuries": _team_injury_rows(conn, sport, home_team, latest_date, as_of),
-        "away_injuries": _team_injury_rows(conn, sport, away_team, latest_date, as_of),
+        "home_injuries": _team_injury_rows(
+            conn, sport, home_team, latest_date, as_of, instant),
+        "away_injuries": _team_injury_rows(
+            conn, sport, away_team, latest_date, as_of, instant),
     }
 
 
