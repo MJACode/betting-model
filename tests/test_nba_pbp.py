@@ -391,3 +391,132 @@ def test_a_gap_game_found_a_day_off_is_dated_by_our_games_row():
                           2020, {}, {})
     assert g[0]["game_date"] == "2020-02-23"
     assert g[0]["source"] == nb.GAP_SOURCE and g[0]["match_method"] == "gap_exact"
+
+
+class _GapConn:
+    """The two reads fill_gaps does after ensure_tables, plus commit/rollback."""
+
+    def __init__(self, missing):
+        self.missing = missing
+        self.rollbacks = 0
+        self.commits = 0
+        self._dirty = False
+
+    def execute(self, sql, params=None):
+        rows = [] if "espn_game_id FROM nba_pbp_games" in sql else self.missing
+
+        class R:
+            def fetchall(self):
+                return rows
+        return R()
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def _patch_gap_io(monkeypatch, conn, get_json, written):
+    monkeypatch.setattr(nb, "ensure_tables", lambda c: None)
+    monkeypatch.setattr(nb, "_load_map", lambda c: {})
+    monkeypatch.setattr(nb, "_season_adv", lambda c, season: [])
+    monkeypatch.setattr(nb.time, "sleep", lambda _s: None)
+
+    def write_games(c, batch, rederive):
+        written.append([g[0]["game_id"] for g in batch])
+        c.commit()
+
+    monkeypatch.setattr(nb, "write_games", write_games)
+    monkeypatch.setattr(nb, "find_event", lambda *a, **k: (
+        {"event_id": "9" if "NYK" in a[0] else "1", "season_type": 2}, False))
+
+
+def test_one_summary_failure_keeps_the_games_that_built_and_does_not_raise(monkeypatch):
+    """A single ESPN error used to abort the season before any commit, so the
+    next morning retried the same games and wrote none of them."""
+    missing = [
+        ("NBA_2026-10-20_BOS_DET", "2026-10-20", 121, 113),
+        ("NBA_2026-10-20_PHI_NYK", "2026-10-20", 100, 106),
+    ]
+    conn = _GapConn(missing)
+    written = []
+    calls = []
+
+    def get_json(url, params):
+        calls.append(conn.rollbacks)
+        if str(params.get("event")) == "1":
+            raise RuntimeError("429 from summary")
+        return _summary()
+
+    _patch_gap_io(monkeypatch, conn, get_json, written)
+    stats = nb.fill_gaps(conn, 2027, get_json=get_json)
+    assert stats["errors"] == 1 and stats["filled"] == 1
+    assert "429" in stats["first_error"]
+    assert written == [["NBA_2026-10-20_PHI_NYK"]]
+    assert calls and min(calls) >= 1   # the read transaction ended before HTTP
+
+
+def test_a_backlog_past_the_cap_fills_the_oldest_and_leaves_the_rest(monkeypatch):
+    missing = [
+        ("NBA_2026-10-20_BOS_DET", "2026-10-20", 121, 113),
+        ("NBA_2026-10-21_PHI_NYK", "2026-10-21", 100, 106),
+    ]
+    conn = _GapConn(missing)
+    written = []
+    seen = []
+
+    def get_json(url, params):
+        seen.append(params.get("event"))
+        return _summary()
+
+    _patch_gap_io(monkeypatch, conn, get_json, written)
+    monkeypatch.setattr(nb, "MAX_GAPS", 1)
+    stats = nb.fill_gaps(conn, 2027, get_json=get_json)
+    assert stats["deferred"] == 1 and stats["filled"] == 1 and not stats.get("errors")
+    assert written == [["NBA_2026-10-20_BOS_DET"]]
+    assert seen == [1]
+
+
+def test_a_play_by_play_error_fails_the_step_rebuilds_and_reaches_pipeline_log(monkeypatch):
+    class C:
+        def __init__(self):
+            self.sqls = []
+
+        def execute(self, sql, params=None):
+            self.sqls.append((sql, params))
+
+            class R:
+                def fetchone(self):
+                    return (2027, "2026-10-20")
+            return R()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    conn = C()
+    import data.db as db
+    import data.ingestors.nba_period_scores as ps
+    import data.ingestors.nba_team_q1 as q1
+    import run_pipeline
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    monkeypatch.setattr(ps, "run", lambda *a, **k: {"rows": 1})
+    rebuilt = []
+    monkeypatch.setattr(q1, "rebuild", lambda *a, **k: rebuilt.append(1) or {"rows": 4})
+    monkeypatch.setattr(nb, "fill_gaps", lambda *a, **k: {
+        "errors": 1, "filled": 2,
+        "first_error": "NBA_2026-10-20_BOS_DET: RuntimeError: 429 from summary"})
+    ok = run_pipeline._timed_step(
+        "nba-quarters", lambda: run_pipeline.step_nba_quarters("2026-10-30"), "2026-10-30")
+    assert ok is False and rebuilt == [1]
+    sql, params = conn.sqls[-1]
+    assert "INSERT INTO pipeline_log" in sql
+    assert params[1] == "dispatch:nba-quarters" and "429 from summary" in params[-1]
+    import inspect
+    assert '_timed_step(\n        "nba-quarters"' in inspect.getsource(run_pipeline.run_daily_pipeline)

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters: fill_gaps commits as it goes and one ESPN failure no longer drops the season; the 6am run writes the reason to pipeline_log. No production write. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, NCAAB feed names: a last rule for shortened school names plus 20 overrides (no name changes team; 80 more resolve). Replay of the kept raw events: a read-only dry run unless --apply, worker mode replay_unmatched. Review round: a prefix tie stays unresolved, a retried write cannot store a quote twice, listings 12+ hours from their game are not replayed; the 2025-26 dry run ran read only. PR #1094, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Stats board notes behind one ⓘ (Anytime TD too tall). Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM Phase A prop filters. NFL boards 01–05 and the same NBA sheet without kickoff slots. Hand-applied migration. Draft, not merged. |
