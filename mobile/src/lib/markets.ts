@@ -49,6 +49,8 @@ export function gameMarketForModel(modelId: string): string | null {
   // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
   if (modelId === 'nba_total_luck') return 'totals';
+  // NCAAB full-game totals: no 'over_under' in the id either.
+  if (modelId === 'ncaab_total_blend') return 'totals';
   // The NBA home team total (unders): the home team's own points, stored
   // under its own market, never the game's 'totals' rows.
   if (modelId === 'nba_team_total_luck') return 'team_totals_home';
@@ -240,6 +242,7 @@ export function marketClassForModel(modelId: string): MarketClass {
   // neither substring.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
   if (modelId === 'nba_total_luck') return 'game_total';
+  if (modelId === 'ncaab_total_blend') return 'game_total';
   // One team's points move with the game total, so the nearest class.
   if (modelId === 'nba_team_total_luck') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {

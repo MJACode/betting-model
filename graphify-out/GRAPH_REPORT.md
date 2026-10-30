@@ -1,15 +1,17 @@
 # Graph Report - wt_ncaab_model  (2026-10-30)
 
 ## Corpus Check
-- cluster-only mode — file stats not available
+- 1801 files · ~3,070,952 words
+- Verdict: corpus is large enough that graph structure adds value.
+- Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
 ## Summary
-- 37055 nodes · 88966 edges · 1118 communities (844 shown, 274 thin omitted)
+- 37055 nodes · 88968 edges · 1118 communities (844 shown, 274 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 2396 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b6c2af63`
+- Built from commit: `3103b84e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1033,16 +1035,16 @@
 10. `PickCard()` - 89 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Identity: ESPN owns the games row` --references--> `make_resolver()`  [INFERRED]
-  docs/sports/ncaab.md → data/ingestors/ncaab_teams.py
-- `What runs, and where it lands` --references--> `replay_unmatched()`  [INFERRED]
-  docs/sports/ncaab.md → data/ingestors/ncaab_odds_history.py
-- `8.1 P1, the market-anchored model: choices fixed before any P1 cell was graded (2026-10-18)` --references--> `choose_C()`  [INFERRED]
-  docs/nba_models_2026.md → models/nhl_moneyline_anchored.py
+- `Forward capture (2026-27)` --references--> `run_forward()`  [INFERRED]
+  docs/nba_public_splits.md → data/ingestors/nba_public_splits_ingestor.py
 - `Things a reader should know` --references--> `shot_value()`  [INFERRED]
   docs/nba_pbp_stints.md → data/ingestors/nba_stints.py
-- `4.3 Player props — one rule ships` --references--> `run_nba_prop_window()`  [INFERRED]
-  docs/nba_models_2026.md → scheduler.py
+- `What runs, and where it lands` --references--> `replay_unmatched()`  [INFERRED]
+  docs/sports/ncaab.md → data/ingestors/ncaab_odds_history.py
+- `Identity: ESPN owns the games row` --references--> `make_resolver()`  [INFERRED]
+  docs/sports/ncaab.md → data/ingestors/ncaab_teams.py
+- `12.2 Definitions` --references--> `visible_numbers()`  [INFERRED]
+  docs/nba_models_2026.md → models/nba_book_numbers.py
 
 ## Import Cycles
 - None detected.
@@ -4450,7 +4452,7 @@ Nodes (4): DNS, Local preview, Signal Base marketing site, Vercel
   docs/privacy.html · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **105 isolated node(s):** `expo/tsconfig.base`, `RFC-4122`, `@babel/core`, `babel-plugin-module-resolver`, `babel-preset-expo` (+100 more)
+- **105 isolated node(s):** `expo-asset`, `expo-dev-client`, `expo-font`, `react-native-purchases`, `react-native-screens` (+100 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 14288 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **274 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -4458,17 +4460,17 @@ Nodes (4): DNS, Local preview, Signal Base marketing site, Vercel
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `over()` connect `Mobile color contrast checker` to `Mobile bankroll card`, `Public splits and pitcher features`?**
-  _High betweenness centrality (0.147) - this node is a cross-community bridge._
-- **What connects `expo/tsconfig.base`, `RFC-4122`, `@babel/core` to the rest of the system?**
+  _High betweenness centrality (0.130) - this node is a cross-community bridge._
+- **What connects `expo-asset`, `expo-dev-client`, `expo-font` to the rest of the system?**
   _105 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Mobile picks home screen and filters` be split into smaller, more focused modules?**
   _Cohesion score 0.016416693259582314 - nodes in this community are weakly interconnected._
 - **Why does `Backtest` connect `Public splits and pitcher features` to `Build Your Own Model NFL facts doc`, `Mobile color contrast checker`, `Settlement, database and pruning`?**
-  _High betweenness centrality (0.141) - this node is a cross-community bridge._
+  _High betweenness centrality (0.129) - this node is a cross-community bridge._
 - **Should `Mobile stats board` be split into smaller, more focused modules?**
   _Cohesion score 0.00937896070975919 - nodes in this community are weakly interconnected._
 - **Why does `statement_timeout()` connect `Settlement, database and pruning` to `Public splits and pitcher features`, `Player prop box score backfill`, `Shared scripts and connections`, `NCAAB ESPN ingestor tests`, `Settlement CLV timeout retry tests`, `NCAAB ESPN schedule ingestor`, `NBA results and ESPN box scores`, `Prop box score backfill`, `NHL box score ingestor`?**
-  _High betweenness centrality (0.136) - this node is a cross-community bridge._
+  _High betweenness centrality (0.126) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

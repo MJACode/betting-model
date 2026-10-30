@@ -487,4 +487,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # API telemetry for the live monitor (monitoring/). The card reads the
+    # database only; installed so the scheduler runs no uninstrumented script.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("ncaab-total-card")
+    except Exception:  # noqa: BLE001
+        pass
     main()

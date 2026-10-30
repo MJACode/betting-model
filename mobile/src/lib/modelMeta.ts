@@ -438,6 +438,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NCAAB full-game totals (models/ncaab_total_blend.py, 2026-10-30): team
+  // ratings plus shooting luck and style, blended with DraftKings' total,
+  // decided once the evening before or on the morning of the game. The label
+  // is the platform's "Duke vs Kansas Over 145.5". A game line.
+  ncaab_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAAB Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
