@@ -144,6 +144,7 @@ second run stores nothing new. Each insert into `odds` also updates
 | Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close. Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
+| Pre-tip injuries | RotoWire's public injury JSON about every 10 minutes, every 5 while a game tips within three hours; Covers' public page about every 30 minutes as the fallback. Change rows, including a `cleared` row when a listed player leaves a non-empty report. Tags only | `data/ingestors/ncaab_injury_feed.py`, job `ncaab_injury_feed`; reachability `scripts/ncaab_injury_probe.py`, job `ncaab_injury_probe` |
 | Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
 
 ## Data accounts and sources (measured 2026-10-28)
@@ -213,8 +214,13 @@ second run stores nothing new. Each insert into `odds` also updates
   SBRO 2015-19).
 - **Overtime** happens in about 6% of games: in full-game and second-half
   markets, never in first-half ones.
-- **Player availability** has no free structured feed. Official reports exist
-  for Big 12, ACC and SEC conference games (and the NCAA tournament pilot).
+- **Player availability tags** come from RotoWire's public injury JSON, with
+  Covers' public page as the fallback (`data/ingestors/ncaab_injury_feed.py`).
+  A row is stored when the status changes, including `cleared` when a listed
+  player leaves a non-empty report. `injury_tags_before_tip` is the status at
+  or before tip, for a tag. It is not a model feature. A team or player the
+  NCAAB resolver and the override maps cannot place is logged and not guessed.
+  Official conference reports still cover conference games only.
 - **Torvik's robots.txt** (read 2026-10-29) bars six named crawlers, ClaudeBot
   and anthropic-ai among them, from the whole site, and every agent from the
   time-machine pages, `db.php`, `box.php`, `results.php`, `playerstat.php`

@@ -479,6 +479,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # a catalog read once both exist. Does not rewrite picks, odds or the
     # record. Sits before the posted-stake pair so those two stay adjacent.
     "add_alt_game_lines_2026_10_29.sql",
+    # 2026-10-30: NCAAB pre-tip injury changes, including status 'cleared',
+    # plus the open report, the poll backoff and the name-miss log. Worker
+    # only (RLS, no policy, anon revoked). Tags read injury_status_current.
+    # Not a model feature. Returns on a catalog read once the four tables
+    # exist and anon cannot SELECT the change log.
+    "add_ncaab_injury_changes_2026_10_30.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

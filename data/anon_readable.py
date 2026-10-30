@@ -322,6 +322,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_events",
     "ncaab_teams",
     "ncaab_venues",
+    # NCAAB pre-tip injury change log, the open report it diffs against, the
+    # poll backoff and the name misses. Created by
+    # data/ingestors/ncaab_injury_feed.py and
+    # data/migrations/add_ncaab_injury_changes_2026_10_30.sql. Tags only,
+    # via injury_status_current; the app does not read these four.
+    "ncaab_injury_changes",
+    "ncaab_injury_open",
+    "ncaab_injury_polls",
+    "ncaab_injury_misses",
     # The league's NBA injury report archive and its pull ledger. Created on
     # demand by data/ingestors/nba_injury_report.py; model input, never read
     # by the app.

@@ -1548,5 +1548,12 @@
     "key": "ncaab-history-deriv-open-2024-2026-r2",
     "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history); 2026-10-28: 'dont stop the spend'. Backstop for the opener purchase if the 2026-11-01 run fired before the refill and stopped at the floor at once.",
     "run_after": "2026-11-02T01:00:00+00:00"
+  },
+  {
+    "key": "ncaab-injury-reachability-2026-10-30",
+    "job_type": "ncaab_injury_probe",
+    "requested_by": "mike",
+    "note": "Reachability of the two public NCAAB injury pages (RotoWire JSON and Covers HTML) from the worker. Writes nothing. A non-200 or a body that does not parse fails the job; zero player rows is still a successful check.",
+    "args": {}
   }
 ]

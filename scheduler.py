@@ -46,6 +46,11 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         latest_odds, so the hour an opener appeared, and at which book, is
         known to five minutes. No call when no NCAAB game tips within 36
         hours; RUN_NCAAB_ODDS_CAPTURE=0 stops it. Writes no picks.)
+  * NCAAB injury feed     every 5 min, 24x7     -> run_ncaab_injury_feed
+        (scripts/ncaab_injury_feed.py: RotoWire's public injury JSON about
+        every 10 minutes, every 5 while a game tips within three hours;
+        Covers' public page about every 30. Change rows, including cleared.
+        Tags only. Writes no picks. RUN_NCAAB_INJURY=0 stops it.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -747,7 +752,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "nhl_goalie_window",
                   # Writes odds, not picks: a paid fetch beside the refresh
                   # passes' own NCAAB fetch, not a loop.
-                  "ncaab_odds_capture"}
+                  "ncaab_odds_capture",
+                  # Writes injury tags, not picks.
+                  "ncaab_injury_feed"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -1527,6 +1534,41 @@ def run_ncaab_odds_capture() -> None:
                    "ncaab-odds-capture", timeout=NCAAB_ODDS_CAPTURE_TIMEOUT_S)
     if outcome != "ok":
         raise RuntimeError(f"NCAAB odds capture did not finish: {outcome}")
+
+
+NCAAB_INJURY_FEED_TIMEOUT_S = 90
+
+
+def run_ncaab_injury_feed() -> None:
+    """One NCAAB injury tick (scripts/ncaab_injury_feed.py).
+
+    The script decides whether RotoWire or Covers is actually due, so most
+    ticks poll one source or neither. It writes change rows and the current
+    injury tags. It writes no picks, so it publishes nothing. A poll error
+    or a zero-player report on a game day exits 1; the alert line is the
+    heartbeat detail the failure alerter posts. RUN_NCAAB_INJURY=0 exits 0
+    without a request.
+    """
+    cmd = [sys.executable, "-m", "scripts.ncaab_injury_feed"]
+    log.info("START ncaab-injury-feed: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(
+            cmd, cwd=ROOT, env=BASE_ENV, check=False, text=True,
+            capture_output=True, timeout=NCAAB_INJURY_FEED_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"NCAAB injury feed timed out after {NCAAB_INJURY_FEED_TIMEOUT_S}s"
+        ) from exc
+    if result.stdout:
+        log.info(result.stdout.rstrip())
+    if result.stderr:
+        log.warning(result.stderr.rstrip())
+    if result.returncode != 0:
+        lines = (result.stderr or result.stdout or "").strip().splitlines()
+        alert = next((ln for ln in reversed(lines) if "NCAAB_INJURY_ALERT" in ln), "")
+        why = alert or (lines[-1] if lines else f"exit {result.returncode}")
+        raise RuntimeError(f"NCAAB injury feed: {why[:500]}")
+    log.info("DONE  ncaab-injury-feed (exit 0)")
 
 
 def run_nfl_opener_card() -> None:
@@ -2469,6 +2511,18 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/5", timezone=TIMEZONE),
         id="ncaab_odds_capture",
         name="NCAAB odds capture (every 5 min, 24x7: change-only, opener timing)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # NCAAB injury tags -- every five minutes, 24x7 (run_ncaab_injury_feed).
+    # The script polls RotoWire about every 10 minutes and every 5 near a tip,
+    # and Covers about every 30. An idle tick is one slate read and no request.
+    # Writes tags, not picks. RUN_NCAAB_INJURY=0 keeps the beat without a request.
+    sched.add_job(
+        run_ncaab_injury_feed,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="ncaab_injury_feed",
+        name="NCAAB injury feed (every 5 min, 24x7: tags only, change rows)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
