@@ -41,6 +41,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -200,12 +201,17 @@ def eastern_game_date(start) -> str:
     return dt.astimezone(_ET).strftime("%Y-%m-%d")
 
 
+@lru_cache(maxsize=16384)
 def _fold(v: str) -> str:
     """Case-, accent- and punctuation-insensitive comparison key.
 
     Apostrophes vanish ("Saint Mary's" = "Saint Marys", "Hawai'i" =
     "Hawaii"); every other punctuation run becomes a space, so "A&M" folds
     the same as "A M" and "Miami (OH)" the same as "Miami OH".
+
+    Cached: every resolve_team_name call folds the registry's 1,348 rows
+    several times over, and the 5-minute capture resolves each event's two
+    names twice.
     """
     v = unicodedata.normalize("NFKD", (v or "").strip().lower())
     v = "".join(c for c in v if not unicodedata.combining(c))
@@ -280,15 +286,111 @@ def _rest_is_mascot(rest: str, mascot: str | None) -> bool:
     return rest.split()[-1] == m.split()[-1]
 
 
+# ── the last step: the feed's shortened school names ────────────────────────
+#
+# The odds feed shortens school names that ESPN spells out. "Michigan St
+# Spartans" is ESPN's Michigan State, "CSU Fullerton Titans" is Cal State
+# Fullerton, "Loyola (Chi) Ramblers" is Loyola Chicago. No earlier step places
+# them: the 2026-10-29 history purchase (worker job 805227) kept bought event
+# snapshots raw (137,007 rows in ncaab_odds_unmatched; the job counted
+# 137,083), nearly all because 82 feed names resolved to no team. This step
+# runs only after every earlier step has returned None, so a name that
+# resolved before it existed resolves to the same team now.
+
+# A feed abbreviation (folded) -> what it may stand for. Each token is also
+# tried as written, so the "St" of "Mt. St. Mary's" can stay "St". Every entry
+# is here because a feed name stored on 2026-10-29 needs it.
+SCHOOL_ABBREVIATIONS: dict[str, tuple[str, ...]] = {
+    "st": ("state",),            # "East Tennessee St Buccaneers" -> East Tennessee State
+    "se": ("southeast",),        # "SE Missouri St Redhawks" -> Southeast Missouri State
+    "univ": ("university",),     # "Boston Univ. Terriers" -> Boston University
+    "csu": ("cal state",),       # "CSU Fullerton Titans" -> Cal State Fullerton
+    "cal": ("california",),      # "Cal Baptist Lancers" -> California Baptist
+    "chi": ("chicago",),         # "Loyola (Chi) Ramblers" -> Loyola Chicago
+    "mt": ("mount",),            # "Mt. St. Mary's Mountaineers" -> Mount St. Mary's
+    "bkn": ("brooklyn",),        # "St. Francis BKN Terriers" -> St. Francis Brooklyn
+    "intl": ("international",),  # "Florida Int'l Golden Panthers" -> Florida International
+}
+
+# ESPN team id -> the other names the feed gives that team's mascot (folded).
+# Keyed by team, not by word: another school can carry the same word.
+MASCOT_ALIASES: dict[int, tuple[str, ...]] = {
+    2253: ("antelopes",),        # Grand Canyon: ESPN "Lopes", the feed "Antelopes"
+    2229: ("golden panthers",),  # Florida International: ESPN "Panthers", the feed "Golden Panthers"
+}
+
+# A school part with more abbreviations than this is not tried (each one
+# doubles the spellings). The longest measured feed name has two.
+_MAX_ABBREVIATIONS = 4
+
+
+def _school_spellings(tokens: list[str]) -> set[str]:
+    """Every spelling of a feed school part: each token as written or expanded."""
+    forms = [""]
+    for tok in tokens:
+        options = (tok,) + SCHOOL_ABBREVIATIONS.get(tok, ())
+        forms = [f"{f} {o}".strip() for f in forms for o in options]
+    return set(forms)
+
+
+def _resolve_shortened_school(key: str, registry: list[dict]) -> int | None:
+    """The last step of resolve_team_name, on the folded name `key`.
+
+    Splits the name into a school part and the rest at every word. The school
+    part, with its abbreviations expanded, must equal the school, short name
+    or an alternate name of exactly ONE registry team, and the rest must be
+    that team's mascot (exactly) or one of its MASCOT_ALIASES. Exactly one
+    team across every split and spelling resolves; anything else is None, and
+    so is a name where one spelling belongs to two teams that both carry the
+    rest as their mascot. A spelling two teams share is otherwise skipped:
+    "Wright State" is both ESPN 2750's school and 134850's short name, so
+    "Wright St Raiders" places 2750 through its short name "Wright St".
+    """
+    by_name: dict[str, set[int]] = {}
+    mascots: dict[int, set[str]] = {}
+    for t in registry:
+        tid = t["espn_id"]
+        for n in (t.get("school"), t.get("short_name"), *(t.get("alt") or ())):
+            folded = _fold(n or "")
+            if folded:
+                by_name.setdefault(folded, set()).add(tid)
+        own = mascots.setdefault(tid, set())
+        if _fold(t.get("mascot") or ""):
+            own.add(_fold(t["mascot"]))
+        own.update(MASCOT_ALIASES.get(tid, ()))
+
+    tokens = key.split()
+    hits: set[int] = set()
+    shared = False
+    for i in range(1, len(tokens)):
+        school, rest = tokens[:i], " ".join(tokens[i:])
+        if sum(1 for tok in school if tok in SCHOOL_ABBREVIATIONS) > _MAX_ABBREVIATIONS:
+            continue
+        for spelling in _school_spellings(school):
+            ids = by_name.get(spelling, set())
+            fits = {tid for tid in ids if rest in mascots.get(tid, ())}
+            if len(fits) > 1:
+                shared = True          # two teams answer to this school AND mascot
+            elif len(ids) == 1:
+                hits |= fits
+    if shared or len(hits) != 1:
+        return None
+    return next(iter(hits))
+
+
 def resolve_team_name(name: str, registry: list[dict]) -> int | None:
     """An odds-feed team name -> ESPN team id, or None when it does not resolve.
 
     Order: config.NCAAB_ODDS_API_MAP override (name -> ESPN id) -> exact ESPN
     display name -> "school mascot" -> exact school -> short name -> alternate
     name -> the longest school that prefixes the name, only when the rest is
-    that school's mascot. Ambiguity at any step (two teams claim the same
-    folded name) resolves to None, never to a guess: an unresolved event is
-    dropped and counted, a mis-resolved one settles on the wrong game.
+    that school's mascot -> LAST, the feed's shortened school names
+    (_resolve_shortened_school: "Michigan St Spartans", "CSU Fullerton
+    Titans"), tried only when every step before it found nothing. Ambiguity at
+    any step (two teams claim the same folded name) resolves to None, never to
+    a guess: an unresolved event is dropped and counted, a mis-resolved one
+    settles on the wrong game. Two schools of the same length that both prefix
+    the name are such an ambiguity, so the last step is not tried for them.
     """
     if not name:
         return None
@@ -334,9 +436,11 @@ def resolve_team_name(name: str, registry: list[dict]) -> int | None:
             best, best_len, tie = t["espn_id"], len(sl), False
         elif len(sl) == best_len and t["espn_id"] != best:
             tie = True
-    if best is not None and not tie:
+    if tie:
+        return None        # two schools of the same length fit: no answer, never a guess
+    if best is not None:
         return best
-    return None
+    return _resolve_shortened_school(key, registry)
 
 
 # ── matching an odds event onto ESPN's schedule ──────────────────────────────
