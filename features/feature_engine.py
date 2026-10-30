@@ -801,7 +801,8 @@ def build_mlb_game_features(conn: DBConnection,
     away_bp_ip1 = _get_bullpen_workload(conn, away_team, game_date, days=1)
     away_bp_ip3 = _get_bullpen_workload(conn, away_team, game_date, days=3)
 
-    injuries = query_injuries_for_game(conn, "MLB", home_team, away_team, game_date)
+    injuries = query_injuries_for_game(
+        conn, "MLB", home_team, away_team, game_date, game_id=game_id)
     home_inj = injuries["home_injuries"]
     away_inj = injuries["away_injuries"]
 
@@ -1098,7 +1099,8 @@ def build_nhl_game_features(conn: DBConnection,
     home_goalie = _get_nhl_goalie_stats(conn, home_team, game_date, season)
     away_goalie = _get_nhl_goalie_stats(conn, away_team, game_date, season)
 
-    injuries = query_injuries_for_game(conn, "NHL", home_team, away_team, game_date)
+    injuries = query_injuries_for_game(
+        conn, "NHL", home_team, away_team, game_date, game_id=game_id)
     home_inj = injuries["home_injuries"]
     away_inj = injuries["away_injuries"]
 
@@ -1281,9 +1283,11 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
 
     # ── Injuries (same structure the shared _blk_injuries helper expects) ────
     inj_cols = ["team", "report_date", "scenario", "severity_weight",
-                "return_ramp_factor", "status"]
+                "return_ramp_factor", "status", "player_name", "player_id",
+                "created_at", "injury_id"]
     inj_rows = conn.execute("""
-        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status
+        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status,
+               player_name, player_id, created_at, injury_id
         FROM injuries WHERE sport = 'NHL'
         ORDER BY team, report_date
     """).fetchall()
@@ -1359,7 +1363,7 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     return dict(team_stats=team_stats, goalies=goalies,
                 goals=goals, home_goals=home_goals, away_goals=away_goals,
                 injuries=injuries, inj_dates=inj_dates, odds=odds_lookup,
-                team_book=book)
+                team_book=book, commence=_commence_by_game(conn, "NHL"))
 
 
 def _blk_nhl_asof(store: dict, team: str, season: int, game_date: str) -> dict:
@@ -1411,8 +1415,9 @@ def _build_nhl_features_from_bulk(bulk: dict,
     home_goalie = _blk_nhl_asof(bulk["goalies"],    home_team, season, game_date)
     away_goalie = _blk_nhl_asof(bulk["goalies"],    away_team, season, game_date)
 
-    home_inj = _blk_injuries(bulk, home_team, game_date)
-    away_inj = _blk_injuries(bulk, away_team, game_date)
+    tip = (bulk.get("commence") or {}).get(game_id)
+    home_inj = _blk_injuries(bulk, home_team, game_date, as_of=tip)
+    away_inj = _blk_injuries(bulk, away_team, game_date, as_of=tip)
 
     # Recompute rolling/locational goals ASOF the game date — the backfill
     # snapshot's rolling values are stale (they describe the snapshot date).
@@ -1660,9 +1665,11 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int],
     }
 
     # ── Injuries ──────────────────────────────────────────────────────────────
-    inj_cols = ['team', 'report_date', 'scenario', 'severity_weight', 'return_ramp_factor', 'status']
+    inj_cols = ['team', 'report_date', 'scenario', 'severity_weight', 'return_ramp_factor',
+                'status', 'player_name', 'player_id', 'created_at', 'injury_id']
     inj_rows = conn.execute("""
-        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status
+        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status,
+               player_name, player_id, created_at, injury_id
         FROM injuries WHERE sport = 'MLB'
         ORDER BY team, report_date
     """).fetchall()
@@ -1719,7 +1726,7 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int],
     out = dict(team_stats=team_stats, pitcher=pitcher, bullpen=bullpen,
                runs=runs, home_runs=home_runs, away_runs=away_runs,
                weather=weather, injuries=injuries, inj_dates=inj_dates,
-               odds=odds_lookup)
+               odds=odds_lookup, commence=_commence_by_game(conn, "MLB"))
     if include_handicap:
         from features.market_handicap import load_public_splits
         from features.market_movement import load_market_movement
@@ -1789,15 +1796,55 @@ def _blk_season_loc_runs(bulk: dict, team: str, game_date: str, location: str) -
     return round(float(np.mean(season_runs)), 3) if season_runs else None
 
 
-def _blk_injuries(bulk: dict, team: str, game_date: str) -> list[dict]:
-    """Injuries for team from the most recent report on or before game_date."""
-    if team not in bulk['inj_dates']:
+def _commence_by_game(conn: DBConnection, sport: str) -> dict:
+    """game_id → tip-off. The injury reader stops at this clock for a game
+    that has already started."""
+    rows = conn.execute(
+        "SELECT game_id, commence_time FROM games WHERE sport = ?",
+        (sport,),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def _choose_injury_report_date(bulk: dict, game_date: str,
+                               as_of: str | None) -> str | None:
+    """Latest report date on or before the game that has a snapshot by `as_of`.
+
+    Sport-wide, same as the live reader: a team missing from that report is
+    healthy. A report whose every snapshot is after tip is not that date.
+    """
+    from data.ingestors.injury_ingestor import latest_injury_rows
+
+    dates = set()
+    for by_date in bulk.get("injuries", {}).values():
+        dates.update(by_date)
+    ordered = sorted(d for d in dates if d <= game_date)
+    for report in reversed(ordered):
+        if not as_of:
+            return report
+        for by_date in bulk["injuries"].values():
+            if latest_injury_rows(by_date.get(report, []), as_of=as_of):
+                return report
+    return None
+
+
+def _blk_injuries(bulk: dict, team: str, game_date: str,
+                  as_of: str | None = None) -> list[dict]:
+    """One row per player from the report `query_injuries_for_game` would use.
+
+    `as_of` is tip-off. Each player keeps his latest snapshot at or before it.
+    """
+    from data.ingestors.injury_ingestor import latest_injury_rows
+
+    cache = bulk.setdefault("_injury_report_date", {})
+    key = (game_date, as_of or "")
+    if key not in cache:
+        cache[key] = _choose_injury_report_date(bulk, game_date, as_of)
+    report = cache[key]
+    if not report:
         return []
-    dates = bulk['inj_dates'][team]
-    idx = bisect.bisect_right(dates, game_date) - 1
-    if idx < 0:
-        return []
-    return bulk['injuries'][team].get(dates[idx], [])
+    rows = bulk.get("injuries", {}).get(team, {}).get(report, [])
+    return latest_injury_rows(rows, as_of=as_of)
 
 
 def _build_mlb_features_from_bulk(bulk: dict,
@@ -1822,8 +1869,9 @@ def _build_mlb_features_from_bulk(bulk: dict,
     away_bp_ip1 = _blk_bullpen_ip(bulk, away_team, game_date, 1)
     away_bp_ip3 = _blk_bullpen_ip(bulk, away_team, game_date, 3)
 
-    home_inj = _blk_injuries(bulk, home_team, game_date)
-    away_inj = _blk_injuries(bulk, away_team, game_date)
+    tip = (bulk.get("commence") or {}).get(game_id)
+    home_inj = _blk_injuries(bulk, home_team, game_date, as_of=tip)
+    away_inj = _blk_injuries(bulk, away_team, game_date, as_of=tip)
 
     def _gp(s): return s.get("games_played") or 0
     is_early = int(_gp(home_stats) < MIN_GAMES_BASELINE or _gp(away_stats) < MIN_GAMES_BASELINE)
