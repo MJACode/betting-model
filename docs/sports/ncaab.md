@@ -163,14 +163,27 @@ second run stores nothing new. Each insert into `odds` also updates
   app had no `ncaab` prefix and filed every such model under MLB
   (`modelMeta.sportOfModel`, and its copy in `ModelsScreen`).
 - **The totals model's label is "NCAAB Totals", badge O/U, under the id
-  `ncaab_over_under`.** That is the id in the model's build plan. The model's
-  own pull request must register the same id in `config.py`: if config scores
-  an id the app has no label for, `tests/test_mobile_pick_categories.py` fails.
-  An id with `over_under` in it is priced off the `totals` rows; an id without
-  it falls to the moneyline rows (`markets.gameMarketForModel`).
+  `ncaab_total_blend`**, the id the model writes its picks under
+  (`models/ncaab_total_blend.py`). The app first used `ncaab_over_under`, the
+  id in the model's build plan; no model writes that id. If config scores an
+  id the app has no label for, `tests/test_mobile_pick_categories.py` fails.
+- **It is priced off the `totals` rows because it is named.** An id with
+  `over_under` in it reaches the totals rows on its own; `ncaab_total_blend`
+  does not, so `markets.gameMarketForModel` names it (else every price,
+  movement and line-shop lookup reads the moneyline rows), and so does
+  `marketClassForModel` (else a parlay treats it as independent of the same
+  game's other legs).
+- **Its page and its picks say when it decides.** The model page says it
+  decides each game once, the evening before, at DraftKings' total, and that a
+  posted bet is never re-priced (`modelMeta.modelPageTiming`). It prints no
+  Eastern clock time: the card runs at 22:00 UTC, which is 6pm ET until
+  1 November and 5pm ET after it. Pick Detail says "Posted" once, not "the
+  first scoring run of the day" (`markets.pickTimingInfo`). A row for a game
+  that is not today shows its day as well as its time, as the Signals card
+  does.
 - **The Today board reads NCAAB picks up to 7 days ahead**
-  (`fetchUpcomingNcaabPicks`), because the totals model is planned to decide
-  the evening before the game. It reads the picks first, then only those
+  (`fetchUpcomingNcaabPicks`), because the totals model decides the evening
+  before the game. It reads the picks first, then only those
   picks' games and lines, 80 game ids per request. Reading the whole window
   instead would have been too big: over 2025-26 the biggest day held 4,417
   main-market rows across all books, and the biggest seven days held 10,424
@@ -188,8 +201,16 @@ second run stores nothing new. Each insert into `odds` also updates
   "No player leaderboard" state, and every Stats read returns nothing for
   NCAAB before it asks the server). School abbreviations: cards show the
   school name, because the app cannot read `ncaab_teams` (anon has no SELECT
-  on it). Live scores and the Scoreboard: the live scoreboard poller
-  (`data/ingestors/live_scoreboard.py`) does not cover NCAAB.
+  on it, RLS is on and it has no policy; read only, 2026-10-30). Opening it is
+  a worker-side change as well as an app one: the code that creates the table
+  (`data/ingestors/ncaab_teams.py`, `ensure_tables`) re-runs its create and
+  lock-down whenever it finds anon holding a grant, so a grant alone would be
+  revoked the next time that runs. Every school name on the games from 1 to
+  8 November matches `ncaab_teams.school` (492 of 492). Nine school names
+  appear twice in `ncaab_teams`, six of them with two different
+  abbreviations, so those six must keep the school name. Live scores and the
+  Scoreboard: the live scoreboard poller (`data/ingestors/live_scoreboard.py`)
+  does not cover NCAAB.
 
 ## Data accounts and sources (measured 2026-10-28)
 

@@ -7,17 +7,19 @@
  * model's picks reach a board. Before that the app had no NCAAB chip, filed an
  * ncaab_* model under MLB, and dropped `sport: 'NCAAB'` from a push.
  *
- * The planned model id is `ncaab_over_under` (the model's build plan). The
- * model's own pull request registers it in config.py; the app's label for it
- * lives in modelMeta.ts.
+ * The totals model writes its picks as `ncaab_total_blend`
+ * (models/ncaab_total_blend.py MODEL_ID, in the model's own pull request). The
+ * app first labelled it `ncaab_over_under`, the id in the model's build plan;
+ * no model writes that id.
  */
 
 import { SPORTS, type Sport } from '../src/hooks/useSportFilter';
 import { routeForPush, PUSH_ROUTE_VERSION } from '../src/lib/pushRoute';
 import {
-  MODEL_META, betTypePickerGroups, modelCategory, modelLong, modelShort, sportOfModel,
+  MODEL_META, betTypePickerGroups, modelCategory, modelLong, modelPageTiming, modelShort, sportOfModel,
 } from '../src/lib/modelMeta';
-import { gameMarketForModel } from '../src/lib/markets';
+import { gameMarketForModel, marketClassForModel, pickTimingInfo } from '../src/lib/markets';
+import type { Pick } from '../src/types';
 import { GROUP_ORDER, defaultStatFor, supportsHitRate } from '../src/lib/statCatalog';
 import { supportsTeamBoard } from '../src/lib/teamStatCatalog';
 import { segmentsForSport } from '../src/lib/statSegments';
@@ -48,15 +50,30 @@ check('a sport the app does not have still leaves the sport alone',
   unknown?.kind === 'board' && unknown.sport === null, JSON.stringify(unknown));
 
 // ── Models ───────────────────────────────────────────────────────────────────
-check('ncaab_over_under is filed under NCAAB', sportOfModel('ncaab_over_under') === 'NCAAB');
+const TOTALS = 'ncaab_total_blend';
+check(`${TOTALS} is filed under NCAAB`, sportOfModel(TOTALS) === 'NCAAB');
 check('any ncaab_ id is filed under NCAAB, not MLB', sportOfModel('ncaab_spread_market') === 'NCAAB');
 check('NCAAF ids are unchanged', sportOfModel('ncaaf_over_under') === 'NCAAF');
-check('ncaab_over_under has a label', !!MODEL_META.ncaab_over_under);
-check('its badge is O/U', modelShort('ncaab_over_under') === 'O/U', modelShort('ncaab_over_under'));
-check('its name is NCAAB Totals', modelLong('ncaab_over_under') === 'NCAAB Totals', modelLong('ncaab_over_under'));
-check('it is a game market', modelCategory('ncaab_over_under') === 'game');
-check('it is priced off the totals rows', gameMarketForModel('ncaab_over_under') === 'totals',
-  String(gameMarketForModel('ncaab_over_under')));
+check(`${TOTALS} has a label`, !!MODEL_META[TOTALS]);
+check('the build-plan id ncaab_over_under has no label (no model writes it)', !MODEL_META.ncaab_over_under);
+check('its badge is O/U', modelShort(TOTALS) === 'O/U', modelShort(TOTALS));
+check('its name is NCAAB Totals', modelLong(TOTALS) === 'NCAAB Totals', modelLong(TOTALS));
+check('it is a game market', modelCategory(TOTALS) === 'game');
+check('it is priced off the totals rows', gameMarketForModel(TOTALS) === 'totals',
+  String(gameMarketForModel(TOTALS)));
+check('a parlay treats it as a game total', marketClassForModel(TOTALS) === 'game_total',
+  marketClassForModel(TOTALS));
+// It decides each game once, the evening before (scripts/ncaab_total_card.py).
+const timing = modelPageTiming(TOTALS);
+check('its page says it decides the evening before', timing.title === 'Decided the evening before', timing.title);
+check('its page names no Eastern clock time (22:00 UTC moves with DST)',
+  ![timing.title, timing.body, timing.empty, timing.note].some((s) => /\d\s?(am|pm)\b|\d:\d\d/i.test(s)));
+const posted = pickTimingInfo({
+  pick_id: 1, model_id: TOTALS, sport: 'NCAAB', signal_type: 'BET', created_at: '2026-11-01T22:05:00Z',
+  player_id: null, is_live: false,
+} as unknown as Pick);
+check('its Pick Detail note says posted once, not the first scoring run of the day',
+  !!posted && posted.kind === 'posted' && !posted.note.includes('first scoring run'), posted?.note ?? 'null');
 // The custom-model picker offers moneyline, spread and props slots only, so a
 // totals model adds no NCAAB row there.
 check('the custom-model picker has no NCAAB row for a totals model',

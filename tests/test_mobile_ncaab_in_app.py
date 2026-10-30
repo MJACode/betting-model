@@ -15,9 +15,13 @@ Measured on origin/master b6c2af63 (2026-10-30), before this change:
 - The Stats reads fall through to the MLB views for a sport they do not name,
   so an NCAAB board would have asked for MLB rows.
 
-The NCAAB model is planned as ``ncaab_over_under`` (the build plan's id). The
-model's own pull request must use the same id: ``test_mobile_pick_categories``
-fails the day config scores a model the app has no label for.
+The NCAAB totals model writes its picks as ``ncaab_total_blend``
+(``models/ncaab_total_blend.py`` ``MODEL_ID``, in the model's own pull
+request). The app first labelled it ``ncaab_over_under``, the id in the
+model's build plan, and under the real id every pick would have shown its raw
+code name and been priced off the moneyline rows (review, 2026-10-30).
+``test_mobile_pick_categories`` fails the day config scores a model the app
+has no label for.
 
 These are text checks, like the rest of the mobile tests: node is not on the
 machine that runs this suite (CLAUDE.md section 1b), so the TypeScript is read,
@@ -48,6 +52,7 @@ TEAM_FORM = SRC / "lib" / "teamForm.ts"
 STAT_CATALOG = SRC / "lib" / "statCatalog.ts"
 TEAM_STAT_CATALOG = SRC / "lib" / "teamStatCatalog.ts"
 MARKETS = SRC / "lib" / "markets.ts"
+DETAIL_SCREEN = SRC / "screens" / "BuiltInModelDetailScreen.tsx"
 
 
 def _read(path: Path) -> str:
@@ -115,19 +120,106 @@ def test_ncaab_is_in_the_custom_model_catalog_order():
     assert names.index("NCAAB") == names.index("NCAAF") + 1, names
 
 
-def test_the_planned_totals_model_has_a_label_and_prices_totals():
+# The id the NCAAB totals model writes its picks under
+# (models/ncaab_total_blend.py MODEL_ID, in the model's own pull request).
+NCAAB_TOTALS_ID = "ncaab_total_blend"
+
+
+def test_the_totals_model_has_a_label_under_the_id_it_writes():
     src = _read(MODEL_META)
-    m = re.search(r"\n  ncaab_over_under: \{(.*?)\n  \},", src, re.S)
-    assert m, "ncaab_over_under has no MODEL_META entry: its card would print the raw id"
+    m = re.search(rf"\n  {NCAAB_TOTALS_ID}: \{{(.*?)\n  \}},", src, re.S)
+    assert m, f"{NCAAB_TOTALS_ID} has no MODEL_META entry: its card would print the raw id"
     entry = m.group(1)
     assert "longLabel: 'NCAAB Totals'" in entry
     assert "shortLabel: 'O/U'" in entry
     assert "type: 'game'" in entry
-    # gameMarketForModel reads the id: 'over_under' maps to the totals rows.
-    # An id without it (ncaab_total_*) would fall to 'h2h' and every price,
-    # movement and line-shop lookup would read moneyline rows.
-    gm = _fn(_read(MARKETS), "gameMarketForModel")
-    assert "if (modelId.includes('over_under')) return 'totals';" in gm
+    # The build plan's id is not a model. A label under it would keep an
+    # 'NCAAB Totals' card on the Models tab that never gets a record.
+    assert not re.search(r"\n  ncaab_over_under: \{", src), (
+        "ncaab_over_under still has a MODEL_META entry: no model writes that id"
+    )
+
+
+def test_the_totals_model_reads_the_totals_rows():
+    """The id has neither 'over_under' nor 'spread' in it.
+
+    gameMarketForModel and marketClassForModel both read the id. Without a
+    named line it falls to 'h2h' (every price, movement and line-shop lookup
+    reads the moneyline rows) and to 'other' (a parlay treats the total as
+    independent of the same game's other legs). mlb_total_market and
+    nba_total_luck hit the same trap and are named the same way.
+    """
+    markets = _read(MARKETS)
+    gm = _fn(markets, "gameMarketForModel")
+    assert f"if (modelId === '{NCAAB_TOTALS_ID}') return 'totals';" in gm
+    # Before the last line, the one every unnamed id falls to (the NFL in-play
+    # moneyline returns 'h2h' earlier on purpose).
+    assert gm.index(f"'{NCAAB_TOTALS_ID}'") < gm.rindex("return 'h2h';")
+    mc = _fn(markets, "marketClassForModel")
+    assert f"if (modelId === '{NCAAB_TOTALS_ID}') return 'game_total';" in mc
+    assert mc.index(f"'{NCAAB_TOTALS_ID}'") < mc.index("return 'other';\n}")
+
+
+# -- the model's own page -------------------------------------------------------
+
+
+def test_a_model_page_row_says_the_day_of_a_game_that_is_not_today():
+    """The NCAAB model decides the evening before, so most of its rows on its
+    own page are tomorrow's games. A clock time alone read as tonight.
+    gameDayLabelET is null for a game today, so today's rows keep the time
+    alone (the Signals card's context line does the same)."""
+    src = _read(DETAIL_SCREEN)
+    m = re.search(r"\nfunction TodayPickRow\((.*?)\n\}\n", src, re.S)
+    assert m, "TodayPickRow not found"
+    row = m.group(1)
+    assert (
+        "const timeLabel = signalsContextTime(gameDayLabelET(game?.commence_time), "
+        "formatGameTimeET(game?.commence_time));"
+    ) in row
+    # One label, used for both what is drawn and what is spoken.
+    assert "accessibilityLabel={[pick.pick_label, signalDisplayName(pick.signal_type), timeLabel," in row
+    assert "{timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}" in row
+    imports = src[:src.index("\nfunction ")]
+    assert re.search(r"import \{[^}]*\bgameDayLabelET\b[^}]*\} from '@/lib/format';", imports)
+    assert re.search(r"import \{[^}]*\bsignalsContextTime\b[^}]*\} from '@/lib/signalsCard';", imports)
+
+
+def _timing_branch(src: str) -> str:
+    body = _fn(src, "modelPageTiming")
+    m = re.search(r"if \(EVENING_BEFORE_MODELS\.includes\(modelId\)\) \{(.*?)\n  \}\n", body, re.S)
+    assert m, "modelPageTiming has no branch for the models that decide the evening before"
+    return m.group(1)
+
+
+def test_the_model_page_says_it_decides_the_evening_before():
+    """The default copy says a pick locks the first time the model scores it
+    today, that lines refresh hourly, and to check back after the next
+    refresh. The NCAAB card decides each game once, the evening before, so all
+    three sent a member back at the wrong time."""
+    src = _read(MODEL_META)
+    lst = re.search(r"const EVENING_BEFORE_MODELS: readonly string\[\] = \[(.*?)\];", src, re.S)
+    assert lst and f"'{NCAAB_TOTALS_ID}'" in lst.group(1)
+    branch = _timing_branch(src)
+    body = _fn(src, "modelPageTiming")
+    assert body.index("EVENING_BEFORE_MODELS.includes(modelId)") < body.index("title: 'Picks lock for the day'")
+    assert "title: 'Decided the evening before'" in branch
+    assert "the evening before" in branch
+    assert "never re-priced" in branch
+    # No Eastern clock time: the card runs at 22:00 UTC, which is 6pm ET until
+    # 1 November and 5pm ET after it.
+    for s in re.findall(r"'([^']*)'", branch):
+        assert not re.search(r"\d\s?(?:am|pm)\b|\d:\d\d", s, re.I), s
+    for stale in ("first time this model scores it today", "pipeline refresh", "hourly"):
+        assert stale not in branch, stale
+
+
+def test_the_pick_screen_says_posted_once_not_first_scoring_run():
+    """Pick Detail's lock note for a game pick says it locked at the first
+    scoring run of the day. The NCAAB card posts once and never re-prices, so
+    it takes the posted note the NBA and NHL totals cards use."""
+    body = _fn(_read(MARKETS), "pickTimingInfo")
+    chain = body[body.index("const nbaPosted ="):body.index("kind: 'posted',")]
+    assert f"pick.model_id === '{NCAAB_TOTALS_ID}'" in chain
 
 
 # -- the board reaches the evening-before pick --------------------------------
