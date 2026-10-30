@@ -48,9 +48,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "data/anon_readable.py": {
-    "mtime": 1793379664.6377385,
-    "seen": 1793382594.569848,
-    "ast_hash": "fc671980f2edd6c2d07f9aefa60329e0",
+    "mtime": 1793392785.0017173,
+    "seen": 1793393233.3447711,
+    "ast_hash": "23a2425158f25eff6dc8b42ce9ff3018",
     "semantic_hash": ""
   },
   "data/db.py": {
@@ -318,9 +318,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/odds_ingestor.py": {
-    "mtime": 1793381225.5807097,
-    "seen": 1793382594.5715227,
-    "ast_hash": "c3ace1b01cc8ea769ef4db15cdd2732d",
+    "mtime": 1793392479.4379222,
+    "seen": 1793393233.3451805,
+    "ast_hash": "c5f40e691d230d4c8120eaea8a9b4ad0",
     "semantic_hash": ""
   },
   "data/ingestors/odds_quota.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1793381509.5514011,
-    "seen": 1793382594.5724497,
-    "ast_hash": "1532bd2faf897b6e50d1e68db45ee699",
+    "mtime": 1793392479.4401014,
+    "seen": 1793393233.346242,
+    "ast_hash": "1bc93561cf0a473fa9b54202fe271ede",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -5712,9 +5712,9 @@
     "semantic_hash": ""
   },
   "tests/test_historical_backfill.py": {
-    "mtime": 1793380999.2278235,
-    "seen": 1793382594.578411,
-    "ast_hash": "45bc5474bba8a754d5ef40d677ff98de",
+    "mtime": 1793392479.4428086,
+    "seen": 1793393233.3524637,
+    "ast_hash": "7e691ebd8b60d385fe7d2d68508e1587",
     "semantic_hash": ""
   },
   "tests/test_house_juice_floor.py": {
@@ -8328,9 +8328,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/nba_odds_history.py": {
-    "mtime": 1793381250.708502,
-    "seen": 1793382594.569971,
-    "ast_hash": "e993e6180e1da857a03a83983f0145b8",
+    "mtime": 1793392784.9997058,
+    "seen": 1793393233.3449547,
+    "ast_hash": "7b709583c9df5cee32b76f8c8ab4f6c7",
     "semantic_hash": ""
   },
   "data/ingestors/nba_period_scores.py": {
@@ -10302,9 +10302,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_odds_history.py": {
-    "mtime": 1793385732.912324,
-    "seen": 1793386687.6158092,
-    "ast_hash": "4555116376833ce26aae9689cccf3e2e",
+    "mtime": 1793392711.3631003,
+    "seen": 1793393233.3450472,
+    "ast_hash": "52a99562380dba3324d1d26c995cd872",
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_sdv_import.py": {
@@ -10650,9 +10650,9 @@
     "semantic_hash": ""
   },
   "tests/test_ncaab_odds_history.py": {
-    "mtime": 1793381552.2171004,
-    "seen": 1793382594.5792413,
-    "ast_hash": "92815027f9e3c3e327e5fd0ac1836b24",
+    "mtime": 1793392368.5924754,
+    "seen": 1793393233.3826168,
+    "ast_hash": "f5f531596f1e9fd0d05250110e22b2be",
     "semantic_hash": ""
   },
   "tests/test_ncaab_odds_intake.py": {
@@ -10674,9 +10674,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaab.md": {
-    "mtime": 1793385733.008528,
-    "seen": 1793386687.644359,
-    "ast_hash": "b8cba5212ad004a538cf501ab5b811a2",
+    "mtime": 1793392784.996033,
+    "seen": 1793393233.3857641,
+    "ast_hash": "472ba00264778dfab954cee7ad08f26f",
     "semantic_hash": ""
   },
   "data/ingestors/alt_game_lines.py": {
@@ -10931,22 +10931,16 @@
     "ast_hash": "e3a1a3df3f0b85f8576fdffcb39d7b9e",
     "semantic_hash": ""
   },
-  "data/migrations/odds_history_pulls_minute_key_2026_10_30.sql": {
-    "mtime": 1793381134.4968996,
-    "seen": 1793382594.5722485,
-    "ast_hash": "6b00184cbde62e94197676843f1d7d61",
-    "semantic_hash": ""
-  },
   "tests/test_ncaab_opener_grid.py": {
-    "mtime": 1793385732.915295,
-    "seen": 1793386687.6421156,
-    "ast_hash": "d32b8801dc2ac953409b98d75a38e234",
+    "mtime": 1793392572.9447086,
+    "seen": 1793393233.3826363,
+    "ast_hash": "9763e091ae81c5d118e02a7d6eeb1e3b",
     "semantic_hash": ""
   },
-  "tests/test_odds_history_pulls_minute_key_pg.py": {
-    "mtime": 1793380959.8070695,
-    "seen": 1793382594.6125891,
-    "ast_hash": "f1a1c08da736fb53dbc8c08d0667dd05",
+  "tests/test_ncaab_opener_grid_pg.py": {
+    "mtime": 1793392367.2941446,
+    "seen": 1793393233.3826423,
+    "ast_hash": "3ed552aa7b5c21d3928a1708c0438763",
     "semantic_hash": ""
   }
 }
