@@ -813,7 +813,8 @@ def step_nba_quarters(run_date: str) -> bool:
       1. quarter scores for every finished game this season that lacks them
          (data/ingestors/nba_period_scores.py; only missing games are fetched)
       2. play-by-play and possessions for the same games
-         (data/ingestors/nba_pbp.fill_gaps; it refuses past MAX_GAPS)
+         (data/ingestors/nba_pbp.fill_gaps; at most MAX_GAPS a run, oldest
+         first, and one game's failure does not drop the games already built)
       3. nba_team_q1_games rebuilt for this season and the last, since the
          last-10 window reaches back into last season early on
          (data/ingestors/nba_team_q1.py)
@@ -845,10 +846,19 @@ def step_nba_quarters(run_date: str) -> bool:
     try:
         try:
             from data.ingestors.nba_pbp import fill_gaps
-            logger.success(f"✓ NBA play-by-play: {fill_gaps(conn, season)}")
+            pbp = fill_gaps(conn, season)
+            if pbp.get("errors"):
+                # Last ERROR line is what _timed_step stores in pipeline_log.
+                # One game's failure is already committed around; the run stays
+                # red until a later pass has none, so a real error is not hidden.
+                detail = f"; first: {pbp['first_error']}" if pbp.get("first_error") else ""
+                logger.error(f"✗ NBA play-by-play failed: {pbp['errors']} game(s){detail}")
+                ok = False
+            else:
+                logger.success(f"✓ NBA play-by-play: {pbp}")
         except Exception as exc:
             conn.rollback()
-            logger.error(f"✗ NBA play-by-play failed: {exc}")
+            logger.error(f"✗ NBA play-by-play failed: {type(exc).__name__}: {exc}")
             ok = False
         try:
             from data.ingestors.nba_team_q1 import rebuild
@@ -2198,7 +2208,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # Quarter scores, play-by-play possessions, then nba_team_q1_games, which
     # the NBA team page reads. Free ESPN endpoints; only missing games fetched.
     logger.info("Step 0c1: NBA quarter scores, possessions and 1Q team stats...")
-    results["nba_quarters"] = step_nba_quarters(run_date)
+    # _timed_step is what writes pipeline_log.error_msg. --step already uses
+    # it; the 6am run did not, so a failed nba_quarters left no reason.
+    results["nba_quarters"] = _timed_step(
+        "nba-quarters", lambda: step_nba_quarters(run_date), run_date)
 
     # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
     # Keeps the table (public track record + mobile action filter + Discord)

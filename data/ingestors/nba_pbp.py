@@ -50,7 +50,9 @@ GAPS. The release lacks seven regular-season games (six from late February
 2019-20, and NBA_2026-01-20_LAC_CHI). --fill-gaps takes every `games` row no stored ESPN game
 matched from ESPN's own free scoreboard and summary endpoints, which the
 release is a flattening of, and writes it through the same path with
-source 'espn_summary_api', dated by our `games` row.
+source 'espn_summary_api', dated by our `games` row. One call takes at most
+MAX_GAPS games, oldest first; a game whose summary fails is counted and the
+games already built stay committed.
 
 REBUILD. --rebuild re-derives the stored games whose ESPN ids a file lists,
 from nba_pbp and nba_pbp_box alone (so gap games rebuild too), and replaces
@@ -1183,7 +1185,7 @@ def _exact_seconds(box_recs: list[dict], adv_secs: dict[str, float],
 # ── gaps: games the release lacks, from ESPN's own summary endpoint ────────
 
 GAP_SOURCE = "espn_summary_api"
-MAX_GAPS = 100      # more than this unmatched means the season is not loaded yet
+MAX_GAPS = 100      # one call fetches at most this many; the rest wait for the next run
 
 
 def summary_records(data: dict, espn_game_id: int, season: int, season_type: int,
@@ -1288,7 +1290,19 @@ def build_gap_game(game_id: str, game_date: str, ev: dict, swapped: bool, data: 
 def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dict:
     """Load every `games` row of the season that no stored ESPN game matched,
     from ESPN's free scoreboard and summary endpoints (the release is missing
-    a few: six late-February 2019-20 games, for one)."""
+    a few: six late-February 2019-20 games, for one).
+
+    At most MAX_GAPS games a call, oldest first. The rest are `deferred` for
+    the next run: a season the release was never loaded (the one in progress)
+    is not fetched whole in one call, and it is not left at zero either.
+
+    One game's summary or build failing is that game's error. Games already
+    built are committed in batches of GAMES_PER_COMMIT, and the read
+    transaction is closed before the first HTTP call (the same rule as
+    nba_results: no snapshot held open while ESPN answers). A failure used
+    to raise out of the whole season before any of those commits, so the
+    next morning retried every game and stored none."""
+    from data.db import release_read
     from data.ingestors.nba_espn_box import (ESPN_NBA_SCOREBOARD_URL, ESPN_NBA_SUMMARY_URL,
                                               parse_nba_scoreboard)
     if get_json is None:
@@ -1298,17 +1312,17 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
         SELECT g.game_id, g.game_date, g.home_score, g.away_score FROM games g
          WHERE g.sport = 'NBA' AND g.season = %s AND g.home_score IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM nba_pbp_games p WHERE p.game_id = g.game_id)
-         ORDER BY g.game_date""", (season,)).fetchall()
+         ORDER BY g.game_date, g.game_id""", (season,)).fetchall()
     stats = Counter(missing=len(missing))
     stats["season"] = season
+    first_error = None
     if not missing:
         return dict(stats)
     if len(missing) > MAX_GAPS:
-        # The release has not been loaded for this season yet: filling now
-        # would fetch the whole season one game at a time.
-        logger.warning(f"season {season}: {len(missing)} games unmatched; run --load first")
-        stats["refused"] = 1
-        return dict(stats)
+        logger.warning(f"season {season}: {len(missing)} games unmatched; "
+                       f"filling the oldest {MAX_GAPS} (run --load for a whole past season)")
+        stats["deferred"] = len(missing) - MAX_GAPS
+        missing = missing[:MAX_GAPS]
     id_map = _load_map(conn)
     adv = defaultdict(dict)
     for gid, _team, pid, _n, played, secs in _season_adv(conn, season):
@@ -1317,33 +1331,75 @@ def fill_gaps(conn, season: int, *, get_json=None, dry_run: bool = False) -> dic
     boards: dict[str, list] = {}
     taken = {int(r[0]) for r in conn.execute(
         "SELECT espn_game_id FROM nba_pbp_games WHERE season = %s", (season,)).fetchall()}
+    # The reads above opened a transaction. Close it before ESPN. nba_results
+    # does this for the same reason; holding it across the summaries is how a
+    # later failure discarded every game built in the call.
+    release_read(conn)
 
     def board(d):
         return parse_nba_scoreboard(get_json(ESPN_NBA_SCOREBOARD_URL, {"dates": d.replace("-", "")}), d)
 
+    def note(game_id, exc):
+        nonlocal first_error
+        stats["errors"] += 1
+        msg = f"{type(exc).__name__}: {exc}"
+        if first_error is None:
+            first_error = f"{game_id}: {msg}"[:300]
+        logger.warning(f"gap {game_id}: {msg}")
+
+    def flush(batch):
+        if not batch or dry_run:
+            batch.clear()
+            return
+        try:
+            write_games(conn, batch, rederive=False)
+        except Exception as exc:                                  # noqa: BLE001
+            try:
+                conn.rollback()
+            except Exception:                                     # noqa: BLE001
+                pass
+            note(batch[0][0]["game_id"], exc)
+            stats["errors"] += len(batch) - 1
+            stats["filled"] -= len(batch)
+        batch.clear()
+
     built = []
     for game_id, gdate, hs, as_ in missing:
-        found = find_event(game_id, gdate, boards, board, taken)
+        try:
+            found = find_event(str(game_id), str(gdate)[:10], boards, board, taken)
+        except Exception as exc:                                  # noqa: BLE001
+            note(game_id, exc)
+            continue
         if not found:
             stats["no_espn_event"] += 1
             logger.warning(f"gap {game_id}: no ESPN event on the scoreboard")
             continue
         ev, swapped = found
         eid = int(ev["event_id"])
-        data = get_json(ESPN_NBA_SUMMARY_URL, {"event": eid})
-        g = build_gap_game(game_id, gdate, ev, swapped, data, season, id_map,
-                           adv.get(game_id, {}), games_final=_games_final((hs, as_)))
+        taken.add(eid)
+        try:
+            data = get_json(ESPN_NBA_SUMMARY_URL, {"event": eid})
+            g = build_gap_game(game_id, str(gdate)[:10], ev, swapped, data, season, id_map,
+                               adv.get(game_id, {}), games_final=_games_final((hs, as_)))
+        except Exception as exc:                                  # noqa: BLE001
+            note(game_id, exc)
+            time.sleep(0.3)
+            continue
         if g is None:
             stats["no_plays_or_not_nba"] += 1
             logger.warning(f"gap {game_id}: ESPN event {eid} has no plays or no NBA teams")
+            time.sleep(0.3)
             continue
         stats["filled"] += 1
         built.append(g)
+        if len(built) >= GAMES_PER_COMMIT:
+            flush(built)
         time.sleep(0.3)
-    if not dry_run:
-        for i in range(0, len(built), GAMES_PER_COMMIT):
-            write_games(conn, built[i:i + GAMES_PER_COMMIT], rederive=False)
-    return dict(stats)
+    flush(built)
+    out = dict(stats)
+    if first_error:
+        out["first_error"] = first_error
+    return out
 
 
 # ── --rebuild: named games re-derived from what Supabase already holds ─────

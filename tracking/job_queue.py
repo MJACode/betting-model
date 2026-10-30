@@ -1450,6 +1450,29 @@ def _job_health_check(**kw):
             "checks": len(res.get("results") or [])}
 
 
+def _job_nba_quarters(**kw):
+    """Run the daily nba_quarters step ON THE WORKER, on demand.
+
+    mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
+    #1097 fixed fill_gaps. The step only reads free ESPN endpoints and writes
+    the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
+    nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
+    through run_pipeline._timed_step, the same dispatch the daily run uses, so
+    pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
+
+    A False step is the step's own handled failure, and _timed_step has already
+    written that error row. health_check and model_quality return {"ok": false}
+    for a non-ok result and do not raise. Raising here would put the job back
+    to pending and run the step again, up to MAX_ATTEMPTS. The queue records
+    this result once.
+    """
+    import run_pipeline
+    run_date = kw.get("run_date") or config.today_et()
+    ok = run_pipeline._timed_step(
+        "nba-quarters", lambda: run_pipeline.step_nba_quarters(run_date), run_date)
+    return {"ok": bool(ok), "run_date": run_date}
+
+
 def _job_model_quality(**kw):
     """Run the model-quality monitor ON THE WORKER.
 
@@ -2196,6 +2219,8 @@ JOBS = {
     # Read-mostly: writes only model_quality_checks. Report only — never
     # pauses. Same invoke path as health_check (CLI / --step / worker_jobs).
     "model_quality":   (_job_model_quality,    _validate_model_quality),
+    # Stats only: the daily nba_quarters step, on demand (dispatch:nba-quarters).
+    "nba_quarters":    (_job_nba_quarters,     _validate_health_check),
     "promote_calibration": (_job_promote_calibration, _validate_promote_calibration),
     "team_stats_asof_verify": (_job_team_stats_asof_verify,
                               _validate_team_stats_asof_verify),
