@@ -150,8 +150,9 @@ approval before a `worker_jobs` row is added.
 - **Why.** The game-line purchase bought fixed hours: the evening before
   (22Z), mid-morning (15Z) and the hour before each tip. A book's first posted
   line is then dated only to the gap between two of those hours, and that gap
-  is over two hours for 41% to 65% of first quotes, depending on the book
-  (the opener-route design, 2026-10-30, against the pull ledger). The grid buys
+  is over two hours for 42% to 68% of first spreads and totals, depending on
+  the book (41.6% for BetMGM totals to 67.6% for betPARX totals; the
+  opener-route design, 2026-10-30, against the pull ledger). The grid buys
   the same bulk snapshot (moneyline, spread and total at the ten fetched
   books, 30 credits for the whole listed slate) at every clock time, every
   hour or every half hour, from 72 hours before each tip up to the tip. Each
@@ -177,8 +178,9 @@ approval before a `worker_jobs` row is added.
 - **What is stored.** Each book's first quote on each game and market, and
   every quote that differs from the one before it in price or line. A repeat
   is not stored, and an in-play price never is. Each row's time is the
-  market's own last update, as the feed sends it, so the first row of a book
-  is when that book posted. Events that resolve onto no ESPN game are kept
+  market's own last update, as the feed sends it. A book's first row is
+  therefore the time it posted, unless it changed that line again before the
+  first snapshot that shows it. Events that resolve onto no ESPN game are kept
   raw in `ncaab_odds_unmatched`, as the game-line purchase keeps them. The
   replay stores those with the game-line purchase's filter, which keeps every
   snapshot in the three hours before the tip, so a replay of grid events can

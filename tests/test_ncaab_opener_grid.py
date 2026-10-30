@@ -3,8 +3,8 @@
 WHY. The game-line purchase (mode `lines`) bought three kinds of hour: the
 evening before, mid-morning, and the hour before each tip. A book that first
 posts its line between two of those is dated only to the gap, and the gap is
-over two hours for 41-65% of first quotes, depending on the book (opener-route
-design, 2026-10-30). The grid buys a snapshot every 60 or 30 minutes from 72
+over two hours for 42-68% of first spreads and totals, depending on the book
+(opener-route design, 2026-10-30). The grid buys a snapshot every 60 or 30 minutes from 72
 hours before each tip to the tip, so each book's first posted full-game line
 is dated to the step. Nothing is queued: the spend needs mike's approval.
 

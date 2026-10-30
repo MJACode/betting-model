@@ -29,8 +29,9 @@ WHAT IS BOUGHT
            hours before any game's tip up to that tip, so each book's first
            posted full-game line is dated to the step. The lines plan above
            dates a first post only to the gap between its fixed hours, which
-           is over two hours for 41-65% of first quotes, by book (opener-route
-           design, 2026-10-30). --pre-start adds every grid time from 240 to
+           is over two hours for 42-68% of first spreads and totals, by book
+           (41.6% BetMGM totals to 67.6% betPARX totals; opener-route design,
+           2026-10-30). --pre-start adds every grid time from 240 to
            72 hours before each season's first tip, for the season-opening
            boards. Times the ledger already holds are skipped. What is stored
            of each snapshot is each book's first quote on each game and market
@@ -932,9 +933,9 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
 # ── the opener grid: a snapshot every step before every tip ─────────────────
 #
 # WHY. The lines plan buys three kinds of hour per game date, so a book's first
-# post is dated only to the gap between two of them: over two hours for 41-65%
-# of first quotes, by book (opener-route design, 2026-10-30, against this
-# ledger). The grid buys a snapshot at every grid time on the clock, every 60
+# post is dated only to the gap between two of them: over two hours for 42-68%
+# of first spreads and totals, by book (41.6% BetMGM totals to 67.6% betPARX
+# totals; opener-route design, 2026-10-30, against this ledger). The grid buys a snapshot at every grid time on the clock, every 60
 # or 30 minutes, from 72 hours before each tip up to the tip. One bulk snapshot
 # covers the whole listed slate, so the plan is a set of times, not of games.
 #
