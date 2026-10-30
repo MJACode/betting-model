@@ -87,9 +87,17 @@ _lock = threading.Lock()
 _q: queue.Queue = queue.Queue(maxsize=_MAX_QUEUE)
 _source = "unknown"
 
-# Odds API credits are not in the response body — they are the DELTA of the
-# x-requests-used header between consecutive responses. Tracked per process;
-# the first call has no baseline and records NULL rather than a guess.
+# Odds API credits are not in the response body. Each response carries
+# x-requests-last, the API's own bill for THAT call, and it is what is
+# recorded. The DELTA of x-requests-used between this process's consecutive
+# responses is only the fallback for a response without x-requests-last: the
+# counter is the whole account's, so the delta also holds every credit any
+# other process spent in between. Measured 2026-10-29: while the NCAAB history
+# purchase ran on the worker (04:25-07:04Z), the pregame poller's ~600 calls an
+# hour were logged at 40,918, 74,463 and 66,105 credits an hour against 2,000-
+# 5,800 before it, and its daily cap, summed from this column, stopped it at
+# 200,280 for the rest of the ET day. Tracked per process; with no
+# x-requests-last the first call has no baseline and records NULL.
 _last_used: float | None = None
 _used_lock = threading.Lock()
 
@@ -168,18 +176,26 @@ def _scrub(text: str | None) -> str | None:
 
 
 def _credits_from(resp) -> tuple[float | None, float | None]:
-    """(credits spent by this call, credits remaining) from Odds API headers."""
+    """(credits spent by this call, credits remaining) from Odds API headers.
+
+    x-requests-last when the response has it; otherwise the delta of
+    x-requests-used since this process's previous response."""
     global _last_used
     try:
         used_raw = resp.headers.get("x-requests-used")
+        last_raw = resp.headers.get("x-requests-last")
         remaining_raw = resp.headers.get("x-requests-remaining")
         remaining = float(remaining_raw) if remaining_raw not in (None, "") else None
-        if used_raw in (None, ""):
+        prev = used = None
+        if used_raw not in (None, ""):
+            used = float(used_raw)
+            with _used_lock:            # keep the baseline current for the fallback
+                prev = _last_used
+                _last_used = used
+        if last_raw not in (None, ""):
+            return (float(last_raw), remaining)
+        if used is None:
             return (None, remaining)
-        used = float(used_raw)
-        with _used_lock:
-            prev = _last_used
-            _last_used = used
         # A negative delta means the billing period reset — report nothing
         # rather than a nonsense figure.
         if prev is None or used < prev:

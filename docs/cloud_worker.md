@@ -151,7 +151,9 @@ never scheduled.
 `live_scoreboard` job, `pollers` service, every minute 24x7
 (`data/ingestors/live_scoreboard.py`). While a sport has a game that has
 started, has no final on `games` and no final row yet, it reads ESPN's site
-scoreboard once per sport and upserts one row per game into
+scoreboard once per sport for each ET date on the slate (today, and
+yesterday until 6 am ET; ESPN refuses a date range with HTTP 400) and
+upserts one row per game into
 `public.live_scoreboard` (`state` `in` / `post`, score, clock label, NFL down
 and possession). The app's Scoreboard reads it. No Odds API credits. An idle
 tick is one database read and no HTTP call. `RUN_LIVE_SCOREBOARD=0` stops it.

@@ -132,6 +132,14 @@ second run stores nothing new. Each insert into `odds` also updates
   seasons, SQL on the Supabase connector (2026-10-29, the new name answers)
   places 11,349 of the 11,857 kept events on 11,300 ESPN games, before the
   24 far-listing events are set aside; the dry-run job prints the rest.
+- **What it stored.** Worker job 827394, 2026-10-30 04:00-04:40Z, seasons
+  2020-21 to 2025-26: 7,340 raw feed times, all mapped to a bought hour;
+  137,007 event snapshots, of which 133,064 placed, 3,799 not (508 events)
+  and 144 (24 events) refused as far listings; 2,239,062 rows parsed,
+  245,242 of them in play; 1,201,028 kept and stored, none already stored,
+  no write failed. Read back from `odds` (sport NCAAB, source
+  `odds_api_historical`): 1,201,028 rows on 11,296 games, every game in
+  `games`, no row after its game's tip.
 
 ## What runs, and where it lands
 
@@ -154,8 +162,9 @@ second run stores nothing new. Each insert into `odds` also updates
   `signalbaseskinny`, no confirmation e-mail required; the first account
   (`malkatrazz`, personal Gmail) is superseded and its values are kept as
   `CBBDATA_OLD_*`. The password and API key are in the local `.env` as
-  `CBBDATA_USER`, `CBBDATA_EMAIL`, `CBBDATA_PASSWORD`, `CBBDATA_API_KEY`; they
-  are NOT on the worker yet (Railway variable, mike's or an OAuth grant). Calls are
+  `CBBDATA_USER`, `CBBDATA_EMAIL`, `CBBDATA_PASSWORD`, `CBBDATA_API_KEY`, and
+  on the Railway worker since 2026-10-29 about 22:58Z (names checked with
+  list-variables). Calls are
   `https://www.cbbdata.com/api/<endpoint>?key=<key>&year=2025&team=Duke` and
   return Parquet. Measured: `torvik/ratings/archive` holds daily T-Rank
   ratings for 364 teams per date for the seasons 2014-15 → 2024-25 (2024-25:
