@@ -20,7 +20,11 @@ are line_no_price. Moneyline grading is the score only.
 """
 from __future__ import annotations
 
-from byom.constants import DK_HISTORY_START_SEASON, SPORT
+from byom.constants import (
+    DK_HISTORY_START_SEASON,
+    NBA_DK_HISTORY_START_SEASON,
+    SPORT,
+)
 from byom.game_facts import assemble_game, parse_date, parse_game_id
 
 # One game at a time. A season of nfl_odds_history is millions of rows
@@ -108,6 +112,18 @@ def _fetch(conn, sql, params):
     return cur.fetchall()
 
 
+def _dk_history_floor(sport: str) -> int | None:
+    """First season whose DraftKings game lines are built.
+
+    NFL is 2020. NBA is 2021. Any other sport has no floor.
+    """
+    if sport == SPORT:
+        return DK_HISTORY_START_SEASON
+    if sport == "NBA":
+        return NBA_DK_HISTORY_START_SEASON
+    return None
+
+
 def _games(conn, season: int, sport: str = SPORT) -> list[dict]:
     rows = _fetch(conn, """
         SELECT game_id, season, game_date, home_team, away_team,
@@ -189,9 +205,10 @@ def facts_for_season(conn, season: int,
 
     `game_ids` None reads every game. A list reads only those games.
     Rest days still come from the whole season's schedule. NFL seasons
-    before DraftKings history are empty. Other sports are not.
+    before 2020, and NBA seasons before 2021, are empty.
     """
-    if sport == SPORT and season < DK_HISTORY_START_SEASON:
+    floor = _dk_history_floor(sport)
+    if floor is not None and season < floor:
         return []
     schedule = _games(conn, season, sport)
     played = _played(schedule)
@@ -264,7 +281,8 @@ def build_season(conn, season: int, apply: bool = False,
     """
     sport = _sport_or_nfl(sport)
     empty_counts = {"same_point": 0, "cross_point": 0, "line_no_price": 0}
-    if sport == SPORT and season < DK_HISTORY_START_SEASON:
+    floor = _dk_history_floor(sport)
+    if floor is not None and season < floor:
         return {
             "season": season, "sport": sport, "facts": 0, "written": 0,
             "skipped": "before DraftKings history",
@@ -282,9 +300,10 @@ def build_season(conn, season: int, apply: bool = False,
 def seasons_in_games(conn, sport: str = SPORT) -> list[int]:
     floor = ""
     params: tuple = (sport,)
-    if sport == SPORT:
+    start = _dk_history_floor(sport)
+    if start is not None:
         floor = " AND season >= %s"
-        params = (sport, DK_HISTORY_START_SEASON)
+        params = (sport, start)
     rows = _fetch(conn, f"""
         SELECT DISTINCT season FROM games
          WHERE sport = %s{floor}

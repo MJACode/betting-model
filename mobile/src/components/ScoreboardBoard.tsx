@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -14,31 +15,41 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { LiveDot } from '@/components/LiveDot';
 import { FilterChip } from '@/components/filters/FilterChip';
+import { SegmentTabs } from '@/components/GroupTabs';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { addDays, dayLabelET } from '@/lib/format';
 import {
   SCOREBOARD_BOOK_NOTE,
+  SCOREBOARD_MARKET_ORDER,
   SCOREBOARD_SPORTS,
-  livePollerCaption,
+  marketCell,
   nextSlateText,
+  orderScoreboard,
+  pctText,
   presentScoreboard,
-  scoreboardLiveEnabled,
+  scoreboardMarketLabel,
   scoreboardSwitchLine,
+  shownSplitLine,
+  splitsFor,
+  splitsSpeech,
   type ScoreboardCard,
   type ScoreboardFeed,
+  type ScoreboardMarket,
   type ScoreboardPhase,
   type ScoreboardQuote,
+  type ScoreboardSplitRow,
   type ScoreboardSport,
+  type SideSplit,
 } from '@/lib/scoreboard';
 import { colors, font, radii, spacing, teamDisc } from '@/lib/theme';
 import type { GameRow } from '@/types';
 
-const PHASES: readonly { id: ScoreboardPhase; label: string }[] = [
-  { id: 'upcoming', label: 'Upcoming' },
-  { id: 'live', label: 'Live' },
-  { id: 'final', label: 'Final' },
-];
+const PHASE_LABEL: Record<ScoreboardPhase, string> = {
+  live: 'Live',
+  upcoming: 'Upcoming',
+  final: 'Final',
+};
 
 function discColor(label: string): string {
   let h = 0;
@@ -58,11 +69,10 @@ export function ScoreboardBoard({
   quotes,
   feeds,
   inplay,
+  splits,
   nextGame,
   sport,
   onSport,
-  phase,
-  onPhase,
   date,
   today,
   onDate,
@@ -72,6 +82,7 @@ export function ScoreboardBoard({
   linesError,
   liveError,
   ncaafUnavailable,
+  liveScoresUnavailable,
   retrying,
   onRefresh,
   locked,
@@ -85,11 +96,11 @@ export function ScoreboardBoard({
   quotes: ReadonlyMap<string, ScoreboardQuote[]>;
   feeds: ReadonlyMap<string, ScoreboardFeed>;
   inplay: ReadonlyMap<string, ScoreboardQuote[]>;
+  /** % bets / % money per game (scoreboard_splits). */
+  splits: ReadonlyMap<string, ScoreboardSplitRow[]>;
   nextGame: GameRow | null;
   sport: ScoreboardSport;
   onSport: (sport: ScoreboardSport) => void;
-  phase: ScoreboardPhase;
-  onPhase: (phase: ScoreboardPhase) => void;
   date: string;
   today: string;
   onDate: (date: string) => void;
@@ -100,6 +111,8 @@ export function ScoreboardBoard({
   /** The selected sport's live feed failed. Null when that sport has no feed. */
   liveError: string | null;
   ncaafUnavailable: boolean;
+  /** live_scoreboard is not readable yet (migration not applied). */
+  liveScoresUnavailable: boolean;
   retrying: boolean;
   onRefresh: () => Promise<void>;
   locked: boolean;
@@ -112,7 +125,8 @@ export function ScoreboardBoard({
   const abbrevs = useNcaafAbbrevs(true);
   const [pulling, setPulling] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
-  const liveOn = scoreboardLiveEnabled(sport);
+  // One market at a time: Odds, % Bets, % Money (Matt, 2026-10-29).
+  const [market, setMarket] = useState<ScoreboardMarket>('spreads');
   const dayWord = dayLabelET(date, today);
 
   const dayGames = useMemo(
@@ -144,60 +158,51 @@ export function ScoreboardBoard({
     }
     return rows;
   }, [locked, games, sport, quotes, inplay, feeds, abbrevs, date, today]);
-  const cards = sportCards.filter((c) => c.phase === phase);
-  const phaseCounts = {
-    upcoming: sportCards.filter((c) => c.phase === 'upcoming').length,
-    live: sportCards.filter((c) => c.phase === 'live').length,
-    final: sportCards.filter((c) => c.phase === 'final').length,
-  };
+  // Every game for the sport in one list (Matt, 2026-10-29): live, then
+  // upcoming, then final. A label marks where each group starts.
+  const cards = useMemo(() => orderScoreboard(sportCards), [sportCards]);
+  // No split stored for any game in this market: drop the two % columns
+  // rather than draw a board of dashes. Some games with splits: keep the
+  // columns so they stay aligned, and the rest show a dash.
+  const showSplits = useMemo(
+    () => cards.some((c) => {
+      const s = splitsFor(splits.get(c.gameId), market, shownSplitLine(c, market));
+      return [s.away.bets, s.away.money, s.home.bets, s.home.money].some((v) => v != null);
+    }),
+    [cards, splits, market],
+  );
+  // A narrow phone or a large text size leaves no room for the name beside
+  // the disc; the disc already carries the team (UX review, 2026-10-29).
+  const { width: screenWidth, fontScale } = useWindowDimensions();
+  const showName = !showSplits || (screenWidth >= 360 && fontScale <= 1.3);
 
   const refresh = () => {
     setPulling(true);
     void onRefresh().finally(() => setPulling(false));
   };
 
-  const choosePhase = (next: ScoreboardPhase) => {
-    if (next === 'live' && !liveOn) return;
-    onPhase(next);
-  };
-
-  const offDay = (counts[sport] ?? 0) === 0;
-  const emptyTitle = offDay
-    ? `No ${sport} games today`
-    : phase === 'live'
-      ? `No live ${sport} scores right now`
-      : phase === 'final'
-        ? `No ${sport} finals yet`
-        : `No upcoming ${sport} games`;
-  const otherPhase: ScoreboardPhase | null = offDay
-    ? null
-    : (['live', 'final', 'upcoming'] as const).find((p) => p !== phase && phaseCounts[p] > 0 && (p !== 'live' || liveOn)) ?? null;
-  const emptyBody = offDay
-    ? (nextSlateText(nextGame, abbrevs) ? `Next slate: ${nextSlateText(nextGame, abbrevs)}` : 'Today’s games show up here once they’re on the board.')
-    : phase === 'live' && sport === 'NFL'
-      ? 'Scores show up here once they’re stored. Nothing is filled in before that. Upcoming and Final still list the slate.'
-      : otherPhase
-        ? `They’re on ${otherPhase === 'live' ? 'Live' : otherPhase === 'final' ? 'Final' : 'Upcoming'}.`
-        : 'Nothing in this filter has a stored score.';
-  const emptyAction = offDay && nextGame
+  const dayPhrase = dayWord === 'Today' || dayWord === 'Tomorrow' || dayWord === 'Yesterday'
+    ? dayWord.toLowerCase()
+    : `on ${dayWord}`;
+  const emptyTitle = `No ${sport} games ${dayPhrase}`;
+  const next = nextSlateText(nextGame, abbrevs);
+  const emptyBody = next ? `Next slate: ${next}` : 'Games show up here once they’re on the board.';
+  const emptyAction = nextGame && nextGame.game_date !== date
     ? `See ${dayLabelET(nextGame.game_date, today)}`
-    : otherPhase === 'live'
-      ? 'See Live'
-      : otherPhase === 'final'
-        ? 'See Final'
-        : otherPhase === 'upcoming'
-          ? 'See Upcoming'
-          : null;
-  const nudge = offDay ? scoreboardSwitchLine(counts, sport) : null;
-  const ncaafNote = sport === 'NCAAF' && phase === 'live' && ncaafUnavailable
-    ? 'Live NCAAF scores aren’t available in this build yet.'
     : null;
+  const nudge = (counts[sport] ?? 0) === 0 ? scoreboardSwitchLine(counts, sport) : null;
+  const ncaafNote = sport === 'NCAAF' && ncaafUnavailable
+    ? 'Live NCAAF scores aren’t available in this build yet.'
+    : (sport === 'NFL' || sport === 'NBA' || sport === 'NHL') && liveScoresUnavailable
+      ? `Live ${sport} scores aren’t available yet. Finals show once stored.`
+      : null;
 
   return (
     <View style={styles.fill}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.sportScroll}
         contentContainerStyle={styles.sports}
       >
         {SCOREBOARD_SPORTS.map((id) => (
@@ -212,27 +217,16 @@ export function ScoreboardBoard({
       </ScrollView>
 
       <View style={styles.filters}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.phaseScroll}
-          contentContainerStyle={styles.phases}
-        >
-          {PHASES.map((p) => {
-            const disabled = p.id === 'live' && !liveOn;
-            return (
-              <FilterChip
-                key={p.id}
-                label={p.label}
-                active={phase === p.id}
-                disabled={disabled}
-                onPress={() => choosePhase(p.id)}
-                accessibilityLabel={disabled ? `${p.label}, unavailable` : p.label}
-                accessibilityHint={disabled ? livePollerCaption(sport) : undefined}
-              />
-            );
-          })}
-        </ScrollView>
+        <View style={styles.markets}>
+          <SegmentTabs
+            compact
+            items={SCOREBOARD_MARKET_ORDER}
+            active={market}
+            onChange={setMarket}
+            labelFor={(m) => scoreboardMarketLabel(m, sport)}
+            accessibilityLabelFor={(m) => (m === 'h2h' ? 'Moneyline' : scoreboardMarketLabel(m, sport))}
+          />
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${dayWord}, DraftKings. Choose a day.`}
@@ -261,9 +255,6 @@ export function ScoreboardBoard({
             );
           })}
         </View>
-      ) : null}
-      {!liveOn ? (
-        <Text style={styles.caption}>{livePollerCaption(sport)}</Text>
       ) : null}
       {ncaafNote ? <Text style={styles.caption}>{ncaafNote}</Text> : null}
       {linesError && loaded ? (
@@ -321,9 +312,25 @@ export function ScoreboardBoard({
               {cards.length > 0 ? (
                 <View style={styles.cols}>
                   <Text style={[styles.colHead, styles.colMatch]}>Matchup</Text>
-                  <Text style={[styles.colHead, styles.colScore]}>Score</Text>
-                  <Text style={[styles.colHead, styles.colLine]}>{sport === 'NHL' ? 'Puck line' : 'Spread'}</Text>
-                  <Text style={[styles.colHead, styles.colLine]}>Total</Text>
+                  <Text
+                    style={[styles.colHead, styles.colScore]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.7}
+                  >
+                    Score
+                  </Text>
+                  <Text style={[styles.colHead, styles.colLine]}>Odds</Text>
+                  {showSplits ? (
+                    <>
+                      <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        % Bets
+                      </Text>
+                      <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        % Money
+                      </Text>
+                    </>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -342,12 +349,7 @@ export function ScoreboardBoard({
                 accessibilityRole="button"
                 accessibilityLabel={emptyAction}
                 onPress={() => {
-                  if (offDay && nextGame) {
-                    onDate(nextGame.game_date);
-                    onPhase('upcoming');
-                    return;
-                  }
-                  if (otherPhase) onPhase(otherPhase);
+                  if (nextGame) onDate(nextGame.game_date);
                 }}
                 style={({ pressed }) => [styles.emptyBtn, pressed && styles.pressed]}
               >
@@ -357,8 +359,22 @@ export function ScoreboardBoard({
               {nudge ? <Text style={styles.nudge}>{nudge}</Text> : null}
             </View>
           }
-          renderItem={({ item }) => (
-            <GameCard card={item} onPress={() => onOpenGame(item.gameId)} />
+          renderItem={({ item, index }) => (
+            <View>
+              {index === 0 || cards[index - 1]?.phase !== item.phase ? (
+                <Text style={[styles.group, index > 0 && styles.groupGap]} accessibilityRole="header">
+                  {`${PHASE_LABEL[item.phase]} · ${cards.filter((c) => c.phase === item.phase).length}`}
+                </Text>
+              ) : null}
+              <GameCard
+                card={item}
+                market={market}
+                split={splitsFor(splits.get(item.gameId), market, shownSplitLine(item, market))}
+                showSplits={showSplits}
+                showName={showName}
+                onPress={() => onOpenGame(item.gameId)}
+              />
+            </View>
           )}
         />
       )}
@@ -433,18 +449,33 @@ function LockedBoard({
   );
 }
 
-function GameCard({ card, onPress }: { card: ScoreboardCard; onPress: () => void }) {
+function GameCard({
+  card,
+  market,
+  split,
+  showSplits,
+  showName,
+  onPress,
+}: {
+  card: ScoreboardCard;
+  market: ScoreboardMarket;
+  split: { away: SideSplit; home: SideSplit };
+  showSplits: boolean;
+  showName: boolean;
+  onPress: () => void;
+}) {
   const ink = card.linesMuted ? colors.textTertiary : colors.textPrimary;
+  const speech = splitsSpeech(card, market, split);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={card.accessibilityLabel}
+      accessibilityLabel={speech ? `${card.accessibilityLabel} ${speech}` : card.accessibilityLabel}
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <SideRow card={card} side="away" ink={ink} />
-      <SideRow card={card} side="home" ink={ink} />
-      {card.showMl ? (
+      <SideRow card={card} side="away" ink={ink} market={market} split={split.away} showSplits={showSplits} showName={showName} />
+      <SideRow card={card} side="home" ink={ink} market={market} split={split.home} showSplits={showSplits} showName={showName} />
+      {card.showMl && market !== 'h2h' ? (
         <Text style={styles.mlLine}>
           ML  {card.away.name} {card.away.ml} · {card.home.name} {card.home.ml}
         </Text>
@@ -476,12 +507,21 @@ function SideRow({
   card,
   side,
   ink,
+  market,
+  split,
+  showSplits,
+  showName,
 }: {
   card: ScoreboardCard;
   side: 'away' | 'home';
   ink: string;
+  market: ScoreboardMarket;
+  split: SideSplit;
+  showSplits: boolean;
+  showName: boolean;
 }) {
   const row = card[side];
+  const cell = marketCell(row, market);
   const scoreColor = row.scoreMuted ? colors.textTertiary : colors.textPrimary;
   return (
     <View style={styles.side}>
@@ -489,12 +529,55 @@ function SideRow({
         <View style={[styles.disc, { backgroundColor: discColor(row.disc) }]}>
           <Text style={styles.discText} numberOfLines={1}>{row.disc}</Text>
         </View>
-        <Text style={styles.abbr} numberOfLines={1}>{row.name}</Text>
+        {showName ? (
+          <Text style={styles.abbr} numberOfLines={1} maxFontSizeMultiplier={1.6}>{row.name}</Text>
+        ) : null}
         {row.possession ? <Text style={styles.poss}>◀</Text> : null}
       </View>
-      <Text style={[styles.score, styles.colScore, { color: scoreColor }]}>{row.score}</Text>
-      <LineCell value={row.spread} price={row.spreadPrice} ink={ink} />
-      <LineCell value={row.total} price={row.totalPrice} ink={ink} />
+      <Text
+        style={[styles.score, styles.colScore, { color: scoreColor }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        maxFontSizeMultiplier={1.6}
+      >
+        {row.score}
+      </Text>
+      <LineCell value={cell.value} price={cell.price} ink={ink} single={market === 'h2h'} />
+      {showSplits ? <PctCell value={split.bets} /> : null}
+      {showSplits ? <PctCell value={split.money} /> : null}
+    </View>
+  );
+}
+
+/**
+ * A percentage over a thin bar; tint when this side holds the majority. Not
+ * the BET green: on a picks board green reads as "the model says bet this",
+ * and the bar only says where the public is (UX review, 2026-10-29).
+ */
+function PctCell({ value }: { value: number | null }) {
+  const majority = value != null && value > 50;
+  return (
+    <View style={[styles.colPct, styles.pct]}>
+      <Text
+        style={[styles.pctText, value == null && styles.pctEmpty]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        maxFontSizeMultiplier={1.6}
+      >
+        {pctText(value)}
+      </Text>
+      <View style={styles.barTrack}>
+        {value != null ? (
+          <View
+            style={[
+              styles.barFill,
+              { width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: majority ? colors.tint : colors.none },
+            ]}
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -527,6 +610,9 @@ function LineCell({
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  // A horizontal ScrollView in a column grows to fill the height it is
+  // given, which stretched every sport pill (Matt's screenshot, 2026-10-29).
+  sportScroll: { flexGrow: 0 },
   sports: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -538,8 +624,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
-  phaseScroll: { flexGrow: 1, flexShrink: 1 },
-  phases: { flexDirection: 'row', gap: spacing.xs, paddingRight: spacing.sm },
+  group: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  groupGap: { marginTop: spacing.sm },
   today: {
     marginLeft: 'auto',
     minHeight: 44,
@@ -593,9 +688,30 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
   },
-  colMatch: { flex: 1, minWidth: 80 },
-  colScore: { width: 32, textAlign: 'center' },
-  colLine: { width: 68, alignItems: 'center', textAlign: 'center' },
+  // 56 keeps the row inside a 320pt-wide phone with four fixed columns.
+  colMatch: { flex: 1, minWidth: 56 },
+  // 40 fits a three-digit NBA score and the 'Score' heading on one line.
+  colScore: { width: 40, textAlign: 'center' },
+  colLine: { width: 64, alignItems: 'center', textAlign: 'center' },
+  colPct: { width: 44, alignItems: 'center', textAlign: 'center' },
+  pct: { gap: 4, justifyContent: 'center' },
+  pctText: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  pctEmpty: { color: colors.textTertiary },
+  barTrack: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.noneSoft,
+    overflow: 'hidden',
+  },
+  barFill: { height: 4, borderRadius: 2 },
+  markets: { flexDirection: 'row', gap: spacing.xs, flexShrink: 1 },
   side: { flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: spacing.xs },
   match: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   disc: {

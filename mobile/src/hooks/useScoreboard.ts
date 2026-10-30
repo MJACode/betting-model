@@ -5,19 +5,25 @@ import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchDkInplayForGames,
   fetchLiveGameStates,
+  fetchLiveScoreboard,
   fetchNcaafScoreboard,
   fetchNextScoreboardGame,
   fetchScoreboardDkOdds,
   fetchScoreboardGames,
+  fetchScoreboardSplits,
+  type LiveScoreboardRow,
   type NcaafScoreboardRow,
 } from '@/lib/queries';
 import {
+  ESPN_LIVE_SPORTS,
+  feedFromEspn,
   feedFromMlb,
   feedFromNcaaf,
   mergeDkInplay,
   scoreboardPhase,
   type ScoreboardFeed,
   type ScoreboardQuote,
+  type ScoreboardSplitRow,
 } from '@/lib/scoreboard';
 import type { GameRow, LatestDkOddsRow, LiveGameStateRow } from '@/types';
 
@@ -41,14 +47,15 @@ function groupQuotes(rows: readonly LatestDkOddsRow[]): Map<string, ScoreboardQu
 /**
  * Games, DK lines and stored live state for the Scoreboard segment.
  * Fetches only while the segment is open and the screen is focused.
- * A missing NCAAF view leaves that sport without live scores. It does
- * not invent them.
+ * A missing NCAAF view, or a live_scoreboard table that is not created
+ * yet, leaves that sport without live scores. It does not invent them.
  */
 export function useScoreboard(enabled: boolean, dates: readonly string[], sport: string, anchorDate: string) {
   const [games, setGames] = useState<GameRow[]>([]);
   const [quotes, setQuotes] = useState<Map<string, ScoreboardQuote[]>>(new Map());
   const [feeds, setFeeds] = useState<Map<string, ScoreboardFeed>>(new Map());
   const [inplay, setInplay] = useState<Map<string, ScoreboardQuote[]>>(new Map());
+  const [splits, setSplits] = useState<Map<string, ScoreboardSplitRow[]>>(new Map());
   const [nextGame, setNextGame] = useState<GameRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -56,6 +63,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
   const [linesError, setLinesError] = useState<string | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [ncaafUnavailable, setNcaafUnavailable] = useState(false);
+  const [liveScoresUnavailable, setLiveScoresUnavailable] = useState(false);
   const loadGen = useRef(0);
   const inplayRef = useRef<Map<string, ScoreboardQuote[]>>(new Map());
   const dateKey = dates.join(',');
@@ -70,7 +78,17 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       const gs = await fetchScoreboardGames(slate);
       if (gen !== loadGen.current) return;
       const ncaafIds = gs.filter((game) => game.sport === 'NCAAF').map((game) => game.game_id);
-      const [oddsRes, mlbRes, ncaafRes, nextRes] = await Promise.all([
+      // Only games that have started can have a live row.
+      const startedIds = gs
+        .filter((game) => ESPN_LIVE_SPORTS.includes(game.sport))
+        .filter((game) => {
+          const t = game.commence_time ? Date.parse(game.commence_time) : NaN;
+          return Number.isFinite(t) && t <= Date.now() + 10 * 60 * 1000;
+        })
+        .map((game) => game.game_id);
+      // Splits for the open sport only: at most 6 rows a game.
+      const sportIds = gs.filter((game) => game.sport === sport).map((game) => game.game_id);
+      const [oddsRes, mlbRes, ncaafRes, espnRes, splitRes, nextRes] = await Promise.all([
         fetchScoreboardDkOdds(slate).then(
           (rows) => ({ rows, error: null as string | null }),
           (e: unknown) => ({ rows: [] as LatestDkOddsRow[], error: isAbortError(e) ? null : errorText(e) }),
@@ -90,6 +108,17 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
             error: isAbortError(e) || missingRelation(e) ? null : errorText(e),
           }),
         ),
+        fetchLiveScoreboard(startedIds).then(
+          (rows) => ({ rows, missing: false, error: null as string | null }),
+          (e: unknown) => ({
+            rows: [] as LiveScoreboardRow[],
+            missing: missingRelation(e),
+            error: isAbortError(e) || missingRelation(e) ? null : errorText(e),
+          }),
+        ),
+        // A missing table or a failed read leaves the columns as dashes; the
+        // board is still usable, so this does not raise a banner.
+        fetchScoreboardSplits(sportIds).catch(() => [] as ScoreboardSplitRow[]),
         gs.some((g) => g.sport === sport && g.game_date === anchorDate)
           ? Promise.resolve(null)
           : fetchNextScoreboardGame(sport, anchorDate).catch(() => null),
@@ -99,13 +128,16 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
       const now = Date.now();
       const mlbById = new Map(mlbRes.rows.map((row) => [row.game_id, row]));
       const ncaafById = new Map(ncaafRes.rows.map((row) => [row.game_id, row]));
+      const espnById = new Map(espnRes.rows.map((row) => [row.game_id, row]));
       const feedMap = new Map<string, ScoreboardFeed>();
       for (const game of gs) {
         const feed = game.sport === 'MLB'
           ? feedFromMlb(mlbById.get(game.game_id), now)
           : game.sport === 'NCAAF'
             ? feedFromNcaaf(ncaafById.get(game.game_id), now)
-            : null;
+            : ESPN_LIVE_SPORTS.includes(game.sport)
+              ? feedFromEspn(espnById.get(game.game_id), now)
+              : null;
         if (feed) feedMap.set(game.game_id, feed);
       }
       const liveIds = gs
@@ -118,13 +150,29 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
 
       setGames(gs);
       setQuotes(groupQuotes(oddsRes.rows));
+      const bySplit = new Map<string, ScoreboardSplitRow[]>();
+      for (const row of splitRes) {
+        const list = bySplit.get(row.game_id) ?? [];
+        list.push(row);
+        bySplit.set(row.game_id, list);
+      }
+      setSplits(bySplit);
       setFeeds(feedMap);
       inplayRef.current = liveLines;
       setInplay(liveLines);
       setNextGame(nextRes);
       setLinesError(oddsRes.error ?? inplayError);
       setNcaafUnavailable(ncaafRes.missing);
-      setLiveError(sport === 'MLB' ? mlbRes.error : sport === 'NCAAF' ? ncaafRes.error : null);
+      setLiveScoresUnavailable(espnRes.missing);
+      setLiveError(
+        sport === 'MLB'
+          ? mlbRes.error
+          : sport === 'NCAAF'
+            ? ncaafRes.error
+            : ESPN_LIVE_SPORTS.includes(sport)
+              ? espnRes.error
+              : null,
+      );
       setLoaded(true);
     } catch (e: unknown) {
       if (gen !== loadGen.current) return;
@@ -148,6 +196,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
     quotes,
     feeds,
     inplay,
+    splits,
     nextGame,
     loading,
     loaded,
@@ -155,6 +204,7 @@ export function useScoreboard(enabled: boolean, dates: readonly string[], sport:
     linesError,
     liveError,
     ncaafUnavailable,
+    liveScoresUnavailable,
     refresh: load,
   };
 }

@@ -12,7 +12,9 @@ import { ErrorBanner, ErrorState } from '@/components/ErrorState';
 import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { useByomLeaderboard } from '@/hooks/useByomLeaderboard';
 import { useByomSeason } from '@/hooks/useByomSeason';
+import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
+import { byomEmptyLabel } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Sport } from '@/hooks/useSportFilter';
 import type { RootStackParamList } from '@/types';
@@ -22,16 +24,19 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function ByomModelList({ sport }: { sport: Sport }) {
   const navigation = useNavigation<Nav>();
   const { scope } = useByomSeason();
-  const nfl = sport === 'NFL';
+  const built = sport === 'NFL' || sport === 'NBA';
+  const facts = useNbaGameFacts(sport === 'NBA' ? 'NBA' : 'NFL');
   const { rows, loading, error, reload, signedIn, authReady } = useByomLeaderboard(sport, scope);
-  const busy = nfl && (!authReady || (signedIn && loading && rows.length === 0));
+  const busy = built && (!authReady || (signedIn && loading && rows.length === 0));
   const failedRefresh = error != null && rows.length > 0;
 
   useFocusEffect(useCallback(() => {
     void reload();
   }, [reload]));
 
-  const openBuilder = () => navigation.navigate('ByomBuilder');
+  const openBuilder = () => navigation.navigate('ByomBuilder', {
+    sport: sport === 'NBA' ? 'NBA' : 'NFL',
+  });
 
   return (
     <FlatList
@@ -39,17 +44,17 @@ export function ByomModelList({ sport }: { sport: Sport }) {
       data={busy ? [] : rows}
       keyExtractor={(item) => item.model.model_id}
       contentContainerStyle={styles.content}
-      refreshControl={nfl ? (
+      refreshControl={built ? (
         <RefreshControl
           refreshing={loading && rows.length > 0}
           onRefresh={() => void reload()}
         />
       ) : undefined}
-      ListHeaderComponent={nfl ? (
+      ListHeaderComponent={built ? (
         <View>
           {failedRefresh ? (
             <ErrorBanner
-              what="your NFL models"
+              what={`your ${sport} models`}
               error={error}
               onRetry={() => void reload()}
               retrying={loading}
@@ -61,7 +66,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           {!busy && rows.length > 0 ? (
             <View style={styles.countRow}>
               <Text style={styles.count}>
-                {rows.length} NFL model{rows.length === 1 ? '' : 's'} · yours only
+                {rows.length} {sport} model{rows.length === 1 ? '' : 's'} · yours only
               </Text>
               <Text style={styles.sort}>Most units</Text>
             </View>
@@ -77,6 +82,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           showsUnits={item.showsUnits}
           ungraded={item.ungraded}
           failed={item.failed}
+          emptyLabel={byomEmptyLabel(sport === 'NBA' ? 'NBA' : 'NFL', facts.status, item.model.filters)}
           onPress={() => navigation.navigate('ByomDetail', { modelId: item.model.model_id })}
         />
       )}
@@ -91,45 +97,45 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           </Skeleton>
         ) : error && rows.length === 0 ? (
           <ErrorState
-            what={nfl ? 'your NFL models' : `your ${sport} models`}
+            what={`your ${sport} models`}
             error={error}
             onRetry={() => void reload()}
             retrying={loading}
           />
-        ) : nfl && !signedIn ? (
+        ) : built && !signedIn ? (
           <EmptyState
             title="Sign in to see your models"
             subtitle="Saving needs a signed-in account."
             actionLabel={AUTH_ENABLED ? 'Sign in' : undefined}
             onAction={AUTH_ENABLED ? () => navigation.navigate('SignIn') : undefined}
           />
-        ) : nfl ? (
+        ) : built ? (
           <EmptyState
-            title="No NFL models yet"
+            title={`No ${sport} models yet`}
             subtitle="Pick a bet type and a side, then see how it would have done before you save it."
           />
         ) : (
           <EmptyState
             title={`No ${sport} models yet`}
-            subtitle="Switch to NFL to build a model."
+            subtitle="Switch to NFL or NBA to build a model."
           />
         )
       }
       ListFooterComponent={
         <>
-          {nfl ? (
+          {built ? (
             <View style={styles.noteWrap}>
               <ByomUnitsNote />
             </View>
           ) : null}
-          {nfl ? (
+          {built ? (
             <Pressable
               onPress={openBuilder}
               accessibilityRole="button"
-              accessibilityLabel="Build an NFL model"
+              accessibilityLabel={`Build an ${sport} model`}
               style={({ pressed }) => [styles.build, pressed && styles.pressed]}
             >
-              <Text style={styles.buildText}>+ Build an NFL model</Text>
+              <Text style={styles.buildText}>+ Build an {sport} model</Text>
             </Pressable>
           ) : null}
           <BetslipBarSpacer />

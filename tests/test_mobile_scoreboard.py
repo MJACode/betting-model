@@ -88,6 +88,8 @@ def test_the_ncaaf_view_is_declared_and_not_last():
 def test_scoreboard_is_on_the_pr_ci_subset():
     yml = _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
     assert "tests/test_mobile_scoreboard.py" in yml
+    assert "tests/test_scoreboard_splits.py" in yml
+    assert "npx tsx scripts/verify_scoreboard.ts" in yml
 
 
 def test_picks_keeps_live_signals_separate():

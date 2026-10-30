@@ -64,17 +64,58 @@ MARKET_COLUMNS: dict[str, tuple[str, ...]] = {
     "player_sacks": ("def_sacks",),
 }
 
+# Odds API market -> nba_player_game_log columns summed into actual.
+# Double-double and triple-double are not sums. They are graded below.
+# Same fourteen the builder offers, same order.
+NBA_MARKET_COLUMNS: dict[str, tuple[str, ...]] = {
+    "player_points": ("points",),
+    "player_rebounds": ("rebounds",),
+    "player_assists": ("assists",),
+    "player_threes": ("fg3_made",),
+    "player_points_rebounds_assists": ("points", "rebounds", "assists"),
+    "player_points_rebounds": ("points", "rebounds"),
+    "player_points_assists": ("points", "assists"),
+    "player_rebounds_assists": ("rebounds", "assists"),
+    "player_blocks": ("blocks",),
+    "player_steals": ("steals",),
+    "player_blocks_steals": ("blocks", "steals"),
+    "player_turnovers": ("turnovers",),
+    "player_double_double": (),
+    "player_triple_double": (),
+}
+
+# 10+ in two of these is a double-double. Three is a triple-double.
+# A missing component counts as 0 once the log row matched.
+_NBA_DOUBLE_CATS = ("points", "rebounds", "assists", "steals", "blocks")
+
 ANYTIME_TD_MARKET = "player_anytime_td"
-# Yes/No anytime rows are stored at 0.5 when the feed omits a point.
+DOUBLE_DOUBLE_MARKET = "player_double_double"
+TRIPLE_DOUBLE_MARKET = "player_triple_double"
+# Yes/No rows are stored at 0.5 when the feed omits a point.
+# Anytime TD, double-double, and triple-double.
 ANYTIME_TD_LINE = Decimal("0.5")
+YES_ONLY_MARKETS = frozenset({
+    ANYTIME_TD_MARKET,
+    DOUBLE_DOUBLE_MARKET,
+    TRIPLE_DOUBLE_MARKET,
+})
 _LINE = Decimal("0.001")
+
+
+def markets_for(sport: str | None) -> dict[str, tuple[str, ...]]:
+    """Standard markets this sport grades. An unknown sport is none."""
+    if sport == "NBA":
+        return NBA_MARKET_COLUMNS
+    if sport == "NFL" or sport is None:
+        return MARKET_COLUMNS
+    return {}
 
 
 def is_standard_market(market: str | None) -> bool:
     """True for a main line. An alt ladder key is false."""
     if not market or market.endswith("_alternate"):
         return False
-    return market in MARKET_COLUMNS
+    return market in MARKET_COLUMNS or market in NBA_MARKET_COLUMNS
 
 
 def player_key(name: str | None) -> str:
@@ -93,11 +134,31 @@ def same_line(left, right) -> bool:
     return abs(Decimal(str(left)) - Decimal(str(right))) <= _LINE
 
 
+def _tens(row: dict) -> int:
+    """How many double-double categories are 10 or more. NULL is not 10."""
+    count = 0
+    for col in _NBA_DOUBLE_CATS:
+        value = _num(row.get(col))
+        if value is not None and value >= 10:
+            count += 1
+    return count
+
+
 def actual_from_log(row: dict, market: str) -> Decimal:
-    """Sum the columns this market grades. A NULL column counts as 0
-    once the row itself matched. Passing TDs are not in anytime TD."""
+    """The stat this market grades. A NULL column counts as 0 once the
+    row itself matched. Passing TDs are not in anytime TD. A
+    double-double is 1 when two categories are 10 or more, else 0.
+    A triple-double needs three. The line on those markets is 0.5, so
+    Yes is the over."""
+    if market == DOUBLE_DOUBLE_MARKET:
+        return Decimal(1 if _tens(row) >= 2 else 0)
+    if market == TRIPLE_DOUBLE_MARKET:
+        return Decimal(1 if _tens(row) >= 3 else 0)
+    columns = MARKET_COLUMNS.get(market)
+    if columns is None:
+        columns = NBA_MARKET_COLUMNS[market]
     total = Decimal(0)
-    for col in MARKET_COLUMNS[market]:
+    for col in columns:
         value = _num(row.get(col))
         if value is not None:
             total += value
@@ -199,7 +260,7 @@ def _line_of(quote: dict, market: str):
     if raw is None:
         raw = quote.get("line")
     line = _num(raw)
-    if line is None and market == ANYTIME_TD_MARKET:
+    if line is None and market in YES_ONLY_MARKETS:
         return ANYTIME_TD_LINE
     return line
 
@@ -210,6 +271,35 @@ def line_key(line) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text
+
+
+def team_for_fact(quote: dict, matches: list[dict],
+                  home: str | None = None, away: str | None = None) -> str | None:
+    """The player's team on this fact.
+
+    The quote's team wins when the book sent one. DraftKings NFL rows in
+    production did not, so the log is the fill: exactly one team among
+    the name matches, and that team is one of the two in the game.
+    Two teams, or a team that is neither side, stays unset. No guess.
+    """
+    quoted = str(quote.get("team") or "").strip()
+    if quoted:
+        return quoted
+    found: list[str] = []
+    for row in matches:
+        team = str(row.get("team") or "").strip().upper()
+        if team and team not in found:
+            found.append(team)
+    if len(found) != 1:
+        return None
+    sides = {
+        str(side or "").strip().upper()
+        for side in (home, away)
+        if str(side or "").strip()
+    }
+    if sides and found[0] not in sides:
+        return None
+    return found[0]
 
 
 def _rows_for_player(log_rows: list[dict], key: str, team: str | None = None) -> list[dict]:
@@ -272,6 +362,30 @@ def _pre_start(quote: dict) -> dict | None:
     return row
 
 
+def _identity(game: dict) -> tuple | None:
+    """(canonical_key, season, week, sport) or None.
+
+    An NFL id is season, week, away, home. Any other game is NBA only
+    when the row says so, and the canonical key is the game id. Week
+    stays null. NBA has no week on the prop row.
+    """
+    parsed = parse_game_id(game.get("game_id") or "")
+    if parsed is not None:
+        canonical, season, week, _away, _home = parsed
+        return canonical, season, week, SPORT
+    if str(game.get("sport") or "") != "NBA":
+        return None
+    game_id = game.get("game_id")
+    season = game.get("season")
+    if not game_id or season is None:
+        return None
+    try:
+        season_n = int(season)
+    except (TypeError, ValueError):
+        return None
+    return str(game_id), season_n, None, "NBA"
+
+
 def facts_for_game(game: dict, quotes: list[dict],
                    log_rows: list[dict]) -> list[dict]:
     """Prop facts for one game.
@@ -285,10 +399,10 @@ def facts_for_game(game: dict, quotes: list[dict],
     won that rank. A side missing on that quote is null. The quote that
     lost the rank is not read for a price.
     """
-    parsed = parse_game_id(game.get("game_id") or "")
-    if parsed is None:
+    identity = _identity(game)
+    if identity is None:
         return []
-    canonical, season, week, _away, _home = parsed
+    canonical, season, week, sport = identity
     played = game.get("home_score") is not None and game.get("away_score") is not None
     grouped: dict[tuple, list[dict]] = {}
     for quote in quotes:
@@ -312,15 +426,17 @@ def facts_for_game(game: dict, quotes: list[dict],
         line = quote["point"]
         matches = _rows_for_player(log_rows, key, quote.get("team"))
         status = log_status(played, game_rows, len(matches) if played else 0)
+        team = team_for_fact(
+            quote, matches, game.get("home_team"), game.get("away_team"))
         out.append(_one(
             canonical, season, week, key, market, line, quote,
-            status, matches,
+            status, matches, sport, team,
         ))
     return out
 
 
 def _one(canonical, season, week, key, market, line, quote,
-         status, matches) -> dict:
+         status, matches, sport=SPORT, team=None) -> dict:
     actual = None
     graded = None
     # Anyone who did not play, and any row still missing a line, stays
@@ -334,12 +450,12 @@ def _one(canonical, season, week, key, market, line, quote,
     return {
         "prop_key": f"{canonical}|{market}|{key}|{line_key(line)}",
         "canonical_key": canonical,
-        "sport": SPORT,
+        "sport": sport,
         "season": season,
         "week": week,
         "player_name": quote.get("player_name") or key,
         "player_key": key,
-        "team": quote.get("team"),
+        "team": team,
         "market": market,
         "line": line,
         "over_price": american_odds(quote.get("over_price")),

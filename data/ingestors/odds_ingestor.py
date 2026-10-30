@@ -133,8 +133,23 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB")
 # without the reference price.
 DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB"})
 
-# Markets to pull (full-game)
+# Markets to pull (full-game). The bulk endpoint. Alternate ladders are NOT
+# in this list: mixing them in 422s the whole slate, the same failure as
+# h2h_3way. They are additional markets, fetched per event below.
 MARKETS = ["h2h", "spreads", "totals"]
+
+# One row per rung, under these keys, so the main spreads/totals row the
+# models read stays the one number. The edit sheet reads the ladder from
+# alt_game_lines: the 6am run fills it for the next 3 days, and this pass
+# (FETCH_ALT_GAME_LINES, default on) refreshes it every pass for games in the
+# next ALT_GAME_LINES_WINDOW_HOURS. UFC is absent: its bulk feed is h2h.
+ALT_GAME_LINE_MARKETS = ["alternate_spreads", "alternate_totals"]
+# Matt, 2026-10-29: option B, every pass, for games starting in the next 24
+# hours (the 6am alt_game_lines run keeps the 3-day look-ahead). Unbounded,
+# this pass bought a ladder for every event the bulk call listed, days out,
+# 53 times a day. ALT_GAME_LINES_WINDOW_HOURS overrides; 0 removes the window.
+ALT_GAME_LINES_WINDOW_HOURS_DEFAULT = 24.0
+ALT_GAME_LINE_SPORTS = frozenset({"MLB", "NHL", "WNBA", "NBA", "NCAAF", "NFL", "NCAAB"})
 
 # Stamped on every row the /historical endpoint writes, and protected by name
 # in data/prune_odds.py. Rows from the live poll carry NULL. Without the stamp
@@ -225,6 +240,25 @@ def _within_lookahead(ev: dict, now: datetime | None = None,
         ts = ts.replace(tzinfo=timezone.utc)
     now = now or datetime.now(timezone.utc)
     return ts <= now + timedelta(days=days)
+
+
+def _commence_passed(ev: dict, now: datetime | None = None) -> bool:
+    """True when the event's start is already in the past.
+
+    FAILS OPEN, the same way _within_lookahead does: a missing or unparseable
+    commence_time is not treated as started, so a real game is still fetched.
+    """
+    raw = ev.get("commence_time")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return ts <= now
 
 # UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
 # attempted per-event (like MLB F5) — absent lines are non-fatal and the
@@ -544,6 +578,64 @@ def _parse_total_outcomes(outcomes: list) -> dict:
             result["under_link"]  = link
             result["under_sid"]   = sid
     return result
+
+
+def _parse_alternate_spread_rows(outcomes: list, home_team_name: str) -> list[dict]:
+    """One row per home number. The home outcome at p pairs with the away
+    outcome at -p (spread_home is the HOME number, CLAUDE.md §4). A rung
+    missing either side is not a line. Links and sids ride along the same
+    way the main spread parser stores them."""
+    home_at: dict[float, dict] = {}
+    away_at: dict[float, dict] = {}
+    for o in outcomes:
+        point = o.get("point")
+        price = o.get("price")
+        if point is None or price is None:
+            continue
+        slot = {"price": price, "link": o.get("link"), "sid": o.get("sid")}
+        (home_at if o.get("name") == home_team_name else away_at)[float(point)] = slot
+    rows = []
+    for p, h in home_at.items():
+        a = away_at.get(-p)
+        if a is None:
+            continue
+        rows.append({
+            "spread_home": p,
+            "home_price": h["price"],
+            "away_price": a["price"],
+            "home_link": h["link"],
+            "away_link": a["link"],
+            "home_sid": h["sid"],
+            "away_sid": a["sid"],
+        })
+    return rows
+
+
+def _parse_alternate_total_rows(outcomes: list) -> list[dict]:
+    """One row per total, Over and Under both present. Same link/sid columns
+    as the main total parser."""
+    slots: dict[float, dict] = {}
+    for o in outcomes:
+        name = o.get("name") or ""
+        point = o.get("point")
+        if point is None or name not in ("Over", "Under") or o.get("price") is None:
+            continue
+        slots.setdefault(float(point), {})[name] = o
+    rows = []
+    for pt, s in slots.items():
+        if "Over" not in s or "Under" not in s:
+            continue
+        ov, un = s["Over"], s["Under"]
+        rows.append({
+            "total_line": pt,
+            "over_price": ov.get("price"),
+            "under_price": un.get("price"),
+            "over_link": ov.get("link"),
+            "under_link": un.get("link"),
+            "over_sid": ov.get("sid"),
+            "under_sid": un.get("sid"),
+        })
+    return rows
 
 
 # ── API Fetcher ───────────────────────────────────────────────────────────────
@@ -875,6 +967,95 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
     return [r for r in odds_rows if r.get("market") == NHL_3WAY_MARKET]
 
 
+def _alt_window_hours() -> float:
+    try:
+        return float(os.environ.get("ALT_GAME_LINES_WINDOW_HOURS",
+                                    ALT_GAME_LINES_WINDOW_HOURS_DEFAULT))
+    except ValueError:
+        return ALT_GAME_LINES_WINDOW_HOURS_DEFAULT
+
+
+def _within_alt_window(ev: dict, now: datetime, hours: float) -> bool:
+    """Inside the alternate-line window. FAILS CLOSED on a missing or
+    unparseable start: every event here is a paid call, and a game we cannot
+    date is one we cannot bound. hours <= 0 means no window."""
+    if hours <= 0:
+        return True
+    raw = ev.get("commence_time")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts <= now + timedelta(hours=hours)
+
+
+def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
+                                snapshot_type: str, snapshot_at: str,
+                                resolve_game_id=None, meter: dict | None = None,
+                                now: datetime | None = None) -> list[dict]:
+    """Alternate spreads and totals for the events the bulk call already
+    listed. Those are the upcoming games this pass is storing main lines
+    for. The events endpoint lists a whole future season and is not used
+    here (the NHL 3-way loop's out-of-season walk).
+
+    Billing is the per-event rule measured on F5 in `_get_event_odds`: one
+    credit per market returned. Both markets coming back is two credits for
+    that event. Not the 30-second poller, and not the historical endpoint
+    (that one bills 10x). A 422 on one event is skipped; the main lines
+    already stored for the slate stay.
+    """
+    event_responses = []
+    now = now or datetime.now(timezone.utc)
+    hours = _alt_window_hours()
+    for ev in events:
+        event_id = ev.get("id")
+        if not event_id or _commence_passed(ev, now) or not _within_alt_window(ev, now, hours):
+            continue
+        # The feed's own x-requests-last for this call, summed for the pass
+        # ledger (alt_game_line_fetches): the cost is measured, not assumed.
+        from data.ingestors import odds_quota as _oq
+        before = _oq.latest()
+        if meter is not None:
+            meter["calls"] = meter.get("calls", 0) + 1
+        try:
+            ev_odds = _get_event_odds(sport_key, event_id, ALT_GAME_LINE_MARKETS)
+        except Exception as exc:
+            # AssertionError is a test refusing the network. Swallowing it
+            # would let a pass spend credits the test exists to forbid.
+            if type(exc) is AssertionError:
+                raise
+            logger.warning(f"  {sport} alternate lines failed for {event_id}: {exc}")
+            _meter_add(meter, before, _oq.latest())
+            continue
+        _meter_add(meter, before, _oq.latest())
+        if ev_odds:
+            event_responses.append(ev_odds)
+        time.sleep(REQUEST_SLEEP)
+
+    if not event_responses:
+        return []
+
+    _, odds_rows = _process_events(
+        event_responses, sport, snapshot_type, snapshot_at,
+        resolve_game_id=resolve_game_id)
+    return [r for r in odds_rows if r.get("market") in ALT_GAME_LINE_MARKETS]
+
+
+def _meter_add(meter: dict | None, before, after) -> None:
+    """Add one call's x-requests-last to the pass meter; count it as
+    unreported when the call recorded none."""
+    if meter is None:
+        return
+    if after is None or after is before or after.get("last") is None:
+        meter["unreported"] = meter.get("unreported", 0) + 1
+    else:
+        meter["credits"] = meter.get("credits", 0.0) + float(after["last"])
+
+
 def _get_historical_odds(sport_key: str, markets: list[str],
                           snapshot_date: str, hour_utc: int = 12,
                           bookmakers: list[str] | None = None) -> list[dict]:
@@ -1115,6 +1296,14 @@ def _process_events(events: list[dict], sport: str,
                     row = {**base_row, **parsed, "market": market_key}
                     odds_rows.append(row)
 
+                elif market_key == "alternate_spreads":
+                    for parsed in _parse_alternate_spread_rows(outcomes, home_name):
+                        odds_rows.append({**base_row, **parsed, "market": market_key})
+
+                elif market_key == "alternate_totals":
+                    for parsed in _parse_alternate_total_rows(outcomes):
+                        odds_rows.append({**base_row, **parsed, "market": market_key})
+
     return game_rows, odds_rows
 
 
@@ -1185,9 +1374,9 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
     the MMA feed mixes promotions, and a poller writing phantom games every 30
     seconds would accumulate them 40x faster than the hourly pass did.
 
-    Per-event markets (F5, NHL 3-way, UFC round totals) are NOT fetched. They
-    cost one call per event, which is the expensive shape, and none of them is
-    what a fast pre-game watch is for.
+    Per-event markets (F5, NHL 3-way, UFC round totals, alternate spreads and
+    totals) are NOT fetched. They cost one call per event, which is the
+    expensive shape, and none of them is what a fast pre-game watch is for.
 
     IT ALSO UPSERTS THE GAMES IT SEES, which is not tidiness. `odds` carries a
     foreign key to `games`, and `_insert_odds` writes its whole batch in one
@@ -1371,6 +1560,58 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 f"{sp}: {n_games} games, {n_odds} odds rows "
                 f"({snapshot_type}) — {duration:.1f}s"
             )
+
+            # Alternate spreads and totals — per-event additional markets.
+            # FETCH_ALT_GAME_LINES=0 turns this off (default on: Matt accepted
+            # the cost). Started games are skipped inside the fetch: the
+            # latest view drops in-play rows, so buying them spends credits
+            # for a ladder the sheet will not show. Billing is the per-event
+            # rule measured on F5: one credit per market returned, two when
+            # both ladders come back, once per unstarted event per pass.
+            # The odds step runs on each refresh (scheduler.py: :17 for hours
+            # 0-5 and 7-17 ET, every 10 minutes for hours 18-23 ET) plus the
+            # 6am daily pipeline. Only games starting inside
+            # ALT_GAME_LINES_WINDOW_HOURS (24) are bought (Matt, 2026-10-29,
+            # option B); alt_game_lines.py buys the 3-day window at 6am.
+            if (sp in ALT_GAME_LINE_SPORTS and events
+                    and os.environ.get("FETCH_ALT_GAME_LINES", "1") == "1"):
+                try:
+                    meter: dict = {}
+                    asked_at = datetime.now(timezone.utc)
+                    try:
+                        alt_rows = _fetch_alternate_game_lines(
+                            sport_key, sp, events, snapshot_type, snapshot_at, resolve,
+                            meter=meter)
+                    except Exception as fetch_exc:
+                        # The calls already made were billed: keep the meter
+                        # and still ledger them below (review of #1093, L4).
+                        if type(fetch_exc) is AssertionError:
+                            raise
+                        meter["error"] = repr(fetch_exc)[:200]
+                        alt_rows = []
+                        logger.warning(f"{sp} alternate game lines fetch failed: {fetch_exc}")
+                    if alt_rows:
+                        n_alt = _insert_odds(conn, alt_rows)
+                        total_odds += n_alt
+                        logger.success(
+                            f"{sp} alternate spreads/totals: {n_alt} odds rows stored")
+                    # The app reads the ladder from alt_game_lines, so the pass
+                    # refreshes it for the games it just bought, and ledgers the
+                    # pass's measured credits beside the daily run's.
+                    # Commit what this pass has stored so far first. The ladder
+                    # refresh's catalog check (data/ddl_guard) rolls the
+                    # connection back if its first query fails, and nothing in
+                    # this pass is committed until every sport is done, so a
+                    # failure there must not be able to discard the main odds.
+                    conn.commit()
+                    from data.ingestors.alt_game_lines import store_pass_ladders
+                    store_pass_ladders(conn, sp, alt_rows, meter, asked_at)
+                except Exception as exc:
+                    if type(exc) is AssertionError:
+                        raise
+                    logger.warning(
+                        f"{sp} alternate game lines failed (non-fatal — main "
+                        f"lines for this sport are already stored): {exc}")
 
             # F5 markets — MLB only, fetched via the per-event endpoint (additional
             # markets are not returned by the bulk /odds endpoint). Gated by env var

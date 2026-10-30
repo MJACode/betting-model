@@ -19,15 +19,34 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters worker job: a False step returns {"ok": false} and is recorded once, instead of raising and being retried up to 3 times. pipeline_log error row unchanged. |
+| 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters: fill_gaps commits as it goes and one ESPN failure no longer drops the season; the 6am run writes the reason to pipeline_log. No production write. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, NCAAB feed names: a last rule for shortened school names plus 20 overrides (no name changes team; 80 more resolve). Replay of the kept raw events: a read-only dry run unless --apply, worker mode replay_unmatched. Review round: a prefix tie stays unresolved, a retried write cannot store a quote twice, listings 12+ hours from their game are not replayed; the 2025-26 dry run ran read only. PR #1094, not merged. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Stats board notes behind one ⓘ (Anytime TD too tall). Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM Phase A prop filters. NFL boards 01–05 and the same NBA sheet without kickoff slots. Hand-applied migration. Draft, not merged. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA CI. Abort skips setError. byom_game_facts left AHEAD_OF_THE_APP. Jobs stay off. Migration not applied. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA follow-up to review 5691932690. Cross-sport names are refused. Game bets and rest chips wait on an NBA game-fact row. Migration not applied. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1086 M1–M3. Scoreboard splits test is on the PR subset. A percent shows only for the line on the card, and not beside a live DK quote. NFL/NHL ESPN scoreboards are parsed; UTAH maps to UTA. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing only when the same sport still has a game more than 24 hours out that a book is pricing. Same-day prices do not hide a dead early-lines pass. The 15:25Z NBA 7 of 13 CRIT was the pulled Friday slate. Outage replays stay CRIT. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H review lows from #1075. Fallback remembered. Meetings sorted newest first. H2H retry is H2H only. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Scoreboard one list per sport (status chips removed), live NFL / NBA / NHL scores from ESPN every minute into `live_scoreboard`, and % bets / % money per market into display-only `scoreboard_splits`. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1083 M1–M2. Main-market filter on the unfiltered odds reads. FETCH_ALT_GAME_LINES and skip started games. Draft stays draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA facts follow-up. NBA game-facts floor is 2021. Docstrings match the off declarations. Enable game facts before prop facts. Jobs stay off. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA game-facts and prop-facts jobs declared off. Game-facts validator accepts NBA. Migration stays hand-applied. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA full 14 player props in the builder. Hand-applied migration. No declared backfill. Draft, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, merged origin/master into the player H2H chip. Range row kept. Chart dates kept. H2H bars labelled from the meeting. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29/30, NBA sixth and seventh searches graded on the bought prices: alternate lines 0 of 30 (191 impossible total rows found and dropped, re-graded), the minutes after an injury report 0 of 26. Nothing built. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate lines every pass for games in the next 24 hours (Matt: option B); the pass now refreshes the app's ladder and ledgers its credits. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate spreads and totals fetched once a day (Matt approved the cost); ladder in the betslip's game-line edit. Cost measured by the worker ledger. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Edit moneyline, spread and total legs on the betslip. Main numbers only; alternate game lines need Odds API credits (Matt's call). PR #1081. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA eighth search: mike's first-quarter cover-record and over/under-record method, 64 cells pre-registered and graded, 0 pass. Last-5 rule 237 bets +6.1% (interval through zero). Alternate-line and injury-news grades blocked on the stale local database login. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM prop units show only for exactly one prop with Over or Under set. Anytime TD only for Yes. Mix and unsided props stay hidden. SQL lows not taken. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Scoreboard Medium follow-ups from #1065. NCAAF by game id. One in-play DK row per market. Sheet polls only while focused. Index migration is hand-applied, not on prod. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter Season row reads `v_nba_team_q1_season`. Last 5 / Last 10 stay on the 40-game fetch. Follow-up to #1069. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, BYOM NFL props in the guided builder. Twelve markets. Over or Under required. Anytime TD is Yes. Units at the stored DraftKings price. `prop_side` is hand-applied. |
+| 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NCAAB foundation merged (#1057). Purchase floor 300,000 = 3.5 worst organic days; resumes 06:00Z Nov 1. cbbdata account created (re-registered under the sign-up mailbox 2026-10-29), archive 2015-25 daily, 2025-26 empty. The football key opens College Basketball Data. Hand-off doc for KenPom and the injury feed. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA first-quarter stats on the team page. Stats only, free. New `nba-quarters` step backfills quarter scores and play-by-play the 2026-27 season was missing. Draft, not merged. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Drop `execute_sql` from the Claude allow-list. Read tools stay. No committed read-only pin. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, DK prices on NFL BYOM prop facts. Hand-applied columns and backtest. Job enabled with apply. Backfill from 2023-09-01. Draft, not merged. |

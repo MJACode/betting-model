@@ -13,7 +13,13 @@
  */
 
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
-import { assertByomSide, nflSeasonList, type ByomSeasonScope } from './byomRecord';
+import {
+  assertByomSide,
+  nbaSeasonList,
+  nflSeasonList,
+  type ByomSeasonScope,
+  type ByomSport,
+} from './byomRecord';
 import { supabase } from './supabase';
 
 export { byomFilters, type ByomFilters };
@@ -150,13 +156,66 @@ export function parseByomModel(value: unknown): ByomModel {
  * deployed function has that column. It does not suggest a stake.
  * The line label is LINE_BASIS.
  */
+function rpcFilters(
+  filters: ByomFilters | undefined,
+  sport: ByomSport,
+): ByomFilters & { sport?: ByomSport } {
+  const checked = byomFilters(filters);
+  // NFL omits sport. Production byom_backtest rejects an unknown key
+  // until byom_nba_props_2026_10_29.sql is applied, and a missing
+  // sport there is NFL. Sending it on every NFL call would break the
+  // live builder before that file is applied.
+  if (sport === 'NBA') return { ...checked, sport: 'NBA' };
+  return checked;
+}
+
+export interface ByomPlayerSearch {
+  names: string[];
+  /** The name RPC is not on this database yet. */
+  missing: boolean;
+}
+
+/**
+ * Distinct player names on byom_prop_facts. Two characters minimum.
+ * A database without byom_player_names returns missing, not a throw.
+ */
+export async function searchByomPlayerNames(
+  sport: ByomSport,
+  query: string,
+): Promise<ByomPlayerSearch> {
+  const q = query.trim().replace(/[%_\\]/g, '');
+  if (q.length < 2) return { names: [], missing: false };
+  const { data, error } = await supabase.rpc('byom_player_names', {
+    p_sport: sport,
+    p_query: q,
+  });
+  if (error) {
+    const code = typeof error.code === 'string' ? error.code : '';
+    const message = typeof error.message === 'string' ? error.message : '';
+    if (code === 'PGRST202' || /could not find the function/i.test(message)) {
+      return { names: [], missing: true };
+    }
+    throw error;
+  }
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const row of asRows(data)) {
+    const name = text(row.player_name);
+    if (name === '' || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return { names, missing: false };
+}
+
 export async function fetchByomBacktest(
   season: number | null,
   filters?: ByomFilters,
+  sport: ByomSport = 'NFL',
 ): Promise<ByomBacktestRow[]> {
   const { data, error } = await supabase.rpc('byom_backtest', {
     p_season: season,
-    p_filters: byomFilters(filters),
+    p_filters: rpcFilters(filters, sport),
   });
   if (error) throw error;
   return asRows(data).map(parseBacktestRow);
@@ -191,11 +250,12 @@ export async function fetchByomScopedBacktest(
   scope: ByomSeasonScope,
   filters?: ByomFilters,
   now: Date = new Date(),
+  sport: ByomSport = 'NFL',
 ): Promise<ByomBacktestRow[]> {
   const parsed = byomFilters(filters);
-  if (scope === 'current') return fetchByomBacktest(null, parsed);
-  const seasons = nflSeasonList(now);
-  const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed));
+  if (scope === 'current') return fetchByomBacktest(null, parsed, sport);
+  const seasons = sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+  const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed, sport));
   return groups.flat();
 }
 
@@ -204,12 +264,13 @@ export async function saveByomModel(
   name: string,
   filters?: ByomFilters,
   season: number | null = null,
+  sport: ByomSport = 'NFL',
 ): Promise<ByomBacktestRow & { model_id: string; season: number }> {
   const checked = byomFilters(filters);
   assertByomSide(checked);
   const { data, error } = await supabase.rpc('byom_save_model', {
     p_name: name,
-    p_filters: checked,
+    p_filters: rpcFilters(filters, sport),
     p_season: season,
   });
   if (error) throw error;
@@ -227,6 +288,30 @@ export async function fetchByomModels(): Promise<ByomModel[]> {
   const { data, error } = await supabase.rpc('byom_list_models');
   if (error) throw error;
   return asRows(data).map(parseByomModel);
+}
+
+/** True once this process has seen one NBA byom_game_facts row. */
+let nbaGameFactsKnown = false;
+
+export function nbaGameFactsAreKnown(): boolean {
+  return nbaGameFactsKnown;
+}
+
+/**
+ * Whether NBA game facts exist. An empty table is 'missing'. A hit stays
+ * 'ready' for the rest of this process. A failed read throws.
+ */
+export async function fetchNbaGameFactsReady(): Promise<'ready' | 'missing'> {
+  if (nbaGameFactsKnown) return 'ready';
+  const { data, error } = await supabase
+    .from('byom_game_facts')
+    .select('canonical_key')
+    .eq('sport', 'NBA')
+    .limit(1);
+  if (error) throw error;
+  if (!Array.isArray(data) || data.length === 0) return 'missing';
+  nbaGameFactsKnown = true;
+  return 'ready';
 }
 
 export async function deleteByomModel(modelId: string): Promise<void> {

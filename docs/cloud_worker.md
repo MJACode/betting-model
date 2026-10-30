@@ -37,7 +37,25 @@ Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
 See `docs/social_posts.md`.
 
-Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
+**Alternate spreads and totals (2026-10-29, Matt approved the cost; every
+pass since the same day, option B).** Every refresh pass's odds step buys
+alternates for games starting in the next 24 hours
+(`ALT_GAME_LINES_WINDOW_HOURS`, default 24; `FETCH_ALT_GAME_LINES=0` turns
+it off) and refreshes `alt_game_lines` for them, one ledger row per sport per
+pass (`endpoint = 'pass'`). The daily full pipeline's Step 2-alt (`--step alt-game-lines`,
+`data/ingestors/alt_game_lines.py`) makes one per-event call per game starting
+in the next 3 days, for NFL, NCAAF, NBA, NHL, MLB, WNBA and NCAAB, and stores
+every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
+pruner) and the current ladder in `alt_game_lines`, which the betslip's
+game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
+game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
+one row per call:
+
+    SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
+           sum(credits_last) AS credits, count(*) FILTER (WHERE NOT ok) AS failed
+      FROM alt_game_line_fetches GROUP BY 1, 2 ORDER BY 1 DESC, 2;
+
+Pre-game Odds-API credit burn is otherwise unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
 instead of double-fetching.
 
@@ -127,6 +145,25 @@ Credit safety: in-play fetches are debounced (60s) and capped by `LIVE_DAILY_CRE
 Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cadence.
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
+
+### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
+
+`live_scoreboard` job, `pollers` service, every minute 24x7
+(`data/ingestors/live_scoreboard.py`). While a sport has a game that has
+started, has no final on `games` and no final row yet, it reads ESPN's site
+scoreboard once per sport and upserts one row per game into
+`public.live_scoreboard` (`state` `in` / `post`, score, clock label, NFL down
+and possession). The app's Scoreboard reads it. No Odds API credits. An idle
+tick is one database read and no HTTP call. `RUN_LIVE_SCOREBOARD=0` stops it.
+`site.api.espn.com` answered the worker 200 on 3,164 scheduler calls in the
+week before 2026-10-29 (`api_call_log`); older notes calling it 403 from the
+worker are out of date. MLB and NCAAF keep their own live tables.
+
+The Scoreboard's % bets / % money come from the `scoreboard-splits`
+refresh-pass step (`data/ingestors/scoreboard_splits.py`) into
+`public.scoreboard_splits`: Action Network's free v2 scoreboard, every sport
+with an unstarted game today or tomorrow, display only (never
+`public_betting`, which the scorer reads).
 
 ### NHL player props
 

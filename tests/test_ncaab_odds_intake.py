@@ -409,6 +409,10 @@ def no_feed(monkeypatch):
 
     monkeypatch.setattr(oi, "_get_odds", _boom)
     monkeypatch.setattr(oi, "_get_historical_odds", _boom)
+    # Alternate ladders are a second call per event the bulk feed returned.
+    # None, not the network: a test that returns events must not spend.
+    monkeypatch.setattr(oi, "_get_event_odds", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "_list_events", lambda *a, **k: [])
     monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
     monkeypatch.setattr(oi, "persist_quota", lambda conn: None)
     monkeypatch.setattr(oi, "lock_down", lambda conn, table: None)

@@ -17,15 +17,36 @@ from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")
 
 
-def current_nfl_season(today: date | datetime | None = None) -> int:
+def _as_et(today: date | datetime | None) -> date | datetime:
     if today is None:
-        today = datetime.now(_ET)
-    elif isinstance(today, datetime):
+        return datetime.now(_ET)
+    if isinstance(today, datetime):
         if today.tzinfo is None:
-            today = today.replace(tzinfo=_ET)
-        else:
-            today = today.astimezone(_ET)
+            return today.replace(tzinfo=_ET)
+        return today.astimezone(_ET)
+    return today
+
+
+def current_nfl_season(today: date | datetime | None = None) -> int:
+    today = _as_et(today)
     year = today.year
     if today.month >= 9:
         return year
     return year - 1
+
+
+def current_nba_season(today: date | datetime | None = None) -> int:
+    """Ending year. October through December are next year's label.
+
+    January through September stay on the calendar year, including the
+    offseason, so a default of "current" does not jump to a season that
+    has not tipped. 2026-10-29 is 2027. 2027-01-15 is 2027. 2026-09-01
+    is 2026. The same rule is in byom_backtest when sport is NBA and
+    season is null. data.ingestors.nba_stats_ingestor._nba_season_for_date
+    is the same split.
+    """
+    today = _as_et(today)
+    year = today.year
+    if today.month >= 10:
+        return year + 1
+    return year

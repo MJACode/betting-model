@@ -49,14 +49,18 @@ sport stores null.
 `data/migrations/byom_facts_schema_2026_10_16.sql` is registered for the
 worker and was not applied by the change that added it. The tables stay
 empty until someone runs the builder with `--apply`. That job is
-`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false,
-and the job is not in `jobs/declared_jobs.json`, so a merge does not
-backfill production.
+`byom_game_facts` in `tracking/job_queue.py`. `apply` defaults to false.
+A missing sport is NFL. `byom-nba-game-facts` is declared with enabled
+false and apply false, so a merge does not backfill production. No NFL
+game-facts row is declared.
 
 The builder is `byom/load.py` (`scripts/byom_game_facts.py` for a dry run).
-NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. Other
-sports are not. For each game it takes the latest DraftKings spread and
-the latest DraftKings total whose snapshot is at or before game start.
+NFL seasons before `DK_HISTORY_START_SEASON` (2020) are refused. NBA
+seasons before `NBA_DK_HISTORY_START_SEASON` (2021) are refused.
+Measured 2026-10-29: the first NBA season with a DraftKings h2h,
+spread, or total is 2021. For each game it takes the latest DraftKings
+spread and the latest DraftKings total whose snapshot is at or before
+game start.
 NFL reads `nfl_odds_history` and `odds` together. Every sport reads
 `odds`, matched on `games.game_id`. Measured 2026-10-23 on two NFL
 games in each season 2020–2026: DraftKings h2h, spread, and total rows
@@ -82,8 +86,11 @@ another point, and how many graded lines still have no American price.
 Each of those four sides is one count. Moneyline sides are not in the
 three counts. A queued `byom_game_facts` job with `sport` null builds
 NFL and still does not write unless `apply` is true.
-`byom-nfl-refresh` stays off. The worker job `byom_game_facts` still
-accepts NFL only and is still undeclared.
+`byom-nfl-refresh` stays off. The worker job `byom_game_facts` accepts
+NFL and NBA. A missing sport is NFL. An NFL season before 2020 is
+still refused. An NBA season before 2021 is refused. The NBA
+declarations stay enabled false. Enable `byom-nba-game-facts` before
+`byom-nba-prop-facts`.
 
 ## Prop facts
 
@@ -150,7 +157,10 @@ August stay on the previous year's label. A caller can pass an older
 season. Filters are side (home/away on a moneyline or spread, over/under
 on a total, and the player's team on a prop), role (favorite/underdog/pickem),
 weeks, rest days, primetime, and market type. A leg missing that datum
-is left out. There is no spread-size, price, or line filter. Each
+is left out. Phase A prop filters (player line, DraftKings price band,
+team spread, game total, month, weekday, kickoff slot, opponent, player)
+are in `byom_prop_phase_a_filters_2026_10_29.sql`, applied by hand.
+Stake and kelly are still rejected. Each
 market row counts wins, losses, pushes, and ties, plus `units` and
 `skipped`. Staking is 1u to win at the stored DraftKings price. A win
 is +1. A loss is `-abs(price)/100` on minus odds and `-100/price` on
@@ -246,7 +256,8 @@ user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
 moment. The snapshot totals and the per-market summary are that one
 read. The snapshot stores wins, losses, pushes, and ties. A
-stake, kelly, price, line, or spread-size filter is rejected. An
+stake or kelly filter is rejected. Phase A line and price keys are
+accepted by `byom_prop_phase_a_filters_2026_10_29.sql`. An
 allowlisted key in the wrong case is rejected. There
 is no recommended stake.
 
@@ -299,7 +310,8 @@ Over or Under is set. Anytime TD shows units only for Yes, which is
 over. A mix, two props, a prop with no side, and an empty market list
 do not.
 There is no recommended stake. `package.json` is unchanged. Sign-in
-is unchanged. NBA props are not in this builder.
+is unchanged. NBA props are a separate sport on the same builder.
+`docs/byom_nba.md`.
 
 `mobile/src/lib/byom.ts` types the rows and calls `byom_backtest`,
 `byom_save_model`, `byom_list_models`, and `byom_delete_model`.
