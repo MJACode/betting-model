@@ -1,7 +1,7 @@
 # Graph Report - wt_ncaab_box  (2026-10-30)
 
 ## Corpus Check
-- 1803 files · ~3,070,014 words
+- 1803 files · ~3,070,317 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d9af3398`
+- Built from commit: `3cfc8e51`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -4360,7 +4360,7 @@ Cohesion: 0.40
 Nodes (4): DNS, Local preview, Signal Base marketing site, Vercel
 
 ## Ambiguous Edges - Review These
-- `Claim: the app cannot write to the backend` → `device_push_tokens table (anon INSERT/UPDATE, no SELECT)`  [AMBIGUOUS]
+- `device_push_tokens table (anon INSERT/UPDATE, no SELECT)` → `Claim: the app cannot write to the backend`  [AMBIGUOUS]
   docs/privacy.html · relation: conceptually_related_to
 
 ## Knowledge Gaps
@@ -4372,20 +4372,20 @@ Nodes (4): DNS, Local preview, Signal Base marketing site, Vercel
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `over()` connect `Mobile color contrast checker` to `current_nfl_season`, `verify_bankroll.ts`, `NBA public betting splits capture`?**
-  _High betweenness centrality (0.146) - this node is a cross-community bridge._
+  _High betweenness centrality (0.147) - this node is a cross-community bridge._
 - **What connects `expo-asset`, `expo-dev-client`, `expo-font` to the rest of the system?**
   _105 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Mobile picks home screen and filters` be split into smaller, more focused modules?**
   _Cohesion score 0.011458582000477441 - nodes in this community are weakly interconnected._
 - **Why does `Backtest` connect `current_nfl_season` to `Mobile color contrast checker`, `DBConnection`, `ncaab_odds_history.py`?**
-  _High betweenness centrality (0.143) - this node is a cross-community bridge._
+  _High betweenness centrality (0.145) - this node is a cross-community bridge._
 - **Should `Mobile stats board` be split into smaller, more focused modules?**
   _Cohesion score 0.009726501548478057 - nodes in this community are weakly interconnected._
 - **Why does `statement_timeout()` connect `DBConnection` to `ncaab_espn_ingestor.py`, `Player prop box score backfill`, `test_ncaab_espn_ingestor.py`, `Settlement CLV timeout retry tests`, `nba_results_ingestor.py`, `current_nfl_season`, `prop_box_scores.py`, `NHL box score ingestor`?**
-  _High betweenness centrality (0.141) - this node is a cross-community bridge._
+  _High betweenness centrality (0.143) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
 
-- **What is the exact relationship between `Claim: the app cannot write to the backend` and `device_push_tokens table (anon INSERT/UPDATE, no SELECT)`?**
+- **What is the exact relationship between `device_push_tokens table (anon INSERT/UPDATE, no SELECT)` and `Claim: the app cannot write to the backend`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._

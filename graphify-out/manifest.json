@@ -1236,9 +1236,9 @@
     "semantic_hash": ""
   },
   "jobs/declared_jobs.json": {
-    "mtime": 1793393113.9571707,
-    "seen": 1793393967.028345,
-    "ast_hash": "fe09615570ce36e9fce07bc6a9f3cc14",
+    "mtime": 1793399283.1574857,
+    "seen": 1793399865.00374,
+    "ast_hash": "beb0fc880295b2cff2cb0a859b306035",
     "semantic_hash": ""
   },
   "mobile/App.tsx": {
@@ -7758,9 +7758,9 @@
     "semantic_hash": ""
   },
   "docs/cloud_worker.md": {
-    "mtime": 1793393095.301926,
-    "seen": 1793393967.0526092,
-    "ast_hash": "647a6fd85b7a8be89352d9b19a5f56b1",
+    "mtime": 1793399514.9265366,
+    "seen": 1793399865.0112407,
+    "ast_hash": "d11f3f0afb1f216af5fe648ebda08847",
     "semantic_hash": ""
   },
   "docs/clv.md": {
@@ -10674,9 +10674,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaab.md": {
-    "mtime": 1793393060.1301582,
-    "seen": 1793393967.0529852,
-    "ast_hash": "6e5d271cb1f5719bae269b98e6353001",
+    "mtime": 1793399569.8926322,
+    "seen": 1793399865.0116148,
+    "ast_hash": "2b066a935490c8df17aeea4c63862db7",
     "semantic_hash": ""
   },
   "data/ingestors/alt_game_lines.py": {
@@ -10932,9 +10932,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_espn_box.py": {
-    "mtime": 1793393331.7944458,
-    "seen": 1793393967.0271318,
-    "ast_hash": "449981001b7f15e97f83d300a4f1d655",
+    "mtime": 1793399569.8964283,
+    "seen": 1793399865.0025537,
+    "ast_hash": "bb1ee05f2f00e8a35b8a61ceb81b71a0",
     "semantic_hash": ""
   },
   "data/migrations/add_ncaab_period_scores_2026_10_30.sql": {

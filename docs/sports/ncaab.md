@@ -232,12 +232,32 @@ Two traps it avoids:
 - **A non-Division I team has no `team_espn_id` in NCAA's rows** (8,854 rows),
   and this feed fills it (Hawaii Pacific is 2269). A query keyed on the team id
   would keep three rows of such a game, NCAA's two and ESPN's row for that
-  side. To match one side across the two sources, use the game and `is_home`
-  (every stored game has one home row and one away row).
+  side. To match one side across the two sources, use the game and `pts`.
+  No game ends level, and the two sources' points agreed on every row
+  compared. Not the team id: in 31 of NCAA's 25,054 games from 2022-23 on,
+  neither row has one. Not `is_home`: at neutral sites the two sources can
+  disagree (below).
 
 A reader that matches on date and team pair and drops duplicate keys (the
 research prep does) would lose such a game rather than choose, so choose the
 source first.
+
+**Four more columns follow each source's own rules.** Measured 2026-10-30 on
+2025-26, NCAA's rows joined to the stored events and games (12,047 team rows):
+
+- `team`: this feed writes the name `games` carries ("Arizona State"), NCAA's
+  rows carry NCAA's ("Arizona St."). They differ for 121 of 365 schools. Key
+  a team on `team_espn_id`, never on `team`.
+- `is_home`: this feed follows the stored event, NCAA its own home team. At
+  neutral sites they disagree: 74 rows, 37 games, every one neutral.
+- `game_date`: this feed uses the ET date from `games`, NCAA its own. Tips at
+  03:59Z or 04:59Z land a day apart: 48 rows, 24 games.
+- `mins`: this feed writes 40 plus 5 per overtime, NCAA the measured playing
+  time (season means 39.50 to 39.69). A pace per 40 minutes moves about 1%
+  across the boundary between the sources.
+
+`ast` and `blk` are stored as ESPN reports them. In a 10-game check against
+NCAA's rows, assists matched on 20 of 20 team rows and blocks on 19 of 20.
 
 **What it refuses.** A summary that is not final, names other teams than the
 stored event, or lacks any of the shooting, rebound or turnover numbers; a

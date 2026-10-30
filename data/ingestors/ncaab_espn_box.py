@@ -56,7 +56,9 @@ espn_game_id before 2022-23 (138,338 of 188,424, read 2026-10-30), so a
 reader that requires one keeps only the last four seasons. Do not key on
 team_espn_id: NCAA's row for a non-Division I team has none (8,854 rows) and
 this feed fills it, so the two sources' rows for that side never match by
-team id; match a side across sources on the game and is_home. The query
+team id; match a side across sources on the game and pts (no game ends
+level), never on is_home, which the sources set differently at neutral
+sites. The query
 (docs/sports/ncaab.md prints the same one; a test runs that copy):
     SELECT * FROM (
       SELECT s.*, RANK() OVER (
@@ -66,6 +68,10 @@ team id; match a side across sources on the game and is_home. The query
      WHERE source_rank = 1;
 A reader keyed on date and team pair that drops duplicate keys would drop
 such a game instead (the research prep does), so choose the source first.
+team, is_home, game_date and mins follow games/ncaab_events in this feed's
+rows and NCAA's own rules in NCAA's (docs/sports/ncaab.md lists the counts).
+ast and blk are stored as ESPN reports them and were not checked against
+NCAA beyond a 10-game sample (blocks differed on 1 of 20 team rows).
 
 WHAT IT REFUSES, each counted, logged and recorded as a miss, never guessed:
   * a summary that is not final, names other teams than our event, or lacks
