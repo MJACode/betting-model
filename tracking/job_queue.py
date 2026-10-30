@@ -1458,16 +1458,18 @@ def _job_nba_quarters(**kw):
     nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
     through run_pipeline._timed_step, the same dispatch the daily run uses, so
     pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
+
+    A False step is the step's own handled failure, and _timed_step has already
+    written that error row. health_check and model_quality return {"ok": false}
+    for a non-ok result and do not raise. Raising here would put the job back
+    to pending and run the step again, up to MAX_ATTEMPTS. The queue records
+    this result once.
     """
     import run_pipeline
     run_date = kw.get("run_date") or config.today_et()
     ok = run_pipeline._timed_step(
         "nba-quarters", lambda: run_pipeline.step_nba_quarters(run_date), run_date)
-    if not ok:
-        # Failed, not done: the per-game reason is in pipeline_log.
-        raise RuntimeError(f"nba_quarters returned False for {run_date}; "
-                           "see pipeline_log step dispatch:nba-quarters")
-    return {"ok": True, "run_date": run_date}
+    return {"ok": bool(ok), "run_date": run_date}
 
 
 def _job_model_quality(**kw):
