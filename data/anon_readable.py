@@ -385,7 +385,8 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "odds_history_pulls",
     # NBA purchase fetches OFF the hour (a gap fill at 23:30Z): odds_history_pulls
     # keys on an integer hour and cannot hold them. Created on demand by
-    # data/ingestors/nba_odds_history.py, never read by the app.
+    # data/ingestors/nba_odds_history.py, never read by the app. The NCAAB
+    # opener grid files its half hours here too (ncaab_odds_history.py).
     "odds_history_fetches",
     # The NBA game-market search's graded cells and populations, stored by
     # scripts/nba_game2_store.py before anything reads them; never read by the app.

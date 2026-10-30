@@ -22,7 +22,7 @@ WHAT IS BOUGHT
            fixed hour list would miss the noon and late-West tips. Rows land in
            `odds` with source 'odds_api_historical' (the pruner protects it),
            resumable through `odds_history_pulls` (sport 'NCAAB', snapshot_date,
-           hour_utc, minute_utc; every hour this mode buys is minute 0).
+           hour_utc).
 
   --opener-grid --step 60|30 [--pre-start]  The same bulk snapshot at every
            grid time on the clock (every hour, or every half hour) from 72
@@ -33,13 +33,20 @@ WHAT IS BOUGHT
            (41.6% BetMGM totals to 67.6% betPARX totals; opener-route design,
            2026-10-30). --pre-start adds every grid time from 240 to
            72 hours before each season's first tip, for the season-opening
-           boards. Times the ledger already holds are skipped. What is stored
-           of each snapshot is each book's first quote on each game and market
-           and every quote that differs from the one before it (ChangeKeeper),
-           never a repeat and never an in-play price. Its own ceiling
-           (tracking/job_queue.py) and the same floor; it reads the balance on
-           record before its first call, so that call is checked too. NOT
-           QUEUED: the spend needs mike's approval.
+           boards. A time on the hour is ledgered in `odds_history_pulls`,
+           exactly as the lines purchase ledgers it, so an hour either one
+           bought is never bought again; a half hour in
+           `odds_history_fetches` (sport 'NCAAB', requested_at, why
+           'opener_grid'), the table the NBA purchase files its off-the-hour
+           fetches in. The shared ledger's key is never changed. What is
+           stored of each snapshot is each book's first quote on each game
+           and market and every quote that differs from the one before it
+           (ChangeKeeper), less any quote already in `odds` (the same game,
+           market, book, feed time, prices and line, stored by the lines
+           purchase or an earlier grid run), and never an in-play price. Its
+           own ceiling (tracking/job_queue.py) and the same floor; it reads
+           the balance on record before its first call, so that call is
+           checked too. NOT QUEUED: the spend needs mike's approval.
 
   --derivatives close|open  The per-event endpoint: first-half moneyline,
            spread and total plus team totals (4 markets; the feed bills 10 a
@@ -109,7 +116,6 @@ from bisect import bisect_left
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -118,7 +124,8 @@ import config
 from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 from data.db import get_connection
-from data.ingestors.nba_odds_history import _ODDS_KEYS, Meter, _write_with_retry
+from data.ingestors.nba_odds_history import (_ODDS_KEYS, FETCH_LEDGER_DDL, Meter,
+                                             _write_with_retry)
 from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window, ncaab_season_label,
                                         load_registry, match_event, reset_registry_cache,
                                         resolve_team_name)
@@ -163,12 +170,15 @@ CREATE TABLE IF NOT EXISTS ncaab_odds_unmatched (
     PRIMARY KEY (event_id, snapshot_at, source)
 )
 """
-PULL_LEDGER_COLS = ("sport", "snapshot_date", "hour_utc", "minute_utc", "pulled_at", "rows")
-# The ledger's minute (2026-10-30). The worker's migration pass applies it
-# (data/view_migrations.ACTIVE_MIGRATIONS); _ensure_tables applies the same
-# file when a purchase finds the column missing, before it buys.
-MINUTE_KEY_MIGRATION = (Path(__file__).resolve().parent.parent / "migrations"
-                        / "odds_history_pulls_minute_key_2026_10_30.sql")
+PULL_LEDGER_COLS = ("sport", "snapshot_date", "hour_utc", "pulled_at", "rows")
+# The opener grid's half hours. odds_history_pulls is shared by every sport's
+# history purchase and keyed on an integer hour, and its key is not changed:
+# any copy of a purchase whose ON CONFLICT names those three columns would pay
+# for a snapshot and then fail to ledger it. A time off the hour is ledgered
+# here instead, keyed on the instant: the NBA purchase's table
+# (nba_odds_history.FETCH_LEDGER_DDL), whose every NBA reader filters on sport.
+FETCH_LEDGER_COLS = ("sport", "requested_at", "snapshot_ts", "why", "pulled_at", "rows")
+GRID_WHY = "opener_grid"
 
 
 class PreconditionError(RuntimeError):
@@ -284,19 +294,22 @@ def check_process_events_contract() -> None:
 # ── tables ───────────────────────────────────────────────────────────────────
 
 def _ensure_tables(conn) -> None:
-    """The pull ledger and the unmatched store, created once and locked down.
+    """The two ledgers and the unmatched store, created once and locked down.
 
-    Both are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The catalog
-    gate means a run that finds them current fires no DDL (data/ddl_guard.py).
+    All three are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The
+    catalog gate means a run that finds them current fires no DDL
+    (data/ddl_guard.py); production holds all three (2026-10-30).
     """
     changed = False
     if not schema_is_current(conn, "odds_history_pulls", columns=PULL_LEDGER_COLS,
                              rls=True, revoked_from=API_ROLES):
         conn.execute(PULL_LEDGER_DDL)
-        # CREATE IF NOT EXISTS leaves an existing ledger as it is: an hour key
-        # gains the minute here, from the same file the worker pass applies.
-        conn.execute(MINUTE_KEY_MIGRATION.read_text(encoding="utf-8"))
         lock_down(conn, "odds_history_pulls")
+        changed = True
+    if not schema_is_current(conn, "odds_history_fetches", columns=FETCH_LEDGER_COLS,
+                             rls=True, revoked_from=API_ROLES):
+        conn.execute(FETCH_LEDGER_DDL)
+        lock_down(conn, "odds_history_fetches")
         changed = True
     if not schema_is_current(conn, "ncaab_odds_unmatched", columns=UNMATCHED_COLS,
                              rls=True, revoked_from=API_ROLES):
@@ -305,24 +318,6 @@ def _ensure_tables(conn) -> None:
         changed = True
     if changed:
         conn.commit()
-
-
-def _ledger_keyed_by_minute(conn) -> bool:
-    """Does the pull ledger's primary key hold minute_utc? One catalog read.
-    False on any doubt (no table, no catalog), so the grid refuses to buy."""
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM pg_constraint c JOIN pg_attribute a "
-            "ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey) "
-            "WHERE c.conrelid = to_regclass('public.odds_history_pulls') "
-            "AND c.contype = 'p' AND a.attname = 'minute_utc'").fetchone()
-    except Exception:                                           # noqa: BLE001
-        try:
-            conn.rollback()
-        except Exception:                                       # noqa: BLE001
-            pass
-        return False
-    return row is not None
 
 
 _UNMATCHED_INSERT = """
@@ -516,31 +511,34 @@ def season_order(todo: list[datetime]) -> list[datetime]:
 
 
 def _held_instants(conn) -> set[datetime]:
-    """Every NCAAB instant the pull ledger records as bought, as aware UTC.
+    """Every NCAAB instant bought, as aware UTC, from both ledgers: the pull
+    ledger's hours (date, hour) and the fetch ledger's off-the-hour instants
+    (sport 'NCAAB' only; the NBA files its own there). A half hour is its own
+    instant and never reads as its hour.
 
-    Read on the full key (date, hour, minute), so a half-hour row is its own
-    instant and never reads as its hour. Before the minute migration has
-    reached the database the column does not exist: every row is then an
-    hour, read as minute 0 (a dry run on the worker can come before the
-    migration pass, and must run no DDL)."""
-    try:
-        rows = conn.execute("SELECT snapshot_date, hour_utc, minute_utc FROM odds_history_pulls "
-                            "WHERE sport = %s", (SPORT,)).fetchall()
-    except Exception:                                           # noqa: BLE001
-        try:
-            conn.rollback()
-        except Exception:                                       # noqa: BLE001
-            pass
-        rows = conn.execute("SELECT snapshot_date, hour_utc FROM odds_history_pulls "
-                            "WHERE sport = %s", (SPORT,)).fetchall()
+    A database the fetch ledger has never reached (no NBA or grid purchase
+    has run there) holds no half hour: its hours are the answer. Any other
+    failure of that read is raised."""
     out = set()
-    for r in rows:
+    for d, hour in conn.execute("SELECT snapshot_date, hour_utc FROM odds_history_pulls "
+                                "WHERE sport = %s", (SPORT,)).fetchall():
         try:
-            day = date.fromisoformat(str(r[0])[:10])
+            day = date.fromisoformat(str(d)[:10])
         except ValueError:
             continue
-        minute = int(r[2]) if len(r) > 2 and r[2] is not None else 0
-        out.add(datetime(day.year, day.month, day.day, int(r[1]), minute, tzinfo=timezone.utc))
+        out.add(datetime(day.year, day.month, day.day, int(hour), tzinfo=timezone.utc))
+    try:
+        fetched = conn.execute("SELECT requested_at FROM odds_history_fetches "
+                               "WHERE sport = %s", (SPORT,)).fetchall()
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()
+        if conn.execute("SELECT to_regclass('public.odds_history_fetches')").fetchone()[0]:
+            raise
+        fetched = []
+    for (at,) in fetched:
+        when = _utc(at)
+        if when is not None:
+            out.add(when)
     return out
 
 
@@ -587,16 +585,30 @@ def _parse_snapshot(events: list[dict], when: datetime, resolver: EventResolver,
 
 
 def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
-                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None) -> bool:
+                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None,
+                  taken: set | None = None) -> bool:
     """Buy the whole slate at `when`, write it, its unmatched events and its
     ledger row in one transaction. False = stop (ceiling or floor).
 
-    The ledger is read and written on (date, hour, minute): 22:30 and 22:00
-    are two snapshots, and neither reads as the other bought."""
-    snap_date, hour, minute = when.date().isoformat(), when.hour, when.minute
-    held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
-                        "AND snapshot_date = %s AND hour_utc = %s AND minute_utc = %s",
-                        (SPORT, snap_date, hour, minute)).fetchone()
+    On the hour the ledger is odds_history_pulls (sport, date, hour), as every
+    purchase has it; off the hour (the grid's half hours) odds_history_fetches,
+    keyed on the instant. One routing rule for the check and the write, so
+    22:30 and 22:00 are two snapshots and neither reads as the other bought.
+
+    With `taken` (the opener grid) a kept row whose identical quote is already
+    in `odds`, or was stored by this run (`taken`), is not stored again: the
+    keeper knows only what this run has seen, and the lines purchase stored
+    its hours' quotes before. `odds` is read back INSIDE the write unit, as
+    the replay does, so a retry after a lost commit stores nothing twice."""
+    snap_date, hour = when.date().isoformat(), when.hour
+    on_hour = when.minute == 0 and when.second == 0
+    if on_hour:
+        held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
+                            "AND snapshot_date = %s AND hour_utc = %s",
+                            (SPORT, snap_date, hour)).fetchone()
+    else:
+        held = conn.execute("SELECT 1 FROM odds_history_fetches WHERE sport = %s "
+                            "AND requested_at = %s", (SPORT, when)).fetchone()
     if held:
         conn.commit()
         stats["skipped_held"] += 1
@@ -628,26 +640,48 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
     lost = [(stamp, str(ev.get("id")), ev.get("home_team"), ev.get("away_team"),
              ev.get("commence_time"), json.dumps(ev), HISTORICAL_ODDS_SOURCE)
             for ev in unmatched + dropped]
+    # The rows this snapshot stored, by one attempt or another: a retry after a
+    # commit the server did make finds them in `odds` and stores none.
+    stored = {"n": 0}
 
     def _write():
-        if odds_rows:
-            _insert_odds(conn, odds_rows)
+        rows = odds_rows
+        if taken is not None:
+            rows = [r for _, r in _not_yet_stored(conn, odds_rows, taken)]
+        if rows:
+            _insert_odds(conn, rows)
+        stored["n"] = max(stored["n"], len(rows))
         if lost:
             conn.executemany(_UNMATCHED_INSERT, lost)
-        conn.execute("""
-            INSERT INTO odds_history_pulls
-                   (sport, snapshot_date, hour_utc, minute_utc, pulled_at, rows)
-            VALUES (%s, %s, %s, %s, NOW(), %s)
-            ON CONFLICT ON CONSTRAINT odds_history_pulls_pkey DO UPDATE
-               SET pulled_at = NOW(), rows = EXCLUDED.rows
-        """, (SPORT, snap_date, hour, minute, len(odds_rows)))
+        if on_hour:
+            conn.execute("""
+                INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
+                VALUES (%s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                   SET pulled_at = NOW(), rows = EXCLUDED.rows
+            """, (SPORT, snap_date, hour, stored["n"]))
+        else:
+            conn.execute("""
+                INSERT INTO odds_history_fetches
+                       (sport, requested_at, snapshot_ts, why, pulled_at, rows)
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, requested_at) DO UPDATE
+                   SET snapshot_ts = EXCLUDED.snapshot_ts, pulled_at = NOW(),
+                       rows = EXCLUDED.rows
+            """, (SPORT, when, body.get("timestamp"), GRID_WHY, stored["n"]))
         conn.commit()
 
     if not _write_with_retry(conn, _write, f"lines {snapshot_at}"):
         stats["errors"] += 1
         return True
+    if taken is not None:
+        # every kept row is in `odds` now; the next snapshot need not store it
+        taken.update(_row_key(r["game_id"], r.get("market"), r.get("bookmaker"),
+                              r.get("snapshot_at"), *(r.get(c) for c in _ROW_VALUES))
+                     for r in odds_rows)
+        stats["rows_already_stored"] += len(odds_rows) - stored["n"]
     stats["calls"] += 1
-    stats["odds_rows"] += len(odds_rows)
+    stats["odds_rows"] += stored["n"]
     stats["unmatched_events"] += len(unmatched)
     stats["dropped_by_parser"] += len(dropped)
     if stats["calls"] % 50 == 0:
@@ -1038,17 +1072,21 @@ def plan_opener_grid(conn, first: int, last: int, step_min: int,
 class ChangeKeeper:
     """What the grid stores of each bought snapshot: each book's first quote on
     each game and market, and every quote that differs from the one before it
-    in price or line. A repeat is not stored (a half-hourly grid over 72 hours
+    in price or line. A repeat is not kept (a half-hourly grid over 72 hours
     would otherwise store the same quote up to 144 times), and an in-play
-    price never is.
+    price never is. What it keeps is then read back against `odds`
+    (_buy_snapshot with `taken`), so a quote already stored is not stored
+    again.
 
     The first quote is the point of the purchase: its feed time (the market's
     own last_update, which the parser stores as snapshot_at) dates the book's
     first post to within the step. Storing each change as well keeps every
     distinct quote the grid paid for, the way the live opener capture
     (scripts/ncaab_odds_capture.py) stores changes only. One keeper a season,
-    so its memory is bounded; a re-run after a stop starts a fresh one, and
-    the first quote it sees for a game may repeat one already stored.
+    so its memory is bounded. It knows only what this run has seen: the
+    quotes the lines purchase stored at its hours (which the grid skips as
+    bought), and those an earlier run stored before a stop, are caught by the
+    read-back of `odds`, not here.
     """
 
     def __init__(self):
@@ -1068,26 +1106,22 @@ class ChangeKeeper:
 
 def buy_opener_grid(conn, meter: Meter, first: int, last: int, step_min: int,
                     pre_start: bool = False) -> dict:
-    """Buy every grid time the ledger lacks, newest season first and each
+    """Buy every grid time the ledgers lack, newest season first and each
     season oldest first, through _buy_snapshot (odds, unmatched events and the
-    ledger row in one transaction).
+    ledger row in one transaction; the hour in odds_history_pulls, the half
+    hour in odds_history_fetches).
 
-    Two checks the lines purchase does not make. The ledger must be keyed by
-    the minute: under the hour key a half-hour row would overwrite its hour's
-    row and never read as bought, so every re-run would pay for it again. And
-    the balance must be known before the first call: the meter reads it off
-    each response, so without the stored reading the first call would go
-    unchecked against the floor."""
+    Two things the lines purchase does not do. Each snapshot's kept rows are
+    read back against `odds` (one `taken` set a season, beside the keeper),
+    so a quote the lines purchase or an earlier run stored is not stored
+    twice. And the balance must be known before the first call: the meter
+    reads it off each response, so without the stored reading the first call
+    would go unchecked against the floor."""
     if step_min not in GRID_STEPS:
         raise ValueError(f"the grid steps every {GRID_STEPS} minutes, not {step_min}")
     check_precondition(conn, list(range(first, last + 1)))
     check_process_events_contract()
     _ensure_tables(conn)
-    if not _ledger_keyed_by_minute(conn):
-        raise PreconditionError(
-            "odds_history_pulls is not keyed by the minute, so a half-hour snapshot would "
-            "overwrite its hour's row; apply data/migrations/" + MINUTE_KEY_MIGRATION.name
-            + " (python -m data.view_migrations) first")
     if meter.remaining is None:
         meter.remaining = latest_remaining(conn)
         if meter.remaining is None:
@@ -1104,12 +1138,12 @@ def buy_opener_grid(conn, meter: Meter, first: int, last: int, step_min: int,
     # End the planning reads' transaction before the first paid call.
     conn.commit()
     stats: dict = defaultdict(int)
-    season, keeper = None, None
+    season, keeper, taken = None, None, None
     for when in season_order(plan.todo):
         label = ncaab_season_label(when.date().isoformat())
-        if label != season:
-            season, keeper = label, ChangeKeeper()
-        if not _buy_snapshot(conn, meter, tips, resolver, when, stats, keeper):
+        if label != season:            # no game spans two seasons: bound the memory
+            season, keeper, taken = label, ChangeKeeper(), set()
+        if not _buy_snapshot(conn, meter, tips, resolver, when, stats, keeper, taken):
             break
     print("opener grid", resolver.report())
     return dict(stats)
@@ -1291,9 +1325,10 @@ def _far_from_tip(ev: dict, hit, tips: dict[str, str]) -> bool:
 
 
 def _ledger_instants(conn) -> list[datetime]:
-    """Every NCAAB instant odds_history_pulls records as bought, ascending, on
-    the ledger's full key (date, hour, minute): a feed time maps back to the
-    half hour the grid bought, not to the hour after it."""
+    """Every NCAAB instant bought, ascending, from both ledgers (the hours in
+    odds_history_pulls, the grid's half hours in odds_history_fetches): a
+    feed time maps back to the half hour the grid bought, not to the hour
+    after it."""
     return sorted(_held_instants(conn))
 
 

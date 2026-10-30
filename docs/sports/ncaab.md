@@ -177,26 +177,38 @@ approval before a `worker_jobs` row is added.
   These are estimates from that one run, not measurements of this one.
 - **What is stored.** Each book's first quote on each game and market, and
   every quote that differs from the one before it in price or line. A repeat
-  is not stored, and an in-play price never is. Each row's time is the
-  market's own last update, as the feed sends it. A book's first row is
-  therefore the time it posted, unless it changed that line again before the
-  first snapshot that shows it. Events that resolve onto no ESPN game are kept
-  raw in `ncaab_odds_unmatched`, as the game-line purchase keeps them. The
-  replay stores those with the game-line purchase's filter, which keeps every
-  snapshot in the three hours before the tip, so a replay of grid events can
-  store repeats there that the grid itself did not. How many rows the grid
-  stores is not measured; at most it is one row per game, market, book and
-  distinct quote.
-- **The pull ledger now records the minute.** `odds_history_pulls` was keyed
-  on (sport, date, hour), so 22:30 would have read as 22:00 already bought,
-  or overwritten 22:00's row and been bought again on every re-run. The key
-  is now (sport, date, hour, minute); every existing row reads as minute 0,
-  the hour it was bought at. The worker's migration pass applies it
-  (`data/migrations/odds_history_pulls_minute_key_2026_10_30.sql`), and the
-  NCAAB purchase applies the same file itself if it gets there first. The
-  grid refuses to buy into a ledger still keyed by the hour. The replay of
-  kept raw events maps each feed time back on the same key, so a feed time
-  of 22:25 maps to the 22:30 snapshot, not to 23:00.
+  is not kept, and an in-play price never is. Each row's time is the market's
+  own last update, as the feed sends it. A book's first row is therefore the
+  time it posted, unless it changed that line again before the first snapshot
+  that shows it.
+- **A quote already stored is not stored again.** The filter above only
+  knows what the current run has seen. The game-line purchase stored its own
+  hours' quotes before the grid existed, and the grid skips those hours as
+  already bought. A run that stops and starts again also begins with an empty
+  filter. So before writing, the grid reads `odds` back, as the replay does.
+  A quote with the same game, market, book, feed time, prices and line is not
+  stored again, whoever stored it first. `odds` has no unique index on a
+  quote, so this read is the only thing that stops a second copy. It happens
+  inside the write, so a retry after a dropped connection stores nothing
+  twice. How many rows the grid stores is not measured. At most it is one row
+  per game, market, book, feed time and quote.
+- **Raw events.** Events that resolve onto no ESPN game are kept raw in
+  `ncaab_odds_unmatched`, as the game-line purchase keeps them. The replay
+  stores those with the game-line purchase's filter, which keeps every
+  snapshot in the three hours before the tip. So a replay of grid events can
+  store a price there again under a later feed time, where the grid itself
+  would not.
+- **Where a bought time is recorded.** A time on the hour goes in
+  `odds_history_pulls`, keyed on (sport, date, hour), exactly as the game-line
+  purchase records it. So an hour either one bought is never bought again. A
+  half hour goes in `odds_history_fetches`, keyed on (sport, exact time),
+  with `why = 'opener_grid'`. That is the table the NBA purchase already uses
+  for its off-the-hour times, and every NBA reader of it filters on sport.
+  The shared ledger's key is not changed. Every sport's history purchase
+  writes to it naming those three columns, so a different key would make
+  any copy of that code pay for a snapshot and then lose it. The replay of
+  kept raw events reads both tables, so a feed time of 22:25 maps to the
+  22:30 snapshot, not to 23:00.
 - **The floor.** The same 300,000-credit floor as the other purchases, and
   its own ceiling (1,170,000, the half-hour grid with the pre-start window
   plus room for calls billed above 30). Before its first call it reads the

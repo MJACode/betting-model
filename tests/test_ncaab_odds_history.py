@@ -425,7 +425,7 @@ def test_a_ledgered_snapshot_is_never_bought_again(monkeypatch):
     ok, conn, meter, stats, rows = _snapshot(monkeypatch, [], held=True)
     assert ok and meter.calls == [] and stats["skipped_held"] == 1
     q, params = conn.sql[0]
-    assert "odds_history_pulls" in q and params == ("NCAAB", "2025-11-19", 0, 0)
+    assert "odds_history_pulls" in q and params == ("NCAAB", "2025-11-19", 0)
 
 
 def test_the_floor_stops_the_snapshot_before_the_call(monkeypatch):
@@ -720,7 +720,8 @@ def test_the_tables_are_created_only_when_the_catalog_says_so(monkeypatch):
     conn = FakeConn()
     h._ensure_tables(conn)
     assert conn.sql == [] and conn.commits == 0
-    assert {t for t, _ in seen} == {"odds_history_pulls", "ncaab_odds_unmatched"}
+    assert {t for t, _ in seen} == {"odds_history_pulls", "odds_history_fetches",
+                                    "ncaab_odds_unmatched"}
     assert all(kw["rls"] is True and kw["revoked_from"] for _, kw in seen)
 
 

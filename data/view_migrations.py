@@ -479,14 +479,6 @@ ACTIVE_MIGRATIONS: list[str] = [
     # a catalog read once both exist. Does not rewrite picks, odds or the
     # record. Sits before the posted-stake pair so those two stay adjacent.
     "add_alt_game_lines_2026_10_29.sql",
-    # 2026-10-30: the historical-odds pull ledger (odds_history_pulls) keyed by
-    # the minute as well as the hour, so the NCAAB opener grid's 22:30 snapshot
-    # is its own row and never reads as 22:00 bought. Existing rows read as
-    # minute 0; the key keeps its name, which every writer's ON CONFLICT ON
-    # CONSTRAINT names. Returns on a catalog read once the key holds the
-    # minute. Does not touch picks, odds or the record. Sits before the
-    # posted-stake pair so those two stay adjacent.
-    "odds_history_pulls_minute_key_2026_10_30.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

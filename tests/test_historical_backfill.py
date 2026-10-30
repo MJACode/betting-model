@@ -69,9 +69,8 @@ def test_resume_checks_the_pull_ledger_not_the_snapshot_timestamp():
 
 def test_the_ledger_is_keyed_by_sport_date_and_hour():
     """Two snapshots a day is the whole point; a date-only key would record the
-    first hour and skip the second. The minute (2026-10-30) lets the NCAAB
-    opener grid buy 22:30 beside 22:00; every hour row is minute 0."""
-    assert "PRIMARY KEY (sport, snapshot_date, hour_utc, minute_utc)" in PULL_LEDGER_DDL
+    first hour and skip the second."""
+    assert "PRIMARY KEY (sport, snapshot_date, hour_utc)" in PULL_LEDGER_DDL
 
 
 def test_the_ledger_row_is_written_in_the_same_commit_as_the_odds():
