@@ -291,6 +291,16 @@ step settle
 # finish" true for that branch; ~7s, CONCURRENTLY, readers never block.
 step refresh-outcomes
 
+# NCAAB box scores and period scores (ncaab_team_game_stats under
+# 'espn_summary', ncaab_period_scores), one ESPN game summary per final.
+# AFTER ncaab-results, which writes the finals it reads, so a game's box lands
+# on the pass that stores its final. After settle and refresh-outcomes because
+# nothing settles off it and it can take a minute or two. SEQUENTIAL: it opens
+# its own connection (the pool note on probables-refresh above) and calls ESPN
+# one request at a time. Self-limiting: no ESPN call unless a final of the
+# last 3 ET dates has no ESPN box row; at most 80 games and ~150 s a pass.
+step ncaab-box
+
 # Health check LAST, on every pass. It used to run only as the final step of the
 # daily 6am pipeline, so a break that only affected refresh passes was invisible
 # for up to 24 hours - exactly what happened 8/24-8/27. It is pure SQL over

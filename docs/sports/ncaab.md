@@ -153,6 +153,106 @@ second run stores nothing new. Each insert into `odds` also updates
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 | Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
+| Box and period scores (2026-27 on) | Each final's team box score into `ncaab_team_game_stats` (source `espn_summary`) and its half and overtime scores into `ncaab_period_scores`, one ESPN game summary per final, on every refresh pass after the results step (Box scores and period scores, below) | `data/ingestors/ncaab_espn_box.py`, step `ncaab-box`; backfill job `ncaab_box_backfill` |
+
+## Box scores and period scores (ESPN, from 2026-27)
+
+**Why.** The rating models refit on `ncaab_team_game_stats`: possessions,
+points, shooting, rebounds and turnovers per team per game. Until
+2026-10-30 its only source was the sportsdataverse season files (NCAA's own
+play-by-play), which have no 2026-27 file and no in-season build. ESPN's free
+game summary carries the box score, so the table now fills as the season is
+played. `data/ingestors/ncaab_espn_box.py` is the writer.
+
+**What it stores, per final game, in one transaction:**
+
+- Two rows in `ncaab_team_game_stats` with source `espn_summary`.
+  `contest_id` is `espn:<ESPN event id>`; NCAA's contest ids are digits only
+  (all 188,424 rows, 2026-10-30), so the two sources never share a key.
+  `team` is the school name `games` carries. Filled: points for and against,
+  FGA, FGM, 3PA, 3PM, FTA, FTM, offensive and defensive rebounds, turnovers,
+  assists, blocks, the game's length in `mins` (40, plus 5 per overtime),
+  ESPN's team and event ids and the possession estimate below. Left empty,
+  because ESPN has no equivalent: shots at the rim, `e_poss`,
+  `time_per_poss` and NCAA's team id.
+- One row per period in `ncaab_period_scores`: periods 1 and 2 are the
+  halves, 3 and later the overtimes, in the stored home/away orientation.
+  `source` names the ESPN endpoint (`espn_summary` here, `espn_scoreboard`
+  from the backfill).
+- A game it will not store gets a row in `ncaab_box_misses` instead: the
+  reason and the attempt count.
+
+**When it runs.** Step `ncaab-box` on every refresh pass, after the
+`ncaab-results` step that writes the finals it reads (and after settle,
+since nothing settles off it): hourly at :17 from midnight to 5 am and 7 am
+to 5 pm ET, every 10 minutes from 6 to 11 pm ET. It looks at the finals of
+the last 3 ET dates that have no `espn_summary` row, newest first, so a box
+lands on the pass that stores the final. A pass takes at most 80 games and
+about 150 seconds, one request at a time with 0.3 seconds between them; the
+rest wait for the next pass. With nothing due it makes no ESPN call.
+
+**The possession estimate.** ESPN's summary has no possession count, so
+`o_poss` is each team's box-score estimate, FGA − offensive rebounds +
+turnovers + 0.475 × FTA, and `d_poss` is the opponent's (one team's `o_poss`
+is the other's `d_poss`, as in NCAA's rows). It is NOT NCAA's play-by-play
+count. Against that count in 2020-21 to 2025-26 it runs 0.30 to 0.46
+possessions a team-game below it (the mean, by season), with a mean absolute
+gap of about 1.2 a team and a correlation of about 0.967; averaged over the
+two teams of a game the correlation is 0.978 and the gap about 1.0. Given to
+the frozen rating model in place of NCAA's count it left totals error where
+it was (13.638 against 13.644 points, 2012-19). Measured in the NCAAB
+research round (`poss_agreement.csv`, `poss_substitution.csv`, 2026-10-30);
+the per-team figures were measured the same day on the research copy of the
+stored NCAA rows (188,424 rows, 2010-11 to 2025-26).
+
+**Two sources, one game.** If a game is ever held under both sources (for
+example a sportsdataverse 2026-27 file appears), it has two pairs of rows
+with the same `espn_game_id` and different `contest_id`. Choose one per game
+by `source`, NCAA's where it exists:
+
+    SELECT DISTINCT ON (espn_game_id, team_espn_id) *
+      FROM ncaab_team_game_stats WHERE espn_game_id IS NOT NULL
+     ORDER BY espn_game_id, team_espn_id, (source = 'sportsdataverse_ncaa') DESC;
+
+A reader that matches on date and team pair and drops duplicate keys (the
+research prep does) would lose such a game rather than choose, so filter on
+`source` first.
+
+**What it refuses.** A summary that is not final, names other teams than the
+stored event, or lacks any of the shooting, rebound or turnover numbers; a
+box whose points are not 2 × FGM + 3PM + FTM; an ESPN final that differs
+from the stored one (the stored final settled the picks); period scores that
+do not sum to the stored final, differ in count between the teams, or
+disagree with `went_to_ot`. Nothing of a refused game is stored. It is tried
+again after 50 minutes, at most 6 times. A 404 for a game is a miss; a 403 or
+429, or three failed fetches in a row, stops the pass's run and turns the
+step red, since ESPN has blocked the worker before.
+
+**Measured 2026-10-30, 25 games of 2025-26 (`summary?event=`).** Every call
+answered 200 in 1.00 s on average (max 1.12 s), 447-566 KB each. On the 49
+team rows NCAA also holds, every one of points, FGA, FGM, 3PA, 3PM, FTA,
+FTM, offensive and defensive rebounds and turnovers matched NCAA's number;
+points = 2 × FGM + 3PM + FTM and the periods summed to the final on all 50.
+One scoreboard date (2026-02-07, 155 events) carried every period,
+overtimes included, and every completed side's periods summed to its score
+(310 of 310).
+
+**Backfill.** `python -m data.ingestors.ncaab_espn_box --periods --seasons
+2021 2026` reads one scoreboard per date and stores the period scores of
+every final with none (855 dates, 35,323 finals in 2020-21 to 2025-26,
+counted 2026-10-30). `--box --seasons 2027 2027` fetches a summary for every
+2026-27 final with no ESPN box row. Both skip what is stored. On the worker:
+job `ncaab_box_backfill` with `{"kind": "periods", "first": 2021, "last":
+2026}` or `{"kind": "box"}` (box is held to 2026-27, the season NCAA's files
+do not cover). Both are declared in `jobs/declared_jobs.json` with `enabled`
+false, so a merge starts nothing.
+
+**The research round's halves file.** It held first- and second-half scores
+for 36,796 ESPN events of 2020-21 to 2025-26, on one laptop only. It is not
+imported: it keeps the two halves and a period count but not each overtime's
+score, and it was built by a script outside the repo. The period backfill
+re-reads the same ESPN scoreboards through the repo's own code, so every
+stored row names its endpoint.
 
 ## Data accounts and sources (measured 2026-10-28)
 
