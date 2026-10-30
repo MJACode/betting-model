@@ -2143,6 +2143,30 @@ below the cut to the top positive; beats the 95th percentile of 200 placebo shuf
 - Both checks are synthetic-tested: the lab drops a ladder 30 minutes older than its purchase,
   and it fails when the favourite's shape is mirrored the wrong way.
 
+### 10.8 A change after the first grade: impossible total rungs (2026-10-29)
+
+**Made after the first grade had been read, and stated as such.** The first full run (run
+`2026-10-29-sixth`, stored in Supabase, superseded by `2026-10-29-sixth-r2`) passed 0 of 30
+cells. Two cells cleared the 95% interval: full-game alternate totals, over, EV ≥ 0.08 (35 bets,
++81.6%) and ≥ 0.10 (30 bets, +94.2%). Their bets showed why. 26 of the 35 were Fanatics rows filed
+as full-game alternate totals with lines from 9.5 to 107.5, between 2025-10-29 and 2025-11-02.
+One more was a FanDuel 57.5. No full-game total is 9.5, so each was priced as a near-certain over
+and won.
+
+- **Measured on the whole purchase** (2,224,067 rungs): every full-game total rung sits within 40
+  points of the median of its game's stored total rungs, except 191 rows (Fanatics 160, FanDuel
+  31, 36 games, 2023-12-23 to 2025-11-02) that sit 120 or more away. Nothing lies between 40 and
+  120. Alternate spreads and both team totals have no such rows.
+- **The rule:** a full-game total rung 40 or more points from the median of the game's stored
+  total rungs is not a full-game total and is not eligible (`IMPOSSIBLE_GAP`,
+  `scripts/nba_game6_alt.frame_alt`). It removes exactly those 191 rows. The cut sits in the empty
+  gap, so 30 or 100 would remove the same rows.
+- A synthetic check builds a total ladder with one 9.5 rung. It fails with the rule removed.
+- Every cell is graded again under the rule, as run `2026-10-29-sixth-r2`. The first run stays in
+  Supabase as the record of what the defect did.
+- Also fixed: the first run's bet file was not written (a price-shape column cannot be stored);
+  the lab now drops that column before writing.
+
 ## 11. Seventh search: the minutes after an injury report (pre-registered 2026-10-24, before any of its prices were bought)
 
 mike, 2026-10-24: *"Buy alts and do #2 as well. Go"*. Section 10.1's second check found that

@@ -79,6 +79,7 @@ MIN_OFF_MAIN, MAX_LADDER_GAP = 1.5, 1.0
 PRICE_MIN, PRICE_MAX = -200.0, 400.0
 TT_MATCH_MIN = 10
 STALE_MAX_MIN = 15                 # 10.3 amendment: a ladder updated longer ago is not visible
+IMPOSSIBLE_GAP = 40.0              # 10.8 amendment: a total rung this far from the game's ladder is not a total
 SPREAD_BUCKETS = (5.0, 10.0)       # 10.4.2 amendment: |line| <= 5, 5-10, > 10
 SEASONS = (2024, 2025, 2026)
 PLACEBO_RUNS = 200
@@ -138,6 +139,15 @@ def frame_alt(o: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     o = o[o["price_a"].notna() & o["price_b"].notna() & o["line"].notna()]
     s = H.imp(o["price_a"]) + H.imp(o["price_b"])
     o["coherent"] = (s >= H.COHERENT[0]) & (s <= H.COHERENT[1])
+    # 10.8 (2026-10-29, after the first grade): a full-game total rung IMPOSSIBLE_GAP or more
+    # from the median of the game's stored total rungs is not a full-game total. Measured on
+    # the purchase: every other rung sits within 40 points; 191 Fanatics and FanDuel rows sit
+    # 120+ away (lines 9.5 to 107.5) and were bet as near-certain overs.
+    tot = o["market"] == "totals"
+    med = o.loc[tot].groupby("game_id")["line"].transform("median")
+    junk = pd.Series(False, index=o.index)
+    junk.loc[tot] = (o.loc[tot, "line"] - med).abs() >= IMPOSSIBLE_GAP
+    o = o[~junk]
     return o[H.QUOTE_COLS + ["alt_market", "stale_min"]].reset_index(drop=True)
 
 
@@ -651,6 +661,18 @@ def synthetic_checks() -> None:
     off = eligible_offers(q, fair, mains)
     cand = priced(off, fair)
     assert (cand["off_main"] >= MIN_OFF_MAIN).all()
+    # an impossible total rung (a 9.5 filed as a full-game total) is dropped and the real
+    # ladder kept (10.8 amendment); the synthetic world holds spreads only, so build totals
+    g0 = games.iloc[0]
+    stamp = (pd.to_datetime(g0["tip"], utc=True) - pd.Timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = [222.5, 226.5, 230.5, 234.5, 238.5, 9.5]
+    tot = pd.DataFrame({"game_id": g0["game_id"], "market": "alternate_totals", "bookmaker": "fanatics",
+                        "snapshot_at": stamp, "source": ALT_SOURCE, "spread_home": np.nan,
+                        "total_line": lines, "home_price": np.nan, "away_price": np.nan,
+                        "over_price": -110.0, "under_price": -110.0})
+    q_tot = frame_alt(tot, games)
+    kept = sorted(q_tot.loc[q_tot["market"] == "totals", "line"])
+    assert kept == lines[:5], f"impossible total rung handling: kept {kept}"
     # a book's ladder stamped 30 minutes before the purchase is not visible (10.3 amendment)
     old = alt.copy()
     one = old["bookmaker"].eq("fanduel") & old["game_id"].eq(old["game_id"].iloc[0])
