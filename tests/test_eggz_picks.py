@@ -1379,6 +1379,7 @@ def _recap_db():
 
 
 def test_restate_posts_corrected_and_keeps_the_sent_row(monkeypatch):
+    monkeypatch.setitem(eg.config.RECORD_RESTATEMENT_APPROVALS, "2026-10-23", "test")
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
     posted = []
     monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
@@ -1407,6 +1408,8 @@ def test_restate_posts_corrected_and_keeps_the_sent_row(monkeypatch):
 
 
 def test_restate_dry_run_and_an_unresolved_leg_post_nothing(monkeypatch):
+    for day in ("2026-10-21", "2026-10-22"):
+        monkeypatch.setitem(eg.config.RECORD_RESTATEMENT_APPROVALS, day, "test")
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
     posted = []
     monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")

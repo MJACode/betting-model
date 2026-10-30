@@ -50,7 +50,7 @@ shows up as a collision.
 | `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
-| `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` |
+| `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` and on mike's approval (`config.RECORD_RESTATEMENT_APPROVALS`) |
 | `_job_publish_discord_signals` | calls `notify_discord_signals` unchanged | `worker_jobs`, claimed by the worker every 5 min |
 
 ### One board — the app, Discord and push publish the same set (2026-09-05)
@@ -387,15 +387,15 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   land BEFORE Step 0 settle.** On 2026-09-10 the NFL player log was filled
   after settle (Steps 4b/4c); the 6am recap for 09-09 went out MLB-only and
   the three NFL BETs settled an hour later, against an already-ledgered date.
-  Now Step 0h. **And a recap a later settlement invalidates is restated by
-  itself** (session 275): every settle pass scans the last week's daily
-  snapshots for a pick in the recap's universe with `settled_at >
-  published_at`, and re-posts Discord (title "· restated", note with both
-  counts) then X ("results (restated)"), ledgered per correction on the
-  published_at being corrected. Late settlement is the only trigger: a count
-  difference is not, because the recap query applies today's cuts. Hand
-  re-posts stay a worker job: `publish_results` with `{"game_date": ...}`
-  clears both ledger rows and posts through the ordinary paths.
+  Now Step 0h, and Step 0h1 pulls the NHL per-game logs for the same reason (a
+  goalie prop grades only once the stats pull has flagged his start).
+- **A record holds until every pick it counts is graded, and it is never posted
+  twice** (mike, 2026-10-30). `record_held_for_grading` runs in front of the daily,
+  weekly and monthly notifiers on both surfaces: it finds the picks with no result
+  (`_UNGRADED_SQL`, the record's own universe), grades them, and holds the post if
+  any are left, telling ops once a morning. The automatic restatement that ran
+  from 2026-09-10 is gone, and a late grade now only alerts ops
+  (`flag_recaps_gone_short`). Rule and every route: `.claude/rules/picks-and-publishing.md`.
 - **A day the 6am run could not recap posts at the first pass that can.**
   2026-10-12's only counting bets (two NHL props) were graded at 07:24 on
   10-13, after the 6am run had found nothing to recap, and nothing asked again

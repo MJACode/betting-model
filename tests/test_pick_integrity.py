@@ -248,6 +248,8 @@ def test_discord_live_refuses_and_does_not_ledger(monkeypatch, discord_sent):
 
 
 def test_discord_restate_refuses(monkeypatch, discord_sent):
+    monkeypatch.setitem(discord_notifier.config.RECORD_RESTATEMENT_APPROVALS,
+                        "2026-09-13", "test")
     monkeypatch.setattr(discord_notifier, "DISCORD_RESTATE_DATES", {"2026-09-13"})
     monkeypatch.setattr(discord_notifier, "_configured", lambda: True)
     monkeypatch.setattr(discord_notifier, "_locked_signals", lambda c, d: [GOOD, BAD])

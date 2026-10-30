@@ -256,6 +256,12 @@ which loads on `tracking/**`, `models/**`, `nfl/**`, `ncaaf_live/**`,
 opens — always.** The full rule loads automatically from
 `.claude/rules/frontend.md` when a file under `mobile/` is opened.
 
+**NO RESTATED RECORDS, ON ANY SURFACE, WITHOUT MIKE'S APPROVAL IN CHAT.** (mike,
+2026-10-30.) A record that went out is never re-posted, corrected or relabelled,
+by any path. Only `config.RECORD_RESTATEMENT_APPROVALS` opens one. Every record
+holds until each pick it counts is graded. Mechanics:
+`.claude/rules/picks-and-publishing.md`.
+
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
 (Repo-level rule, 2026-08-30.) "Update CLAUDE.md after every commit" grew this
 file to 909 KB — ~225k tokens re-read at the start of every session. The split:

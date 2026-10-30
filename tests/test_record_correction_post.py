@@ -431,6 +431,9 @@ def test_the_oct13_job_takes_no_text_and_is_declared_once():
 
 
 def test_the_job_calls_the_poster_and_closes_its_connection(monkeypatch):
+    import config
+    monkeypatch.setitem(config.RECORD_RESTATEMENT_APPROVALS,
+                        "record_correction:2026-10-14", "test")
     closed = []
 
     class Conn:

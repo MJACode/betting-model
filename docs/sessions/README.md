@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, no restated records without mike's approval (automatic restatement removed, approval register empty, every re-post route refuses). Every record holds until each pick it counts is graded; the 6am run pulls NHL logs before settle. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters worker job: a False step returns {"ok": false} and is recorded once, instead of raising and being retried up to 3 times. pipeline_log error row unchanged. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters: fill_gaps commits as it goes and one ESPN failure no longer drops the season; the 6am run writes the reason to pipeline_log. No production write. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-29/30 evening: local DATABASE_URL password replaced by mike (Railway's was right). CBBDATA_* on the worker. #1094 merged 00:26Z; replay dry run 827393, then 827394 stored 1,201,028 rows 04:00-04:40Z. Scoreboard froze at midnight ET because ESPN refuses a date range; it now asks one date at a time. Pre-game poller capped at 06:41Z on 10-29 by the NCAAB purchase's spend: probe now logs x-requests-last, and its day starts at ET midnight. |
