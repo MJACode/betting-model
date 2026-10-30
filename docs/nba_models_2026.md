@@ -2167,6 +2167,52 @@ and won.
 - Also fixed: the first run's bet file was not written (a price-shape column cannot be stored);
   the lab now drops that column before writing.
 
+### 10.9 Results (graded 2026-10-29, run `2026-10-29-sixth-r2`)
+
+Graded on the research cache refreshed 2026-10-29 (2,224,067 stored rungs on 3,690 games), under
+10.8's rule, then `python -m scripts.nba_game2_verdict --house5`. Stored in Supabase as run
+`2026-10-29-sixth-r2`; the first run, before 10.8, is `2026-10-29-sixth`.
+
+**0 of the 30 cells pass, and none clears the 95% interval on its own** (about 0.75 would by
+chance). The 14 cells with 200 or more bets have a median return of +0.2%; 8 are positive.
+
+| Family | Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | Fails |
+|---|---|---|---|---|---|---|---|
+| A1 alternate spreads | away, EV ≥ 0.04 | 868 | +22.1 | +5.2% | −3.9% to +14.7% | +8.7% / +10.0% / −1.9% | interval, bands |
+| A1 alternate spreads | home, EV ≥ 0.04 | 628 | +17.5 | +5.6% | −5.8% to +16.6% | +6.4% / +12.7% / −2.2% | interval, bands |
+| A2 alternate totals | under, EV ≥ 0.02 | 254 | −33.5 | −11.5% | −23.9% to +0.5% | −15.5% / −9.0% / −12.0% | all but bets |
+| A2 alternate totals | over, EV ≥ 0.02 | 147 | −4.5 | −3.7% | −21.2% to +13.1% | −17.2% / −11.7% / +22.3% | all |
+| A3 alternate team totals | under, EV ≥ 0.04 | 616 | +7.5 | +2.5% | −8.9% to +13.6% | −1.1% / +5.6% / +1.9% | interval, bands, placebo |
+| A3 alternate team totals | over, EV ≥ 0.02 | 217 | +0.2 | +0.1% | −10.7% to +11.2% | −16.3% / −1.1% / +8.4% | interval, seasons, bands, placebo |
+
+**Reported, never bars, for the best cell (A1 away, EV ≥ 0.04):**
+- DraftKings alone, the rule re-run with DraftKings as the only book: 247 bets, −6.6%. (The cell's
+  own 108 DraftKings bets: +5.1%. The two differ because the re-run picks other rungs.)
+- Without BetMGM, its biggest book (473 of 868 bets), re-run: 518 bets, +2.8%.
+- By distance from the book's main number: 1.5-4 points 100 bets +4.7%; 4-8 points 272 bets
+  −4.0%; 8 or more points 496 bets +17.6%. The far bets are all away underdogs priced +260 to
+  +400 (26.4% won). At DraftKings alone they lose (167 bets, −2.1%), and by book they run from
+  +12.3% (BetRivers) to −20.6% (Fanatics). That split was found after looking, inside a failed
+  cell.
+- Closing-line value is not independent evidence here (11.5, item 3), and the team-total cells
+  have none: the derivative purchase holds one Pinnacle team-total quote per game, at the
+  decision.
+
+**Independent verification** (workflow `nba-alt-lines-regrade-verify`, scripts under
+`%TEMP%/q1trend/verify6/` on the build machine):
+- All 3,709 bets of six headline cells settled again from final scores: 0 differ. Every bet's rung
+  is in the purchase at that book, line and price, before tip, 1.5 or more from the book's main,
+  priced −200 to +400, from a ladder no more than 15 minutes old.
+- **A gap in 11.5's first change, flagged and not fixed.** That change takes each book's main
+  number from the hourly archive, up to 60 minutes old, so "the book's main is within 1 point of
+  Pinnacle" no longer tests the ladder itself. 54,905 priced offers come from ladders more than 1
+  point from Pinnacle at the purchase; 475 bets used them. Recomputed without them: the best cell
+  is 838 bets, +6.3% (−3.4% to +15.8%); A3 under at 0.04 falls from +2.5% to −4.6%. **0 of 30
+  pass under every cleaning tried.** One FanDuel totals ladder (ORL at CHI, 2023-11-15), centred
+  15 points from the market, made the search's single highest-EV bet (under 216.5 at +310) and won.
+
+**Closed for 2026-27: alternate spreads, totals and team totals.** Nothing is built.
+
 ## 11. Seventh search: the minutes after an injury report (pre-registered 2026-10-24, before any of its prices were bought)
 
 mike, 2026-10-24: *"Buy alts and do #2 as well. Go"*. Section 10.1's second check found that
