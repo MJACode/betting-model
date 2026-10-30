@@ -10,9 +10,11 @@ Neither page carries a status-change time. received_at is when this server
 stored the poll. RotoWire is polled about every 10 minutes, and every 5
 minutes while an NCAAB game tips within three hours. Covers is polled about
 every 30 minutes. HTTP 403 and 429 back off (10 minutes, doubling, capped at
-2 hours). A poll that errors, and a poll that parses to zero players on a
-game day, exits non-zero so the scheduler heartbeat stays "error" and the
-failure alerter speaks. A zero-player poll does not clear anyone.
+2 hours). A poll that errors exits non-zero. On a game day a zero-player
+report exits non-zero only when that source is the one the tags are using:
+RotoWire when it just listed players or is still healthy, otherwise Covers.
+An empty Covers poll while RotoWire supplies the tags is a warning, not an
+alert. A zero-player poll does not clear anyone.
 
 Storage:
   * ncaab_injury_changes — one row per status change, including status
@@ -619,6 +621,31 @@ def tags_from_rows(rows: list[dict]) -> list[dict]:
     return out
 
 
+def zero_row_alert(game_day: bool, empty: set[str], refreshed: set[str],
+                   rotowire: PollState, now: datetime) -> str | None:
+    """The game-day zero-row alert, or None.
+
+    The tags use RotoWire when this tick stored its players, or when RotoWire
+    is still healthy and this tick did not find it empty. An empty Covers
+    report is not an alert in that case. Otherwise the tags use Covers, and
+    an empty Covers report is an alert. If Covers was not polled and did not
+    supply players, an empty RotoWire report is the alert: it is the source
+    the tags are left with.
+    """
+    if not game_day or not empty:
+        return None
+    rotowire_tags = ("rotowire" in refreshed) or (
+        rotowire_healthy(rotowire, now) and "rotowire" not in empty
+    )
+    if rotowire_tags:
+        return None
+    if "covers" in empty:
+        return "covers returned 0 rows on a game day"
+    if "rotowire" in empty and "covers" not in refreshed:
+        return "rotowire returned 0 rows on a game day"
+    return None
+
+
 def rotowire_healthy(state: PollState, now: datetime) -> bool:
     until = _aware(state.backoff_until)
     if until is not None and until > now:
@@ -973,6 +1000,7 @@ def run(conn, *, now: datetime | None = None, fetch=None,
     # Resolve before writing. A roster read that rolls back then discards
     # selects only: no change row is inserted until every source is resolved.
     planned: list[tuple] = []
+    empty: set[str] = set()
     for source in SOURCES:
         state = polls.get(source) or PollState(source)
         action = source_due(source, state, now, near_tip=near)
@@ -1012,10 +1040,11 @@ def run(conn, *, now: datetime | None = None, fetch=None,
         state.backoff_until = None
         result.polled.append(source)
         if not listings:
-            # A zero-player poll is not a list of clearances, on a game day
-            # or off one. The game-day case is also an alert.
+            # A zero-player poll is not a list of clearances. Whether it
+            # alerts depends on which source the tags are using, decided
+            # after both polls (zero_row_alert).
             if game_day:
-                result.alerts.append(f"{source} returned 0 rows on a game day")
+                empty.add(source)
             planned.append((state, None))
             continue
         resolved = []
@@ -1040,10 +1069,23 @@ def run(conn, *, now: datetime | None = None, fetch=None,
         result.misses += len(misses)
         refreshed[state.source] = opened
 
+    rw = polls.get("rotowire") or PollState("rotowire")
     if "rotowire" in refreshed:
         replace_current(conn, refreshed["rotowire"])
-    elif "covers" in refreshed and not rotowire_healthy(polls.get("rotowire") or PollState("rotowire"), now):
+    elif "covers" in refreshed and not rotowire_healthy(rw, now):
         replace_current(conn, refreshed["covers"])
+    alert = zero_row_alert(game_day, empty, set(refreshed), rw, now)
+    if alert:
+        result.alerts.append(alert)
+    if game_day and "covers" in empty and alert is None and (
+            "rotowire" in refreshed or rotowire_healthy(rw, now)):
+        logger.warning(
+            "NCAAB injury: covers returned 0 rows on a game day; tags stay on rotowire"
+        )
+    if game_day and "rotowire" in empty and "covers" in refreshed:
+        logger.warning(
+            "NCAAB injury: rotowire returned 0 rows on a game day; tags use covers"
+        )
     conn.commit()
     return result
 

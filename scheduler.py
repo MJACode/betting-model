@@ -1544,8 +1544,8 @@ def run_ncaab_injury_feed() -> None:
 
     The script decides whether RotoWire or Covers is actually due, so most
     ticks poll one source or neither. It writes change rows and the current
-    injury tags. It writes no picks, so it publishes nothing. A poll error
-    or a zero-player report on a game day exits 1; the alert line is the
+    injury tags. It writes no picks, so it publishes nothing.     A poll error exits 1. A zero-player report on a game day exits 1 only
+    when that source is the one the tags are using. The alert line is the
     heartbeat detail the failure alerter posts. RUN_NCAAB_INJURY=0 exits 0
     without a request.
     """

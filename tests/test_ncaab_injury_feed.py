@@ -263,6 +263,29 @@ def test_a_403_or_429_backs_off_and_the_wait_doubles():
     assert feed.source_due("rotowire", state, NOW, near_tip=True) == "backoff"
 
 
+def test_an_empty_covers_poll_is_not_an_alert_while_rotowire_supplies_tags():
+    rw = feed.PollState("rotowire", last_success_at=NOW, last_row_count=4)
+    assert feed.zero_row_alert(True, {"covers"}, {"rotowire"}, rw, NOW) is None
+    assert feed.zero_row_alert(True, {"covers"}, set(), rw, NOW) is None
+
+
+def test_an_empty_covers_poll_alerts_when_covers_is_the_tag_source():
+    failed = feed.PollState("rotowire", last_error="HTTP 500")
+    empty_rw = feed.PollState("rotowire", last_success_at=NOW, last_row_count=0)
+    assert feed.zero_row_alert(True, {"covers"}, set(), failed, NOW) == (
+        "covers returned 0 rows on a game day")
+    assert feed.zero_row_alert(True, {"rotowire", "covers"}, set(), empty_rw, NOW) == (
+        "covers returned 0 rows on a game day")
+
+
+def test_an_empty_rotowire_poll_alerts_only_when_covers_did_not_take_over():
+    empty_rw = feed.PollState("rotowire", last_success_at=NOW, last_row_count=0)
+    assert feed.zero_row_alert(True, {"rotowire"}, set(), empty_rw, NOW) == (
+        "rotowire returned 0 rows on a game day")
+    assert feed.zero_row_alert(True, {"rotowire"}, {"covers"}, empty_rw, NOW) is None
+    assert feed.zero_row_alert(False, {"rotowire", "covers"}, set(), empty_rw, NOW) is None
+
+
 def test_a_game_within_three_hours_is_near_tip_and_a_game_day():
     game_day, near = feed.slate_flags([("2026-11-01", TIP)], NOW)
     assert game_day and near
@@ -339,8 +362,8 @@ def test_zero_rows_on_a_game_day_alerts_and_writes_no_clearance(monkeypatch):
         return feed.FetchResult(200, body, None)
 
     result = feed.run(conn, now=NOW, fetch=fetch_empty, registry=REGISTRY)
-    assert "rotowire returned 0 rows on a game day" in result.alerts
-    assert "covers returned 0 rows on a game day" in result.alerts
+    # Both listed nobody, so Covers is the source the tags would use.
+    assert result.alerts == ["covers returned 0 rows on a game day"]
     assert not any("ncaab_injury_changes" in sql for sql, _ in conn.calls)
     assert not any("injury_status_current" in sql for sql, _ in conn.calls)
     assert polls["rotowire"].last_row_count == 0
@@ -369,17 +392,9 @@ def test_a_rotowire_report_writes_a_change_and_the_ncaab_current_row(monkeypatch
         "injury": "Concussion", "status": "Out", "rDate": "Nov 15",
     }])
 
-    def fetch(url):
-        if url == feed.ROTOWIRE_URL:
-            return feed.FetchResult(200, body, None)
-        return feed.FetchResult(200, "[]", None)
+    noted = []
+    monkeypatch.setattr(feed.logger, "warning", lambda msg, *a, **k: noted.append(str(msg)))
 
-    # Covers "[]" is a parse error (not HTML). That alerts. Use an empty
-    # covers block so the fallback parses and, on a game day, also alerts
-    # for zero. This test only needs RotoWire's write. Stub covers as not due
-    # by giving it a recent success via the poll store inside _wire... _wire
-    # starts empty, so covers is due. Point covers at a one-team empty page
-    # and accept its game-day alert; the current row must still be RotoWire's.
     def fetch_ok(url):
         if url == feed.ROTOWIRE_URL:
             return feed.FetchResult(200, body, None)
@@ -389,7 +404,8 @@ def test_a_rotowire_report_writes_a_change_and_the_ncaab_current_row(monkeypatch
         return feed.FetchResult(200, page, None)
 
     result = feed.run(conn, now=NOW, fetch=fetch_ok, registry=REGISTRY)
-    assert any("covers returned 0 rows" in a for a in result.alerts)
+    assert result.alerts == []
+    assert any("tags stay on rotowire" in msg for msg in noted)
     changes = [row for sql, rows in conn.calls if "INSERT INTO ncaab_injury_changes" in sql
                for row in rows]
     assert any(r["player_raw"] == "Terrance Ford" and r["status"] == "Out" for r in changes)
@@ -399,6 +415,45 @@ def test_a_rotowire_report_writes_a_change_and_the_ncaab_current_row(monkeypatch
     assert current[0]["player_key"] == "terrance ford"
     assert current[0]["status"] == "Out"
     assert any(sql.startswith("DELETE FROM injury_status_current") for sql, _ in conn.calls)
+
+
+def test_rotowire_empty_and_covers_players_does_not_fail_the_tick(monkeypatch):
+    _wire(monkeypatch, [("2026-11-01", TIP)])
+    conn = Conn()
+    noted = []
+    monkeypatch.setattr(feed.logger, "warning", lambda msg, *a, **k: noted.append(str(msg)))
+
+    def fetch(url):
+        if url == feed.ROTOWIRE_URL:
+            return feed.FetchResult(200, "[]", None)
+        return feed.FetchResult(200, _covers(), None)
+
+    result = feed.run(conn, now=NOW, fetch=fetch, registry=REGISTRY)
+    assert result.alerts == []
+    assert any("tags use covers" in msg for msg in noted)
+    current = [row for sql, rows in conn.calls if "INSERT INTO injury_status_current" in sql
+               for row in rows]
+    assert {r["player_raw"] for r in current} == {"Cooper Flagg", "Khaman Maluach"}
+
+
+def test_empty_covers_alerts_when_rotowire_failed(monkeypatch):
+    _wire(monkeypatch, [("2026-11-01", TIP)])
+    conn = Conn()
+    empty_covers = (
+        "x covers-CoversSeasonInjuries-blockContainer "
+        "<div class='covers-CoversMatchups-teamName'><a>Duke<br><span>Blue Devils</span></a></div>"
+        "<tbody>No injuries to report.</tbody>"
+    )
+
+    def fetch(url):
+        if url == feed.ROTOWIRE_URL:
+            return feed.FetchResult(500, "", None)
+        return feed.FetchResult(200, empty_covers, None)
+
+    result = feed.run(conn, now=NOW, fetch=fetch, registry=REGISTRY)
+    assert any("rotowire poll error HTTP 500" in a for a in result.alerts)
+    assert "covers returned 0 rows on a game day" in result.alerts
+    assert not any("injury_status_current" in sql for sql, _ in conn.calls)
 
 
 def test_when_rotowire_fails_covers_sets_the_current_tags(monkeypatch):

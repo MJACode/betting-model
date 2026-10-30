@@ -218,7 +218,9 @@ second run stores nothing new. Each insert into `odds` also updates
   Covers' public page as the fallback (`data/ingestors/ncaab_injury_feed.py`).
   A row is stored when the status changes, including `cleared` when a listed
   player leaves a non-empty report. `injury_tags_before_tip` is the status at
-  or before tip, for a tag. It is not a model feature. A team or player the
+  or before tip, for a tag. On a game day an empty report fails the tick
+  only for the source those tags are using. An empty Covers poll while
+  RotoWire listed players is a warning. It is not a model feature. A team or player the
   NCAAB resolver and the override maps cannot place is logged and not guessed.
   Official conference reports still cover conference games only.
 - **Torvik's robots.txt** (read 2026-10-29) bars six named crawlers, ClaudeBot
