@@ -866,8 +866,12 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
-    assert sorted(k for k in keys if k.startswith("ncaab-")) == sorted(DECLARED)
     by = {e["key"]: e for e in entries}
+    # Every NCAAB declaration a merge would QUEUE is one of the approved ones.
+    # A declaration shipped with enabled false queues nothing until someone
+    # turns it on (the free ESPN box/period backfills, 2026-10-30).
+    assert sorted(k for k in keys if k.startswith("ncaab-")
+                  and by[k].get("enabled", True) is not False) == sorted(DECLARED)
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True

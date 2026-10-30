@@ -1,7 +1,7 @@
 # Graph Report - wt_ncaab_box  (2026-10-30)
 
 ## Corpus Check
-- 1803 files · ~3,067,171 words
+- 1803 files · ~3,067,212 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b6c2af63`
+- Built from commit: `cee84d97`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -4246,17 +4246,17 @@ Nodes (4): DNS, Local preview, Signal Base marketing site, Vercel
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `over()` connect `Mobile color contrast checker` to `verify_bankroll.ts`, `NBA public betting splits capture`?**
-  _High betweenness centrality (0.143) - this node is a cross-community bridge._
+  _High betweenness centrality (0.144) - this node is a cross-community bridge._
 - **What connects `expo-asset`, `expo-dev-client`, `expo-font` to the rest of the system?**
   _105 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Mobile picks home screen and filters` be split into smaller, more focused modules?**
   _Cohesion score 0.015431446328161333 - nodes in this community are weakly interconnected._
 - **Why does `Backtest` connect `NBA public betting splits capture` to `test_byom_prop_facts.py`, `Mobile color contrast checker`, `Database connection, settlement and pruning`?**
-  _High betweenness centrality (0.141) - this node is a cross-community bridge._
+  _High betweenness centrality (0.143) - this node is a cross-community bridge._
 - **Should `Mobile stats board` be split into smaller, more focused modules?**
   _Cohesion score 0.009473290782588696 - nodes in this community are weakly interconnected._
 - **Why does `statement_timeout()` connect `Database connection, settlement and pruning` to `NBA public betting splits capture`, `Player prop box score backfill`, `get_connection`, `test_ncaab_espn_ingestor.py`, `Settlement CLV timeout retry tests`, `prune_odds.py`, `NBA results ingestion`, `prop_box_scores.py`, `NHL box score ingestor`?**
-  _High betweenness centrality (0.139) - this node is a cross-community bridge._
+  _High betweenness centrality (0.140) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
