@@ -1,7 +1,7 @@
 # Graph Report - wt_ncaab_opener  (2026-10-30)
 
 ## Corpus Check
-- 1799 files · ~3,061,835 words
+- 1799 files · ~3,061,877 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 3, .mdc 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a37ba087`
+- Built from commit: `2feab6dd`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

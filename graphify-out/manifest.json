@@ -10302,9 +10302,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_odds_history.py": {
-    "mtime": 1793383471.537174,
-    "seen": 1793384249.7302299,
-    "ast_hash": "aeec91f3e47d4df9458da7b40d276142",
+    "mtime": 1793385732.912324,
+    "seen": 1793386687.6158092,
+    "ast_hash": "4555116376833ce26aae9689cccf3e2e",
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_sdv_import.py": {
@@ -10674,9 +10674,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaab.md": {
-    "mtime": 1793383471.6018524,
-    "seen": 1793384249.7396965,
-    "ast_hash": "e2c47ddfb8265ad65a2da7b74ff36a59",
+    "mtime": 1793385733.008528,
+    "seen": 1793386687.644359,
+    "ast_hash": "b8cba5212ad004a538cf501ab5b811a2",
     "semantic_hash": ""
   },
   "data/ingestors/alt_game_lines.py": {
@@ -10938,9 +10938,9 @@
     "semantic_hash": ""
   },
   "tests/test_ncaab_opener_grid.py": {
-    "mtime": 1793380983.2699785,
-    "seen": 1793382594.5792587,
-    "ast_hash": "4d78a31718051124d70dd3c1f0134100",
+    "mtime": 1793385732.915295,
+    "seen": 1793386687.6421156,
+    "ast_hash": "d32b8801dc2ac953409b98d75a38e234",
     "semantic_hash": ""
   },
   "tests/test_odds_history_pulls_minute_key_pg.py": {
