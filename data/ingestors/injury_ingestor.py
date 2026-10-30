@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import sqlite3
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
@@ -841,8 +841,9 @@ def fetch_return_ramp_players(conn: sqlite3.Connection, sport: str,
 
 def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
     """
-    Insert injury rows. We insert fresh rows each day (append-only log).
-    Deduplication done at query time by using the most recent report_date.
+    Insert injury rows. We insert fresh rows each run (append-only log).
+    A day holds one full copy of the list per run. The reader keeps one row
+    per player from the latest copy as of tip-off.
     Returns number of rows inserted.
     """
     if not injuries:
@@ -1065,46 +1066,181 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     }
 
 
+def _parse_injury_ts(value) -> datetime | None:
+    """UTC time of a stored injury stamp or a game's tip.
+
+    `created_at` is Postgres `NOW()::text` (`2026-10-13 04:17:18.147923+00`).
+    `games.commence_time` is `2026-10-13T23:30:00Z` or `...+00:00`. String
+    order is not time order across those shapes.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _player_key(row: dict) -> str | None:
+    """Identity for one player across snapshots. None when the row has neither
+    an id nor a name, so a fixture row that never carried one is not merged
+    with a different anonymous row."""
+    pid = str(row.get("player_id") or "").strip()
+    if pid:
+        return "id:" + pid
+    name = str(row.get("player_name") or "").strip().lower()
+    if name:
+        return "name:" + name
+    return None
+
+
+def _snapshot_rank(row: dict) -> tuple:
+    """Later snapshot wins; the same clock keeps the later insert."""
+    ts = _parse_injury_ts(row.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        iid = int(row.get("injury_id"))
+    except (TypeError, ValueError):
+        iid = -1
+    return (ts, iid)
+
+
+def latest_injury_rows(rows: list[dict], as_of=None) -> list[dict]:
+    """One row per player: that player's latest snapshot at or before `as_of`.
+
+    Each ingest writes a fresh copy of the whole list under the same
+    `report_date`, so the same player is in the table once per run. Summing
+    those copies counts him once per snapshot. A row taken after `as_of`
+    (tip-off, for a game already started) is not his latest eligible
+    snapshot. A row with no clock stays eligible: a backfill that never
+    stored `created_at` cannot be shown to be after tip. A row with no
+    player id and no name is kept as its own row.
+    """
+    cutoff = _parse_injury_ts(as_of) if as_of else None
+    best: dict[str, dict] = {}
+    anonymous: list[dict] = []
+    for row in rows:
+        stamp = _parse_injury_ts(row.get("created_at"))
+        if cutoff is not None and stamp is not None and stamp > cutoff:
+            continue
+        key = _player_key(row)
+        if key is None:
+            anonymous.append(row)
+            continue
+        prev = best.get(key)
+        if prev is None or _snapshot_rank(row) >= _snapshot_rank(prev):
+            best[key] = row
+    return list(best.values()) + anonymous
+
+
+_INJURY_ROW_COLS = [
+    "player_name", "player_id", "status", "injury_type",
+    "scenario", "severity_weight", "return_ramp_factor",
+    "games_since_return", "activation_date",
+    "created_at", "injury_id",
+]
+
+
+def _report_date_as_of(conn, sport: str, game_date: str, as_of) -> str | None:
+    """Latest `report_date` on or before `game_date` that has a snapshot
+    at or before `as_of`. No `as_of` means the latest report date, as before.
+
+    The clock filter is applied here in Python. `created_at` is text, and
+    this query also runs against the sqlite fixtures the feature tests build,
+    which have no `timestamptz` cast.
+    """
+    cutoff = _parse_injury_ts(as_of) if as_of else None
+    bound = game_date
+    for _ in range(14):
+        row = conn.execute("""
+            SELECT MAX(report_date)
+            FROM injuries
+            WHERE sport = ?
+              AND report_date <= ?
+        """, (sport, bound)).fetchone()
+        latest = row[0] if row else None
+        if not latest:
+            return None
+        if cutoff is None:
+            return latest
+        early = conn.execute("""
+            SELECT created_at
+            FROM injuries
+            WHERE sport = ?
+              AND report_date = ?
+              AND created_at IS NOT NULL
+            ORDER BY created_at
+            LIMIT 1
+        """, (sport, latest)).fetchone()
+        ts = _parse_injury_ts(early[0]) if early and early[0] is not None else None
+        if ts is None or ts <= cutoff:
+            return latest
+        prev = (date.fromisoformat(str(latest)[:10]) - timedelta(days=1)).isoformat()
+        if prev >= bound:
+            return None
+        bound = prev
+    return None
+
+
+def _team_injury_rows(conn, sport: str, team: str, report_date: str,
+                      as_of) -> list[dict]:
+    rows = conn.execute("""
+        SELECT player_name, player_id, status, injury_type,
+               scenario, severity_weight, return_ramp_factor,
+               games_since_return, activation_date,
+               created_at, injury_id
+        FROM injuries
+        WHERE sport = ?
+          AND team = ?
+          AND report_date = ?
+    """, (sport, team, report_date)).fetchall()
+    parsed = [dict(zip(_INJURY_ROW_COLS, r)) for r in rows]
+    return latest_injury_rows(parsed, as_of=as_of)
+
+
 def query_injuries_for_game(conn: sqlite3.Connection,
                              sport: str,
                              home_team: str,
                              away_team: str,
-                             game_date: str) -> dict:
+                             game_date: str,
+                             game_id: str | None = None,
+                             as_of=None) -> dict:
     """
-    Helper used by feature engine to pull injury context for a specific game.
-    Returns dict with keys: home_injuries, away_injuries (list of injury rows).
-    Pulls the most recent injury report on or before game_date.
-    """
-    latest_date = conn.execute("""
-        SELECT MAX(report_date)
-        FROM injuries
-        WHERE sport = ?
-          AND report_date <= ?
-    """, (sport, game_date)).fetchone()[0]
+    Injury rows for one game: home_injuries, away_injuries.
 
+    The report is the latest `report_date` on or before `game_date` that
+    already had a snapshot by tip-off. Each player is in that report once,
+    on his latest snapshot by then. `as_of` is that tip when the caller
+    passes it; otherwise `game_id` is looked up on `games.commence_time`.
+    A game that has not started has its tip in the future, so every snapshot
+    stored so far is eligible. A game already started does not read a
+    snapshot taken after tip. No tip on the game means the latest report
+    date, still one row per player.
+    """
+    if as_of is None and game_id:
+        tip = conn.execute(
+            "SELECT commence_time FROM games WHERE game_id = ?",
+            (game_id,),
+        ).fetchone()
+        as_of = tip[0] if tip else None
+
+    latest_date = _report_date_as_of(conn, sport, game_date, as_of)
     if not latest_date:
         return {"home_injuries": [], "away_injuries": []}
 
-    def _get_team_injuries(team: str) -> list[dict]:
-        rows = conn.execute("""
-            SELECT player_name, player_id, status, injury_type,
-                   scenario, severity_weight, return_ramp_factor,
-                   games_since_return, activation_date
-            FROM injuries
-            WHERE sport = ?
-              AND team = ?
-              AND report_date = ?
-            ORDER BY severity_weight DESC
-        """, (sport, team, latest_date)).fetchall()
-
-        cols = ["player_name", "player_id", "status", "injury_type",
-                "scenario", "severity_weight", "return_ramp_factor",
-                "games_since_return", "activation_date"]
-        return [dict(zip(cols, r)) for r in rows]
-
     return {
-        "home_injuries": _get_team_injuries(home_team),
-        "away_injuries": _get_team_injuries(away_team),
+        "home_injuries": _team_injury_rows(conn, sport, home_team, latest_date, as_of),
+        "away_injuries": _team_injury_rows(conn, sport, away_team, latest_date, as_of),
     }
 
 

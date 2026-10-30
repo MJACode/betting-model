@@ -32,6 +32,8 @@ from data.db import DBConnection
 # Shared injury helpers (one-way import — feature_engine imports the builders here
 # only lazily, inside functions, so there is no circular import at module load).
 from features.feature_engine import (
+    _blk_injuries,
+    _commence_by_game,
     _compute_injury_adjustment,
     _has_returnee,
     _is_pregame_snapshot,
@@ -239,7 +241,8 @@ def build_wnba_game_features(conn: DBConnection, game_id: str, game_date: str,
     home_stats = _get_wnba_team_stats(conn, home_team, season, game_date)
     away_stats = _get_wnba_team_stats(conn, away_team, season, game_date)
 
-    injuries = query_injuries_for_game(conn, "WNBA", home_team, away_team, game_date)
+    injuries = query_injuries_for_game(
+        conn, "WNBA", home_team, away_team, game_date, game_id=game_id)
     home_inj = injuries["home_injuries"]
     away_inj = injuries["away_injuries"]
 
@@ -308,9 +311,11 @@ def build_bulk_wnba_lookups(conn: DBConnection, seasons: list[int]) -> dict:
 
     # ── Injuries ───────────────────────────────────────────────────────────────
     inj_cols = ['team', 'report_date', 'scenario', 'severity_weight',
-                'return_ramp_factor', 'status']
+                'return_ramp_factor', 'status', 'player_name', 'player_id',
+                'created_at', 'injury_id']
     inj_rows = conn.execute("""
-        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status
+        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status,
+               player_name, player_id, created_at, injury_id
         FROM injuries WHERE sport = 'WNBA'
         ORDER BY team, report_date
     """).fetchall()
@@ -368,7 +373,8 @@ def build_bulk_wnba_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     )
 
     return dict(team_stats=team_stats, points=points, play_dates=play_dates,
-                injuries=injuries, inj_dates=inj_dates, odds=odds_lookup)
+                injuries=injuries, inj_dates=inj_dates, odds=odds_lookup,
+                commence=_commence_by_game(conn, "WNBA"))
 
 
 def _blk_wnba_team_stats(bulk: dict, team: str, season: int, game_date: str) -> dict:
@@ -399,20 +405,17 @@ def _blk_wnba_rest(bulk: dict, team: str, game_date: str) -> int | None:
     return _rest_days(bulk['play_dates'][team], game_date)
 
 
-def _blk_wnba_injuries(bulk: dict, team: str, game_date: str) -> list:
-    if team not in bulk['inj_dates']:
-        return []
-    dates = bulk['inj_dates'][team]
-    idx = bisect.bisect_right(dates, game_date) - 1
-    if idx < 0:
-        return []
-    return bulk['injuries'][team].get(dates[idx], [])
+def _blk_wnba_injuries(bulk: dict, team: str, game_date: str,
+                       as_of: str | None = None) -> list:
+    """Same one-row-per-player rule as the MLB/NHL bulk reader."""
+    return _blk_injuries(bulk, team, game_date, as_of=as_of)
 
 
 def build_wnba_features_from_bulk(bulk: dict, game_id: str, game_date: str,
                                   home_team: str, away_team: str, season: int,
                                   odds_row: dict | None) -> dict:
     """Build a WNBA feature row from pre-loaded bulk data (training/backtest)."""
+    tip = (bulk.get("commence") or {}).get(game_id)
     return _assemble_wnba_features(
         game_id, game_date, home_team, away_team, season,
         _blk_wnba_team_stats(bulk, home_team, season, game_date),
@@ -423,7 +426,7 @@ def build_wnba_features_from_bulk(bulk: dict, game_id: str, game_date: str,
         _blk_wnba_rolling_points(bulk, away_team, game_date, 5),
         _blk_wnba_rest(bulk, home_team, game_date),
         _blk_wnba_rest(bulk, away_team, game_date),
-        _blk_wnba_injuries(bulk, home_team, game_date),
-        _blk_wnba_injuries(bulk, away_team, game_date),
+        _blk_wnba_injuries(bulk, home_team, game_date, as_of=tip),
+        _blk_wnba_injuries(bulk, away_team, game_date, as_of=tip),
         odds_row,
     )
