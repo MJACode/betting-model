@@ -281,10 +281,10 @@ counted 2026-10-30). `--box --seasons 2027 2027` fetches a summary for every
 2026-27 final with no ESPN box row. Both skip what is stored. On the worker:
 job `ncaab_box_backfill` with `{"kind": "periods", "first": 2021, "last":
 2026}` or `{"kind": "box"}` (box is held to 2026-27, the season NCAA's files
-do not cover). Both are declared in `jobs/declared_jobs.json`
-(`ncaab-period-scores-2021-2026`, `ncaab-box-scores-2027`) with `enabled`
-false, so a merge starts nothing. Turning one on is that one line: set
-`enabled` to true and merge; the worker queues it on its next tick. No test
+do not cover). Both are declared in `jobs/declared_jobs.json`.
+`ncaab-period-scores-2021-2026` ships ON (mike, 2026-10-30), so the worker
+queues it once on its first tick after the merge. `ncaab-box-scores-2027`
+ships off. Turning it on is one line: set `enabled` to true and merge. No test
 pins either switch, and the NCAAB credit-approval test leaves this free job
 out. The ESPN schedule backfill made the same kind of calls on the worker on
 2026-10-28/29: 17 seasons, one scoreboard per date, about 13 minutes a season,

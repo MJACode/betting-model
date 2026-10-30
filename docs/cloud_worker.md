@@ -185,10 +185,11 @@ means its summary changed for every game. Detail: `docs/sports/ncaab.md`
 Backfill job `ncaab_box_backfill`: `{"kind": "periods", "first": 2021,
 "last": 2026}` stores the period scores of every 2020-21 to 2025-26 final
 from one scoreboard call per date; `{"kind": "box"}` fetches the 2026-27
-box scores the passes have not stored. Both are declared OFF in
-`jobs/declared_jobs.json` (`ncaab-period-scores-2021-2026`,
-`ncaab-box-scores-2027`). To queue one, set its `enabled` to true and merge:
-that one line is the whole change, no test needs editing. Its two tables
+box scores the passes have not stored. Both are declared in
+`jobs/declared_jobs.json`: `ncaab-period-scores-2021-2026` is ON (mike,
+2026-10-30), so the worker queues it once after the merge;
+`ncaab-box-scores-2027` is OFF. To queue it, set its `enabled` to true and
+merge: that one line is the whole change, no test needs editing. Its two tables
 are also created by `add_ncaab_period_scores_2026_10_30.sql`, which the
 `apply-view-migrations` step applies on the first pass after a merge.
 
