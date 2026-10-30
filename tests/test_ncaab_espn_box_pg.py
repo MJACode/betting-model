@@ -5,8 +5,9 @@ Python: the migration and the write-time guard create the same locked-down
 tables and, once they exist, neither runs DDL again; the due query's key
 ('espn:' || a BIGINT) and its cool-down (a TIMESTAMPTZ against a text
 parameter) mean on Postgres what they mean on sqlite; production's NUMERIC
-scores read back as whole points; and the DISTINCT ON the docs give picks one
-row per game and team. Runs against LATEST_LINE_TEST_DSN or a throwaway
+scores read back as whole points; and the reader query docs/sports/ncaab.md
+prints keeps one source per game, every season included. Runs against
+LATEST_LINE_TEST_DSN or a throwaway
 cluster from tests/_pg.py, and SKIPS only where neither exists (the worker).
 """
 from __future__ import annotations
@@ -27,6 +28,8 @@ from data.ingestors import ncaab_espn_box as box  # noqa: E402
 from data.ingestors import ncaab_sdv_import as sdv  # noqa: E402
 from data.ingestors import ncaab_teams as nt  # noqa: E402
 from tests._pg import can_scratch, env_dsn, scratch_cluster  # noqa: E402
+from tests.test_ncaab_espn_box import (  # noqa: E402
+    READER_EXPECTED, documented_reader_sql, insert_reader_cases)
 
 ROOT = Path(__file__).parent.parent
 FIX = Path(__file__).parent / "fixtures" / "ncaab_espn_box"
@@ -197,13 +200,15 @@ def test_the_documented_reader_picks_one_source_per_game(raw, dsn):
         c.commit()
         box.run_recent("2026-02-16", now=NOW, connect=lambda: c,
                        get_json=Espn({401825519: SUMMARY}))
-        rows = c.execute("""
-            SELECT DISTINCT ON (espn_game_id, team_espn_id) team_espn_id, source, o_poss
-              FROM ncaab_team_game_stats WHERE espn_game_id IS NOT NULL
-             ORDER BY espn_game_id, team_espn_id, (source = 'sportsdataverse_ncaa') DESC
-        """).fetchall()
-        assert rows == [(120, "sportsdataverse_ncaa", 67.0), (164, "sportsdataverse_ncaa", 67.0)]
+        insert_reader_cases(lambda s, p: c.execute(s, p))
+        c.commit()
         n = c.execute("SELECT count(*) FROM ncaab_team_game_stats").fetchone()[0]
-        assert n == 4
+        assert n == 12
+        rows = c.execute(f"SELECT contest_id, team, source, o_poss FROM "
+                         f"({documented_reader_sql()}) r ORDER BY contest_id, team").fetchall()
+        assert [r[:3] for r in rows] == READER_EXPECTED
+        by = {(r[0], r[1]): r[3] for r in rows}
+        assert by[("6465747", "Maryland")] == by[("6465747", "Rutgers")] == 67.0, (
+            "NCAA's play-by-play count, not the ESPN estimate")
     finally:
         c._conn.close()

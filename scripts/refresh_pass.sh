@@ -7,10 +7,12 @@
 # Requires: DATABASE_URL, ODDS_API_KEY, DATAGOLF_API_KEY, FETCH_F5_LIVE in the env.
 #
 # Usage: refresh_pass.sh [hourly|evening]   (default hourly)
-#   The only difference is the WNBA results ingest, which costs ~40 ESPN calls
-#   per game. ESPN IP-blocked this worker in August 2026 and WNBA settlement was
-#   dead for two weeks; running that every 10 minutes is how it happens again.
-#   Everything else runs on every pass.
+#   The difference is three hourly-only steps. The WNBA results ingest costs
+#   ~40 ESPN calls per game. ESPN IP-blocked this worker in August 2026 and WNBA
+#   settlement was dead for two weeks; running that every 10 minutes is how it
+#   happens again. Golf results is a per-event DataGolf pull. The NCAAB box
+#   scores (ncaab-box) can take up to ~150 s, which a 10-minute tick has no
+#   room for. Everything else runs on every pass.
 # NOT `set -e`. Every step below is an independent producer, so one failure must
 # never abort the rest of the pass. On 2026-08-27 a NameError in the WNBA prop
 # scorer (step 9 of 24) aborted every hourly pass for three days: opening-signal
@@ -293,13 +295,21 @@ step refresh-outcomes
 
 # NCAAB box scores and period scores (ncaab_team_game_stats under
 # 'espn_summary', ncaab_period_scores), one ESPN game summary per final.
-# AFTER ncaab-results, which writes the finals it reads, so a game's box lands
-# on the pass that stores its final. After settle and refresh-outcomes because
-# nothing settles off it and it can take a minute or two. SEQUENTIAL: it opens
-# its own connection (the pool note on probables-refresh above) and calls ESPN
-# one request at a time. Self-limiting: no ESPN call unless a final of the
-# last 3 ET dates has no ESPN box row; at most 80 games and ~150 s a pass.
-step ncaab-box
+# AFTER ncaab-results, which writes the finals it reads. After settle and
+# refresh-outcomes because nothing settles off it and it can take a minute or
+# two. SEQUENTIAL: it opens its own connection (the pool note on
+# probables-refresh above) and calls ESPN one request at a time.
+# Self-limiting: no ESPN call unless a final of the last 3 ET dates has no
+# ESPN box row; at most 80 games and ~150 s of fetching a pass, and one failed
+# fetch ends its run (about 46 s at worst).
+# HOURLY passes only (7am-5pm and midnight-5am ET). An evening pass already
+# takes 455-526 s (median, p90, pipeline_runs 7 days to 2026-10-30) of its
+# 10-minute tick; this step's up-to-150 s there would push passes past the
+# tick and skip the next one. The evening's finals are stored from the 12:17am
+# pass on, and nothing reads them sooner.
+if [ "$MODE" = "hourly" ]; then
+  step ncaab-box
+fi
 
 # Health check LAST, on every pass. It used to run only as the final step of the
 # daily 6am pipeline, so a break that only affected refresh passes was invisible

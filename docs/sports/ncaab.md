@@ -153,7 +153,7 @@ second run stores nothing new. Each insert into `odds` also updates
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 | Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
-| Box and period scores (2026-27 on) | Each final's team box score into `ncaab_team_game_stats` (source `espn_summary`) and its half and overtime scores into `ncaab_period_scores`, one ESPN game summary per final, on every refresh pass after the results step (Box scores and period scores, below) | `data/ingestors/ncaab_espn_box.py`, step `ncaab-box`; backfill job `ncaab_box_backfill` |
+| Box and period scores (2026-27 on) | Each final's team box score into `ncaab_team_game_stats` (source `espn_summary`) and its half and overtime scores into `ncaab_period_scores`, one ESPN game summary per final, on the hourly refresh passes after the results step (Box scores and period scores, below) | `data/ingestors/ncaab_espn_box.py`, step `ncaab-box`; backfill job `ncaab_box_backfill` |
 
 ## Box scores and period scores (ESPN, from 2026-27)
 
@@ -182,14 +182,18 @@ played. `data/ingestors/ncaab_espn_box.py` is the writer.
 - A game it will not store gets a row in `ncaab_box_misses` instead: the
   reason and the attempt count.
 
-**When it runs.** Step `ncaab-box` on every refresh pass, after the
-`ncaab-results` step that writes the finals it reads (and after settle,
-since nothing settles off it): hourly at :17 from midnight to 5 am and 7 am
-to 5 pm ET, every 10 minutes from 6 to 11 pm ET. It looks at the finals of
-the last 3 ET dates that have no `espn_summary` row, newest first, so a box
-lands on the pass that stores the final. A pass takes at most 80 games and
-about 150 seconds, one request at a time with 0.3 seconds between them; the
-rest wait for the next pass. With nothing due it makes no ESPN call.
+**When it runs.** Step `ncaab-box` on the hourly refresh passes, at :17
+from midnight to 5 am and from 7 am to 5 pm ET, after the `ncaab-results`
+step that writes the finals it reads (and after settle, since nothing settles
+off it). Not on the 10-minute evening passes (6 to 11 pm ET): those already
+take 455-526 seconds (median and 90th percentile, `pipeline_runs`, 7 days to
+2026-10-30) of their 600-second tick, and a pass that overruns makes the next
+one skip. The evening's finals are stored from the 12:17 am pass on; nothing
+reads them sooner. It looks at the finals of the last 3 ET dates that have
+no `espn_summary` row, newest first. A pass takes at most 80 games and about
+150 seconds of fetching (checked before each call), one request at a time
+with 0.3 seconds between them; the rest wait for the next pass. With nothing
+due it makes no ESPN call.
 
 **The possession estimate.** ESPN's summary has no possession count, so
 `o_poss` is each team's box-score estimate, FGA − offensive rebounds +
@@ -207,16 +211,33 @@ stored NCAA rows (188,424 rows, 2010-11 to 2025-26).
 
 **Two sources, one game.** If a game is ever held under both sources (for
 example a sportsdataverse 2026-27 file appears), it has two pairs of rows
-with the same `espn_game_id` and different `contest_id`. Choose one per game
-by `source`, NCAA's where it exists:
+with the same `espn_game_id` and different `contest_id`. Keep one source per
+game, both of its rows, NCAA's where it holds the game. This query keeps
+every row of the table today (188,424 of 188,424, read 2026-10-30) and runs
+as printed on Postgres and in the tests:
 
-    SELECT DISTINCT ON (espn_game_id, team_espn_id) *
-      FROM ncaab_team_game_stats WHERE espn_game_id IS NOT NULL
-     ORDER BY espn_game_id, team_espn_id, (source = 'sportsdataverse_ncaa') DESC;
+    SELECT * FROM (
+      SELECT s.*, RANK() OVER (
+               PARTITION BY COALESCE('espn:' || s.espn_game_id, s.contest_id)
+               ORDER BY (s.source = 'sportsdataverse_ncaa') DESC) AS source_rank
+        FROM ncaab_team_game_stats s) ranked
+     WHERE source_rank = 1;
+
+Two traps it avoids:
+
+- **Older seasons have no `espn_game_id`.** NCAA's rows carry none before
+  2022-23 (138,338 of 188,424 rows). A query that requires one keeps only the
+  last four seasons, without an error. The game key is the ESPN id where the
+  row has one and the `contest_id` where it does not.
+- **A non-Division I team has no `team_espn_id` in NCAA's rows** (8,854 rows),
+  and this feed fills it (Hawaii Pacific is 2269). A query keyed on the team id
+  would keep three rows of such a game, NCAA's two and ESPN's row for that
+  side. To match one side across the two sources, use the game and `is_home`
+  (every stored game has one home row and one away row).
 
 A reader that matches on date and team pair and drops duplicate keys (the
-research prep does) would lose such a game rather than choose, so filter on
-`source` first.
+research prep does) would lose such a game rather than choose, so choose the
+source first.
 
 **What it refuses.** A summary that is not final, names other teams than the
 stored event, or lacks any of the shooting, rebound or turnover numbers; a
@@ -224,9 +245,25 @@ box whose points are not 2 × FGM + 3PM + FTM; an ESPN final that differs
 from the stored one (the stored final settled the picks); period scores that
 do not sum to the stored final, differ in count between the teams, or
 disagree with `went_to_ot`. Nothing of a refused game is stored. It is tried
-again after 50 minutes, at most 6 times. A 404 for a game is a miss; a 403 or
-429, or three failed fetches in a row, stops the pass's run and turns the
-step red, since ESPN has blocked the worker before.
+again after 50 minutes, at most 6 times. A 404 for a game is a miss. A 403
+or 429 stops the pass's run and turns the step red, since ESPN has blocked
+the worker before. So does the first fetch that fails outright (no answer
+after the fetch's own retry): the next pass is the retry, so an ESPN outage
+costs one fetch a pass, about 46 seconds at worst. The season backfills stop
+after three.
+
+**When every game is refused.** If ESPN changes its game summary (a renamed
+statistic, a moved endpoint), every game is refused, and each one alone is
+only a miss. So after each pass the step counts the newest finals of the
+3-date window that ESPN answered for and that were refused, back to the
+newest one stored. Five in a row turns the step red (`espn-box-refused` in
+the log, the step named in `pipeline_runs`). It stays red on every pass,
+including passes with nothing due, until a game is stored again. Counted from
+the stored rows, it catches a break that arrives one game a pass, and it
+stays green while an occasional bad game is retried behind newer stored ones.
+The refused games use up their 6 attempts meanwhile; once the cause is fixed,
+the box backfill (`--box`, or the `ncaab-box-scores-2027` declaration
+switched on) fetches them again, ignoring the misses.
 
 **Measured 2026-10-30, 25 games of 2025-26 (`summary?event=`).** Every call
 answered 200 in 1.00 s on average (max 1.12 s), 447-566 KB each. On the 49
@@ -244,8 +281,14 @@ counted 2026-10-30). `--box --seasons 2027 2027` fetches a summary for every
 2026-27 final with no ESPN box row. Both skip what is stored. On the worker:
 job `ncaab_box_backfill` with `{"kind": "periods", "first": 2021, "last":
 2026}` or `{"kind": "box"}` (box is held to 2026-27, the season NCAA's files
-do not cover). Both are declared in `jobs/declared_jobs.json` with `enabled`
-false, so a merge starts nothing.
+do not cover). Both are declared in `jobs/declared_jobs.json`
+(`ncaab-period-scores-2021-2026`, `ncaab-box-scores-2027`) with `enabled`
+false, so a merge starts nothing. Turning one on is that one line: set
+`enabled` to true and merge; the worker queues it on its next tick. No test
+pins either switch, and the NCAAB credit-approval test leaves this free job
+out. The ESPN schedule backfill made the same kind of calls on the worker on
+2026-10-28/29: 17 seasons, one scoreboard per date, about 13 minutes a season,
+all 17 done.
 
 **The research round's halves file.** It held first- and second-half scores
 for 36,796 ESPN events of 2020-21 to 2025-26, on one laptop only. It is not

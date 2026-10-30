@@ -204,6 +204,55 @@ def _periods(conn, game_id):
                   "WHERE game_id = ? ORDER BY period", (game_id,))
 
 
+def _seed_copies(conn, n, *, start=990000, tip="2026-02-15T17:00:00Z", game_date="2026-02-15"):
+    """n more finals shaped like Maryland @ Rutgers, each under its own event
+    id and game id, tipping 10 minutes apart (the first tips earliest).
+    Returns their event ids, oldest first, and a summary per event: the real
+    payload with the header naming that event."""
+    (_, season, _, _, hid, aid, home, away, hs, as_, ot) = GAMES[401825519]
+    t0 = datetime.fromisoformat(tip.replace("Z", "+00:00"))
+    ids, sums = [], {}
+    for k in range(n):
+        eid = start + k
+        gid = f"NCAAB_{game_date}_copy-{eid}"
+        at = (t0 + timedelta(minutes=10 * k)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        conn.sq.execute(
+            "INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, "
+            "home_score, away_score, commence_time, went_to_ot) "
+            "VALUES (?, 'NCAAB', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (gid, season, game_date, home, away, hs, as_, at, ot))
+        conn.sq.execute(
+            "INSERT INTO ncaab_events (espn_event_id, game_id, season, game_date, "
+            "commence_time, home_espn_id, away_espn_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (eid, gid, season, game_date, at, hid, aid))
+        js = copy.deepcopy(SUM_MD_RU)
+        js["header"]["id"] = str(eid)
+        ids.append(eid)
+        sums[eid] = js
+    conn.sq.commit()
+    return ids, sums
+
+
+def _without_turnovers(js):
+    """ESPN renames its turnover fields: every box score lacks turnovers."""
+    js = copy.deepcopy(js)
+    for t in js["boxscore"]["teams"]:
+        for s in t["statistics"]:
+            if s.get("name") in ("turnovers", "totalTurnovers"):
+                s["name"] += "Renamed"
+    return js
+
+
+class Clock:
+    """A fake monotonic clock that a fake ESPN moves forward."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
 # ── parsing a real summary ───────────────────────────────────────────────────
 
 def test_a_real_summary_parses_to_ncaas_own_numbers():
@@ -304,6 +353,26 @@ def test_the_pass_cap_leaves_the_rest_for_the_next_pass(conn):
     assert t["due"] == 2 and t["left"] == 1 and len(espn.calls) == 2
 
 
+def test_the_time_budget_stops_fetching_and_leaves_the_rest(conn):
+    """The only bound on wall-clock time: once the budget is spent no further
+    summary is fetched, and the games not reached are counted as left."""
+    ids, sums = _seed_copies(conn, 10)
+    clock = Clock()
+    espn = Espn(sums)
+
+    def slow(url, params):            # every summary takes 20 seconds
+        clock.t += 20.0
+        return espn(url, params)
+    t = box.run_recent("2026-02-16", now=NOW_0216, connect=lambda: conn, get_json=slow,
+                       budget_s=50.0, clock=clock)
+    # fetched at 0, 20 and 40 seconds; at 60 the 50-second budget is spent
+    assert len(espn.calls) == 3
+    assert (t["due"], t["fetched"], t["games_stored"], t["left"]) == (10, 3, 3, 7)
+    assert t["failed"] == []
+    # the three newest went first; the seven older ones wait for the next pass
+    assert [int(p["event"]) for _, p in espn.calls] == ids[::-1][:3]
+
+
 # ── what is refused, and that refusing never raises ──────────────────────────
 
 def _broken(js, path, value):
@@ -365,15 +434,31 @@ def test_a_404_is_a_miss_and_a_403_stops_the_run_red(conn):
     assert conn2.q("SELECT COUNT(*) FROM ncaab_box_misses") == [(0,)]
 
 
-def test_repeated_network_failures_stop_the_run(conn):
+def test_one_failed_fetch_ends_the_passs_run(conn):
+    """On a refresh pass the next pass is the retry: the first fetch that
+    fails (after the helper's own retry) stops the run, so an ESPN outage
+    costs one fetch a pass, not three. The games stay due, nothing is
+    recorded against them, and the step is red."""
     _seed(conn, [401804920, 401827665, 401820724])
     err = requests.ConnectionError("reset")
     espn = Espn({e: err for e in (401804920, 401827665, 401820724)})
     t = box.run_recent("2026-02-08", now=datetime(2026, 2, 8, 15, tzinfo=timezone.utc),
                        connect=lambda: conn, get_json=espn)
-    assert t["fetch_errors"] == 3 and t["failed"] == ["espn-unreachable"]
+    assert len(espn.calls) == 1, "kept calling an ESPN that did not answer"
+    assert t["fetch_errors"] == 1 and t["failed"] == ["espn-unreachable"]
+    assert t["left"] == 2
     assert conn.q("SELECT COUNT(*) FROM ncaab_box_misses") == [(0,)], (
         "an unreachable ESPN is not a fact about the game")
+
+
+def test_the_backfill_tolerates_two_failed_fetches_and_stops_at_three(conn):
+    _seed(conn, [401804920, 401827665, 401820724])
+    err = requests.ConnectionError("reset")
+    espn = Espn({e: err for e in (401804920, 401827665, 401820724)})
+    t = box.run_box_backfill(2026, 2026, now=datetime(2026, 2, 8, 15, tzinfo=timezone.utc),
+                             connect=lambda: conn, get_json=espn)
+    assert len(espn.calls) == 3
+    assert t["fetch_errors"] == 3 and t["failed"] == ["espn-unreachable"]
 
 
 def test_a_refused_game_cools_and_then_stops_being_fetched(conn):
@@ -409,6 +494,66 @@ def test_a_write_failure_is_red_and_does_not_raise(conn, monkeypatch):
     assert t["failed"] == ["NCAAB_2026-02-15_maryland_rutgers"]
 
 
+# ── a feed-wide break is red, and stays red after the games stop being due ──
+
+@pytest.mark.parametrize("how", ["a renamed turnover field", "the summary answers 404"])
+def test_a_feed_wide_break_turns_the_step_red_and_keeps_it_red(conn, how):
+    """ESPN changes the summary for every game. Each game alone is a refusal,
+    which is green; five refused in a row with nothing stored is the feed,
+    not the games. The step stays red on every later pass, including the
+    ones where every game has used up its attempts and nothing is due."""
+    ids, sums = _seed_copies(conn, box.REFUSED_RUN_RED + 1)
+    espn = Espn({e: _without_turnovers(js) for e, js in sums.items()}
+                if how.startswith("a renamed") else {})
+    t = box.run_recent("2026-02-16", now=NOW_0216, connect=lambda: conn, get_json=espn)
+    assert (t["refused"], t["games_stored"]) == (len(ids), 0)
+    assert t["refused_run"] == len(ids)
+    assert t["failed"] == ["espn-box-refused"]
+    for i in range(1, box.MAX_ATTEMPTS + 2):
+        t = box.run_recent("2026-02-16", now=NOW_0216 + timedelta(hours=i),
+                           connect=lambda: conn, get_json=espn)
+    assert t["due"] == 0, "the games should have used up their attempts by now"
+    assert t["failed"] == ["espn-box-refused"], "green again once nothing was due"
+
+
+def test_a_break_that_arrives_one_game_a_pass_still_turns_red(conn):
+    """A quiet night: one new final a pass, each refused. Counted across
+    passes from the stored rows, not per pass."""
+    ids, sums = _seed_copies(conn, box.REFUSED_RUN_RED)
+    espn = Espn({e: _without_turnovers(js) for e, js in sums.items()})
+    conn.sq.execute("UPDATE games SET home_score = NULL, away_score = NULL "
+                    "WHERE game_id LIKE '%copy%'")
+    conn.sq.commit()
+    seen = []
+    for k, eid in enumerate(ids):     # the final of one more game lands each pass
+        conn.sq.execute("UPDATE games SET home_score = 68, away_score = 57 WHERE game_id = ?",
+                        (f"NCAAB_2026-02-15_copy-{eid}",))
+        conn.sq.commit()
+        t = box.run_recent("2026-02-16", now=NOW_0216 + timedelta(minutes=10 * k),
+                           connect=lambda: conn, get_json=espn)
+        seen.append((t["due"], t["refused_run"], t["failed"]))
+    assert [s[0] for s in seen] == [1] * len(ids)
+    assert [s[1] for s in seen] == list(range(1, len(ids) + 1))
+    assert [s[2] for s in seen] == [[]] * (len(ids) - 1) + [["espn-box-refused"]]
+
+
+def test_refused_games_behind_a_stored_newer_one_stay_green(conn):
+    """Games ESPN cannot answer for happen one at a time (a box score it never
+    posts). As long as a newer game was stored, the refusals are about the
+    games, and their retries on later passes stay green."""
+    ids, sums = _seed_copies(conn, box.REFUSED_RUN_RED + 1)
+    broken = {e: _without_turnovers(js) for e, js in sums.items()}
+    broken[ids[-1]] = sums[ids[-1]]              # the newest game is fine
+    espn = Espn(broken)
+    t = box.run_recent("2026-02-16", now=NOW_0216, connect=lambda: conn, get_json=espn)
+    assert (t["refused"], t["games_stored"], t["refused_run"]) == (len(ids) - 1, 1, 0)
+    assert t["failed"] == []
+    t = box.run_recent("2026-02-16", now=NOW_0216 + timedelta(hours=1),
+                       connect=lambda: conn, get_json=espn)
+    assert (t["due"], t["refused"], t["games_stored"]) == (len(ids) - 1, len(ids) - 1, 0)
+    assert t["failed"] == [], "retrying old refusals is not a break"
+
+
 # ── two sources, one game ────────────────────────────────────────────────────
 
 def _insert_sdv(conn):
@@ -439,22 +584,94 @@ def test_no_key_collision_with_a_sportsdataverse_row(conn):
     assert not box.contest_id(401825519).isdigit()
 
 
-def test_a_reader_can_choose_one_source_per_game(conn):
-    """The rule the docs give: one row per game and team, NCAA's where it
-    exists (a portable form of the DISTINCT ON in the module docstring; the
-    Postgres test runs that one)."""
+def documented_reader_sql() -> str:
+    """The one-source-per-game query exactly as docs/sports/ncaab.md prints
+    it (the indented block under "Two sources, one game"), so the test runs
+    what a reader would copy."""
+    doc = (ROOT / "docs" / "sports" / "ncaab.md").read_text(encoding="utf-8")
+    section = doc[doc.index("**Two sources, one game.**"):]
+    lines, started = [], False
+    for ln in section.splitlines():
+        if ln.startswith("    SELECT"):
+            started = True
+        if started:
+            lines.append(ln[4:])
+            if ln.rstrip().endswith(";"):
+                break
+    assert started, "no SQL block under 'Two sources, one game' in docs/sports/ncaab.md"
+    return "\n".join(lines).rstrip().rstrip(";")
+
+
+def _norm(sql: str) -> str:
+    return " ".join(sql.replace(";", " ").split())
+
+
+def _team_row(**kw):
+    cols = [c for c in sdv.TEAM_COLS if c != "loaded_at"]
+    row = {c: None for c in cols}
+    row.update(kw)
+    return tuple(row[c] for c in cols), cols
+
+
+def insert_reader_cases(execute):
+    """Four games, each a case the reader has to get right; `execute(sql,
+    params)` inserts one row. Production, read 2026-10-30: espn_game_id is
+    NULL on 138,338 of 188,424 NCAA rows (every season before 2022-23), and
+    team_espn_id is NULL on 8,854, the non-Division I side of a game.
+      * contest 4100001 (2014-15), NCAA only, no espn_game_id: keep both rows.
+      * 401824899, a Division I team against Hawaii Pacific (not D-I), under
+        both sources: NCAA's pair has no team id for Hawaii Pacific, ESPN's
+        has 2269. Keep NCAA's two rows, not three.
+      * 401812127, ESPN only: keep both rows."""
+    def put(**kw):
+        params, cols = _team_row(**kw)
+        execute(f"INSERT INTO ncaab_team_game_stats ({', '.join(cols)}) VALUES "
+                f"({', '.join(['%s'] * len(cols))})", params)
+    for team, tid, home in (("Kansas", 2305, True), ("Duke", 150, False)):
+        put(contest_id="4100001", team=team, team_espn_id=tid, is_home=home, season=2015,
+            o_poss=70, source="sportsdataverse_ncaa")
+    for src, cid, hp_id in (("sportsdataverse_ncaa", "6460001", None),
+                            ("espn_summary", "espn:401824899", 2269)):
+        put(contest_id=cid, team="Hawaii", espn_game_id=401824899, team_espn_id=62,
+            is_home=True, season=2026, o_poss=71, source=src)
+        put(contest_id=cid, team="Hawaii Pacific", espn_game_id=401824899,
+            team_espn_id=hp_id, is_home=False, season=2026, o_poss=71, source=src)
+    for team, tid, home in (("New Hampshire", 160, True), ("Binghamton", 2066, False)):
+        put(contest_id="espn:401812127", team=team, espn_game_id=401812127,
+            team_espn_id=tid, is_home=home, season=2026, o_poss=80.5, source="espn_summary")
+
+
+READER_EXPECTED = [
+    ("4100001", "Duke", "sportsdataverse_ncaa"),
+    ("4100001", "Kansas", "sportsdataverse_ncaa"),
+    ("6460001", "Hawaii", "sportsdataverse_ncaa"),
+    ("6460001", "Hawaii Pacific", "sportsdataverse_ncaa"),
+    ("6465747", "Maryland", "sportsdataverse_ncaa"),
+    ("6465747", "Rutgers", "sportsdataverse_ncaa"),
+    ("espn:401812127", "Binghamton", "espn_summary"),
+    ("espn:401812127", "New Hampshire", "espn_summary"),
+]
+
+
+def test_the_documented_reader_keeps_one_source_per_game_and_every_season(conn):
+    """The query the docs and the module docstring give: every game once,
+    from one source, NCAA's where it holds the game. It must keep the
+    seasons with no espn_game_id and must not split a game against a
+    non-Division I team into three rows. The same query runs on Postgres in
+    tests/test_ncaab_espn_box_pg.py."""
+    sql = documented_reader_sql()
+    assert _norm(sql) in _norm(box.__doc__), "module docstring and docs give different queries"
     _seed(conn, [401825519])
     _insert_sdv(conn)
     box.run_recent("2026-02-16", now=NOW_0216, connect=lambda: conn,
                    get_json=Espn({401825519: SUM_MD_RU}))
-    picked = conn.q("""
-        SELECT team_espn_id, source FROM (
-          SELECT team_espn_id, source, ROW_NUMBER() OVER (
-                   PARTITION BY espn_game_id, team_espn_id
-                   ORDER BY (source = 'sportsdataverse_ncaa') DESC) AS rn
-            FROM ncaab_team_game_stats WHERE espn_game_id IS NOT NULL) x
-         WHERE rn = 1 ORDER BY team_espn_id""")
-    assert picked == [(120, "sportsdataverse_ncaa"), (164, "sportsdataverse_ncaa")]
+    insert_reader_cases(lambda s, p: conn.sq.execute(_lite(s), p))
+    conn.sq.commit()
+    total = conn.q("SELECT COUNT(*) FROM ncaab_team_game_stats")[0][0]
+    assert total == 12
+    picked = conn.q(f"SELECT contest_id, team, source FROM ({sql}) r "
+                    "ORDER BY contest_id, team")
+    assert picked == READER_EXPECTED
 
 
 # ── the period backfill ──────────────────────────────────────────────────────
@@ -512,14 +729,23 @@ def test_the_step_is_registered_and_dispatchable():
     assert re.search(r'"ncaab-box":\s*lambda: step_ncaab_box\(run_date\)', PIPE)
 
 
-def test_the_refresh_pass_runs_it_after_the_ncaab_results_step():
+def test_the_refresh_pass_runs_it_on_hourly_passes_only_after_the_ncaab_results_step():
     """Sequential, after the results group has finished writing the finals it
-    reads, and before the health check that closes the pass."""
-    assert re.search(r"^step ncaab-box$", SH, re.M), "ncaab-box must be a sequential step"
-    assert not re.search(r"^par ncaab-box$", SH, re.M)
+    reads, and before the health check that closes the pass. HOURLY passes
+    only (7 am-5 pm and midnight-5 am ET): an evening pass already runs
+    455-526 s (median and 90th percentile, 7 days to 2026-10-30) against its
+    600 s tick, so this step's up-to-150 s there would push the pass past the
+    tick and skip the next one."""
+    assert not re.search(r"^\s*par ncaab-box$", SH, re.M), "ncaab-box must be a sequential step"
+    assert len(re.findall(r"^\s*step ncaab-box$", SH, re.M)) == 1
+    at = _pos(r"^\s+step ncaab-box$")
+    opener = SH.rfind('if [ "$MODE" = "hourly" ]; then', 0, at)
+    assert opener != -1, "ncaab-box must sit inside an hourly-only block"
+    assert not re.search(r"^\s*fi\s*$", SH[opener:at], re.M), (
+        "ncaab-box must sit inside an hourly-only block, not after one")
     results = _pos(r"^par ncaab-results$")
     group_end = SH.index("par_wait", results)
-    assert results < group_end < _pos(r"^step ncaab-box$") < _pos(r"^step health-check$")
+    assert results < group_end < at < _pos(r"^step health-check$")
 
 
 @pytest.mark.parametrize("failed,ok", [([], True), (["espn-403"], False)])
@@ -538,7 +764,11 @@ def test_a_step_that_raises_is_a_false_not_a_crash(monkeypatch):
     assert run_pipeline.step_ncaab_box("2026-11-04") is False
 
 
-def test_the_backfill_job_validates_and_is_declared_off():
+def test_the_backfill_jobs_validate_and_are_free():
+    """The two declarations validate and spend nothing. Whether each is on is
+    the owner's one-line switch (`enabled`): no test pins it, so turning one
+    on needs no test change. tests/test_ncaab_odds_history.py leaves this
+    job type out of its credit-approval check for the same reason."""
     from tracking import job_queue as q
     _, validate = q.JOBS["ncaab_box_backfill"]
     assert validate({"kind": "periods", "first": 2021, "last": 2026}) == {
@@ -551,8 +781,29 @@ def test_the_backfill_job_validates_and_is_declared_off():
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     mine = {e["key"]: e for e in declared if e["job_type"] == "ncaab_box_backfill"}
     assert set(mine) == {"ncaab-period-scores-2021-2026", "ncaab-box-scores-2027"}
-    assert all(e["enabled"] is False for e in mine.values()), (
-        "a merge must not start a backfill against production")
+    for e in mine.values():
+        assert validate(e["args"]) == e["args"]
+        assert isinstance(e.get("enabled", True), bool)
+        assert not any("credit" in k for k in e["args"])
+
+
+@pytest.mark.parametrize("key", ["ncaab-period-scores-2021-2026", "ncaab-box-scores-2027"])
+def test_turning_a_backfill_on_is_one_line(monkeypatch, key):
+    """The after-merge step: set `enabled` to true on one declaration. Every
+    declaration test in the suite still passes with it on."""
+    import tests.test_ncaab_odds_history as odds_hist
+    real = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
+    flipped = [dict(e, enabled=True) if e["key"] == key else e for e in real]
+    text = json.dumps(flipped)
+    real_read = Path.read_text
+
+    def read_text(self, *a, **k):
+        if self.name == "declared_jobs.json":
+            return text
+        return real_read(self, *a, **k)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    test_the_backfill_jobs_validate_and_are_free()
+    odds_hist.test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval()
 
 
 def test_the_job_runs_the_cli_it_names(monkeypatch):

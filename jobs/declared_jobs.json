@@ -1389,7 +1389,7 @@
     "job_type": "ncaab_box_backfill",
     "requested_by": "owner",
     "enabled": false,
-    "note": "OFF until someone turns it on after the merge (set enabled to true). Free, no key: one ESPN game summary per 2026-27 final with no 'espn_summary' row in ncaab_team_game_stats, box and period scores together. The refresh pass already covers the last 3 ET dates, so this is only needed if the merge lands after 2026-11-04 or a pass missed games. Skips what is stored.",
+    "note": "OFF until someone turns it on after the merge (set enabled to true). Free, no key: one ESPN game summary per 2026-27 final with no 'espn_summary' row in ncaab_team_game_stats, box and period scores together. The refresh pass already covers the last 3 ET dates, so this is only needed if the merge lands after 2026-11-04, a pass missed games, or ESPN refused every game for a while (step ncaab-box red with espn-box-refused): it tries refused games again, ignoring their attempt count. Skips what is stored.",
     "args": {
       "kind": "box",
       "first": 2027,

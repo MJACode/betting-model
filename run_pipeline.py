@@ -971,11 +971,13 @@ def step_ncaab_box(run_date: str) -> bool:
     NCAAB team box scores and period scores from ESPN's game summary
     (data/ingestors/ncaab_espn_box.py) into ncaab_team_game_stats (source
     'espn_summary') and ncaab_period_scores. Runs AFTER ncaab-results, which
-    writes the finals it reads. Self-limiting: no ESPN call unless a final of
+    writes the finals it reads, on the HOURLY refresh passes only
+    (scripts/refresh_pass.sh). Self-limiting: no ESPN call unless a final of
     the last 3 ET dates has no ESPN box row; at most 80 games and about 150
-    seconds a pass. A game ESPN cannot answer usefully is logged and skipped,
-    not raised. False when ESPN refused the worker, the fetches kept failing,
-    or a write failed, so pipeline_runs names it.
+    seconds of fetching a pass. A game ESPN cannot answer usefully is logged
+    and skipped, not raised. False when ESPN refused the worker, a fetch
+    failed, a write failed, or the newest 5 finals ESPN answered for were all
+    refused (the summary changed for every game), so pipeline_runs names it.
     """
     try:
         from data.ingestors.ncaab_espn_box import run_recent

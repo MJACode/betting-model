@@ -49,13 +49,23 @@ and poss_substitution.csv (2026-10-30).
 
 TWO SOURCES, ONE GAME. If a game is ever held under both sources it has two
 pairs of rows with different contest_ids and the same espn_game_id. A reader
-picks one per game by `source`, preferring 'sportsdataverse_ncaa' (NCAA's
-count) where it exists:
-    SELECT DISTINCT ON (espn_game_id, team_espn_id) *
-      FROM ncaab_team_game_stats WHERE espn_game_id IS NOT NULL
-     ORDER BY espn_game_id, team_espn_id, (source = 'sportsdataverse_ncaa') DESC
+keeps one SOURCE per game, both of its rows, preferring 'sportsdataverse_ncaa'
+(NCAA's count) where it holds the game. The game is the espn_game_id where
+the row has one and the contest_id where it does not: NCAA's rows carry no
+espn_game_id before 2022-23 (138,338 of 188,424, read 2026-10-30), so a
+reader that requires one keeps only the last four seasons. Do not key on
+team_espn_id: NCAA's row for a non-Division I team has none (8,854 rows) and
+this feed fills it, so the two sources' rows for that side never match by
+team id; match a side across sources on the game and is_home. The query
+(docs/sports/ncaab.md prints the same one; a test runs that copy):
+    SELECT * FROM (
+      SELECT s.*, RANK() OVER (
+               PARTITION BY COALESCE('espn:' || s.espn_game_id, s.contest_id)
+               ORDER BY (s.source = 'sportsdataverse_ncaa') DESC) AS source_rank
+        FROM ncaab_team_game_stats s) ranked
+     WHERE source_rank = 1;
 A reader keyed on date and team pair that drops duplicate keys would drop
-such a game instead (the research prep does), so filter on source first.
+such a game instead (the research prep does), so choose the source first.
 
 WHAT IT REFUSES, each counted, logged and recorded as a miss, never guessed:
   * a summary that is not final, names other teams than our event, or lacks
@@ -67,13 +77,30 @@ WHAT IT REFUSES, each counted, logged and recorded as a miss, never guessed:
     between the teams, or disagree with games.went_to_ot.
   A refused game stores nothing at all, period scores included.
 
-COST. The refresh-pass step (run_recent) reads the database first and calls
-ESPN only for finals of the last RECENT_DAYS ET dates with no 'espn_summary'
-row, newest first, at most MAX_GAMES_PER_PASS games and TIME_BUDGET_S seconds
-a pass, one request at a time with REQUEST_SLEEP between them. An idle pass,
-and every pass out of season, makes no ESPN call. A 403 or 429 from ESPN
-stops the run at once (ESPN has IP-blocked the worker before), as do three
-failed fetches in a row.
+WHEN ESPN CHANGES THE SUMMARY FOR EVERY GAME (a renamed stat, a moved
+endpoint), each game alone is only a refusal. So after every pass the step
+counts the newest finals of the window that ESPN answered for and that were
+refused, back to the newest one stored (refused_run). REFUSED_RUN_RED of them
+in a row turns the step red ('espn-box-refused'), and it stays red, even on
+passes with nothing due, until a game is stored again. It is counted from the
+stored rows, so a break that arrives one game a pass is caught too, and a
+refused game's retries behind a newer stored game are not. The refused games
+use up their MAX_ATTEMPTS meanwhile; once the cause is fixed, the box backfill
+(--box, job ncaab_box_backfill kind box) fetches them again, misses ignored.
+
+COST. The refresh-pass step (run_recent) runs on the HOURLY passes only (7 am
+to 5 pm and midnight to 5 am ET, scripts/refresh_pass.sh): an evening pass
+already takes 455-526 s (median, 90th percentile, 7 days to 2026-10-30) of its
+600 s tick. It reads the database first and calls ESPN only for finals of the
+last RECENT_DAYS ET dates with no 'espn_summary' row, newest first, at most
+MAX_GAMES_PER_PASS games and TIME_BUDGET_S seconds a pass (checked before each
+call, so one call in flight can run past it), one request at a time with
+REQUEST_SLEEP between them. An idle pass, and every pass out of season, makes
+no ESPN call. A 403 or 429 from ESPN stops the run at once (ESPN has
+IP-blocked the worker before). So does the first fetch that fails after the
+helper's own retry: the next pass is the retry, and an ESPN outage costs one
+fetch a pass (at most about 46 s: two 20 s timeouts and the helper's sleeps)
+rather than three. The season backfills stop after STOP_AFTER_FAILURES.
 
 Usage:
     python -m data.ingestors.ncaab_espn_box --recent [--date D] [--days 3]
@@ -108,7 +135,9 @@ TIME_BUDGET_S = 150.0     # a pass stops fetching after this, the rest wait
 REQUEST_SLEEP = 0.3       # between ESPN calls: one request in flight at a time
 MAX_ATTEMPTS = 6          # a refused game is tried at most this often
 COOL_MINUTES = 50         # and not again within this many minutes
-STOP_AFTER_FAILURES = 3   # fetch failures in a row before a run stops
+STOP_AFTER_FAILURES = 3   # fetch failures in a row before a backfill stops
+PASS_STOP_AFTER_FAILURES = 1  # a refresh pass stops at the first; the next pass retries
+REFUSED_RUN_RED = 5       # newest answered finals refused in a row: the feed, not the games
 EARLY_TIP_HOUR_ET = 6     # a tip before this hour ET is on the previous board
 
 _ET = ZoneInfo("America/New_York")
@@ -485,6 +514,35 @@ def due_period_games(conn, seasons: tuple[int, int]) -> list[dict]:
     return _rows_to_games(conn.execute(sql, tuple(seasons)).fetchall())
 
 
+# The window's finals, newest first: stored or not, and the miss on record.
+# Both lookups are by primary key, as in the due query.
+_ANSWERED_SQL = (
+    "SELECT e.espn_event_id, "
+    "EXISTS (SELECT 1 FROM ncaab_team_game_stats s "
+    "WHERE s.contest_id = 'espn:' || e.espn_event_id) AS stored, m.reason "
+    "FROM games g JOIN ncaab_events e ON e.game_id = g.game_id "
+    "LEFT JOIN ncaab_box_misses m ON m.espn_event_id = e.espn_event_id "
+    "WHERE g.sport = 'NCAAB' AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL "
+    "AND g.game_date >= %s AND g.game_date <= %s" + _NEWEST_FIRST)
+
+
+def refused_run(conn, first: str, last: str) -> tuple[int, str | None]:
+    """How many of the newest finals of the window ESPN answered for were
+    refused, counted back to the newest one stored, and the newest refusal's
+    reason. A final not tried yet (left for a later pass) is skipped. A game
+    ESPN cannot answer for now and then sits among stored ones and counts 0
+    or 1; a summary changed for every game counts every final since."""
+    n, reason = 0, None
+    for _eid, stored, miss in conn.execute(_ANSWERED_SQL, (first, last)).fetchall():
+        if stored:
+            break
+        if miss is None:
+            continue
+        n += 1
+        reason = reason or miss
+    return n, reason
+
+
 def write_game(conn, box: list[tuple], periods: list[tuple]) -> tuple[int, int]:
     """Box rows and period rows in one savepoint; ON CONFLICT DO NOTHING, so a
     row already stored is never rewritten. Returns the row counts sent."""
@@ -508,7 +566,7 @@ def record_miss(conn, game: dict, reason: str, now: datetime) -> None:
 def new_totals() -> dict:
     return {"due": 0, "fetched": 0, "games_stored": 0, "box_rows": 0, "period_rows": 0,
             "refused": 0, "left": 0, "fetch_errors": 0, "stopped": None,
-            "reasons": {}, "failed": []}
+            "refused_run": 0, "reasons": {}, "failed": []}
 
 
 def _open(connect):
@@ -547,13 +605,16 @@ def _refuse(conn, game: dict, reason: str, totals: dict, now: datetime) -> None:
 
 
 def _run_games(conn, games: list[dict], totals: dict, *, get_json, sleep: float,
-               budget_s: float | None, now: datetime, clock=time.monotonic) -> None:
+               budget_s: float | None, now: datetime, clock=time.monotonic,
+               stop_after: int = STOP_AFTER_FAILURES) -> None:
     """Fetch and store each game in turn, one request at a time.
 
     What makes the run red (totals["failed"]): ESPN refusing the worker (403
-    or 429), STOP_AFTER_FAILURES fetch failures in a row, or a database write
-    that failed. A game ESPN answered for but that is refused on its content
-    is logged, counted and recorded as a miss, and does not make it red.
+    or 429), `stop_after` fetch failures in a row, or a database write that
+    failed. A game ESPN answered for but that is refused on its content is
+    logged, counted and recorded as a miss, and does not make it red by
+    itself (run_recent's refused_run check is what catches every game being
+    refused).
     """
     start = clock()
     in_a_row = 0
@@ -584,7 +645,7 @@ def _run_games(conn, games: list[dict], totals: dict, *, get_json, sleep: float,
                 totals["fetch_errors"] += 1
                 in_a_row += 1
                 logger.warning(f"NCAAB box: event {game['espn_event_id']} fetch failed: {exc}")
-                if in_a_row >= STOP_AFTER_FAILURES:
+                if in_a_row >= stop_after:
                     totals["stopped"] = f"{in_a_row} fetch failures in a row"
                     totals["failed"].append("espn-unreachable")
                     totals["left"] += len(games) - i - 1
@@ -612,9 +673,12 @@ def _run_games(conn, games: list[dict], totals: dict, *, get_json, sleep: float,
 
 def run_recent(run_date: str | None = None, days: int = RECENT_DAYS, *, now: datetime | None = None,
                get_json=None, connect=None, sleep: float = REQUEST_SLEEP,
-               max_games: int = MAX_GAMES_PER_PASS, budget_s: float | None = TIME_BUDGET_S) -> dict:
+               max_games: int = MAX_GAMES_PER_PASS, budget_s: float | None = TIME_BUDGET_S,
+               clock=time.monotonic) -> dict:
     """The refresh-pass step: box and period scores for the finals of the last
-    `days` ET dates that have none yet. No ESPN call when nothing is due."""
+    `days` ET dates that have none yet. No ESPN call when nothing is due.
+    Red, besides _run_games' reasons, while the newest REFUSED_RUN_RED finals
+    ESPN answered for were all refused (refused_run)."""
     now = now or datetime.now(timezone.utc)
     today = run_date or _today_et(now)
     first = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
@@ -628,15 +692,27 @@ def run_recent(run_date: str | None = None, days: int = RECENT_DAYS, *, now: dat
             totals["left"] += 1          # at least one more waits for the next pass
             games = games[:max_games]
         totals["due"] = len(games)
-        if not games:
+        if games:
+            _run_games(conn, games, totals, get_json=get_json, sleep=sleep,
+                       budget_s=budget_s, now=now, clock=clock,
+                       stop_after=PASS_STOP_AFTER_FAILURES)
+        else:
             logger.info("NCAAB box: nothing due (no ESPN call)")
-            return totals
-        _run_games(conn, games, totals, get_json=get_json, sleep=sleep,
-                   budget_s=budget_s, now=now)
+        run, reason = refused_run(conn, first, today)
+        conn.rollback()
+        totals["refused_run"] = run
+        if run >= REFUSED_RUN_RED:
+            totals["failed"].append("espn-box-refused")
+            logger.error(
+                f"NCAAB box: the newest {run} finals ESPN answered for were all refused "
+                f"and none stored since (newest reason: {reason}). ESPN's game summary "
+                f"has likely changed for every game. Once fixed, the box backfill "
+                f"(job ncaab_box_backfill, kind box) fetches the refused games again.")
     finally:
         if own:
             conn.close()
-    logger.info(f"NCAAB box (ESPN): {_summary(totals)}")
+    if games:
+        logger.info(f"NCAAB box (ESPN): {_summary(totals)}")
     return totals
 
 
