@@ -190,10 +190,22 @@ def windows(events: pd.DataFrame, slots: dict, snaps: dict, offsets=OFFSETS,
     return pd.DataFrame(rows, columns=WINDOW_COLS)
 
 
+def centre_lookup(cen: pd.DataFrame) -> dict:
+    """{column: {(game_id, market, fetch_at): value}} for centre, mu, sigma and p_home, built
+    once. The per-key Series.get on the (game_id, market, fetch_at) MultiIndex this replaces
+    took about 25 minutes per candidate pass on the real windows, and the N2 placebo repeats
+    the pass 200 times. A dict gives the same value for every key (the index is unique,
+    asserted) in constant time."""
+    keys = list(zip(cen["game_id"], cen["market"], cen["fetch_at"]))
+    if len(set(keys)) != len(keys):
+        raise ValueError("centres hold two rows for one (game, market, fetch)")
+    return {col: dict(zip(keys, cen[col].tolist())) for col in ("centre", "mu", "sigma", "p_home")}
+
+
 def n1_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame) -> pd.DataFrame:
     """N1 offers: a fresh deciding quote at t identical to its quote at R-5, toward Pinnacle's
     move, priced at Pinnacle's centre at t."""
-    c = cen.set_index(["game_id", "market", "fetch_at"])
+    c = centre_lookup(cen)
     out = []
     for market in SIDE_A:
         w = win.copy()
@@ -238,7 +250,7 @@ def n1_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame) -> pd.D
 def n2_candidates(win: pd.DataFrame, q: pd.DataFrame, cen: pd.DataFrame, s_col: str = "s") -> pd.DataFrame:
     """N2 offers: the market has not moved; fair centre = Pinnacle's spread centre at R-5 +
     N2_SLOPE * s; bet the side s favours at every fresh deciding quote at t."""
-    c = cen.set_index(["game_id", "market", "fetch_at"])
+    c = centre_lookup(cen)
     w = win.copy()
     sk0 = list(zip(w["game_id"], ["spreads"] * len(w), w["pre_at"]))
     sk1 = list(zip(w["game_id"], ["spreads"] * len(w), w["t_at"]))
