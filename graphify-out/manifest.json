@@ -24,9 +24,9 @@
     "semantic_hash": ""
   },
   "config.py": {
-    "mtime": 1793321454.356876,
-    "seen": 1793322422.3537476,
-    "ast_hash": "13bbd82742db804f82aa2d917803755a",
+    "mtime": 1793323518.724796,
+    "seen": 1793337524.4273727,
+    "ast_hash": "81b033e33bccd98f84044e7e0fddd6cf",
     "semantic_hash": ""
   },
   "dashboard/__init__.py": {
@@ -7758,9 +7758,9 @@
     "semantic_hash": ""
   },
   "docs/cloud_worker.md": {
-    "mtime": 1793321158.650013,
-    "seen": 1793322422.3625522,
-    "ast_hash": "f9ec26bc5e796487965158292d4e4d00",
+    "mtime": 1793336898.1962657,
+    "seen": 1793337524.4349911,
+    "ast_hash": "a04bebc9370c941ea3527ac678a5832b",
     "semantic_hash": ""
   },
   "docs/clv.md": {
@@ -7788,9 +7788,9 @@
     "semantic_hash": ""
   },
   "docs/followups.md": {
-    "mtime": 1793321553.2298367,
-    "seen": 1793322422.3625746,
-    "ast_hash": "6a6257721f7fbed36fb2a4519be21733",
+    "mtime": 1793335553.8536258,
+    "seen": 1793337524.4350066,
+    "ast_hash": "169961d66c7c0b01859ac5beeb214fe6",
     "semantic_hash": ""
   },
   "docs/game_injury_gate.md": {
@@ -10674,9 +10674,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaab.md": {
-    "mtime": 1793321158.8235414,
-    "seen": 1793322422.362917,
-    "ast_hash": "cd102190fcde04b2153b75fff3a76d2a",
+    "mtime": 1793335553.855426,
+    "seen": 1793337524.4352832,
+    "ast_hash": "a904593a1eb3bf1810f44baef812e74e",
     "semantic_hash": ""
   },
   "data/ingestors/alt_game_lines.py": {
@@ -10686,9 +10686,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/live_scoreboard.py": {
-    "mtime": 1793321157.9233918,
-    "seen": 1793322422.3538985,
-    "ast_hash": "a2be5103df6b6c83c91ba13f8980e3ac",
+    "mtime": 1793336898.1942506,
+    "seen": 1793337524.4274852,
+    "ast_hash": "d00d07f2c2b1b63e3bc946fc1e22ee24",
     "semantic_hash": ""
   },
   "data/ingestors/scoreboard_splits.py": {
@@ -10890,9 +10890,9 @@
     "semantic_hash": ""
   },
   "tests/test_live_scoreboard.py": {
-    "mtime": 1793321179.816885,
-    "seen": 1793322422.360236,
-    "ast_hash": "8c069146d001c89707d7814b83c59e04",
+    "mtime": 1793336898.1962657,
+    "seen": 1793337524.4336042,
+    "ast_hash": "7339431bcf19c4c9e48ddbac63f7d4ce",
     "semantic_hash": ""
   },
   "tests/test_ncaab_odds_replay_pg.py": {
