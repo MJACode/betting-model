@@ -671,10 +671,11 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
     return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
 
 
-# Free NCAAB history into Supabase on the worker: the local DATABASE_URL is
-# stale (password authentication failed on both pooler ports, 2026-10-26), so
-# every production write runs here. Each kind is one importer's CLI with a fixed
-# argv; seasons are bounded to what each source publishes.
+# Free NCAAB history into Supabase on the worker. Built here because the local
+# DATABASE_URL was stale from 2026-10-26 (password authentication failed on
+# both pooler ports) until mike replaced it on 2026-10-29. Each kind is one
+# importer's CLI with a fixed argv; seasons are bounded to what each source
+# publishes.
 NCAAB_HISTORY_IMPORTS = {
     "box_scores": ("data.ingestors.ncaab_sdv_import", ["--seasons"], (2011, 2026)),
     "prediction_tracker": ("data.ingestors.ncaab_archive_import", ["--pt"], (2005, 2026)),

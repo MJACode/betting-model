@@ -27,9 +27,12 @@
 place on an ESPN game (worker job 805227). Branch `fix/ncaab-odds-team-names`
 places 80 more feed names and adds the replay; `docs/sports/ncaab.md`,
 "Replaying the kept raw events", says what it does and the counts to expect.
-After it merges, queue job `ncaab_odds_history` with `{"mode":
-"replay_unmatched", "dry_run": true}`, compare what it prints with that
-section, then queue `{"mode": "replay_unmatched"}` to store. It buys nothing.
+#1094 merged 2026-10-30 00:26Z. Queued: worker job 827393 `{"mode":
+"replay_unmatched", "dry_run": true}`, then 827394 `{"mode":
+"replay_unmatched"}` with run_after 04:00Z. Compare 827393's printout with
+that section before 827394 runs. 827393 ran 00:45-01:07Z: 1,201,028 rows
+would be inserted, 0 already stored (session log, 2026-10-29/30 evening).
+Close this when 827394 is done. It buys nothing.
 It writes `odds`, and through that table's insert trigger `latest_odds`; a
 second run stores nothing new.
 
@@ -107,9 +110,9 @@ on (game, team, player, observed_at).
 
 `docs/sports/ncaab.md` "Data accounts". cbbdata's archive is daily 2014-15 →
 2024-25 and EMPTY after (the maintainer's last reply on any issue was
-2024-01-18); the import (backtest feature and benchmark) needs `CBBDATA_*` on
-Railway, not set yet (the write was blocked by Claude Code's permission
-system on 2026-10-29). Current-season ratings
+2024-01-18); the import (backtest feature and benchmark) reads `CBBDATA_*`,
+which are on the Railway worker since 2026-10-29 about 22:58Z (names checked
+with list-variables). Current-season ratings
 come from Torvik's own `2027_team_results.csv`, which his robots.txt lets
 general agents fetch with a 10-second crawl delay: pull it once a day before
 the first tip and store every pull with the time pulled, so the as-of history

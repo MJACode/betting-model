@@ -2795,6 +2795,17 @@ RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
 # credits a day against 4,661,626 remaining. Read `odds_api_quota`, never this
 # comment, before quoting a number (section 1b).
 #
+# One cause of that overstatement, measured 2026-10-29: each process logged the
+# change in the ACCOUNT's x-requests-used since its own previous call, so it
+# also logged whatever every other process spent in between. The NCAAB history
+# purchase (worker job 805227, 04:25-07:04Z) was charged to this loop that way,
+# 40,918 to 74,463 credits an hour on its usual ~600 calls an hour, and the cap
+# stopped the loop at 200,280 for the rest of the ET day. The fix (branch
+# fix/odds-credits-per-call): monitoring/probe.py logs each call's own
+# x-requests-last, and the day starts at ET midnight, not 00:00Z
+# (data/ingestors/pregame_line_poller.py). The cap now sums this loop's own
+# spend, where it summed roughly everyone's.
+#
 # Set = 0 to run uncapped.
 PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
     os.environ.get("PREGAME_POLL_DAILY_CREDIT_CAP", 200000))
