@@ -104,8 +104,10 @@ SOURCE_PREFIX = DERIV_SOURCE
 FIRST_LINES_DATE = "2020-06-06"     # the feed's first featured-market snapshot
 FIRST_PROPS_DATE = "2023-05-03"     # the feed's first player-prop snapshot
 DEFAULT_FLOOR = 2_200_000
-# Fetches OFF the hour (a gap fill at 23:30Z). odds_history_pulls keys on an
-# integer hour and cannot hold one; see _buy_snapshot for the routing rule.
+# Fetches OFF the hour (a gap fill at 23:30Z). odds_history_pulls was keyed on
+# an integer hour when this was written and the NBA still files only on-the-hour
+# rows there (minute 0; the minute was added 2026-10-30 for the NCAAB opener
+# grid); see _buy_snapshot for the routing rule.
 FETCH_LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS odds_history_fetches (
     sport        TEXT NOT NULL,
@@ -284,7 +286,7 @@ def _buy_snapshot(conn, meter: Meter, games: dict, when: datetime, stats: dict,
             conn.execute("""
                 INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
                 VALUES ('NBA', %s, %s, NOW(), %s)
-                ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                ON CONFLICT ON CONSTRAINT odds_history_pulls_pkey DO UPDATE
                    SET pulled_at = NOW(), rows = EXCLUDED.rows
             """, (snap_date, hour, len(keep)))
         else:

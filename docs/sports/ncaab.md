@@ -141,6 +141,67 @@ second run stores nothing new. Each insert into `odds` also updates
   `odds_api_historical`): 1,201,028 rows on 11,296 games, every game in
   `games`, no row after its game's tip.
 
+## The opener grid (built 2026-10-30, not queued)
+
+`python -m data.ingestors.ncaab_odds_history --opener-grid --step 30 --seasons 2021 2026 --dry-run`
+prints what the grid would buy. **Nothing is queued.** The spend needs mike's
+approval before a `worker_jobs` row is added.
+
+- **Why.** The game-line purchase bought fixed hours: the evening before
+  (22Z), mid-morning (15Z) and the hour before each tip. A book's first posted
+  line is then dated only to the gap between two of those hours, and that gap
+  is over two hours for 41% to 65% of first quotes, depending on the book
+  (the opener-route design, 2026-10-30, against the pull ledger). The grid buys
+  the same bulk snapshot (moneyline, spread and total at the ten fetched
+  books, 30 credits for the whole listed slate) at every clock time, every
+  hour or every half hour, from 72 hours before each tip up to the tip. Each
+  book's first post is then dated to the hour or the half hour.
+- **Grid times are on the clock, not on the tip.** A 01:20Z tip wants 01:00Z
+  and not 01:30Z; its window starts at the first grid time at or after 01:20Z
+  three days earlier. One snapshot serves every game whose window holds it.
+- **`--pre-start`** adds every grid time from 240 to 72 hours before each
+  season's first tip, for boards posted before the first window opens: 168
+  snapshots a season every hour, 336 every half hour.
+- **What it costs** (the dry run on 2026-10-30, against ESPN's schedule and
+  the pull ledger, both checked equal to production that day; 30 credits a
+  snapshot):
+
+  | Every | Grid times | Already bought | To buy | Credits | With `--pre-start` |
+  |---|---|---|---|---|---|
+  | 60 minutes | 21,710 | 7,403 | 14,307 | 429,210 | 15,315 snapshots, 459,450 credits |
+  | 30 minutes | 43,415 | 7,403 | 36,012 | 1,080,360 | 38,028 snapshots, 1,140,840 credits |
+
+  At the game-line purchase's pace (7,403 snapshots in 2 hours 40 minutes on
+  2026-10-29) that is about 5 hours every hour and 13 hours every half hour.
+  These are estimates from that one run, not measurements of this one.
+- **What is stored.** Each book's first quote on each game and market, and
+  every quote that differs from the one before it in price or line. A repeat
+  is not stored, and an in-play price never is. Each row's time is the
+  market's own last update, as the feed sends it, so the first row of a book
+  is when that book posted. Events that resolve onto no ESPN game are kept
+  raw in `ncaab_odds_unmatched`, as the game-line purchase keeps them.
+- **The pull ledger now records the minute.** `odds_history_pulls` was keyed
+  on (sport, date, hour), so 22:30 would have read as 22:00 already bought,
+  or overwritten 22:00's row and been bought again on every re-run. The key
+  is now (sport, date, hour, minute); every existing row reads as minute 0,
+  the hour it was bought at. The worker's migration pass applies it
+  (`data/migrations/odds_history_pulls_minute_key_2026_10_30.sql`), and the
+  NCAAB purchase applies the same file itself if it gets there first. The
+  grid refuses to buy into a ledger still keyed by the hour. The replay of
+  kept raw events maps each feed time back on the same key, so a feed time
+  of 22:25 maps to the 22:30 snapshot, not to 23:00.
+- **The floor.** The same 300,000-credit floor as the other purchases, and
+  its own ceiling (1,170,000, the half-hour grid with the pre-start window
+  plus room for calls billed above 30). Before its first call it reads the
+  newest balance on record (`odds_api_quota`) and refuses to start without
+  one, so the first call is checked against the floor too.
+- **On the worker, once approved:** job `ncaab_odds_history` with
+  `{"mode": "opener_grid", "step_min": 30, "max_credits": N, "floor":
+  300000}`; add `"pre_start": true` for the pre-start window and
+  `"seasons": [2024, 2026]` to narrow the seasons. `{"mode": "opener_grid",
+  "step_min": 30, "dry_run": true}` prints the plan against production and
+  buys nothing.
+
 ## What runs, and where it lands
 
 | Piece | What | Where |
@@ -153,6 +214,7 @@ second run stores nothing new. Each insert into `odds` also updates
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 | Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
+| Opener grid (built, not queued) | Game lines every hour or half hour from 72 hours before each tip, so each book's first post is dated to the step (The opener grid, above) | `data/ingestors/ncaab_odds_history.py --opener-grid`, job `ncaab_odds_history` mode `opener_grid` |
 
 ## Data accounts and sources (measured 2026-10-28)
 

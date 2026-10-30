@@ -1742,14 +1742,23 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     }
 
 
+# One row per historical snapshot bought. The minute (2026-10-30) lets the
+# NCAAB opener grid buy 22:30 beside 22:00; every other writer leaves it at
+# its default 0, the hour. A table created before then gains the column and
+# the four-column key from
+# data/migrations/odds_history_pulls_minute_key_2026_10_30.sql, which keeps
+# the constraint's name, so every writer says ON CONFLICT ON CONSTRAINT
+# odds_history_pulls_pkey: valid on either key, where a column list naming
+# three columns raises once the key has four.
 PULL_LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS odds_history_pulls (
     sport         TEXT NOT NULL,
     snapshot_date TEXT NOT NULL,
     hour_utc      INTEGER NOT NULL,
+    minute_utc    INTEGER NOT NULL DEFAULT 0 CHECK (minute_utc BETWEEN 0 AND 59),
     pulled_at     TIMESTAMPTZ NOT NULL,
     rows          INTEGER NOT NULL,
-    PRIMARY KEY (sport, snapshot_date, hour_utc)
+    PRIMARY KEY (sport, snapshot_date, hour_utc, minute_utc)
 )
 """
 
@@ -1986,7 +1995,7 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                         INSERT INTO odds_history_pulls
                             (sport, snapshot_date, hour_utc, pulled_at, rows)
                         VALUES (%s, %s, %s, NOW(), %s)
-                        ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                        ON CONFLICT ON CONSTRAINT odds_history_pulls_pkey DO UPDATE
                             SET pulled_at = NOW(), rows = EXCLUDED.rows
                     """, (sport, day.isoformat(), hour, len(odds_rows)))
                     conn.commit()
