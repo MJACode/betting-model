@@ -31,8 +31,9 @@ two bets, NBA_2024-11-18_IND_TOR and NBA_2025-01-02_BOS_MIN, both wins.
 
 Needs the research cache (NBA_RESEARCH_CACHE, written by
 scripts/nba_research_cache.py) and the lab's bet file; SKIPS where either is
-absent. About six minutes on a free machine: the load, and the first-half
-distributions of three seasons, each built twice.
+absent. It took 1,244 seconds on 2026-10-31 with other jobs holding the machine's
+CPU at 100%: the load, and the first-half distributions of three seasons, each
+built twice.
 """
 from __future__ import annotations
 

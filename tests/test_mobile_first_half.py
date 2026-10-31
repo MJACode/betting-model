@@ -68,17 +68,19 @@ eq(pickRowTitle({ pick_label: 'TB @ CAR — CAR -3' }), 'TB @ CAR — CAR -3', '
 
 @node
 def test_the_line_movement_card_shows_the_first_half_line(tmp_path):
+    """Over 112.5 at FanDuel, then 113.5: the card lists both numbers and calls the
+    rise against the over, as it does for a game total."""
     _run(tmp_path, VIEW_FILES, H1 + """
 import { lineMovementView } from './lineMovementView.ts';
-import { gameMarketForModel } from './markets.ts';
-eq(gameMarketForModel(H1_PICK.model_id), 'totals_h1', 'market');
-const snaps = [
-  { bookmaker: 'fanduel', market: 'totals_h1', snapshot_at: '2026-11-01T22:35:00Z', total_line: 112.5, over_price: -105, under_price: -115 },
-  { bookmaker: 'fanduel', market: 'totals_h1', snapshot_at: '2026-11-01T23:10:00Z', total_line: 113.5, over_price: -110, under_price: -110 },
-];
-const v = lineMovementView({ ...H1_PICK, decision_book: 'fanduel' }, snaps, 'totals_h1');
-eq(v == null, false, 'a view');
-eq(v.showLineCol, true, 'the line column shows');
+import { sincePick, HISTORY_ROWS } from './lineHistory.ts';
+const P = { ...H1_PICK, dk_odds: null, line_book: 'fanduel' };
+const tot = (snapshot_at, total_line, over_price, under_price) => ({ snapshot_at, total_line, over_price, under_price });
+const rows = [tot('2026-11-01T22:34:00Z', 112.5, -105, -115), tot('2026-11-01T22:50:00Z', 113.5, -110, -110)];
+const win = sincePick(rows, P.created_at, P.game_time, HISTORY_ROWS, Date.parse('2026-11-01T23:00:00Z'));
+const v = lineMovementView(P, win, 'totals_h1', false);
+eq(v.showLineCol, true, 'line column');
+eq(v.rows.map((r) => r.lineText), ['112.5', '113.5'], 'rows, the price at the pick first');
+eq([v.verdict.tone, v.verdict.label], ['against', 'Line moved 112.5 → 113.5 against you'], 'verdict');
 """)
 
 
@@ -113,7 +115,8 @@ const note = modelProbabilityNote('nba_first_half_total_luck');
 eq([note.includes('upper bound'), note.includes('about 6 percentage')], [true, true], note);
 const t = modelPageTiming('nba_first_half_total_luck');
 eq([t.title, t.empty.includes('about an hour before tip-off')], ['Checked once per game', true], 'page');
-const info = pickTimingInfo({ model_id: 'nba_first_half_total_luck', sport: 'NBA', created_at: '2026-11-01 22:35:10+00', is_live: false });
+const info = pickTimingInfo({ ...PICK, model_id: 'nba_first_half_total_luck', pick_side: 'over',
+  pick_label: 'BOS @ MIL — First Half Over 112.5', scored_line: 112.5 });
 eq([info.kind, info.note.startsWith('Posted once and never re-priced'), info.note.includes('Void')],
    ['posted', true, false], 'timing');
 """)
@@ -131,8 +134,7 @@ eq(signalsBetHeadline({ side: 'over', line: 225.5, market: 'totals', homeTeam: '
 
 
 def test_the_first_half_is_read_with_the_main_game_markets_and_its_alternates_are_not():
-    src = (LIB / "queries.py").read_text(encoding="utf-8") if False else (
-        LIB / "queries.ts").read_text(encoding="utf-8")
+    src = (LIB / "queries.ts").read_text(encoding="utf-8")
     i = src.index("const MAIN_GAME_ODDS_MARKETS = [")
     block = src[i:src.index("] as const;", i)]
     assert "'totals_h1'," in block
