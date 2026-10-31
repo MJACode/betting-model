@@ -6,9 +6,12 @@ games and their scores included. MLB (live_game_state) and NCAAF
 nothing until the final score landed on `games`, so a game in progress
 showed as upcoming.
 
-One ESPN site scoreboard call per sport per tick. The call is made only while
-that sport has a game that has started, has no final score on `games`, and
-has no final row here yet. A tick with nothing live is one database read.
+One ESPN site scoreboard call per sport for each ET date on the slate, each
+tick: today, plus yesterday until 6 am ET. ESPN answers HTTP 400 to a
+YYYYMMDD-YYYYMMDD range (NBA, NHL and NFL, measured 2026-10-30), so the dates
+are asked for one at a time. The calls are made only while that sport has a
+game that has started, has no final score on `games`, and has no final row
+here yet. A tick with nothing live is one database read.
 
 Reachability, measured 2026-10-29 from api_call_log: site.api.espn.com
 answered the worker 200 on 3,164 scheduler calls in the 7 days before, the
@@ -286,23 +289,30 @@ def _default_fetch(sport: str, dates: list[str]) -> dict | None:
     from data.ingestors.injury_ingestor import ESPN_HEADERS
 
     url = SCOREBOARD_URL.format(path=SPORT_PATHS[sport])
-    # ESPN's date range is YYYYMMDD-YYYYMMDD. The slate is today, plus
-    # yesterday in the early-morning window (config.live_slate_dates).
-    days = sorted(d.replace("-", "") for d in dates)
-    params = {"dates": days[0] if len(days) == 1 else f"{days[0]}-{days[-1]}"}
-    try:
-        r = requests.get(url, params=params, headers=ESPN_HEADERS, timeout=10)
-    except Exception as exc:                                  # noqa: BLE001
-        logger.warning(f"live_scoreboard {sport}: fetch failed: {exc}")
-        return None
-    if r.status_code != 200:
-        logger.warning(f"live_scoreboard {sport}: HTTP {r.status_code}")
-        return None
-    try:
-        return r.json()
-    except ValueError:
-        logger.warning(f"live_scoreboard {sport}: response was not JSON")
-        return None
+    # One call per ET date. The slate is today, plus yesterday in the
+    # early-morning window (config.live_slate_dates), and the site scoreboard
+    # answers HTTP 400 to a YYYYMMDD-YYYYMMDD range: every call from 00:00 ET
+    # on 2026-10-30 was refused, and the late games stopped updating. A date
+    # that fails does not cost the other its events.
+    events: list = []
+    answered = False
+    for day in sorted(d.replace("-", "") for d in dates):
+        try:
+            r = requests.get(url, params={"dates": day}, headers=ESPN_HEADERS, timeout=10)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning(f"live_scoreboard {sport} {day}: fetch failed: {exc}")
+            continue
+        if r.status_code != 200:
+            logger.warning(f"live_scoreboard {sport} {day}: HTTP {r.status_code}")
+            continue
+        try:
+            data = r.json()
+        except ValueError:
+            logger.warning(f"live_scoreboard {sport} {day}: response was not JSON")
+            continue
+        answered = True
+        events.extend((data or {}).get("events") or [])
+    return {"events": events} if answered else None
 
 
 UPSERT_SQL = """

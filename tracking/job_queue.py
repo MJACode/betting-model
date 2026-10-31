@@ -555,12 +555,28 @@ NCAAB_ODDS_HISTORY_MODES = {
 # mike, 2026-10-28: "dont stop the spend" — lowered from 500,000.
 NCAAB_ODDS_HISTORY_MIN_FLOOR = 300_000
 
+# The same job's FREE mode, which spends nothing and so takes no ceiling or
+# floor (2026-10-29): `replay_unmatched` stores the raw events the purchase
+# kept in ncaab_odds_unmatched that resolve now, after the team-name fix, over
+# every purchased season. It runs with --apply; {"dry_run": true} runs it
+# read only and prints what it would store.
+NCAAB_ODDS_HISTORY_FREE_MODES = {
+    "replay_unmatched": {"seasons": (2021, 2026), "argv": ["--replay-unmatched"]},
+}
+
 
 def _job_ncaab_odds_history(**kw):
     """One of the NCAAB purchases (NCAAB_ODDS_HISTORY_MODES), through
     data.ingestors.ncaab_odds_history's own credit meter (ceiling and floor).
     The buyer raises before any paid call when the ESPN schedule is not yet
-    stored for a season, so the purchase can never outrun the backfill."""
+    stored for a season, so the purchase can never outrun the backfill. A
+    free mode (NCAAB_ODDS_HISTORY_FREE_MODES) makes no paid call at all."""
+    if kw["mode"] in NCAAB_ODDS_HISTORY_FREE_MODES:
+        free = NCAAB_ODDS_HISTORY_FREE_MODES[kw["mode"]]
+        first, last = free["seasons"]
+        argv = list(free["argv"]) + ["--seasons", str(first), str(last),
+                                     "--dry-run" if kw.get("dry_run") else "--apply"]
+        return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
     mode = NCAAB_ODDS_HISTORY_MODES[kw["mode"]]
     first, last = mode["seasons"]
     argv = list(mode["argv"]) + ["--seasons", str(first), str(last), "--apply",
@@ -570,12 +586,23 @@ def _job_ncaab_odds_history(**kw):
 
 
 def _validate_ncaab_odds_history(args: dict) -> dict:
+    if args.get("mode") in NCAAB_ODDS_HISTORY_FREE_MODES:
+        extra = sorted(set(args) - {"mode", "dry_run"})
+        if extra:
+            raise ValueError(f"unknown args {extra}; {args['mode']} buys nothing and takes "
+                             f"mode and dry_run only")
+        dry = args.get("dry_run", False)
+        if not isinstance(dry, bool):
+            raise ValueError(f"dry_run must be true or false, got {dry!r}")
+        return {"mode": args["mode"], "dry_run": dry}
     extra = sorted(set(args) - {"mode", "max_credits", "floor"})
     if extra:
         raise ValueError(f"unknown args {extra}; this job takes mode, max_credits and floor")
     mode = args.get("mode")
     if mode not in NCAAB_ODDS_HISTORY_MODES:
-        raise ValueError(f"mode must be one of {sorted(NCAAB_ODDS_HISTORY_MODES)}, got {mode!r}")
+        raise ValueError(f"mode must be one of "
+                         f"{sorted(NCAAB_ODDS_HISTORY_MODES) + sorted(NCAAB_ODDS_HISTORY_FREE_MODES)}"
+                         f", got {mode!r}")
     cap = int(args.get("max_credits") or 0)
     top = NCAAB_ODDS_HISTORY_MODES[mode]["cap"]
     if not 0 < cap <= top:
@@ -644,10 +671,11 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
     return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
 
 
-# Free NCAAB history into Supabase on the worker: the local DATABASE_URL is
-# stale (password authentication failed on both pooler ports, 2026-10-26), so
-# every production write runs here. Each kind is one importer's CLI with a fixed
-# argv; seasons are bounded to what each source publishes.
+# Free NCAAB history into Supabase on the worker. Built here because the local
+# DATABASE_URL was stale from 2026-10-26 (password authentication failed on
+# both pooler ports) until mike replaced it on 2026-10-29. Each kind is one
+# importer's CLI with a fixed argv; seasons are bounded to what each source
+# publishes.
 NCAAB_HISTORY_IMPORTS = {
     "box_scores": ("data.ingestors.ncaab_sdv_import", ["--seasons"], (2011, 2026)),
     "prediction_tracker": ("data.ingestors.ncaab_archive_import", ["--pt"], (2005, 2026)),
@@ -1422,6 +1450,29 @@ def _job_health_check(**kw):
             "checks": len(res.get("results") or [])}
 
 
+def _job_nba_quarters(**kw):
+    """Run the daily nba_quarters step ON THE WORKER, on demand.
+
+    mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
+    #1097 fixed fill_gaps. The step only reads free ESPN endpoints and writes
+    the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
+    nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
+    through run_pipeline._timed_step, the same dispatch the daily run uses, so
+    pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
+
+    A False step is the step's own handled failure, and _timed_step has already
+    written that error row. health_check and model_quality return {"ok": false}
+    for a non-ok result and do not raise. Raising here would put the job back
+    to pending and run the step again, up to MAX_ATTEMPTS. The queue records
+    this result once.
+    """
+    import run_pipeline
+    run_date = kw.get("run_date") or config.today_et()
+    ok = run_pipeline._timed_step(
+        "nba-quarters", lambda: run_pipeline.step_nba_quarters(run_date), run_date)
+    return {"ok": bool(ok), "run_date": run_date}
+
+
 def _job_model_quality(**kw):
     """Run the model-quality monitor ON THE WORKER.
 
@@ -2168,6 +2219,8 @@ JOBS = {
     # Read-mostly: writes only model_quality_checks. Report only — never
     # pauses. Same invoke path as health_check (CLI / --step / worker_jobs).
     "model_quality":   (_job_model_quality,    _validate_model_quality),
+    # Stats only: the daily nba_quarters step, on demand (dispatch:nba-quarters).
+    "nba_quarters":    (_job_nba_quarters,     _validate_health_check),
     "promote_calibration": (_job_promote_calibration, _validate_promote_calibration),
     "team_stats_asof_verify": (_job_team_stats_asof_verify,
                               _validate_team_stats_asof_verify),

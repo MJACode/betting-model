@@ -59,6 +59,14 @@ def load(cache: Path = H.CACHE, seasons=LAB_SEASONS) -> dict:
     o = o[o["game_id"].isin(set(data.games["game_id"]))]
     o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
     led = pd.read_parquet(cache / "nba_fetch_ledger.parquet")
+    # the injury-report windows (docs/nba_models_2026.md section 11) stay out, as H.load
+    # leaves them out: the lab this replays was graded before they were bought
+    if "why" in led:
+        news = led["why"].astype(str) == H.NEWS_WINDOW_WHY
+        if news.any():
+            pulled = set(pd.to_datetime(led.loc[news, "pulled_at"], utc=True))
+            o = o[~pd.to_datetime(o["created_at"], utc=True, format="mixed").isin(pulled)]
+            led = led[~news]
     o, _ = H.attach_fetch(o, led)
     o["created_at"] = o["fetch_at"]                          # the live table's meaning
     box = pd.read_parquet(cache / "nba_player_game_log.parquet",

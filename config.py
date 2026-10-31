@@ -2795,6 +2795,17 @@ RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
 # credits a day against 4,661,626 remaining. Read `odds_api_quota`, never this
 # comment, before quoting a number (section 1b).
 #
+# One cause of that overstatement, measured 2026-10-29: each process logged the
+# change in the ACCOUNT's x-requests-used since its own previous call, so it
+# also logged whatever every other process spent in between. The NCAAB history
+# purchase (worker job 805227, 04:25-07:04Z) was charged to this loop that way,
+# 40,918 to 74,463 credits an hour on its usual ~600 calls an hour, and the cap
+# stopped the loop at 200,280 for the rest of the ET day. The fix (branch
+# fix/odds-credits-per-call): monitoring/probe.py logs each call's own
+# x-requests-last, and the day starts at ET midnight, not 00:00Z
+# (data/ingestors/pregame_line_poller.py). The cap now sums this loop's own
+# spend, where it summed roughly everyone's.
+#
 # Set = 0 to run uncapped.
 PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
     os.environ.get("PREGAME_POLL_DAILY_CREDIT_CAP", 200000))
@@ -4420,11 +4431,39 @@ NCAAF_PROMOTED_TO_FBS: dict = {
 
 # Men's college basketball: an odds-feed team name -> ESPN team id, for the
 # names data.ingestors.ncaab_teams.resolve_team_name cannot place on its own
-# (it matches ESPN's display name, "school mascot", school, short name and
-# alternate names first). Fill it from the unresolved-name list the
-# ncaab_feed_probe worker job prints. A value is an ESPN id, not a name, so a
-# school renaming itself cannot silently re-point an entry.
-NCAAB_ODDS_API_MAP: dict = {}
+# (it matches ESPN's display name, "school mascot", school, short name,
+# alternate names, then the feed's shortened school names like "Michigan St").
+# Fill it from the unresolved-name list the ncaab_feed_probe worker job and
+# the history purchase print. A value is an ESPN id, not a name, so a school
+# renaming itself cannot silently re-point an entry.
+#
+# The entries below (2026-10-29) are the feed names in ncaab_odds_unmatched
+# that no rule can place: a renamed school, a renamed mascot, or a name with
+# nothing in common with ESPN's. Each id is the team ESPN's schedule plays
+# against the feed event's other (resolved) team on the event's date, in the
+# share of that name's events given, measured on the Supabase connector.
+NCAAB_ODDS_API_MAP: dict = {
+    "Albany Great Danes": 399,              # ESPN "UAlbany Great Danes"; 158 of 158 events
+    "Appalachian St Mountaineers": 2026,    # ESPN "App State Mountaineers"; 143 of 143
+    "Arkansas-Little Rock Trojans": 2031,   # ESPN "Little Rock Trojans" (not Arkansas, 8); 118 of 121
+    "Dixie State Trailblazers": 3101,       # ESPN "Utah Tech Trailblazers"; 16 of 16
+    "Fort Wayne Mastodons": 2870,           # ESPN "Purdue Fort Wayne Mastodons"; 119 of 121
+    "George Washington Colonials": 45,      # ESPN "George Washington Revolutionaries"; 85 of 90
+    "GW Revolutionaries": 45,               # ESPN "George Washington Revolutionaries"; 69 of 69
+    "Houston Baptist Huskies": 2277,        # ESPN "Houston Christian Huskies" (not Houston, 248); 68 of 70
+    "IUPUI Jaguars": 85,                    # ESPN "IU Indianapolis Jaguars"; 101 of 101
+    "LIU Brooklyn Blackbirds": 112358,      # ESPN "Long Island University Sharks", NOT 6446 "LIU Brooklyn"; 19 of 19
+    "LIU Sharks": 112358,                   # ESPN "Long Island University Sharks"; 104 of 106
+    "Long Beach St 49ers": 299,             # ESPN "Long Beach State Beach"; 118 of 122
+    "Mcneese St Mcneese": 2377,             # ESPN "McNeese Cowboys"; 27 of 27
+    "New Orleans Privateers": 2443,         # ESPN "LSU New Orleans Privateers"; 121 of 122
+    "Seattle Redhawks": 2547,               # ESPN "Seattle U Redhawks"; 122 of 125
+    "St. Francis (PA) Red Flash": 2598,     # ESPN "Saint Francis Red Wolves"; 129 of 132
+    "Tenn-Martin Skyhawks": 2630,           # ESPN "UT Martin Skyhawks" (not Tennessee, 2633); 103 of 104
+    "Texas A&M-Commerce Lions": 2837,       # ESPN "East Texas A&M Lions" (not Texas A&M or Texas); 62 of 63
+    "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 118 of 120
+    "Valparaiso Crusaders": 2674,           # ESPN "Valparaiso Beacons"; 36 of 37
+}
 
 # The Odds API team name → CFBD canonical school name.
 #

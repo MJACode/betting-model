@@ -37,8 +37,12 @@ Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
 See `docs/social_posts.md`.
 
-**Alternate spreads and totals (2026-10-29, Matt approved the cost).** The
-daily full pipeline's Step 2-alt (`--step alt-game-lines`,
+**Alternate spreads and totals (2026-10-29, Matt approved the cost; every
+pass since the same day, option B).** Every refresh pass's odds step buys
+alternates for games starting in the next 24 hours
+(`ALT_GAME_LINES_WINDOW_HOURS`, default 24; `FETCH_ALT_GAME_LINES=0` turns
+it off) and refreshes `alt_game_lines` for them, one ledger row per sport per
+pass (`endpoint = 'pass'`). The daily full pipeline's Step 2-alt (`--step alt-game-lines`,
 `data/ingestors/alt_game_lines.py`) makes one per-event call per game starting
 in the next 3 days, for NFL, NCAAF, NBA, NHL, MLB, WNBA and NCAAB, and stores
 every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
@@ -147,7 +151,9 @@ never scheduled.
 `live_scoreboard` job, `pollers` service, every minute 24x7
 (`data/ingestors/live_scoreboard.py`). While a sport has a game that has
 started, has no final on `games` and no final row yet, it reads ESPN's site
-scoreboard once per sport and upserts one row per game into
+scoreboard once per sport for each ET date on the slate (today, and
+yesterday until 6 am ET; ESPN refuses a date range with HTTP 400) and
+upserts one row per game into
 `public.live_scoreboard` (`state` `in` / `post`, score, clock label, NFL down
 and possession). The app's Scoreboard reads it. No Odds API credits. An idle
 tick is one database read and no HTTP call. `RUN_LIVE_SCOREBOARD=0` stops it.

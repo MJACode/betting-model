@@ -34,11 +34,112 @@ run.
   (`ncaab_teams.make_resolver`). When the feed calls ESPN's away team home (a
   neutral court: ESPN shows 30 of 69 games neutral on 2026-11-25), the names
   are swapped before the outcomes are parsed, so the stored spread is ESPN's
-  home number. Unresolved names are dropped, counted, and fixed by an entry in
-  `config.NCAAB_ODDS_API_MAP` (name -> ESPN id).
+  home number. Names resolve through ESPN's display name, "school mascot",
+  school, short name, alternate names, a school that starts the name followed
+  by its mascot, and last the feed's shortened school names (Feed team names,
+  below). A name none of them places is dropped, counted, and fixed by an
+  entry in `config.NCAAB_ODDS_API_MAP` (name -> ESPN id).
 - Three-letter ids were never an option: the old fallback turned "Kentucky
   Wildcats" and "Kansas State Wildcats" into the same team (measured
   2026-10-26: `NCAAB_2026-11-03_WIL_WIL`).
+
+## Feed team names (2026-10-29)
+
+The odds feed shortens school names that ESPN spells out: "Michigan St
+Spartans", "CSU Fullerton Titans", "Loyola (Chi) Ramblers". On 2026-10-29 82
+feed names placed no team. The game-lines purchase (worker job 805227) keeps
+every event it cannot place raw in `ncaab_odds_unmatched`, which then held
+137,007 rows, nearly all because of those names. The job itself counted
+137,083; the table keeps one row per event and feed time.
+
+- **The rule** (`ncaab_teams._resolve_shortened_school`). It is tried only
+  after every other step finds nothing, so a name that resolved before still
+  resolves to the same team. The name is split into a school part and a
+  mascot at every word. The school part's abbreviations are expanded (St, SE,
+  Univ., CSU, Cal, Chi, Mt., BKN, Int'l; each one is there because a stored
+  feed name needs it). The school part must then equal the school, short name
+  or an alternate name of exactly one ESPN team, and the rest must be that
+  team's mascot, or one of two aliases kept per team (Grand Canyon
+  "Antelopes", Florida International "Golden Panthers"). The name resolves
+  to nothing when two teams share that school and that mascot, or when two
+  schools of the same length both start it (the step before this one; the
+  rule is then not tried). A spelling two teams share places nothing by
+  itself.
+- **The overrides.** 20 names no rule can place are in
+  `config.NCAAB_ODDS_API_MAP`, each with the ESPN team and how many of the
+  name's events ESPN's schedule plays as that team: schools or mascots ESPN
+  names differently ("Dixie State", "Houston Baptist", "IUPUI", "UMKC",
+  "George Washington Colonials", "Valparaiso Crusaders", "Long Beach St
+  49ers") and names unlike ESPN's ("Albany", "Fort Wayne", "Tenn-Martin").
+  "LIU Brooklyn Blackbirds" is ESPN 112358, Long Island University, not the
+  non-Division I row 6446 called "LIU Brooklyn": ESPN's schedule has all 19
+  of its events under 112358.
+- **Measured 2026-10-29.** Over 7,468 names, no name changed team from the
+  resolver before this rule: every feed name in `ncaab_odds_unmatched` and
+  every name form built from the ESPN registry (display name, school, short
+  name and abbreviation, with and without the mascot, and the feed's
+  contractions of each). 80 feed names now resolve, 60 by the rule and 20 by
+  override, each to the team ESPN's schedule plays it as. Two stay unresolved
+  on purpose: "Regent University Royals" and "Western State Colorado
+  Mountaineers" each fit two ESPN rows.
+- **The live capture uses the same resolver**, so these names now place from
+  opening night too.
+
+## Replaying the kept raw events
+
+`python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2021 2026 --apply`
+re-reads the events the purchase kept raw and stores the ones that resolve
+now, as the purchase would have stored them: ESPN's game, ESPN's home number,
+the in-play label from ESPN's tip, and the same filter of what is kept (the
+first quote, the evening-before and morning anchors, and the three hours
+before the tip). It makes no paid call, never writes the pull ledger, never
+deletes a raw row, and does not store a quote that is already stored, so a
+second run stores nothing new. Each insert into `odds` also updates
+`latest_odds`, through that table's insert trigger.
+
+- **Without `--apply` it is a dry run** that prints what it would store, and
+  its database connection is read only: every transaction opens READ ONLY.
+- **The raw rows carry the feed's own time** (21:55:38Z for the 22Z
+  snapshot). The replay maps each one back to the hour that was bought: the
+  first pull-ledger hour at or after it, within an hour. A time with no such
+  hour is counted and skipped. Stored rows carry each market's own last-update
+  time as `snapshot_at` (the bought hour only when the feed sends none), as
+  the purchase's rows do.
+- **Two differences from the purchase.** A listing whose start is 12 hours
+  or more from the ESPN game it lands on is not stored. The matcher takes the
+  nearest game within a day either side, so a second listing of the same two
+  teams a day later lands on the same game; in the kept events every such
+  game also has a listing within the hour (24 events, 144 event snapshots;
+  SQL on the Supabase connector, 2026-10-29). And when the feed answered
+  several bought hours with the same stale snapshot, the raw table kept it
+  once, so it is replayed only at the first of those hours (2020-11-27, 18Z
+  to 20Z, the one case found).
+- **A write cut off at its commit is retried safely.** Each write reads
+  `odds` back before it inserts, so a retry after a commit that did land
+  stores nothing twice.
+- **On the worker:** job `ncaab_odds_history` with `{"mode":
+  "replay_unmatched"}` stores (every purchased season, 2020-21 to 2025-26);
+  `{"mode": "replay_unmatched", "dry_run": true}` only prints what it would
+  store. It takes no credit limit because it spends nothing.
+- **What to expect.** The 2025-26 dry run, read only, 2026-10-29 23:26Z to
+  23:41Z: 1,260 raw feed times, all mapped to a bought hour; 24,914 event
+  snapshots, of which 24,692 place on an ESPN game, 209 do not (31 team pairs
+  ESPN has no game for) and 13 (2 events) are refused as far listings; 1,956
+  events placed; 484,773 rows parsed, 59,867 of them in play; 256,684 kept,
+  none already stored, so 256,684 would be stored. A placed event snapshot
+  parses into about 20 rows and the keep filter keeps about half of them, so
+  the replay stores far more rows than event snapshots. Across the six
+  seasons, SQL on the Supabase connector (2026-10-29, the new name answers)
+  places 11,349 of the 11,857 kept events on 11,300 ESPN games, before the
+  24 far-listing events are set aside; the dry-run job prints the rest.
+- **What it stored.** Worker job 827394, 2026-10-30 04:00-04:40Z, seasons
+  2020-21 to 2025-26: 7,340 raw feed times, all mapped to a bought hour;
+  137,007 event snapshots, of which 133,064 placed, 3,799 not (508 events)
+  and 144 (24 events) refused as far listings; 2,239,062 rows parsed,
+  245,242 of them in play; 1,201,028 kept and stored, none already stored,
+  no write failed. Read back from `odds` (sport NCAAB, source
+  `odds_api_historical`): 1,201,028 rows on 11,296 games, every game in
+  `games`, no row after its game's tip.
 
 ## What runs, and where it lands
 
@@ -51,6 +152,7 @@ run.
 | Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close. Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
+| Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
 
 ## Data accounts and sources (measured 2026-10-28)
 
@@ -60,8 +162,9 @@ run.
   `signalbaseskinny`, no confirmation e-mail required; the first account
   (`malkatrazz`, personal Gmail) is superseded and its values are kept as
   `CBBDATA_OLD_*`. The password and API key are in the local `.env` as
-  `CBBDATA_USER`, `CBBDATA_EMAIL`, `CBBDATA_PASSWORD`, `CBBDATA_API_KEY`; they
-  are NOT on the worker yet (Railway variable, mike's or an OAuth grant). Calls are
+  `CBBDATA_USER`, `CBBDATA_EMAIL`, `CBBDATA_PASSWORD`, `CBBDATA_API_KEY`, and
+  on the Railway worker since 2026-10-29 about 22:58Z (names checked with
+  list-variables). Calls are
   `https://www.cbbdata.com/api/<endpoint>?key=<key>&year=2025&team=Duke` and
   return Parquet. Measured: `torvik/ratings/archive` holds daily T-Rank
   ratings for 364 teams per date for the seasons 2014-15 → 2024-25 (2024-25:
