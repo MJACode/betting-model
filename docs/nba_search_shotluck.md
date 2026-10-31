@@ -403,3 +403,24 @@ By cut: 50.1% at ≥ 1, 55.3% at ≥ 2, 60.2% at ≥ 3, 64.6% at ≥ 4.
 **Time and memory, `--full`:** projected 1.64 hours, peak 3.0 GB, with other jobs running on the machine.
 One placebo run across the 48 cells takes 13.5 seconds, so the 200 take about 45 minutes. It was measured
 on the real offers against invented final scores. An earlier run of the same lab projected 1.30 hours.
+
+**Dated line, 2026-10-31: `--smoke` re-run after section 5's change to what the 95% check counts. Nothing
+has been graded.**
+
+- **Every table above stands.** The counts, overlap, placebo and gap files this run wrote are identical,
+  row for row, to the run those tables came from. With the clock lines removed, the two printouts differ
+  only by the new printout below and the peak memory.
+- **The new printout, for both team-total groups:** asks to choose on 2023-24 and 2024-25, keeps both,
+  drops nothing. Coverage is 99.59%, 99.51% and 99.02% for 2023-24, 2024-25 and 2025-26. The full-game
+  groups keep all four of their choosing seasons.
+- **Team totals per season, from the same printout:**
+
+  | Season | Games | Games with team totals | Games with a decision time | Decision times that moved |
+  |---|---|---|---|---|
+  | 2023-24 | 1,230 | 1,138 | 1,225 | 0 |
+  | 2024-25 | 1,230 | 1,229 | 1,224 | 0 |
+  | 2025-26 | 1,230 | 1,228 | 1,218 | 0 |
+
+- **Time and memory, `--full`:** projected 1.44 hours, peak 3.1 GB. One placebo run across the 48 cells
+  takes 11.9 seconds, so the 200 take about 40 minutes. The same offers measured 1.64 hours on the run
+  above, so the clock moves by that much between runs. Another job ran on the machine during both.
