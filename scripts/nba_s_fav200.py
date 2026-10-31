@@ -1018,9 +1018,8 @@ def point_counts(fr: Frames, season: pd.Series, spread_offers: pd.DataFrame) -> 
 
 def placebo_cost(run, cells: int, extra: int = 30) -> float:
     """Seconds for one placebo run of one cell, on the path --full takes: the same
-    cells with 1 + extra seeds against one seed. A run timed outside run_cells read
-    low by more than three times. The longer call goes first, so what the first
-    call pays once falls on the high side."""
+    cells with 1 + extra seeds against one seed. The longer call goes first, so what
+    the first call pays once falls on the high side."""
     t = time.perf_counter()
     run(tuple(range(1, extra + 2)))
     many = time.perf_counter() - t
