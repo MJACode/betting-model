@@ -1965,10 +1965,12 @@ def run_system_health(run_date: str | None = None) -> dict:
         # after the 10:02Z threshold_sync, hours after first pitch. A genuine
         # notifier outage still alarms: those picks are pre-commence.
         try:
-            from config import DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT
+            from config import DISCORD_WEBHOOK_DEFAULT, discord_sports_wired
+            # A sport with a channel id and the bot token posts too
+            # (tracking/discord_notifier._channel_webhook).
+            wired = discord_sports_wired()
         except Exception:
-            DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT = {}, ""
-        wired = set(DISCORD_WEBHOOKS)
+            DISCORD_WEBHOOK_DEFAULT, wired = "", set()
         if not wired and not DISCORD_WEBHOOK_DEFAULT:
             r.add("signal_delivery", SKIPPED, "CRIT",
                   "no DISCORD_WEBHOOK_* configured - nothing to deliver to")
