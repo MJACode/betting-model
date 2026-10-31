@@ -14,6 +14,8 @@ is:
   * the fetch before settling (data/ingestors/nba_period_scores
     .ensure_first_half_period_scores): the only other writer of those rows is the
     6am run's nba-quarters step, which runs AFTER the 6am settle.
+  * the repair: stored rows that disagree with the final are asked for again, and
+    replaced only by rows that agree with it. Until then the pick stays pending.
   * the label (models/scorer._build_pick_label) and its check
     (tracking/pick_integrity).
   * the line-movement check (models/scorer.check_line_movement).
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -338,6 +341,183 @@ def test_the_query_asks_only_for_this_model_s_unsettled_bets_with_a_final_and_no
         assert piece in q, piece
 
 
+# ── rows that disagree with the final are repaired, never settled from ────────
+
+class _RepairConn:
+    """The live quarter pull's connection on sqlite: %s, ANY and the named inserts
+    translated, and close() as the real one behaves: what was not committed is gone."""
+
+    def __init__(self, c):
+        self.c, self.closed = c, False
+
+    @staticmethod
+    def _sql(sql):
+        return re.sub(r"%\((\w+)\)s", r":\1", sql).replace("%s", "?")
+
+    def execute(self, sql, params=None):
+        params = list(params or [])
+        if "= ANY(%s)" in sql:
+            ids = list(params[0])
+            sql = sql.replace("= ANY(%s)", f"IN ({', '.join('?' * len(ids))})")
+            params = ids + params[1:]
+        return self.c.execute(self._sql(sql), params)
+
+    def executemany(self, sql, rows):
+        self.c.executemany(self._sql(sql), list(rows))
+
+    def commit(self):
+        self.c.commit()
+
+    def rollback(self):
+        self.c.rollback()
+
+    def close(self):
+        self.c.rollback()
+        self.closed = True
+
+
+def _scoreboard(home_lines, away_lines, home_score=136, away_score=134):
+    """The ESPN scoreboard for the game, which agrees with itself or is skipped."""
+    def comp(side, code, lines, score):
+        return {"homeAway": side, "score": score, "team": {"abbreviation": code, "displayName": code},
+                "linescores": [{"value": v} for v in lines]}
+    body = {"events": [{"date": "2026-04-05T00:00Z", "status": {"type": {"completed": True}},
+                        "competitions": [{"competitors": [
+                            comp("home", "DEN", home_lines, home_score),
+                            comp("away", "SAS", away_lines, away_score)]}]}]}
+
+    class Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return body
+    asked = []
+
+    def get(url, params=None, timeout=None):
+        asked.append(params["dates"])
+        return Resp()
+    get.asked = asked
+    return get
+
+
+# One point too many in the home first quarter: 137 against the stored 136. A later
+# correction reached ESPN's quarters and not the final, or the reverse.
+WRONG = [(1, 37, 30), *PERIODS[1:]]
+ESPN_RIGHT = dict(home_lines=[36, 29, 27, 32, 12], away_lines=[30, 33, 35, 26, 10])
+
+
+@pytest.fixture
+def repairing(raw, monkeypatch):
+    import data.ingestors.nba_period_scores as ps
+    conn = _RepairConn(raw)
+    monkeypatch.setattr(ps, "get_connection", lambda: conn)
+    monkeypatch.setattr(ps, "ensure_table", lambda c: None)
+    return ps
+
+
+def _stored(raw):
+    return raw.execute("SELECT period, home_points, away_points FROM nba_period_scores "
+                       "WHERE game_id = ? ORDER BY period", (GAME_ID,)).fetchall()
+
+
+def test_rows_that_disagree_with_the_final_are_replaced_and_the_pick_then_settles(raw, repairing):
+    """RULE: nothing else can repair this. write() never overwrites a stored period
+    and both quarter pulls only ask for games with no row at all, so without this a
+    pick stays pending for good."""
+    _pick(raw)
+    _periods(raw, WRONG)
+    raw.commit()
+    _settle(raw)
+    assert _settled(raw)[0] is None                       # pending, as it must be
+    get = _scoreboard(**ESPN_RIGHT)
+    out = repairing.ensure_first_half_period_scores(get=get)
+    assert get.asked == ["20260404"]
+    assert out["repaired"] == 1 and out["still_refused"] == 0
+    assert _stored(raw) == PERIODS
+    _settle(raw)
+    assert _settled(raw)[0] == "WIN"                      # 65 + 63 = 128 over 125.5
+
+
+def test_fresh_rows_that_also_disagree_change_nothing_and_the_pick_stays_pending(raw, repairing):
+    """ESPN agrees with itself at 137, the stored final says 136: the final is what
+    disagrees, and no rewrite of the quarters can settle that."""
+    _pick(raw)
+    _periods(raw, WRONG)
+    raw.commit()
+    get = _scoreboard(home_lines=[37, 29, 27, 32, 12], away_lines=ESPN_RIGHT["away_lines"],
+                      home_score=137)
+    out = repairing.ensure_first_half_period_scores(get=get)
+    assert out["repaired"] == 0 and out["still_refused"] == 1
+    assert _stored(raw) == WRONG
+    _settle(raw)
+    assert _settled(raw)[0] is None
+
+
+def test_a_game_the_scoreboard_no_longer_lists_keeps_its_rows(raw, repairing):
+    _pick(raw)
+    _periods(raw, WRONG)
+    raw.commit()
+    out = repairing.ensure_first_half_period_scores(
+        get=_scoreboard(**ESPN_RIGHT, home_score=999))   # fails ESPN's own sum: skipped
+    assert out["repaired"] == 0 and out["still_refused"] == 1
+    assert _stored(raw) == WRONG
+
+
+def test_a_failed_call_keeps_the_rows_and_stays_pending(raw, repairing):
+    _pick(raw)
+    _periods(raw, WRONG)
+    raw.commit()
+
+    class Down:
+        status_code = 503
+
+    out = repairing.ensure_first_half_period_scores(get=lambda *a, **k: Down())
+    assert out["repaired"] == 0 and out["still_refused"] == 1
+    assert _stored(raw) == WRONG
+
+
+def test_a_replace_that_dies_midway_leaves_the_old_rows(raw, repairing, monkeypatch):
+    """The delete and the insert are one transaction, so a failure cannot leave a
+    game with no quarters at all."""
+    _pick(raw)
+    _periods(raw, WRONG)
+    raw.commit()
+    conn = repairing.get_connection()
+    real = conn.executemany
+
+    def boom(sql, rows):
+        if "DELETE" not in sql and conn.c.in_transaction:
+            raise RuntimeError("the insert failed")
+        return real(sql, rows)
+    monkeypatch.setattr(conn, "executemany", boom)
+    with pytest.raises(RuntimeError):
+        repairing.ensure_first_half_period_scores(get=_scoreboard(**ESPN_RIGHT))
+    assert _stored(raw) == WRONG
+
+
+def test_rows_that_agree_are_not_asked_for_again(raw, repairing):
+    """A pick waiting on this pass's settle has good rows: no call."""
+    _pick(raw)
+    _periods(raw)
+    raw.commit()
+
+    def get(*a, **k):
+        raise AssertionError("its rows agree with the final")
+    assert repairing.ensure_first_half_period_scores(get=get) == {"dates": 0, "rows": 0}
+
+
+def test_a_settled_pick_is_not_repaired(raw, repairing):
+    _pick(raw)
+    _periods(raw, WRONG)
+    raw.execute("UPDATE picks SET result = 'WIN' WHERE model_id = ?", (MODEL_ID,))
+    raw.commit()
+
+    def get(*a, **k):
+        raise AssertionError("nothing waits on these rows")
+    assert repairing.ensure_first_half_period_scores(get=get) == {"dates": 0, "rows": 0}
+
+
 @pytest.fixture
 def settle_pass(monkeypatch):
     """settle_picks whole, on a connection that answers nothing: each grader is a
@@ -506,3 +686,86 @@ def test_a_first_half_close_is_read_from_close_rows_only():
     # A full-game total keeps its newest pre-game row.
     conn.rows[:] = [{"snapshot_type": "open", "line": 225.5, "over": -110, "under": -110}]
     assert pt._closing_odds(conn, GAME_ID, "totals", "2026-04-05T00:00:00Z", "fanduel") is not None
+
+
+# ── nothing stays stranded without a word ────────────────────────────────────
+
+@pytest.fixture
+def health_db(tmp_path, monkeypatch):
+    """tracking/system_health on a sqlite file, as tests/test_pick_integrity.py does."""
+    from data.db_setup import _MIGRATIONS
+    from tracking import system_health as sh
+    path = str(tmp_path / "health.db")
+
+    class Shim:
+        def __init__(self, db):
+            self._c = sqlite3.connect(db)
+
+        def execute(self, sql, params=()):
+            return self._c.execute(sql.replace("%s", "?"), params)
+
+        def commit(self):
+            self._c.commit()
+
+        def rollback(self):
+            self._c.rollback()
+
+        def close(self):
+            self._c.close()
+    c = sqlite3.connect(path)
+    c.executescript(SCHEMA_SQL)
+    for tbl, col, defn in _MIGRATIONS:
+        try:
+            c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass
+    c.execute("CREATE TABLE model_action_thresholds (model_id TEXT PRIMARY KEY,"
+              " min_prob REAL, min_edge REAL, prob_only BOOLEAN, paused BOOLEAN,"
+              " min_odds REAL)")
+    c.commit()
+    monkeypatch.setattr(sh, "get_connection", lambda: Shim(path))
+    yield c, sh
+    c.close()
+
+
+def _old_pick(c, days_ago, result=None, final=136, model=MODEL_ID):
+    from datetime import date, timedelta
+
+    from config import today_et
+    d = (date.fromisoformat(today_et()) - timedelta(days=days_ago)).isoformat()
+    gid = f"NBA_{d}_SAS_DEN"
+    c.execute("INSERT OR IGNORE INTO games (game_id, sport, season, game_date, home_team,"
+              " away_team, home_score, away_score) VALUES (?, 'NBA', 2026, ?, 'DEN', 'SAS', ?, 134)",
+              (gid, d, final))
+    c.execute("INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label,"
+              " model_probability, dk_implied_prob, edge, scored_line, kelly_fraction,"
+              " recommended_bet, bankroll_at_pick, signal_type, result)"
+              " VALUES (?, ?, 'NBA', ?, 'over', ?, 0.56, 0.52, 0.04, 125.5, 0.02, 20, 1000, 'BET', ?)",
+              (gid, model, d, LABEL, result))
+    c.commit()
+    return gid
+
+
+def _check(sh, name="settlement_stranded"):
+    return {r["check_name"]: r for r in sh.run_system_health()["results"]}[name]
+
+
+@pytest.mark.parametrize("days_ago", [15, 211])
+def test_a_bet_stranded_past_the_two_week_check_is_still_reported(health_db, days_ago):
+    """RULE: settlement_lag only reads 2 to 14 days back, so a pick that cannot
+    settle went quiet after a fortnight. This check has no ceiling, and it names the
+    pick, so someone can go and look."""
+    c, sh = health_db
+    gid = _old_pick(c, days_ago)
+    r = _check(sh)
+    assert (r["status"], r["severity"]) == (sh.STALE, "WARN")
+    assert gid in r["detail"] and MODEL_ID in r["detail"]
+
+
+@pytest.mark.parametrize("kwargs", [dict(days_ago=15, result="WIN"),   # settled
+                                    dict(days_ago=15, final=None),     # no final yet
+                                    dict(days_ago=3)])                 # settlement_lag's own
+def test_what_is_not_stranded_past_two_weeks_is_not_reported(health_db, kwargs):
+    c, sh = health_db
+    _old_pick(c, **kwargs)
+    assert _check(sh)["status"] == sh.OK

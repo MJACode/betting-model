@@ -2436,28 +2436,21 @@ def _first_half_points(conn: DBConnection, game_id: str,
     period rows this settlement can trust. Then the pick stays PENDING: no result,
     never the full-game score, never a made-up one.
 
-    The rule is the first search's, which the graded bets were settled on
-    (scripts/nba_derivative_lab.build_outcomes, read through
-    scripts/nba_game_harness.with_periods): the periods sum to the stored final,
-    are numbered 1..n with n >= 4, and periods 1 and 2 are both there. Overtime
-    is a period, so it counts in the sum and never in the first half.
+    The check is data/ingestors/nba_period_scores.first_half_from_periods, which
+    the repair of rows that disagree with the final also reads.
     """
+    from data.ingestors.nba_period_scores import first_half_from_periods
     rows = conn.execute(
         "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
         (game_id,)).fetchall()
     if not rows:
         return None
-    per = {int(r[0]): (r[1], r[2]) for r in rows}
-    n = max(per)
-    if (n < 4 or set(per) != set(range(1, n + 1))
-            or any(v is None for pts in per.values() for v in pts)
-            or sum(p[0] for p in per.values()) != home_score
-            or sum(p[1] for p in per.values()) != away_score):
+    points = first_half_from_periods(rows, home_score, away_score)
+    if points is None:
         logger.warning(f"{game_id}: its period scores do not add up to the final "
-                       f"({away_score}-{home_score}) or a period is missing: {per}. Its "
-                       f"first-half picks stay pending.")
-        return None
-    return per[1][0] + per[2][0], per[1][1] + per[2][1]
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
+    return points
 
 
 def _game_settle_window_days(conn: DBConnection, game_date: str) -> int:
@@ -2900,8 +2893,9 @@ def settle_picks(game_date: str = None) -> dict:
         # of those rows is the 6am run's nba-quarters step, which runs AFTER the
         # 6am settle and in no refresh pass. Pull a missing game's quarters the
         # same way, on its own connection, so a finished game's first-half pick
-        # grades on this pass and is in the morning recap. A failure leaves the
-        # pick pending; the next pass asks again.
+        # grades on this pass and is in the morning recap. Stored rows that
+        # disagree with the final are asked for again and replaced by rows that
+        # agree. A failure leaves the pick pending; the next pass asks again.
         try:
             from data.ingestors.nba_period_scores import ensure_first_half_period_scores
             quarters = ensure_first_half_period_scores()
