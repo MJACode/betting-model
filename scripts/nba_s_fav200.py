@@ -982,6 +982,7 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
         write_family(rows, fam, out)
     for fam in (C_DOG, C_SPREAD, C_POWER):
         write_family(ctl, fam, out)
+    log("the model's inputs and walk-forward next, the longest step", t0)
     setup = p1_setup(cache, games)
     for point in P1_POINTS:
         fr = frames_at(prep, point)
@@ -1015,18 +1016,17 @@ def point_counts(fr: Frames, season: pd.Series, spread_offers: pd.DataFrame) -> 
     return out
 
 
-def _timed_placebo(build, cut, strength, floor, games) -> float:
-    """One placebo run: build the frame, take the bets, grade them on random
-    scores, three times; the middle time."""
-    ts = []
-    with price_floor(floor):
-        for s in (1, 2, 3):
-            t = time.perf_counter()
-            b = G5._pick(build(s), cut, SIDE, strength)
-            if len(b):
-                H.grade(b, games)
-            ts.append(time.perf_counter() - t)
-    return float(np.median(ts))
+def placebo_cost(run, cells: int, extra: int = 30) -> float:
+    """Seconds for one placebo run of one cell, on the path --full takes: the same
+    cells with 1 + extra seeds against one seed. A run timed outside run_cells read
+    low by more than three times. The longer call goes first, so what the first
+    call pays once falls on the high side."""
+    t = time.perf_counter()
+    run(tuple(range(1, extra + 2)))
+    many = time.perf_counter() - t
+    t = time.perf_counter()
+    run((1,))
+    return max(many - (time.perf_counter() - t), 0.0) / extra / cells
 
 
 def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
@@ -1069,8 +1069,10 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
             differs += differ_rows(fr)
             print(f"\nHIGHEST-EV, same number, proportional, at {point}:\n{top_offers(fr.same.frame)}")
             print(f"HIGHEST-EV, same number, power, at {point}:\n{top_offers(fr.power.frame)}")
-            print(f"HIGHEST-EV, every favourite at the market's fair line, at {point}:\n{top_offers(fr.blind.frame)}")
-            print(f"HIGHEST-EV, the favourite's spread at the market's fair line, at {point}:\n{top_offers(offers)}")
+            short = best_in_range(fr.blind.frame, NO_FLOOR, OLD_EDGE)
+            print(f"HIGHEST-EV, every favourite shorter than -200 at the market's fair line, at {point}:\n{top_offers(short)}")
+            print(f"HIGHEST-EV, those favourites' spreads at the market's fair line, at {point}:\n"
+                  f"{top_offers(in_band_cand(offers, fr.blind, NO_FLOOR, OLD_EDGE))}")
             log(f"{point}: counted", t0)
         fr = frames["C"]
         # the whole path through the harness on real prices and random scores, one placebo
@@ -1088,9 +1090,11 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
         r += emit_power(data_b, "C", fr.times, fr.power, prep.close, set())
         times["controls_at_one_point"] = time.perf_counter() - t1
         r_ctl = len(r)
-        lo, hi = BANDS["200_300"]
-        times["placebo_blind"] = _timed_placebo(blind_builder(fr.blind, lo, hi), FLAG, "strength", NO_FLOOR, blinded)
-        times["placebo_same"] = _timed_placebo(ev_builder(fr.same), P2_CUTS[0], "ev", RULE_FLOOR, blinded)
+        assert all(x["pool_n"] > 0 for x in r), "a control placed no bet on the real prices"
+        times["placebo_blind"] = placebo_cost(
+            lambda seeds: emit_blind(data_b, "C", fr.times, fr.blind, prep.close, seeds, set(), bands=("300_500",)), 1)
+        times["placebo_same"] = placebo_cost(
+            lambda seeds: emit_same(data_b, "C", fr.times, fr.same, prep.close, seeds, set()), len(P2_CUTS))
         mv_extremes = {}
         if not skip_model:
             t1 = time.time()
@@ -1112,7 +1116,9 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
             t1 = time.perf_counter()
             emit_model(data_b, pt_last, frames[pt_last].times, kf_last, nm_last, prep.close, (1,), set())
             times["model_4_cells_with_1_placebo"] = time.perf_counter() - t1
-            times["placebo_model"] = _timed_placebo(move_builder(kf_last), P1_CUTS[0], "ev", RULE_FLOOR, blinded)
+            times["placebo_model"] = placebo_cost(
+                lambda seeds: emit_model(data_b, pt_last, frames[pt_last].times, kf_last, nm_last, prep.close, seeds, set()),
+                len(P1_CUTS))
             print("\nmodel extremes:", json.dumps(mv_extremes, indent=1))
     assert r_blind == 1 and r_same == 4 and r_ctl == 2 * len(BANDS) + len(P2_CUTS), (r_blind, r_same, r_ctl)
     print("\nCOVERAGE (share of a season's games with a decision):", json.dumps(cover))

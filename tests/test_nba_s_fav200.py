@@ -505,6 +505,27 @@ def test_random_scores_keep_nothing_of_the_real_ones_and_never_tie():
     assert b.attrs[F.BLINDED] is True and not games.attrs.get(F.BLINDED)
 
 
+def test_the_projection_counts_200_placebo_runs_for_every_cell():
+    times = {"frames_A": 0.0, "blind_cell_with_1_placebo": 0.0, "same_4_cells_with_1_placebo": 0.0,
+             "controls_at_one_point": 0.0, "placebo_blind": 1.0, "placebo_same": 1.0}
+    p = F.projection(times, skip_model=True)
+    assert p["blind_s"] == 12 * 200 and p["same_s"] == 16 * 200
+    assert p["total_minutes"] == (12 + 16) * 200 / 60
+    times.update(model_setup=0.0, model_4_cells_with_1_placebo=0.0, placebo_model=1.0)
+    assert F.projection(times, skip_model=False)["model_s"] == 12 * 200
+
+
+def test_the_placebo_cost_is_the_extra_time_of_the_extra_seeds_per_cell(monkeypatch):
+    clock, calls = [0.0], []
+    monkeypatch.setattr(F.time, "perf_counter", lambda: clock[0])
+
+    def run(seeds):
+        calls.append(len(seeds))
+        clock[0] += 7.0 + 0.5 * len(seeds)                   # one cell's report, then its placebo runs
+    assert F.placebo_cost(run, cells=2, extra=4) == pytest.approx(0.5 / 2)
+    assert calls == [5, 1]                                   # the longer call first
+
+
 @pytest.mark.parametrize("missing", [F.GO_ENV, F.RESULTS_ENV, F.BETS_ENV])
 def test_full_refuses_without_each_setting(missing, tmp_path, monkeypatch):
     (tmp_path / "nba_fetch_ledger.parquet").write_bytes(b"")
