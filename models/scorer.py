@@ -3478,6 +3478,7 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               -- tests/test_rule_model_markets_everywhere.py).
               WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
                 OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
+                OR p.model_id = 'ncaab_total_blend'
                 THEN 'totals'
               -- The home team's own points, not the game total.
               WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'

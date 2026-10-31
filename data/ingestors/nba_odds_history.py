@@ -116,6 +116,9 @@ FIRST_PROPS_DATE = "2023-05-03"     # the feed's first player-prop snapshot
 DEFAULT_FLOOR = 2_200_000
 # Fetches OFF the hour (a gap fill at 23:30Z). odds_history_pulls keys on an
 # integer hour and cannot hold one; see _buy_snapshot for the routing rule.
+# The NCAAB opener grid files its half hours here too (sport 'NCAAB', why
+# 'opener_grid', data/ingestors/ncaab_odds_history.py); every NBA read of this
+# table filters on sport = 'NBA'.
 FETCH_LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS odds_history_fetches (
     sport        TEXT NOT NULL,

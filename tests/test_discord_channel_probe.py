@@ -136,3 +136,49 @@ def test_the_probe_covers_the_per_sport_live_channels(monkeypatch):
     assert out["live:NFL"]["channel_id"] == "live"
     assert out["sport:NFL"]["channel_id"] == "pre"
     assert out["_summary"]["collisions"] == []
+
+
+def test_the_probe_covers_a_sport_that_posts_through_its_channel_id(monkeypatch):
+    """NCAAB (2026-10-30) has no webhook variable: DISCORD_CHANNEL_NCAAB names
+    its channel and the bot token finds the bot's own webhook there. The probe
+    reports that sport too, by GET only, with the webhook's id and name and
+    never its token; a sport with no bot webhook yet is reported as such and
+    nothing is created."""
+    import config
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS",
+                        {"MLB": "https://discord.com/api/webhooks/1/mlbtoken"}, raising=False)
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS_LIVE", {}, raising=False)
+    monkeypatch.setattr(config, "DISCORD_CHANNELS",
+                        {"NCAAB": "123", "NHL": "456", "MLB": "999"}, raising=False)
+    for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
+                 "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
+                 "DISCORD_WEBHOOK_OPS"):
+        monkeypatch.setattr(config, attr, "", raising=False)
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "BOTSECRET")
+
+    import requests
+
+    def _get(url, headers=None, timeout=None):
+        if url.endswith("/users/@me"):
+            return _Resp(body={"id": "999"})
+        if url.endswith("/channels/123/webhooks"):
+            return _Resp(body=[{"id": "8", "token": "HOOKSECRET", "name": "ncaab",
+                                "channel_id": "123", "user": {"id": "999"}}])
+        if url.endswith("/channels/456/webhooks"):
+            return _Resp(body=[])
+        return _Resp(body={"channel_id": "111", "guild_id": "g", "name": "mlb"})
+
+    def _boom(*a, **k):
+        raise AssertionError("the probe must never create or post anything")
+
+    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(requests, "post", _boom)
+    out = jq._job_discord_probe()
+    assert out["sport:NCAAB"]["status"] == 200
+    assert out["sport:NCAAB"]["channel_id"] == "123"
+    assert out["sport:NCAAB"]["webhook_id"] == "8"
+    assert out["sport:NCAAB"]["webhook_name"] == "ncaab"
+    assert out["sport:NHL"]["status"] == "no bot webhook in the channel yet"
+    assert out["sport:MLB"]["channel_id"] == "111"          # its webhook variable wins
+    assert "HOOKSECRET" not in repr(out) and "BOTSECRET" not in repr(out)
+    assert out["_summary"]["distinct_channels"] == 3

@@ -326,8 +326,8 @@ the pick that already exists?* The only acceptable answer is "nothing".
 ## 2. Project Purpose
 Building a **personal sports betting model** targeting **DraftKings** as the
 primary sportsbook. The long-term goal is all major US sports with all player
-props. Seven sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL and NCAAF
-(§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
+props. Eight sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF and
+NCAAB (§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
 
 **Every model is live real money.** There is no second mode that counts a
 graded pick in the win-loss record and leaves it out of the units, and there
@@ -560,8 +560,8 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 67 models carry their
-  own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 68 models carry
+  their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline

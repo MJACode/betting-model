@@ -2346,6 +2346,9 @@ _RULE_MODEL_MARKETS = {
     # nba_period_scores (_first_half_points). NEVER "totals": that sums the two
     # finals and grades every over a win.
     "nba_first_half_total_luck": "totals_h1",
+    # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
+    # total; the stored final includes overtime, as books settle it.
+    "ncaab_total_blend": "totals",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

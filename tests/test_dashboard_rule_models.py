@@ -45,6 +45,10 @@ KNOWN_RULES = {
     # 2026-10-30 (mike): NBA first-half overs on the same gap; its artifact holds
     # parameters too.
     "nba_first_half_total_luck",
+    # 2026-10-30 (mike): NCAAB totals, ratings plus a residual blended with
+    # DraftKings' total (models/ncaab_total_blend.py); its artifact holds
+    # parameters, not an estimator.
+    "ncaab_total_blend",
 }
 
 

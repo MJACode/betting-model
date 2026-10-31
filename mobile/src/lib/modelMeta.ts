@@ -592,6 +592,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // ── NCAAB ─────────────────────────────────────────────────────────────────
+  // Men's college basketball, full-game totals. Named like the other totals
+  // ("NCAAB Totals", badge O/U). The id is the one the model writes its picks
+  // under (models/ncaab_total_blend.py MODEL_ID). It has no 'over_under' in
+  // it, so markets.ts names it for the totals rows. The build plan's id,
+  // ncaab_over_under, is not a model. tests/test_mobile_pick_categories.py
+  // fails if config scores an id with no label here.
+  ncaab_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAAB Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -849,6 +863,16 @@ const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
   'nba_total_luck',
 ];
 
+// The models that decide each game once, the evening before, at DraftKings'
+// total: the NCAAB totals card (scripts/ncaab_total_card.py) runs at 22:00
+// UTC the evening before, else on game day when no total was up yet. Their
+// page fills in one batch in the early evening, so the hourly-refresh copy
+// sent people back at the wrong time. No Eastern clock time is printed:
+// 22:00 UTC is 6pm ET until 1 November and 5pm ET after it.
+const EVENING_BEFORE_MODELS: readonly string[] = [
+  'ncaab_total_blend',
+];
+
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
   title: string;
@@ -871,6 +895,17 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model checks each game about an hour before tip-off and bets only some of them. ' +
         'Nothing has posted today so far.',
       note: 'Posted about an hour before tip-off and never re-priced.',
+    };
+  }
+  if (EVENING_BEFORE_MODELS.includes(modelId)) {
+    return {
+      title: 'Decided the evening before',
+      body:
+        'This model decides each game once, the evening before, at DraftKings’ total. A game with no ' +
+        'total by then is decided on game day instead. A posted bet is never re-priced.',
+      empty:
+        'This model posts the evening before each game day. Nothing has posted for the next slate yet.',
+      note: 'Posted the evening before and never re-priced.',
     };
   }
   return {
@@ -917,7 +952,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -932,6 +967,7 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('nhl')) return 'NHL';
@@ -969,6 +1005,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NBA',
   'NFL',
   'NCAAF',
+  'NCAAB',
   'UFC',
   'NHL',
   'GOLF',

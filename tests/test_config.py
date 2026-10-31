@@ -212,7 +212,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "nba_team_total_luck",
          # 2026-10-30 (mike): the NBA first-half overs: market-fair P(over) plus
          # the earlier graded seasons' walk-forward uplift, and no record either.
-         "nba_first_half_total_luck"}
+         "nba_first_half_total_luck",
+         # 2026-10-30 (mike, "Yes to the totals model"): NCAAB totals; its 0.04
+         # cut was measured on its own P(win | no push), and it has no record.
+         "ncaab_total_blend"}
     )
 
 
@@ -303,5 +306,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nba_total_luck",           # 2026-10-17 (mike): market-fair P(over) + its bucket's uplift
         "nba_team_total_luck",      # market-fair P(under) + the walk-forward uplift
         "nba_first_half_total_luck",  # 2026-10-30 (mike): market-fair P(over) + the walk-forward uplift
+        "ncaab_total_blend",        # 2026-10-30 (mike): its blend's P(win, push left out)
     }
     assert not not_named_here

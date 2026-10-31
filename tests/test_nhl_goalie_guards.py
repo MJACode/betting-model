@@ -570,6 +570,7 @@ ALLOWED = {
     "nfl/live_model/pick_writer.py": "NFL in-play picks only; it writes no NHL row",
     "scripts/nba_prop_market_card.py": "NBA player props only",
     "scripts/nba_total_luck_card.py": "NBA full-game totals only",
+    "scripts/ncaab_total_card.py": "NCAAB full-game totals only",
     "scripts/nfl_prop_market_card.py": "NFL player props only",
     "scripts/nfl_wind_publisher.py": "the NFL wind and opener rules only",
     "scripts/wnba_prop_market_card.py": "WNBA player props only",

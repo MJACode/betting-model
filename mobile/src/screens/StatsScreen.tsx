@@ -718,6 +718,15 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = etDay;
+    // A sport with no player leaderboard and no Teams board (NCAAB today)
+    // draws only its empty state. Its week of games would be read and thrown
+    // away: 472 NCAAB games for 2026-11-02 to 11-08.
+    if (!defaultStatFor(sport) && !supportsTeamBoard(sport)) {
+      setSlate(EMPTY_SLATE);
+      setSlateGames([]);
+      setSlateFor(sport);
+      return;
+    }
     // BOUNDED, because .finally() is not a guarantee that anything happens.
     // The supabase client is created with no fetch timeout, so a request that
     // hangs never settles: no `.finally`, no `error` to render the Retry banner

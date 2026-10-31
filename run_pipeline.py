@@ -966,6 +966,33 @@ def step_ncaab_results(run_date: str) -> bool:
         return False
 
 
+def step_ncaab_box(run_date: str) -> bool:
+    """
+    NCAAB team box scores and period scores from ESPN's game summary
+    (data/ingestors/ncaab_espn_box.py) into ncaab_team_game_stats (source
+    'espn_summary') and ncaab_period_scores. Runs AFTER ncaab-results, which
+    writes the finals it reads, on the HOURLY refresh passes only
+    (scripts/refresh_pass.sh). Self-limiting: no ESPN call unless a final of
+    the last 3 ET dates has no ESPN box row; at most 80 games and about 150
+    seconds of fetching a pass. A game ESPN cannot answer usefully is logged
+    and skipped, not raised. False when ESPN refused the worker, a fetch
+    failed, a write failed, or the newest 5 finals ESPN answered for were all
+    refused (the summary changed for every game), so pipeline_runs names it.
+    """
+    try:
+        from data.ingestors.ncaab_espn_box import run_recent
+        t = run_recent(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAAB box scores (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAAB box scores (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAB box scores failed: {exc}")
+        return False
+
+
 def step_ncaaf_weather(run_date: str) -> bool:
     """
     Forecast weather for upcoming NCAAF games (next 7 days) into game_weather.
@@ -2656,7 +2683,7 @@ Examples:
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
-                                 "ncaab-results", "ncaab-schedule",
+                                 "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -2760,6 +2787,7 @@ Examples:
             "ncaaf-weather": lambda: step_ncaaf_weather(run_date),
             "ncaab-results": lambda: step_ncaab_results(run_date),
             "ncaab-schedule": lambda: step_ncaab_schedule(run_date),
+            "ncaab-box": lambda: step_ncaab_box(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),
