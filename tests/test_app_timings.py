@@ -7,7 +7,8 @@ Three halves are pinned here:
   property it asserts was watched failing by breaking the code it guards
   (response not passed through, own send timed, query string kept, a poll
   holding a screen open, a request in the quiet gap ignored, rows dropped on a
-  failed send, a throwing clock breaking the request);
+  failed send, a throwing clock breaking the request, a screen left before it
+  loaded dropped, a slow start losing its launch row, no backoff offline);
 * the wiring -- the Supabase client fetches through timedFetch, App.tsx starts
   the logger and reports each route;
 * the server surface -- add_app_timings.sql is write-only for the anon key, and
@@ -62,6 +63,10 @@ def test_the_perf_log_logic_holds():
         "launch row timed from the launch clock",
         "offline: the rows stay buffered",
         "back online: delivered once",
+        "a screen left before it loaded writes its row, status 0",
+        "a slow start still gets a launch row, timed from the launch clock",
+        "offline: no second attempt inside the backoff",
+        "offline: the backoff doubles, so one first-backoff later is still too soon",
     ):
         assert f"[PASS] {line}" in proc.stdout, line
 

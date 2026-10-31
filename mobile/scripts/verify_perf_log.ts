@@ -1,5 +1,7 @@
 /**
- * Standalone verification for load-time logging (src/lib/perfLog.ts). Run with:
+ * Standalone verification for load-time logging (src/lib/perfLog.ts). Run it
+ * through `python -m pytest tests/test_app_timings.py`, which copies both
+ * files beside each other for node's type stripping, or with:
  *
  *   npx tsx scripts/verify_perf_log.ts
  *
@@ -11,15 +13,20 @@
  *   * a screen row only once EVERY request it started has finished, timed to
  *     the last one; a request that starts after JOIN_MS does not hold it open;
  *   * the first screen also writes a launch row, timed from the launch clock;
- *   * a failed send keeps the rows and a later flush delivers them once.
+ *   * a screen left before it loaded still writes its row, status 0;
+ *   * a slow start whose reads begin after LAUNCH_JOIN_MS still gets a launch row;
+ *   * a failed send keeps the rows, backs off, and a later flush delivers them once.
  */
 
 import {
   configurePerfLog,
+  FIRST_BACKOFF_MS,
   flushPerfLog,
   JOIN_MS,
+  LAUNCH_JOIN_MS,
   peekPerfBufferForTests,
   QUIET_MS,
+  resetPerfBackoff,
   resetPerfLogForTests,
   resourceFromUrl,
   setPerfScreen,
@@ -197,6 +204,40 @@ async function main() {
     check('a screen with no request writes no row', !peekPerfBufferForTests().some((r) => r.kind === 'screen' && r.name === 'Settings'));
   }
 
+  // --- a screen left before it loaded
+  {
+    setup();
+    const { f, calls } = controllable();
+    const wrapped = timedFetch(f);
+    setPerfScreen('Tabs');
+    const a = wrapped(`${BASE}/rest/v1/picks`);
+    calls[0].resolve({ status: 200 });
+    await a;
+    await sleep(QUIET_MS + 50);
+    setPerfScreen('TrackRecord');
+    void wrapped(`${BASE}/rest/v1/v_public_track_record`);
+    clock += 2_000;
+    setPerfScreen('Settings');
+    const left = peekPerfBufferForTests().filter((r) => r.kind === 'screen' && r.name === 'TrackRecord');
+    check('a screen left before it loaded writes its row, status 0', left.length === 1 && left[0].status === 0 && left[0].ms === 2_000, JSON.stringify(left));
+  }
+
+  // --- a slow start: navigation ready, and its reads begun, after LAUNCH_JOIN_MS
+  {
+    setup();
+    const { f, calls } = controllable();
+    const wrapped = timedFetch(f);
+    clock += LAUNCH_JOIN_MS + 1_000;
+    setPerfScreen('Tabs');
+    const a = wrapped(`${BASE}/rest/v1/picks`);
+    clock += 300;
+    calls[0].resolve({ status: 200 });
+    await a;
+    await sleep(QUIET_MS + 50);
+    const launch = peekPerfBufferForTests().filter((r) => r.kind === 'launch');
+    check('a slow start still gets a launch row, timed from the launch clock', launch.length === 1 && launch[0].ms === 200 + LAUNCH_JOIN_MS + 1_000 + 300, JSON.stringify(launch));
+  }
+
   // --- delivery
   {
     const sent: TimingRow[][] = [];
@@ -206,9 +247,28 @@ async function main() {
     const p = timedFetch(f)(`${BASE}/rest/v1/picks`);
     calls[0].resolve({ status: 200 });
     await p;
+    let attempts = 0;
+    const counting = () => {
+      attempts++;
+      return offline;
+    };
+    setup(sent, counting);
+    const { f: f2, calls: c2 } = controllable();
+    const p2 = timedFetch(f2)(`${BASE}/rest/v1/picks`);
+    c2[0].resolve({ status: 200 });
+    await p2;
     await flushPerfLog();
     check('offline: the rows stay buffered', sent.length === 0 && peekPerfBufferForTests().length > 0);
+    await flushPerfLog();
+    check('offline: no second attempt inside the backoff', attempts === 1, `attempts=${attempts}`);
+    clock += FIRST_BACKOFF_MS + 1;
+    await flushPerfLog();
+    check('offline: after the backoff it tries again', attempts === 2, `attempts=${attempts}`);
+    clock += FIRST_BACKOFF_MS + 1;
+    await flushPerfLog();
+    check('offline: the backoff doubles, so one first-backoff later is still too soon', attempts === 2, `attempts=${attempts}`);
     offline = false;
+    resetPerfBackoff();
     await flushPerfLog();
     await flushPerfLog();
     const delivered = sent.flat().filter((r) => r.kind === 'request');

@@ -8,9 +8,11 @@
  *            strings are never sent.
  *   screen   a navigation to a screen until every request it started has
  *            finished and the network has been quiet for QUIET_MS. A screen
- *            that starts no request in its first JOIN_MS writes no row.
+ *            that starts no request in its first JOIN_MS writes no row. A
+ *            screen left before it loaded writes its row anyway, status 0,
+ *            timed to when it was left, so slow screens are not lost.
  *   launch   the same, for the first screen, measured from when this module
- *            was first evaluated (JS start). Time the OS spends before JS runs
+ *            was first evaluated (JS start). Status 0 if left before loaded. Time the OS spends before JS runs
  *            is not visible from here.
  *
  * No imports, so it runs under bare node (scripts/verify_perf_log.ts). It must
@@ -48,6 +50,9 @@ export const LAUNCH_JOIN_MS = 5_000;
 export const MAX_BUFFERED = 300;
 /** Most rows in one send. The server caps a call at the same number. */
 export const MAX_BATCH = 100;
+/** After a failed send, wait this long before trying again, doubling to MAX_BACKOFF_MS. */
+export const FIRST_BACKOFF_MS = 60_000;
+export const MAX_BACKOFF_MS = 15 * 60_000;
 
 type Fetch = (input: any, init?: any) => Promise<any>;
 
@@ -72,6 +77,8 @@ let windowState: ScreenWindow | null = null;
 let buffer: TimingRow[] = [];
 let nextId = 1;
 let flushing: Promise<void> | null = null;
+let backoffMs = 0;
+let backoffUntil = 0;
 
 function now(): number {
   return deps ? deps.now() : Date.now();
@@ -94,7 +101,17 @@ function openWindow(name: string | null, start: number, joinMs: number, launch: 
 }
 
 function closeWindow(): void {
-  if (windowState?.quietTimer) clearTimeout(windowState.quietTimer);
+  const w = windowState;
+  if (!w) return;
+  if (w.quietTimer) clearTimeout(w.quietTimer);
+  // Left before it loaded: still a wait the member had, and the slowest one.
+  if (w.name != null && w.count > 0 && w.pending.size > 0) {
+    const at = now();
+    push({ kind: 'screen', name: w.name, ms: Math.max(0, Math.round(at - w.namedAt)), status: 0, screen: w.name, requestCount: w.count }, at);
+    if (w.launch) {
+      push({ kind: 'launch', name: w.name, ms: Math.max(0, Math.round(at - launchAt)), status: 0, screen: w.name, requestCount: w.count }, at);
+    }
+  }
   windowState = null;
 }
 
@@ -107,6 +124,10 @@ export function setPerfScreen(name: string | null | undefined): void {
     if (windowState && windowState.launch && windowState.name == null) {
       windowState.name = n;
       windowState.namedAt = now();
+      // Restart the join clock: on a slow start the screen's reads begin after
+      // navigation is ready, which can be past LAUNCH_JOIN_MS from JS start.
+      // `launch` is still timed from launchAt.
+      windowState.start = windowState.namedAt;
       return;
     }
     closeWindow();
@@ -224,6 +245,7 @@ export function timedFetch(real: Fetch): Fetch {
  */
 export function flushPerfLog(): Promise<void> {
   if (flushing) return flushing;
+  if (deps && now() < backoffUntil) return Promise.resolve();
   flushing = (async () => {
     try {
       while (deps && buffer.length > 0) {
@@ -231,8 +253,12 @@ export function flushPerfLog(): Promise<void> {
         try {
           await deps.send(batch);
         } catch {
+          backoffMs = Math.min(MAX_BACKOFF_MS, backoffMs > 0 ? backoffMs * 2 : FIRST_BACKOFF_MS);
+          backoffUntil = now() + backoffMs;
           return;
         }
+        backoffMs = 0;
+        backoffUntil = 0;
         buffer = buffer.slice(batch.length);
       }
     } finally {
@@ -240,6 +266,12 @@ export function flushPerfLog(): Promise<void> {
     }
   })();
   return flushing;
+}
+
+/** The app came back to the foreground: try again now rather than wait out the backoff. */
+export function resetPerfBackoff(): void {
+  backoffMs = 0;
+  backoffUntil = 0;
 }
 
 /** For the verify script only. */
@@ -254,5 +286,7 @@ export function resetPerfLogForTests(): void {
   buffer = [];
   nextId = 1;
   flushing = null;
+  backoffMs = 0;
+  backoffUntil = 0;
   launchAt = Date.now();
 }

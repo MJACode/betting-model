@@ -2,7 +2,7 @@ import { AppState, Platform } from 'react-native';
 import * as Updates from 'expo-updates';
 
 import { getDeviceId } from '@/hooks/useDeviceId';
-import { configurePerfLog, flushPerfLog, type TimingRow } from '@/lib/perfLog';
+import { configurePerfLog, flushPerfLog, resetPerfBackoff, type TimingRow } from '@/lib/perfLog';
 import { APP_VERSION } from '@/lib/socialLinks';
 import { supabase } from '@/lib/supabase';
 
@@ -12,7 +12,8 @@ import { supabase } from '@/lib/supabase';
  * at module scope in App.tsx, right after crash logging.
  */
 
-/** Send buffered timings this often while the app is open. */
+/** Send buffered timings this often while the app is open. After a failed
+ *  send, perfLog skips these ticks for 1, 2, 4 ... 15 minutes. */
 const FLUSH_EVERY_MS = 60_000;
 
 function updateId(): string | null {
@@ -56,5 +57,7 @@ export function startPerfLogging(): void {
   }, FLUSH_EVERY_MS);
   AppState.addEventListener('change', (state) => {
     if (state === 'background') void flushPerfLog();
+    // A failed send backs off (perfLog); coming back is a fresh chance.
+    if (state === 'active') resetPerfBackoff();
   });
 }
