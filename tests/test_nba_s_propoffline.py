@@ -463,6 +463,187 @@ def test_the_card_overlap_uses_earlier_seasons_maps_and_leaves_out_what_the_rule
     assert S.card_propositions(r, props, pd.DataFrame(pr), widths, earlier, set()) != held
 
 
+# ── when a report counts as known (dated line of the doc) ───────────────────
+
+class _Stop(Exception):
+    """Raised where a test has seen what it came for: the frame's models are never fitted."""
+
+
+def _tip(k: int) -> pd.Timestamp:
+    return pd.Timestamp("2024-11-01 00:00", tz="UTC") + pd.Timedelta(days=k)
+
+
+REPORTED = 14                                           # games with no report before this one: the ten-game rule is met
+SNAPSHOT_LEAD = 55                                      # not the 60 a game with no prop snapshot falls back on
+
+
+def _before(k: int, minutes: int) -> pd.Timestamp:
+    """`minutes` before game k's decision, its prop snapshot."""
+    return _tip(k) - pd.Timedelta(minutes=SNAPSHOT_LEAD + minutes)
+
+
+def _tiny_raw() -> dict:
+    """A small cache in the stored tables' shape: LAL at GSW every day, five players a side, every one plays.
+
+    Game 14: LAL's report 90 minutes before the decision lists L1 Questionable, its report 20 minutes before lists him
+    Out. GSW's report 90 minutes before lists G1 Out, its report exactly 30 minutes before lists him Questionable.
+    Game 15: the only report is LAL's, 10 minutes before the decision, listing L2 Out. Game 16: no report. Game LIVE: its
+    prop row is dated past the research window, so its decision is the fallback, not its snapshot."""
+    games, sched, props, log = [], [], [], []
+    for k in range(REPORTED + 3):
+        gid, date = f"G{k}", str(_tip(k))[:10]
+        games.append({"game_id": gid, "season": 2025, "game_date": date, "commence_time": _tip(k).isoformat(),
+                      "home_team": "LAL", "away_team": "GSW", "home_score": 100, "away_score": 95})
+        sched.append({"game_id": gid, "season": 2025, "game_date": date, "game_type": "regular"})
+        props.append({"game_id": gid, "game_date": date, "snapshot_at": _before(k, 0).isoformat()})
+        for team in ("LAL", "GSW"):
+            for n in range(1, 6):
+                log.append({"game_id": gid, "player_id": f"{team[0]}{n}", "season": 2025, "game_date": date, "team": team,
+                            "player_name": f"{team} Player{n}", "is_starter": True, "minutes": 30.0 + n, "points": 15.0,
+                            "rebounds": 5.0, "offensive_reb": 1.0, "defensive_reb": 4.0, "assists": 3.0, "steals": 1.0,
+                            "blocks": 1.0, "turnovers": 2.0, "fg_made": 6.0, "fg_att": 13.0, "fg3_made": 1.0, "fg3_att": 4.0,
+                            "ft_made": 2.0, "ft_att": 3.0})
+    games.append({"game_id": "LIVE", "season": 2027, "game_date": "2026-10-21", "commence_time": "2026-10-22T00:00:00+00:00",
+                  "home_team": "LAL", "away_team": "GSW", "home_score": None, "away_score": None})
+    sched.append({"game_id": "LIVE", "season": 2027, "game_date": "2026-10-21", "game_type": "regular"})
+    props.append({"game_id": "LIVE", "game_date": "2026-10-21", "snapshot_at": "2026-10-21T23:05:00+00:00"})
+    report = [("G14", "LAL", _before(14, 90), "L1", "LAL Player1", "Questionable"),
+              ("G14", "LAL", _before(14, 20), "L1", "LAL Player1", "Out"),
+              ("G14", "GSW", _before(14, 90), "G1", "GSW Player1", "Out"),
+              ("G14", "GSW", _before(14, 30), "G1", "GSW Player1", "Questionable"),
+              ("G15", "LAL", _before(15, 10), "L2", "LAL Player2", "Out")]
+    return {"nba_games": pd.DataFrame(games), "nba_schedule": pd.DataFrame(sched), "nba_props": pd.DataFrame(props),
+            "nba_player_game_log": pd.DataFrame(log),
+            "nba_injury_report": pd.DataFrame(report, columns=["game_id", "team", "report_ts", "player_id", "player_name", "status"])}
+
+
+def _keep_thread_setting(monkeypatch) -> None:
+    for d in (S.nb.XGB_MIN, S.nb.XGB_COUNT):
+        monkeypatch.setitem(d, "n_jobs", d["n_jobs"])   # fold_predictions sets it: put back for the next test
+
+
+def _frame_the_folds_read(monkeypatch, work) -> pd.DataFrame:
+    """The frame the real fold_predictions builds from the tiny cache, stopped before any model is fitted."""
+    raw, seen, real = _tiny_raw(), {}, S.nb.build_frame
+
+    def spy(data, dec, **kw):
+        seen["frame"] = real(data, dec, **kw)
+        raise _Stop
+
+    monkeypatch.setattr(S.nb, "load_cache", lambda *a, **k: raw)
+    monkeypatch.setattr(S.nb, "build_frame", spy)
+    _keep_thread_setting(monkeypatch)
+    with pytest.raises(_Stop):
+        S.fold_predictions(work, work)
+    return seen["frame"].set_index(["game_id", "player_id"])
+
+
+def test_the_folds_read_a_report_30_minutes_after_it_is_printed(monkeypatch, tmp_path):
+    fr = _frame_the_folds_read(monkeypatch, tmp_path)
+    # printed 20 minutes before the decision: not known yet, so the report 90 minutes before is the one read
+    assert fr.loc[("G14", "L1"), "status"] == "Questionable"
+    assert fr.loc[("G14", "L1"), "own_q"] == 1.0
+    assert fr.loc[("G14", "L2"), "tm_q_min"] > 0 and fr.loc[("G14", "L2"), "tm_o_min"] == 0
+    # printed exactly 30 minutes before: known
+    assert fr.loc[("G14", "G1"), "status"] == "Questionable"
+    assert fr.loc[("G14", "L2"), "opp_o_min"] == 0
+    # a game whose only report is under 30 minutes old has no report at all at the decision
+    assert pd.isna(fr.loc[("G15", "L2"), "status"]) and pd.isna(fr.loc[("G15", "L2"), "own_q"])
+    assert pd.isna(fr.loc[("G15", "L3"), "tm_o_min"])
+
+
+def test_the_lag_is_the_records():
+    assert pd.Timedelta(minutes=S.REPORT_LAG_MIN) == S.P.INJURY_LAG == pd.Timedelta(minutes=30)
+
+
+def test_the_shift_lands_before_the_report_is_compacted():
+    # shifted after compacting, the report 90 minutes before is already gone, and L1 reads as not listed at all
+    raw = _tiny_raw()
+    dec = pd.DataFrame({"game_id": ["G14"], "decision_ts": [_before(14, 0)]})
+
+    def lal(lag):
+        got = S.nb.injury_asof(S.report_as_known(raw["nba_injury_report"], dec, lag), dec)
+        got = got[got["team"] == "LAL"]
+        return dict(zip(got["player_id"], got["status"]))
+
+    assert lal(30) == {"L1": "Questionable"}
+    assert lal(0) == {"L1": "Out"}
+
+
+def test_the_labs_inputs_are_the_shipped_research_path_but_for_the_lag(monkeypatch, tmp_path):
+    # the lab holds its own copy of research_inputs' lines: at lag 0 it has to be the same path
+    from scripts.nba_prop_projection_train import research_inputs
+    raw = _tiny_raw()
+    monkeypatch.setattr(S.nb, "load_cache", lambda *a, **k: raw)
+    ours, dec_ours = S.lab_inputs(tmp_path, lag_min=0)
+    theirs, dec_theirs = research_inputs(tmp_path)
+    pd.testing.assert_frame_equal(dec_ours, dec_theirs)
+    assert set(ours) == set(theirs)
+    for k in ours:
+        pd.testing.assert_frame_equal(ours[k], theirs[k])
+    lagged, _ = S.lab_inputs(tmp_path)
+    assert not lagged["nba_injury_report"].equals(ours["nba_injury_report"])   # and the default is not lag 0
+
+
+def _fake_pred(season: int) -> pd.DataFrame:
+    cols = list(S.FRAME_KEEP) + ["min_hat"] + [f"mu_{st}" for st in S.nb.BASE_STATS]
+    d = {c: [1.0] for c in cols}
+    d.update({"game_id": [f"F{season}"], "player_id": ["1"], "season": [season], "played": [True], "status": ["Listed none"]})
+    return pd.DataFrame(d)
+
+
+def test_folds_fitted_on_the_print_time_read_are_never_reused(monkeypatch, tmp_path):
+    # the old names on disk: a run that returns these has read the print-time folds without a word
+    for season in S.FOLDS:
+        _fake_pred(season).to_parquet(tmp_path / f"pred_{season}.parquet")
+
+    def reached(*a, **k):
+        raise _Stop
+
+    monkeypatch.setattr(S.nb, "load_cache", reached)
+    _keep_thread_setting(monkeypatch)
+    with pytest.raises(_Stop):                          # it goes and rebuilds them
+        S.fold_predictions(tmp_path, tmp_path)
+
+
+def _stub_models(monkeypatch, raw) -> None:
+    monkeypatch.setattr(S.nb, "load_cache", lambda *a, **k: raw)
+    monkeypatch.setattr(S.nb, "fit_minutes", lambda tr, cols=None: None)
+    monkeypatch.setattr(S.nb, "predict_minutes", lambda m, te: np.full(len(te), 30.0))
+    monkeypatch.setattr(S.nb, "fit_rate", lambda tr, st, cols=None: None)
+    monkeypatch.setattr(S.nb, "predict_rate_mean", lambda m, te, mins: np.full(len(te), 5.0))
+    monkeypatch.setattr(S, "FOLDS", (2025,))
+    _keep_thread_setting(monkeypatch)
+
+
+def test_parts_of_a_print_time_fold_are_never_resumed(monkeypatch, tmp_path):
+    # a stopped refit resumes from its parts: the old names must not feed a new fold
+    _stub_models(monkeypatch, _tiny_raw())
+    clean, old = tmp_path / "clean", tmp_path / "old"
+    clean.mkdir()
+    old.mkdir()
+    n = len(S.fold_predictions(clean, clean))
+    assert n > 0
+    np.save(old / "part_2025_minutes.npy", np.full(n, -999.0))
+    for st in S.nb.BASE_STATS:
+        np.save(old / f"part_2025_{st}.npy", np.full(n, -999.0))
+    got = S.fold_predictions(old, old)
+    assert (got["min_hat"] == 30.0).all() and (got["mu_points"] == 5.0).all()
+
+
+def test_a_fold_on_this_read_is_kept_and_read_back(monkeypatch, tmp_path):
+    # the resume still works: built once, then no rebuild
+    _stub_models(monkeypatch, _tiny_raw())
+    a = S.fold_predictions(tmp_path, tmp_path)
+
+    def reached(*x, **k):
+        raise AssertionError("rebuilt a fold it already holds")
+
+    monkeypatch.setattr(S.nb, "load_cache", reached)
+    b = S.fold_predictions(tmp_path, tmp_path)
+    pd.testing.assert_frame_equal(a, b)
+
+
 # ── end to end: through the harness, the files and the verdict ──────────────
 
 def test_credit_compares_each_anchored_cell_with_its_own_reference_kind():

@@ -19,7 +19,7 @@ judges a cell, and no cut, constant or rule below was chosen from a betting resu
        (OffsetLogit, choose_C from models/nhl_moneyline_anchored.py, imported unchanged), one model
        per (market, reference kind), fitted on seasons before the graded one. Offers at the
        reference line only. EV >= 0.01 / 0.02 / 0.04. 2024-25 and 2025-26 pooled; 2023-24 is a
-       fitting season only.
+       fitting season only. An injury report counts as known 30 minutes after its printed time.
 
   A PROPOSITION IS ONE "GAME" TO THE HARNESS. (game, player, market) gets an integer id, a row in
   the games table with its settling stat as the home score and 0 as the away score, and its offers
@@ -98,6 +98,7 @@ CONTROL_OL, CONTROL_AN, CONTROL_SAME = "control_OL_blind", "control_AN_lean", "c
 MIN_MODEL_ROWS = 300                      # record 8.1's line
 LOW_SHARE = 0.5                           # a placebo run below this repeats more real bets than it changes
 DISAGREE_LIMIT = 3.0
+REPORT_LAG_MIN = 30                       # section 6.1 of the record: a report is known 30 minutes after print
 # Report inputs read 0 where no report covers the game; the others read the training mean.
 REPORT_INPUTS = ("tm_o_min", "d_o_min", "tm_q_min", "opp_o_min", "own_q")
 OTHER_INPUTS = ("disagree", "min_hat", "is_home", "rest", "b2b", "pace_l", "opp_pace_l")
@@ -342,8 +343,8 @@ def fold_widths(preds: pd.DataFrame) -> dict:
 
 def anchored_table(ref: pd.DataFrame, props: pd.DataFrame, preds: pd.DataFrame, widths: dict) -> pd.DataFrame:
     """One row per proposition with a reference and a projection: the offset and every input as of the
-    snapshot. Out players and players under 10 career games have no row (fold predictions hold only
-    nb.usable rows)."""
+    snapshot, a report read REPORT_LAG_MIN after print (lab_inputs). Out players and players under 10 career
+    games have no row (fold predictions hold only nb.usable rows)."""
     p = props[["prop_id", "game_id", "player_id", "market", "season", "game_date"]].merge(ref, on="prop_id")
     pr = preds[preds["season"].isin(SEASONS)].drop_duplicates(["game_id", "player_id"])
     pr = pr[pr["status"].astype(object) != "Out"]
@@ -770,20 +771,53 @@ def card_propositions(r: pd.DataFrame, props: pd.DataFrame, preds: pd.DataFrame,
 FOLD_THREADS = int(os.environ.get("NBA_S_FOLD_THREADS", "1"))
 
 
+def report_as_known(report: pd.DataFrame, decisions: pd.DataFrame, lag_min: int = REPORT_LAG_MIN) -> pd.DataFrame:
+    """The compact report the projection reads, each row stamped with when it could be known: printed time plus
+    lag_min. The shift has to land before pj.compact_report, which keeps only each team's latest report at or before
+    the decision: shifted after it, the earlier report a late one displaced is already gone. (The shape of
+    scripts/nba_prop_model_verify.collapse_report's lag. Everything downstream compares these stamps with the decision,
+    so nothing else adds a lag.)"""
+    r = pj.collapse_official(report)
+    r["report_ts"] = r["report_ts"] + pd.Timedelta(minutes=lag_min)
+    return pj.compact_report(r, decisions)
+
+
+def lab_inputs(cache: Path, lag_min: int = REPORT_LAG_MIN) -> tuple[dict, pd.DataFrame]:
+    """scripts/nba_prop_projection_train.research_inputs, but for reading the report through report_as_known. The
+    shipped file is not this lab's to change, and a test holds this copy to it at lag 0."""
+    from scripts.nba_prop_projection_train import LAST_RESEARCH_DATE
+    raw = nb.load_cache(cache, with_props=True, with_lines=False)
+    props = raw["nba_props"]
+    decisions = nb.decisions_for(raw, props[props.game_date < LAST_RESEARCH_DATE])
+    report = report_as_known(raw["nba_injury_report"], decisions, lag_min)
+    data = pj.worker_data(raw["nba_games"], raw["nba_schedule"], raw["nba_player_game_log"], report, decisions)
+    return data, decisions
+
+
+def fold_file(work: Path, season: int) -> Path:
+    """A fold is named for the report lag it was fitted on, so no other read can ever load it."""
+    return Path(work) / f"pred_{season}_lag{REPORT_LAG_MIN}.parquet"
+
+
+def part_file(work: Path, season: int, what: str) -> Path:
+    """One model's predictions inside a fold, named for the lag too: a stopped refit resumes from these."""
+    return Path(work) / f"part_{season}_lag{REPORT_LAG_MIN}_{what}.npy"
+
+
 def fold_predictions(cache: Path = H.CACHE, work: Path = WORK) -> pd.DataFrame:
     """Season S's rostered rows predicted by a fold fitted on 2018-19 .. S-1: minutes and all seven base
-    stats' means on the worker's inputs (record 4.5). The earlier stored folds are gone, so each model's
-    predictions are refitted once and cached in `work`, one file per fold and model, so a stopped refit
-    resumes. Threads are held to FOLD_THREADS: the model is unchanged, only how many cores fit it."""
-    from scripts.nba_prop_projection_train import research_inputs
+    stats' means on the worker's inputs (record 4.5), reading a report REPORT_LAG_MIN after print. The earlier
+    stored folds are gone, so each model's predictions are refitted once and cached in `work`, one file per
+    fold and model, so a stopped refit resumes. Threads are held to FOLD_THREADS: the model is unchanged, only
+    how many cores fit it."""
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
-    files = {S: work / f"pred_{S}.parquet" for S in FOLDS}
+    files = {S: fold_file(work, S) for S in FOLDS}
     if not all(f.exists() for f in files.values()):
         t0 = time.time()
         for d in (nb.XGB_MIN, nb.XGB_COUNT):
             d["n_jobs"] = FOLD_THREADS
-        data, dec = research_inputs(Path(cache))
+        data, dec = lab_inputs(Path(cache))
         fr = nb.build_frame(data, dec, with_lines=False)
         say(f"projection frame {fr.shape} in {time.time() - t0:.0f}s; fitting on {FOLD_THREADS} threads")
         use = nb.usable(fr)
@@ -792,7 +826,7 @@ def fold_predictions(cache: Path = H.CACHE, work: Path = WORK) -> pd.DataFrame:
                 continue
             tr = fr[use & fr.played & fr.season.between(nb.FIRST_TRAIN_SEASON, S - 1)]
             te = fr[use & (fr.season == S)]
-            part = work / f"part_{S}_minutes.npy"
+            part = part_file(work, S, "minutes")
             if part.exists():
                 mins = np.load(part)
             else:
@@ -802,7 +836,7 @@ def fold_predictions(cache: Path = H.CACHE, work: Path = WORK) -> pd.DataFrame:
             out = te[list(FRAME_KEEP)].copy()
             out["min_hat"] = mins
             for st in nb.BASE_STATS:
-                part = work / f"part_{S}_{st}.npy"
+                part = part_file(work, S, st)
                 if part.exists():
                     out[f"mu_{st}"] = np.load(part)
                     continue
@@ -1088,6 +1122,7 @@ def smoke_report(prep: Prep, preds: pd.DataFrame) -> dict:
     pd.set_option("display.width", 220)
     pd.set_option("display.max_columns", 40)
     pd.set_option("display.max_rows", 200)
+    print(f"Injury reports read {REPORT_LAG_MIN} minutes after their printed time (AN, its control and the card's overlap).")
     extremes(prep)
     print("\nGames with a decision by season:",
           prep.props.drop_duplicates("game_id").groupby("season").size().to_dict())
