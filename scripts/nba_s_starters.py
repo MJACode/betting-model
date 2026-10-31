@@ -124,12 +124,12 @@ FRAMES_VERSION = 2
 # Fit before any cell was graded and registered in the doc's counts section; a
 # refit that returns anything else stops --full.
 REGISTERED_BETA: dict = {
-    (2024, "spreads_h1"): 1.072430875313576, (2024, "spreads_q1"): 2.153234329824304,
-    (2024, "totals_h1"): -1.4738829393566564, (2024, "totals_q1"): -0.04941554820134783,
-    (2025, "spreads_h1"): 0.8872614617099474, (2025, "spreads_q1"): 2.23526200788532,
-    (2025, "totals_h1"): -0.38513241274123466, (2025, "totals_q1"): 0.09766361126038543,
-    (2026, "spreads_h1"): 1.4344046772169095, (2026, "spreads_q1"): 2.0542636654710607,
-    (2026, "totals_h1"): -0.19666602107331368, (2026, "totals_q1"): 0.44943074597479427}
+    (2024, "spreads_h1"): 0.9411084472871227, (2024, "spreads_q1"): 2.107162026982248,
+    (2024, "totals_h1"): -1.68714999789803, (2024, "totals_q1"): -0.098573933763044,
+    (2025, "spreads_h1"): 0.7863756878703179, (2025, "spreads_q1"): 2.203032914132867,
+    (2025, "totals_h1"): -0.5410796090850172, (2025, "totals_q1"): 0.06025273111144231,
+    (2026, "spreads_h1"): 1.3755058880342714, (2026, "spreads_q1"): 2.0280488442860056,
+    (2026, "totals_h1"): -0.3293699607192663, (2026, "totals_q1"): 0.4173753654979911}
 BETA_TOLERANCE = 1e-6
 
 assert len(MARKETS) * 2 * 4 == EXPECTED_CELLS

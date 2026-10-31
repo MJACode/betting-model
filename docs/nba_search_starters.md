@@ -270,12 +270,12 @@ highest cell in each market.
 |---|---|---|---|
 | First-quarter spread | 0.55 to 0.85 | 0.64 to 0.96 | 0.45 to 0.81 |
 | First-quarter total | 0.41 to 0.55 | 0.46 to 0.63 | 0.00 to 0.01 |
-| First-half spread | 0.66 to 0.89 | 0.76 to 1.00 | 0.27 to 0.73 |
-| First-half total | 0.40 to 0.52 | 0.45 to 0.59 | 0.00 to 0.02 |
+| First-half spread | 0.66 to 0.90 | 0.76 to 1.00 | 0.25 to 0.67 |
+| First-half total | 0.40 to 0.52 | 0.45 to 0.59 | 0.00 to 0.03 |
 
 - **The middle column is a limit of the cell, not of the placebo.** A cell that bets half of a market's
   games repeats half of them under any shuffle, so its limit is 1 minus the share of games it bets. The
-  totals' low shares come from that breadth: the first-quarter under at gap 0.25 bets 1,983 of 3,667
+  totals' low shares come from that breadth: the first-quarter under at gap 0.25 bets 1,986 of 3,667
   games.
 - **A date is not the limit.** 0.14% of the market-game rows are alone on their date, and the median game
   shares its date with 8 others. The registered shuffle sits about 10 points under the limit because
@@ -356,24 +356,42 @@ No game with a purchase lacks a trusted period score, so none loses its bet for 
 These are the numbers section 4.5 registers. `--full` stops on any refit more than 0.000001 away from
 them. A second build of the frames from the saved engine returned them unchanged.
 
+**Re-registered 2026-10-31, before any cell was graded.** Section 4.3's full-game check took one game out
+of the fit: Miami at Houston, 2021-12-31. Miami had exactly five available players, so its period ratings
+carried five players and its full-game rating 4.18. The game's first-half margin tilt read 3.72 points
+toward Miami, 14 times the spread of all fit games, and that one game moved all 12 slopes. Toronto at
+Cleveland (2021-12-26) also misses 240, with four available players, but the period check already had it
+out. No graded game has the fault: 0 of 3,667 miss 240, and every saved number for them is unchanged.
+Sections 7 and 11.3 to 11.6 are refreshed from the same run. The most any cell's bets moved is from 648
+to 628, on the first-half spread's home side at cut 0.5.
+
 | Serves | Fit on | Games | Market | Beta | Standard error | Intercept (not used) | Spread of the tilt points |
 |---|---|---|---|---|---|---|---|
-| 2023-24 | 2020-21 to 2022-23 | 3,538 | First-quarter spread | 2.153234329824304 | 0.53 | -0.09 | 0.26 |
-| | | | First-quarter total | -0.04941554820134783 | 0.61 | 0.29 | 0.23 |
-| | | | First-half spread | 1.072430875313576 | 0.71 | -0.25 | 0.26 |
-| | | | First-half total | -1.4738829393566564 | 0.96 | 0.40 | 0.21 |
-| 2024-25 | 2020-21 to 2023-24 | 4,768 | First-quarter spread | 2.23526200788532 | 0.45 | -0.07 | 0.26 |
-| | | | First-quarter total | 0.09766361126038543 | 0.53 | 0.09 | 0.22 |
-| | | | First-half spread | 0.8872614617099474 | 0.60 | -0.15 | 0.26 |
-| | | | First-half total | -0.38513241274123466 | 0.85 | 0.12 | 0.21 |
-| 2025-26 | 2020-21 to 2024-25 | 5,998 | First-quarter spread | 2.0542636654710607 | 0.40 | -0.10 | 0.27 |
-| | | | First-quarter total | 0.44943074597479427 | 0.49 | 0.06 | 0.21 |
-| | | | First-half spread | 1.4344046772169095 | 0.53 | -0.19 | 0.27 |
-| | | | First-half total | -0.19666602107331368 | 0.78 | 0.10 | 0.20 |
+| 2023-24 | 2020-21 to 2022-23 | 3,537 | First-quarter spread | 2.107162026982248 | 0.54 | -0.08 | 0.26 |
+| | | | First-quarter total | -0.098573933763044 | 0.61 | 0.29 | 0.23 |
+| | | | First-half spread | 0.9411084472871227 | 0.73 | -0.25 | 0.25 |
+| | | | First-half total | -1.68714999789803 | 0.96 | 0.41 | 0.21 |
+| 2024-25 | 2020-21 to 2023-24 | 4,767 | First-quarter spread | 2.203032914132867 | 0.45 | -0.07 | 0.26 |
+| | | | First-quarter total | 0.06025273111144231 | 0.53 | 0.09 | 0.22 |
+| | | | First-half spread | 0.7863756878703179 | 0.62 | -0.15 | 0.26 |
+| | | | First-half total | -0.5410796090850172 | 0.85 | 0.13 | 0.21 |
+| 2025-26 | 2020-21 to 2024-25 | 5,997 | First-quarter spread | 2.0280488442860056 | 0.40 | -0.10 | 0.27 |
+| | | | First-quarter total | 0.4173753654979911 | 0.49 | 0.06 | 0.21 |
+| | | | First-half spread | 1.3755058880342714 | 0.54 | -0.19 | 0.26 |
+| | | | First-half total | -0.3293699607192663 | 0.78 | 0.11 | 0.20 |
+
+What the re-registration moved:
+
+| Market | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|
+| First-quarter spread | 2.153 to 2.107 | 2.235 to 2.203 | 2.054 to 2.028 |
+| First-quarter total | -0.049 to -0.099 | 0.098 to 0.060 | 0.449 to 0.417 |
+| First-half spread | 1.072 to 0.941 | 0.887 to 0.786 | 1.434 to 1.376 |
+| First-half total | -1.474 to -1.687 | -0.385 to -0.541 | -0.197 to -0.329 |
 
 - **The first-quarter spread's slope is about two and clear of zero.** Over earlier seasons, a point of
   tilt came with about two points of first-quarter margin beyond the league-share number.
-- **The total slopes cannot be told from zero.** All six sit within 1.6 standard errors of it.
+- **The total slopes cannot be told from zero.** All six sit within 1.8 standard errors of it.
 
 ### 11.3 How far the projection sits from the period market
 
@@ -382,20 +400,21 @@ tilt points: how much of a tilt point the books' number already holds. No result
 
 | Market | Gap | Gap, control | The tilt's part | Tilt points | Correlation, control's gap with the tilt's part | The books' slope |
 |---|---|---|---|---|---|---|
-| First-quarter spread | 0.59 | 0.55 | 0.58 | 0.27 | -0.46 | 0.94 |
-| First-quarter total | 1.42 | 1.43 | 0.06 | 0.19 | -0.10 | -0.11 |
-| First-half spread | 0.68 | 0.70 | 0.30 | 0.27 | -0.27 | 0.71 |
-| First-half total | 2.92 | 2.92 | 0.18 | 0.18 | -0.03 | -0.13 |
+| First-quarter spread | 0.59 | 0.55 | 0.57 | 0.27 | -0.46 | 0.94 |
+| First-quarter total | 1.42 | 1.43 | 0.06 | 0.19 | -0.11 | -0.11 |
+| First-half spread | 0.68 | 0.70 | 0.28 | 0.27 | -0.27 | 0.71 |
+| First-half total | 2.92 | 2.92 | 0.21 | 0.18 | -0.03 | -0.13 |
 
 - **The control's column equals §9.6's** (0.55, 1.43, 0.70, 2.92), so the base is the same number that
   search graded.
 - **The search has something to say on the first-quarter spread, some on the first-half spread and
   almost nothing on the totals.** The tilt's part is as large as the control's gap on the first, under
-  half of it on the second, and 4% and 6% of it on the two totals.
-- **The total cells are their controls** (11.5). Their bets are 95% to 100% the control's, so a total
-  cell cannot show what the starters add. They are graded as registered.
+  half of it on the second, and 4% and 7% of it on the two totals.
+- **The total cells are their controls** (11.5). Their bets are 94% to 100% the control's, so a total
+  cell cannot show what the starters add. They are graded as registered, and section 8 gives them no
+  credit.
 - **The books already hold the tilt in part.** They move 0.94 of a tilt point on the first-quarter spread
-  against the earlier seasons' 2.05 to 2.24, and 0.71 on the first-half spread against 0.89 to 1.43. That
+  against the earlier seasons' 2.03 to 2.20, and 0.71 on the first-half spread against 0.79 to 1.38. That
   difference is the whole case for an edge here, and it is what the cells test.
 
 **How well the expected minutes did** (root mean square error per player row at T against what happened;
@@ -421,14 +440,14 @@ A game counts on the side its gap favours. These are games, not bets.
 
 | Market | Side | Below the lowest cut | Band 1 | Band 2 | Band 3 | Top band |
 |---|---|---|---|---|---|---|
-| First-quarter spread (0.25 / 0.5 / 0.75 / 1) | home | 596 | 543 | 385 | 206 | 190 |
-| | away | 628 | 478 | 330 | 153 | 158 |
-| First-quarter total (same cuts) | over | 33 | 30 | 71 | 166 | 1,353 |
-| | under | 31 | 79 | 163 | 302 | 1,439 |
-| First-half spread (0.5 / 1 / 1.5 / 2) | home | 1,078 | 454 | 141 | 45 | 8 |
-| | away | 1,057 | 531 | 267 | 64 | 22 |
-| First-half total (same cuts) | over | 7 | 4 | 22 | 87 | 1,510 |
-| | under | 14 | 23 | 86 | 191 | 1,723 |
+| First-quarter spread (0.25 / 0.5 / 0.75 / 1) | home | 593 | 548 | 382 | 207 | 185 |
+| | away | 639 | 476 | 330 | 155 | 152 |
+| First-quarter total (same cuts) | over | 31 | 31 | 71 | 171 | 1,346 |
+| | under | 31 | 80 | 158 | 302 | 1,446 |
+| First-half spread (0.5 / 1 / 1.5 / 2) | home | 1,087 | 438 | 139 | 44 | 7 |
+| | away | 1,084 | 521 | 262 | 64 | 21 |
+| First-half total (same cuts) | over | 8 | 5 | 23 | 96 | 1,499 |
+| | under | 13 | 23 | 79 | 190 | 1,731 |
 
 Bar 5 judges a band once it has 30 bets. **On the totals the bands below the top hold few games: the cuts
 were fixed by §9.2's rule and most games clear all of them.**
@@ -437,62 +456,66 @@ were fixed by §9.2's rule and most games clear all of them.**
 
 An offer at a deciding book at −200 or better; counted, never graded.
 
-| Market | Side | Cut | 2023-24 | 2024-25 | 2025-26 | Pooled | Control, pooled | Share also the control's |
-|---|---|---|---|---|---|---|---|---|
-| First-quarter spread | home | 0.25 | 493 | 454 | 377 | 1,324 | 1,168 | 0.53 |
-| | | 0.5 | 297 | 285 | 199 | 781 | 614 | 0.39 |
-| | | 0.75 | 155 | 140 | 101 | 396 | 329 | 0.32 |
-| | | 1 | 66 | 74 | 50 | 190 | 170 | 0.25 |
-| | away | 0.25 | 318 | 411 | 390 | 1,119 | 1,019 | 0.48 |
-| | | 0.5 | 182 | 251 | 208 | 641 | 613 | 0.43 |
-| | | 0.75 | 79 | 133 | 99 | 311 | 330 | 0.37 |
-| | | 1 | 40 | 74 | 44 | 158 | 138 | 0.29 |
-| First-quarter total | over | 0.25 | 568 | 581 | 471 | 1,620 | 1,615 | 1.00 |
-| | | 0.5 | 563 | 563 | 464 | 1,590 | 1,579 | 0.99 |
-| | | 0.75 | 558 | 510 | 451 | 1,519 | 1,509 | 0.99 |
-| | | 1 | 537 | 404 | 412 | 1,353 | 1,327 | 0.98 |
-| | under | 0.25 | 616 | 625 | 742 | 1,983 | 1,982 | 1.00 |
-| | | 0.5 | 560 | 607 | 737 | 1,904 | 1,903 | 1.00 |
-| | | 0.75 | 451 | 561 | 729 | 1,741 | 1,740 | 1.00 |
-| | | 1 | 264 | 467 | 708 | 1,439 | 1,448 | 0.99 |
-| First-half spread | home | 0.5 | 198 | 264 | 186 | 648 | 575 | 0.70 |
-| | | 1 | 51 | 85 | 58 | 194 | 218 | 0.77 |
-| | | 1.5 | 14 | 27 | 12 | 53 | 76 | 0.79 |
-| | | 2 | 2 | 5 | 1 | 8 | 9 | 0.50 |
-| | away | 0.5 | 269 | 260 | 353 | 882 | 839 | 0.77 |
-| | | 1 | 89 | 114 | 149 | 352 | 393 | 0.81 |
-| | | 1.5 | 18 | 33 | 34 | 85 | 118 | 0.75 |
-| | | 2 | 3 | 10 | 9 | 22 | 12 | 0.32 |
-| First-half total | over | 0.5 | 565 | 586 | 470 | 1,621 | 1,622 | 1.00 |
-| | | 1 | 563 | 584 | 470 | 1,617 | 1,619 | 1.00 |
-| | | 1.5 | 556 | 574 | 465 | 1,595 | 1,606 | 1.00 |
-| | | 2 | 529 | 525 | 454 | 1,508 | 1,531 | 1.00 |
-| | under | 0.5 | 648 | 632 | 736 | 2,016 | 2,020 | 1.00 |
-| | | 1 | 629 | 628 | 736 | 1,993 | 1,984 | 0.99 |
-| | | 1.5 | 569 | 609 | 729 | 1,907 | 1,872 | 0.98 |
-| | | 2 | 443 | 556 | 717 | 1,716 | 1,639 | 0.95 |
+| Market | Side | Cut | 2023-24 | 2024-25 | 2025-26 | Pooled | Control, pooled | Share also the control's | Only the cell's | Only the control's |
+|---|---|---|---|---|---|---|---|---|---|---|
+| First-quarter spread | home | 0.25 | 491 | 455 | 376 | 1,322 | 1,168 | 0.53 | 625 | 471 |
+| | | 0.5 | 294 | 281 | 199 | 774 | 614 | 0.39 | 470 | 310 |
+| | | 0.75 | 155 | 139 | 98 | 392 | 329 | 0.33 | 263 | 200 |
+| | | 1 | 64 | 73 | 48 | 185 | 170 | 0.27 | 135 | 120 |
+| | away | 0.25 | 315 | 409 | 389 | 1,113 | 1,019 | 0.49 | 570 | 476 |
+| | | 0.5 | 179 | 250 | 208 | 637 | 613 | 0.43 | 360 | 336 |
+| | | 0.75 | 75 | 134 | 98 | 307 | 330 | 0.38 | 191 | 214 |
+| | | 1 | 39 | 71 | 42 | 152 | 138 | 0.30 | 106 | 92 |
+| First-quarter total | over | 0.25 | 568 | 580 | 471 | 1,619 | 1,615 | 1.00 | 4 | 0 |
+| | | 0.5 | 563 | 562 | 463 | 1,588 | 1,579 | 0.99 | 9 | 0 |
+| | | 0.75 | 557 | 509 | 451 | 1,517 | 1,509 | 0.99 | 9 | 1 |
+| | | 1 | 534 | 401 | 411 | 1,346 | 1,327 | 0.98 | 25 | 6 |
+| | under | 0.25 | 619 | 625 | 742 | 1,986 | 1,982 | 1.00 | 5 | 1 |
+| | | 0.5 | 561 | 608 | 737 | 1,906 | 1,903 | 1.00 | 7 | 4 |
+| | | 0.75 | 457 | 562 | 729 | 1,748 | 1,740 | 0.99 | 14 | 6 |
+| | | 1 | 268 | 469 | 709 | 1,446 | 1,448 | 0.99 | 14 | 16 |
+| First-half spread | home | 0.5 | 187 | 259 | 182 | 628 | 575 | 0.74 | 166 | 113 |
+| | | 1 | 49 | 85 | 56 | 190 | 218 | 0.81 | 37 | 65 |
+| | | 1.5 | 14 | 26 | 11 | 51 | 76 | 0.84 | 8 | 33 |
+| | | 2 | 1 | 5 | 1 | 7 | 9 | 0.71 | 2 | 4 |
+| | away | 0.5 | 264 | 255 | 347 | 866 | 839 | 0.79 | 179 | 152 |
+| | | 1 | 83 | 114 | 149 | 346 | 393 | 0.84 | 55 | 102 |
+| | | 1.5 | 17 | 34 | 33 | 84 | 118 | 0.79 | 18 | 52 |
+| | | 2 | 3 | 9 | 9 | 21 | 12 | 0.33 | 14 | 5 |
+| First-half total | over | 0.5 | 565 | 586 | 470 | 1,621 | 1,622 | 1.00 | 0 | 1 |
+| | | 1 | 563 | 584 | 469 | 1,616 | 1,619 | 1.00 | 1 | 4 |
+| | | 1.5 | 554 | 574 | 465 | 1,593 | 1,606 | 1.00 | 1 | 14 |
+| | | 2 | 521 | 523 | 453 | 1,497 | 1,531 | 1.00 | 5 | 39 |
+| | under | 0.5 | 648 | 632 | 736 | 2,016 | 2,020 | 1.00 | 1 | 5 |
+| | | 1 | 629 | 628 | 736 | 1,993 | 1,984 | 0.99 | 14 | 5 |
+| | | 1.5 | 572 | 613 | 729 | 1,914 | 1,872 | 0.97 | 56 | 14 |
+| | | 2 | 447 | 560 | 717 | 1,724 | 1,639 | 0.94 | 100 | 15 |
 
 - **Seven of the 32 cells cannot reach 200 bets** and fail bar 1 by construction: the first-quarter spread
-  at cut 1 on both sides (190, 158), and the first-half spread at 1 (home, 194), 1.5 (53, 85) and 2 (8,
-  22). They are graded and reported as "too few games to tell".
-- **The first-quarter spread is where the tilt changes the bets:** only 25% to 53% of its bets are also
+  at cut 1 on both sides (185, 152), and the first-half spread at 1 (home, 190), 1.5 (51, 84) and 2 (7,
+  21). They are graded and reported as "too few games to tell".
+- **The first-quarter spread is where the tilt changes the bets:** only 27% to 53% of its bets are also
   the control's. So those eight cells are the real test.
+- **The last two columns are what section 8's credit rule rests on.** On the 16 total cells, 0 to 100
+  bets are only the cell's and 0 to 39 only the control's. On the first-quarter spread it is 106 to 625
+  and 92 to 476; on the first-half spread, 2 to 179 and 4 to 152.
 - **2025-26 leans to the under on both totals** (742 under against 471 over at the first quarter's lowest
-  cut; 625 against 581 in 2024-25). The cells' bets are the control's there, so the lean comes from the
+  cut; 625 against 580 in 2024-25). The cells' bets are the control's there, so the lean comes from the
   league-share base, not the tilt. Bar 4, the blind bet, is what answers it.
 
 ### 11.6 What the rest of the smoke run measured
 
-- **The placebo on the real prices** is section 7's table, unchanged on this run: the mean share of
-  placebo bets differing from the real bets is 0.61 for the cells and 0.61 for the controls.
+- **The placebo on the real prices** is section 7's table: the mean share of placebo bets differing from
+  the real bets is 0.61 for the cells and 0.61 for the controls.
 - **The extremes and the impossible-number rule** read as section 4.7 states.
 - **The lab's full-game team ratings are the engine's.** The largest difference from `P.project` on 40
   real games per season at their T is 0.00000000000002 points per 100 possessions, and 0 on pace.
-- **The clock.** One placebo run takes 0.005 to 0.006 seconds (0.16 to 0.19 frame by frame). The two
-  paths agreed on the real offers with made-up scores. One cell without its placebo takes 2.0 to 2.3
-  seconds. Setup, with the engine and the market pricing saved, took 1.9 minutes.
-- **`--full` is projected at 6 minutes with everything saved.** With both saved files gone it is 114
-  minutes: the engine's 6,026 seconds and the market pricing's 463 as they were built, plus those 6.
+- **The clock.** One placebo run takes 0.004 seconds (0.09 to 0.11 frame by frame). The two paths agreed
+  on the real offers with made-up scores. One cell without its placebo takes 1.3 to 1.4 seconds. Setup,
+  with the engine, the market pricing and the frames saved, took 0.7 minutes.
+- **`--full` is projected at 3.5 minutes with everything saved.** With the engine and the market pricing
+  gone it is 112 minutes: the engine's 6,026 seconds and the market pricing's 463 as they were built,
+  plus those 3.5.
 - **Peak memory in `--smoke` was 2.9 GB.** The engine's own build did not record its peak.
 - **`--full`'s own path ran on the real cache up to the line before the first cell,** stopped there by a
   scratch script: its coverage check passed and the betas matched. No cell ran.

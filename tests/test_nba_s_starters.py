@@ -710,7 +710,9 @@ def test_a_total_cell_earns_no_credit_for_the_starters_even_when_it_beats_its_co
 def test_the_control_is_read_as_the_league_share_idea_and_a_failing_cell_as_no_one():
     cells = _credit_cells("totals_q1")
     c = S.credit_table(cells)
-    assert set(c.loc[c["family"] == S.CONTROL, "counts_for"]) == {S.LEAGUE_IDEA}
+    k = c[c["family"] == S.CONTROL]
+    assert set(k["counts_for"]) == {S.LEAGUE_IDEA}
+    assert bool(k["creditable"].all()) and bool(k["credited"].all())        # the rule reaches the S1 cells only
     failing = S.credit_table(cells.assign(pool_ci95_lo=-0.01))
     assert set(failing["counts_for"]) == {""} and not failing["credited"].any()
 
@@ -723,11 +725,16 @@ def test_a_spread_cell_that_passes_and_loses_to_its_control_is_not_the_starters(
 
 
 def test_the_credit_report_gives_a_total_pass_to_the_league_share_idea(monkeypatch, capsys):
-    monkeypatch.setattr(V, "load_cells", lambda results: _credit_cells("totals_h1"))
+    cells = _credit_cells("totals_h1")
+    # one spread cell fails a bar, so the three counts below are three different numbers
+    one = (cells["family"] == "S1") & (cells["market"] == "spreads_q1") & (cells["cut_index"] == 0)
+    cells.loc[one, "pool_ci95_lo"] = -0.01
+    monkeypatch.setattr(V, "load_cells", lambda results: cells)
     S.credit(Path("unused"))
     out = capsys.readouterr().out
-    assert "S1: 6 cells, 6 pass, 3 credited" in out
+    assert "S1: 6 cells, 5 pass, 2 credited" in out
     assert "3 total cells pass and read as the league-share idea's" in out
+    assert S.LEAGUE_IDEA in out and S.STARTERS_IDEA in out
 
 
 # ── nothing here grades a real bet before --full ────────────────────────────
