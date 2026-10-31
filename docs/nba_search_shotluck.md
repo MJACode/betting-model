@@ -200,14 +200,16 @@ markets it holds, as every earlier lab's does. The first version of this lab cou
 holding team totals. It was found by a checker before any grade.
 
 - **What it would have done:** team totals exist on 1,138 of 1,230 games in 2023-24, so it read 92.1%
-  there. `--full` would have dropped 2023-24 from all 16 team-total cells without saying so, and judged
-  them on 2024-25 and 2025-26 against the three seasons registered above.
+  there. `--full` would have dropped 2023-24 from all 16 team-total cells and judged them on 2024-25 and
+  2025-26, against the three seasons registered above. Only a column in each cell's row would have
+  recorded it: `--smoke` did not print it, and section 9's counts pool all three seasons regardless.
 - **What the check reads now:** 2023-24 99.6% (1,225 of 1,230 games have a purchase inside the 45-75
   minute window), 2024-25 99.5%, 2025-26 99.0%.
 - **What does not move:** a game's decision time differs on 0 of the 3,575 games both ways of counting
   share, and the 74,670 team-total offers are identical, read without any result. The 92 games of
   2023-24 with a purchase and no team total have a decision time and no offer, so they place no bet.
-  The population file's "games with a time" for 2023-24 reads 1,225, where the old count gave 1,133.
+  Games with a decision time in 2023-24 count 1,225, where the old count gave 1,133, and `--full`'s
+  population file will read the same frame.
 - **The guard:** `--smoke` and `--full` print the seasons each group asks for and what the check keeps,
   and refuse to run if an asked season would drop.
 
