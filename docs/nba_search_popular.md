@@ -1,0 +1,246 @@
+# NBA search: the popular-team tax (pre-registered 2026-10-30, before any bet in it was graded)
+
+mike, 2026-10-30, on the NBA having no spread or moneyline model: *"whatever is missing, find
+it"*. This is rank 5 of that day's sweep of what is missing.
+
+**The idea.** Casual money lands on the same teams game after game. If books shade those teams'
+lines rather than balance them, the popular side is overpriced by a predictable amount. A team's
+average share of public tickets in its EARLIER games is known before tip. So: bet against the
+habitually backed team when the two teams' popularity differs a lot, on the full-game spread and
+moneyline, and bet the total under when both teams habitually draw over tickets.
+
+**Evidence going in.**
+
+- For: popularity persists inside a season. Each team's October-December spread ticket share
+  against its January-May share correlates 0.66 / 0.63 / 0.49 / 0.70 / 0.61 / 0.63 across
+  2020-21 to 2025-26 (measured 2026-10-30 on the rows in 1 below).
+- Against: Feddersen, Humphreys and Soebbing (Journal of Sports Economics 2018, 33,000 NBA games
+  1981-2012) found books offer favourable spreads on popular-team games and that informed bettors
+  earned no higher return. So the prior is low.
+
+**What earlier searches did and did not cover.**
+
+- The second search graded "fading the public" only as a control. It reads a game's own pre-tip
+  ticket split, and the stored history is the closing split, known only after tip, so that control
+  has no bets before 2026-27 (`docs/nba_models_2026.md` 6.3, 6.5, third amendment).
+- No search has used a team's ticket habit from its earlier games. That is the only thing tested
+  here. A game's own closing split is never read for that game.
+- The sweep's rank 8 (fade the same game's closing split, labelled as look-ahead) is a different
+  idea and is not tested here.
+
+**Written before any bet in this search was graded. Nothing below changes after a result is seen;
+a later change gets its own dated line and reason.** Lab: `scripts/nba_s_popular.py`. Tests:
+`tests/test_nba_s_popular.py`. Pass or fail: `python -m scripts.nba_game2_verdict --results DIR
+--house5`, the bars of `docs/nba_models_2026.md` 9.1, then the credit line in 7. No data is
+bought. The builder ran no grade: the lab's `--smoke` reads prices, ticket shares and earlier
+results for market pricing only, and whoever runs `--full` grades it.
+
+## 1. Data
+
+- **Prices:** `nba_odds`, full-game spread, moneyline and total, purchased slate fetches, read by
+  the shared harness (`H.load`, `scripts/nba_game_harness.py`). 2,598,846 pre-game rows on 7,230
+  games, 2020-21 to 2025-26. The seventh search's 5-minute purchase around injury reports is left
+  out by `H.load`.
+- **Tickets:** `nba_public_splits`, the closing rows: `capture_kind = 'archive_undated'`,
+  `endpoint = 'v1'`, `quality IS NULL`, a matched `game_id`, a non-null `tickets_pct`. Games per
+  season with such rows: 960 / 1,215 / 1,216 / 1,158 / 1,230 / 1,157 (2020-21 to 2025-26).
+  - The `quality` filter removes the reversed 2022-03-09 slate (`reversed_at_source`, 72 rows) and
+    the listings rewritten more than 400 minutes after tip (`late_rewrite`, 1,706 rows).
+  - **A flagged game can still be bet.** The filter only stops its tickets from counting toward
+    later games. Its own price is fine and the rule never reads its own split.
+  - A closing split is known only after its game has started, and a later game is decided on a
+    later date, so it is known by then (the rule in 2 is strictly earlier dates).
+- **National television:** `nba_schedule.national_tv`, regular season. Filled for 274 games of
+  2020-21 and 306 of 2025-26; empty for the four seasons between. Report only (8).
+- **Read from** the research cache of 2026-10-29 (`NBA_RESEARCH_CACHE`). It is a cache of
+  Supabase; the lab writes nothing to it.
+
+**The check the sweep asked for: the total tickets changed at the source.**
+
+- The share of tickets on the over averages 60.0 / 60.2 / 60.9 / 60.3 in 2020-21 to 2023-24 and
+  81.8 / 82.2 in 2024-25 and 2025-26. April 2024 is 66.6; October 2024 is 84.5.
+- It is not one endpoint: v1 and v2 agree (mean difference 0.00; spread of the difference 0.03 in
+  2024-25 and 0.00 in 2025-26). The ticket count cannot separate it, because it is one number per
+  game for all three markets. So the stored data shows when it happened and that both endpoints
+  carry it. It does not show why.
+- Spread tickets show no such step: the home share averages 47.0 to 48.6 in every season.
+- **What this search does about it:** the over habit in 2 is measured against the league's own
+  mean in the same season, so the level cancels. The habit also persists differently either side
+  of the change: October-December against January-May correlates 0.29 / 0.47 / 0.28 / 0.34 before
+  it and 0.71 / 0.72 after. So the total cells are also reported on 2021-22 to 2023-24 and on
+  2024-25 to 2025-26 apart (8), and a total result is read with that in mind.
+
+**If a cell passes and is built live:** v1 stopped carrying splits on 2026-04-12, so a live model
+reads v2's closing rows of earlier games. On 2025-26 v1 and v2 are the same number on spreads and
+totals (difference 0.00 on 1,107 games).
+
+## 2. Definitions
+
+- **A team's ticket share in a game:** `tickets_pct` on its side of the full-game SPREAD market.
+- **Popularity:** the unweighted mean of that share over the team's earlier games THIS SEASON
+  with a clean row, on dates strictly before today's date, with at least 10 such games. Fewer
+  than 10 for either team: no number, no bet.
+- **The gap:** home popularity minus away popularity, in ticket points. **The popular team** is
+  the one with the higher popularity; **against** is the other team. A gap of exactly 0 is no bet.
+  Strength is the size of the gap.
+- **Both the spread and the moneyline read the spread ticket gap.** Moneyline tickets mostly
+  follow the favourite (their spread across games is about twice the spread market's).
+- **A team's over habit:** the unweighted mean of the over ticket share in its earlier games this
+  season (same rules, at least 10 games), minus the league's mean over the same season's games on
+  dates before today.
+- **The total's strength:** the SMALLER of the two teams' over habits. The sweep says "both teams'
+  mean over-ticket share is high", and the smaller of the two is the plain reading of both. The
+  bet is the under.
+- **Decision point C:** the newest fetch 60 to 180 minutes before tip (`H.decision_times`). Each
+  game is decided once per cell.
+- **The price:** the side's best deciding offer (`config.BEST_LINE_BOOKMAKERS`, Pinnacle and
+  Bovada never) at that book's own number, under the market's fair line (`H.market_fair`:
+  Pinnacle's no-vig where it quotes coherently, else the deciding books' median; priced through
+  the spread of results around Pinnacle's close on earlier seasons, `H.close_dist`). A two-way
+  quote must be coherent (implied sum 1.00 to 1.15). -200 floor. DraftKings alone is reported
+  beside every cell.
+
+### Three changes from the sweep's plan, each made from counts or prices, never a result
+
+1. **The total's cuts are 1 / 2 / 3 points, not 5 / 10 / 15.** Teams differ far less in over habit
+   than in popularity. The sweep's cuts would bet 11 / 0 / 0 games in five seasons. At 1 / 2 / 3
+   the same rule has 942 / 404 / 159 pooled. The 3-point cell is under 200 bets and is registered
+   anyway: its answer is "too few games to tell".
+2. **Decision point D is reported, not registered.** The sweep named C and D. On 7,205 of the
+   7,219 games with both, they are the same fetch (99.8%; lead 60 minutes at the median and at the
+   1st and 99th percentiles of both). Registering both would count one test twice. A live model
+   decides at D, so D is run as a diagnostic beside each cell (`control_POP_at_D`,
+   `control_POPT_at_D`), never judged.
+3. **The sweep's Step 1 was not run before these rules were written.** It regresses the popular
+   side's result, minus Pinnacle's no-vig close, on the gap. That reads the results of the games
+   this search bets, which is grading. It is written by `--full` as a report (8), never a gate.
+
+### Impossible numbers (fixed before any price was selected for a bet)
+
+- **A full-game total 40 or more points from the median of its game's stored totals is not a
+  full-game total and is not eligible.** This is the sixth search's rule (`docs/nba_models_2026.md`
+  10.8). In this load it removes 11 rows on 5 games: Bovada 1.0 on three games of 2020-21 (7 rows),
+  BetMGM 155.5 on NBA_2023-11-24_SAS_GSW (3 rows), Caesars 136.5 on NBA_2026-03-13_UTA_POR (1 row).
+  Nothing lies 20 to 60 points away, so any cut in that range removes the same rows.
+- **Spreads need no such rule:** the largest distance from a game's median stored spread is 15.5
+  points, and every number lies between -24.5 and +22 (the HOME number).
+- **Prices:** a price with a size under 100 is not a price (none stored); an incoherent pair is
+  never an offer (1 stored).
+- **Ticket shares:** a share at or outside 0 and 100 is not a share (none on the clean rows; spread
+  sides run 7 to 93, totals 2 to 98).
+- **A coherent price far from Pinnacle's stays in.** The highest-EV offers at C are moneylines
+  such as NBA_2023-04-08_DEN_UTA home +375 at BetMGM, against Pinnacle's no-vig home chance of
+  0.353 (EV 0.68). Five deciding books stored +360 to +375 at that fetch, so it is not one bad
+  row, and nothing here says which side was stale. It is eligible. The harness reports each cell's
+  units without single-book outlier prices and its units still offered at the next fetch.
+  `--smoke` prints these extremes and the top offers.
+
+### The prices these rules lay (read at C, before any grade)
+
+| Market | Lowest | Median | Highest | Bets on the underdog |
+|---|---|---|---|---|
+| Spread, against the popular team, gap ≥ 5 / 10 / 15 | -120 | -110 | +102 | 81% / 86% / 90% |
+| Moneyline, against the popular team, gap ≥ 5 / 10 / 15 | -200 | +220 / +260 / +295 | +2500 / +2250 / +1300 | 86% / 90% / 92% |
+| Total under | -125 | | +105 | |
+
+So the moneyline cells are long-price underdog bets, sized to win one unit: a bet at +1300 risks
+0.077 units.
+
+## 3. The cells (9)
+
+| Family | Market, side | Decision | Cut | Cells |
+|---|---|---|---|---|
+| POP | full-game spread, against the popular team (a per-game side) | C | gap ≥ 5 / 10 / 15 | 3 |
+| POP | full-game moneyline, against the popular team (a per-game side) | C | gap ≥ 5 / 10 / 15 | 3 |
+| POPT | full-game total, under | C | smaller over habit ≥ 1 / 2 / 3 | 3 |
+| **Total** | | | | **9** |
+
+## 4. Bands (bar 5)
+
+Along the cut within one market and side. Spread and moneyline: [0, 5), [5, 10), [10, 15), 15+.
+Total: [0, 1), [1, 2), [2, 3), 3+. The band just below the cut and every band from the cut up must
+be positive where they hold 30 or more pooled bets (`G5.band_columns`). A band's bets are the
+cell's own choice at the band's lower edge, less the games still chosen at its upper edge.
+
+## 5. Seasons
+
+2021-22 to 2025-26 graded and pooled. The choosing seasons, which the placebo reads, are 2021-22
+to 2024-25 (`H.CHOOSE`). 2020-21 is reported only (`H.REGIME`). Season-to-date numbers start again
+each season. The first 10 or so games of each team's season carry no number.
+
+**The pool is not five equal seasons.** Teams' popularity spread varies a lot by season (team
+standard deviation 2.9 / 8.3 / 5.0 / 6.1 / 6.2 / 5.4 points for 2020-21 to 2025-26), and the cuts
+are in ticket points because the mechanism is. So at gap ≥ 15, 2021-22 holds 237 of the 524 pooled
+spread bets and 2022-23 holds 4. Bar 3 reads only seasons with 30 or more bets.
+
+## 6. Settlement
+
+Full-game final scores, overtime counted (`H.grade`). One unit to win, risk capped at 3. A push
+returns the stake: 0 units, and its risk leaves the denominator. Spread numbers are the HOME number.
+
+## 7. The bars
+
+`docs/nba_models_2026.md` 9.1, unchanged: 200 or more pooled bets; the pooled whole-day bootstrap
+95% interval above zero; at least two seasons with 30 or more bets and all but at most one of them
+positive; beats the blind bet on its dominant real side; the bands; the choosing seasons' return
+above the 95th percentile of 200 placebo runs.
+
+- **Bar 4 here.** Popular teams are mostly favourites, so 81-92% of POP's bets are underdogs. The
+  verdict reads that share and compares each POP cell with the blind underdog on every game with a
+  number. Every POPT bet is an under, so it compares with the blind under on the same games.
+- **The credit line, added because bar 4's comparison is over all games with a number.** A POP
+  cell that passes the six bars is credited to popularity only when its pooled return also beats
+  `control_POP_dog` at the same market and cut: the underdog in the SAME games. Otherwise the
+  answer is "underdogs in lopsided games", not "popular teams". `python -m scripts.nba_s_popular
+  --credit --results DIR` applies it to the verdict's file.
+- **Placebo, 200 runs, seeds 1-200.** Each game's four inputs (both teams' popularity and both
+  teams' over share) move together to another game with a number on the same date, by one
+  permutation per date. Each game keeps its own prices, and the rule is recomputed.
+  - The shuffle runs over every game with a number on the date, not over the games past a cut.
+    Only 0.1-0.5% of games with a number are alone on their date, but 39% of games at gap ≥ 15 are
+    the only such game on their date. Shuffling those alone would repeat the real bets. `--smoke`
+    prints the share of placebo bets that differ from the real bets.
+  - This placebo moves the bet off the underdog as well as off the popular team, because a
+    shuffled game's side comes from another game (`--smoke` prints the underdog share of placebo
+    bets). So it does not separate popularity from being an underdog. Bar 4 and the credit line do
+    that.
+- **Closing-line value** is reported, never a bar (`pool_clv_median`, beside the blind side's).
+- **A thin cell is still reported.** A cell under 200 pooled bets fails bar 1 and its bets, units,
+  return, interval and season split are printed anyway. Its answer is "too few games to tell", not
+  "it loses".
+- **Expected passes by chance:** 9 × 0.025 ≈ 0.23 cells clear bar 2 alone, before correlation, and
+  the three cuts of a market are nested, so fewer distinct tests than that.
+- **A pass is built live** (`CLAUDE.md` 2), with its own EV floor and the prices it lays stated
+  before it ships.
+
+## 8. Controls and reports (never judged, never a cell)
+
+| Name | What it is |
+|---|---|
+| `control_POP_with` | spread and moneyline, WITH the popular team, same games and cuts |
+| `control_POP_dog` | spread and moneyline, the market's underdog, same games and cuts (the credit line) |
+| `control_POPT_over` | total, the over, same games and cuts |
+| `control_POP_at_D`, `control_POPT_at_D` | the registered cells at decision point D |
+| National television report | each registered cell's bets split into national broadcast, NBA TV only and neither, on 2025-26 (and 2020-21 beside it, outside the pool). Those are the only seasons with the flag. Bets, units, return, interval. No bar and no selection reads it. |
+| Total tickets report | each POPT cell on 2021-22 to 2023-24 and on 2024-25 to 2025-26 apart (1) |
+| Step 1 report | the popular side's (or the under's) result minus Pinnacle's no-vig close at the close's number, a push left out, per band and as a slope per ticket point, with a whole-day bootstrap interval. Graded data, so `--full` only. |
+
+## 9. Counts that set the rules (measured 2026-10-30, no result read)
+
+Bets each cell would place at C with a deciding offer at or above the floor. Counted from the
+choice, never the grade:
+
+| Cell | 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 | Pooled 2021-22 on |
+|---|---|---|---|---|---|---|---|
+| Spread, gap ≥ 5 | 256 | 719 | 446 | 579 | 655 | 640 | 3,039 |
+| Spread, gap ≥ 10 | 47 | 435 | 100 | 253 | 317 | 333 | 1,438 |
+| Spread, gap ≥ 15 | 5 | 237 | 4 | 60 | 93 | 130 | 524 |
+| Moneyline, gap ≥ 5 | 250 | 684 | 424 | 566 | 582 | 589 | 2,845 |
+| Moneyline, gap ≥ 10 | 47 | 421 | 96 | 250 | 291 | 315 | 1,373 |
+| Moneyline, gap ≥ 15 | 5 | 235 | 4 | 58 | 87 | 126 | 510 |
+| Total under, habit ≥ 1 | 96 | 146 | 146 | 178 | 250 | 222 | 942 |
+| Total under, habit ≥ 2 | 40 | 38 | 59 | 73 | 130 | 104 | 404 |
+| Total under, habit ≥ 3 | 14 | 7 | 23 | 34 | 69 | 26 | 159 |
+
+The moneyline counts are lower because the -200 floor removes a price when the team bet against
+the public is itself a heavy favourite.
