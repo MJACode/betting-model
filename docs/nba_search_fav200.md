@@ -309,7 +309,7 @@ A cell under 50% with 30 or more real bets is named in section 9.
 Added 2026-10-31, before any cell is graded. **No rule above changed.** Every number here is read from
 prices, or from the model's chance on seasons after its fit. `--smoke` read no result of any bet: each
 grade inside it reads scores replaced by random numbers, and a guard stops the run if a grade is handed
-real ones. Source: `--smoke` on the research cache, commit 1b425472 for the blind, same-number and control rows, and the run just before it for the model's rows, on the same prices.
+real ones. Source: `--smoke` on the research cache, commit 8178c5e3.
 
 ### 9.1 What can reach the 200-bet bar
 
@@ -443,19 +443,20 @@ Every book, every fetch, after the drops. Prices are American odds. The spread i
   on NBA_2022-02-16_WAS_IND, with the other books between 0.0 and -1.5. It is inside the 3-point rule, so it is kept.
   Only the spread control reads it.
 
-**The highest-EV offers, at C.** Three per list. EV here is the offer's price against the list's own fair chance.
+**The highest-EV offers, at C**, on games shorter than -200. Three per list. EV here is the offer's price against the
+list's own fair chance.
 
 | List | Game | Book | The bet | Price | Fair chance | EV |
 |---|---|---|---|---|---|---|
 | same number | NBA_2021-04-19_GSW_PHI | draftkings | PHI | -233 | 0.772 | +0.103 |
 | same number | NBA_2022-04-08_MIL_DET | betrivers | MIL | -263 | 0.769 | +0.061 |
 | same number | NBA_2025-01-18_ATL_BOS | betmgm | BOS | -275 | 0.775 | +0.057 |
-| every favourite | NBA_2022-11-13_MIN_CLE | fanduel | CLE | -116 | 0.660 | +0.228 |
-| every favourite | NBA_2021-04-06_MIL_GSW | betrivers | MIL | -135 | 0.693 | +0.206 |
-| every favourite | NBA_2021-01-27_DAL_UTA | betmgm | UTA | +115 | 0.552 | +0.187 |
-| favourite's spread | NBA_2023-11-22_MIA_CLE | betparx | MIA +1.0 | -108 | 0.609 | +0.199 |
-| favourite's spread | NBA_2025-04-08_BOS_NYK | fanatics | NYK +1.5 | -110 | 0.600 | +0.145 |
-| favourite's spread | NBA_2025-01-15_DAL_NOP | williamhill_us | DAL +1.5 | -105 | 0.584 | +0.141 |
+| every favourite | NBA_2021-04-19_GSW_PHI | betrivers | PHI | -233 | 0.772 | +0.103 |
+| every favourite | NBA_2022-04-08_MIL_DET | betrivers | MIL | -263 | 0.769 | +0.061 |
+| every favourite | NBA_2025-01-18_ATL_BOS | betmgm | BOS | -275 | 0.775 | +0.057 |
+| favourite's spread | NBA_2021-04-19_GSW_PHI | fanduel | PHI -6.0 | -110 | 0.573 | +0.125 |
+| favourite's spread | NBA_2025-03-10_PHI_ATL | betrivers | ATL -9.0 | -112 | 0.578 | +0.124 |
+| favourite's spread | NBA_2025-01-18_ATL_BOS | betmgm | BOS -7.5 | -105 | 0.569 | +0.111 |
 | model | NBA_2023-01-19_CHI_DET | betrivers | CHI | -286 | 0.849 | +0.146 |
 | model | NBA_2024-03-13_CLE_NOP | draftkings | NOP | -205 | 0.734 | +0.092 |
 | model | NBA_2021-11-18_WAS_MIA | fanduel | MIA | -244 | 0.774 | +0.092 |
@@ -527,18 +528,18 @@ set against the real cell's.
 | FAVP2 | D | EV >= 0.01 | 11 | 11.0 | 92% | 74% |
 | FAVP2 | D | EV >= 0.02 | 7 | 7.0 | 94% | 75% |
 | FAVP2 | D | EV >= 0.03 | 6 | 6.0 | 93% | 76% |
-| FAVP1 | A | EV >= 0.02 | 139 | not measured | 84% | 67% |
-| FAVP1 | A | EV >= 0.04 | 45 | not measured | 88% | 62% |
-| FAVP1 | A | EV >= 0.06 | 9 | not measured | 95% | 64% |
-| FAVP1 | A | EV >= 0.08 | 4 | not measured | 93% | 58% |
-| FAVP1 | C | EV >= 0.02 | 141 | not measured | 81% | 62% |
-| FAVP1 | C | EV >= 0.04 | 46 | not measured | 86% | 64% |
-| FAVP1 | C | EV >= 0.06 | 12 | not measured | 92% | 72% |
-| FAVP1 | C | EV >= 0.08 | 7 | not measured | 93% | 68% |
-| FAVP1 | D | EV >= 0.02 | 137 | not measured | 80% | 62% |
-| FAVP1 | D | EV >= 0.04 | 46 | not measured | 86% | 62% |
-| FAVP1 | D | EV >= 0.06 | 12 | not measured | 92% | 76% |
-| FAVP1 | D | EV >= 0.08 | 7 | not measured | 90% | 61% |
+| FAVP1 | A | EV >= 0.02 | 139 | 150.2 | 84% | 67% |
+| FAVP1 | A | EV >= 0.04 | 45 | 40.1 | 88% | 62% |
+| FAVP1 | A | EV >= 0.06 | 9 | 10.4 | 95% | 64% |
+| FAVP1 | A | EV >= 0.08 | 4 | 2.7 | 93% | 58% |
+| FAVP1 | C | EV >= 0.02 | 141 | 141.5 | 81% | 62% |
+| FAVP1 | C | EV >= 0.04 | 46 | 46.1 | 86% | 64% |
+| FAVP1 | C | EV >= 0.06 | 12 | 14.0 | 92% | 72% |
+| FAVP1 | C | EV >= 0.08 | 7 | 4.2 | 93% | 68% |
+| FAVP1 | D | EV >= 0.02 | 137 | 133.2 | 80% | 62% |
+| FAVP1 | D | EV >= 0.04 | 46 | 44.9 | 86% | 62% |
+| FAVP1 | D | EV >= 0.06 | 12 | 13.2 | 92% | 76% |
+| FAVP1 | D | EV >= 0.08 | 7 | 3.6 | 90% | 61% |
 
 **No cell with 30 or more real bets is under 50%.** The lowest such cell is at 76% under the week shuffle
 and 62% under the date shuffle.
@@ -554,10 +555,15 @@ and 62% under the date shuffle.
 
 ### 9.7 Time and memory for `--full`
 
-One placebo run on the real data, the middle of three: 0.085 s for a blind cell, 0.077 s for a same-number cell, 0.069 s for a model cell.
-Projected from that run's own times: **52 minutes** for every cell with 200 placebo runs, the
-loading of the prices excluded. Of that, the model's fit and inputs take 38 minutes. The peak working set was
-2.9 GB. Other jobs ran beside this smoke, so these times are not a best case.
+One placebo run of one cell on the real data, on the path `--full` takes (the same cells at 31 seeds against one): 0.078 s for a blind cell, 0.084 s for a same-number cell, 0.073 s for a model cell.
+Projected from that run's own times: **48 minutes** for every cell with 200 placebo runs, the
+loading of the prices excluded. Of that, the model's fit and inputs take 33 minutes. The peak working set was
+3.1 GB. The whole test suite ran beside this smoke.
+
+A one-off measure with four other jobs running read 0.107 s for a blind cell and 0.274 s for a same-number cell. At
+0.274 s for the same-number and model cells, the total is about 67 minutes. Both are inside the two-hour limit.
+
+**`--full` has not been run.** No cell has been graded.
 
 ---
 
