@@ -29,6 +29,10 @@ def test_points_threes_and_free_throws_come_from_the_plays(lines):
     assert (lines.loc[2, "points"], lines.loc[2, "ft_made"], lines.loc[2, "ft_att"]) == (3, 1, 2)
 
 
+def test_a_made_two_is_not_a_three(lines):
+    assert lines.loc[2, "fg_made"] == 1 and lines.loc[2, "fg3_made"] == 0
+
+
 def test_an_assist_goes_to_the_passer_on_a_made_shot_only(lines):
     assert lines.loc[2, "assists"] == 1 and lines.loc[1, "assists"] == 0
 
@@ -535,6 +539,13 @@ def test_the_registered_cells_are_the_rule_and_the_six_market_cells_at_their_shi
         "player_rebounds_assists": 0.04, "player_threes": 0.04}
     assert S.PM_BANDS == [(-0.01, 0.0), (0.0, 0.01), (0.01, np.inf)]
     assert S.pj_bounds(0.04)[0] == pytest.approx((0.02, 0.04)) and np.isinf(S.pj_bounds(0.04)[-1][1])
+
+
+def test_the_report_switch_reads_a_results_folder(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(S, "report", lambda p: seen.setdefault("p", p))
+    S.main(["--report", str(tmp_path)])
+    assert seen["p"] == tmp_path
 
 
 def test_the_synthetic_checks_pass():

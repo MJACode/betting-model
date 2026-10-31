@@ -1437,6 +1437,16 @@ def synthetic_checks() -> dict:
 
 # ── the two runs ────────────────────────────────────────────────────────────
 
+def peak_memory_gb() -> float | None:
+    """This process's peak memory so far, where psutil is installed."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    info = psutil.Process().memory_info()
+    return round(getattr(info, "peak_wset", info.rss) / 2 ** 30, 2)
+
+
 def refuse_full() -> list[str]:
     why = []
     if os.environ.get(GO_ENV) != "1":
@@ -1483,7 +1493,7 @@ def smoke(cache: Path, work: Path) -> dict:
     print(json.dumps({"placebo_differs_from_real": placebo_null(prep)}, indent=1), flush=True)
     t = timed_placebo(prep)
     print(json.dumps({"timed_placebo": t, "projected_full_minutes": round(t["projected_placebo_minutes"] + 10, 1),
-                      "and_memory_gb_free_needed": 8}, indent=1), flush=True)
+                      "peak_memory_gb_this_run": peak_memory_gb()}, indent=1), flush=True)
     return c
 
 
@@ -1501,9 +1511,26 @@ def full(cache: Path, work: Path) -> None:
     print(f"cells written to {out}: {len(rows)} registered, {len(ctl)} controls")
 
 
+def report(results: Path) -> pd.DataFrame:
+    """What every row carries beside the bars, for the owner after --full: the three postseasons,
+    the three phases, the three leads, DraftKings alone. Prints only; the verdict judges."""
+    from scripts.nba_game2_verdict import load_cells
+    c = load_cells(results)
+    cols = ["family", "market", "side", "cut", "pool_n", "pool_units", "pool_roi", "pool_ci95_lo", "pool_ci95_hi",
+            "n_2024", "roi_2024", "n_2025", "roi_2025", "n_confirm", "roi_confirm", "void_bets",
+            *[f"phase_{p}_{k}" for p in PHASES for k in ("n", "units", "roi")],
+            *[f"lead_{name}_{k}" for name in LEADS for k in ("n", "roi")],
+            "dk_pool_n", "dk_pool_units", "dk_pool_roi", "blind_pool_under", "blind_pool_over",
+            *[f"band{i}_{k}" for i in range(G5.BAND_SLOTS) for k in ("lo", "hi", "n", "roi")]]
+    out = c[[x for x in cols if x in c]]
+    print(out.T.to_string())
+    return out
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--report", type=Path, help="after --full: what each row carries beside the bars")
     g.add_argument("--pull", action="store_true", help="the one read-only pull into the scratch folder")
     g.add_argument("--smoke", action="store_true", help="synthetic checks, then real counts only")
     g.add_argument("--full", action="store_true", help=f"every cell (needs {GO_ENV}=1)")
