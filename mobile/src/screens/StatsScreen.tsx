@@ -254,6 +254,15 @@ import {
   type MatchupTier,
 } from '@/lib/anytimeMatchup';
 import { nflPositionGroup } from '@/lib/positionVsOpponent';
+import {
+  HEADLINE_WRAP_FONT_SCALE,
+  PICKER_AFTER_DISMISS_MS,
+  SHEET_DISMISS_FALLBACK_MS,
+  boardNotesAccessibilityLabel,
+  lineHeadlineNumberOfLines,
+  reducePickerHandoff,
+  type PickerHandoffPhase,
+} from '@/lib/statsBoardA11y';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -456,6 +465,13 @@ export function StatsScreen() {
   // The "hasn't posted lines" note is the switch — an instruction sits with
   // the control that performs it.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Mirrors pickerOpen. A present iOS refuses does not clear the flag, and
+  // writing true again does not present. The sheet hand-off reads this.
+  const pickerOpenRef = useRef(false);
+  const setPickerOpenTracked = (open: boolean) => {
+    pickerOpenRef.current = open;
+    setPickerOpen(open);
+  };
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -496,7 +512,17 @@ export function StatsScreen() {
   const [rankReload, setRankReload] = useState(0);
   const [matchupInfoOpen, setMatchupInfoOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
-  const openPickerAfterNotes = useRef(false);
+  // About sheet → sportsbook picker. iOS presents the picker only after the
+  // sheet has dismissed (reducePickerHandoff). The timer is the fallback
+  // when onDismiss does not arrive, and the short defer after it does.
+  const pickerHandoff = useRef<PickerHandoffPhase>('idle');
+  const pickerHandoffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickerHandoffToken = useRef(0);
+  useEffect(() => {
+    return () => {
+      if (pickerHandoffTimer.current != null) clearTimeout(pickerHandoffTimer.current);
+    };
+  }, []);
   // Default ON: a dash means we hold no rating for that defence, not that the
   // spot is bad, and on an NCAAF Saturday the ungraded rows are the FCS
   // visitors — the softest spots on the board. Excluding them by default made
@@ -2298,7 +2324,11 @@ export function StatsScreen() {
   // Does Hit Rates | Averages still fit on the end of the window row? Read at
   // render rather than cached in state: a Dynamic Type change re-renders the
   // tree, and a stale flag here is a clipped control.
-  const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
+  const fontScale = PixelRatio.getFontScale();
+  // Accessibility sizes wrap the bet headline (it names the bet, and a
+  // one-line cap ellipsizes it). The same cut stacks Hit Rates | Averages.
+  const stackModeTabs = fontScale >= HEADLINE_WRAP_FONT_SCALE;
+  const headlineLines = lineHeadlineNumberOfLines(fontScale);
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // NHL says the bet once, in words ("3 or more shots"), on the caption and
   // on the sheet. Every other sport keeps the ruler's idiom ("25+ Points",
@@ -2636,6 +2666,11 @@ export function StatsScreen() {
     boardNotes.push(ATD_COPY.earlySeason);
   }
   const notesCanSwitch = noLinesNote?.canSwitch === true;
+  // The price column is absent exactly when showOdds is false. That is when
+  // the note explains missing prices. A one-sided book (dirLockNote) keeps
+  // the column, so it stays in the sheet body and is not spoken as "prices
+  // are missing". Dash cells are not mounted in the absent-column case.
+  const missingPriceReason = showOdds ? null : (noLinesNote?.text ?? null);
   // The notes can empty while the sheet is open (a stat change, a refetch);
   // close it then, or it would pop back open on the next note.
   // Not an effect: this sits below the `!stat` early return, so a hook here
@@ -2646,9 +2681,16 @@ export function StatsScreen() {
   const notesButton =
     boardNotes.length > 0 ? (
       <Pressable
-        onPress={() => setNotesOpen(true)}
+        onPress={() => {
+          // A leftover arm (the fallback presented, onDismiss never came)
+          // must not open the picker when this sheet is later dismissed
+          // with Got it.
+          pickerHandoff.current = 'idle';
+          cancelPickerHandoffTimer();
+          setNotesOpen(true);
+        }}
         accessibilityRole="button"
-        accessibilityLabel={`About this board, ${boardNotes.length} note${boardNotes.length > 1 ? 's' : ''}`}
+        accessibilityLabel={boardNotesAccessibilityLabel(boardNotes.length, missingPriceReason)}
         accessibilityHint="Opens notes about this board"
         style={({ pressed }) => [styles.notesBtn, pressed && styles.pressed]}
       >
@@ -2658,6 +2700,55 @@ export function StatsScreen() {
         {noLinesNote ? <View style={styles.notesDot} importantForAccessibility="no" /> : null}
       </Pressable>
     ) : null;
+
+  const cancelPickerHandoffTimer = () => {
+    pickerHandoffToken.current += 1;
+    if (pickerHandoffTimer.current != null) {
+      clearTimeout(pickerHandoffTimer.current);
+      pickerHandoffTimer.current = null;
+    }
+  };
+  // iOS will not present a Modal while another is fading out. The tap arms
+  // the hand-off and closes the sheet; the picker opens from onDismiss,
+  // one beat after the fade, so the presenter is free. The fallback covers
+  // a dropped onDismiss. A release that is not armed (Got it) opens nothing.
+  const onChangeSportsbooks = () => {
+    const step = reducePickerHandoff(
+      pickerHandoff.current,
+      Platform.OS === 'ios' ? 'tap-ios' : 'tap-other',
+    );
+    pickerHandoff.current = step.phase;
+    if (step.closeSheet) setNotesOpen(false);
+    if (step.openPicker) setPickerOpenTracked(true);
+    if (!step.armFallback) return;
+    cancelPickerHandoffTimer();
+    const token = pickerHandoffToken.current;
+    pickerHandoffTimer.current = setTimeout(() => {
+      if (pickerHandoffToken.current !== token) return;
+      pickerHandoffTimer.current = null;
+      // Stay armed. If this present is refused because the sheet is still
+      // up, onDismiss presents again.
+      const released = reducePickerHandoff(pickerHandoff.current, 'fallback');
+      pickerHandoff.current = released.phase;
+      if (released.openPicker) setPickerOpenTracked(true);
+    }, SHEET_DISMISS_FALLBACK_MS);
+  };
+  const onNotesSheetDismiss = () => {
+    const step = reducePickerHandoff(pickerHandoff.current, 'release');
+    pickerHandoff.current = step.phase;
+    if (!step.openPicker) return;
+    cancelPickerHandoffTimer();
+    const token = pickerHandoffToken.current;
+    // The fallback may already have set the flag. If iOS refused that
+    // present, writing true again changes nothing. Drop it, then present
+    // once the sheet has released the screen.
+    if (pickerOpenRef.current) setPickerOpenTracked(false);
+    pickerHandoffTimer.current = setTimeout(() => {
+      if (pickerHandoffToken.current !== token) return;
+      pickerHandoffTimer.current = null;
+      setPickerOpenTracked(true);
+    }, PICKER_AFTER_DISMISS_MS);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -2758,7 +2849,13 @@ export function StatsScreen() {
       {!canHitRate && showOdds && lineHeadline ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText} numberOfLines={1}>{lineHeadline}</Text>
+          <Text
+            style={styles.noLinesText}
+            numberOfLines={headlineLines}
+            accessibilityLabel={lineHeadline}
+          >
+            {lineHeadline}
+          </Text>
         </View>
       ) : null}
 
@@ -3067,7 +3164,7 @@ export function StatsScreen() {
           atdStack={stackAtd}
           matchupOrder={matchupOrder}
           onMatchupSort={() => setMatchupOrder((current) => nextMatchupSort(current))}
-          onOpenBooks={() => setPickerOpen(true)}
+          onOpenBooks={() => setPickerOpenTracked(true)}
         />
       ) : null}
 
@@ -3203,22 +3300,12 @@ export function StatsScreen() {
         title="About this board"
         body={boardNotes.join('\n\n')}
         onClose={() => setNotesOpen(false)}
-        onDismiss={() => {
-          if (!openPickerAfterNotes.current) return;
-          openPickerAfterNotes.current = false;
-          setPickerOpen(true);
-        }}
+        onDismiss={onNotesSheetDismiss}
         action={
           notesCanSwitch
             ? {
                 label: 'Change your sportsbooks',
-                onPress: () => {
-                  // iOS will not present a Modal while another is still
-                  // fading out, so the picker opens from onDismiss there.
-                  if (Platform.OS === 'ios') openPickerAfterNotes.current = true;
-                  else setPickerOpen(true);
-                  setNotesOpen(false);
-                },
+                onPress: onChangeSportsbooks,
               }
             : null
         }
@@ -3231,7 +3318,7 @@ export function StatsScreen() {
       />
       <SportsbookPickerSheet
         visible={pickerOpen}
-        onClose={() => setPickerOpen(false)}
+        onClose={() => setPickerOpenTracked(false)}
         coverageNote={coverageNote}
       />
       <HitModeSheet
@@ -4450,7 +4537,9 @@ function OddsCell({
       );
     }
     // The dash is not read out: the row's own label already says the player and
-    // the stat, and "em dash" is not information.
+    // the stat, and "em dash" is not information. A column that is absent
+    // entirely is explained on the board-notes ⓘ, not on a cell that is not
+    // mounted.
     return (
       <View style={wrapStyle} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
