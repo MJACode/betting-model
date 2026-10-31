@@ -588,6 +588,100 @@ def test_each_family_asks_for_its_own_choosing_seasons():
         assert tuple(choose) == ((2024, 2025) if point == "D" else (2022, 2023, 2024, 2025)), point
 
 
+def _only_team_total_purchases(prep):
+    """The lab's first version: decision times counted only from purchases holding team totals."""
+    return {**prep, "times_d": H.per_event_times(prep["raw_pe"], "D")}
+
+
+def test_a_season_missing_team_totals_on_some_games_stays_in_the_pool():
+    """2023-24 has a per-game purchase on every game and team totals on 1,138 of 1,230. The
+    95% check counts purchases, so all three registered seasons stay in every team-total cell."""
+    run = S.synthetic_run()
+    world, prep = run["world"], run["prep"]
+    games = world["games_p"][world["games_p"]["season"] == 2024]
+    pe = world["pe"][world["pe"]["season"] == 2024]
+    tt = set(pe.loc[pe["market"].isin(list(S.TT_SIDES)), "game_id"])
+    # the world really holds the case: a purchase on every game, with team totals missing on about 8%
+    assert set(pe["game_id"]) == set(games["game_id"])
+    assert world["no_team_totals"] == set(games["game_id"]) - tt
+    assert 0.90 <= len(tt) / len(games) <= 0.93
+    assert set(pe.loc[pe["game_id"].isin(world["no_team_totals"]), "market"]) == {"totals_h1"}
+    rows = pd.DataFrame(run["rows"])
+    d = rows[rows["point"] == "D"]
+    assert len(d) == 16
+    assert set(d["gate_dropped"]) == {""}
+    assert set(d["choose_seasons"]) == {"2024,2025"}
+    assert set(d["pool_seasons"]) == {"2024,2025,2026"}
+    assert (d["gate_cov_2024"] == 1.0).all()
+
+
+def test_a_game_with_a_purchase_and_no_team_total_has_a_time_and_no_offer():
+    run = S.synthetic_run()
+    prep, gone = run["prep"], run["world"]["no_team_totals"]
+    assert gone <= set(prep["times_d"]["game_id"])
+    assert not gone & set(prep["neutral_d"]["game_id"])
+    # no team-total game's decision time moves
+    both = prep["times_d"].merge(H.per_event_times(prep["raw_pe"], "D"), on="game_id", suffixes=("", "_rows"))
+    assert len(both) and (both["T"] == both["T_rows"]).all()
+    reach = S.team_total_reach(prep).set_index("season")
+    assert reach.loc[2024, "games"] - reach.loc[2024, "team_total_games"] == len(gone)
+    assert reach.loc[2024, "decision_games"] == reach.loc[2024, "games"]
+    assert reach.loc[2024, "decision_games_counting_team_total_purchases_only"] == reach.loc[2024, "team_total_games"]
+    assert (reach["decision_times_that_differ"] == 0).all()
+    # that last column can read other than 0: one game's time moved by a minute shows as one
+    moved = prep["times_d"].copy()
+    moved.loc[moved["game_id"] == both["game_id"].iloc[0], "T"] -= pd.Timedelta(minutes=1)
+    assert S.team_total_reach({**prep, "times_d": moved})["decision_times_that_differ"].sum() == 1
+
+
+def test_the_gate_table_reads_what_the_cells_read():
+    """With only team-total purchases counted the harness really drops 2023-24, and the table
+    says so; on the times the lab builds it drops nothing."""
+    prep = S.synthetic_run()["prep"]
+    good = S.season_gate(prep)
+    assert len(good) == 6 and set(good["dropped"]) == {""} and S.gate_refusals(good) == []
+    assert set(good.loc[good["point"] == "D", "kept"]) == {"2024,2025"}
+    assert set(good.loc[good["point"] != "D", "kept"]) == {"2022,2023,2024,2025"}
+    broken = _only_team_total_purchases(prep)
+    gate = S.season_gate(broken)
+    assert set(gate.loc[gate["point"] == "D", "dropped"]) == {"2024"}
+    assert set(gate.loc[gate["point"] == "D", "kept"]) == {"2025"}
+    assert (gate.loc[gate["point"] == "D", "cov_2024"] < H.GATE_MIN).all()
+    assert set(gate.loc[gate["point"] != "D", "dropped"]) == {""}
+    why = S.gate_refusals(gate)
+    assert len(why) == 2 and all("drops 2024" in w for w in why)
+    rows = pd.DataFrame(S.emit(broken, "zone", S.FAMILY, only={("D", "team_totals_home")})[0])
+    assert set(rows["gate_dropped"]) == {"2024"} and set(rows["pool_seasons"]) == {"2025,2026"}
+
+
+def test_smoke_and_full_refuse_a_season_that_would_drop(tmp_path, monkeypatch, capsys):
+    broken = _only_team_total_purchases(S.synthetic_run()["prep"])
+
+    def not_reached(*a, **k):
+        raise AssertionError("the run went past the seasons check")
+    monkeypatch.setattr(S, "synthetic_checks", lambda: {"synthetic_checks": "pass"})
+    monkeypatch.setattr(S, "load_shots", lambda folder: (None, None))
+    monkeypatch.setattr(S.G5, "load_real", lambda cache, require: {
+        "data": None, "all_games": None, "games_p": None, "pe": None, "graded": S.TT_GRADED, "tb": None})
+    monkeypatch.setattr(S, "assemble", lambda *a, **k: broken)
+    monkeypatch.setattr(S, "coverage", not_reached)
+    monkeypatch.setattr(S, "emit", not_reached)
+    monkeypatch.setenv(S.SHOTS_ENV, str(tmp_path))
+    with pytest.raises(SystemExit):
+        S.smoke(tmp_path)
+    out = capsys.readouterr().out
+    assert "THE SEASONS EACH GROUP CHOOSES ON" in out and "REFUSED: D team_totals_home" in out and "drops 2024" in out
+    monkeypatch.setenv(S.GO_ENV, "1")
+    monkeypatch.setenv(S.RESULTS_ENV, str(tmp_path / "results"))
+    monkeypatch.setenv(S.BETS_ENV, str(tmp_path / "bets"))
+    for f in (S.P.LEDGER_FILE, S.SHOTS_FILE, S.SHOT_GAMES_FILE):
+        (tmp_path / f).write_bytes(b"x")
+    with pytest.raises(SystemExit):
+        S.full(tmp_path)
+    assert "REFUSED: D team_totals_away" in capsys.readouterr().out
+    assert not (tmp_path / "results").exists()
+
+
 def test_the_counts_never_grade():
     run = S.synthetic_run()
     real_grade = H.grade

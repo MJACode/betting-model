@@ -43,8 +43,9 @@ and no cut, constant or rule below was chosen from a betting result.
     PYTHONPATH=. python -m scripts.nba_game2_verdict --results <folder> --house5
     PYTHONPATH=. python -W ignore -m scripts.nba_s_shotluck --report <folder>
 
---smoke runs the synthetic checks, then prints on the real cache coverage, the
-extremes of every number and price, the rows each rule removes, the highest-EV
+--smoke runs the synthetic checks, then prints on the real cache the seasons each
+group asks for and what the 95% check at D keeps (it and --full refuse if one would
+drop), coverage, the extremes of every number and price, the rows each rule removes, the highest-EV
 offers, the gaps, the counts each cell would bet, the overlap with the live
 models, the placebo's share of different bets, and the timing. It never grades
 a real bet: the timing grades real offers against SCRAMBLED final scores
@@ -411,7 +412,9 @@ def assemble(data: H.Data, all_games: pd.DataFrame, games_p: pd.DataFrame, pe: p
     log(f"full-game offers built: { {p: len(v['neutral']) for p, v in at.items()} }")
     raw_pe = pe[pe["market"].isin(list(TT_SIDES))].reset_index(drop=True)
     pe2, removed_tt = drop_impossible(raw_pe)
-    times_d = H.per_event_times(pe2, TT_POINT)
+    # every per-game purchase, not only those holding team totals: the 95% check at D reads
+    # these times, and 2023-24 has team totals on 1,138 of 1,230 games (section 5's dated line)
+    times_d = H.per_event_times(pe, TT_POINT)
     vis_d = NB.visible_numbers(pe2, times_d)
     gp_full = games_p[games_p["season"].isin(data.games["season"])]
     # F6d's team-total table, which P3.market_pricing also returns; its period tables are not read here
@@ -533,6 +536,60 @@ def emit(prep: dict, name: str, family: str, seeds=(), progress: bool = False, o
             log(f"{family} {point} {market}: {len(got)} cells in {time.time() - t0:.0f}s")
     assert only is not None or len(rows) == EXPECTED_CELLS, (family, len(rows))
     return rows, pops
+
+
+# ── the seasons each group is judged on ─────────────────────────────────────
+
+def _seasons_text(seasons) -> str:
+    return ",".join(str(int(s)) for s in seasons)
+
+
+def season_gate(prep: dict) -> pd.DataFrame:
+    """Per group: the seasons it asks to choose on, each season's coverage, and what the
+    95% check keeps and drops, through the same objects emit hands H.run_cells. A drop
+    there is silent: the row records it, and the cell is judged on fewer seasons."""
+    out = []
+    for point, market, _sides, _n, dat, choose, times, _c, _s in groups(prep):
+        cov = H.point_coverage(dat, point, times)
+        kept, dropped = H.gated_seasons(cov, choose, point)
+        out.append({"point": point, "market": market, "asked": _seasons_text(choose), "kept": _seasons_text(kept),
+                    "dropped": _seasons_text(dropped), **{f"cov_{s}": v for s, v in sorted(cov.items())}})
+    return pd.DataFrame(out)
+
+
+def gate_refusals(gate: pd.DataFrame) -> list[str]:
+    """A cell is judged on the seasons section 5 registers, or the run does not start."""
+    return [f"{r['point']} {r['market']}: asks to choose on {r['asked']}, the 95% check drops {r['dropped']}; "
+            "its cells would be judged on other seasons than section 5 registers"
+            for _, r in gate[gate["dropped"] != ""].iterrows()]
+
+
+def require_registered_seasons(prep: dict) -> pd.DataFrame:
+    """Prints what season_gate read, then stops --smoke or --full if a season would drop."""
+    gate = season_gate(prep)
+    print("THE SEASONS EACH GROUP CHOOSES ON, AND WHAT THE 95% CHECK KEEPS:\n", gate.round(4).to_string(index=False), flush=True)
+    why = gate_refusals(gate)
+    if why:
+        P.refuse(why)
+    return gate
+
+
+def team_total_reach(prep: dict) -> pd.DataFrame:
+    """Per graded season: games, games with any team-total row, games with a decision
+    time, the same if only the purchases holding team totals counted, and how many
+    decision times differ between the two. Counts only."""
+    from_rows = H.per_event_times(prep["raw_pe"], TT_POINT)
+    both = prep["times_d"].merge(from_rows, on="game_id", suffixes=("", "_rows"))
+    games = prep["dd"].games
+    out = []
+    for s, ids in games.groupby(games["season"].astype(int))["game_id"]:
+        ids = set(ids)
+        shared = both[both["game_id"].isin(ids)]
+        out.append({"season": s, "games": len(ids), "team_total_games": int(prep["raw_pe"].loc[prep["raw_pe"]["game_id"].isin(ids), "game_id"].nunique()),
+                    "decision_games": int(prep["times_d"]["game_id"].isin(ids).sum()),
+                    "decision_games_counting_team_total_purchases_only": int(from_rows["game_id"].isin(ids).sum()),
+                    "decision_times_that_differ": int((shared["T"] != shared["T_rows"]).sum())})
+    return pd.DataFrame(out)
 
 
 # ── what is counted before grading (nothing here reads a result) ────────────
@@ -806,6 +863,9 @@ def smoke(cache: Path = H.CACHE) -> dict:
     prep = assemble(real["data"], real["all_games"], real["games_p"], real["pe"], real["graded"], real["tb"], shots, ledger)
     setup_seconds = time.time() - t_setup
     log(f"assembled in {setup_seconds:.0f}s; peak memory {peak_memory_gb():.1f} GB")
+    gate = require_registered_seasons(prep)
+    reach = team_total_reach(prep)
+    print("TEAM TOTALS, games and decision times per season (no result read):\n", reach.to_string(index=False))
     cov = coverage(shots, ledger, prep["untrusted"])
     print("COVERAGE PER SEASON:\n", cov.to_string())
     print("games left out:", prep["untrusted"].groupby(["season", "why"]).size().to_dict())
@@ -836,6 +896,7 @@ def smoke(cache: Path = H.CACHE) -> dict:
     mem = peak_memory_gb()
     print(f"PEAK MEMORY OF THIS RUN: {mem:.1f} GB")
     out = {"extremes": ext, "coverage": cov.reset_index().to_dict("records"), "timing": tm, "peak_memory_gb": mem,
+           "season_gate": gate.to_dict("records"), "team_total_reach": reach.to_dict("records"),
            "placebo_by_decision": summary.reset_index().to_dict("records"),
            "untrusted": prep["untrusted"].groupby(["season", "why"]).size().reset_index().to_dict("records")}
     folder = shots_dir()
@@ -878,12 +939,14 @@ def synthetic_world(seed: int = 0, seasons=(2020, 2021, 2022, 2023, 2024, 2025, 
     """Random, never real: every market the cells read (full-game totals and spreads at
     A and C from 2021 on, both team totals at D from 2024 on), a shot table consistent
     with the box scores and final scores, league make rates that DRIFT between seasons,
-    and one impossible total, one flipped spread and one impossible team total."""
+    and one impossible total, one flipped spread and one impossible team total. As on the
+    real data, a per-game purchase holds more than team totals, and in 2023-24 about one
+    game in twelve has a purchase with no team total (the real count is 1,138 of 1,230)."""
     rng = np.random.default_rng(seed)
     teams = [f"T{i}" for i in range(n_teams)]
     own = dict(zip(teams, rng.normal(0.0, 0.012, n_teams)))
     alw = dict(zip(teams, rng.normal(0.0, 0.012, n_teams)))
-    games, box, ledger, per, quotes, pe = [], [], [], [], [], []
+    games, box, ledger, per, quotes, pe, other_pe = [], [], [], [], [], [], []
     shot_cols = {c: [] for c in ("espn_game_id", "play_no", "clock_s", "team_side", "shot_value", "points",
                                  "coord_x", "coord_y")}
     bad = {}
@@ -958,6 +1021,8 @@ def synthetic_world(seed: int = 0, seasons=(2020, 2021, 2022, 2023, 2024, 2025, 
                             "price_a": -110.0, "price_b": -110.0},
                            {**b2, "book": b, "market": "team_totals_away", "line": _half((total + spread) / 2) + jt,
                             "price_a": -110.0, "price_b": -110.0}]
+                other_pe.append({**b2, "book": "pinnacle", "market": "totals_h1", "line": _half(total / 2),
+                                 "price_a": -110.0, "price_b": -110.0})
     g = pd.DataFrame(games)
     q = pd.DataFrame(quotes)
     tt = pd.DataFrame(pe)
@@ -977,6 +1042,8 @@ def synthetic_world(seed: int = 0, seasons=(2020, 2021, 2022, 2023, 2024, 2025, 
     gid_tt = str(tt[(tt["season"] == 2025)]["game_id"].iloc[len(tt[tt["season"] == 2025]) // 2])
     tt.loc[(tt["game_id"] == gid_tt) & (tt["book"] == "betmgm") & (tt["market"] == "team_totals_home"), "line"] = 9.5
     bad["team_total"] = (gid_tt, "betmgm", 9.5)
+    no_team_totals = sorted(tt.loc[tt["season"] == 2024, "game_id"].unique())[::12]
+    tt = pd.concat([tt[~tt["game_id"].isin(no_team_totals)], pd.DataFrame(other_pe)], ignore_index=True)
     fetches = q[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"])
     fetches = fetches.assign(lead_min=(fetches["tip"] - fetches["fetch_at"]).dt.total_seconds() / 60.0)
     priced = g[g["season"] > seasons[0]].reset_index(drop=True)
@@ -984,7 +1051,7 @@ def synthetic_world(seed: int = 0, seasons=(2020, 2021, 2022, 2023, 2024, 2025, 
     shots = pd.DataFrame({c: np.concatenate(v) for c, v in shot_cols.items()}).assign(period=1, feet_text=np.nan)
     return {"data": data, "all_games": g, "games_p": H.with_periods(g, periods=pd.DataFrame(per)),
             "pe": tt[H.QUOTE_COLS].reset_index(drop=True), "graded": TT_GRADED, "box": pd.DataFrame(box),
-            "shots": shots, "ledger": pd.DataFrame(ledger), "bad": bad}
+            "shots": shots, "ledger": pd.DataFrame(ledger), "bad": bad, "no_team_totals": set(no_team_totals)}
 
 
 def assemble_world(world: dict) -> dict:
@@ -1052,6 +1119,12 @@ def synthetic_checks(n_placebo: int = 2) -> dict:
     by = pd.DataFrame(rows).groupby(["point", "market"])["pool_n"].sum()
     want = {(p, m) for p in FULL_POINTS for m in FULL_SIDES} | {(TT_POINT, m) for m in TT_SIDES}
     assert set(by.index) == want and (by > 0).all(), by
+    # section 5's seasons: the world holds a season the 95% check would lose if only purchases
+    # holding team totals counted, and the cells keep it
+    only_rows = H.point_coverage(prep["dd"], TT_POINT, H.per_event_times(prep["raw_pe"], TT_POINT))
+    assert only_rows[2024] < H.GATE_MIN, only_rows
+    why = gate_refusals(season_gate(prep))
+    assert not why, why
     # section 6: the bad rows reach no offer, no fair line and no bet
     assert len(prep["removed_full"]) >= 1 and len(prep["removed_tt"]) >= 1
     assert sum(len(v["removed"]) for v in prep["at"].values()) >= 1
@@ -1104,6 +1177,7 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
         P.refuse([f"derivative seasons {real['graded']}, the search grades exactly {TT_GRADED}"])
     prep = assemble(real["data"], real["all_games"], real["games_p"], real["pe"], real["graded"], real["tb"], shots, ledger)
     log(f"assembled; peak memory {peak_memory_gb():.1f} GB")
+    require_registered_seasons(prep)
     rows, pops = emit(prep, "zone", FAMILY, seeds=PLACEBO_SEEDS, progress=True)
     ctl = {}
     for name, fam in CONTROLS.items():
