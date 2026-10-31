@@ -292,16 +292,36 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # connection, no hosting) — one channel per sport. Set only the sports you want:
 #   DISCORD_WEBHOOK_MLB, DISCORD_WEBHOOK_NFL, DISCORD_WEBHOOK_NBA,
 #   DISCORD_WEBHOOK_NHL, DISCORD_WEBHOOK_WNBA, DISCORD_WEBHOOK_UFC,
-#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF
+#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF, DISCORD_WEBHOOK_NCAAB
 # A sport with no webhook is SKIPPED and its signals are NOT marked as sent, so
 # adding that channel later still delivers the rest of the day's picks.
 # (Listed literally rather than derived from SPORTS — that registry is defined
 # further down this file, and a webhook name is a stable, user-facing env var.)
-DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL")
+DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB")
 DISCORD_WEBHOOKS: dict = {
     sport: url for sport in DISCORD_SPORTS
     if (url := os.environ.get(f"DISCORD_WEBHOOK_{sport}", "").strip())
 }
+# A sport with no DISCORD_WEBHOOK_<SPORT> may instead name its CHANNEL:
+# DISCORD_CHANNEL_<SPORT> is a channel id (not a secret). The notifier then
+# resolves that channel's webhook at runtime through DISCORD_BOT_TOKEN, reusing
+# one the bot owns or creating it, and keeps the URL in memory only
+# (tracking/discord_notifier._channel_webhook). Added for NCAAB (2026-10-30),
+# whose channel is created by scripts/discord_create_sport_channel.py; a
+# webhook variable, when set, still wins.
+DISCORD_CHANNELS: dict = {
+    sport: cid for sport in DISCORD_SPORTS
+    if (cid := os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip())
+}
+
+
+def discord_sports_wired() -> set:
+    """The sports whose picks have somewhere to post: a webhook, or a channel
+    id the bot token can resolve one for."""
+    wired = set(DISCORD_WEBHOOKS)
+    if os.environ.get("DISCORD_BOT_TOKEN", "").strip():
+        wired |= set(DISCORD_CHANNELS)
+    return wired
 
 # Catch-all for any sport without its own channel. Leave unset to post nothing
 # for unmapped sports rather than dumping every sport into one channel.
@@ -685,6 +705,22 @@ ACTION_THRESHOLDS: dict = {
     # +64.72 units on 390.37 risked, +16.6%, every season positive. prob / edge
     # are 0.0 for the same reason as nba_total_luck's.
     "nba_team_total_luck":      {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
+    # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
+    # Team ratings refit as of DraftKings' total, a residual on as-of shooting
+    # luck and style rates, blended with DraftKings' total; bet the side whose
+    # P(win | no push) beats DraftKings' implied probability by more than 0.04,
+    # both teams 10+ games. Graded exactly as it runs live (box-score
+    # possessions, no roster input, 2026-10-30): 2021-2025 1,094 bets, +87.48
+    # units, +7.32%, date-resampled 95% interval [2.0, 12.7], 5 of 5 seasons;
+    # 2025-26 349 bets +7.03%. Neighbours (2021-2025): 0.02 +5.18%, 0.03
+    # +5.45%, 0.05 +9.85%, 0.06 +10.45%. 92% overs; prices -120 to +102.
+    # min_edge 0.04 IS the card's cut: model_probability is P(win | no push),
+    # so decision_edge is exactly the edge the card cut on and every publisher
+    # agrees with it. min_prob 0.0: the edge is the cut, and a probability
+    # floor could only hide a pick the card wrote (the smallest written
+    # probability on 2021-2025 is 0.5403).
+    "ncaab_total_blend":        {"min_prob": 0.0, "min_edge": 0.04},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1938,6 +1974,10 @@ MODEL_MIN_ODDS: dict = {
     # (median -112), so -200 admits prices it was never graded at. Pinned so a
     # Railway DEFAULT_MIN_ODDS override cannot move it.
     "nba_team_total_luck":       -200,
+    # NCAAB totals (2026-10-30, mike): it laid -120 to +102 on its 1,094
+    # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
+    # override cannot move it.
+    "ncaab_total_blend":         -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2192,6 +2232,12 @@ MODEL_OWN_EV_FLOOR: dict = {
     # uplift (+0.1022), it removes one: NBA_2025-01-24_POR_CHA, FanDuel under
     # 109.5 at -118, -0.113. The next smallest is +0.053, the median +0.169.
     "nba_team_total_luck":      0.00,
+    # NCAAB totals (2026-10-30, mike). The cut is the edge (0.04, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
+    # (1,094 bets; median +0.0996). An edge above 0.04 at -120 or longer is EV
+    # above 0.073, so 0.07 never removes a bet the evidence took.
+    "ncaab_total_blend":        0.07,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2327,6 +2373,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # walk-forward uplift of the earlier graded seasons, which is what its
     # floor was set on. No record either, so the same reasoning.
     "nba_team_total_luck",
+    # 2026-10-30 (mike, "Yes to the totals model"). NCAAB totals: its number
+    # is the blend's P(win | no push) at DraftKings' line, which its 0.04 cut
+    # was measured on. It has no record, so its map would be the offset
+    # borrowed from other models.
+    "ncaab_total_blend",
 })
 
 
@@ -2445,6 +2496,12 @@ SCORING_METHODS: dict = {
     # The same shape: a rule whose parameter artifact holds the residual sample
     # and the per-season uplift buckets, loaded by the card, never registered.
     "nba_team_total_luck": "rule",
+    # A rule with a parameter artifact committed under models/saved/ (last
+    # season's ratings, the residual and blend coefficients,
+    # models/ncaab_total_blend.py), never registered: the card loads it by
+    # its pinned path. Not in SPORTS or MODELS, which the trainer and the
+    # loaders iterate.
+    "ncaab_total_blend":   "rule",
 }
 
 
@@ -2474,6 +2531,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.04,   # 2026-10-30 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2564,6 +2622,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS

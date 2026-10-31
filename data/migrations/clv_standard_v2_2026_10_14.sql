@@ -206,6 +206,7 @@ BEGIN
         WHEN 'ncaaf_live_total' THEN 'totals'
         WHEN 'nba_total_luck' THEN 'totals'
         WHEN 'nba_team_total_luck' THEN 'team_totals_home'
+        WHEN 'ncaab_total_blend' THEN 'totals'
         ELSE 'h2h'
       END
     $body$;

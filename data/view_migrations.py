@@ -479,6 +479,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # a catalog read once both exist. Does not rewrite picks, odds or the
     # record. Sits before the posted-stake pair so those two stay adjacent.
     "add_alt_game_lines_2026_10_29.sql",
+    # 2026-10-30: NCAAB period scores and the ESPN box-score miss ledger,
+    # both written by data/ingestors/ncaab_espn_box.py (which also creates
+    # them at write time behind the schema guard). Worker-only: RLS on,
+    # nothing granted. Returns on a catalog read once both tables, the index
+    # and the lock-down exist. Does not touch picks, odds or the record.
+    # Sits before the posted-stake pair so those two stay adjacent.
+    "add_ncaab_period_scores_2026_10_30.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

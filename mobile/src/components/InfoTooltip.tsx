@@ -53,7 +53,9 @@ export function InfoSheet({
   /** One optional follow-up, drawn as a text link above "Got it" — for a note
    *  whose fix is a tap away ("Change your sportsbooks"). The caller closes. */
   action?: { label: string; onPress: () => void } | null;
-  /** iOS: fires after the fade-out, when another Modal may be presented. */
+  /** iOS: fires after the fade-out. A caller that presents another Modal
+   *  from here still has to defer that present — UIKit has not released
+   *  the presenter in this turn. */
   onDismiss?: () => void;
 }) {
   const accent = warn ? colors.gradeBad : colors.tint;
