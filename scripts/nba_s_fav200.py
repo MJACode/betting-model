@@ -1039,7 +1039,7 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
     prep = prepare(cache, require=False)
     log(f"the fetch-median rule dropped {len(prep.dropped_ml)} moneyline rows and {len(prep.dropped_sp)} spread rows")
     print(prep.dropped_ml[["game_id", "book", "price_a", "price_b", "fetch_at"]].to_string(index=False))
-    print(prep.dropped_sp[["game_id", "book", "line", "price_a", "price_b", "fetch_at"]].head(40).to_string(index=False))
+    print(prep.dropped_sp[["game_id", "book", "line", "price_a", "price_b", "fetch_at"]].to_string(index=False))
     ex = extremes(prep)
     for k, v in ex.items():
         print(f"\n{k}:\n{v}")
