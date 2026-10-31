@@ -338,16 +338,71 @@ def test_the_query_asks_only_for_this_model_s_unsettled_bets_with_a_final_and_no
         assert piece in q, piece
 
 
-def test_settle_picks_fetches_the_quarters_before_it_grades_and_survives_a_failure():
+@pytest.fixture
+def settle_pass(monkeypatch):
+    """settle_picks whole, on a connection that answers nothing: each grader is a
+    stub that records its turn, and nothing opens a connection or calls out. Returns
+    (the calls in order, the module holding the quarter pull)."""
+    import data.ingestors.cfbd_ingestor as cfbd
+    import data.ingestors.nba_period_scores as periods
+    import data.ingestors.prop_box_scores as box
+    import tracking.opening_signals as opening
+    import tracking.parlay_track_record as parlay
+
+    class Conn:
+        def execute(self, *a, **k):
+            return None
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    calls: list[str] = []
+    zero = (0, 0, 0, 0, 0.0, 0.0)
+    monkeypatch.setattr(pt, "get_connection", lambda: Conn())
+    for name in ("_fetch_and_store_scores", "_void_postponed_mlb_picks", "_heal_stranded_mlb",
+                 "_backfill_clv", "_capture_clv"):
+        monkeypatch.setattr(pt, name, lambda *a, **k: None)
+    for name in ("_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
+                 "_settle_golf_picks"):
+        monkeypatch.setattr(pt, name, lambda *a, _n=name, **k: calls.append(_n) or zero)
+    monkeypatch.setattr(cfbd, "mirror_stored_finals", lambda *a, **k: None)
+    monkeypatch.setattr(box, "ensure_prop_box_scores", lambda *a, **k: {})
+    monkeypatch.setattr(opening, "settle_opening_signals", lambda *a, **k: None)
+    monkeypatch.setattr(parlay, "settle_parlay_track_record", lambda *a, **k: None)
+    return calls, periods
+
+
+def test_settle_picks_fetches_the_quarters_before_it_grades(settle_pass, monkeypatch):
     """RULE: the 6am run settles (Step 0h) BEFORE its nba-quarters step (Step 0c1
     of the later group) and no refresh pass runs that step, so settle_picks fetches
-    what its own picks need, before _settle_game_picks_window, in a try: an ESPN
-    failure leaves the pick pending and every other pick grading."""
-    src = inspect.getsource(pt.settle_picks)
-    at = src.index("ensure_first_half_period_scores")
-    assert at < src.index("_settle_game_picks_window(conn, game_date, settled_at)")
-    assert src.rindex("try:", 0, at) > src.rindex("conn.commit()", 0, at)
-    assert 'first-half picks stay pending' in src
+    what its own picks need, before it grades. Runs the pass, because a read of the
+    source was satisfied with the call taken out and its import left behind."""
+    calls, periods = settle_pass
+    monkeypatch.setattr(periods, "ensure_first_half_period_scores",
+                        lambda *a, **k: calls.append("quarters") or {})
+    pt.settle_picks("2026-04-04")
+    assert "quarters" in calls
+    assert calls.index("quarters") < calls.index("_settle_game_picks_window")
+
+
+def test_a_failed_quarter_pull_leaves_every_other_pick_grading(settle_pass, monkeypatch):
+    """RULE: an ESPN failure leaves the first-half pick pending and nothing else."""
+    calls, periods = settle_pass
+
+    def boom(*a, **k):
+        calls.append("quarters")
+        raise RuntimeError("ESPN is down")
+    monkeypatch.setattr(periods, "ensure_first_half_period_scores", boom)
+    pt.settle_picks("2026-04-04")
+    assert calls[0] == "quarters"
+    assert {"_settle_game_picks_window", "_settle_prop_picks_window", "_settle_ufc_picks",
+            "_settle_golf_picks"} <= set(calls)
 
 
 def test_the_6am_order_is_what_the_comment_says():
