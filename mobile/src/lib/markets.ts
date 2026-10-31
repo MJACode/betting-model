@@ -190,15 +190,26 @@ export function matchupLedBet(label: string): string | null {
 
 /**
  * The text of a one-line pick row (a model's page, the tracked list): a team
- * total's bet without the matchup (the row's date already places the game, the
- * home team plays once a night), every other label as stored, except a first
- * half, which keeps its matchup because the bet alone names no team. A prop keeps
- * its player name. The row's accessibility label keeps the whole stored label.
+ * total's or a first half's bet without the matchup, every other label as
+ * stored. A team total names its team and the row's date places the game; a
+ * first half names no team, so pickRowMatchup puts it on its own line. A prop
+ * keeps its player name. The row's accessibility label keeps the whole stored
+ * label.
  */
 export function pickRowTitle(pick: { pick_label: string }): string {
   const label = pick.pick_label ?? '';
-  const bet = matchupLedBet(label);
-  return bet && bet.includes(' Team Total ') ? bet : label;
+  return matchupLedBet(label) ?? label;
+}
+
+/**
+ * The caption under a first half's row title, quoted from the label before the
+ * dash: "BOS @ MIL — First Half Over 112.5" -> "BOS @ MIL". Null for every other
+ * label, whose title already says who plays.
+ */
+export function pickRowMatchup(pick: { pick_label: string }): string | null {
+  const label = pick.pick_label ?? '';
+  if (!matchupLedBet(label)?.startsWith('First Half ')) return null;
+  return label.slice(0, label.indexOf(' — ')).trim();
 }
 
 export function splitPickTitle(pick: { pick_label: string }): {

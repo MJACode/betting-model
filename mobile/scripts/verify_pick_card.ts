@@ -28,6 +28,7 @@ import {
   snapshotMatchesLock,
   splitPickTitle,
   pickRowTitle,
+  pickRowMatchup,
   storedQuoteBook,
   todayBoardHandoff,
   MODEL_BOOK,
@@ -861,8 +862,15 @@ check(
   check('a first-half total\'s bold line is the bet, quoted from the label after the dash',
     h1.primary === 'First Half Over 112.5' && h1.secondary === null,
     JSON.stringify(h1));
-  check('a one-line pick row keeps a first half\'s matchup: the bet alone names no team',
-    pickRowTitle({ pick_label: 'BOS @ MIL — First Half Over 112.5' }) === 'BOS @ MIL — First Half Over 112.5');
+  check('a first-half row titles the bet, so the number survives larger text',
+    pickRowTitle({ pick_label: 'BOS @ MIL — First Half Over 112.5' }) === 'First Half Over 112.5');
+  check('a first-half row quotes its matchup onto a caption line: the bet alone names no team',
+    pickRowMatchup({ pick_label: 'BOS @ MIL — First Half Over 112.5' }) === 'BOS @ MIL');
+  check('only a first-half row has that caption',
+    pickRowMatchup({ pick_label: 'BOS @ MIL — MIL Team Total Under 115.5' }) === null &&
+      pickRowMatchup({ pick_label: 'TB @ CAR — CAR -3' }) === null &&
+      pickRowMatchup({ pick_label: 'Roquan Smith Under 9.5 Tackles' }) === null &&
+      pickRowMatchup({ pick_label: 'BOS vs MIL Over 225.5' }) === null);
   const tt = splitPickTitle({ pick_label: 'BOS @ MIL — MIL Team Total Under 115.5' });
   check(
     'a team total titles the bet, quoted from the label',

@@ -13,6 +13,10 @@ prices or a line has to know that:
     about half the size into the game-total record on BOTH teams' pages.
   * lib/markets.ts splitPickTitle: the card's bold line is the bet after the
     label's dash; movement is read at the deciding book's own number.
+  * lib/markets.ts pickRowTitle and pickRowMatchup, components/PickRowTitle.tsx: a
+    row on a model's page or the tracked list titles the bet and clips its middle,
+    with the matchup on its own line. The whole label on one line lost the side
+    and number first at larger text.
   * lib/signalsCard.ts signalsBetHeadline: "First Half Over 112.5", never a bare
     "Over 112.5", which reads as the game total.
   * lib/queries.ts MAIN_GAME_ODDS_MARKETS: the prices are read, the alternate rung
@@ -48,7 +52,7 @@ const H1_PICK = { ...PICK, model_id: 'nba_first_half_total_luck', pick_side: 'ov
 @node
 def test_the_pick_reads_the_first_half_market_and_its_number(tmp_path):
     _run(tmp_path, MARKETS_FILES, H1 + """
-import { gameMarketForModel, marketClassForModel, lineFromSnapshot, splitPickTitle, pickRowTitle, rowIsSameBet } from './markets.ts';
+import { gameMarketForModel, marketClassForModel, lineFromSnapshot, splitPickTitle, pickRowTitle, pickRowMatchup, rowIsSameBet } from './markets.ts';
 eq(gameMarketForModel('nba_first_half_total_luck'), 'totals_h1', 'market');
 eq(marketClassForModel('nba_first_half_total_luck'), 'game_total', 'parlay class');
 const fd = { bookmaker: 'fanduel', total_line: 112.5, over_price: -108, under_price: -112 };
@@ -56,13 +60,18 @@ eq(lineFromSnapshot(fd, 'totals_h1'), 112.5, 'first-half line');
 eq(rowIsSameBet(H1_PICK, fd, 'totals_h1'), true, 'the same number is the same bet');
 eq(rowIsSameBet(H1_PICK, { ...fd, total_line: 113.5 }, 'totals_h1'), false, 'another number is not');
 eq(splitPickTitle(H1_PICK), { primary: 'First Half Over 112.5', secondary: null }, 'the card');
-// A one-line row keeps the matchup: the bet alone names no team.
-eq(pickRowTitle(H1_PICK), H1_LABEL, 'the row');
+// A row's title is the bet, so the number survives larger text. The bet alone
+// names no team, so the matchup is quoted onto its own caption line.
+eq(pickRowTitle(H1_PICK), 'First Half Over 112.5', 'the row');
+eq(pickRowMatchup(H1_PICK), 'BOS @ MIL', 'the row caption');
 // The team total's own behaviour has not moved.
 eq(splitPickTitle(PICK), { primary: 'MIL Team Total Under 115.5', secondary: null }, 'team total card');
 eq(pickRowTitle(PICK), 'MIL Team Total Under 115.5', 'team total row');
+eq(pickRowMatchup(PICK), null, 'a team total names its team, so no caption');
 // An NFL opener's "TB @ CAR — CAR -3" is neither.
 eq(pickRowTitle({ pick_label: 'TB @ CAR — CAR -3' }), 'TB @ CAR — CAR -3', 'opener row');
+eq(pickRowMatchup({ pick_label: 'TB @ CAR — CAR -3' }), null, 'opener has no caption');
+eq(pickRowMatchup({ pick_label: 'Roquan Smith Under 9.5 Tackles' }), null, 'a prop has no caption');
 """)
 
 
@@ -131,6 +140,19 @@ eq(signalsBetHeadline({ side: 'over', line: 112.5, market: 'totals_h1', homeTeam
 eq(signalsBetHeadline({ side: 'over', line: 225.5, market: 'totals', homeTeam: 'MIL', awayTeam: 'BOS' }),
    'Over 225.5', 'the game total is unchanged');
 """)
+
+
+def test_every_pick_row_titles_through_the_component_that_keeps_the_number():
+    """The JSX cannot run under node's type stripping, so this reads the source. Only
+    a first half clips its middle: an opener's number sits in the middle of its label.
+    """
+    comp = (ROOT / "mobile/src/components/PickRowTitle.tsx").read_text(encoding="utf-8")
+    assert "numberOfLines={1} ellipsizeMode={matchup ? 'middle' : 'tail'}" in comp
+    assert "{matchup ? <Text style={matchupStyle}>{matchup}</Text> : null}" in comp
+    for screen, rows in (("BuiltInModelDetailScreen.tsx", 2), ("PerformanceScreen.tsx", 1)):
+        src = (ROOT / "mobile/src/screens" / screen).read_text(encoding="utf-8")
+        assert src.count("<PickRowTitle pick=") == rows, screen
+        assert "pickRowTitle(" not in src, screen
 
 
 def test_the_first_half_is_read_with_the_main_game_markets_and_its_alternates_are_not():

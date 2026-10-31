@@ -32,9 +32,10 @@ import { roundsToZero, signalDisplayName } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
-import { bookLabelShort, pickRowTitle, storedQuoteBook } from '@/lib/markets';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { PickRowTitle } from '@/components/PickRowTitle';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -445,9 +446,7 @@ function TodayPickRow({
     >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.pickLabel} numberOfLines={1}>
-            {pickRowTitle(pick)}
-          </Text>
+          <PickRowTitle pick={pick} titleStyle={styles.pickLabel} matchupStyle={styles.pickMatchup} />
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
             {timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}
@@ -490,9 +489,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
     >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.pickLabel} numberOfLines={1}>
-            {pickRowTitle(pick)}
-          </Text>
+          <PickRowTitle pick={pick} titleStyle={styles.pickLabel} matchupStyle={styles.pickMatchup} />
           <View style={styles.pickMeta}>
             <Text style={styles.pickMetaText}>{dayLabelET(pick.game_date)}</Text>
             <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(pick))} {formatAmerican(decisionOdds(pick))}</Text>
@@ -612,6 +609,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  pickMatchup: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   pickMeta: {
     flexDirection: 'row',
