@@ -25,9 +25,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         from tip; scripts/nba_team_total_luck_window.py: one team-total call
         per game, and the nba_team_total_luck card run, when an undecided
         game is 45-56 minutes from tip, and the closing team totals of its bet
-        games 12-25 minutes out. One planning read for both,
-        scripts/nba_pregame_window.py; a tick with nothing due makes no API
-        call)
+        games 12-25 minutes out; scripts/nba_first_half_total_luck_window.py:
+        the same for the first half's total and nba_first_half_total_luck. One
+        planning read for all three, scripts/nba_pregame_window.py; a tick with
+        nothing due makes no API call)
         (scripts/nba_prop_window.py: props for exactly the NBA games 40-62
         minutes from tip and not yet decided, then the nba_prop_market card,
         the closing snapshot for bet games 12-25 minutes out, and publish.
@@ -739,8 +740,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes picks through the same card as the refresh pass,
                   # so it lives beside the passes, not with the loops.
                   "nba_prop_window",
-                  # Writes picks through its own cards (nba_total_luck and
-                  # nba_team_total_luck), with their own fetches.
+                  # Writes picks through its own cards (nba_total_luck,
+                  # nba_team_total_luck and nba_first_half_total_luck), with
+                  # their own fetches.
                   "nba_total_luck_window",
                   # Writes NHL picks through the scorer and the NHL cards, and
                   # takes turns with the refresh passes in this process.
@@ -1434,11 +1436,15 @@ NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180}
 # odds_ingestor._get_event_odds); the card is the full-game card's reads; the
 # close is the same calls for the bet games.
 NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
+# nba_first_half_total_luck's steps, bounded the same way: its own event list and
+# one event call per due game, then the same card reads.
+NBA_FIRST_HALF_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
 
 
 def run_nba_total_luck_window() -> None:
-    """One NBA totals window tick: every game due a decision from either NBA
-    totals model, and every team-total bet game due its closing snapshot.
+    """One NBA totals window tick: every game due a decision from any of the NBA
+    game total models, and every team-total or first-half bet game due its
+    closing snapshot.
 
     nba_total_luck decides a game once, on a fetch that landed 60-66 minutes
     before tip (models/nba_total_luck.py). Riding the refresh pass it had one
@@ -1446,15 +1452,19 @@ def run_nba_total_luck_window() -> None:
     skip the next tick, and with it every game that tick would have decided.
     So this job runs every minute, 24x7. nba_team_total_luck decides a game
     once, on its own team-total fetch 45-66 minutes before tip
-    (models/nba_team_total_luck.py), planned 45-56 minutes out. ONE planning
-    read serves both (scripts/nba_pregame_window.plan), and the tick returns
-    without an API call when nothing is due -- most ticks of most days.
+    (models/nba_team_total_luck.py), planned 45-56 minutes out, and
+    nba_first_half_total_luck the same way on its own first-half fetch
+    (models/nba_first_half_total_luck.py). ONE planning read serves all three
+    (scripts/nba_pregame_window.plan), and the tick returns without an API call
+    when nothing is due -- most ticks of most days.
 
     Otherwise, nba_total_luck first, as it ran alone: fetch the NBA board, run
     its card. Then nba_team_total_luck: its team-total fetch for exactly the
     due games, its card; then the closing team totals of its bet games. Then
-    publish what the cards wrote. A tick that runs both models can pass a
-    minute and the next tick coalesces into it; each window holds six ticks or
+    nba_first_half_total_luck, the same three steps; no step of one model reads
+    another's outcome, so a failed team-total call cannot stop the first half's.
+    Then publish what the cards wrote. A tick that runs several models can pass
+    a minute and the next tick coalesces into it; each window holds six ticks or
     more, so one skipped tick loses no game. A step that fails or is killed
     raises AFTER publishing, so the heartbeat records "error" and the failure
     alerter reports it, while a bet that was written still goes out. The next
@@ -1493,6 +1503,23 @@ def run_nba_total_luck_window() -> None:
             [sys.executable, "-m", "scripts.nba_team_total_luck_window", "--close",
              *team.close],
             "nba-team-total-luck-close", timeout=t["close"])
+    first = plan.first_half
+    t = NBA_FIRST_HALF_WINDOW_TIMEOUT_S
+    if first.decide:
+        log.info("NBA totals window: first-half totals deciding %s", first.decide)
+        outcomes["nba-first-half-total-luck-fetch"] = _run(
+            [sys.executable, "-m", "scripts.nba_first_half_total_luck_window", "--fetch",
+             *first.decide],
+            "nba-first-half-total-luck-fetch", timeout=t["fetch"])
+        outcomes["nba-first-half-total-luck"] = _run(
+            [sys.executable, "run_pipeline.py", "--step", "nba-first-half-total-luck"],
+            "nba-first-half-total-luck", timeout=t["card"])
+    if first.close:
+        log.info("NBA totals window: first-half totals closing snapshot for %s", first.close)
+        outcomes["nba-first-half-total-luck-close"] = _run(
+            [sys.executable, "-m", "scripts.nba_first_half_total_luck_window", "--close",
+             *first.close],
+            "nba-first-half-total-luck-close", timeout=t["close"])
     if outcomes:
         _publish_new_signals("nba-total-luck-window")
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
@@ -2429,19 +2456,20 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # NBA totals window -- every minute, 24x7 (run_nba_total_luck_window). The
-    # nba_total_luck and nba_team_total_luck cards decide here and nowhere
-    # else: on the refresh pass a skipped tick lost every game it would have
-    # decided. Every minute so the 61-66-minute window holds six ticks and the
-    # team totals' 45-56 twelve; misfire_grace_time 30 because a tick
-    # overtaken by the next one has nothing left to add. One job for both
-    # models, not two: each job's heartbeat opens a connection every tick
+    # nba_total_luck, nba_team_total_luck and nba_first_half_total_luck cards
+    # decide here and nowhere else: on the refresh pass a skipped tick lost every
+    # game it would have decided. Every minute so the 61-66-minute window holds
+    # six ticks and the team and first-half totals' 45-56 twelve;
+    # misfire_grace_time 30 because a tick overtaken by the next one has nothing
+    # left to add. One job for all of them, not three: each job's heartbeat opens
+    # a connection every tick
     # (scripts/nba_pregame_window.py). No write switch, like the cards.
     sched.add_job(
         run_nba_total_luck_window,
         CronTrigger(minute="*", timezone=TIMEZONE),
         id="nba_total_luck_window",
         name="NBA totals window (every minute, 24x7: full-game totals 61-66 min, "
-             "home team totals 45-56 min from tip)",
+             "home team and first-half totals 45-56 min from tip)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
