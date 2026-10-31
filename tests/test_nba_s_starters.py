@@ -2,6 +2,8 @@
 (docs/nba_search_starters.md). Every rule is pinned on small hand-built or
 synthetic games by its outcome; each was watched failing once with its rule
 broken. No real price is read and no real bet is graded."""
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -806,3 +808,17 @@ def test_saved_frames_built_by_other_code_do_not_pass_for_this_codes(monkeypatch
         return None
     monkeypatch.setattr(S, "player_rows", player_rows)
     assert a != S.frames_fingerprint(tmp_path, times)
+
+
+def test_the_betas_the_lab_requires_are_the_ones_the_rules_document_registers():
+    doc = (Path(S.ROOT) / "docs" / "nba_search_starters.md").read_text(encoding="utf-8")
+    section = doc[doc.index("### 11.2"):doc.index("### 11.3")]
+    names = {"First-quarter spread": "spreads_q1", "First-quarter total": "totals_q1",
+             "First-half spread": "spreads_h1", "First-half total": "totals_h1"}
+    got, season = {}, None
+    for row in section.splitlines():
+        c = [x.strip() for x in row.strip().strip("|").split("|")]
+        if len(c) == 8 and c[3] in names:
+            season = int(c[0][:4]) + 1 if c[0] else season
+            got[(season, names[c[3]])] = float(c[4])
+    assert len(got) == 12 and got == S.REGISTERED_BETA
