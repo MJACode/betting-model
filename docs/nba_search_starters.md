@@ -131,6 +131,13 @@ a good defence: the engine's efficiency is `eff_home = league + O_home − D_awa
 - **In points:** each × the period's possessions / 100. The possessions are the engine's as-of game
   pace (pace_home × pace_away / league) × 12/48 for the first quarter, 24/48 for the first half.
 
+**Added 2026-10-31, before any cell was graded: a game has no tilt unless both teams' expected minutes
+reach all three totals (60, 120 and 240), each within 1.** The lab checked the first two and not the
+third. A team with exactly five available players fills both periods, since each of them plays all of
+it, but stops at five times the engine's per-player cap over the game. Its full-game rating then carries
+fewer than five players, so its tilt is a level error and not a change of who plays. What this moved is
+in section 11.2.
+
 ### 4.4 The projected number
 
 - **The base (no tilt):** §9.3's league-share projection, by calling its code
@@ -288,10 +295,17 @@ highest cell in each market.
   (§9.8) and is built live.
 - **Credit.** An S1 cell counts for the starters only when it passes **and** its pooled return beats its
   control's at the same market, side and cut. A control with no bet counts as 0.
+- **A total cell earns no credit for the starters (added 2026-10-31, before any cell was graded).** A
+  total cell and its control place nearly the same bets: on the first-half over at the lowest cut, 0
+  bets are only the cell's and 1 only the control's, of about 1,620 (section 11.5). One beating the other
+  is then a few games' luck, not a reading of the starters. It is settled now because changing it after a
+  result would be choosing a rule with the result in view. A total cell is still judged under the six
+  bars and reported, and a pass there reads as the league-share idea's. Only the 16 spread cells can earn
+  credit.
 - **Read credit from `python -m scripts.nba_s_starters --credit --results DIR`.** The verdict's own
   printed "credited" count knows only §9's control, so for S1 it equals the passes. The lab calls the
   verdict's own function with this search's pairing (`house_verdict_bands(credit={"S1": "S1_league"})`),
-  so the verdict script stays as it is.
+  then takes the total cells' credit away, so the verdict script stays as it is.
 
 ## 9. Expected passes by chance
 
