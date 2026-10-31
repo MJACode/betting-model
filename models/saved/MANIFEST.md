@@ -42,10 +42,10 @@ models/saved/mlb_prop_pitcher_k_20260903_190319.pkl
 models/saved/mlb_prop_pitcher_outs_20260903_233111.pkl
 models/saved/mlb_prop_pitcher_walks_20260620_164336.pkl
 models/saved/mlb_runline_20260823_105841.pkl
-models/saved/nba_first_half_total_luck_20261030_233823.pkl
+models/saved/nba_first_half_total_luck_20261031_095356.pkl
 models/saved/nba_prop_projection_20261016_091702.pkl
-models/saved/nba_team_total_luck_20261018_014024.pkl
-models/saved/nba_total_luck_20261017_090305.pkl
+models/saved/nba_team_total_luck_20261031_095356.pkl
+models/saved/nba_total_luck_20261031_095356.pkl
 models/saved/ncaaf_moneyline_20260821_113517.pkl
 models/saved/ncaaf_over_under_20260825_204305.pkl
 models/saved/ncaaf_spread_20260828_103438.pkl
@@ -102,18 +102,25 @@ models/saved/wnba_spread_20260719_113238.pkl
   through 2025-26), committed with the code that reads it and registered with
   `--register --from-file`. A new model id: no older file to drop.
 
-- `nba_team_total_luck_20261018_014024.pkl` — the NBA home team-total under
+- `nba_team_total_luck_20261031_095356.pkl` — the NBA home team-total under
   rule's pricing sample and per-season bet counts (`models/nba_team_total_luck.py`,
   built by `scripts/nba_team_total_luck_build.py` from 2020-21 .. 2025-26). Read
   by the model's own `load_artifact`, not `model_registry`; committed with the
   code that reads it. A new model id: no older file to drop.
 
-- `nba_first_half_total_luck_20261030_233823.pkl` — the NBA first-half over
+- `nba_first_half_total_luck_20261031_095356.pkl` — the NBA first-half over
   rule's pricing rows and per-season bet counts
   (`models/nba_first_half_total_luck.py`, built by
   `scripts/nba_first_half_total_luck_build.py` from 2020-21 .. 2025-26). Read by
   the model's own `load_artifact`, not `model_registry`; committed with the code
   that reads it. A new model id: no older file to drop.
+
+- `nba_total_luck_`, `nba_team_total_luck_` and `nba_first_half_total_luck_` of
+  2026-10-31 are the files of 2026-10-17, 10-18 and 10-30 with one key added, the
+  finished price table of 2026-27 (`scripts/nba_pricing_table_embed.py`, which proved
+  every other key byte-identical and the table identical to a full rebuild). So a card
+  reads the table instead of building it on every run (`models/nba_total_luck.py`, THE
+  PRICE TABLE IS STORED). The older files are dropped.
 
 ## Tracked artifacts that are not timestamped pkls
 

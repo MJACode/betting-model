@@ -27,7 +27,9 @@ scripts/nba_game_harness.py at bought prices, 2023-24 .. 2025-26):
     2023-24  244 bets  +10.68 units  +4.0%
     2024-25  188 bets  +23.29 units  +11.6%
     2025-26  163 bets  +17.52 units  +9.9%
-    prices   -130 to +114, median -110;  lines 100.0 to 130.5, median 114.0
+    prices   -130 to +114 at all books (595 bets), -118 to +105 at the four books
+             whose rows look like main numbers (517 bets); median -110
+    lines    100.0 to 130.5, median 114.0
     books    draftkings 161, fanduel 151, williamhill_us 106, betmgm 99,
              hardrockbet 61, betrivers 9, betparx 8
 
@@ -49,7 +51,8 @@ THE RULE, per regular-season game:
      book whose number is more than 1.0 point from the median of the deciding
      books' main numbers (Pinnacle never dropped, never in the median). The live
      fetch stores only the main rung under totals_h1; any other rung goes under
-     totals_h1_alternate (data/ingestors/nba_first_half_odds.py).
+     totals_h1_alternate (data/ingestors/nba_first_half_odds.py). The graded bets
+     did not read main numbers at every book: see THE GRADED QUOTES.
   4. THE FAIR LINE: Pinnacle's no-vig first-half total when it quotes
      coherently, else the median of the deciding books' solved centres
      (scripts/nba_game_harness.market_fair), priced through the first half's
@@ -74,6 +77,33 @@ THE RULE, per regular-season game:
      level result is a push. A game with no trustworthy period rows stays
      PENDING: never settled from the full-game score, never a made-up result.
 
+THE GRADED QUOTES ARE NOT ALL MAIN NUMBERS. The first-half purchase kept ONE
+listed pair per book, the last one listed (data/ingestors/odds_ingestor.py
+_parse_total_outcomes, called from nba_odds_history.parse_derivatives), so the main
+rung rule above had nothing to choose among: every archived fetch holds one number
+per book. Against Pinnacle's number in the same game, the stored rows sit at least
+1.5 points off it at BetRivers 84.6%, betPARX 82.7% and Hard Rock 34.0% of the time,
+and 1.1% or less at every other deciding book (exactly on it: 3.5%, 4.1%, 9.2%
+against 43.0% to 52.6%). That pattern reads as a ladder cut to one rung. The ladder
+itself is inferred: no raw response was stored. So 78 of the 595 bets are at those
+three books (betrivers 9, betparx 8, hardrockbet 61), including all ten priced above
++105 and all eleven at -125 or worse. Live takes each book's real main number, so it
+will not be offered the quotes behind some of them. It does not change which games
+are bet, because the gap decides the game. The re-grades bound what it costs on the
+units; no game is gained or lost in any of them:
+
+    the lab's quotes                               595 bets  +51.49  +8.01%  +0.43% to +15.37%
+    BetRivers, betPARX lopsided rows removed       595 bets  +51.32  +7.97%  +0.40% to +15.30%   10 offers change, 0 results flip
+    and Hard Rock's lopsided rows                  595 bets  +52.16  +8.05%  +0.69% to +15.39%   45 offers change, 1 flips
+    all three books removed entirely               595 bets  +48.12  +7.44%  -0.04% to +14.85%   79 offers change, 3 flip
+
+(a lopsided row: its two prices over 6 points of probability apart;
+`python -m scripts.nba_first_half_total_luck_replay --quote-bounds` measures all of
+it.) Fanatics has no purchase rows at all, so it is a deciding book the graded bets
+never saw. The first live ticks replace the inference with a measurement: count
+totals_h1_alternate rows per book in `odds`, source SOURCE
+(data/ingestors/nba_first_half_odds.py).
+
 STALENESS IS JUDGED ON THE FETCH INSTANT, for the reason written in
 models/nba_team_total_luck.py: the purchase's snapshot_at IS its fetch time, a
 live row's is the book's own last_update. quote_frame keeps the book's stamp as
@@ -95,7 +125,9 @@ NBA_2025-01-02_BOS_MIN, DraftKings over 109 at -110. Without them: 593 bets,
 THE ARTIFACT (models/saved/, ARTIFACT_PATH; scripts/nba_first_half_total_luck_build.py):
 every game of 2020-21 .. 2025-26 with a Pinnacle full-game close and trustworthy
 period scores, as (season, Pinnacle's closing total, the first half's total),
-and the bucket's per-season counts. It must be refitted before 2027-28: the card
+the bucket's per-season counts, and the finished price table of 2026-27
+(models/nba_total_luck.py, THE PRICE TABLE IS STORED). It must be refitted before
+2027-28: the card
 refuses a season the artifact does not end just before.
 """
 from __future__ import annotations
@@ -126,7 +158,7 @@ GAP_CUT = 2.0
 REFERENCE_BOOK = "draftkings"
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACT_PATH = "models/saved/nba_first_half_total_luck_20261030_233823.pkl"
+ARTIFACT_PATH = "models/saved/nba_first_half_total_luck_20261031_095356.pkl"
 ARTIFACT_KIND = "nba_first_half_total_luck"
 # scripts/nba_game4_p3.MIN_PRIOR_GAMES: the lab's bar for the market's own pricing.
 MIN_PRIOR_GAMES = 300
@@ -169,30 +201,36 @@ _DIST_CACHE: dict = {}
 
 
 def pricing_dist(art: dict, season: int):
-    """The first half's distribution season `season` is priced with: its total
-    around a + b x Pinnacle's full-game close, a, b and the residuals from the
-    games of the seasons BEFORE it, re-centred (scripts.nba_game_harness
+    """The first half's distribution season `season` is priced with: the table
+    the artifact stores for it (models.nba_total_luck, THE PRICE TABLE IS STORED),
+    else its total around a + b x Pinnacle's full-game close, a, b and the residuals
+    from the games of the seasons BEFORE it, re-centred (scripts.nba_game_harness
     .ResidDist), the rows in the lab's order, so it is the lab's
     scripts/nba_game4_p3.period_market_pricing exactly. Fewer than
     MIN_PRIOR_GAMES refuses: there is no fallback to the season's own results.
-    Built once per artifact and season in a process."""
-    from scripts import nba_game_harness as H
-    from scripts.nba_game4_p3 import _line_fit
+    Once per artifact and season in a process."""
     key = (art.get("built_at"), len(art["h1_rows"]), int(season))
     if key not in _DIST_CACHE:
-        r = pd.DataFrame(art["h1_rows"], columns=["season", "close_total", "h1_total"])
-        prior = r[r["season"].astype(int) < int(season)]
-        xv, yv = prior["close_total"].to_numpy(float), prior["h1_total"].to_numpy(float)
-        ok = np.isfinite(xv) & np.isfinite(yv)
-        if int(ok.sum()) < MIN_PRIOR_GAMES:
-            raise ValueError(f"{MODEL_ID}: {int(ok.sum())} games with a first-half total before "
-                             f"{season} (need {MIN_PRIOR_GAMES}); no own-season fallback")
-        a, b = _line_fit(xv[ok], yv[ok])
-        _DIST_CACHE[key] = H.ResidDist(
-            yv[ok] - (a + b * xv[ok]),
-            f"{season} {MARKET}: result around {a:.2f} + {b:.3f} x Pinnacle's full-game close, "
-            f"seasons < {season} ({int(ok.sum())} games)")
+        stored = tl.stored_dist(art, season)
+        _DIST_CACHE[key] = stored if stored is not None else _build_dist(art, season)
     return _DIST_CACHE[key]
+
+
+def _build_dist(art: dict, season: int):
+    from scripts import nba_game_harness as H
+    from scripts.nba_game4_p3 import _line_fit
+    r = pd.DataFrame(art["h1_rows"], columns=["season", "close_total", "h1_total"])
+    prior = r[r["season"].astype(int) < int(season)]
+    xv, yv = prior["close_total"].to_numpy(float), prior["h1_total"].to_numpy(float)
+    ok = np.isfinite(xv) & np.isfinite(yv)
+    if int(ok.sum()) < MIN_PRIOR_GAMES:
+        raise ValueError(f"{MODEL_ID}: {int(ok.sum())} games with a first-half total before "
+                         f"{season} (need {MIN_PRIOR_GAMES}); no own-season fallback")
+    a, b = _line_fit(xv[ok], yv[ok])
+    return H.ResidDist(
+        yv[ok] - (a + b * xv[ok]),
+        f"{season} {MARKET}: result around {a:.2f} + {b:.3f} x Pinnacle's full-game close, "
+        f"seasons < {season} ({int(ok.sum())} games)")
 
 
 def uplift(art: dict, season: int) -> float:

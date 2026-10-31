@@ -683,7 +683,7 @@ everything it failed are `docs/nba_models_2026.md` 6.6 and 6.7).
 | every game present | every scheduled game of the season before the date must have its final score and both box scores, and each team's box points must add up to its final score, as every game did in the lab; else the game is declined, `score_missing`, `box_missing` or `box_mismatch`, and the card logs the games and the repair command. A game ESPN lists as postponed is not owed; one still unscored two weeks after its date is presumed not played and named in the log every run | `models/nba_total_luck.missing_inputs` |
 | regular season only | the lab's population: a game the schedule lists as regular season, or a `games` row it does not list on a regular-season day with no other kind of game that day. The NBA Cup quarterfinals and semifinals count; the Cup final, preseason, play-in and playoffs never do | `models/nba_total_luck.regular_season` |
 | decided once | on a fetch that landed 60-66 minutes before tip, at most 5 minutes old, made by its own job every minute (the refresh pass does not run it); a row in `nba_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_total_luck_window.py`, `scheduler.run_nba_total_luck_window`, `scripts/nba_total_luck_card.py` |
-| artifact | the residual sample and the bucket's per-season counts | `models/saved/nba_total_luck_20261017_090305.pkl` |
+| artifact | the residual sample, the bucket's per-season counts and the finished price table of 2026-27 | `models/saved/nba_total_luck_20261031_095356.pkl` |
 
 **The evidence** (decision point C, gap ≥ 3, the over; graded walk-forward at
 bought prices by the lab, `scripts/nba_game2_luck.py`):
@@ -813,7 +813,7 @@ other passing cell (the first-half over) was not built.
 | decided once | on this model's own team-total fetch that landed 45-66 minutes before tip and is at most 5 minutes old; the fetch is planned when an undecided game is 45-56 minutes from tip. A row in `nba_team_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_team_total_luck_window.py`, `scheduler.run_nba_total_luck_window`, `scripts/nba_team_total_luck_card.py` |
 | settlement | the home team's final score, overtime included (DraftKings' house rule for team totals); a push when equal | `tracking/paper_tracker._compute_result`, `_RULE_MODEL_MARKETS` |
 | closing line | one more call 12-25 minutes before tip, only for games holding a bet, stored as `close`; the card never reads it | `scripts/nba_team_total_luck_window.py` |
-| artifact | the team-total residuals (14,460 rows, 2020-21 → 2025-26) and the bucket's per-season counts | `models/saved/nba_team_total_luck_20261018_014024.pkl` |
+| artifact | the team-total residuals (14,460 rows, 2020-21 → 2025-26), the bucket's per-season counts and the finished price table of 2026-27 | `models/saved/nba_team_total_luck_20261031_095356.pkl` |
 
 **The evidence** (decision point D: each game's one purchase 45-75 minutes
 before tip; the home team's part ≥ 2, the under; graded walk-forward at bought
@@ -946,7 +946,7 @@ that passed."
 |---|---|---|
 | the cut | the full-game gap (`nba_total_luck`'s number, unscaled), at least 2.0 points; overs only. `nba_total_luck`'s own cut of 3.0 is unchanged | `models/nba_first_half_total_luck.GAP_CUT`, `signal` |
 | prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
-| price floor | -200, pinned. It laid -130 to +114 | `config.MODEL_MIN_ODDS` |
+| price floor | -200, pinned. It laid -130 to +114 across all books, -118 to +105 at the four books whose rows look like main numbers (`docs/nba_models_2026.md` 8.4) | `config.MODEL_MIN_ODDS` |
 | EV floor | 0.00 on the fair probability plus the walk-forward uplift, a push scored as a loss. It removes 2 of the 595 graded bets, both wins | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
 | the quotes | each book's main number in this model's own fetch; no deciding book more than 1.0 point from the deciding books' median | `models/nba_book_numbers.py`, `data/ingestors/nba_first_half_odds.py` |
 | the fair line | Pinnacle's no-vig first-half total when it quotes coherently, else the median of the deciding books' solved centres, priced through the first half's total around a + b × Pinnacle's full-game close, fitted on the seasons before the live one, at least 300 games | `models/nba_first_half_total_luck.pricing_dist`, `scripts/nba_game4_p3.period_market_pricing` |
@@ -954,7 +954,7 @@ that passed."
 | decided once | on this model's own first-half fetch that landed 45-66 minutes before tip and is at most 5 minutes old; the fetch is planned when an undecided game is 45-56 minutes from tip. A row in `nba_first_half_total_luck_decisions`, bet or not, never looked at again | `scripts/nba_first_half_total_luck_window.py`, `scheduler.run_nba_total_luck_window`, `scripts/nba_first_half_total_luck_card.py` |
 | settlement | Q1 + Q2 from `nba_period_scores`, a level result a push. No trustworthy period rows: pending, never the full-game score | `tracking/paper_tracker._first_half_points` |
 | closing line | one more call 12-25 minutes before tip, only for games holding a bet, stored as `close`; the card never reads it | `scripts/nba_first_half_total_luck_window.py` |
-| artifact | every game's Pinnacle closing total and first-half total (7,230 rows, 2020-21 → 2025-26) and the bucket's per-season counts | `models/saved/nba_first_half_total_luck_20261030_233823.pkl` |
+| artifact | every game's Pinnacle closing total and first-half total (7,230 rows, 2020-21 → 2025-26), the bucket's per-season counts and the finished price table of 2026-27 | `models/saved/nba_first_half_total_luck_20261031_095356.pkl` |
 
 **What it lays** (the lab's 595 bets, read from
 `bets_P3_F4_D_totals_h1_0010.parquet`, family P3_F4, over, cut 2): prices -130 to

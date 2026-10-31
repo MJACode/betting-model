@@ -19,6 +19,8 @@ rather than recomputed on the worker:
            decision point D, totals_h1, over, cut 2.0), wins, pushes and the sum
            of their market-fair win probabilities, read from the lab's own bet
            file. uplift(S) is fitted on the seasons before S.
+  pricing_tables  the finished price table of the season it prices live, built from
+           h1_rows (models.nba_total_luck.with_pricing_table).
 
 Reads only the research cache (NBA_RESEARCH_CACHE, a cache of Supabase) and
 the lab's bet file; no database, no API.
@@ -120,6 +122,7 @@ def main() -> None:
         store(a.store)
         return
     art = build(H.CACHE, a.bets)
+    art = fh.tl.with_pricing_table(art, fh.pricing_dist, fh.newest_season)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = ROOT / "models" / "saved" / f"{fh.MODEL_ID}_{stamp}.pkl"
     with open(out, "wb") as fh_out:
