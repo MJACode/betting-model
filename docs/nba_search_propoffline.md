@@ -288,3 +288,195 @@ real bet.
 `--full` refuses without all three variables. It prints progress and an estimate after each group, writes
 one `cells_*.parquet` per group (so a stopped run resumes), the bets, the proposition table and the beside
 tables. It is built to finish in about two hours.
+
+## Dated lines, 2026-10-31, before any cell was graded
+
+No cell, cut, side, band, bar or season above changed. These three lines are about how the lab reports.
+
+- **The credit test has its own file.** The verdict's `credited` column cannot read `control_AN_lean`: its credit
+  map matches on market, side and cut, with no reference kind, so the Pinnacle and consensus rows would collide.
+  There, `credited` equals a pass. `--full` writes `credit_AN.parquet` with each AN cell's return against the control
+  at the same reference kind, side and cut. An AN cell is credited when it passes the verdict and `beats_control` is
+  true.
+- **Small p-values are not re-drawn.** The harness re-draws a p under 0.01 with 400,000 resamples for the first
+  search's false-discovery bar, about 40 seconds each on this machine under load (timed 2026-10-31). A smoke run on
+  results set to zero never shows that cost, so it would hide up to 68 minutes. Section 9.1's bars do not read that p.
+  In this lab's cells `p_choose` and `p_confirm` stay at 4,000 resamples, and the harness is handed back unchanged.
+- **"Low" share means under 0.5.** The placebo section says the print names a cell whose share is low. It names any
+  cell where a run changes under half its bets.
+
+## Counts before grading
+
+Counted 2026-10-31 by `python -m scripts.nba_s_propoffline --smoke` on the research cache. Lines, prices and
+timestamps only. The model's fit read the seasons before the one it prices, and no bet of any cell was graded.
+
+**The rules, row by row** (a row is one book's quote on one proposition at one line):
+
+| Step | Rows left |
+|---|---:|
+| Stored rows the first search's table holds | 2,733,240 |
+| A named player who took the court, with a stat line | 2,700,136 |
+| In the 45-75 minute window | 2,685,992 |
+| A coherent two-way quote | 2,415,494 |
+| Both prices inside ±10,000, line under the ceiling | 2,415,295 |
+
+The price limit removed 199 rows. The line ceiling removed none. The ceilings, the highest each stat reached in the
+stored box scores: points 83, rebounds 31, assists 24, threes 14, points + rebounds + assists 95, points + rebounds 92, points + assists 86, rebounds + assists 45, blocks 10, steals 10, blocks + steals 12, turnovers 12.
+
+**Games with a decision:** 1,225 in 2023-24, 1,224 in 2024-25, 1,217 in 2025-26.
+
+**Bets each cell would place.** AN and its control have no 2023-24 bets, because that season only fits.
+
+| Family | Reference | Side | Cut on EV | 2023-24 | 2024-25 | 2025-26 | Pooled |
+|---|---|---|---|---:|---:|---:|---:|
+| OL | pinnacle | under | ≥ 0.00 | 1,541 | 4,152 | 5,285 | 10,978 |
+| OL | pinnacle | under | ≥ 0.01 | 1,189 | 3,404 | 4,306 | 8,899 |
+| OL | pinnacle | under | ≥ 0.02 | 916 | 2,705 | 3,437 | 7,058 |
+| OL | pinnacle | under | ≥ 0.03 | 678 | 2,128 | 2,653 | 5,459 |
+| OL | pinnacle | under | ≥ 0.04 | 497 | 1,652 | 1,991 | 4,140 |
+| OL | pinnacle | under | ≥ 0.05 | 376 | 1,260 | 1,515 | 3,151 |
+| control_OL_blind | pinnacle | under | none | 6,957 | 10,122 | 13,792 | 30,871 |
+| OL | pinnacle | over | ≥ 0.00 | 1,806 | 4,649 | 4,369 | 10,824 |
+| OL | pinnacle | over | ≥ 0.01 | 1,351 | 3,760 | 3,407 | 8,518 |
+| OL | pinnacle | over | ≥ 0.02 | 952 | 2,937 | 2,633 | 6,522 |
+| OL | pinnacle | over | ≥ 0.03 | 688 | 2,179 | 1,981 | 4,848 |
+| OL | pinnacle | over | ≥ 0.04 | 492 | 1,607 | 1,451 | 3,550 |
+| OL | pinnacle | over | ≥ 0.05 | 331 | 1,131 | 1,076 | 2,538 |
+| control_OL_blind | pinnacle | over | none | 7,559 | 12,220 | 13,661 | 33,440 |
+| control_same_line | pinnacle | under | ≥ 0.00 | 8,487 | 8,306 | 7,650 | 24,443 |
+| CS | consensus | under | ≥ 0.00 | 5,432 | 5,791 | 6,045 | 17,268 |
+| CS | consensus | under | ≥ 0.01 | 3,370 | 3,694 | 3,992 | 11,056 |
+| CS | consensus | under | ≥ 0.02 | 2,116 | 2,392 | 2,552 | 7,060 |
+| CS | consensus | under | ≥ 0.03 | 1,141 | 1,478 | 1,630 | 4,249 |
+| CS | consensus | under | ≥ 0.04 | 696 | 905 | 1,037 | 2,638 |
+| CS | consensus | under | ≥ 0.05 | 356 | 565 | 677 | 1,598 |
+| CS | consensus | over | ≥ 0.00 | 6,214 | 6,811 | 6,424 | 19,449 |
+| CS | consensus | over | ≥ 0.01 | 3,936 | 4,546 | 4,279 | 12,761 |
+| CS | consensus | over | ≥ 0.02 | 2,449 | 2,987 | 2,848 | 8,284 |
+| CS | consensus | over | ≥ 0.03 | 1,388 | 1,886 | 1,889 | 5,163 |
+| CS | consensus | over | ≥ 0.04 | 840 | 1,222 | 1,215 | 3,277 |
+| CS | consensus | over | ≥ 0.05 | 478 | 769 | 822 | 2,069 |
+| AN | pinnacle | under | ≥ 0.01 | – | 19,138 | 12,628 | 31,766 |
+| AN | pinnacle | under | ≥ 0.02 | – | 15,904 | 9,956 | 25,860 |
+| AN | pinnacle | under | ≥ 0.04 | – | 10,392 | 5,746 | 16,138 |
+| control_AN_lean | pinnacle | under | ≥ 0.01 | – | 17,319 | 11,859 | 29,178 |
+| control_AN_lean | pinnacle | under | ≥ 0.02 | – | 13,679 | 9,035 | 22,714 |
+| control_AN_lean | pinnacle | under | ≥ 0.04 | – | 7,822 | 4,772 | 12,594 |
+| AN | pinnacle | over | ≥ 0.01 | – | 3,490 | 3,262 | 6,752 |
+| AN | pinnacle | over | ≥ 0.02 | – | 2,587 | 2,341 | 4,928 |
+| AN | pinnacle | over | ≥ 0.04 | – | 1,384 | 1,156 | 2,540 |
+| control_AN_lean | pinnacle | over | ≥ 0.01 | – | 1,553 | 1,900 | 3,453 |
+| control_AN_lean | pinnacle | over | ≥ 0.02 | – | 1,032 | 1,237 | 2,269 |
+| control_AN_lean | pinnacle | over | ≥ 0.04 | – | 420 | 502 | 922 |
+| AN | consensus | under | ≥ 0.01 | – | 24,032 | 15,468 | 39,500 |
+| AN | consensus | under | ≥ 0.02 | – | 19,619 | 12,091 | 31,710 |
+| AN | consensus | under | ≥ 0.04 | – | 12,202 | 7,074 | 19,276 |
+| control_AN_lean | consensus | under | ≥ 0.01 | – | 17,156 | 9,063 | 26,219 |
+| control_AN_lean | consensus | under | ≥ 0.02 | – | 11,298 | 6,050 | 17,348 |
+| control_AN_lean | consensus | under | ≥ 0.04 | – | 4,981 | 2,663 | 7,644 |
+| AN | consensus | over | ≥ 0.01 | – | 5,844 | 4,573 | 10,417 |
+| AN | consensus | over | ≥ 0.02 | – | 4,348 | 3,415 | 7,763 |
+| AN | consensus | over | ≥ 0.04 | – | 2,381 | 1,838 | 4,219 |
+| control_AN_lean | consensus | over | ≥ 0.01 | – | 1,483 | 2,249 | 3,732 |
+| control_AN_lean | consensus | over | ≥ 0.02 | – | 928 | 1,492 | 2,420 |
+| control_AN_lean | consensus | over | ≥ 0.04 | – | 380 | 663 | 1,043 |
+
+**Against the first search's counts:** OL under at EV ≥ 0.02, 7,058 here and 7,123 in the record. CS under at EV ≥ 0.00,
+17,268 here and 17,386 in the record. The shipped same-line control, 24,443 here and 24,572 in the record. The first
+search had no −200 floor or 45-75 minute window on the first two. These rows differ by under 1% each.
+
+**The extremes of every line and price read, after the rules:**
+
+| Market | Rows | Lowest line | Highest line | Lowest over | Highest over | Lowest under | Highest under |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| player_assists | 231,787 | 0.5 | 14.5 | -475 | +300 | -450 | +270 |
+| player_blocks | 117,013 | 0.5 | 4.5 | -300 | +750 | -2,000 | +210 |
+| player_blocks_steals | 66,266 | 0.5 | 5.5 | -275 | +360 | -560 | +210 |
+| player_double_double | 38,210 | 0.5 | 0.5 | -5,000 | +2,200 | -10,000 | +900 |
+| player_points | 347,851 | 1.5 | 44.5 | -375 | +225 | -400 | +215 |
+| player_points_assists | 184,893 | 2.5 | 49.5 | -190 | +215 | -300 | +140 |
+| player_points_rebounds | 225,970 | 2.5 | 50.5 | -200 | +525 | -1,000 | +150 |
+| player_points_rebounds_assists | 264,059 | 3.5 | 64.5 | -315 | +215 | -305 | +190 |
+| player_rebounds | 299,493 | 0.5 | 16.5 | -295 | +320 | -500 | +210 |
+| player_rebounds_assists | 176,196 | 1.5 | 25.5 | -224 | +215 | -300 | +165 |
+| player_steals | 122,323 | 0.5 | 3.5 | -304 | +375 | -600 | +220 |
+| player_threes | 272,593 | 0.5 | 6.5 | -900 | +1,400 | -3,500 | +400 |
+| player_triple_double | 2,372 | 0.5 | 0.5 | -233 | +2,000 | -10,000 | +170 |
+| player_turnovers | 66,269 | 0.5 | 5.5 | -284 | +300 | -450 | +196 |
+
+**The highest-EV offers stay in, as the rules above say.** The top of each family is a wide gap, not an impossible
+number, and each lands in the beside row that takes out offers more than 0.20 above the price's implied chance.
+
+- CS and AN over: Goga Bitadze points + rebounds over 19.5 at BetMGM, +525 on 2024-12-08. EV 2.03 against the other
+  books' median of 0.485.
+- OL under: Chimezie Metu points under 14.5 at BetMGM, −125 on 2023-12-13, with Pinnacle at 8.5. EV 0.63.
+- OL over: Jonathan Kuminga points + rebounds + assists over 16.5 at DraftKings, −114 on 2025-11-12, with Pinnacle at
+  23.5. EV 0.58.
+
+**The placebo, on the real data.** Every group's identity permutation returned its real bets. Share of propositions alone
+in their group: OL 0.04%, CS 0.08%, AN Pinnacle 0.00%, AN consensus 0.03%. Averaged over three runs:
+
+| Family | Reference | Side | Cut on EV | Real bets | Bets in a run | Share of a run's bets not among the real ones |
+|---|---|---|---|---:|---:|---:|
+| OL | pinnacle | under | ≥ 0.00 | 10,978 | 10,456 | 0.77 |
+| OL | pinnacle | under | ≥ 0.01 | 8,899 | 8,491 | 0.80 |
+| OL | pinnacle | under | ≥ 0.02 | 7,058 | 6,738 | 0.84 |
+| OL | pinnacle | under | ≥ 0.03 | 5,459 | 5,219 | 0.86 |
+| OL | pinnacle | under | ≥ 0.04 | 4,140 | 3,961 | 0.89 |
+| OL | pinnacle | under | ≥ 0.05 | 3,151 | 3,031 | 0.90 |
+| OL | pinnacle | over | ≥ 0.00 | 10,824 | 10,339 | 0.78 |
+| OL | pinnacle | over | ≥ 0.01 | 8,518 | 8,145 | 0.82 |
+| OL | pinnacle | over | ≥ 0.02 | 6,522 | 6,258 | 0.85 |
+| OL | pinnacle | over | ≥ 0.03 | 4,848 | 4,660 | 0.88 |
+| OL | pinnacle | over | ≥ 0.04 | 3,550 | 3,410 | 0.91 |
+| OL | pinnacle | over | ≥ 0.05 | 2,538 | 2,442 | 0.93 |
+| CS | consensus | under | ≥ 0.00 | 17,268 | 16,873 | 0.82 |
+| CS | consensus | under | ≥ 0.01 | 11,056 | 10,782 | 0.86 |
+| CS | consensus | under | ≥ 0.02 | 7,060 | 6,882 | 0.89 |
+| CS | consensus | under | ≥ 0.03 | 4,249 | 4,127 | 0.91 |
+| CS | consensus | under | ≥ 0.04 | 2,638 | 2,561 | 0.93 |
+| CS | consensus | under | ≥ 0.05 | 1,598 | 1,553 | 0.93 |
+| CS | consensus | over | ≥ 0.00 | 19,449 | 19,252 | 0.80 |
+| CS | consensus | over | ≥ 0.01 | 12,761 | 12,623 | 0.85 |
+| CS | consensus | over | ≥ 0.02 | 8,284 | 8,191 | 0.88 |
+| CS | consensus | over | ≥ 0.03 | 5,163 | 5,103 | 0.90 |
+| CS | consensus | over | ≥ 0.04 | 3,277 | 3,237 | 0.92 |
+| CS | consensus | over | ≥ 0.05 | 2,069 | 2,045 | 0.93 |
+| AN | pinnacle | under | ≥ 0.01 | 31,766 | 31,591 | 0.37 |
+| AN | pinnacle | under | ≥ 0.02 | 25,860 | 26,015 | 0.41 |
+| AN | pinnacle | under | ≥ 0.04 | 16,138 | 16,800 | 0.50 |
+| AN | pinnacle | over | ≥ 0.01 | 6,752 | 7,465 | 0.61 |
+| AN | pinnacle | over | ≥ 0.02 | 4,928 | 5,560 | 0.65 |
+| AN | pinnacle | over | ≥ 0.04 | 2,540 | 2,953 | 0.71 |
+| AN | consensus | under | ≥ 0.01 | 39,500 | 39,333 | 0.51 |
+| AN | consensus | under | ≥ 0.02 | 31,710 | 31,677 | 0.55 |
+| AN | consensus | under | ≥ 0.04 | 19,276 | 19,698 | 0.64 |
+| AN | consensus | over | ≥ 0.01 | 10,417 | 11,180 | 0.69 |
+| AN | consensus | over | ≥ 0.02 | 7,763 | 8,399 | 0.72 |
+| AN | consensus | over | ≥ 0.04 | 4,219 | 4,619 | 0.77 |
+
+Three cells are low: AN Pinnacle under at all three cuts. The intercept stays in every run on purpose, so that a cell
+earning only from the over-lean fails this bar. With no inputs at all, that intercept places 29,178 bets at EV ≥ 0.01 against
+the model's 31,766, and the median move is −0.059 log-odds. That fits most of these bets not depending on which move a
+proposition reads, though no count here isolates it. In these cells only the bets a run changes can separate the real return
+from the placebo's.
+
+Can the bar still say yes? On invented data, 40 runs at each group's lowest cut: with a planted edge, every AN group's real
+rule beat its 95th percentile at 0.83 or more of six seeds, and with no edge at none of them, in every family. The invented
+world holds no consensus edge, so the CS placebo's power is shown by a hand-built one (`test_a_consensus_edge_beats_its_placebo`).
+On a planted off-line edge, cells pass every one of the verdict's six bars (`test_a_planted_edge_can_pass_every_bar_of_the_verdict`).
+
+**Overlap with the two shipped models** (counts only; 0.000 for CS is by construction, since the same-line rule needs Pinnacle):
+
+| Family, lowest cut | Bets | Share on a proposition the same-line rule holds | Share the projection card holds |
+|---|---:|---:|---:|
+| OL_pinnacle_under | 10,978 | 0.260 | 0.032 |
+| OL_pinnacle_over | 10,824 | 0.052 | 0.066 |
+| CS_consensus_under | 17,268 | 0.000 | 0.252 |
+| CS_consensus_over | 19,449 | 0.000 | 0.215 |
+| AN_pinnacle_under | 31,766 | 0.406 | 0.164 |
+| AN_pinnacle_over | 6,752 | 0.058 | 0.195 |
+| AN_consensus_under | 39,500 | 0.000 | 0.418 |
+| AN_consensus_over | 10,417 | 0.000 | 0.169 |
+
+**Time and memory.** One placebo run across all of a group's cuts took 0.5 to 6.2 seconds by group (the median of three runs, on results set to zero). The projected `--full` is 93 minutes of cells plus 3 minutes of loading, measured on this machine under its shared load that morning; two earlier smoke runs that day projected 78 and 105. Peak memory was 4.0 GB, and `--full` adds at most 0.2 GB for one group's 200 placebo runs. The first run on a fresh folder also refits the projection, 11 to 20 minutes a fold on one thread (that refit's logs, 2026-10-31), then caches it.
