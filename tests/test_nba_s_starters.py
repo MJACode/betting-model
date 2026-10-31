@@ -374,6 +374,46 @@ def test_a_game_failing_the_guard_has_no_tilt():
     assert S.tilt_points(f)["game_id"].tolist() == ["g"]
 
 
+def _out_tonight(game, players=("A0", "A1", "A2"), cap=40.13):
+    """AAA at `game` with the listed players Out, known well before T. AAA is home in G2021_2 and away in G2021_3."""
+    at = _games().set_index("game_id").loc[game, "tip"] - pd.Timedelta(hours=3)
+    w, st, model, gm, last = _tiny(_inj([(at, game, "AAA", p, "x", "Out", 2021) for p in players]), cap=cap)
+    pr = S.player_rows(w, st, model, gm, last)
+    return S.game_frame(w, st, model, gm, pr).set_index("game_id"), pr
+
+
+@pytest.mark.parametrize("game,side,other", [("G2021_2", "h", "G2021_3"), ("G2021_3", "a", "G2021_2")])
+def test_a_team_down_to_five_players_fills_the_periods_but_not_the_game_and_has_no_tilt(game, side, other):
+    # NBA_2021-12-31_MIA_HOU: five available players, each capped at 40.13 over the game but playing all of
+    # both periods. The period ratings carry five players and the full-game rating 4.18, so the tilt is a
+    # level error and not a change of who plays.
+    fr, _ = _out_tonight(game)
+    assert fr.loc[game, f"min_q1_{side}"] == pytest.approx(60.0) and fr.loc[game, f"min_h1_{side}"] == pytest.approx(120.0)
+    assert fr.loc[game, f"min_fg_{side}"] == pytest.approx(5 * 40.13)      # the fault is really in this world
+    assert not bool(fr.loc[game, "ok"])
+    assert bool(fr.loc[other, "ok"])
+    x = S.tilt_points(fr.reset_index())
+    assert game not in set(x["game_id"]) and other in set(x["game_id"])
+
+
+def test_a_team_with_six_players_fills_the_game_and_keeps_its_tilt():
+    # one more player than the fault needs: 6 x 40.13 reaches 240, so nothing here is thrown away
+    fr, _ = _out_tonight("G2021_2", players=("A0", "A1"))
+    assert fr.loc["G2021_2", "min_fg_h"] == pytest.approx(240.0) and bool(fr.loc["G2021_2", "ok"])
+
+
+@pytest.mark.parametrize("player,moved,ok", [("A0", -1.5, False), ("A0", 1.5, False), ("A0", -0.5, True), ("A0", 0.5, True),
+                                             ("B0", -1.5, False), ("B0", 1.5, False), ("B0", -0.5, True)])
+def test_full_game_minutes_more_than_a_minute_from_240_stop_the_tilt_on_either_team(player, moved, ok):
+    # G2021_4: AAA home, BBB away. Only the full-game column moves, so only the full-game check can see it.
+    w, st, model, gm, last = _tiny()
+    pr = S.player_rows(w, st, model, gm, last)
+    pr.loc[(pr["game_id"] == "G2021_4") & (pr["player_id"] == player), "min_fg"] += moved
+    fr = S.game_frame(w, st, model, gm, pr).set_index("game_id")
+    assert bool(fr.loc["G2021_4", "ok"]) is ok
+    assert bool(fr.loc["G2021_5", "ok"])
+
+
 def _fit_rows(n_per=120, seasons=(2021, 2022, 2023, 2024, 2025), slope=0.6, seed=4):
     rng = np.random.default_rng(seed)
     ids = [f"G{s}_{i}" for s in seasons for i in range(n_per)]
@@ -603,6 +643,13 @@ def _cell(k, fam="S1", **over):
     return row
 
 
+def _spread_cell(k, fam="S1", **over):
+    """A cell on a market where credit is possible, with the blind bets a spread row carries."""
+    row = {"market": "spreads_q1", "side": "home", "pool_share_over": np.nan, "pool_share_home": 1.0,
+           "blind_pool_home": -0.04, "blind_pool_away": -0.03, **over}
+    return _cell(k, fam=fam, **row)
+
+
 def test_the_verdicts_own_call_judges_the_control_like_a_cell():
     cells = pd.DataFrame([_cell(k) for k in range(3)] + [_cell(k, fam=S.CONTROL) for k in range(3)])
     v = V.house_verdict_bands(cells)
@@ -616,18 +663,71 @@ def test_the_verdicts_own_call_judges_the_control_like_a_cell():
 
 @pytest.mark.parametrize("control_roi,credited", [(0.08, False), (0.06, False), (0.04, True), (np.nan, True)])
 def test_a_cell_counts_for_the_starters_only_when_it_passes_and_beats_its_control(control_roi, credited):
-    cells = pd.DataFrame([_cell(k) for k in range(3)]
-                         + [_cell(k, fam=S.CONTROL, pool_roi=control_roi) for k in range(3)])
+    cells = pd.DataFrame([_spread_cell(k) for k in range(3)]
+                         + [_spread_cell(k, fam=S.CONTROL, pool_roi=control_roi) for k in range(3)])
     c = S.credit_table(cells)
     m = c[(c["family"] == "S1") & (c["cut_index"] == 1)].iloc[0]
     assert bool(m["house5_passes"]) is True and bool(m["credited"]) is credited
 
 
 def test_a_cell_that_fails_a_bar_is_never_credited():
-    cells = pd.DataFrame([_cell(k, pool_ci95_lo=-0.01) for k in range(3)]
-                         + [_cell(k, fam=S.CONTROL, pool_roi=-0.5) for k in range(3)])
+    cells = pd.DataFrame([_spread_cell(k, pool_ci95_lo=-0.01) for k in range(3)]
+                         + [_spread_cell(k, fam=S.CONTROL, pool_roi=-0.5) for k in range(3)])
     c = S.credit_table(cells)
     assert not c.loc[c["family"] == "S1", "credited"].any()
+    assert bool(c.loc[c["family"] == "S1", "beats_control"].all())          # it fails on the bar, not on the control
+
+
+def _credit_cells(total_market, control_roi=0.04):
+    """A total cell and a spread cell, each passing every bar and beating its control."""
+    tot = dict(market=total_market, cut=None)
+    rows = []
+    for k in range(3):
+        rows += [_cell(k, **_cuts(tot, k)), _cell(k, fam=S.CONTROL, pool_roi=control_roi, **_cuts(tot, k)),
+                 _spread_cell(k), _spread_cell(k, fam=S.CONTROL, pool_roi=control_roi)]
+    return pd.DataFrame(rows)
+
+
+def _cuts(tot, k):
+    return {**tot, "cut": S.CUTS[tot["market"]][k]}
+
+
+@pytest.mark.parametrize("market", ["totals_q1", "totals_h1"])
+@pytest.mark.parametrize("control_roi", [0.04, np.nan])
+def test_a_total_cell_earns_no_credit_for_the_starters_even_when_it_beats_its_control(market, control_roi):
+    # section 8: a total cell's bets are nearly all its control's, so beating the control there says nothing
+    # about the starters. The spread cell beside it, with the same numbers, is the proof the rule is what stops it.
+    c = S.credit_table(_credit_cells(market, control_roi))
+    s1 = c[c["family"] == "S1"]
+    tot, spr = s1[s1["market"] == market], s1[s1["market"] == "spreads_q1"]
+    assert len(tot) == 3 and bool(tot["house5_passes"].all()) and bool(tot["beats_control"].all())
+    assert not tot["credited"].any()
+    assert bool(spr["credited"].all())
+    assert not tot["creditable"].any() and bool(spr["creditable"].all())
+    assert set(tot["counts_for"]) == {S.LEAGUE_IDEA} and set(spr["counts_for"]) == {S.STARTERS_IDEA}
+
+
+def test_the_control_is_read_as_the_league_share_idea_and_a_failing_cell_as_no_one():
+    cells = _credit_cells("totals_q1")
+    c = S.credit_table(cells)
+    assert set(c.loc[c["family"] == S.CONTROL, "counts_for"]) == {S.LEAGUE_IDEA}
+    failing = S.credit_table(cells.assign(pool_ci95_lo=-0.01))
+    assert set(failing["counts_for"]) == {""} and not failing["credited"].any()
+
+
+def test_a_spread_cell_that_passes_and_loses_to_its_control_is_not_the_starters():
+    cells = pd.DataFrame([_spread_cell(k) for k in range(3)] + [_spread_cell(k, fam=S.CONTROL, pool_roi=0.08) for k in range(3)])
+    s1 = S.credit_table(cells).query("family == 'S1'")
+    assert bool(s1["house5_passes"].all()) and not s1["credited"].any()
+    assert S.STARTERS_IDEA not in set(s1["counts_for"]) and S.LEAGUE_IDEA not in set(s1["counts_for"])
+
+
+def test_the_credit_report_gives_a_total_pass_to_the_league_share_idea(monkeypatch, capsys):
+    monkeypatch.setattr(V, "load_cells", lambda results: _credit_cells("totals_h1"))
+    S.credit(Path("unused"))
+    out = capsys.readouterr().out
+    assert "S1: 6 cells, 6 pass, 3 credited" in out
+    assert "3 total cells pass and read as the league-share idea's" in out
 
 
 # ── nothing here grades a real bet before --full ────────────────────────────
@@ -642,6 +742,15 @@ def test_the_counts_the_placebo_share_and_the_extremes_never_call_the_grader(ran
     S.placebo_null(prep, n_runs=2)
     S.extremes(prep)
     assert "EXTREMES" in capsys.readouterr().out
+
+
+def test_the_counts_say_how_many_bets_are_only_the_cells_and_only_the_controls(ran):
+    t = S.counts(_prep(ran))["cells"]
+    assert (t["bets_pooled"] - t["only_cell"] == t["control_bets"] - t["only_control"]).all()      # both are the bets in both
+    has = t["bets_pooled"] > 0
+    both = t.loc[has, "bets_pooled"] - t.loc[has, "only_cell"]
+    assert (t.loc[has, "share_also_control"] * t.loc[has, "bets_pooled"]).to_numpy() == pytest.approx(both.to_numpy())
+    assert (t["only_cell"] > 0).any() and (t["only_control"] > 0).any()      # the synthetic tilt really moves bets
 
 
 def _prep(ran):

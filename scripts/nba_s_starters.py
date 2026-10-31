@@ -40,8 +40,9 @@ before tip (decision point D, H.per_event_times), 2023-24 .. 2025-26 pooled:
             first-half spread and total x 2 sides x gap >= .5/1/1.5/2.
   CONTROL   S1_league: the same 32 cells on the base alone. It carries no
             "control_" prefix so the verdict's --house5 judges it like a cell;
-            the credit rule is read by `--credit` (a cell counts for the
-            starters only if it passes AND beats its control).
+            the credit rule is read by `--credit` (a spread cell counts for the
+            starters only if it passes AND beats its control; a total cell never
+            does, and its pass reads as the league-share idea's).
   PLACEBO   200 runs, seeds 1-200: each game's whole gap moved to another game
             on the same date in the same market; offers and prices stay. The
             same runs with only the tilt moved are reported beside, not judged.
@@ -102,6 +103,11 @@ EXPECTED_CELLS = 32
 MIN_FIT_GAMES = 300
 N_PLACEBO = 200
 PLACEBO_SEEDS = tuple(range(1, N_PLACEBO + 1))
+# The doc's section 8, added before any cell was graded: a total cell's bets are
+# nearly all its control's, so beating the control there says nothing about the starters.
+NO_CREDIT_MARKETS = ("totals_q1", "totals_h1")
+STARTERS_IDEA, LEAGUE_IDEA = "the starters", "the league-share idea"
+NOT_THE_STARTERS = "not the starters: it did not beat its control"
 TEAM_MINUTE_SLACK = 1.0                        # a team-game whose segments miss the period by more is unread
 # No such number exists on an NBA board. A row outside these is filed wrong: it
 # is dropped before anything is computed, and counted. The total ranges do not
@@ -280,7 +286,9 @@ def team_ratings(pr: pd.DataFrame) -> pd.DataFrame:
 def game_frame(w: P.World, st: P.State, model: P.Model, gm: pd.DataFrame, pr: pd.DataFrame) -> pd.DataFrame:
     """One row per game at T: both teams' ratings (_h, _a), the engine's as-of
     pace (pace_h x pace_a / league), and `ok`: the engine's box guard held and
-    both teams' period minutes reached their total."""
+    both teams' minutes reached all three totals (60, 120, 240). A team of
+    exactly five fills both periods and stops at 5 x the cap over the game: its
+    tilt would be a level error, not a change of who plays."""
     st = model.st or st
     gm = gm.reset_index(drop=True)
     t = team_ratings(pr)
@@ -300,6 +308,7 @@ def game_frame(w: P.World, st: P.State, model: P.Model, gm: pd.DataFrame, pr: pd
     for s in ("h", "a"):
         for p in PERIODS:
             full &= ((out[f"min_{p}_{s}"] - TEAM_MINUTES[p]).abs() <= TEAM_MINUTE_SLACK).to_numpy()
+        full &= ((out[f"min_fg_{s}"] - P.TEAM_MINUTES).abs() <= TEAM_MINUTE_SLACK).to_numpy()
         full &= out[f"n_players_{s}"].fillna(0).to_numpy() > 0
     out["box_ok"] = P.box_guard(w, out)
     out["ok"] = out["box_ok"].to_numpy() & full & np.isfinite(out["pace"].to_numpy(float))
@@ -558,10 +567,19 @@ def emit_family(dd: H.Data, family: str, gap: pd.DataFrame, neutral: pd.DataFram
 
 
 def credit_table(cells: pd.DataFrame) -> pd.DataFrame:
-    """Section 9's bars with this search's credit rule: an S1 cell counts for
+    """Section 9's bars with this search's credit rule: a spread cell counts for
     the starters only if it passes and its pooled return beats the control's at
-    the same market, side and cut (a control with no bet counts as 0)."""
-    return V.house_verdict_bands(cells, judge_controls=(), credit={FAMILY: CONTROL})
+    the same market, side and cut (a control with no bet counts as 0). A total
+    cell is never creditable, whatever the two returns are. `counts_for` says
+    whose idea each pass reads as; a row that fails reads as nobody's."""
+    c = V.house_verdict_bands(cells, judge_controls=(), credit={FAMILY: CONTROL})
+    s1 = (c["family"].astype(str) == FAMILY).to_numpy()
+    c["creditable"] = ~(s1 & c["market"].astype(str).isin(NO_CREDIT_MARKETS).to_numpy())
+    c["credited"] = c["credited"].to_numpy() & c["creditable"].to_numpy()
+    c["counts_for"] = np.select(
+        [~c["house5_passes"].to_numpy(bool), c["credited"].to_numpy(bool) & s1, ~c["creditable"].to_numpy() | ~s1],
+        ["", STARTERS_IDEA, LEAGUE_IDEA], default=NOT_THE_STARTERS)
+    return c
 
 
 # ── a synthetic world (the only place a cell is run before --full) ──────────
@@ -983,7 +1001,8 @@ def counts(prep: dict) -> dict:
                 cells.append({"market": m, "side": side, "cut": cut,
                               **{f"bets_{s}": int(by.get(s, 0)) for s in GRADED},
                               "bets_pooled": int(len(b)), "control_bets": int(len(bc)),
-                              "share_also_control": both / len(b) if len(b) else np.nan})
+                              "share_also_control": both / len(b) if len(b) else np.nan,
+                              "only_cell": int(len(b) - both), "only_control": int(len(bc) - both)})
     return {"population": pop, "sizes": pd.DataFrame(sizes), "bands": pd.DataFrame(bands),
             "cells": pd.DataFrame(cells), "alone_on_date": float(
                 (gap.assign(d=gap["game_id"].map(dates)).groupby(["market", "d"])["game_id"]
@@ -1117,6 +1136,11 @@ def smoke(cache: Path = H.CACHE) -> dict:
     print(starter_minutes(cache).round(3).to_string(index=False))
     print("\nEXPECTED MINUTES AT T AGAINST WHAT HAPPENED (root mean square error, player minutes):")
     print(minutes_accuracy(prep["frames"]["players_T"], cache).round(3).to_string(index=False))
+    print("\nGAMES WITH NO TILT BECAUSE A TEAM'S FULL-GAME MINUTES MISS 240 (section 4.3):")
+    for name, key in (("graded games at T", "games_T"), ("the slope fit's games", "games_ref")):
+        f = prep["frames"][key]
+        miss = (f["min_fg_h"] - P.TEAM_MINUTES).abs().gt(TEAM_MINUTE_SLACK) | (f["min_fg_a"] - P.TEAM_MINUTES).abs().gt(TEAM_MINUTE_SLACK)
+        print(f"  {name}: {int(miss.sum())} of {len(f)}", f.loc[miss, "game_id"].tolist()[:10])
     print("\nBETAS (each fit on the seasons before the one it serves; period result minus base, on tilt points):")
     print(prep["fit"].round(4).to_string(index=False))
     print("as registered:", repr({k: v for k, v in sorted(prep["betas"].items())}),
@@ -1224,9 +1248,11 @@ def credit(results: Path) -> None:
     s = c[c["family"] == FAMILY]
     k = c[c["family"] == CONTROL]
     print(f"{FAMILY}: {len(s)} cells, {int(s['house5_passes'].sum())} pass, {int(s['credited'].sum())} credited "
-          f"(pass and beat the control); {CONTROL}: {len(k)} cells, {int(k['house5_passes'].sum())} pass")
+          f"(spread cells that pass and beat the control); "
+          f"{int((s['house5_passes'] & ~s['creditable']).sum())} total cells pass and read as the league-share idea's; "
+          f"{CONTROL}: {len(k)} cells, {int(k['house5_passes'].sum())} pass")
     cols = ["family", "market", "side", "cut", "pool_n", "pool_units", "pool_roi", "pool_ci95_lo", "pool_ci95_hi",
-            "control_pool_roi", "beats_control", "house5_passes", "credited", "house5_failed"]
+            "control_pool_roi", "beats_control", "house5_passes", "credited", "counts_for", "house5_failed"]
     print(c[c["house5_passes"]][cols].to_string(index=False) if c["house5_passes"].any() else "no cell passes")
 
 
