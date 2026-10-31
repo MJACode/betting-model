@@ -18,7 +18,8 @@ THE RULES THIS MODULE LIVES BY
   * It must never make a call slower. Recording is a bounded in-memory queue and
     a daemon thread; nothing touches the database on the request path.
   * A process's last calls are written before it exits, and the exit waits a
-    bounded time for that (API_LOG_EXIT_WAIT_SEC). See _flush_on_exit.
+    bounded time for that (twice API_LOG_EXIT_WAIT_SEC at most). See
+    _flush_on_exit.
   * It must never leak a key. The query string is dropped except for an
     allowlist of descriptive params — `apiKey`, `key` and friends can therefore
     never be persisted, not even by accident on a new host.
@@ -82,12 +83,14 @@ _DEFAULT_TIMEOUT = (
 _MAX_QUEUE = int(os.environ.get("API_LOG_QUEUE", "5000"))
 _FLUSH_SEC = float(os.environ.get("API_LOG_FLUSH_SEC", "0.75"))
 _PRUNE_EVERY_SEC = 3600
-# The longest a process's exit waits for its writer to store what it recorded.
-# A normal final write from the worker is one connect plus one insert, which
-# the scheduler log puts at 0.3-0.45 s. Nothing on this path sets a connect
-# timeout, so without this bound an unreachable database could hold an exit for
-# as long as the TCP connect takes. The shortest timeout scheduler.py puts on any
-# job is 60 s, so the wait cannot push a job past its own.
+# The longest each of the exit's two waits lasts: first for the writer to store
+# what it recorded, then, only if the writer is stuck with calls still queued,
+# for the standby to write those over a fresh connection. A normal final write
+# from the worker is one connect plus one insert, which the scheduler log puts
+# at 0.3-0.45 s. Nothing on this path sets a connect timeout, so without this
+# bound an unreachable database could hold an exit for as long as the TCP
+# connect takes. Both waits together are 6 s by default; the shortest timeout
+# scheduler.py puts on any job is 60 s, so they cannot push a job past its own.
 _EXIT_WAIT_SEC = float(os.environ.get("API_LOG_EXIT_WAIT_SEC", "3"))
 
 _installed = False
@@ -97,6 +100,8 @@ _q: queue.Queue = queue.Queue(maxsize=_MAX_QUEUE)
 _source = "unknown"
 _stop = threading.Event()               # set once, at exit
 _writer: threading.Thread | None = None
+_takeover = threading.Event()           # set at exit, only if calls are still queued
+_standby: threading.Thread | None = None
 
 # Odds API credits are not in the response body. Each response carries
 # x-requests-last, the API's own bill for THAT call, and it is what is
@@ -314,9 +319,45 @@ def _writer_loop() -> None:
         pass
 
 
+def _standby_loop() -> None:
+    """The exit's second writer, for calls a stuck writer cannot reach.
+
+    Idle until _flush_on_exit sets _takeover, which it does only when calls
+    remain on the queue after the wait for the writer: the writer is stuck
+    (say its connection is hung inside an insert on a socket that died without
+    a reset) or gone. It takes everything left, writes it once over its own
+    fresh connection, and stops. It is started with the writer at install, so the
+    exit never has to start a thread while the interpreter is shutting down.
+
+    Nothing is written twice. The queue hands each row to one taker, and the
+    batch the stuck writer holds is not on the queue. That batch is lost:
+    there is no way to reach it.
+    """
+    _takeover.wait()
+    rows = _drain(max_rows=_MAX_QUEUE)
+    if not rows:
+        return
+    conn = None
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        store.ensure_table(conn)
+        conn.executemany(store.INSERT_SQL, rows)
+        conn.commit()
+    except Exception:
+        pass                    # a failed last write is lost, not retried
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
 def _flush_on_exit() -> None:
     """Let the writer store what this process recorded, for at most
-    _EXIT_WAIT_SEC, then let the process go.
+    _EXIT_WAIT_SEC; if it is stuck with calls still queued, let the standby
+    write those, for at most _EXIT_WAIT_SEC more; then let the process go.
 
     WHY THE WRITER DOES IT, NOT THIS FUNCTION. This used to drain the queue and
     write the rows itself. But the writer may already have drained them: it
@@ -332,16 +373,31 @@ def _flush_on_exit() -> None:
     sets the stop flag and joins the writer, which finishes the batch it
     holds, drains the rest and stops.
 
-    The main thread never touches the database here, so the join's timeout is
-    the whole bound. Past it the rows are lost and the exit goes ahead: a
-    process must not hang on its telemetry. If the writer is gone (it catches
-    every Exception, so only something like a KeyboardInterrupt inside it could
-    end it), its rows go with it rather than the exit waiting on a connect.
+    WHY A STANDBY. The writer holds one connection. If that connection hangs
+    inside an insert, the writer cannot reach the calls still on the queue,
+    and waiting longer does not help. The old exit drained those itself and
+    wrote them over a new connection, so the standby keeps that: it writes them
+    over its own fresh connection (_standby_loop). It runs only when the queue
+    is not empty after the writer's wait, so a healthy exit never opens a
+    second connection. If the writer is gone (it catches every Exception, so
+    only something like a KeyboardInterrupt inside it could end it), the
+    standby writes what it left on the queue the same way.
+
+    The main thread never touches the database here, so the two joins'
+    timeouts are the whole bound: twice _EXIT_WAIT_SEC at most. Past that the
+    rows are lost and the exit goes ahead: a process must not hang on its
+    telemetry.
     """
     _stop.set()
     t = _writer
     if t is not None and t.is_alive():
         t.join(_EXIT_WAIT_SEC)
+    if _q.empty():
+        return
+    s = _standby
+    if s is not None and s.is_alive():
+        _takeover.set()
+        s.join(_EXIT_WAIT_SEC)
 
 
 # ── the patch ────────────────────────────────────────────────────────────────
@@ -429,7 +485,7 @@ def install_timeout_floor() -> bool:
 
 def install(source: str = "unknown", start_writer: bool = True) -> bool:
     """Patch requests and start the writer. Idempotent; returns True if it took."""
-    global _installed, _source, _timeout_floor_installed, _writer
+    global _installed, _source, _timeout_floor_installed, _writer, _standby
     if os.environ.get("PIPELINE_TELEMETRY", "1") == "0":
         # The deadline still applies -- see install_timeout_floor.
         install_timeout_floor()
@@ -511,6 +567,9 @@ def install(source: str = "unknown", start_writer: bool = True) -> bool:
         _writer = threading.Thread(target=_writer_loop, name="api-telemetry",
                                    daemon=True)
         _writer.start()
+        _standby = threading.Thread(target=_standby_loop,
+                                    name="api-telemetry-exit", daemon=True)
+        _standby.start()
         atexit.register(_flush_on_exit)
     return True
 

@@ -314,12 +314,23 @@ interpreter stopped the writer (a daemon thread) with the rows in hand.
   140, with no duplicates. On Python 3.12, the worker's version, a shorter run
   lost 29 of 60 before the fix and 0 of 60 after it.
 - **The fix.** The exit hook sets a stop flag and waits for the writer, which
-  finishes the batch it holds, drains the rest and stops. The main thread never
-  touches the database, so the wait is the whole bound:
-  `API_LOG_EXIT_WAIT_SEC` (default 3 s). Past it the rows are lost and the
-  process exits. A failed last batch is dropped, never retried. A process whose
-  calls were already stored exits at once; one with an unwritten row waits one
-  connect and insert (~0.4 s).
+  finishes the batch it holds, drains the rest and stops. A failed last batch
+  is dropped, never retried. A process whose calls were already stored exits
+  at once; one with an unwritten row waits one connect and insert (~0.4 s).
+- **When the writer is stuck.** The writer keeps one connection open. If that
+  connection hangs inside an insert (a socket that died without a reset), the
+  writer cannot reach the calls still on the queue. So when the wait for the
+  writer runs out and calls remain on the queue, a second thread takes them
+  and writes them once over its own fresh connection. That thread is started
+  with the writer and sits idle until then, so a healthy exit never opens a
+  second connection. The batch the stuck writer holds is lost, and nothing is
+  written twice. Such an exit takes about 3 s plus one write, where the code
+  before this fix took about 0.1 s, because it first waits out the stuck
+  writer.
+- **The bound.** The main thread never touches the database. Each of the two
+  waits is at most `API_LOG_EXIT_WAIT_SEC` (default 3 s), so an exit is held
+  6 s at most. Past that the rows are lost and the process exits. The shortest
+  timeout the scheduler puts on any job is 60 s.
 - **How to see a loss of paid calls.** The Odds API reports the account's
   remaining credits on every reply, so every credit spent between two logged
   calls that is not on a logged row is a call the log does not have:
@@ -498,7 +509,7 @@ TTL rather than behind the meta tick.
 | `PIPELINE_TELEMETRY=0` | Stops recording everywhere (the probe never installs). |
 | `API_LOG_RETENTION_DAYS` | Prune horizon, default 7. |
 | `API_LOG_FLUSH_SEC` | Writer flush interval, default 0.75. |
-| `API_LOG_EXIT_WAIT_SEC` | Longest a process's exit waits for its last calls to be written, default 3. |
+| `API_LOG_EXIT_WAIT_SEC` | Longest each of the exit's two waits lasts (for the writer, then for the fresh-connection write when the writer is stuck), default 3. |
 | `MONITOR_POLL_SEC` | Stream poll interval, default 1.0. |
 | `DISCORD_BOT_TOKEN` | Enables the Discord member/online tiles (with the guild id). |
 | `DISCORD_GUILD_ID` | The server id. Both are needed; neither is used for posting. |

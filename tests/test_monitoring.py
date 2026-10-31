@@ -348,6 +348,11 @@ def test_curl_cffi_is_patched_only_once(http_server):
 # the row in hand. These run a real child process with the real writer, against
 # a sqlite file and a connect slowed down on purpose, so the race is not left
 # to chance.
+#
+# The "stuck" modes are the case the first fix lost: the writer's own
+# connection hangs inside its insert (a socket that died without a reset) and
+# the process makes one more call before it exits. That call is still on the
+# queue, and the exit has to write it without waiting on the stuck writer.
 
 _EXIT_CHILD = r'''
 import os, sqlite3, sys, threading, time
@@ -357,15 +362,21 @@ from monitoring import probe, store
 import data.db
 
 connecting = threading.Event()
+inserting = threading.Event()
+n_conn = [0]
 
 
 class Conn:
     """Just enough of data.db.DBConnection for the writer: INSERT_SQL's ?
     placeholders are sqlite's own."""
-    def __init__(self):
+    def __init__(self, hang=0.0):
+        self.hang = hang
         self.c = sqlite3.connect(db_path, check_same_thread=False)
 
     def executemany(self, sql, rows):
+        if self.hang:
+            inserting.set()
+            time.sleep(self.hang)      # an insert on a socket that died without a reset
         self.c.executemany(sql, [tuple(v.isoformat() if hasattr(v, "isoformat") else v
                                        for v in r) for r in rows])
 
@@ -385,7 +396,11 @@ class Conn:
 def slow_connect(*a, **k):
     connecting.set()
     time.sleep(connect_delay)          # the pooler's round trips, made long
-    return Conn()
+    n_conn[0] += 1
+    # "stuck": only the writer's first connection hangs in its insert.
+    # "stuck_all": every connection does, the exit's fresh one included.
+    stuck = (mode == "stuck" and n_conn[0] == 1) or mode == "stuck_all"
+    return Conn(hang=60.0 if stuck else 0.0)
 
 
 data.db.get_connection = slow_connect
@@ -398,12 +413,17 @@ if mode == "drained":
     # The writer has taken the row off the queue and is connecting: the
     # state 41 of the 72 production exits were in.
     assert connecting.wait(10), "the writer never picked the row up"
+if mode in ("stuck", "stuck_all"):
+    assert inserting.wait(10), "the writer never started its insert"
+    # Made while the writer is stuck: this row waits on the queue.
+    requests.get(url + "/v4/sports/basketball_ncaab/events", timeout=5)
 print(f"MAIN_DONE {time.time():.3f}", flush=True)
 sys.exit(0)
 '''
 
 
-def _run_exit_child(tmp_path, url, *, connect_delay, mode, env_extra, timeout):
+def _run_exit_child(tmp_path, url, *, connect_delay, mode, env_extra, timeout,
+                    select="source, status"):
     import sqlite3
     import subprocess
     import sys
@@ -429,7 +449,7 @@ def _run_exit_child(tmp_path, url, *, connect_delay, mode, env_extra, timeout):
     assert proc.returncode == 0, proc.stderr[-2000:]
     main_done = float(re.search(r"MAIN_DONE (\d+\.\d+)", proc.stdout).group(1))
     with sqlite3.connect(db_path) as c:
-        rows = c.execute("SELECT source, status FROM api_call_log").fetchall()
+        rows = c.execute(f"SELECT {select} FROM api_call_log").fetchall()
     return rows, ended - main_done
 
 
@@ -454,6 +474,37 @@ def test_exit_waits_a_bounded_time_for_a_database_that_never_answers(http_server
     except subprocess.TimeoutExpired:
         pytest.fail("the process was still exiting 20 s later: exit waited on the "
                     "database connect with no bound")
+    assert exit_took < 5, f"exit took {exit_took:.1f}s past the end of main"
+
+
+def test_a_call_still_queued_is_written_when_the_writer_is_stuck(http_server, tmp_path):
+    """The writer is stuck in its insert of the first call; the second call is
+    on the queue at exit. The exit writes the second over a fresh connection.
+    The first is in the stuck writer's hands and is lost, so exactly one row:
+    nothing is written twice."""
+    rows, exit_took = _run_exit_child(
+        tmp_path, http_server, connect_delay=0, mode="stuck",
+        env_extra={"API_LOG_FLUSH_SEC": "0.05", "API_LOG_EXIT_WAIT_SEC": "0.5"},
+        timeout=60, select="path")
+    assert rows == [("/v4/sports/basketball_ncaab/events",)], (
+        "the writer was stuck and the call still on the queue was not written")
+    assert exit_took < 5, f"exit took {exit_took:.1f}s past the end of main"
+
+
+def test_exit_stays_bounded_when_the_fresh_connection_hangs_too(http_server, tmp_path):
+    """Every connection hangs in its insert, the exit's own included. The exit
+    gives up after its two bounded waits and loses the rows, rather than
+    holding the job for the 60 s each insert would take."""
+    import subprocess
+    try:
+        rows, exit_took = _run_exit_child(
+            tmp_path, http_server, connect_delay=0, mode="stuck_all",
+            env_extra={"API_LOG_FLUSH_SEC": "0.05", "API_LOG_EXIT_WAIT_SEC": "0.5"},
+            timeout=20, select="path")
+    except subprocess.TimeoutExpired:
+        pytest.fail("the process was still exiting 20 s later: the exit's own "
+                    "write waited on a hung insert with no bound")
+    assert rows == []
     assert exit_took < 5, f"exit took {exit_took:.1f}s past the end of main"
 
 
