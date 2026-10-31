@@ -1486,8 +1486,10 @@ full-game model, and chance. Replication and look-ahead found no fault in either
 reproduces exactly, every bet settles the same way from the cache, and changing a game's own
 box score moves none of the signals.
 
-**C1 is not built.** It passed the house standard, which section 8 says is built live; this is
-a judgement against that, made after looking, and is reported as such.
+**C1 was not built at first; it is now, as `nba_first_half_total_luck`** (mike, 2026-10-30:
+"Build the model that passed."). It passed the house standard, which section 8 says is built
+live. The first decision, made after looking and reported as such, went against that. The reasons
+it gave stand as the model's known weaknesses:
 - The effect is incoherent. A total set wrong by shooting luck should be wrong in both halves.
   Against games with a gap between -1 and +1, C1's games ran +1.89 points over in the first half
   (interval +0.68 to +3.09) and -0.45 in the second (-1.80 to +0.87); the difference is +2.34
