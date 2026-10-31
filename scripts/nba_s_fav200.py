@@ -540,10 +540,9 @@ def spread_neutral(q_sp: pd.DataFrame, times: pd.DataFrame, sig: dict, fv: pd.Da
     return slim(on_side(H.fair_offers(H.offers(vis), fair), fv), ("side_pick",))
 
 
-def emit_spread(data_sp: H.Data, point: str, times: pd.DataFrame, sig: dict, close_sp, fv: pd.DataFrame, kf: Keyed,
+def emit_spread(data_sp: H.Data, point: str, times: pd.DataFrame, offers: pd.DataFrame, sig: dict, close_sp, kf: Keyed,
                 early: set) -> list[dict]:
     rows = []
-    offers = spread_neutral(data_sp.quotes, times, sig, fv)
     for band, (lo, hi) in BANDS.items():
         cand = in_band_cand(offers, kf, lo, hi)
         with bets_dir(f"{C_SPREAD}_{band}"):
@@ -712,7 +711,7 @@ def extremes(prep: Prep) -> dict:
 def top_offers(frame: pd.DataFrame, n: int = 10) -> str:
     """The highest-EV offer of each game, highest first (prices only)."""
     x = frame.sort_values("ev", ascending=False).drop_duplicates("game_id").head(n)
-    cols = [c for c in ("game_id", "book", "side", "price", "p_win", "ev", "fetch_at", "T") if c in x]
+    cols = [c for c in ("game_id", "book", "side", "line", "price", "p_win", "ev", "fetch_at", "T") if c in x]
     return x[cols].to_string(index=False)
 
 
@@ -846,7 +845,8 @@ def run_world(data: H.Data, seeds=(1, 2), min_train: int = 100, points=BLIND_POI
         rows += emit_blind(prep.ml, point, fr.times, fr.blind, prep.close, seeds, early)
         rows += emit_same(prep.ml, point, fr.times, fr.same, prep.close, seeds, early)
         ctl += emit_dog(prep.ml, point, fr.times, fr.neutral, fr.fv, fr.blind, prep.close, early)
-        ctl += emit_spread(prep.sp, point, fr.times, sig, close_sp, fr.fv, fr.blind, early)
+        ctl += emit_spread(prep.sp, point, fr.times, spread_neutral(prep.sp.quotes, fr.times, sig, fr.fv), sig, close_sp,
+                           fr.blind, early)
         ctl += emit_power(prep.ml, point, fr.times, fr.power, prep.close, early)
         if point in P1_POINTS:
             pt = P1.make_point(prep.ml, point, fr.times, {}, base)
@@ -973,9 +973,10 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
         rows += emit_blind(prep.ml, point, fr.times, fr.blind, prep.close, PLACEBO_SEEDS, early)
         rows += emit_same(prep.ml, point, fr.times, fr.same, prep.close, PLACEBO_SEEDS, early)
         ctl += emit_dog(prep.ml, point, fr.times, fr.neutral, fr.fv, fr.blind, prep.close, early)
-        ctl += emit_spread(prep.sp, point, fr.times, sig, close_sp, fr.fv, fr.blind, early)
+        offers = spread_neutral(prep.sp.quotes, fr.times, sig, fr.fv)
+        ctl += emit_spread(prep.sp, point, fr.times, offers, sig, close_sp, fr.blind, early)
         ctl += emit_power(prep.ml, point, fr.times, fr.power, prep.close, early)
-        pops += point_counts(fr, season)
+        pops += point_counts(fr, season, offers)
         log(f"{point}: blind, same number and controls done: {len(rows)} cells, {len(ctl)} controls so far", t0)
     for fam in (FAVB, FAVP2):
         write_family(rows, fam, out)
@@ -997,12 +998,17 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
     log(f"cells written to {out}: {len(rows)} judged, {len(ctl)} controls", t0)
 
 
-def point_counts(fr: Frames, season: pd.Series) -> list[dict]:
-    """Prices only: the bets of every judged blind and same-number cell and the
-    power control at one decision point."""
+def point_counts(fr: Frames, season: pd.Series, spread_offers: pd.DataFrame) -> list[dict]:
+    """Prices only: the bets of every judged blind and same-number cell and every
+    control at one decision point. The controls run at the harness's own floor."""
     out = []
+    dogs = on_side(fr.neutral, fr.fv, "dog")
     for band, (lo, hi) in BANDS.items():
         out += count_rows(FAVB, fr.point, band, blind_cand(fr.blind, lo, hi), [FLAG], SIDE, "strength", season, NO_FLOOR)
+        out += count_rows(C_DOG, fr.point, band, in_band_cand(dogs, fr.blind, lo, hi), [FLAG], DOG, "strength", season,
+                          H.PRICE_FLOOR)
+        out += count_rows(C_SPREAD, fr.point, band, in_band_cand(spread_offers, fr.blind, lo, hi), [FLAG], SIDE, "strength",
+                          season, H.PRICE_FLOOR)
     if len(fr.same.frame):
         out += count_rows(FAVP2, fr.point, ALL, fr.same.frame, P2_CUTS, SIDE, "ev", season, RULE_FLOOR)
         out += count_rows(C_POWER, fr.point, ALL, fr.power.frame, P2_CUTS, SIDE, "ev", season, RULE_FLOOR)
@@ -1047,7 +1053,7 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
     close_sp = H.pinnacle_close(prep.sp)
     sig = H.close_dist(close_sp, games)
     counts, differs, alone, cover, times = [], [], [], {}, {}
-    frames = {}
+    frames, spread_offers = {}, {}
     r_blind, r_same, r_ctl = 0, 0, 0
     with only_random_scores():
         for point in BLIND_POINTS:
@@ -1056,12 +1062,15 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
             frames[point] = fr
             times[f"frames_{point}"] = time.time() - t1
             cover[point] = H.point_coverage(prep.ml, point, fr.times)
-            counts += point_counts(fr, season)
+            offers = spread_neutral(prep.sp.quotes, fr.times, sig, fr.fv)
+            spread_offers[point] = offers
+            counts += point_counts(fr, season, offers)
             alone += alone_rows(fr)
             differs += differ_rows(fr)
             print(f"\nHIGHEST-EV, same number, proportional, at {point}:\n{top_offers(fr.same.frame)}")
             print(f"HIGHEST-EV, same number, power, at {point}:\n{top_offers(fr.power.frame)}")
             print(f"HIGHEST-EV, every favourite at the market's fair line, at {point}:\n{top_offers(fr.blind.frame)}")
+            print(f"HIGHEST-EV, the favourite's spread at the market's fair line, at {point}:\n{top_offers(offers)}")
             log(f"{point}: counted", t0)
         fr = frames["C"]
         # the whole path through the harness on real prices and random scores, one placebo
@@ -1075,7 +1084,7 @@ def smoke(cache: Path = H.CACHE, skip_model: bool = False) -> dict:
         r_same = len(r)
         t1 = time.perf_counter()
         r = emit_dog(data_b, "C", fr.times, fr.neutral, fr.fv, fr.blind, prep.close, set())
-        r += emit_spread(data_sp_b, "C", fr.times, sig, close_sp, fr.fv, fr.blind, set())
+        r += emit_spread(data_sp_b, "C", fr.times, spread_offers["C"], sig, close_sp, fr.blind, set())
         r += emit_power(data_b, "C", fr.times, fr.power, prep.close, set())
         times["controls_at_one_point"] = time.perf_counter() - t1
         r_ctl = len(r)

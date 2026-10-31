@@ -437,6 +437,16 @@ def test_the_underdog_control_bets_the_other_side_of_the_same_games(world):
     assert (dog["price"] > 0).all()
 
 
+def test_the_spread_control_bets_the_favourite_at_its_home_number(world):
+    files = sorted(world["bets"].glob(f"{F.C_SPREAD}_*/*.parquet"))
+    assert files, "the spread control placed no bet: the world does not cover it"
+    b = pd.concat(pd.read_parquet(p) for p in files)
+    assert b["market"].eq(F.SPREADS).all()
+    # the world stores a favourite's number at home as minus, at away as plus
+    assert (b.loc[b["side"] == "home", "line"] < 0).all() and (b.loc[b["side"] == "away", "line"] > 0).all()
+    assert (b["side"] == "home").any() and (b["side"] == "away").any()
+
+
 def test_the_blind_comparison_of_a_band_is_favourites_at_large_not_itself(world):
     d = pd.DataFrame([r for r in world["rows"] if r["family"] == F.FAVB])
     assert (d["pool_share_fav"] == 1.0).all()
