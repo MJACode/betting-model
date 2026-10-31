@@ -193,6 +193,24 @@ and the zone edges are stated above and do not change.
   (home − away) + the home number > 0. Team total: that team's own final score, overtime included. A
   push returns the stake.
 
+**Dated line, 2026-10-31: what the 95% coverage check at D counts. The cells, seasons and bars do not
+change; nothing has been graded.** Record 6.5 says a choosing season reached on fewer than 95% of its
+games at D is reported and not chosen on. That check counts each game's per-game purchase, whatever
+markets it holds, as every earlier lab's does. The first version of this lab counted only purchases
+holding team totals. It was found by a checker before any grade.
+
+- **What it would have done:** team totals exist on 1,138 of 1,230 games in 2023-24, so it read 92.1%
+  there. `--full` would have dropped 2023-24 from all 16 team-total cells without saying so, and judged
+  them on 2024-25 and 2025-26 against the three seasons registered above.
+- **What the check reads now:** 2023-24 99.6% (1,225 of 1,230 games have a purchase inside the 45-75
+  minute window), 2024-25 99.5%, 2025-26 99.0%.
+- **What does not move:** a game's decision time differs on 0 of the 3,575 games both ways of counting
+  share, and the 74,670 team-total offers are identical, read without any result. The 92 games of
+  2023-24 with a purchase and no team total have a decision time and no offer, so they place no bet.
+  The population file's "games with a time" for 2023-24 reads 1,225, where the old count gave 1,133.
+- **The guard:** `--smoke` and `--full` print the seasons each group asks for and what the check keeps,
+  and refuse to run if an asked season would drop.
+
 ## 6. Impossible numbers (stated before any cell is graded)
 
 Measured on the cache before this was written, prices and numbers only.
