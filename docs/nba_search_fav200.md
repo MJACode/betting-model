@@ -561,7 +561,7 @@ loading of the prices excluded. Of that, the model's fit and inputs take 33 minu
 3.1 GB. The whole test suite ran beside this smoke.
 
 A one-off measure with four other jobs running read 0.107 s for a blind cell and 0.274 s for a same-number cell. At
-0.274 s for the same-number and model cells, the total is about 67 minutes. Both are inside the two-hour limit.
+those rates, and 0.274 s for the model cells too, the total is about 67 minutes. Both are inside the two-hour limit.
 
 **`--full` has not been run.** No cell has been graded.
 
