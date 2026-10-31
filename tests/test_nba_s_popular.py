@@ -23,6 +23,14 @@ def prep():
 
 
 @pytest.fixture(scope="module")
+def groups(prep):
+    """Each POP cell and its underdog control by market, built once."""
+    cells = {g.market: g for g in S.cell_groups(prep)}
+    dogs = {g.market: g for g in S.control_groups(prep) if g.family == S.CONTROL_DOG}
+    return cells, dogs
+
+
+@pytest.fixture(scope="module")
 def ran(prep):
     with S.no_bet_files():
         return S.all_cells(prep, S.placebo_signals(prep["inp"], seeds=(1, 2, 3)))
@@ -154,6 +162,8 @@ def test_the_doc_registers_what_the_lab_runs():
     assert "gap ≥ 5 / 10 / 15" in doc and "smaller over habit ≥ 1 / 2 / 3" in doc
     assert "strictly before today's date" in doc and "at least 10 such games" in doc
     assert "40 or more points from the median" in doc and "seeds 1-200" in doc
+    assert "5 or more points from the median of the deciding books' spreads at the same fetch" in doc
+    assert "The same games means the games the cell can bet" in doc
 
 
 def test_each_pop_bet_is_on_the_side_against_the_popular_team_at_its_cut(prep):
@@ -188,19 +198,93 @@ def test_the_with_control_bets_the_other_side_of_the_same_games(prep):
     assert (a.reindex(common).to_numpy() != b.reindex(common).to_numpy()).all()
 
 
-def test_the_dog_control_bets_the_markets_underdog_in_the_same_games(prep):
-    groups = {(g.family, g.market): g for g in S.control_groups(prep)}
-    real = S.cell_groups(prep)[0]
-    ctl = groups[(S.CONTROL_DOG, "spreads")]
+def test_the_dog_control_reads_the_home_number_the_right_way_round(groups):
+    ctl = groups[1]["spreads"]
     b = S.pick(ctl.cand, 10.0, ctl.side)
     assert len(b) > 10
     # the home number is positive on a home underdog, negative on a home favourite
     assert (b.loc[b["side"] == "home", "line"] > -1.0).all()
     assert (b.loc[b["side"] == "away", "line"] < 1.0).all()
-    assert set(b["game_id"]) == set(S.pick(real.cand, 10.0, real.side)["game_id"])
-    fav = H.fav_sides(ctl.cand)
-    x = b.merge(fav, on=["game_id", "market"])
-    assert (x["side"] == x["dog"]).all() and (x["side"] != x["fav"]).all()
+
+
+@pytest.mark.parametrize("market", ["spreads", "h2h"])
+@pytest.mark.parametrize("cut", [0.0, 5.0, 10.0, 15.0])
+def test_the_dog_control_bets_the_markets_underdog_in_the_same_games(groups, market, cut):
+    real, ctl = groups[0][market], groups[1][market]
+    a = set(S.pick(real.cand, cut, real.side)["game_id"])
+    b = S.pick(ctl.cand, cut, ctl.side)
+    assert len(b) > 10
+    level = a - set(H.fav_sides(real.cand)["game_id"])
+    assert set(b["game_id"]) == a - level
+    x = b.merge(H.fav_sides(ctl.cand), on=["game_id", "market"])
+    assert len(x) == len(b) and (x["side"] == x["dog"]).all() and (x["side"] != x["fav"]).all()
+
+
+@pytest.mark.parametrize("cut", [0.0, 5.0, 10.0, 15.0])
+def test_the_synthetic_moneyline_really_holds_favourites_the_cell_cannot_bet(groups, cut):
+    # without these games the test above passes with the floor left off the control
+    real = groups[0]["h2h"]
+    c = real.cand[real.cand["book"].isin(H.BETTABLE) & (real.cand["side"] == real.cand["side_pick"])
+                  & (real.cand["strength"] >= cut)]
+    best = c.groupby("game_id")["price"].max()
+    heavy = set(best[best < H.PRICE_FLOOR].index)
+    assert heavy, cut
+    assert heavy.isdisjoint(S.pick(real.cand, cut, real.side)["game_id"])
+    # the underdog on each is the popular team, not the side the cell would bet
+    dog = H.fav_sides(real.cand).set_index("game_id")["dog"]
+    against = real.cand.drop_duplicates("game_id").set_index("game_id")["side_pick"]
+    assert all(dog[g] != against[g] for g in heavy)
+    assert heavy.isdisjoint(S.pick(groups[1]["h2h"].cand, cut, S.SIDE_DOG)["game_id"])
+
+
+def _h2h_world():
+    # game, home popularity, away popularity, home price, away price, the fair home chance
+    games = [("beyond", 40.0, 60.0, -300.0, 250.0, 0.72),   # against home, past the floor: neither bets
+             ("at_floor", 40.0, 60.0, -200.0, 170.0, 0.64),  # against home, on the floor: both bet
+             ("underdog", 60.0, 40.0, -170.0, 150.0, 0.60),  # against away, the underdog: both bet it
+             ("level", 40.0, 60.0, -105.0, -105.0, 0.50)]    # no underdog: the cell only
+    rows = []
+    for gid, _, _, hp, ap, ph in games:
+        for side, price, pw in (("home", hp, ph), ("away", ap, 1.0 - ph)):
+            rows.append({"game_id": gid, "season": 2024, "game_date": "2024-01-01", "market": "h2h", "side": side,
+                         "book": "fanduel", "line": np.nan, "price": price, "mu": np.nan, "p_home": ph,
+                         "p_win": pw, "p_push": 0.0, "ev": 0.01})
+    sig = S.signals(pd.DataFrame({"game_id": [g[0] for g in games], "season": 2024, "game_date": "2024-01-01",
+                                  "h_pop": [g[1] for g in games], "a_pop": [g[2] for g in games],
+                                  "h_over": 60.0, "a_over": 60.0, "lg_over": 60.0}))
+    return pd.DataFrame(rows), sig
+
+
+def test_the_control_leaves_out_what_the_floor_keeps_from_the_cell_and_a_level_market_has_no_underdog():
+    base, sig = _h2h_world()
+    cell = S.pick(S.pop_cand(base, sig), 5.0, S.SIDE_AGAINST).set_index("game_id")["side"].to_dict()
+    ctl = S.pick(S.dog_cand(base, sig), 5.0, S.SIDE_DOG).set_index("game_id")["side"].to_dict()
+    assert cell == {"at_floor": "home", "underdog": "away", "level": "home"}
+    assert ctl == {"at_floor": "away", "underdog": "away"}
+
+
+def test_the_controls_games_do_not_depend_on_the_cut():
+    base, sig = _h2h_world()
+    # above every gap here, so the exclusion cannot have been read at a cut
+    assert set(S.dog_cand(base, sig)["game_id"]) == {"at_floor", "underdog"}
+
+
+def test_the_credit_line_stops_when_the_control_is_not_on_the_same_games(prep, monkeypatch):
+    rows = S.credit_games(prep)
+    assert {r["market"] for r in rows} == {"spreads", "h2h"} and len(rows) == 6
+    for r in rows:
+        assert r["control_only"] == 0 and r["cell_only"] == r["cell_only_level"] == 0
+        assert r["cell_bets"] == r["control_bets"] > 0
+    assert all(r["games_beyond_floor"] >= 3 for r in rows if r["market"] == "h2h")
+    assert all(r["games_beyond_floor"] == 0 for r in rows if r["market"] == "spreads")
+
+    def gap_filter_only(base, sig):
+        fv = H.fav_sides(base)[["game_id", "dog"]]
+        x = S._rule_frame(sig, "gap_size", sig["side_against"].to_numpy(object)).drop(columns="side_pick")
+        return base.merge(x.merge(fv, on="game_id").rename(columns={"dog": "side_pick"}), on="game_id")
+    monkeypatch.setattr(S, "dog_cand", gap_filter_only)
+    with pytest.raises(RuntimeError, match="same games"):
+        S.credit_games(prep)
 
 
 def test_the_bands_are_the_one_below_the_cut_and_each_from_the_cut_up(ran):
@@ -240,9 +324,109 @@ def test_without_the_rule_the_over_control_really_takes_the_impossible_total(pre
     assert (S.pick(ctl2.cand, -np.inf, "over")["line"] < 100).sum() == 1
 
 
+def _visible(game="g", books=None, **spreads):
+    rows = []
+    for book, line in spreads.items():
+        for market, ln in (("spreads", line), ("h2h", np.nan), ("totals", 220.0)):
+            rows.append({"game_id": game, "season": 2022, "market": market, "book": book, "line": ln,
+                         "price_a": -110.0, "price_b": -110.0, "coherent": True})
+    return pd.DataFrame(rows)
+
+
+def test_a_spread_5_from_the_median_takes_the_books_spread_and_moneyline_and_leaves_its_total():
+    vis = _visible(draftkings=-3.5, fanduel=3.5, betmgm=-3.5, williamhill_us=-4.0, betrivers=-3.5)
+    kept, gone = S.drop_swapped(vis)
+    assert sorted(zip(gone["book"], gone["market"])) == [("fanduel", "h2h"), ("fanduel", "spreads")]
+    assert len(kept) == len(vis) - 2
+    assert ("fanduel", "totals") in set(zip(kept["book"], kept["market"]))
+    # the same book on another game stays
+    other = _visible("h", draftkings=-3.5, fanduel=-3.5, betmgm=-3.5)
+    _, gone2 = S.drop_swapped(pd.concat([vis, other], ignore_index=True))
+    assert set(gone2["game_id"]) == {"g"} and len(gone2) == 2
+
+
+@pytest.mark.parametrize("line,out", [(1.5, True), (1.0, False), (-8.5, True), (-8.0, False)])
+def test_exactly_5_from_the_median_is_out_and_under_it_stays(line, out):
+    # the median of the four is -3.5, whichever way the fourth lies
+    vis = _visible(draftkings=-3.5, betmgm=-3.5, betrivers=-3.5, fanduel=line, williamhill_us=-3.5)
+    assert len(S.drop_swapped(vis)[1]) == (2 if out else 0)
+
+
+def test_only_deciding_books_set_the_median_and_only_they_are_removed():
+    # Pinnacle and Bovada never decide. Read into the median, they would make it +3.5
+    vis = _visible(draftkings=-3.5, betmgm=-3.5, fanduel=3.5, pinnacle=3.5, bovada=3.5)
+    assert set(S.drop_swapped(vis)[1]["book"]) == {"fanduel"}
+    # Pinnacle far from the deciding books is still Pinnacle
+    vis2 = _visible(draftkings=-3.5, betmgm=-3.5, fanduel=-3.5, pinnacle=3.5)
+    assert S.drop_swapped(vis2)[1].empty
+
+
+def test_an_incoherent_row_does_not_move_the_median():
+    vis = _visible(draftkings=-3.5, betmgm=-3.5, fanduel=-3.5, betrivers=3.5, williamhill_us=3.5, fanatics=3.5)
+    vis.loc[vis["book"].isin(["williamhill_us", "fanatics"]), "coherent"] = False
+    # read as coherent the six have a median of 0 and nothing is 5 away
+    assert set(S.drop_swapped(vis)[1]["book"]) == {"betrivers"}
+
+
+def test_two_books_cannot_say_which_is_wrong():
+    assert S.SWAPPED_MIN_BOOKS == 3
+    assert S.drop_swapped(_visible(draftkings=-6.0, fanduel=6.0))[1].empty
+    assert set(S.drop_swapped(_visible(draftkings=-6.0, betmgm=-6.0, fanduel=6.0))[1]["book"]) == {"fanduel"}
+
+
+def _swapped_game(prep):
+    return prep["frames"]["C"]["swapped"]["game_id"].iloc[0]
+
+
+@pytest.mark.parametrize("point", ["C", "D"])
+def test_the_swapped_row_is_no_offer_at_either_point(prep, point):
+    fr, gid = prep["frames"][point], _swapped_game(prep)
+    assert set(fr["swapped"]["book"]) == {"fanduel"} and set(fr["swapped"]["game_id"]) == {gid}
+    assert sorted(fr["swapped"]["market"]) == ["h2h", "spreads"]
+    x = fr["neutral"][fr["neutral"]["game_id"] == gid]
+    pairs = set(zip(x["book"], x["market"]))
+    assert ("fanduel", "spreads") not in pairs and ("fanduel", "h2h") not in pairs
+    assert ("fanduel", "totals") in pairs
+    assert {("draftkings", "spreads"), ("betmgm", "spreads"), ("draftkings", "h2h"), ("betmgm", "h2h")} <= pairs
+
+
+@pytest.mark.parametrize("market", ["spreads", "h2h"])
+def test_without_the_swapped_rule_the_cell_really_bets_the_row(prep, groups, monkeypatch, market):
+    gid = _swapped_game(prep)
+    g = groups[0][market]
+
+    def row(group):
+        got = S.pick(group.cand, 0.0, group.side)     # its gap is under the first cut, like the real row's
+        return got[got["game_id"] == gid].iloc[0]
+    good = row(g)
+    assert good["side"] == "home" and good["book"] != "fanduel"
+    best = S.best_offers(prep["frames"]["C"]["neutral"].query("market == @market"))
+    assert not ((best["game_id"] == gid) & (best["book"] == "fanduel")).any()   # the placebo's frame
+    if market == "spreads":
+        assert good["line"] <= -3.0
+    monkeypatch.setattr(S, "SWAPPED_GAP", 1e9)
+    bad = row(next(x for x in S.cell_groups(S.synthetic_prep()) if x.market == market))
+    assert bad["side"] == "home" and bad["book"] == "fanduel" and bad["ev"] > good["ev"]
+    if market == "spreads":
+        assert bad["line"] >= 3.0
+
+
+def test_the_swapped_row_is_out_before_the_fair_line_is_read(prep, monkeypatch):
+    seen, fair = [], H.market_fair
+    monkeypatch.setattr(H, "market_fair", lambda vis, sig: (seen.append(vis), fair(vis, sig))[1])
+    fr = S.point_frames(prep["data"], "C", prep["pricing"])
+    gid = _swapped_game(prep)
+    v = seen[0]
+    assert len(fr["swapped"]) == 2 and (v["game_id"] == gid).any()
+    assert not ((v["game_id"] == gid) & (v["book"] == "fanduel") & v["market"].isin(S.POP_MARKETS)).any()
+
+
 def test_the_synthetic_world_holds_what_the_checks_claim(prep, ran):
     q = prep["data"].quotes
     assert set(q["market"]) == {"h2h", "spreads", "totals"}
+    sp = q[(q["game_id"] == _swapped_game(prep)) & (q["market"] == "spreads")].set_index("book")["line"]
+    assert sp["fanduel"] >= 3.0 and sp["draftkings"] == -sp["fanduel"] and sp["betmgm"] == -sp["fanduel"]
+    assert (q.loc[q["market"] == "h2h", ["price_a", "price_b"]].min(axis=1) == -300.0).any()
     rows, _, _ = ran
     for market in ("spreads", "h2h", "totals"):
         assert sum(r["pool_n"] for r in rows if r["market"] == market) > 0, market
@@ -407,8 +591,10 @@ def test_smoke_never_grades_a_real_score(prep, monkeypatch):
         assert not ((m["home_score"] == m["home_score_real"]) & (m["away_score"] == m["away_score_real"])).all()
     assert rep["timing"]["projected_full_minutes"] > 0 and rep["read_gap"]["min_hours"] > 0
     text = "\n".join(printed)
-    for needle in ("EXTREMES", "HIGHEST-EV OFFERS", "PLACEBO NULL", "TIMING", "same_fetch"):
+    for needle in ("EXTREMES", "HIGHEST-EV OFFERS", "PLACEBO NULL", "TIMING", "same_fetch", "CREDIT LINE GAMES",
+                   "swapped_rows_C", "swapped_rows_D", "farthest_spreads_C"):
         assert needle in text
+    assert {r["book"] for r in rep["extremes"]["swapped_rows_D"]} == {"fanduel"}
 
 
 def test_full_then_the_verdict_then_the_credit_line_run_end_to_end_on_synthetic_games(prep, monkeypatch, tmp_path, capsys):
@@ -438,6 +624,29 @@ def test_full_then_the_verdict_then_the_credit_line_run_end_to_end_on_synthetic_
     got = S.credit_table(out)
     assert len(got) == 9 and got["credited_popularity"].dtype == bool
     assert got.loc[got["family"] == "POP", "dog_pool_roi"].notna().all()
+
+
+def test_full_stops_before_any_grade_when_the_credit_line_is_not_on_the_same_games(prep, monkeypatch, tmp_path):
+    cache, out = tmp_path / "cache", tmp_path / "out"
+    cache.mkdir()
+    for name in ("nba_fetch_ledger.parquet", "nba_public_splits.parquet", "nba_schedule.parquet"):
+        (cache / name).write_bytes(b"")
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setenv("NBA_GAME2_RESULTS", str(out))
+    monkeypatch.setenv("NBA_GAME2_BETS", str(tmp_path / "bets"))
+    monkeypatch.setattr(S, "synthetic_checks", lambda: {})
+    monkeypatch.setattr(S, "prepare", lambda c, require: prep)
+
+    def boom(p):
+        raise RuntimeError("the credit line does not compare the same games")
+
+    def graded(*a, **k):
+        raise AssertionError("graded before the credit line's games were checked")
+    monkeypatch.setattr(S, "credit_games", boom)
+    monkeypatch.setattr(S, "all_cells", graded)
+    with pytest.raises(RuntimeError, match="same games"):
+        S.full(cache)
+    assert not out.exists()
 
 
 def test_a_read_of_a_game_not_yet_started_stops_the_smoke(prep, monkeypatch):

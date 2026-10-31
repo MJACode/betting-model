@@ -27,6 +27,10 @@ betting result.
   IMPOSSIBLE  a full-game total 40 or more points from the median of its game's
             stored totals is not a full-game total and is removed before any
             quote is placed (the sixth search's rule, IMPOSSIBLE_GAP).
+  SWAPPED   a deciding book's spread 5 or more points from the median of the
+            deciding books' spreads at the same fetch (3 or more books) has home
+            and away swapped. That book's spread and moneyline at that fetch are
+            not offers, at C and D, before the fair line is read (SWAPPED_GAP).
   BANDS     along the cut: [0, 5) [5, 10) [10, 15) 15+; [0, 1) [1, 2) [2, 3) 3+.
   PLACEBO   200 runs, seeds 1-200: every numbered game's four inputs (both
             teams' popularity and over share) moved together to ANOTHER numbered
@@ -34,9 +38,10 @@ betting result.
             its own inputs; each game keeps its own prices and the rule is
             recomputed. It shuffles over every game with a number, never over the
             games past a cut.
-  CONTROLS  never judged: with the popular team; the underdog in the same games
-            (the credit line, --credit); the over in the same games; the same
-            cells at decision point D, which is the same fetch on 99.8% of games.
+  CONTROLS  never judged: with the popular team; the underdog on the games the
+            cell can bet (the credit line, --credit; a level market has no
+            underdog and stays in the cell only); the over in the same games; the
+            same cells at decision point D, the same fetch on 99.8% of games.
   REPORTS   never judged, written by --full: national television; POPT on each
             side of the 2024-25 change in the total tickets; the sweep's Step 1.
 
@@ -82,6 +87,7 @@ POP_MARKETS, TOTAL = ("spreads", "h2h"), "totals"
 GAP_CUTS, HABIT_CUTS = (5.0, 10.0, 15.0), (1.0, 2.0, 3.0)
 MIN_GAMES = 10
 IMPOSSIBLE_GAP = 40.0
+SWAPPED_GAP, SWAPPED_MIN_BOOKS = 5.0, 3
 SIDE_AGAINST, SIDE_WITH, SIDE_DOG = "against_popular", "with_popular", "underdog"
 SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)     # 2020-21 reported, 2021-22 .. 2025-26 pooled
 EXPECTED_CELLS = 9
@@ -206,15 +212,39 @@ def drop_impossible(quotes: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return quotes[~bad].reset_index(drop=True), quotes[bad].reset_index(drop=True)
 
 
+def spread_distances(vis: pd.DataFrame) -> pd.DataFrame:
+    """Each deciding book's coherent spread at the decision, with the median of
+    the deciding books' spreads on that game, how many quote it, and the distance."""
+    sp = vis[vis["market"].eq("spreads") & vis["book"].isin(H.BETTABLE) & vis["coherent"]]
+    grp = sp.groupby("game_id")["line"]
+    med = grp.transform("median")
+    return sp[["game_id", "season", "book", "line", "price_a", "price_b"]].assign(
+        median=med, books=grp.transform("size"), distance=(sp["line"] - med).abs())
+
+
+def drop_swapped(vis: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(what each book shows at the decision without its swapped rows, those rows).
+    A swapped row is a book's spread and moneyline on a game where that spread is
+    SWAPPED_GAP or more from the deciding books' median; its total stays."""
+    d = spread_distances(vis)
+    bad = d.loc[(d["distance"] >= SWAPPED_GAP) & (d["books"] >= SWAPPED_MIN_BOOKS), ["game_id", "book"]]
+    hit = vis[["game_id", "book"]].merge(bad.assign(_bad=True), on=["game_id", "book"], how="left")["_bad"]
+    gone = hit.notna().to_numpy() & vis["market"].isin(POP_MARKETS).to_numpy()
+    return vis[~gone].reset_index(drop=True), vis[gone].reset_index(drop=True)
+
+
 # ── offers and candidate frames ─────────────────────────────────────────────
 
 def point_frames(data: H.Data, point: str, pricing: dict) -> dict:
-    """The decision times and the market-fair offers at one point. The pricing
-    objects are dropped from the offers: a bet frame must be storable."""
+    """The decision times and the market-fair offers at one point, swapped rows
+    out before the fair line is read. The pricing objects are dropped from the
+    offers: a bet frame must be storable."""
     times = H.decision_times(data.fetches, data.games, point)
-    vis = H.visible(data.quotes, times)
+    seen = H.visible(data.quotes, times)
+    vis, swapped = drop_swapped(seen)
     fair = H.market_fair(vis, pricing)
-    return {"times": times, "neutral": H.fair_offers(H.offers(vis), fair).drop(columns="sigma")}
+    return {"times": times, "neutral": H.fair_offers(H.offers(vis), fair).drop(columns="sigma"),
+            "swapped": swapped, "farthest": spread_distances(seen).nlargest(6, "distance")}
 
 
 def _rule_frame(sig: pd.DataFrame, strength: str, pick) -> pd.DataFrame:
@@ -231,9 +261,14 @@ def pop_cand(base: pd.DataFrame, sig: pd.DataFrame, pick_col: str = "side_agains
 
 
 def dog_cand(base: pd.DataFrame, sig: pd.DataFrame) -> pd.DataFrame:
-    """The credit line's control: the market's underdog at T in the same games."""
+    """The credit line's control: the market's underdog at T on the games the cell
+    can bet, those where the side against the popular team has a deciding offer at
+    or above the floor (at any cut: the choice at strength 0 is every gap). A level
+    market has no underdog, so the cell bets it and this control does not."""
+    same = set(pick(pop_cand(base, sig), 0.0, SIDE_AGAINST)["game_id"])
     fv = H.fav_sides(base)[["game_id", "dog"]]
     x = _rule_frame(sig, "gap_size", sig["side_against"].to_numpy(object)).drop(columns="side_pick")
+    x = x[x["game_id"].isin(same)]
     x = x.merge(fv, on="game_id").rename(columns={"dog": "side_pick"})
     return base.merge(x, on="game_id")
 
@@ -615,9 +650,43 @@ def synthetic_splits(games: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
     return pd.concat([df, orphan], ignore_index=True)
 
 
+def with_swapped_book(q: pd.DataFrame, sig: pd.DataFrame, book: str = "fanduel") -> pd.DataFrame:
+    """One book's spread and moneyline on one game with home and away swapped, the
+    shape of NBA_2021-12-10_BOS_PHX: the home team is a favourite of 3 or more, so
+    the row lies 6 or more from the median, and home is the side against the popular
+    team under the first cut, so without the rule the row is that band's bet. G5's
+    world holds no such game past the first cut: its popular teams are its strong ones.
+    Home's moneyline is above the floor, so the other books' offers remain a bet."""
+    x = sig[(sig["side_against"] == "home") & (sig["gap_size"] < GAP_CUTS[0]) & sig["season"].isin(H.CHOOSE)]
+    priced = set(q.loc[q["market"].eq("h2h") & q["price_a"].ge(H.PRICE_FLOOR), "game_id"])
+    sp = q[q["market"].eq("spreads") & q["book"].eq(book) & (q["line"] <= -3.0)
+           & q["game_id"].isin(set(x["game_id"]) & priced)]
+    rows = q["game_id"].eq(sp["game_id"].iloc[0]) & q["book"].eq(book) & q["market"].isin(POP_MARKETS)
+    q = q.copy()
+    q.loc[rows, ["price_a", "price_b"]] = q.loc[rows, ["price_b", "price_a"]].to_numpy()
+    spread = rows & q["market"].eq("spreads")
+    q.loc[spread, "line"] = -q.loc[spread, "line"]
+    return q
+
+
+def with_heavy_favourites(q: pd.DataFrame, sig: pd.DataFrame, n: int = 3) -> pd.DataFrame:
+    """On n games past the top cut, the team bet against the public is priced beyond
+    the floor at every book, so the cell has no moneyline bet there and the market's
+    underdog is the popular team. G5's world holds none of these past the first cut."""
+    x = sig[(sig["gap_size"] >= GAP_CUTS[-1]) & sig["season"].isin(H.CHOOSE)].head(n)
+    side = dict(zip(x["game_id"], x["side_against"]))
+    rows = q["market"].eq("h2h") & q["game_id"].isin(set(side))
+    home = q.loc[rows, "game_id"].map(side).eq("home").to_numpy()
+    q = q.copy()
+    q.loc[rows, "price_a"] = np.where(home, -300.0, 250.0)
+    q.loc[rows, "price_b"] = np.where(home, 250.0, -300.0)
+    return q
+
+
 def synthetic_prep(seed: int = 0, bad_rung: bool = True) -> dict:
     """G5's synthetic world (games, h2h / spreads / totals quotes, closes), these
-    splits, one impossible total rung, a television flag on the flagged seasons."""
+    splits, one impossible total rung, one book with home and away swapped, three
+    favourites beyond the floor, a television flag on the flagged seasons."""
     w = G5.synthetic_world(seed=seed)
     data, close = w["data"], w["close"]
     h2h = close[close["market"] == "spreads"].assign(market="h2h", close_line=np.nan)
@@ -628,6 +697,8 @@ def synthetic_prep(seed: int = 0, bad_rung: bool = True) -> dict:
         q = pd.concat([q, row.assign(line=9.5, price_a=-110.0, price_b=-110.0, book="betmgm",
                                      snapshot_at=row["snapshot_at"] + pd.Timedelta(minutes=1))],
                       ignore_index=True)
+    sig = signals(game_inputs(data.games, clean_splits(synthetic_splits(data.games, seed))))
+    q = with_heavy_favourites(with_swapped_book(q, sig), sig)
     kept, removed = drop_impossible(q)
     d = H.Data(games=data.games, quotes=kept, fetches=data.fetches, notes={})
     pricing = H.close_dist(close, d.games)
@@ -648,6 +719,10 @@ def synthetic_checks(n_placebo: int = 2) -> dict:
     q = prep["data"].quotes
     assert set(q["market"]) == {"h2h", "spreads", TOTAL}, set(q["market"])
     assert len(prep["removed"]) == 1 and (q.loc[q["market"] == TOTAL, "line"] > 100).all()
+    for pt in (POINT, DIAG_POINT):
+        sw = prep["frames"][pt]["swapped"]
+        assert set(sw["market"]) == set(POP_MARKETS) and len(sw) == 2 and sw["game_id"].nunique() == 1, pt
+    assert sum(r["games_beyond_floor"] for r in credit_games(prep) if r["market"] == "h2h") > 0
     per_family = pd.Series([r["family"] for r in rows + ctl]).value_counts().to_dict()
     assert per_family == {FAMILY_POP: 6, FAMILY_TOT: 3, CONTROL_WITH: 6, CONTROL_DOG: 6, CONTROL_OVER: 3,
                           CONTROL_POP_D: 6, CONTROL_TOT_D: 3}, per_family
@@ -701,7 +776,8 @@ def dummy_games(games: pd.DataFrame, seed: int = 0) -> pd.DataFrame:
 
 
 def extremes(prep: dict) -> dict:
-    """The extremes of every line, price and ticket number the search reads."""
+    """The extremes of every line, price and ticket number the search reads, the
+    rows the swapped rule removes, and the spreads farthest from their median."""
     out = {"impossible_rows_removed": int(len(prep["removed"]))}
     if len(prep["removed"]):
         out["impossible_rows"] = (prep["removed"].groupby(["game_id", "book", "line"]).size()
@@ -714,6 +790,8 @@ def extremes(prep: dict) -> dict:
                     ("over_share_mean", pd.concat([inp["h_over"], inp["a_over"]])), ("habit", sig["habit"])):
         out[name] = [round(float(x.min()), 2), round(float(x.max()), 2)]
     for pt, fr in prep["frames"].items():
+        out[f"swapped_rows_{pt}"] = fr["swapped"][["game_id", "book", "market", "line", "price_a", "price_b"]].to_dict("records")
+        out[f"farthest_spreads_{pt}"] = fr["farthest"].to_dict("records")
         n = fr["neutral"]
         d = n[n["book"].isin(H.BETTABLE) & (n["price"] >= H.PRICE_FLOOR)]
         out[f"deciding_offers_{pt}"] = {
@@ -803,6 +881,32 @@ def counts(prep: dict) -> dict:
                             row[f"tv_{s}_{grp}"] = int(len(v))
                 cells.append(row)
     return {"seasons": season_n, "fetch": fetch, "cells": cells}
+
+
+def credit_games(prep: dict, pool=(*H.CHOOSE, H.CONFIRM)) -> list[dict]:
+    """The credit line's games, pooled and counted from the choice: per market and
+    cut the cell's bets, the underdog control's, and the games only one of them
+    bets. Stops on a control game the cell cannot bet, or on a game only the cell
+    bets that is not a level market: the comparison would not be the registered one.
+    games_beyond_floor counts the games the floor keeps out at that cut."""
+    neutral, sig = prep["frames"][POINT]["neutral"], prep["signal"]
+    out = []
+    for market in POP_MARKETS:
+        base = neutral[neutral["market"] == market]
+        cell, ctl = pop_cand(base, sig), dog_cand(base, sig)
+        level = set(cell["game_id"]) - set(H.fav_sides(cell)["game_id"])
+        for cut in GAP_CUTS:
+            a, b = pick(cell, cut, SIDE_AGAINST), pick(ctl, cut, SIDE_DOG)
+            a, b = a[a["season"].isin(pool)], b[b["season"].isin(pool)]
+            ga, gb = set(a["game_id"]), set(b["game_id"])
+            past = cell[(cell["strength"] >= cut) & cell["season"].isin(pool) & cell["book"].isin(H.BETTABLE)]
+            r = {"market": market, "cut": cut, "cell_bets": len(a), "control_bets": len(b),
+                 "control_only": len(gb - ga), "cell_only": len(ga - gb), "cell_only_level": len((ga - gb) & level),
+                 "games_beyond_floor": len(set(past["game_id"]) - ga)}
+            if r["control_only"] or r["cell_only"] != r["cell_only_level"]:
+                raise RuntimeError(f"the credit line does not compare the same games: {r}")
+            out.append(r)
+    return out
 
 
 def placebo_null(prep: dict, seeds=(1, 2, 3)) -> list[dict]:
@@ -895,11 +999,13 @@ def smoke_report(prep: dict, t_prep: float = 0.0, out=print) -> dict:
     out("GAMES " + json.dumps(c["seasons"], default=str))
     out("FETCHES " + json.dumps(c["fetch"]))
     out("CELLS, COUNTED FROM THE CHOICE, NO GRADE\n" + pd.DataFrame(c["cells"]).to_string(index=False))
+    cg = credit_games(prep)
+    out("CREDIT LINE GAMES, POOLED, COUNTED FROM THE CHOICE\n" + pd.DataFrame(cg).to_string(index=False))
     nul = placebo_null(prep)
     out("PLACEBO NULL ON THE REAL DATA (seeds 1-3)\n" + pd.DataFrame(nul).to_string(index=False))
     tm = timing(prep, t_prep)
     out("TIMING " + json.dumps(tm))
-    return {"extremes": ex, "read_gap": gap, "counts": c, "placebo_null": nul, "timing": tm}
+    return {"extremes": ex, "read_gap": gap, "counts": c, "credit_games": cg, "placebo_null": nul, "timing": tm}
 
 
 def refuse_full(cache: Path) -> list[str]:
@@ -947,7 +1053,9 @@ def full(cache: Path = H.CACHE, out: Path | None = None) -> None:
         prep = prepare(cache, require=True)
     except RuntimeError as e:
         P.refuse([str(e)])
-    log(f"prepared: {len(prep['removed'])} impossible rows removed; building {N_PLACEBO} placebo signals")
+    credit_games(prep)
+    log(f"prepared: {len(prep['removed'])} impossible rows, "
+        f"{len(prep['frames'][POINT]['swapped'])} swapped rows removed; building {N_PLACEBO} placebo signals")
     plc = placebo_signals(prep["inp"])
     assert len(plc) == N_PLACEBO, len(plc)
     rows, ctl, cands = all_cells(prep, plc, log)
