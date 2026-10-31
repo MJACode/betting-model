@@ -122,13 +122,41 @@ totals (difference 0.00 on 1,107 games).
   10.8). In this load it removes 11 rows on 5 games: Bovada 1.0 on three games of 2020-21 (7 rows),
   BetMGM 155.5 on NBA_2023-11-24_SAS_GSW (3 rows), Caesars 136.5 on NBA_2026-03-13_UTA_POR (1 row).
   Nothing lies 20 to 60 points away, so any cut in that range removes the same rows.
-- **Spreads need no such rule:** the largest distance from a game's median stored spread is 15.5
-  points, and every number lies between -24.5 and +22 (the HOME number).
+- **No stored spread is impossible on its own.** Every number lies between -24.5 and +22 (the HOME
+  number), and the largest distance from a game's median stored spread is 15.5 points. Each book's
+  numbers move across a game's fetches, so that median cannot catch a row that is wrong at one fetch.
+  The next rule does.
+- **A spread with home and away swapped (added 2026-10-31, section 10).** A deciding book's spread
+  5 or more points from the median of the deciding books' spreads at the same fetch is a swapped
+  row, and that book's spread and moneyline at that fetch are not eligible.
+  - It needs 3 or more deciding books on the game's spread. With 2, the median is their midpoint and
+    cannot say which is wrong. Five games have 2, all in 2020-21, and each pair agrees.
+  - It applies at C and at D, before the market's fair line is read. That book's total stays.
+  - It removes one book on one game: NBA_2021-12-10_BOS_PHX, FanDuel, at the 02:00Z fetch (tip
+    03:00Z). The number is 7.0 points from the median. FanDuel's fetch before it reads home -4.5,
+    moneyline -189 / +160. This one reads home +3.5, moneyline home +124 / away -147. Every other
+    deciding book and Pinnacle read home -3.5 or -4, moneyline home -156 to -175.
+  - The next largest distance is 4.0 (NBA_2021-03-27_DAL_NOP, FanDuel, 2020-21, reported only), so
+    any cut above 4 and up to 7 removes the same row.
+- **Left in, each measured on prices only:**
+  - NBA_2021-01-27_DAL_UTA, BetMGM's moneyline at the decision reads home +115 / away -141, after
+    home -141 / away +115 on its earlier fetches, and every other deciding book reads home -135.
+    Its spread agrees with the others, so the rule above cannot see it. It stays because it touches
+    nothing judged: 2020-21 is reported only, no band or placebo run reads that season, and the
+    game's gap of 2.35 is under every cut.
+  - NBA_2024-02-05_GSW_BKN, BetMGM's spread at the decision reads home -1.5 at +110 / -135, between
+    fetches reading home +1.5 at -115 / -105. It is 3.0 points from the median. No cell bets it on
+    the real inputs. In 49 of the 200 placebo runs the game gets the away side at gap 5 or more, and
+    the row is that side's best offer, at EV 0.021. One bet at most in each of those runs.
+  - On a game near level, a book can sit on the other side of the median without being wrong. 127
+    other rows at C are 2 or more points from the median and on its other side. Every one has a
+    median within 1.5 of level and a number within 2 of level, and the largest distance is 3.0.
 - **Prices:** a price with a size under 100 is not a price (none stored); an incoherent pair is
   never an offer (1 stored).
 - **Ticket shares:** a share at or outside 0 and 100 is not a share (none on the clean rows; spread
   sides run 7 to 93, totals 2 to 98).
-- **A coherent price far from Pinnacle's stays in.** The highest-EV offers at C are moneylines
+- **A coherent price far from Pinnacle's stays in, unless the swapped rule above removes it.** The
+  highest-EV offers at C are moneylines
   such as NBA_2023-04-08_DEN_UTA home +375 at BetMGM, against Pinnacle's no-vig home chance of
   0.353 (EV 0.68). Five deciding books stored +360 to +375 at that fetch, so it is not one bad
   row, and nothing here says which side was stale. It is eligible. The harness reports each cell's
@@ -193,6 +221,14 @@ above the 95th percentile of 200 placebo runs.
   `control_POP_dog` at the same market and cut: the underdog in the SAME games. Otherwise the
   answer is "underdogs in lopsided games", not "popular teams". `python -m scripts.nba_s_popular
   --credit --results DIR` applies it to the verdict's file.
+  - **The same games means the games the cell can bet** (made exact 2026-10-31, section 10): those
+    where the side against the popular team has a deciding offer at or above the -200 floor. That
+    test does not depend on the cut. Without it the moneyline control would also bet games the cell
+    cannot, where the team bet against the public is a favourite beyond -200 and the underdog is the
+    popular team.
+  - **A level market stays in the cell only.** When the market's fair chance is exactly 0.5 there is
+    no underdog, so the control has no bet there. The cell's rules do not change, so it keeps those
+    games: 6 / 4 / 1 pooled moneyline bets at gap ≥ 5 / 10 / 15, none on the spread.
 - **Placebo, 200 runs, seeds 1-200.** Each game's four inputs (both teams' popularity and both
   teams' over share) move together to another game with a number on the same date, by one
   permutation per date. No game keeps its own inputs (changed 2026-10-31, section 10), unless it is
@@ -220,7 +256,7 @@ above the 95th percentile of 200 placebo runs.
 | Name | What it is |
 |---|---|
 | `control_POP_with` | spread and moneyline, WITH the popular team, same games and cuts |
-| `control_POP_dog` | spread and moneyline, the market's underdog, same games and cuts (the credit line) |
+| `control_POP_dog` | spread and moneyline, the market's underdog, same cuts, on the games the cell can bet (the credit line, 7) |
 | `control_POPT_over` | total, the over, same games and cuts |
 | `control_POP_at_D`, `control_POPT_at_D` | the registered cells at decision point D |
 | National television report | each registered cell's bets split into national broadcast, NBA TV only and neither, on 2025-26 (and 2020-21 beside it, outside the pool). Those are the only seasons with the flag. Bets, units, return, interval. No bar and no selection reads it. |
@@ -339,3 +375,21 @@ and those games repeat their real bets. A placebo that shares bets with the real
 luck, which makes the bar harder to read. So each date's permutation now leaves no game in its
 place (`no_fixed_points`). This reads no result. The share measured under the new rule is in
 section 9.
+
+**2026-10-31: on the moneyline the credit line's underdog control now bets the same games as the
+cell.** Sections 7 and 8 registered it as the underdog in the same games, but the code applied only
+the gap filter and not the cell's -200 floor. So at gap ≥ 5 / 10 / 15 the moneyline control held
+194 / 65 / 14 pooled bets on games the cell cannot bet. On every one of them the underdog was the
+popular team, at +176 to +1400, and they were 5.1% / 4.0% / 2.3% of the control's risk. The control
+now keeps only games where the side against the popular team has a deciding offer at or above the
+floor. Spreads already matched. Level markets stay in the cell only (section 7). A checker found
+this by counting prices and the choice. No cell had been graded.
+
+**2026-10-31: a spread with home and away swapped is not an offer.** Section 2 said spreads need no
+rule. That was wrong: it measured a game's stored numbers across fetches, and one row was wrong at a
+single fetch. FanDuel's row on NBA_2021-12-10_BOS_PHX has home and away swapped on both the spread
+and the moneyline. It is coherent, so it stayed eligible, and at the decision it was that game's
+best home offer in both markets (EV 0.339 and 0.333). It sat in the band below gap ≥ 5, which bar 5
+reads, and in the placebo runs that give the game the home side at a cut, which bar 6 reads. The rule
+and what it leaves in are in section 2. A checker found this from prices alone. No cell had been
+graded.
