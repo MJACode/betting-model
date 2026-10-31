@@ -124,7 +124,7 @@ line, at least 3 of them. The book being bet is left out of its own fair price.
   lower one), and their median no-vig over there, at least 3 books (reference kind "consensus"). A
   proposition with neither has no model number.
 - **Offset:** the log-odds of that number, unpenalised.
-- **Inputs, as of the snapshot:**
+- **Inputs, as of the snapshot** (a report counts as known 30 minutes after its printed time: dated line below):
   1. The projection's disagreement: the log-odds of the projection's chance of over at the
      reference line, less the offset, limited to ±3.
   2. Projected minutes.
@@ -146,8 +146,8 @@ line, at least 3 of them. The book being bet is left out of its own fair price.
 - **The projection:** two-stage (minutes × per-minute rate, all seven base stats). Fold S is fitted on
   2018-19 through S−1. Each market's width is fitted on season S−1 as predicted by the fold that never
   saw it. Fold S's means are what prices season S, and they are out of sample in every training row.
-- **Who is left out:** a player listed Out at the decision, and a player with fewer than 10 career
-  games, have no model number (the projection's own rule, record 5).
+- **Who is left out:** a player listed Out at the decision (on that same 30-minute read), and a player with fewer than 10
+  career games, have no model number (the projection's own rule, record 5).
 
 **Why the anchored model bets only the market's own line.** Its offers are the deciding books' quotes
 at the reference line. The first search measured that the count distribution overstates the favoured
@@ -304,6 +304,38 @@ No cell, cut, side, band, bar or season above changed. These three lines are abo
   In this lab's cells `p_choose` and `p_confirm` stay at 4,000 resamples, and the harness is handed back unchanged.
 - **"Low" share means under 0.5.** The placebo section says the print names a cell whose share is low. It names any
   cell where a run changes under half its bets.
+
+## Dated line, 2026-10-31, later the same day, before any cell was graded: when a report counts as known
+
+No cell had been graded when this changed, and no cell, cut, side, band, bar or season changed with it.
+
+**The rule: an injury report counts as known 30 minutes after its printed time.** The record's words (section 6.1): when
+each file became downloadable is unknown, so a report is treated as known 30 minutes after its printed time. The game-market
+anchored model already read reports this way (`INJURY_LAG` in `scripts/nba_game2_projection.py`).
+
+**What was wrong.** This search read a report the moment it was printed, and "as of the snapshot" above never stated a lag. It
+inherited that from the shipped projection's own research path (`scripts/nba_prop_projection_train.research_inputs`, and the
+default of `scripts/nba_prop_model_verify.py`). The print schedule makes it matter. In the stored report, 2023-24 and 2024-25 are
+stamped only on the half hour; 2025-26 is also stamped on the hour, at :15 and at :45. So a snapshot can read a report printed
+minutes earlier, and an input read just after print can sit against a price that has not moved yet. A checker found this before
+any grade.
+
+**What it reaches.**
+
+- **AN and `control_AN_lean`:** the Out filter, `own_q`, `tm_o_min`, `d_o_min`, `tm_q_min`, `opp_o_min`, projected minutes, every
+  projected mean, the disagreement and the widths all read the shifted report, in the rows fitted on as well as the rows priced.
+- **The overlap column "the share the projection card holds":** this lab rebuilds that card from the same folds, so it moves too.
+- **OL, CS and `control_same_line`:** these read no report. Their bets do not change.
+
+**How.** The lab shifts `report_ts` by 30 minutes before the report is compacted, in its own wrapper (`report_as_known`), and
+`models/` is untouched. The fold files are named for the lag, so a run under the 30-minute read can never load a fold fitted on
+the print-time read. The print-time folds stay on disk under their old names, and nothing reads them.
+
+**Not re-judged here:** the shipped projection's record (records 4.5 and 5) used the print-time read. This search does not
+change or re-measure that record.
+
+The counts that move are at the end of this file, under "Counts under the 30-minute read". The counts straight below were taken
+on the print-time read. Their OL, CS and `control_same_line` rows stand. Their AN and `control_AN_lean` rows do not.
 
 ## Counts before grading
 
