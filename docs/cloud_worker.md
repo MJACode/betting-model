@@ -167,6 +167,34 @@ refresh-pass step (`data/ingestors/scoreboard_splits.py`) into
 with an unstarted game today or tomorrow, display only (never
 `public_betting`, which the scorer reads).
 
+### NCAAB box scores and period scores (added 2026-10-30)
+
+Refresh-pass step `ncaab-box` (`data/ingestors/ncaab_espn_box.py`), on the
+HOURLY passes only (midnight-5am and 7am-5pm ET; the evening passes have no
+room in their 10-minute tick), after the results group, settle and
+refresh-outcomes: one ESPN game summary per NCAAB final of the last 3 ET
+dates with no box row yet, into `ncaab_team_game_stats` (source
+`espn_summary`) and `ncaab_period_scores`. Free, no key, no new variable, no
+Odds API credits. At most 80 games and about 150 seconds of fetching a pass,
+one request at a time; an idle pass makes no ESPN call. Red when ESPN answers
+403 or 429, when a fetch fails outright (the run stops there; about 46 s at
+worst), or when the newest 5 finals ESPN answered for were all refused, which
+means its summary changed for every game. Detail: `docs/sports/ncaab.md`
+(Box scores and period scores).
+
+Backfill job `ncaab_box_backfill`: `{"kind": "periods", "first": 2021,
+"last": 2026}` stores the period scores of every 2020-21 to 2025-26 final
+from one scoreboard call per date; `{"kind": "box"}` fetches the 2026-27
+box scores the passes have not stored. Both are declared in
+`jobs/declared_jobs.json`: `ncaab-period-scores-2021-2026` is ON (mike,
+2026-10-30), so the worker queues it once after the merge;
+`ncaab-box-scores-2027` is OFF. To queue it, set its `enabled` to true and
+merge: that one line is the whole change, no test needs editing. A run
+that ESPN stops part-way is still recorded as done, as the schedule backfill
+is; its result names the stop, so the read-back query is the check. Its two tables
+are also created by `add_ncaab_period_scores_2026_10_30.sql`, which the
+`apply-view-migrations` step applies on the first pass after a merge.
+
 ### NHL player props
 
 `data/ingestors/nhl_prop_odds_ingestor.py`, 2026-10-01 (mike). Step
