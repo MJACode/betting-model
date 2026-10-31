@@ -22,6 +22,12 @@ ONE MODEL'S PLAN CANNOT STOP ANOTHER'S. Each model's plan is read on its
 own: one that raises is logged and recorded in `errors`, and the tick still
 runs the other models' steps, then fails (the scheduler raises after
 publishing, so the heartbeat records an error).
+
+THE GAME NOBODY DECIDED (undecided_games). The job's own failure signal is its
+heartbeat's last status, one row a job, which the next idle tick overwrites with
+'ok', and it names no game. So what a real-money model must not do silently is
+read from what it wrote: a regular-season game that has tipped with no decision
+from a model is a game that model lost. tracking/failure_alerter reports it.
 """
 from __future__ import annotations
 
@@ -34,7 +40,10 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config  # noqa: E402
+import scripts.nba_first_half_total_luck_card as h1card  # noqa: E402
 import scripts.nba_first_half_total_luck_window as h1w  # noqa: E402
+import scripts.nba_team_total_luck_card as ttcard  # noqa: E402
 import scripts.nba_team_total_luck_window as ttw  # noqa: E402
 import scripts.nba_total_luck_card as tlcard  # noqa: E402
 import scripts.nba_total_luck_window as tlw  # noqa: E402
@@ -84,6 +93,38 @@ def plan(conn, now: datetime) -> PregamePlan:
             out.team_total = got
         else:
             out.first_half = got
+    return out
+
+
+# How far back a tipped game is looked for: long enough to outlast a night's
+# outage, short enough that a lost game stops being named the next day.
+UNDECIDED_LOOKBACK_HOURS = 24.0
+# Each model's own reading of "decided", the one its plan skips a game on: a
+# decision row, or any BET of that model on the game.
+DECIDED_BY = (("nba_total_luck", tlcard.decided_games),
+              ("nba_team_total_luck", ttcard.decided_games),
+              ("nba_first_half_total_luck", h1card.decided_games))
+
+
+def undecided_games(conn, now: datetime,
+                    hours: float = UNDECIDED_LOOKBACK_HOURS) -> dict[str, list[str]]:
+    """{model id: the regular-season games that tipped in the last `hours` with no
+    decision from that model}. Models with none are left out. Reads only. A model
+    whose decisions table does not exist yet has decided nothing, so every tipped
+    game is named: the table is created by the model's first card."""
+    tipped = tlcard.tipped_games(conn, now, hours)
+    # A placeholder with no teams has no feed event, and is never planned.
+    ids = sorted(g for g, v in tipped.items() if tlw.has_teams(v))
+    out: dict[str, list[str]] = {}
+    if not ids:
+        return out
+    for model, decided in DECIDED_BY:
+        if model in config.RETIRED_MODELS:
+            continue
+        done = decided(conn, ids)
+        lost = [g for g in ids if g not in done]
+        if lost:
+            out[model] = lost
     return out
 
 
