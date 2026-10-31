@@ -227,6 +227,16 @@ Measured on the cache before this was written, prices and numbers only.
 removes, and the 15 highest-EV offers. A number that looks impossible there and passes these rules
 stops the run for a dated line here, before any grade.
 
+**Dated line, 2026-10-31: the count in rule 1. No rule changes; nothing has been graded.** The 17 rows
+are every stored row. The lab's quotes hold 11 of them, read through the harness's own filters:
+
+- 4 came only in the injury-report purchase, which these cells leave out: BetMGM at 314.5 and 335.5,
+  Caesars at 136.5 twice.
+- 2 fall at or after tip: Bovada at 1.0 on `NBA_2021-01-02_CLE_ATL` (stamped 9 minutes after tip) and
+  on `NBA_2021-04-05_WAS_TOR` (fetched at tip).
+- The 11 left are Bovada at 1.0 (7), BetMGM at 155.5 (3) and Caesars at 136.5 (1). The rule removes
+  all 11. The median it reads is over the lab's rows, and the same rows fall either way.
+
 ## 7. The bars
 
 Section 9.1 of the record, unchanged, through `--house5`:
@@ -282,4 +292,96 @@ defender-distance bins pulled from Matt's machine. Not part of this search.
 
 ## 9. Counts before grading
 
-To be added from `--smoke`, dated, before any cell is graded.
+Added 2026-10-31 from `python -m scripts.nba_s_shotluck --smoke`, before any cell was graded. These
+are counts of games and read of no result. Research cache of 2026-10-29, shots pulled 2026-10-30.
+
+**Bets per cell, pooled** (full game 2021-22 to 2025-26, team totals 2023-24 to 2025-26):
+
+| Decision | Market | Side | ≥ 1 | ≥ 2 | ≥ 3 | ≥ 4 | ≥ 4, fewest in one graded season |
+|---|---|---|---|---|---|---|---|
+| A | full-game total | over | 2,347 | 2,032 | 1,689 | 1,373 | 239 |
+| A | full-game total | under | 2,308 | 1,975 | 1,673 | 1,346 | 246 |
+| A | full-game spread | home | 2,399 | 2,115 | 1,824 | 1,573 | 270 |
+| A | full-game spread | away | 2,341 | 2,055 | 1,784 | 1,533 | 261 |
+| C | full-game total | over | 2,348 | 2,033 | 1,690 | 1,374 | 239 |
+| C | full-game total | under | 2,308 | 1,975 | 1,673 | 1,346 | 246 |
+| C | full-game spread | home | 2,399 | 2,115 | 1,824 | 1,573 | 270 |
+| C | full-game spread | away | 2,342 | 2,056 | 1,785 | 1,534 | 261 |
+| D | home team total | over | 1,332 | 1,085 | 864 | 682 | 202 |
+| D | home team total | under | 1,325 | 1,075 | 856 | 664 | 197 |
+| D | away team total | over | 1,325 | 1,080 | 819 | 626 | 175 |
+| D | away team total | under | 1,374 | 1,102 | 885 | 671 | 199 |
+
+Every cell clears 200 pooled bets, so none reads "too few games to tell". 2020-21, reported and never
+judged, holds 277 to 427 bets per full-game cell.
+
+**This gap is wide, so a cut of 4 is not a rare event.** Across 2018-19 to 2025-26, per season:
+
+| Number | Mean | Standard deviation | Correlation with the shipped gap |
+|---|---|---|---|
+| Total gap | −0.09 to +0.11 | 5.1 to 7.3 | 0.09 to 0.44 |
+| Margin gap | +0.01 to +0.19 | 6.5 to 7.6 | 0.26 to 0.65 |
+| Home part | −0.02 to +0.15 | 4.3 to 5.2 | 0.22 to 0.51 |
+| Away part | −0.12 to 0.00 | 4.2 to 5.2 | 0.26 to 0.53 |
+
+The means sit near zero, section 4's check that the league's drift stays out. The over at C and gap ≥ 3
+places 1,690 bets here against the shipped gap's 508 at the same cut (record 6.7). The cuts stand as
+registered.
+
+**What the new gap adds.** `control_SL_added` subtracts b × the shipped number, with b from earlier
+seasons only. Over the graded seasons b runs 0.63 to 0.79 on totals, 1.46 to 1.63 on spreads, 1.07 to
+1.13 on the home team total and about 1.08 on the away team total. Its cells are graded by `--full` and by
+nothing before it.
+
+**Overlap with the live models:**
+
+| Cells | Same bet, ≥ 1 to ≥ 4 | Same game, ≥ 1 to ≥ 4 |
+|---|---|---|
+| Full-game over, A and C | 14.7% to 17.5% | 18.6% to 21.4% |
+| Home team-total under, D | 18.2% to 23.8% | 24.1% to 27.7% |
+| The other 36 cells | none: neither live model bets that side | 12.4% to 29.2% |
+
+So at least three of every four bets in any cell are bets neither live model makes.
+
+**The placebo on the real data,** 20 runs per cell:
+
+| Decision | Placebo bets | Not the real cell's bets | A perfect same-date shuffle | Lowest and highest cell |
+|---|---|---|---|---|
+| A | 719,360 | 55.9% | 55.9% | 48.0% to 66.6% |
+| C | 719,720 | 56.0% | 55.9% | 48.0% to 66.7% |
+| D | 315,300 | 59.3% | 59.2% | 50.5% to 70.8% |
+
+By cut: 50.1% at ≥ 1, 55.3% at ≥ 2, 60.2% at ≥ 3, 64.6% at ≥ 4.
+
+- The dates are full: about 7.5 games a date, and 0.1% of full-game games and 0.2% of team-total games are
+  alone on theirs.
+- **What repeats is the cell's breadth, not a stuck shuffle.** If 3 of a date's 7 games fire for real, a
+  shuffled gap lands on one of those 3 with chance 3/7, however well it shuffles. Every cell sits within
+  0.004 of that figure, so no shuffle within a date could differ more.
+- **Dated line, 2026-10-31: section 7's "a bet moves to a different game unless the date is nearly
+  empty" understates this.** The procedure does not change. About half the placebo's bets at ≥ 1 are real
+  bets, and any real edge travels with them, so bar 6 asks more of the low cuts than of the high ones.
+
+**Lines and prices the cells can read, after the rules:**
+
+| Market, decision | Numbers | Prices | Highest EV |
+|---|---|---|---|
+| Spread (home number), A | −24.5 to +21.5 | −135 to +110 | 0.120 |
+| Spread (home number), C | −24.5 to +21.5 | −135 to +110 | 0.255 |
+| Total, A | 199.0 to 262.5 | −125 to +105 | 0.124 |
+| Total, C | 195.5 to 262.0 | −125 to +105 | 0.191 |
+| Home team total, D | 94.5 to 135.5 | −164 to +134 | 0.227 |
+| Away team total, D | 94.5 to 135.5 | −150 to +112 | 0.160 |
+
+- Rule 1 removes 11 full-game rows and no team-total rows. None of the 11 would be visible at A or C
+  even without it. Rule 2 removes 1 row at A and 1 at C, the two named in section 6, and the flipped
+  spread's 0.339 is gone from the top of the list. No offer lies past +200.
+- **The highest EVs are real numbers read against a Pinnacle quote from before a sudden move, so nothing
+  stops the run.** On `NBA_2021-05-16_PHX_SAS` the books went from home +9 to +3.5 by 16:50 UTC, and
+  Pinnacle's newest stored quote was still +9 from 16:40. On `NBA_2023-04-08_DEN_UTA` the books went from
+  home +5.5 to +10.5 by 18:24 UTC, and Pinnacle stayed at +5.5 until 18:55. The gap decides these cells and
+  the fair line only chooses among offers, so a stale fair line cannot start a bet.
+
+**Time and memory, `--full`:** projected 1.64 hours, peak 3.0 GB, with other jobs running on the machine.
+One placebo run across the 48 cells takes 13.5 seconds, so the 200 take about 45 minutes. It was measured
+on the real offers against invented final scores. An earlier run of the same lab projected 1.30 hours.
