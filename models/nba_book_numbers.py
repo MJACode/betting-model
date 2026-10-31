@@ -1,9 +1,13 @@
 """Which quote is a book's number: ONE copy of the main-number rule.
 
 Some books hang a whole ladder of lines for one market in one fetch (betrivers
-and betparx 5-7 team-total rungs, betmgm up to 21), and a few list a single
-first-half or first-quarter rung 2+ points off every other book at a lopsided
-price. A bettor reading "the book's number" means the main rung, so every
+and betparx 5-7 team-total rungs, betmgm up to 21). In the first-half and
+first-quarter purchase a few show a single rung 2+ points off every other book at
+a lopsided price: that purchase kept the last pair each book listed
+(data/ingestors/odds_ingestor._parse_total_outcomes), which reads as a ladder cut
+to one rung, so this rule had nothing to choose among there
+(models/nba_first_half_total_luck.py, THE GRADED QUOTES). A bettor reading "the
+book's number" means the main rung, so every
 reader of these markets goes through the rule below. It moved here from the
 fourth search's lab (scripts/nba_game4_p2.py) so that the lab's three families
 (P1, P2, P3) and the live model nba_team_total_luck read the SAME code; the lab

@@ -20,10 +20,15 @@ books, links and sids on (_get_event_odds' own parameters):
     any other rung under totals_h1_alternate. Every reader of one row per (game,
     market, book) -- the latest_odds trigger, the app's other-books prices,
     closing-line value -- then lands on the main number. The history purchase
-    held exactly one rung per (game, book, market) on all 25,917 of its rows,
-    because its parser keeps one pair (nba_odds_history.parse_derivatives), so a
-    live ladder, if a book hangs one, is measured here for the first time:
-    rows_stored minus main_rows in the ledger.
+    held exactly one rung per (game, book, market, fetch) on all 25,917 of its rows,
+    because its parser keeps the last pair a book lists
+    (odds_ingestor._parse_total_outcomes, through
+    nba_odds_history.parse_derivatives). So at the books that hang a ladder the
+    graded quotes are not main numbers (BetRivers and betPARX over 82% of rows at
+    least 1.5 points off Pinnacle's number, Hard Rock 34%, the rest 1.1% or less;
+    models/nba_first_half_total_luck.py, THE GRADED QUOTES). A live ladder is
+    measured here for the first time: rows_stored minus main_rows in the ledger, and
+    the totals_h1_alternate rows per book in `odds`.
   * snapshot_type 'open' for a decision fetch, 'close' for the closing snapshot;
     snapshot_at = the market's own last_update (else the book's, else the fetch
     time), the live `odds` convention; created_at = the fetch instant, as the

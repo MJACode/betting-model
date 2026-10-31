@@ -1502,6 +1502,29 @@ it gave stand as the model's known weaknesses:
   out after looking and is not a registered strategy.
 - By chance: in 5,000 shuffled 24-cell families, a pass at +8.0% or better appears in 3.0% to
   4.1% of them, depending on the shuffle.
+- Its quotes are not all main numbers, which this section's first paragraph implies. The
+  first-half purchase kept one listed pair per book, the last one listed
+  (`odds_ingestor._parse_total_outcomes`), so the main-number rule had nothing to choose among.
+  Against Pinnacle's number in the same game, the stored rows sit at least 1.5 points off it at
+  BetRivers 84.6%, betPARX 82.7% and Hard Rock 34.0% of the time, and 1.1% or less at every
+  other deciding book. That reads as a ladder cut to one rung; the ladder is inferred, because
+  no raw response was stored. 78 of the 595 bets are at those three books, including all ten
+  priced above +105 and all eleven at -125 or worse. **The prices it lays are -130 to +114 across
+  all books, and -118 to +105 at the four books whose rows look like main numbers (517 bets).**
+  Live takes each book's real main number, so it will not be offered the quotes behind some
+  bets. That does not change which games are bet, because the gap decides the game. Re-graded
+  through the live code (`python -m scripts.nba_first_half_total_luck_replay --quote-bounds`):
+
+  | Quotes | Bets | Units | Return | 95% interval | Offers changed | Results flipped |
+  |---|---|---|---|---|---|---|
+  | The lab's | 595 | +51.49 | +8.01% | +0.43% to +15.37% | | |
+  | BetRivers and betPARX rows with prices over 6 points of probability apart removed | 595 | +51.32 | +7.97% | +0.40% to +15.30% | 10 | 0 |
+  | The same, including Hard Rock | 595 | +52.16 | +8.05% | +0.69% to +15.39% | 45 | 1 |
+  | All three books removed entirely | 595 | +48.12 | +7.44% | -0.04% to +14.85% | 79 | 3 |
+
+  Fanatics has no purchase rows at all, so it is a deciding book the graded bets never saw. The
+  first live ticks replace the inference with a measurement: the `totals_h1_alternate` rows per
+  book in `odds`.
 
 **C2 is built live** as `nba_team_total_luck`.
 - Not one book: DraftKings alone 340 bets, +14.8% (interval +4.4% to +24.8%); FanDuel alone

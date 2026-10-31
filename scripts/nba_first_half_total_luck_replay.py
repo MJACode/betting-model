@@ -10,8 +10,7 @@ game's per-game purchase 45-75 minutes before tip, scripts.nba_game_harness
            archive's created_at is the day the rows were bought), passed through
            the LIVE write-time split (models.nba_book_numbers.split_main_rungs:
            one fetch at a time) and the LIVE shaping
-           (models.nba_first_half_total_luck.quote_frame), so the match below is
-           proven on the shape the live fetch stores.
+           (models.nba_first_half_total_luck.quote_frame).
   games    the season's final games, box scores and owed games read by the
            totals card's own load (scripts.nba_total_luck_card.load_season, its
            SQL answered from the cache by scripts.nba_total_luck_replay.FrameConn)
@@ -36,7 +35,19 @@ under the live timing) and the EV floor at the 2026-27 uplift (models.honest_ev
 (tracking.paper_tracker._first_half_points and _compute_result) from the cache's
 nba_period_scores, against the lab's result on each bet.
 
+WHAT THE MATCH DOES NOT PROVE. The purchase kept ONE listed pair per book
+(odds_ingestor._parse_total_outcomes keeps the last pair a book lists), so every
+archived fetch holds one number per book, the split has nothing to choose among,
+and it sets nothing aside (rungs_listed, which this replay reports). So the replay
+proves the live code decides as the lab did on the lab's quotes. It says nothing
+about whether those quotes were each book's main number, and at BetRivers, betPARX
+and probably Hard Rock they were not (quote_census). Live takes the real main
+number, so it will not be offered the quotes behind some graded bets. --quote-bounds
+re-grades without them (quote_bounds); models/nba_first_half_total_luck.py states
+the numbers.
+
     NBA_RESEARCH_CACHE=... python -m scripts.nba_first_half_total_luck_replay [--seasons 2026 ...]
+    NBA_RESEARCH_CACHE=... python -m scripts.nba_first_half_total_luck_replay --quote-bounds
 """
 from __future__ import annotations
 
@@ -58,6 +69,11 @@ from scripts.nba_total_luck_replay import FrameConn  # noqa: E402
 
 LAB_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)        # the lab's full-game load (P3 --full)
 REPLAY_SEASONS = (2024, 2025, 2026)
+# The books whose stored first-half pair mostly sits off the market's number, and
+# how far apart a row's two prices must be, in points of probability, to read as
+# an off-main rung (the re-grades of quote_bounds).
+OFF_MAIN_BOOKS = ("betrivers", "betparx", "hardrockbet")
+LOPSIDED_GAP = 0.06
 
 
 def lab_bets(path: Path = BETS) -> pd.DataFrame:
@@ -133,9 +149,104 @@ def pricing_matches(ld: dict, art: dict, seasons) -> dict:
     return out
 
 
-def main_rungs_match(ld: dict, season: int) -> bool:
-    """The rows the live split stores under totals_h1 are exactly the lab's main
-    rungs (models.nba_book_numbers.main_rungs on its own load)."""
+def rungs_listed(rows: pd.DataFrame) -> dict:
+    """How many numbers the stored rows hold per (game, book, fetch). One
+    everywhere means the main-number rule had nothing to choose among, so a match
+    against it is true of any file and is evidence of nothing."""
+    n = rows.groupby(["game_id", "bookmaker", "created_at"]).size()
+    most = int(n.max()) if len(n) else 0
+    return {"most_per_book_and_fetch": most, "fetches_with_a_choice": int((n > 1).sum()),
+            "the_main_rule_chose_anything": most > 1}
+
+
+def quote_census(rows: pd.DataFrame) -> pd.DataFrame:
+    """Per book, the stored first-half rows against Pinnacle's number in the same
+    game (Pinnacle's latest row): the share at least 1.5 points off it and the
+    share exactly on it. A row stored from a ladder cut to one rung shows here."""
+    main = rows[rows["market"] == fh.MARKET]
+    pin = (main[main["bookmaker"] == "pinnacle"].sort_values("snapshot_at")
+           .drop_duplicates("game_id", keep="last").set_index("game_id")["total_line"])
+    x = main[main["bookmaker"] != "pinnacle"].assign(_pin=lambda d: d["game_id"].map(pin))
+    x = x[x["_pin"].notna()]
+    off = (x["total_line"] - x["_pin"]).abs()
+    return (x.assign(_far=off >= 1.5, _on=off == 0).groupby("bookmaker")
+            .agg(rows=("_far", "size"), far=("_far", "mean"), on=("_on", "mean"))
+            .assign(far=lambda d: (100.0 * d["far"]).round(1),
+                    on=lambda d: (100.0 * d["on"]).round(1))
+            .sort_values("far", ascending=False))
+
+
+def _graded_bets(ld: dict, art: dict, rows: pd.DataFrame, seasons=REPLAY_SEASONS) -> pd.DataFrame:
+    """The live rule on `rows`, graded on Q1 + Q2 points, without the EV floor."""
+    from scripts.nba_total_luck_card import load_season
+    out = []
+    for season in seasons:
+        games = ld["data"].games[ld["data"].games["season"] == season]
+        times = ld["times"][ld["times"]["game_id"].isin(set(games["game_id"]))]
+        targets = games[games["game_id"].isin(set(times["game_id"]))][
+            ["game_id", "season", "game_date", "home_team", "away_team"]]
+        final, box, sched = load_season(FrameConn(ld["games"], ld["schedule"], ld["box"]),
+                                        season, "9999-12-31")
+        prior = [s for s in art["bucket"] if int(s) < season]
+        bets = fh.decide(targets, fh.quote_frame(rows, games), box, final, times, art,
+                         scheduled=sched, bucket_uplift=None if prior else 0.0)[0]
+        out += [{"game_id": b.game_id, "season": season, "market": fh.MARKET, "side": fh.SIDE,
+                 "line": b.line, "price": b.price, "book": b.book} for b in bets]
+    bets = pd.DataFrame(out).merge(ld["data"].games[["game_id", "game_date"]], on="game_id")
+    return H.grade(bets, ld["games_p"])
+
+
+def _bound(graded: pd.DataFrame, base: pd.DataFrame) -> dict:
+    lo, hi = H.ci95(graded)
+    m = graded.merge(base, on="game_id", how="outer", suffixes=("", "_b"), indicator=True)
+    both = m[m["_merge"] == "both"]
+    return {"bets": int(len(graded)), "units": round(float(graded["units"].sum()), 2),
+            "roi": round(100.0 * float(graded["units"].sum() / graded["risk"].sum()), 2),
+            "interval": (round(100.0 * lo, 2), round(100.0 * hi, 2)),
+            "offers_changed": int(((both["book"] != both["book_b"])
+                                   | (both["line"] != both["line_b"])
+                                   | (both["price"] != both["price_b"])).sum()),
+            "results_flipped": int((both["result"] != both["result_b"]).sum()),
+            "games_gained": int((m["_merge"] == "left_only").sum()),
+            "games_lost": int((m["_merge"] == "right_only").sum()),
+            "price_range": (float(graded["price"].min()), float(graded["price"].max()))}
+
+
+def quote_bounds(ld: dict, art: dict) -> dict:
+    """What the lab's off-main quotes are worth: the live rule re-graded without
+    them, three ways. The rule is unchanged in each, so the same games are bet."""
+    rows = ld["rows"]
+    lopsided = np.abs(H.imp(rows["over_price"]) - H.imp(rows["under_price"])) > LOPSIDED_GAP
+    book = rows["bookmaker"]
+    base = _graded_bets(ld, art, rows)
+    return {
+        "base": _bound(base, base),
+        "betrivers_betparx_lopsided_removed": _bound(_graded_bets(
+            ld, art, rows[~(book.isin(OFF_MAIN_BOOKS[:2]) & lopsided)]), base),
+        "and_hard_rock_lopsided_removed": _bound(_graded_bets(
+            ld, art, rows[~(book.isin(OFF_MAIN_BOOKS) & lopsided)]), base),
+        "all_three_removed": _bound(_graded_bets(ld, art, rows[~book.isin(OFF_MAIN_BOOKS)]), base),
+    }
+
+
+def lab_prices() -> dict:
+    """The price range the lab's bets lay, across all books and at the books whose
+    rows look like main numbers."""
+    lb = lab_bets()
+    four = lb[~lb["book"].isin(OFF_MAIN_BOOKS)]
+    return {"all": (float(lb["price"].min()), float(lb["price"].max()), int(len(lb))),
+            "main_number_books": (float(four["price"].min()), float(four["price"].max()),
+                                  int(len(four))),
+            "at_the_three_books": lb[lb["book"].isin(OFF_MAIN_BOOKS)]["book"].value_counts().to_dict(),
+            "above_plus_105_by_book": lb[lb["price"] > 105]["book"].value_counts().to_dict(),
+            "minus_125_or_worse_by_book": lb[lb["price"] <= -125]["book"].value_counts().to_dict()}
+
+
+def split_keeps_the_labs_rows(ld: dict, season: int) -> bool:
+    """The rows the live split stores under totals_h1 are the lab's own
+    (models.nba_book_numbers.main_rungs on its load). True of any file with one
+    number per book, so this is NOT evidence that the rows are main numbers
+    (rungs_listed)."""
     games = ld["data"].games[ld["data"].games["season"] == season]
     pe = ld["pe"]
     lab = NB.main_rungs(pe[(pe["market"] == fh.MARKET) & pe["game_id"].isin(set(games["game_id"]))])
@@ -269,7 +380,7 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
         "record": graded["result"].value_counts().to_dict(),
         "units": round(float(graded["units"].sum()), 2),
         "risk": round(float(graded["risk"].sum()), 2),
-        "main_rungs_are_the_labs": main_rungs_match(ld, season),
+        "split_keeps_the_labs_rows": split_keeps_the_labs_rows(ld, season),
         "settled_pending": sorted(g for g, r in settled.items() if r is None),
         "settled_differently": sorted(g for g, r in settled.items()
                                       if r is not None and r != lab_result.get(g)),
@@ -279,10 +390,19 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--seasons", type=int, nargs="+", default=list(REPLAY_SEASONS))
+    ap.add_argument("--quote-bounds", action="store_true",
+                    help="the stored rows by book, and the re-grades without the off-main quotes")
     a = ap.parse_args()
     ld = load()
     art = fh.load_artifact()
     print("split:", ld["split"])
+    print("rungs listed:", rungs_listed(ld["rows"]))
+    if a.quote_bounds:
+        print(quote_census(ld["rows"]).to_string())
+        print("prices:", lab_prices())
+        for name, bound in quote_bounds(ld, art).items():
+            print(name, bound, flush=True)
+        return
     print("pricing equals the lab's period_market_pricing:", pricing_matches(ld, art, a.seasons))
     tot = {"lab_bets": 0, "live_bets": 0, "bets_matched": 0, "units": 0.0, "risk": 0.0}
     below = []
