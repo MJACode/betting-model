@@ -322,8 +322,10 @@ any grade.
 
 **What it reaches.**
 
-- **AN and `control_AN_lean`:** the Out filter, `own_q`, `tm_o_min`, `d_o_min`, `tm_q_min`, `opp_o_min`, projected minutes, every
-  projected mean, the disagreement and the widths all read the shifted report, in the rows fitted on as well as the rows priced.
+- **AN:** the Out filter, `own_q`, `tm_o_min`, `d_o_min`, `tm_q_min`, `opp_o_min`, projected minutes, every projected mean, the
+  disagreement and the widths all read the shifted report, in the rows fitted on as well as the rows priced.
+- **`control_AN_lean`:** it has no inputs, so it reads the report only through who is left out. Its bets did not change (measured
+  in the counts at the end).
 - **The overlap column "the share the projection card holds":** this lab rebuilds that card from the same folds, so it moves too.
 - **OL, CS and `control_same_line`:** these read no report. Their bets do not change.
 
@@ -331,11 +333,12 @@ any grade.
 `models/` is untouched. The fold files are named for the lag, so a run under the 30-minute read can never load a fold fitted on
 the print-time read. The print-time folds stay on disk under their old names, and nothing reads them.
 
-**Not re-judged here:** the shipped projection's record (records 4.5 and 5) used the print-time read. This search does not
-change or re-measure that record.
+**Not re-judged here:** the shipped projection's record (records 4.5 and 5) used the print-time read, with reports read 60
+minutes late reported beside it. This search does not change or re-measure that record.
 
 The counts that move are at the end of this file, under "Counts under the 30-minute read". The counts straight below were taken
-on the print-time read. Their OL, CS and `control_same_line` rows stand. Their AN and `control_AN_lean` rows do not.
+on the print-time read. Their OL, CS and control rows stand. Their AN rows do not, and neither do the AN rows of the placebo and
+overlap tables, the card column of the overlap table, or the time and memory line.
 
 ## Counts before grading
 
@@ -512,3 +515,128 @@ On a planted off-line edge, cells pass every one of the verdict's six bars (`tes
 | AN_consensus_over | 10,417 | 0.000 | 0.169 |
 
 **Time and memory.** One placebo run across all of a group's cuts took 0.5 to 6.2 seconds by group (the median of three runs, on results set to zero). The projected `--full` is 93 minutes of cells plus 3 minutes of loading, measured on this machine under its shared load that morning; two earlier smoke runs that day projected 78 and 105. Peak memory was 4.0 GB, and `--full` adds at most 0.2 GB for one group's 200 placebo runs. The first run on a fresh folder also refits the projection, 11 to 20 minutes a fold on one thread (that refit's logs, 2026-10-31), then caches it.
+
+## Counts under the 30-minute read
+
+Counted 2026-10-31 by `python -m scripts.nba_s_propoffline --smoke`, after the four folds were refitted on the new read. No cell had
+been graded and none was. Lines, prices, timestamps and who took the court only; the model's fit read the seasons before the one it
+prices. The comparisons with the print-time read come from three one-off scripts in the search's scratch folder (`lagcount.py`,
+`lagdiff.py`, `lagplayed.py`), which build on both sets of folds and read no result.
+
+**What did not move.** Between the two smoke runs, 39 of the 51 rows of the bets table above are identical: every OL, CS,
+`control_OL_blind`, `control_same_line` and `control_AN_lean` row. Only the 12 AN rows differ. The rule counts, the ceilings and the
+extremes are identical too.
+
+**Why the control did not move.** The anchored table holds the same number of rows under both reads, in every season and reference
+kind: 91,921 / 73,542 / 54,630 consensus and 44,472 / 47,437 / 40,993 Pinnacle, for 2023-24 / 2024-25 / 2025-26. In those three seasons
+908 fold rows are Out at print and not Out 30 minutes later, and none of those players took the court, so the void rule had already
+removed them. What moves AN is what it reads about teammates and opponents, and the projection built on that.
+
+**The bets each AN cell would place.**
+
+| Family | Reference | Side | Cut on EV | 2024-25 | 2025-26 | Pooled | Pooled on the print-time read | Share of these bets the print-time read did not place |
+|---|---|---|---|---:|---:|---:|---:|---:|
+| AN | pinnacle | under | ≥ 0.01 | 19,245 | 12,522 | 31,767 | 31,766 | 0.070 |
+| AN | pinnacle | under | ≥ 0.02 | 15,978 | 9,881 | 25,859 | 25,860 | 0.082 |
+| AN | pinnacle | under | ≥ 0.04 | 10,326 | 5,758 | 16,084 | 16,138 | 0.103 |
+| AN | pinnacle | over | ≥ 0.01 | 3,466 | 3,313 | 6,779 | 6,752 | 0.131 |
+| AN | pinnacle | over | ≥ 0.02 | 2,600 | 2,371 | 4,971 | 4,928 | 0.144 |
+| AN | pinnacle | over | ≥ 0.04 | 1,423 | 1,205 | 2,628 | 2,540 | 0.185 |
+| AN | consensus | under | ≥ 0.01 | 24,270 | 15,453 | 39,723 | 39,500 | 0.087 |
+| AN | consensus | under | ≥ 0.02 | 19,731 | 12,096 | 31,827 | 31,710 | 0.099 |
+| AN | consensus | under | ≥ 0.04 | 12,236 | 7,061 | 19,297 | 19,276 | 0.119 |
+| AN | consensus | over | ≥ 0.01 | 5,884 | 4,656 | 10,540 | 10,417 | 0.140 |
+| AN | consensus | over | ≥ 0.02 | 4,342 | 3,373 | 7,715 | 7,763 | 0.146 |
+| AN | consensus | over | ≥ 0.04 | 2,409 | 1,813 | 4,222 | 4,219 | 0.154 |
+| control_AN_lean | pinnacle | under | ≥ 0.01 | 17,319 | 11,859 | 29,178 | 29,178 | 0.000 |
+| control_AN_lean | pinnacle | under | ≥ 0.02 | 13,679 | 9,035 | 22,714 | 22,714 | 0.000 |
+| control_AN_lean | pinnacle | under | ≥ 0.04 | 7,822 | 4,772 | 12,594 | 12,594 | 0.000 |
+| control_AN_lean | pinnacle | over | ≥ 0.01 | 1,553 | 1,900 | 3,453 | 3,453 | 0.000 |
+| control_AN_lean | pinnacle | over | ≥ 0.02 | 1,032 | 1,237 | 2,269 | 2,269 | 0.000 |
+| control_AN_lean | pinnacle | over | ≥ 0.04 | 420 | 502 | 922 | 922 | 0.000 |
+| control_AN_lean | consensus | under | ≥ 0.01 | 17,156 | 9,063 | 26,219 | 26,219 | 0.000 |
+| control_AN_lean | consensus | under | ≥ 0.02 | 11,298 | 6,050 | 17,348 | 17,348 | 0.000 |
+| control_AN_lean | consensus | under | ≥ 0.04 | 4,981 | 2,663 | 7,644 | 7,644 | 0.000 |
+| control_AN_lean | consensus | over | ≥ 0.01 | 1,483 | 2,249 | 3,732 | 3,732 | 0.000 |
+| control_AN_lean | consensus | over | ≥ 0.02 | 928 | 1,492 | 2,420 | 2,420 | 0.000 |
+| control_AN_lean | consensus | over | ≥ 0.04 | 380 | 663 | 1,043 | 1,043 | 0.000 |
+
+**What the read changes in the report**, on the games with a snapshot in the window (one more in 2025-26 than the 1,217 with an
+eligible row). Across the three seasons, 1,171 of 7,271 (game, team) lists differ.
+
+| | 2023-24 | 2024-25 | 2025-26 |
+|---|---:|---:|---:|
+| Games | 1,225 | 1,224 | 1,218 |
+| Games where a team's Out or Questionable list differs | 236 | 258 | 447 |
+| Games with any report at the decision, either read | 1,224 | 1,224 | 1,218 |
+| Share of (game, team) reading a report under 30 minutes old, print time | 0.354 | 0.324 | 0.707 |
+| The same, 30-minute read | 0.000 | 0.000 | 0.000 |
+| Youngest report read, minutes before the decision, 30-minute read | 30.6 | 35.6 | 35.6 |
+| Out listed per game, print time / 30-minute read | 7.69 / 7.50 | 8.60 / 8.36 | 8.80 / 8.39 |
+| Questionable listed per game (with Doubtful and Probable), print time / 30-minute read | 1.68 / 2.10 | 1.69 / 2.20 | 0.96 / 1.80 |
+| Fold rows whose status differs, one row per (game, player) | 515 of 38,994 | 617 of 39,339 | 1,029 of 39,599 |
+| Mean `own_q`, print time / 30-minute read | 0.047 / 0.059 | 0.050 / 0.065 | 0.028 / 0.053 |
+| Mean `tm_o_min`, print time / 30-minute read | 19.7 / 18.1 | 23.7 / 22.1 | 25.8 / 23.2 |
+| Mean `tm_q_min`, print time / 30-minute read | 13.7 / 17.1 | 13.7 / 17.8 | 7.2 / 13.3 |
+| Mean `opp_o_min`, print time / 30-minute read | 20.8 / 19.2 | 24.9 / 23.2 | 27.4 / 24.7 |
+
+The gap between the seasons fitted on and the season priced narrows and does not close: mean `tm_q_min` for 2024-25 against 2025-26
+was 13.7 against 7.2 and is 17.8 against 13.3. The season split beside the verdict is where that would show.
+
+**The fold's means.** Row by row and season by season, projected minutes moved 0.6 minutes on average and projected points 0.33 to 0.40.
+How much of that is the report and how much is a refit's churn was not separated. The move off the market, log-odds, percentiles 1 / 50
+/ 99: −0.315, −0.059, +0.179, against −0.318, −0.059, +0.177. 33 of 36 fits have a model, as before. 32 of them chose the penalty 0.003, as
+before. The other, blocks + steals against the consensus for 2025-26, chose 0.30 where it chose 0.03; that model prices 6 rows.
+
+**Looked at, not only tested.** Status in the new folds was rebuilt from the raw report with no lab or model code. Over the 117,958 rows of
+the three seasons, 0 differ from that rebuild at 30 minutes, and 2,178 differ from the same rebuild at print time. The time a report is
+read against is the priced snapshot in all 3,667 games (0 minutes apart at the first and last snapshot of each).
+
+**The highest-EV anchored offers**, on the same rule as above (a wide gap stays in, and lands in the beside row):
+
+- AN consensus over: Goga Bitadze points + rebounds over 19.5 at BetMGM, +525 on 2024-12-08. EV 1.93.
+- AN consensus under: Yanic Konan Niederhauser rebounds under 4.5 at BetParx, +123 on 2026-02-08. EV 0.48.
+- AN Pinnacle under: Neemias Queta rebounds under 6.5 at FanDuel, +120 on 2025-10-22. EV 0.36.
+- AN Pinnacle over: Anfernee Simons assists over 3.5 at Hard Rock, +180 on 2025-10-29. EV 0.29.
+
+**The placebo, AN rows.** OL and CS are unchanged from the table above. Every group's identity permutation returned its real bets. Share of
+propositions alone in their group: AN Pinnacle 0.00%, AN consensus 0.03%. Averaged over three runs:
+
+| Reference | Side | Cut on EV | Real bets | Bets in a run | Share of a run's bets not among the real ones |
+|---|---|---|---:|---:|---:|
+| pinnacle | under | ≥ 0.01 | 31,767 | 31,636 | 0.37 |
+| pinnacle | under | ≥ 0.02 | 25,859 | 26,021 | 0.41 |
+| pinnacle | under | ≥ 0.04 | 16,084 | 16,670 | 0.49 |
+| pinnacle | over | ≥ 0.01 | 6,779 | 7,499 | 0.62 |
+| pinnacle | over | ≥ 0.02 | 4,971 | 5,622 | 0.65 |
+| pinnacle | over | ≥ 0.04 | 2,628 | 3,011 | 0.71 |
+| consensus | under | ≥ 0.01 | 39,723 | 39,523 | 0.51 |
+| consensus | under | ≥ 0.02 | 31,827 | 31,844 | 0.55 |
+| consensus | under | ≥ 0.04 | 19,297 | 19,830 | 0.63 |
+| consensus | over | ≥ 0.01 | 10,540 | 11,312 | 0.69 |
+| consensus | over | ≥ 0.02 | 7,715 | 8,433 | 0.72 |
+| consensus | over | ≥ 0.04 | 4,222 | 4,654 | 0.76 |
+
+The same three cells are low: AN Pinnacle under at all three cuts, 0.37, 0.41 and 0.49. The paragraph under the print-time table still says
+why, with its control count unchanged (29,178 bets at EV ≥ 0.01) and this table's 31,767 for the model's.
+
+**Overlap with the two shipped models** (counts only). The card column moves because this lab rebuilds the card from the same folds. The
+shipped card's record was measured on the print-time read, so this column now compares against the card as it would have read the report
+30 minutes after print.
+
+| Family, lowest cut | Bets | Share on a proposition the same-line rule holds | Share the projection card holds |
+|---|---:|---:|---:|
+| OL_pinnacle_under | 10,978 | 0.260 | 0.033 |
+| OL_pinnacle_over | 10,824 | 0.052 | 0.066 |
+| CS_consensus_under | 17,268 | 0.000 | 0.255 |
+| CS_consensus_over | 19,449 | 0.000 | 0.216 |
+| AN_pinnacle_under | 31,767 | 0.406 | 0.163 |
+| AN_pinnacle_over | 6,779 | 0.058 | 0.198 |
+| AN_consensus_under | 39,723 | 0.000 | 0.423 |
+| AN_consensus_over | 10,540 | 0.000 | 0.171 |
+
+**Time and memory.** The four folds took 395 to 574 seconds each, as four processes side by side on one thread each, about 4 minutes of that
+building the frame (the refit's logs, 2026-10-31). They are cached, so `--full` does not refit. One placebo run across all of a group's cuts
+took 0.3 to 1.0 seconds by group. The projected `--full` is 26 minutes of cells plus 1 minute of loading, peak memory 4.1 GB, and at most
+0.3 GB more for one group's 200 placebo runs. The smoke run itself took 11 minutes. Smoke runs on this machine that day have now projected
+26, 78, 93 and 105 minutes, all inside the two hours, so the range is the figure to plan on.
