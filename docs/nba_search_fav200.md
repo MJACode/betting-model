@@ -306,7 +306,258 @@ A cell under 50% with 30 or more real bets is named in section 9.
 
 ## 9. Counts before grading
 
-Added after the first `--smoke`, dated, before any cell is graded.
+Added 2026-10-31, before any cell is graded. **No rule above changed.** Every number here is read from
+prices, or from the model's chance on seasons after its fit. `--smoke` read no result of any bet: each
+grade inside it reads scores replaced by random numbers, and a guard stops the run if a grade is handed
+real ones. Source: `--smoke` on the research cache, commit 1b425472 for the blind, same-number and control rows, and the run just before it for the model's rows, on the same prices.
+
+### 9.1 What can reach the 200-bet bar
+
+- **FAVB: all 12 cells can.** Their pooled counts run 951 to 1,334.
+- **FAVP2: none can.** The largest pooled count is 40.
+- **FAVP1: none can.** The largest pooled count is 141, at EV >= 0.02.
+
+So 28 of the 40 cells will read "too few games to tell", whatever their return. Only the blind bands can
+pass. Section 6's chance figure was for all 40. For the 12 that can reach the bar it is
+12 x 0.025 = 0.3 cells clearing bar 2 by chance, before correlation.
+
+### 9.2 Bets by cell and season
+
+Pooled is 2021-22 to 2025-26. 2020-21 is apart and never pooled. These are the bets each cell would place,
+from prices alone.
+
+**FAVB, the favourite by price band**
+
+| Decision | Cell | 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 | **Pooled** |
+|---|---|---|---|---|---|---|---|---|
+| A | -200 to -300 | 213 | 256 | 300 | 242 | 270 | 266 | **1,334** |
+| A | -300 to -500 | 190 | 197 | 188 | 204 | 229 | 206 | **1,024** |
+| A | shorter than -500 | 116 | 176 | 97 | 209 | 221 | 248 | **951** |
+| B | -200 to -300 | 225 | 244 | 284 | 232 | 280 | 244 | **1,284** |
+| B | -300 to -500 | 187 | 197 | 208 | 228 | 220 | 223 | **1,076** |
+| B | shorter than -500 | 117 | 178 | 104 | 206 | 228 | 245 | **961** |
+| C | -200 to -300 | 212 | 246 | 278 | 238 | 275 | 244 | **1,281** |
+| C | -300 to -500 | 186 | 204 | 193 | 216 | 216 | 227 | **1,056** |
+| C | shorter than -500 | 123 | 177 | 113 | 208 | 229 | 244 | **971** |
+| D | -200 to -300 | 212 | 246 | 278 | 238 | 275 | 244 | **1,281** |
+| D | -300 to -500 | 185 | 204 | 193 | 216 | 217 | 227 | **1,057** |
+| D | shorter than -500 | 122 | 176 | 113 | 208 | 228 | 244 | **969** |
+
+**FAVP2, the same-number rule**
+
+| Decision | Cell | 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 | **Pooled** |
+|---|---|---|---|---|---|---|---|---|
+| A | EV >= 0.00 | 3 | 2 | 3 | 2 | 10 | 6 | **23** |
+| A | EV >= 0.01 | 0 | 1 | 1 | 0 | 2 | 1 | **5** |
+| A | EV >= 0.02 | 0 | 1 | 0 | 0 | 0 | 1 | **2** |
+| A | EV >= 0.03 | 0 | 0 | 0 | 0 | 0 | 1 | **1** |
+| B | EV >= 0.00 | 9 | 4 | 0 | 2 | 3 | 1 | **10** |
+| B | EV >= 0.01 | 5 | 0 | 0 | 1 | 1 | 0 | **2** |
+| B | EV >= 0.02 | 0 | 0 | 0 | 1 | 1 | 0 | **2** |
+| B | EV >= 0.03 | 0 | 0 | 0 | 0 | 1 | 0 | **1** |
+| C | EV >= 0.00 | 10 | 17 | 4 | 6 | 9 | 4 | **40** |
+| C | EV >= 0.01 | 2 | 5 | 1 | 2 | 2 | 1 | **11** |
+| C | EV >= 0.02 | 2 | 3 | 1 | 1 | 2 | 0 | **7** |
+| C | EV >= 0.03 | 2 | 2 | 1 | 1 | 2 | 0 | **6** |
+| D | EV >= 0.00 | 10 | 17 | 4 | 6 | 9 | 4 | **40** |
+| D | EV >= 0.01 | 2 | 5 | 1 | 2 | 2 | 1 | **11** |
+| D | EV >= 0.02 | 2 | 3 | 1 | 1 | 2 | 0 | **7** |
+| D | EV >= 0.03 | 2 | 2 | 1 | 1 | 2 | 0 | **6** |
+
+**FAVP1, the market-anchored model** (2020-21 only fits, so it holds no bets)
+
+| Decision | Cell | 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 | **Pooled** |
+|---|---|---|---|---|---|---|---|---|
+| A | EV >= 0.02 | 0 | 46 | 20 | 24 | 32 | 17 | **139** |
+| A | EV >= 0.04 | 0 | 19 | 6 | 6 | 8 | 6 | **45** |
+| A | EV >= 0.06 | 0 | 3 | 4 | 2 | 0 | 0 | **9** |
+| A | EV >= 0.08 | 0 | 3 | 1 | 0 | 0 | 0 | **4** |
+| C | EV >= 0.02 | 0 | 60 | 20 | 19 | 28 | 14 | **141** |
+| C | EV >= 0.04 | 0 | 23 | 10 | 3 | 6 | 4 | **46** |
+| C | EV >= 0.06 | 0 | 8 | 3 | 1 | 0 | 0 | **12** |
+| C | EV >= 0.08 | 0 | 4 | 2 | 1 | 0 | 0 | **7** |
+| D | EV >= 0.02 | 0 | 59 | 19 | 18 | 27 | 14 | **137** |
+| D | EV >= 0.04 | 0 | 25 | 9 | 2 | 6 | 4 | **46** |
+| D | EV >= 0.06 | 0 | 8 | 3 | 1 | 0 | 0 | **12** |
+| D | EV >= 0.08 | 0 | 4 | 2 | 1 | 0 | 0 | **7** |
+
+**`control_FAVB_dog` and `control_FAVB_spread`:** the same games as FAVB in every cell and season, so the same
+counts. The script that wrote this table checks that row by row.
+
+**`control_FAVP2_power`, the same-number rule at the power method's chance**
+
+| Decision | Cell | 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 | **Pooled** |
+|---|---|---|---|---|---|---|---|---|
+| A | EV >= 0.00 | 57 | 25 | 40 | 37 | 99 | 54 | **255** |
+| A | EV >= 0.01 | 14 | 4 | 5 | 12 | 25 | 11 | **57** |
+| A | EV >= 0.02 | 2 | 1 | 2 | 0 | 4 | 1 | **8** |
+| A | EV >= 0.03 | 0 | 1 | 1 | 0 | 2 | 1 | **5** |
+| B | EV >= 0.00 | 63 | 52 | 33 | 50 | 76 | 40 | **251** |
+| B | EV >= 0.01 | 22 | 11 | 5 | 9 | 15 | 4 | **44** |
+| B | EV >= 0.02 | 10 | 3 | 0 | 2 | 3 | 0 | **8** |
+| B | EV >= 0.03 | 3 | 0 | 0 | 2 | 1 | 0 | **3** |
+| C | EV >= 0.00 | 71 | 94 | 41 | 61 | 110 | 47 | **353** |
+| C | EV >= 0.01 | 21 | 27 | 9 | 13 | 26 | 11 | **86** |
+| C | EV >= 0.02 | 4 | 10 | 2 | 4 | 5 | 2 | **23** |
+| C | EV >= 0.03 | 2 | 4 | 1 | 1 | 2 | 0 | **8** |
+| D | EV >= 0.00 | 71 | 94 | 41 | 61 | 111 | 47 | **354** |
+| D | EV >= 0.01 | 21 | 27 | 9 | 13 | 26 | 11 | **86** |
+| D | EV >= 0.02 | 4 | 10 | 2 | 4 | 5 | 2 | **23** |
+| D | EV >= 0.03 | 2 | 4 | 1 | 1 | 2 | 0 | **8** |
+
+**How common these favourites are.** The share of a season's games whose favourite's best price at C is shorter
+than -200 (the three FAVB bands over the season's stored games):
+
+| 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|---|---|
+| 48.2% | 51.0% | 47.5% | 53.8% | 58.5% | 58.1% |
+
+The opening paragraph's "48% to 59%" is 47.5% to 58.5% on these counts. It was rounded by hand; this is the measured figure.
+
+### 9.3 Extremes, and what the rules on impossible numbers dropped
+
+Every book, every fetch, after the drops. Prices are American odds. The spread is the HOME number.
+
+| Season | Moneyline shortest | Moneyline longest | Spread lowest | Spread highest | Spread price shortest | Spread price longest |
+|---|---|---|---|---|---|---|
+| 2020-21 | -5,000 | +1,641 | -19.0 | +16.0 | -130 | +105 |
+| 2021-22 | -10,000 | +1,730 | -20.5 | +19.0 | -169 | +150 |
+| 2022-23 | -5,000 | +1,400 | -19.5 | +18.5 | -125 | +108 |
+| 2023-24 | -10,000 | +1,607 | -20.0 | +18.5 | -135 | +114 |
+| 2024-25 | -10,000 | +2,800 | -23.5 | +18.5 | -130 | +105 |
+| 2025-26 | -25,000 | +3,283 | -24.5 | +22.0 | -138 | +114 |
+
+- **Stored rows the harness loaded:** 2,733,316 on 7,230 games, every season fully priced. Moneylines and spreads
+  only, after the drops and one number per fetch: 880,079 moneyline and 881,409 spread quotes.
+- **Moneyline rows dropped by the fetch-median rule:** 22, in 15 games. By book: bovada 11, pinnacle 5, betmgm 3, fanduel 2, hardrockbet 1.
+  None of them is a price between -100 and +100; each is a real price far from its fetch.
+- **Spread rows dropped by the 3-point rule:** 149, in 88 games. The spread control is the only reader.
+- **The two-chances rule:** 1 moneyline quote fails it.
+- **What the fetch-median rule cannot judge:** 56,831 moneyline quotes (6.5%) sit in a fetch of fewer than four
+  books. No FAVB game is decided at such a fetch, at any point: each game in the three bands has four or more books
+  at its decision.
+- **The prices a band actually takes.** The stored -25,000 is one book's quote, not a best price. The best prices
+  taken, at every point: -300 to -204 in the first band, -500 to -303 in the second. In the third: -5,000 to -510, median
+  -769, with 234 to 254 of its games shorter than -1000. Section 8's split at -1000 reads those.
+- **One odd spread.** Of 881,409 spread quotes, one is priced outside -140 to +120: DraftKings at -3.5, +150/-169,
+  on NBA_2022-02-16_WAS_IND, with the other books between 0.0 and -1.5. It is inside the 3-point rule, so it is kept.
+  Only the spread control reads it.
+
+**The highest-EV offers, at C.** Three per list. EV here is the offer's price against the list's own fair chance.
+
+| List | Game | Book | The bet | Price | Fair chance | EV |
+|---|---|---|---|---|---|---|
+| same number | NBA_2021-04-19_GSW_PHI | draftkings | PHI | -233 | 0.772 | +0.103 |
+| same number | NBA_2022-04-08_MIL_DET | betrivers | MIL | -263 | 0.769 | +0.061 |
+| same number | NBA_2025-01-18_ATL_BOS | betmgm | BOS | -275 | 0.775 | +0.057 |
+| every favourite | NBA_2022-11-13_MIN_CLE | fanduel | CLE | -116 | 0.660 | +0.228 |
+| every favourite | NBA_2021-04-06_MIL_GSW | betrivers | MIL | -135 | 0.693 | +0.206 |
+| every favourite | NBA_2021-01-27_DAL_UTA | betmgm | UTA | +115 | 0.552 | +0.187 |
+| favourite's spread | NBA_2023-11-22_MIA_CLE | betparx | MIA +1.0 | -108 | 0.609 | +0.199 |
+| favourite's spread | NBA_2025-04-08_BOS_NYK | fanatics | NYK +1.5 | -110 | 0.600 | +0.145 |
+| favourite's spread | NBA_2025-01-15_DAL_NOP | williamhill_us | DAL +1.5 | -105 | 0.584 | +0.141 |
+| model | NBA_2023-01-19_CHI_DET | betrivers | CHI | -286 | 0.849 | +0.146 |
+| model | NBA_2024-03-13_CLE_NOP | draftkings | NOP | -205 | 0.734 | +0.092 |
+| model | NBA_2021-11-18_WAS_MIA | fanduel | MIA | -244 | 0.774 | +0.092 |
+
+A spread reads as the team bet and its own number. The stored number is the HOME number, so MIA +1.0 at CLE is stored as -1.0.
+
+None of these is dropped by the rules in section 2. The blind bet reads no EV: its list shows where a game's market
+chance and best price are far apart. Such a game's band is read on that best price, as section 2 registers. The full
+lists, for all four decision points, print on every `--smoke`.
+
+### 9.4 The market-anchored model's numbers
+
+| Decision | Games in range | Lowest move, log-odds | Highest move | Lowest chance | Highest chance | Penalty |
+|---|---|---|---|---|---|---|
+| A | 3,090 | -1.17 | +0.51 | 0.363 | 0.920 | 0.003 |
+| C | 3,077 | -1.26 | +0.49 | 0.347 | 0.918 | 0.003 |
+| D | 3,076 | -1.24 | +0.48 | 0.351 | 0.918 | 0.003 |
+
+A move is in log-odds, signed toward the home team. The lowest chance column is the model's own number for a favourite in
+range. A game below the cut gets no bet, and every cut is above zero EV.
+
+### 9.5 Coverage and the gate at D
+
+The share of a season's games with a decision.
+
+| Decision | 2020-21 | 2021-22 | 2022-23 | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|---|---|---|
+| A | 99.6% | 100.0% | 100.0% | 100.0% | 100.0% | 99.9% |
+| B | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
+| C | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
+| D | 99.6% | 99.4% | 100.0% | 100.0% | 100.0% | 100.0% |
+
+The lowest choosing season at D is 99.4%, above the 95% gate. **No season is gated out at any point.**
+
+### 9.6 The placebo on real prices
+
+Share of placebo bets on a game the cell itself does not bet, over 20 seeds, on the graded seasons. Near 0 would
+mean the shuffle repeats the real bets and the bar could never pass. Beside it, the same share under a same-date
+shuffle in the same pool (the rule section 7 turned down). "Mean bets" is a placebo run's bets over those seeds,
+set against the real cell's.
+
+| Family | Decision | Cell | Real bets | Mean bets in a run | Other games, same week | Other games, same date |
+|---|---|---|---|---|---|---|
+| FAVB | A | -200 to -300 | 1,334 | 1,334.0 | 76% | 67% |
+| FAVB | A | -300 to -500 | 1,024 | 1,024.0 | 81% | 71% |
+| FAVB | A | shorter than -500 | 951 | 951.0 | 78% | 70% |
+| FAVP2 | A | EV >= 0.00 | 23 | 23.0 | 94% | 77% |
+| FAVP2 | A | EV >= 0.01 | 5 | 5.0 | 96% | 86% |
+| FAVP2 | A | EV >= 0.02 | 2 | 2.0 | 98% | 90% |
+| FAVP2 | A | EV >= 0.03 | 1 | 1.0 | 100% | 95% |
+| FAVB | B | -200 to -300 | 1,284 | 1,284.0 | 77% | 68% |
+| FAVB | B | -300 to -500 | 1,076 | 1,076.0 | 81% | 71% |
+| FAVB | B | shorter than -500 | 961 | 961.0 | 79% | 70% |
+| FAVP2 | B | EV >= 0.00 | 10 | 10.0 | 94% | 78% |
+| FAVP2 | B | EV >= 0.01 | 2 | 2.0 | 95% | 78% |
+| FAVP2 | B | EV >= 0.02 | 2 | 2.0 | 95% | 78% |
+| FAVP2 | B | EV >= 0.03 | 1 | 1.0 | 100% | 80% |
+| FAVB | C | -200 to -300 | 1,281 | 1,281.0 | 77% | 68% |
+| FAVB | C | -300 to -500 | 1,056 | 1,056.0 | 81% | 71% |
+| FAVB | C | shorter than -500 | 971 | 971.0 | 78% | 70% |
+| FAVP2 | C | EV >= 0.00 | 40 | 40.0 | 96% | 73% |
+| FAVP2 | C | EV >= 0.01 | 11 | 11.0 | 97% | 75% |
+| FAVP2 | C | EV >= 0.02 | 7 | 7.0 | 96% | 75% |
+| FAVP2 | C | EV >= 0.03 | 6 | 6.0 | 96% | 75% |
+| FAVB | D | -200 to -300 | 1,281 | 1,281.0 | 77% | 68% |
+| FAVB | D | -300 to -500 | 1,057 | 1,057.0 | 81% | 71% |
+| FAVB | D | shorter than -500 | 969 | 969.0 | 78% | 69% |
+| FAVP2 | D | EV >= 0.00 | 40 | 40.0 | 93% | 75% |
+| FAVP2 | D | EV >= 0.01 | 11 | 11.0 | 92% | 74% |
+| FAVP2 | D | EV >= 0.02 | 7 | 7.0 | 94% | 75% |
+| FAVP2 | D | EV >= 0.03 | 6 | 6.0 | 93% | 76% |
+| FAVP1 | A | EV >= 0.02 | 139 | not measured | 84% | 67% |
+| FAVP1 | A | EV >= 0.04 | 45 | not measured | 88% | 62% |
+| FAVP1 | A | EV >= 0.06 | 9 | not measured | 95% | 64% |
+| FAVP1 | A | EV >= 0.08 | 4 | not measured | 93% | 58% |
+| FAVP1 | C | EV >= 0.02 | 141 | not measured | 81% | 62% |
+| FAVP1 | C | EV >= 0.04 | 46 | not measured | 86% | 64% |
+| FAVP1 | C | EV >= 0.06 | 12 | not measured | 92% | 72% |
+| FAVP1 | C | EV >= 0.08 | 7 | not measured | 93% | 68% |
+| FAVP1 | D | EV >= 0.02 | 137 | not measured | 80% | 62% |
+| FAVP1 | D | EV >= 0.04 | 46 | not measured | 86% | 62% |
+| FAVP1 | D | EV >= 0.06 | 12 | not measured | 92% | 76% |
+| FAVP1 | D | EV >= 0.08 | 7 | not measured | 90% | 61% |
+
+**No cell with 30 or more real bets is under 50%.** The lowest such cell is at 76% under the week shuffle
+and 62% under the date shuffle.
+
+**Alone in their band on their date**, the counts behind section 7:
+
+| Band | A | B | C | D |
+|---|---|---|---|---|
+| -200 to -300 | 20.7% | 21.2% | 21.9% | 21.9% |
+| -300 to -500 | 26.9% | 24.5% | 25.1% | 25.2% |
+| -500 to -1000 | 39.7% | 40.0% | 38.9% | 39.3% |
+| shorter than -1000 | 62.0% | 56.8% | 57.9% | 57.9% |
+
+### 9.7 Time and memory for `--full`
+
+One placebo run on the real data, the middle of three: 0.085 s for a blind cell, 0.077 s for a same-number cell, 0.069 s for a model cell.
+Projected from that run's own times: **52 minutes** for every cell with 200 placebo runs, the
+loading of the prices excluded. Of that, the model's fit and inputs take 38 minutes. The peak working set was
+2.9 GB. Other jobs ran beside this smoke, so these times are not a best case.
 
 ---
 
