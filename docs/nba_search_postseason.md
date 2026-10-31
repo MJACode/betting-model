@@ -328,18 +328,40 @@ row label, so all but the first row of every market's table came out empty. A gr
 dropped almost every bet without an error. It now builds by position, and
 `test_every_synthetic_game_id_is_filled_and_distinct_on_many_rows` fails on the old code.
 
+**2026-10-31: found by a checker, fixed before grading. No cell had been graded and no result of a
+bet was read.** Two `nba_prop_market` bets worth exactly nothing were refused, and the rebounds cell
+then bet them, which 4.2 forbids. Both are 2025-26 DraftKings unders: Paul George under 5.5 rebounds
+at -126 against Pinnacle's +116 / -140, and Julian Champagnie under 4.5 rebounds at +117 against
+Pinnacle's -130 / +107. The floor is EV ≥ 0.00 and the shipped rule takes both.
+
+- **Cause.** The lab built the fair under from 1 / decimal, which landed each one rounding step below
+  zero (-1.1e-16). The rounding is in the fair price, so sending that price through
+  `config.expected_value` returns the same number. The lab now builds it as the shipped
+  `fair_under` does. The rules, floors and cells are unchanged.
+- **What moved.** The tables below are recounted. `nba_prop_market` 2025-26 533 to 535, pooled 1,951
+  to 1,953. Rebounds 2025-26 457 to 455, pooled 1,598 to 1,596. The six cells pooled 8,353 to 8,351.
+  The bands and the frozen control's count moved with them. The caps control's counts did not.
+- **What now checks it.** The lab's EV equals the shipped gate's to the last bit on all 52,922 offers,
+  and on the 53,038 of the no-clock control. `--smoke` runs the shipped `find_bets` game by game on
+  these quotes: 1,953 bets, 1,953 in the lab's, the same book, price and line on all of them. The
+  older check could not see this, because the research lab's stored list used the same arithmetic.
+  48 offers sit on the floor, none just below it. No projection offer is within a rounding step of
+  its floor, so this cannot reach those cells.
+- **The re-run.** One placebo run of every row took 2.88 seconds, so 200 take 9.6 minutes; `--smoke`'s
+  peak was 5.29 GB.
+
 Bets the rule would place, at the best deciding price, in the 254 games kept:
 
 | Cell | Propositions | 2023-24 | 2024-25 | 2025-26 | Pooled | Void | Play-in | Playoffs | Cup final | Unders | Lowest / median / highest price | Top EV |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `nba_prop_market` | 11,400 | 958 | 460 | 533 | **1,951** | 0 | 91 | 1,832 | 28 | 1,951 | -192 / -104 / +210 | 0.13 |
+| `nba_prop_market` | 11,400 | 958 | 460 | 535 | **1,953** | 0 | 91 | 1,834 | 28 | 1,953 | -192 / -104 / +210 | 0.13 |
 | Steals | 3,377 | 862 | 327 | 615 | **1,804** | 16 | 124 | 1,654 | 26 | 1,309 | -200 / +120 / +390 | 0.53 |
-| Rebounds | 3,438 | 571 | 570 | 457 | **1,598** | 15 | 132 | 1,444 | 22 | 1,598 | -166 / +102 / +164 | 0.49 |
+| Rebounds | 3,436 | 571 | 570 | 455 | **1,596** | 15 | 132 | 1,442 | 22 | 1,596 | -166 / +102 / +164 | 0.49 |
 | Blocks + steals | 2,625 | 696 | 190 | 367 | **1,253** | 12 | 83 | 1,159 | 11 | 1,033 | -198 / +110 / +360 | 0.53 |
 | Blocks | 3,179 | 439 | 348 | 433 | **1,220** | 5 | 60 | 1,156 | 4 | 1,220 | -200 / -105 / +190 | 0.66 |
 | Rebounds + assists | 3,416 | 350 | 293 | 270 | **913** | 3 | 55 | 843 | 15 | 913 | -145 / +105 / +146 | 0.34 |
 | Threes | 3,134 | 510 | 516 | 539 | **1,565** | 19 | 103 | 1,448 | 14 | 733 | -200 / +120 / +600 | 0.71 |
-| Control: the six cells pooled | 19,169 | 3,428 | 2,244 | 2,681 | 8,353 | 70 | 557 | 7,704 | 92 | 6,806 | -200 / +105 / +600 | 0.71 |
+| Control: the six cells pooled | 19,167 | 3,428 | 2,244 | 2,679 | 8,351 | 70 | 557 | 7,702 | 92 | 6,804 | -200 / +105 / +600 | 0.71 |
 | Control: caps on, both models | 27,165 | 86 | 81 | 87 | 254 | 3 | 16 | 235 | 3 | 182 | -160 / +135 / +360 | 0.71 |
 
 - `nba_prop_market`'s void column is 0 because the research code drops a player who did not play
@@ -348,17 +370,17 @@ Bets the rule would place, at the best deciding price, in the 254 games kept:
   in each cell. The play-in and the Cup final are thin on their own.
 - **Caps on:** every kept game has a bet, 234 from the projection model and 20 from the Pinnacle
   rule. Three are void, so 251 would grade.
-- **Regular-season history only** (the frozen control) bets 11,353 of the six cells' propositions
-  against 8,283 for the graded history, both after voids. That is what section 4.3's false reason to
+- **Regular-season history only** (the frozen control) bets 11,351 of the six cells' propositions
+  against 8,281 for the graded history, both after voids. That is what section 4.3's false reason to
   bet unders looks like as a count.
 
 **Bets in each band** (a band under 30 is reported, not judged; none is):
 
 | Cell | Just below the cut | Then, upward to the open top band |
 |---|---|---|
-| `nba_prop_market` | 830 | 665, 1,286 |
+| `nba_prop_market` | 828 | 667, 1,286 |
 | Steals | 333 | 298, 402, 512, 592 |
-| Rebounds | 256 | 250, 359, 455, 534 |
+| Rebounds | 256 | 249, 358, 455, 534 |
 | Blocks + steals | 220 | 208, 274, 306, 465 |
 | Blocks | 138 | 149, 200, 303, 568 |
 | Rebounds + assists | 295 | 254, 290, 264, 105 |
@@ -440,7 +462,18 @@ first pass caught 43. `threes count twos` was uncaught because no test read a ma
 | Timing table reads results | `test_the_blind_table_used_to_time_a_run_holds_no_result` |
 | A void, or a game left out, stays settled | `test_a_game_left_out_and_a_void_have_no_synthetic_game` |
 | A market's stat wrong | `test_a_stat_is_the_markets_own_sum` |
+| 2026-10-31: fair under from 1 / decimal (the old code) | `test_an_offer_worth_exactly_nothing_clears_the_floor_as_the_shipped_gate_has_it`, `test_the_rules_ev_equals_the_shipped_gate_to_the_last_bit`, `test_a_rule_bet_worth_exactly_nothing_is_never_a_projection_bet`, `test_the_lab_bets_what_the_shipped_code_bets_at_and_around_zero`, `test_the_synthetic_checks_pass` |
+| 2026-10-31: floor above zero, not at it | `test_an_offer_worth_exactly_nothing_clears_the_floor_as_the_shipped_gate_has_it`, `test_the_registered_cells_are_the_rule_and_the_six_market_cells_at_their_shipped_floors` |
+| 2026-10-31: a rule bet left on the projection card | `test_a_rule_bet_worth_exactly_nothing_is_never_a_projection_bet` |
+| 2026-10-31: comparison to the shipped code ignores the price, or drops what only the lab bets | `test_the_comparison_to_the_shipped_code_finds_a_missing_bet_and_a_different_offer` |
+| 2026-10-31: the shipped code run where it bets nothing | `test_the_lab_bets_what_the_shipped_code_bets_at_and_around_zero` |
+| 2026-10-31: the floor count counts every offer | `test_floor_ties_counts_offers_a_rounding_step_from_their_floor_and_no_others` |
 
 **Data checked to contain what a test claims.** The first version of the projection placebo test held
 one proposition a market, so its shuffle moved nothing; it failed on real code, and now holds six
-propositions in one group and asserts that.
+propositions in one group and asserts that. The two prices that are worth exactly nothing are checked
+as exact fractions inside their own test, and the shipped code is run on them, so that test cannot
+pass on a price that is merely close.
+
+2026-10-31: the dated rows hold seven breaks, each made once, and all seven were caught. On the
+unbroken code 66 tests pass.
