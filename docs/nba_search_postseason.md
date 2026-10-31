@@ -316,3 +316,131 @@ placebo's differing share and a timed placebo run graded on a table of zeros. It
 bet. `--full` refuses without its three switches and writes `cells_registered.parquet`,
 `cells_controls.parquet` and each cell's bets. Counts before grading follow in a dated section once
 the lab's own run has printed them.
+
+### 7.1 Counts before grading (2026-10-31)
+
+Counted by `python -m scripts.nba_s_postseason --smoke`, before any cell was graded. No result of a
+bet was read. The timed placebo run grades on a table of zeros, so no result exists to read.
+
+**Found by the first count, fixed before grading.** Nearly every bet counted as void (1,949 of
+`nba_prop_market`'s 1,951). `pid_of` built each synthetic game's id with one market name aligned by
+row label, so all but the first row of every market's table came out empty. A grade would have
+dropped almost every bet without an error. It now builds by position, and
+`test_every_synthetic_game_id_is_filled_and_distinct_on_many_rows` fails on the old code.
+
+Bets the rule would place, at the best deciding price, in the 254 games kept:
+
+| Cell | Propositions | 2023-24 | 2024-25 | 2025-26 | Pooled | Void | Play-in | Playoffs | Cup final | Unders | Lowest / median / highest price | Top EV |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `nba_prop_market` | 11,400 | 958 | 460 | 533 | **1,951** | 0 | 91 | 1,832 | 28 | 1,951 | -192 / -104 / +210 | 0.13 |
+| Steals | 3,377 | 862 | 327 | 615 | **1,804** | 16 | 124 | 1,654 | 26 | 1,309 | -200 / +120 / +390 | 0.53 |
+| Rebounds | 3,438 | 571 | 570 | 457 | **1,598** | 15 | 132 | 1,444 | 22 | 1,598 | -166 / +102 / +164 | 0.49 |
+| Blocks + steals | 2,625 | 696 | 190 | 367 | **1,253** | 12 | 83 | 1,159 | 11 | 1,033 | -198 / +110 / +360 | 0.53 |
+| Blocks | 3,179 | 439 | 348 | 433 | **1,220** | 5 | 60 | 1,156 | 4 | 1,220 | -200 / -105 / +190 | 0.66 |
+| Rebounds + assists | 3,416 | 350 | 293 | 270 | **913** | 3 | 55 | 843 | 15 | 913 | -145 / +105 / +146 | 0.34 |
+| Threes | 3,134 | 510 | 516 | 539 | **1,565** | 19 | 103 | 1,448 | 14 | 733 | -200 / +120 / +600 | 0.71 |
+| Control: the six cells pooled | 19,169 | 3,428 | 2,244 | 2,681 | 8,353 | 70 | 557 | 7,704 | 92 | 6,806 | -200 / +105 / +600 | 0.71 |
+| Control: caps on, both models | 27,165 | 86 | 81 | 87 | 254 | 3 | 16 | 235 | 3 | 182 | -160 / +135 / +360 | 0.71 |
+
+- `nba_prop_market`'s void column is 0 because the research code drops a player who did not play
+  before it builds offers. The projection cells carry theirs to the grade.
+- Every registered cell clears the 200-bet bar on count, and every postseason holds 30 or more bets
+  in each cell. The play-in and the Cup final are thin on their own.
+- **Caps on:** every kept game has a bet, 234 from the projection model and 20 from the Pinnacle
+  rule. Three are void, so 251 would grade.
+- **Regular-season history only** (the frozen control) bets 11,353 of the six cells' propositions
+  against 8,283 for the graded history, both after voids. That is what section 4.3's false reason to
+  bet unders looks like as a count.
+
+**Bets in each band** (a band under 30 is reported, not judged; none is):
+
+| Cell | Just below the cut | Then, upward to the open top band |
+|---|---|---|
+| `nba_prop_market` | 830 | 665, 1,286 |
+| Steals | 333 | 298, 402, 512, 592 |
+| Rebounds | 256 | 250, 359, 455, 534 |
+| Blocks + steals | 220 | 208, 274, 306, 465 |
+| Blocks | 138 | 149, 200, 303, 568 |
+| Rebounds + assists | 295 | 254, 290, 264, 105 |
+| Threes | 338 | 265, 380, 402, 518 |
+
+**Extremes read.** Lines run 0.5-39.5 on points, 0.5-16.5 rebounds, 0.5-12.5 assists, 0.5-5.5
+threes, 2.5-57.5 points+rebounds+assists, 0.5-2.5 steals, 0.5-4.5 blocks, 0.5-6.5 blocks+steals,
+1.5-24.5 rebounds+assists; all on the half point. The longest prices on file (-6,600 on a blocks
+under, +1,500 on a blocks over, -2,500 on a blocks+steals over) are never laid: the -200 floor
+refuses the first and third, and blocks bets unders only. Refused: 0 lines, 0 prices, 1 incoherent
+two-way quote. 5,142 one-sided quotes decide nothing, as shipped.
+
+**Highest-EV offers, read one by one.** `nba_prop_market`'s top is 0.13: an assists under at +155
+against Pinnacle's 0.444. The projection model's top is 0.71. Eleven of its top twelve are threes
+overs at +100 to +350, eight of the twelve at BetMGM and nine in 2024-25. Its regular-season card
+reached 0.9981 (`models/nba_prop_rank.py`), so this is inside what it has always shown. None is an
+impossible number; none is refused. It is the card's known habit of wide EV on plus-money overs, at
+stakes of a unit or less.
+
+**The fit, reproduced.** Widths and maps equal the shipped artifact's in all six markets, on 241,731
+pairs against 241,731. `nba_prop_market`: 24,572 rebuilt, 24,572 stored, 24,572 in both. The six
+cells on 2024-25 and 2025-26: 54,571, 54,571, 54,571 (2023-24 ran on weekly maps and is not
+compared). Those checks read who was bet from the stored lists, never what the bets won.
+
+**The archive's stray line.** One regular-season row holds a points line of 113.5. Neither model's
+record is touched: neither bet can reach it. Flagged, not repaired.
+
+**The placebo.** The 20-seed run matches section 6's table to two decimals, no proposition alone in
+its group.
+
+**Time and memory.** One placebo run of every row takes 3.18 seconds on real data with the machine
+at 100% under other jobs, so 200 runs take 10.6 minutes. A dry run of `--full`'s whole path on the
+table of zeros took 86 seconds with 3 placebo runs. `--smoke`'s peak was 5.23 GB. Projected `--full`:
+**about 20 minutes** with this scratch folder's fits and frames cached, about 30 from empty.
+
+## 8. Each rule watched failing
+
+Each line was broken once in a copy of the lab's source, and the named test failed. 44 rules; the
+first pass caught 43. `threes count twos` was uncaught because no test read a made two, so
+`test_a_made_two_is_not_a_three` was added and watched failing. On the unbroken code 58 tests pass.
+
+| Rule broken | Test that failed |
+|---|---|
+| Assist credited on any shot | `test_an_assist_goes_to_the_passer_on_a_made_shot_only` |
+| Block to the shooter | `test_a_block_goes_to_the_blocker_not_the_shooter` |
+| Steal to the passer | `test_a_steal_goes_to_the_stealer_and_the_turnover_to_the_passer` |
+| Heave counted | `test_a_heave_is_not_a_field_goal_attempt` |
+| "No Turnover" row counted | `test_a_no_turnover_row_and_a_team_turnover_count_for_nobody` |
+| Offensive rebound dropped | `test_rebounds_are_offensive_plus_defensive_and_team_rebounds_count_for_nobody` |
+| A made two counted as a three | `test_a_made_two_is_not_a_three` |
+| Free throw not a point | `test_points_threes_and_free_throws_come_from_the_plays` |
+| Cross-check ignores a line one source holds | `test_a_line_only_one_source_holds_counts_as_zeros_there` |
+| Seconds ignored for a void | `test_a_player_takes_the_court_on_minutes_or_seconds` |
+| Synthetic id by label | `test_every_synthetic_game_id_is_filled_and_distinct_on_many_rows` |
+| Market rule: any line | `test_the_rule_takes_only_pinnacles_exact_line` |
+| Market rule: clock ignored | `test_the_rule_refuses_a_book_ten_minutes_behind_pinnacle` |
+| Market rule: unknown clock refused | `test_the_rule_counts_a_book_with_no_clock` |
+| Market rule: every market | `test_the_rule_has_five_markets` |
+| Market rule: incoherent Pinnacle allowed | `test_the_rule_needs_a_coherent_pinnacle` |
+| Market rule: wrong fair price | `test_the_rules_ev_is_pinnacles_no_vig_under_times_the_price` |
+| Card: Out player, or too few games, allowed | `test_the_card_never_prices_a_player_out_or_a_row_with_too_few_games` |
+| Card: every line | `test_the_card_reads_draftkings_line_else_the_line_most_books_hang` |
+| Card: clock ignored | `test_the_card_refuses_a_quote_ten_minutes_behind_the_freshest_of_its_market` |
+| Card: a proposition the rule bets, or a side the cell does not bet | `test_the_card_offers_only_each_markets_sides_and_never_a_rule_proposition` |
+| Card: map skipped | `test_the_map_moves_the_probability` |
+| Card: lower-EV side | `test_a_both_sides_cell_bets_its_higher_ev_side_only` |
+| Playoff game reads the earlier fit; artifact not used for 2025-26 | `test_a_playoff_game_reads_the_fit_through_its_season_and_the_shipped_artifact_for_2025_26` |
+| Cup final reads a later fit | `test_a_cup_final_reads_the_fit_before_its_season` |
+| Cup final map reads its own season | `test_a_cup_final_map_never_reads_its_own_season_after_2023_24_or_a_later_game` |
+| Thin group not widened | `test_a_thin_date_joins_the_other_thin_propositions_of_its_round` |
+| Shuffle leaves its group | `test_a_shuffle_stays_inside_its_group_and_keeps_every_value` |
+| Seed not used | `test_seeds_give_different_shuffles_and_the_same_seed_repeats` |
+| Market placebo returns the real prices | `test_on_a_one_game_date_the_placebo_bets_differ_from_the_real_bets` |
+| Projection placebo returns the real means | `test_the_projection_placebo_moves_the_mean_and_reprices_it` |
+| 20 placebo runs in place of 200 | `test_each_cell_writes_what_the_verdict_reads_and_the_verdict_judges_it` |
+| Bad line, bad price, incoherent quote kept | `test_a_line_outside_its_markets_range_is_refused`, `test_an_impossible_price_is_refused`, `test_an_incoherent_two_way_quote_is_refused_and_a_one_sided_one_is_kept_for_the_rules_to_refuse` |
+| Caps by raw EV, no game cap | `test_the_caps_take_one_bet_a_game_strongest_by_each_models_own_percentile` |
+| `--full` without its switches | `test_full_refuses_without_the_owners_switches` |
+| Timing table reads results | `test_the_blind_table_used_to_time_a_run_holds_no_result` |
+| A void, or a game left out, stays settled | `test_a_game_left_out_and_a_void_have_no_synthetic_game` |
+| A market's stat wrong | `test_a_stat_is_the_markets_own_sum` |
+
+**Data checked to contain what a test claims.** The first version of the projection placebo test held
+one proposition a market, so its shuffle moved nothing; it failed on real code, and now holds six
+propositions in one group and asserts that.
