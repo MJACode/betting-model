@@ -21,6 +21,28 @@
 
 ---
 
+## [ ] NBA game total models: read what could not be measured before they ran live (2026-10-31)
+
+Three reads, none possible from the branch that made the changes (no production
+connection, no deploy; session log, 2026-10-31):
+
+1. **How many team-total games the killed cards actually lost.** The worker's logs
+   show 60 of 74 cards killed from 2026-10-24 20:55Z to 10-31 01:15Z, and 20 groups of
+   games (32 games) with no finished card, but a run that was killed may have committed
+   first. `SELECT g.game_id FROM games g LEFT JOIN nba_team_total_luck_decisions d
+   USING (game_id) WHERE g.sport = 'NBA' AND g.commence_time::timestamptz BETWEEN
+   '2026-10-24 21:30+00' AND '2026-10-31 02:30+00' AND d.game_id IS NULL`.
+2. **Whether the stored price table ended the kills.** After it deploys, pair the worker's
+   `START` and `DONE`/`TIMEOUT` lines for `nba-team-total-luck`, `nba-total-luck` and
+   `nba-first-half-total-luck` over a week of evenings. The table took 41.0, 18.5 and
+   17.3 s of each run on an idle machine; the rest of a card's time on a slow evening is
+   not established. The same lines say whether three cards at once strain the worker.
+3. **Whether the books hang first-half ladders.** The graded quotes at BetRivers, betPARX
+   and probably Hard Rock read as a ladder cut to one rung (`docs/nba_models_2026.md`
+   8.4), inferred because no raw response was stored. `SELECT bookmaker, COUNT(*) FROM
+   odds WHERE market = 'totals_h1_alternate' AND source = 'odds_api_nba_first_half_live'
+   GROUP BY 1`, once the model has fetched a few games.
+
 ## [x] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29) — DONE 2026-10-30
 
 `ncaab_odds_unmatched` holds the events the game-lines purchase could not
@@ -153,7 +175,7 @@ ESPN lists the teams (`espn:` keys; the placeholders stay, the date rule reads
 them); no reload by hand is needed; (4) the
 artifact's copy in Supabase's `model_artifacts` — not written yet (the
 committed file is what the worker loads); `python -m scripts.nba_total_luck_build
---store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
+--store models/saved/nba_total_luck_20261031_095356.pkl` writes it. **Before the
 2027-28 season** refit the artifact through 2026-27
 (`python -m scripts.nba_total_luck_build`): the card refuses a season the artifact
 does not end just before. Re-sweep the gap cut at about 250 settled bets

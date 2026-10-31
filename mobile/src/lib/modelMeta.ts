@@ -438,6 +438,21 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first half's total points, overs only (models/nba_first_half_total_luck.py).
+  // The same luck read as nba_total_luck, on the first half's line: when both
+  // teams' plain defensive ratings overstate how good they have been by at least
+  // 2 points of game total, it bets the first half over, once, about an hour
+  // before tip, at the best price. It settles on the first two quarters' points,
+  // never the game total. The label is "BOS @ MIL — First Half Over 112.5". A game
+  // line, not a picker slot.
+  nba_first_half_total_luck: {
+    // 1H O/U is the first half's total. The side is already in the pick label.
+    shortLabel: '1H O/U',
+    longLabel: 'NBA First Half Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -819,6 +834,13 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'points, the extra these bets won over the last three NBA seasons (62% won where the market’s fair ' +
     'chance averaged 51%). Read it as an upper bound: plan on a return nearer 8% than the 17% those ' +
     'seasons made.',
+  // The market's fair chance plus the walk-forward uplift (+0.0572 for
+  // 2026-27): on the 595 graded bets, 56.0% won where the market's fair chance
+  // averaged 50.2%. docs/nba_models_2026.md 8.4 has the bets' return, +8.0%.
+  nba_first_half_total_luck:
+    'What our model says is the chance this side hits: the market’s fair chance plus about 6 percentage ' +
+    'points, the extra these bets won over the last three NBA seasons (56% won where the market’s fair ' +
+    'chance averaged 50%). Read it as an upper bound.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -828,11 +850,13 @@ export function modelProbabilityNote(modelId: string): string {
 // The NBA models that check each game once, about an hour before tip, and
 // post only the bets they find: the
 // full-game totals overs (scripts/nba_total_luck_card.py, 60-66 minutes out),
-// the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66) and
+// the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66), the
+// first-half overs (scripts/nba_first_half_total_luck_card.py, 45-66) and
 // the two prop models (scripts/nba_prop_market_card.py,
 // nba_prop_projection_card.py, 45-57). Their page is empty most of the day,
 // and the morning-run copy sent people back at the wrong time.
 const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
+  'nba_first_half_total_luck',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',

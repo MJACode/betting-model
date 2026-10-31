@@ -191,6 +191,11 @@ function mkPick(over: Partial<Pick>): Pick {
     nbaTotals?.note);
   check('NBA totals overs note has no void line', Boolean(nbaTotals && !nbaTotals.note.includes('Void')));
   // The NBA home team-total unders post the same way, in the same hour.
+  const nbaFirstHalf = pickTimingInfo(mkPick({ sport: 'NBA', model_id: 'nba_first_half_total_luck', created_at: NOW }));
+  check('an nba_first_half_total_luck pick posts once and carries no void line',
+    nbaFirstHalf?.kind === 'posted' && Boolean(nbaFirstHalf?.note.startsWith('Posted once and never re-priced'))
+      && !nbaFirstHalf.note.includes('Void'),
+    nbaFirstHalf?.note);
   const nbaTeamTotal = pickTimingInfo(mkPick({ sport: 'NBA', model_id: 'nba_team_total_luck', created_at: NOW }));
   check('NBA home team-total unders take the posted-once note',
     nbaTeamTotal?.kind === 'posted' && Boolean(nbaTeamTotal?.note.startsWith('Posted once and never re-priced')),
@@ -286,6 +291,9 @@ function mkPick(over: Partial<Pick>): Pick {
 check('an nba_total_luck pick reads the totals market', gameMarketForModel('nba_total_luck') === 'totals',
   String(gameMarketForModel('nba_total_luck')));
 // The home team-total unders read the home team's own team-total rows.
+check('an nba_first_half_total_luck pick reads the first-half market',
+  gameMarketForModel('nba_first_half_total_luck') === 'totals_h1',
+  String(gameMarketForModel('nba_first_half_total_luck')));
 check('an nba_team_total_luck pick reads the home team-total market',
   gameMarketForModel('nba_team_total_luck') === 'team_totals_home',
   String(gameMarketForModel('nba_team_total_luck')));

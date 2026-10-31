@@ -111,9 +111,10 @@ its 0.024 chance of a push refunded it would have been +0.011). The next
 smallest is +0.030 and the median +0.090.
 
 THE ARTIFACT (models/saved/, ARTIFACT_PATH): the residual sample (final total
-minus Pinnacle's closing total, per season, 2020-21 to 2025-26) and the
-per-season bucket counts. The live model and the replay of the lab read the
-same rows, so they rank offers identically. It must be refitted before
+minus Pinnacle's closing total, per season, 2020-21 to 2025-26), the
+per-season bucket counts, and the finished price table of 2026-27 (THE PRICE TABLE
+IS STORED, below). The live model and the replay of the lab read the same rows, so
+they rank offers identically. It must be refitted before
 2027-28: the card refuses a season the artifact does not end just before.
 """
 from __future__ import annotations
@@ -136,7 +137,7 @@ GAP_CUT = 3.0
 REFERENCE_BOOK = "draftkings"
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACT_PATH = "models/saved/nba_total_luck_20261017_090305.pkl"
+ARTIFACT_PATH = "models/saved/nba_total_luck_20261031_095356.pkl"
 ARTIFACT_KIND = "nba_total_luck"
 
 # Decision point C is "the newest fetch 60-180 minutes before tip". Live, the
@@ -329,18 +330,48 @@ def residual_frame(art: dict) -> pd.DataFrame:
     return r.assign(season=r["season"].astype(int), market=MARKET)[["season", "market", "resid"]]
 
 
+# THE PRICE TABLE IS STORED IN THE ARTIFACT (the three NBA game total models). Each
+# card is a process of its own, so a table rebuilt by each run was rebuilt on every
+# tick that decides a game: 18.5 s here, 17.3 s for the first half, 41.0 s for the
+# team total, measured one after the other on this machine, with no other work to
+# do. On the worker the team-total card was killed at its 180-second limit on 60 of
+# 74 attempts from 2026-10-24 to 10-31. The table is a pure function of the residuals
+# already in the artifact, so the artifact stores it for the one season it prices
+# live, and a graded season, or an artifact without one, still builds.
+
+
+def stored_dist(art: dict, season: int):
+    """The finished table the artifact holds for `season`, else None."""
+    state = (art.get("pricing_tables") or {}).get(int(season))
+    if state is None:
+        return None
+    from scripts import nba_game_harness as H
+    return H.ResidDist.from_state(state)
+
+
+def with_pricing_table(art: dict, pricing_dist, newest_season) -> dict:
+    """`art` plus the finished table of the season it prices live, the one after
+    its newest (the cards refuse any other). `pricing_dist` and `newest_season` are
+    the model's own."""
+    live = int(newest_season(art)) + 1
+    return {**art, "pricing_tables": {live: pricing_dist(art, live).state()}}
+
+
 _DIST_CACHE: dict = {}
 
 
 def pricing_dist(art: dict, season: int):
     """The empirical totals distribution the harness prices season `season`
-    with: scripts.nba_game_harness.dist_by_season on the stored residuals,
-    which uses the seasons BEFORE `season` (the lab's close_dist). Built once
-    per artifact and season in a process (the table takes a few seconds)."""
-    from scripts import nba_game_harness as H
+    with: the table the artifact stores for it, else
+    scripts.nba_game_harness.dist_by_season on the stored residuals, which uses the
+    seasons BEFORE `season` (the lab's close_dist). Once per artifact and season in
+    a process."""
     key = (art.get("built_at"), len(art["close_resid"]), int(season))
     if key not in _DIST_CACHE:
-        d = H.dist_by_season(residual_frame(art), [int(season)]).get((int(season), MARKET))
+        d = stored_dist(art, season)
+        if d is None:
+            from scripts import nba_game_harness as H
+            d = H.dist_by_season(residual_frame(art), [int(season)]).get((int(season), MARKET))
         if d is None:
             raise ValueError(f"{MODEL_ID}: the artifact holds no residuals to price {season}")
         _DIST_CACHE[key] = d

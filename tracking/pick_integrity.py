@@ -47,6 +47,9 @@ Checked:
                   so it cannot be read as the full-game total, and does not
                   name the other team as the one whose points it is. Keyed on
                   the model's market, so no other model's verdict changes.
+  * first half -- a pick that settles on Q1 + Q2 points (its model's market is
+                  totals_h1) says "First Half", so it cannot be read as the
+                  full-game total. Keyed on the model's market too.
 
 A producer that does not supply `side` and `line` cannot be checked, so its
 picks are refused too. A check that dead code can satisfy is not a check (§1b).
@@ -146,6 +149,20 @@ def _team_total_problem(label: str, model_id: str | None,
     return None
 
 
+_FIRST_HALF = re.compile(r"\bfirst[\s-]*half\b", re.IGNORECASE)
+
+
+def _first_half_problem(label: str, model_id: str | None) -> str | None:
+    """A first-half pick whose label reads as the game total. None for every
+    model whose market is not the first half's total."""
+    if _market(model_id) != "totals_h1":
+        return None
+    if not _FIRST_HALF.search(label):
+        return ("the label does not say First Half, so it reads as the "
+                "full-game total; the pick settles on the first half's points")
+    return None
+
+
 def _tail(label: str) -> str:
     """The bet itself: the opener writes "BUF @ HOU — BUF +1 (...)"."""
     return label.rsplit("— ", 1)[-1].strip()
@@ -200,6 +217,9 @@ def pick_problems(label, side, line, model_id, home=None, away=None,
     team_total = _team_total_problem(label, model_id, home, away)
     if team_total:
         problems.append(team_total)
+    first_half = _first_half_problem(label, model_id)
+    if first_half:
+        problems.append(first_half)
     return problems
 
 

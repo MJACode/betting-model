@@ -446,6 +446,8 @@ export interface TeamPickRecords {
   settled: number;
   /** Team totals (one team's points): in `settled`, in no tile. */
   teamTotals: number;
+  /** First-half totals (the first two quarters' points): in `settled`, in no tile. */
+  firstHalves: number;
   /** A ledger read failed. Unknown stamps stayed in the counts. */
   ledgerUnread: boolean;
 }
@@ -479,7 +481,7 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
   const byId = new Map(games.map((g) => [g.game_id, g] as const));
   const out: TeamPickRecords = {
     on: emptyRecord(), against: emptyRecord(), over: emptyRecord(), under: emptyRecord(),
-    settled: 0, teamTotals: 0, ledgerUnread: false,
+    settled: 0, teamTotals: 0, firstHalves: 0, ledgerUnread: false,
   };
   for (const p of picks) {
     const g = byId.get(p.game_id);
@@ -509,6 +511,14 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     if (gameMarketForModel(p.model_id ?? '')?.startsWith('team_totals')) {
       if (p.discordPublish === 'unknown') out.ledgerUnread = true;
       out.teamTotals += 1;
+      out.settled += 1;
+      continue;
+    }
+    // A first half's total (nba_first_half_total_luck, over) is the same story:
+    // a different number from the game's total, on two quarters of it.
+    if (gameMarketForModel(p.model_id ?? '') === 'totals_h1') {
+      if (p.discordPublish === 'unknown') out.ledgerUnread = true;
+      out.firstHalves += 1;
       out.settled += 1;
       continue;
     }
