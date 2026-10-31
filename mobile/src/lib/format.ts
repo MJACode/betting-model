@@ -376,6 +376,10 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   NHL: 5 * 3_600_000,
   NBA: 5 * 3_600_000,
   WNBA: 5 * 3_600_000,
+  // A college basketball game runs about two hours, and the late West Coast
+  // tips start after 10pm ET with no live feed in the app, so this window is
+  // all it has. 4h is twice the game.
+  NCAAB: 4 * 3_600_000,
   // Football, and the reason these two are named rather than left on the
   // default: they are the sports that play late and are NOT covered by the live
   // poller, so the blind window is all they have. Once the app's live board
@@ -659,6 +663,9 @@ const GAME_DURATION_HOURS: Record<string, number> = {
   NHL: 3.5,
   NBA: 3,
   WNBA: 3,
+  // 40 minutes of play, about two hours on the clock. ESPN finals land on the
+  // next refresh pass, which drops the game sooner when they do.
+  NCAAB: 3,
   UFC: 6,
 };
 

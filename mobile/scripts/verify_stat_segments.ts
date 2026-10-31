@@ -60,6 +60,7 @@ const def = (sport: Sport, group: string, key: string) =>
 const WANT_SEGMENTS: Record<Sport, StatSegment[]> = {
   NFL: ['qb', 'rb', 'wrte', 'def', 'teams'],
   NCAAF: ['qb', 'rb', 'wrte', 'def', 'teams'],
+  NCAAB: ['players'], // no NCAAB stats or Teams board yet → no row
   MLB: ['hitters', 'pitchers', 'teams'],
   NBA: ['players', 'teams'],
   WNBA: ['players', 'teams'],

@@ -49,6 +49,8 @@ export function gameMarketForModel(modelId: string): string | null {
   // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
   if (modelId === 'nba_total_luck') return 'totals';
+  // The NCAAB totals model (models/ncaab_total_blend.py): same trap.
+  if (modelId === 'ncaab_total_blend') return 'totals';
   // The NBA home team total (unders): the home team's own points, stored
   // under its own market, never the game's 'totals' rows.
   if (modelId === 'nba_team_total_luck') return 'team_totals_home';
@@ -240,6 +242,7 @@ export function marketClassForModel(modelId: string): MarketClass {
   // neither substring.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
   if (modelId === 'nba_total_luck') return 'game_total';
+  if (modelId === 'ncaab_total_blend') return 'game_total';
   // One team's points move with the game total, so the nearest class.
   if (modelId === 'nba_team_total_luck') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
@@ -1930,12 +1933,16 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
   // once, about an hour before tip, and is a game line: nothing to void. The
   // NBA home team-total unders post the same way, in the same hour.
+  // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
+  // once, the evening before, and never re-prices: not "the first scoring run
+  // of the day".
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
     pick.model_id === 'nba_total_luck' ||
     pick.model_id === 'nba_team_total_luck' ||
+    pick.model_id === 'ncaab_total_blend' ||
     nbaPosted
   ) {
     return {

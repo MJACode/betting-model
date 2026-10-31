@@ -22,10 +22,12 @@ import {
   formatPct,
   formatPctSigned,
   formatSigned,
+  gameDayLabelET,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelDetailTitle, modelLong, modelPageTiming, modelShort, sportOfModel } from '@/lib/modelMeta';
 import { navShowsSportOnly } from '@/lib/modelBadgeLayout';
+import { signalsContextTime } from '@/lib/signalsCard';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
@@ -435,7 +437,10 @@ function TodayPickRow({
   onPress: () => void;
 }) {
   const { pick, game } = enriched;
-  const timeLabel = formatGameTimeET(game?.commence_time);
+  // The day as well as the time for a game that is not today: look-ahead
+  // rows (the NCAAB model decides the evening before) read as tonight with a
+  // clock time alone. A game today keeps the time alone.
+  const timeLabel = signalsContextTime(gameDayLabelET(game?.commence_time), formatGameTimeET(game?.commence_time));
   return (
     <Pressable
       accessibilityRole="button"

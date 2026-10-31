@@ -328,8 +328,9 @@ check('the paused model\'s graded win is listed',
 // ALL_SPORTS drives the modal's always-show-every-sport sections. Pinned to the
 // literal on purpose — the ORDER is the product decision — but it has to be
 // updated when a sport is added, and was not when NCAAF shipped (2026-08-24).
+// NCAAB joined beside NCAAF on 2026-10-30.
 check('ALL_SPORTS is the full canonical order',
-  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,NCAAF,UFC,NHL', ALL_SPORTS.join(','));
+  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,NCAAF,NCAAB,UFC,NHL', ALL_SPORTS.join(','));
 
 // A day where ONLY a retired model's pick graded is an EMPTY day: no totals,
 // no sport section, nothing listed.
