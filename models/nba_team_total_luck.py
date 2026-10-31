@@ -246,18 +246,20 @@ QUOTE_ROW_COLS = ("game_id", "bookmaker", "market", "snapshot_type", "snapshot_a
                   "under_link")
 
 
-def quote_frame(rows: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+def quote_frame(rows: pd.DataFrame, games: pd.DataFrame, market: str = MARKET) -> pd.DataFrame:
     """Stored `odds` rows (QUOTE_ROW_COLS; the links may be absent) -> the
     harness's quote frame, through scripts.nba_game_harness.frame_quotes:
-    line = total_line, price_a = the over, price_b = the under.
+    line = total_line, price_a = the over, price_b = the under. `market` is
+    this model's, unless another per-event total model shares the shaping
+    (models/nba_first_half_total_luck.py).
 
     The fetch instant is `created_at` (one fetch, one transaction). The
     harness's staleness rule reads snapshot_at, and for this market it is set
     to the fetch instant, as in the lab (STALENESS, above); the book's own
-    last_update is kept as `book_update_at`. Pre-game ('open') home team
-    totals only; `games` carries season, game_date and tip."""
+    last_update is kept as `book_update_at`. Pre-game ('open') rows of `market`
+    only; `games` carries season, game_date and tip."""
     from scripts import nba_game_harness as H
-    o = rows[(rows["market"] == MARKET) & (rows["snapshot_type"] == "open")].copy()
+    o = rows[(rows["market"] == market) & (rows["snapshot_type"] == "open")].copy()
     o["fetch_at"] = pd.to_datetime(o["created_at"], utc=True, format="mixed")
     o["book_update_at"] = pd.to_datetime(o["snapshot_at"], utc=True, format="mixed")
     o["snapshot_at"] = o["fetch_at"]

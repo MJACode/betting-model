@@ -209,7 +209,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "nba_total_luck",
          # The NBA home team-total unders: market-fair P(under) plus the earlier
          # graded seasons' walk-forward uplift, and no record either.
-         "nba_team_total_luck"}
+         "nba_team_total_luck",
+         # 2026-10-30 (mike): the NBA first-half overs: market-fair P(over) plus
+         # the earlier graded seasons' walk-forward uplift, and no record either.
+         "nba_first_half_total_luck"}
     )
 
 
@@ -232,6 +235,15 @@ def test_the_nba_home_team_total_floor_does_not_move_with_the_platform_default(m
 
     monkeypatch.setattr(config, "DEFAULT_MIN_ODDS", -1000.0)
     assert config.min_odds_for("nba_team_total_luck") == -200
+
+
+def test_the_nba_first_half_floor_does_not_move_with_the_platform_default(monkeypatch):
+    """It laid -130 to +114 on its 595 graded bets, so its -200 is pinned in
+    MODEL_MIN_ODDS, like the team total's."""
+    import config
+
+    monkeypatch.setattr(config, "DEFAULT_MIN_ODDS", -1000.0)
+    assert config.min_odds_for("nba_first_half_total_luck") == -200
 
 
 def test_the_models_the_global_floor_silently_removed_can_bet_again():
@@ -290,5 +302,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nba_prop_projection",      # 2026-10-16 (mike): calibrated inside its own artifact
         "nba_total_luck",           # 2026-10-17 (mike): market-fair P(over) + its bucket's uplift
         "nba_team_total_luck",      # market-fair P(under) + the walk-forward uplift
+        "nba_first_half_total_luck",  # 2026-10-30 (mike): market-fair P(over) + the walk-forward uplift
     }
     assert not not_named_here
