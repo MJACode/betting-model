@@ -98,6 +98,8 @@ POINTS_F6D = ("C", "D")
 LOWEST_EV_BAND = -0.01                            # the band below a cut of EV >= 0
 HOME_AWAY = ("home", "away")
 EXPECTED_CELLS = 256
+TIMED_POINT = "D"                                 # --smoke times one whole group per family and market here
+CONTROLS_AT_TIMED_POINT = 24                      # P2 same number 16, P1 moneyline 8
 
 
 def oneshape(family: str) -> str:
@@ -516,10 +518,24 @@ def differ_shares(fast: Fast, spec, cuts, seeds) -> pd.DataFrame:
             t[1] += int((~np.isin(chosen, r)).sum())
             t[2] += int((~np.isin(fast.gid[chosen], fast.gid[r])).sum())
     for (lab, k), (n, d_offer, d_game) in tot.items():
+        games = len(np.unique(fast.gid[fast.idx[lab]]))
         rows.append({"label": lab, "cut": cuts[k], "real_bets": int(len(real[(lab, k)])),
                      "placebo_bets_per_run": n / max(len(seeds), 1),
-                     "differ_offer": d_offer / n if n else np.nan, "differ_game": d_game / n if n else np.nan})
+                     "differ_offer": d_offer / n if n else np.nan, "differ_game": d_game / n if n else np.nan,
+                     # a shuffle with no tie to the real bets lands on a game the cell bets this often by
+                     # chance alone, so a cell that bets most games cannot reach a high share
+                     "differ_game_if_independent": 1.0 - len(real[(lab, k)]) / games if games else np.nan})
     return pd.DataFrame(rows)
+
+
+def kept_own_share(spec, seeds) -> float:
+    """The share of opinions (or of a rule's gaps) a run leaves on their own game or offer. If most
+    candidates were alone on their date this would be near 1 and the placebo would repeat the bets."""
+    n = len(spec.value) if isinstance(spec, Model) else len(spec.strength)
+    idx = np.concatenate(spec.groups) if spec.groups else np.zeros(0, int)
+    if not len(idx) or not seeds:
+        return np.nan
+    return float(np.mean([(permute_within(spec.groups, n, s)[idx] == idx).mean() for s in seeds]))
 
 
 # ── one group of cells: the same cells, the two arms ────────────────────────
@@ -709,6 +725,12 @@ def build_spec(g: Group):
 
 # ── the cells ───────────────────────────────────────────────────────────────
 
+def placebo_seasons(dd: H.Data, g: Group, choose_seasons) -> tuple:
+    """The seasons the cell's own choosing return reads: H.run_cells drops a season the decision point
+    reaches on too few games (section 6.5), and the placebo return it is compared with must drop it too."""
+    return H.gated_seasons(H.point_coverage(dd, g.point, g.times), choose_seasons, g.point)[0]
+
+
 def run_group(dd: H.Data, g: Group, close, sig, games, arm: str = "line", seeds=SEEDS,
               choose_seasons=H.CHOOSE) -> list[dict]:
     """One group's cells under one arm through H.run_cells. The line arm carries its placebo runs
@@ -718,7 +740,7 @@ def run_group(dd: H.Data, g: Group, close, sig, games, arm: str = "line", seeds=
     cands, neutral = (g.line, g.neutral_line) if arm == "line" else (g.one, g.neutral_one)
     placebo = None
     if arm == "line":
-        fast = Fast(g.pool, g.masks, games, choose_seasons)
+        fast = Fast(g.pool, g.masks, games, placebo_seasons(dd, g, choose_seasons))
         placebo = fast_placebo(fast, build_spec(g), g.cuts, seeds)
     with bets_folder(family, g.axis):
         for lab in g.labels:
@@ -813,6 +835,16 @@ def count_bets(g: Group) -> list[dict]:
     return out
 
 
+def groups_plan(groups: list[Group]) -> set:
+    """The cells these groups will emit, in cell_plan's shape: checked in --smoke, before any run."""
+    got = set()
+    for g in groups:
+        axis = g.axis.get("axis_ref") or g.axis.get("axis_rule") or ""
+        for lab in g.labels:
+            got |= {(g.family, g.point, g.market, lab, axis, k, c) for k, c in enumerate(g.cuts)}
+    return got
+
+
 def check_cells(rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     got = set()
@@ -843,16 +875,34 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def reports_without_refined_p() -> None:
+    """H.p_one_sided recomputes any p under 0.01 with 400,000 resamples, for the first search's
+    multiple-testing bar. Section 9.1's bars read the pooled interval and never a p, so here a p stays
+    at the 4,000 resamples of every other number. Timed on scrambled scores no p comes under 0.01, so a
+    real run with many such cells would otherwise run for hours past its projection."""
+    H.P_REFINE_BELOW = 0.0
+
+
+def frame_matches(frame: pd.DataFrame, times: pd.DataFrame) -> bool:
+    """A saved projection belongs to this point only if every game in it was projected at the time
+    this run decides that game. Anything else is another run's frame."""
+    x = frame[["game_id", "T"]].merge(times[["game_id", "T"]], on="game_id", how="left", suffixes=("", "_now"))
+    return len(x) == len(frame) and bool((x["T"] == x["T_now"]).all())
+
+
 def projections(data: H.Data, cache: Path, points, work: Path | None) -> dict:
     """The second search's projection at every decision time. Reads each point's frame from `work`
     when it is there, else builds the engine once, and writes the frames there when named."""
     out, need = {}, []
     for p in points:
         f = work / f"proj_{p}.parquet" if work else None
-        if f is not None and f.exists():
-            out[p] = pd.read_parquet(f)
-            _log(f"projection {p}: read {len(out[p]):,} rows from {f}")
+        frame = pd.read_parquet(f) if f is not None and f.exists() else None
+        if frame is not None and frame_matches(frame, H.decision_times(data.fetches, data.games, p)):
+            out[p] = frame
+            _log(f"projection {p}: read {len(frame):,} rows from {f}")
         else:
+            if frame is not None:
+                _log(f"projection {p}: {f} was made at other decision times, rebuilding it")
             need.append(p)
     if need:
         t0 = time.time()
@@ -973,6 +1023,7 @@ def full(cache: Path = H.CACHE) -> None:
     out = Path(os.environ[RESULTS_ENV])
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
+    reports_without_refined_p()
     synthetic_checks(run_cells=False)
     try:
         data = load_real(cache, require=True)
@@ -1007,11 +1058,11 @@ def full(cache: Path = H.CACHE) -> None:
         controls += control_cells(data, p, extra, close, line.sig)
         write_rows(controls, out)
         _log(f"point {p}: controls written ({time.time() - t0:.0f}s)")
-    check_cells(rows)
     pd.DataFrame(compare).to_parquet(out / "compare_S.parquet")
     if ledger:
         pd.concat(ledger, ignore_index=True).to_parquet(out / "dropped_quotes_S.parquet")
     dropped.drop(columns=["close_at"], errors="ignore").to_parquet(out / "dropped_closes_S.parquet")
+    check_cells(rows)
     _log(f"cells written to {out}: {len(rows)} registered, {len(twins)} one-shape twins, "
          f"{len(controls)} controls ({time.time() - t0:.0f}s)")
 
@@ -1125,7 +1176,17 @@ def underdog_gap(vis: pd.DataFrame, line: Pricing, one: Pricing, min_season: int
 
 
 def synthetic_checks(run_cells: bool = True, world: dict | None = None, built: dict | None = None) -> dict:
-    """Plumbing on made-up games; raises on a fault. Run first by --smoke and --full."""
+    """Plumbing on made-up games; raises on a fault. Run first by --smoke and --full, on a 0.05-point
+    table in place of 0.01: the same arithmetic, five times faster, and no real number is priced here."""
+    step = H.ResidDist.STEP
+    H.ResidDist.STEP = 0.05
+    try:
+        return _synthetic_checks(run_cells, world, built)
+    finally:
+        H.ResidDist.STEP = step
+
+
+def _synthetic_checks(run_cells: bool, world: dict | None, built: dict | None) -> dict:
     H.check()
     world = synthetic_world() if world is None else world
     data = world["data"]
@@ -1171,26 +1232,42 @@ def synthetic_checks(run_cells: bool = True, world: dict | None = None, built: d
 def smoke(cache: Path = H.CACHE) -> dict:
     sys.stdout.reconfigure(line_buffering=True)
     t0 = time.time()
+    stage: dict = {}
+    reports_without_refined_p()
     print(json.dumps(synthetic_checks()), flush=True)
+    stage["synthetic_checks_s"] = time.time() - t0
+    t1 = time.time()
     data = load_real(cache, require=True)
     fake = scrambled(data.games)
+    stage["load_s"] = time.time() - t1
     report: dict = {"seasons": data.notes.get("games_priced_share")}
     _log(f"loaded {len(data.quotes):,} spread and moneyline rows ({time.time() - t0:.0f}s)")
+    t1 = time.time()
     close, dropped = clean_close(data)
     line, one = build_pricing(close, data.games)
+    stage["shapes_s"] = time.time() - t1
     _log(f"shapes built ({time.time() - t0:.0f}s); closes dropped by the rule: "
          f"{dropped.groupby(['season', 'market']).size().to_dict()}")
     shape_coverage(close, data, line)
-    t_proj = time.time()
+    t1 = time.time()
     proj = projections(data, cache, POINTS_ALL, Path(os.environ[PROJ_ENV]) if os.environ.get(PROJ_ENV) else None)
-    t_proj = time.time() - t_proj
+    stage["projection_s"] = time.time() - t1
+    t1 = time.time()
     luck, sched_in = p1_inputs(data, cache)
     q_main, q_same = main_rungs(data.quotes), P2.rungs_at_pinnacle(data.quotes)
-    ledger, counts, compare, shares, tops, timing, reads = [], [], [], [], [], [], []
+    stage["inputs_s"] = time.time() - t1
+    stage["groups_s"], controls_s, plan = 0.0, np.nan, set()
+    ledger, counts, compare, shares, tops, timing, reads, whole = [], [], [], [], [], [], [], []
     for p in POINTS_ALL:
+        t1 = time.time()
         base = P1.base_inputs(proj[p], luck, sched_in)
         groups, extra = groups_at(p, data, close, line, one, proj[p], base, q_main, q_same, ledger)
+        stage["groups_s"] += time.time() - t1
+        plan |= groups_plan(groups)
         reads.append(extra["vis"])
+        cov = H.point_coverage(data, p, extra["times"])
+        _log(f"point {p}: share of each season's games decided here {({k: round(v, 3) for k, v in cov.items()})}; "
+             f"choosing seasons dropped for too few games {H.gated_seasons(cov, H.CHOOSE, p)[1]}")
         _log(f"point {p}: {len(groups)} groups built ({time.time() - t0:.0f}s)")
         for g in groups:
             got = smoke_group(g, data, fake, close, line.sig)
@@ -1199,8 +1276,16 @@ def smoke(cache: Path = H.CACHE) -> dict:
             shares.append(got["shares"])
             timing.append(got["timing"])
             tops.append(got["top"])
-            _log(f"  {g.name()}: {len(g.pool):,} offers, one placebo run {got['timing']['one_run_s']:.3f}s, "
-                 f"one cell {got['timing']['one_cell_s']:.1f}s ({time.time() - t0:.0f}s)")
+            _log(f"  {g.name()}: {len(g.pool):,} offers, one placebo run {got['timing']['one_run_s']:.3f}s "
+                 f"({time.time() - t0:.0f}s)")
+            if p == TIMED_POINT and (g.family, g.market) not in {(w["family"], w["market"]) for w in whole}:
+                whole.append(time_group(data, g, close, line.sig, fake))
+                _log(f"  timed whole: {whole[-1]} ({time.time() - t0:.0f}s)")
+        if p == TIMED_POINT:
+            controls_s = time_controls(data, p, extra, close, line.sig, fake)
+            _log(f"  timed the {CONTROLS_AT_TIMED_POINT} controls at {p}: {controls_s:.1f}s ({time.time() - t0:.0f}s)")
+    assert plan == set(cell_plan()), (len(plan), len(cell_plan()))
+    print(f"\nthe groups built emit the registered cells: {len(plan)}")
     print_extremes(pd.concat(reads, ignore_index=True), ledger)
     print("\nHIGHEST-EV OFFERS UNDER THE LINE-SIZE ARM")
     top = pd.concat(tops, ignore_index=True)
@@ -1209,14 +1294,21 @@ def smoke(cache: Path = H.CACHE) -> dict:
         print(x.sort_values("ev", ascending=False).drop_duplicates(["game_id", "book", "side"]).head(10).to_string(index=False))
     sh = pd.concat(shares, ignore_index=True)
     print("\nSHARE OF PLACEBO BETS THAT ARE NOT THE REAL BETS (seeds 1-5)")
+    print("differ_game_if_independent: the share a shuffle with no tie to the real bets would show, because a")
+    print("cell that bets half its games lands on one of them half the time by chance")
     wt = sh.assign(w=sh["placebo_bets_per_run"], o=sh["differ_offer"] * sh["placebo_bets_per_run"],
-                   g=sh["differ_game"] * sh["placebo_bets_per_run"])
+                   g=sh["differ_game"] * sh["placebo_bets_per_run"],
+                   i=sh["differ_game_if_independent"] * sh["placebo_bets_per_run"])
     tab = wt.groupby(["family", "cut"]).agg(real_bets=("real_bets", "sum"), placebo_bets_per_run=("w", "sum"),
-                                            o=("o", "sum"), g=("g", "sum")).reset_index()
-    tab["differ_offer"], tab["differ_game"] = tab["o"] / tab["placebo_bets_per_run"], tab["g"] / tab["placebo_bets_per_run"]
-    print(tab.drop(columns=["o", "g"]).round(3).to_string(index=False))
-    fam = wt.groupby("family").agg(w=("w", "sum"), o=("o", "sum"), g=("g", "sum"))
-    print("by family, by game:", (fam["g"] / fam["w"]).round(3).to_dict(), "by offer:", (fam["o"] / fam["w"]).round(3).to_dict())
+                                            o=("o", "sum"), g=("g", "sum"), i=("i", "sum")).reset_index()
+    w_ = tab["placebo_bets_per_run"]
+    tab["differ_offer"], tab["differ_game"], tab["differ_game_if_independent"] = tab["o"] / w_, tab["g"] / w_, tab["i"] / w_
+    print(tab.drop(columns=["o", "g", "i"]).round(3).to_string(index=False))
+    fam = wt.groupby("family").agg(w=("w", "sum"), o=("o", "sum"), g=("g", "sum"), i=("i", "sum"))
+    print("by family, by game:", (fam["g"] / fam["w"]).round(3).to_dict(), "by offer:", (fam["o"] / fam["w"]).round(3).to_dict(),
+          "if independent:", (fam["i"] / fam["w"]).round(3).to_dict())
+    print("share of opinions a run leaves on their own game:",
+          pd.DataFrame(timing).groupby("family")["kept_own"].mean().round(3).to_dict())
     print("\nCOUNTS BEFORE GRADING: bets per cell and season, line-size arm")
     cdf = pd.DataFrame(counts)
     print(cdf.to_string(index=False))
@@ -1227,20 +1319,34 @@ def smoke(cache: Path = H.CACHE) -> dict:
     first = cmp_[cmp_["side"].isin(["fav", "home"])]
     print("games whose real side flips, summed over cuts:", first.groupby("family")["n_side_flips_at_cut"].sum().to_dict())
     tdf = pd.DataFrame(timing)
-    placebo_s = float((tdf["one_run_s"] * N_PLACEBO).sum())
-    cells_s = float((tdf["cells"] * tdf["one_cell_s"]).sum())
-    twins_s = cells_s                                   # the one-shape twin is the same report
-    ctl_s = float(88 * tdf["one_cell_s"].median())
+    wdf = pd.DataFrame(whole)
     print("\nTIMING (scrambled scores)")
     print(tdf.to_string(index=False))
-    total = t_proj + placebo_s + cells_s + twins_s + ctl_s + float(tdf["build_s"].sum())
-    print(json.dumps({"per_placebo_run_all_groups_s": round(float(tdf["one_run_s"].sum()), 3),
-                      "projection_s_this_run": round(t_proj, 1), "placebo_200_runs_s": round(placebo_s, 1),
-                      "registered_cells_s": round(cells_s, 1), "twins_s": round(twins_s, 1), "controls_s": round(ctl_s, 1),
-                      "projected_full_s": round(total, 1), "projected_full_h": round(total / 3600.0, 2),
-                      "peak_memory_gb": peak_gb(), "smoke_s": round(time.time() - t0, 1)}, indent=1))
+    print(wdf.to_string(index=False))
+    got = projected_full(stage, tdf, wdf, controls_s)
+    got.update({"peak_memory_gb": peak_gb(), "smoke_s": round(time.time() - t0, 1)})
+    print(json.dumps(got, indent=1))
     report.update({"cells": len(cdf)})
     return report
+
+
+def projected_full(stage: dict, per_group: pd.DataFrame, whole: pd.DataFrame, controls_s: float) -> dict:
+    """--full's seconds from what this run measured, on this machine at this load. Each group's cells
+    take their family and market's measured seconds per cell. Everything --full does is here except
+    writing the parquet files, and rebuilding the projection if its saved frames are gone."""
+    x = per_group.merge(whole.drop(columns="cells"), on=["family", "market"], how="left")
+    assert x["line_cell_s"].notna().all(), "a family and market was never timed"
+    out = {k: round(float(v), 1) for k, v in stage.items()}
+    out["placebo_run_all_groups_s"] = round(float(x["one_run_s"].sum()), 3)
+    out["placebo_200_runs_s"] = round(float((x["one_run_s"] * N_PLACEBO + x["build_s"]).sum()), 1)
+    out["registered_cells_s"] = round(float((x["line_cell_s"] * x["cells"]).sum()), 1)
+    out["twins_s"] = round(float((x["one_cell_s"] * x["cells"]).sum()), 1)
+    out["compare_s"] = round(float(x["compare_s"].sum()), 1)
+    out["controls_s"] = round(float(controls_s) * len(control_plan()) / CONTROLS_AT_TIMED_POINT, 1)
+    total = sum(float(stage[k]) for k in stage) + sum(out[k] for k in ("placebo_200_runs_s", "registered_cells_s",
+                                                                        "twins_s", "compare_s", "controls_s"))
+    out.update({"projected_full_s": round(total, 1), "projected_full_h": round(total / 3600.0, 2)})
+    return out
 
 
 def smoke_group(g: Group, data: H.Data, fake: pd.DataFrame, close, sig) -> dict:
@@ -1254,29 +1360,52 @@ def smoke_group(g: Group, data: H.Data, fake: pd.DataFrame, close, sig) -> dict:
     t3 = time.time()
     d = differ_shares(fast, spec, g.cuts, seeds=(1, 2, 3, 4, 5))
     d = d.assign(family=g.family, point=g.point, market=g.market, **g.axis)
-    cell_s = time_cell(data, g, close, sig, fake)
     ok = g.pool["book"].isin(H.BETTABLE) & (g.pool["price"] >= H.PRICE_FLOOR)
     top = g.pool[ok].nlargest(6, "ev")[["game_id", "book", "side", "line", "price", "ev", "p_win"]]
     return {"counts": count_bets(g), "compare": compare_group(g, None), "shares": d,
             "top": top.assign(group=g.name()),
-            "timing": {"group": g.name(), "cells": len(g.labels) * len(g.cuts), "offers": len(g.pool),
-                       "build_s": round(t2 - t1, 3), "one_run_s": round(t3 - t2, 4), "one_cell_s": round(cell_s, 2)}}
+            "timing": {"group": g.name(), "family": g.family, "market": g.market, "cells": len(g.labels) * len(g.cuts),
+                       "offers": len(g.pool), "build_s": round(t2 - t1, 3), "one_run_s": round(t3 - t2, 4),
+                       "kept_own": kept_own_share(spec, (1, 2, 3, 4, 5))}}
 
 
-def time_cell(data: H.Data, g: Group, close, sig, fake: pd.DataFrame) -> float:
-    """Seconds for one real-size cell through H.run_cells and its bands, on scrambled scores."""
-    lab = g.labels[0]
-    t = time.time()
+class no_bets_written:
+    """The timing passes grade scrambled scores: nothing of theirs belongs in a bets folder."""
+
+    def __enter__(self):
+        self.saved = os.environ.pop(BETS_ENV, None)
+
+    def __exit__(self, *exc):
+        if self.saved is not None:
+            os.environ[BETS_ENV] = self.saved
+
+
+def time_group(data: H.Data, g: Group, close, sig, fake: pd.DataFrame) -> dict:
+    """Seconds per cell of a whole group through H.run_cells and its bands, under each arm, and its
+    compare table, as --full runs them but with no placebo run (timed apart) and scrambled scores."""
+    t0 = time.time()
     dd = slim(data, g.market, g.times)
     dd.games = fake
-    saved = os.environ.pop(BETS_ENV, None)
-    try:
-        H.run_cells(dd, g.family, g.point, g.line[lab], g.neutral_line[lab], [g.cuts[0]], {g.market: [lab]},
-                    close=close, sig=sig, placebo=None, strength=g.strength, times=g.times)
-        G5.band_columns(g.line[lab], lab, g.strength, G5.band_bounds(g.cuts, 0, lowest=g.lowest), fake, H.CHOOSE)
-    finally:
-        if saved is not None:
-            os.environ[BETS_ENV] = saved
+    with no_bets_written():
+        t1 = time.time()
+        run_group(dd, g, close, sig, fake, "line", seeds=())
+        t2 = time.time()
+        run_group(dd, g, close, sig, fake, "one", seeds=())
+        t3 = time.time()
+        compare_group(g, fake)
+        t4 = time.time()
+    n = len(g.labels) * len(g.cuts)
+    return {"family": g.family, "market": g.market, "cells": n, "slim_s": round(t1 - t0, 1),
+            "line_cell_s": round((t2 - t1) / n, 2), "one_cell_s": round((t3 - t2) / n, 2), "compare_s": round(t4 - t3, 1)}
+
+
+def time_controls(data: H.Data, point: str, extra: dict, close, sig, fake: pd.DataFrame) -> float:
+    """Seconds for the control cells at one point, scrambled scores."""
+    dd = H.Data(games=fake, quotes=data.quotes, fetches=data.fetches)
+    t = time.time()
+    with no_bets_written():
+        rows = control_cells(dd, point, extra, close, sig)
+    assert len(rows) == CONTROLS_AT_TIMED_POINT, len(rows)
     return time.time() - t
 
 

@@ -363,6 +363,7 @@ def test_fast_choice_is_h_choose_with_ties_floor_and_books():
                           "away_score": [100.0, 100.0, 90.0]})
     fast = S.Fast(pool, {"home": (pool["side"] == "home").to_numpy()}, games, (2024,))
     ev = np.where(pool["price"] > 0, 0.05, 0.9)   # the -500 offer has the top EV but is under the floor
+    ev[(pool["book"] == "pinnacle").to_numpy()] = 0.7   # the next best, and never a deciding price
     ev[pool.index[(pool["game_id"] == "c")]] = np.nan
     chosen = fast.at_cut(ev, fast.best(ev, "home"), 0.0)
     h = H.choose(pool.assign(ev=ev, p_win=0.5, p_push=0.0), 0.0, sides=["home"])
@@ -492,6 +493,26 @@ def test_the_placebo_is_a_null_on_made_up_games(world, built):
             assert d["differ_offer"].mean() > 0.3, (g.name(), d.to_dict("records"))
 
 
+def test_the_placebo_reads_the_seasons_the_cell_reads(world, built):
+    """At D the harness drops a choosing season reached on under 95% of its games, from the cell's own
+    return. A placebo that kept it would be compared with a return over different seasons."""
+    from dataclasses import replace
+    data = world["data"]
+    g = group(built, S.FAM_P2)
+    assert S.placebo_seasons(data, g, H.CHOOSE) == tuple(H.CHOOSE)
+    season = data.games.set_index("game_id")["season"]
+    short = g.times[season.reindex(g.times["game_id"]).to_numpy() != H.CHOOSE[1]]
+    d = replace(g, point=H.GATE_POINT, times=short)
+    kept = S.placebo_seasons(data, d, H.CHOOSE)
+    assert H.CHOOSE[1] not in kept and len(kept) == len(H.CHOOSE) - 1
+    row = H.run_cells(S.slim(data, g.market, short), g.family, H.GATE_POINT, g.line[g.labels[0]], g.neutral_line[g.labels[0]],
+                      [g.cuts[0]], {g.market: [g.labels[0]]}, close=built["close"], sig=built["line"].sig, strength=g.strength,
+                      times=short)[0]
+    assert row["choose_seasons"] == ",".join(str(x) for x in kept)
+    fast = S.Fast(g.pool, g.masks, data.games, kept)
+    assert not fast.choosing[g.pool["season"].to_numpy() == H.CHOOSE[1]].any()
+
+
 def test_two_hundred_runs_seeds_one_to_two_hundred():
     assert S.N_PLACEBO == 200 and S.SEEDS == tuple(range(1, 201))
 
@@ -561,6 +582,23 @@ def test_the_slim_quotes_change_no_report(world, built):
         assert len(S.slim(data, g.market, g.times).quotes) < len(data.quotes[data.quotes["market"] == g.market]) / 3
 
 
+def test_the_slim_quotes_read_the_first_later_fetch(world):
+    """At point C the next fetch is this world's last, so the test above cannot tell the first later
+    fetch from the last. At point A three fetches follow, and only the first is the report's."""
+    data = world["data"]
+    t = H.decision_times(data.fetches, data.games, "A")
+    off = H.offers(H.visible(data.quotes, t))
+    b = off[(off["market"] == "spreads") & (off["book"] == "draftkings") & (off["side"] == "home")].reset_index(drop=True)
+    assert len(b) > 100
+    later = t.merge(data.fetches[["game_id", "fetch_at"]], on="game_id")
+    later = later[later["fetch_at"] > later["T"]].groupby("game_id").size()
+    assert later.min() >= 2, "one later fetch cannot tell first from last"
+    full = H.next_fetch_check(b, data)
+    mine = H.next_fetch_check(b, S.slim(data, "spreads", t))
+    assert full.any(), "nothing was still offered, so this test tests nothing"
+    assert full.equals(mine)
+
+
 def test_the_compare_table_counts_both_arms(world, built):
     g = group(built, S.FAM_F2, ref="pinnacle")
     rows = S.compare_group(g, world["data"].games)
@@ -571,6 +609,19 @@ def test_the_compare_table_counts_both_arms(world, built):
     assert sum(r["n_line"] - r["n_same_bet"] for r in rows) > 0, "the shape moved no bet in this world"
     no_grade = S.compare_group(g, None)
     assert "units_line" not in no_grade[0]
+
+
+def test_the_shares_say_what_an_independent_shuffle_would_show(world, built):
+    g = group(built, S.FAM_F2, ref="pinnacle")
+    fast = S.Fast(g.pool, g.masks, world["data"].games, H.CHOOSE)
+    spec = S.build_spec(g)
+    d = S.differ_shares(fast, spec, g.cuts, seeds=(1, 2, 3))
+    assert d["differ_game_if_independent"].between(0.0, 1.0).all() and d["differ_game"].between(0.0, 1.0).all()
+    r = d[d["label"] == "dog"].iloc[0]
+    games = len(np.unique(fast.gid[fast.idx["dog"]]))
+    assert r["differ_game_if_independent"] == pytest.approx(1.0 - r["real_bets"] / games)
+    # the shuffle really moves: a date holds 8 games here, so about one opinion in eight stays
+    assert S.kept_own_share(spec, (1, 2, 3)) == pytest.approx(1.0 / 8.0, abs=0.05)
 
 
 # ── no grade in the smoke run; the refusals ─────────────────────────────────
@@ -590,6 +641,93 @@ def test_the_smoke_work_never_reads_a_real_result(world, built, monkeypatch):
     got = S.smoke_group(g, data, fake, built["close"], built["line"].sig)
     assert seen and all(x["home_score"].equals(fake["home_score"]) for x in seen), "a real result was graded"
     assert got["timing"]["one_run_s"] >= 0 and len(got["counts"]) == 12 and len(got["top"]) == 6
+    assert 0.0 <= got["timing"]["kept_own"] < 0.5, "most opinions stayed on their own game"
+    seen.clear()
+    timed = S.time_group(data, g, built["close"], built["line"].sig, fake)
+    assert seen and all(x["home_score"].equals(fake["home_score"]) for x in seen), "the timing pass graded a real result"
+    assert timed["line_cell_s"] > 0 and timed["one_cell_s"] > 0 and timed["cells"] == 12
+
+
+def test_the_timing_pass_writes_no_bets(world, built, tmp_path, monkeypatch):
+    data = world["data"]
+    monkeypatch.setenv(S.BETS_ENV, str(tmp_path))
+    g = group(built, S.FAM_P2)
+    S.time_group(data, g, built["close"], built["line"].sig, S.scrambled(data.games))
+    assert not list(tmp_path.rglob("*.parquet")), "scrambled scores reached the bets folder"
+    assert S.os.environ[S.BETS_ENV] == str(tmp_path)
+
+
+def test_the_projection_counts_every_stage():
+    stage = {"load_s": 100.0, "groups_s": 200.0}
+    per = pd.DataFrame({"family": ["S_F2", "S_F2", "S_P2"], "market": ["h2h", "h2h", "spreads"], "cells": [12, 12, 8],
+                        "build_s": [1.0, 1.0, 2.0], "one_run_s": [0.05, 0.05, 0.1]})
+    whole = pd.DataFrame({"family": ["S_F2", "S_P2"], "market": ["h2h", "spreads"], "cells": [12, 8], "line_cell_s": [5.0, 3.0],
+                          "one_cell_s": [4.0, 2.0], "compare_s": [6.0, 3.0]})
+    got = S.projected_full(stage, per, whole, S.CONTROLS_AT_TIMED_POINT * 2.0)
+    assert got["registered_cells_s"] == 12 * 5.0 * 2 + 8 * 3.0
+    assert got["twins_s"] == 12 * 4.0 * 2 + 8 * 2.0
+    assert got["placebo_200_runs_s"] == (0.05 * 200 + 1.0) * 2 + 0.1 * 200 + 2.0
+    assert got["compare_s"] == 15.0 and got["controls_s"] == 88 * 2.0
+    assert got["projected_full_s"] == 300.0 + 144.0 + 112.0 + 44.0 + 15.0 + 176.0
+    with pytest.raises(AssertionError):
+        S.projected_full(stage, per, whole[whole["family"] == "S_F2"], 1.0)
+
+
+def test_a_saved_projection_from_other_times_is_not_used():
+    t = pd.Timestamp("2024-01-02 15:00", tz="UTC")
+    times = pd.DataFrame({"game_id": ["a", "b", "c"], "T": [t, t, t]})
+    frame = pd.DataFrame({"game_id": ["a", "b"], "T": [t, t], "margin": [1.0, 2.0]})
+    assert S.frame_matches(frame, times)
+    assert not S.frame_matches(frame.assign(T=[t, t + pd.Timedelta(minutes=30)]), times)
+    assert not S.frame_matches(pd.concat([frame, frame.assign(game_id="d")], ignore_index=True), times)
+
+
+def test_a_p_stays_at_the_interval_resamples(monkeypatch):
+    """Section 9.1 reads the interval, never a p. A strongly positive cell must not pay for 400,000."""
+    monkeypatch.setattr(H, "P_REFINE_BELOW", H.P_REFINE_BELOW)
+    S.reports_without_refined_p()
+    calls = []
+    real = H.boot
+    monkeypatch.setattr(H, "boot", lambda b, n=H.N_BOOT, seed=H.SEED: calls.append(n) or real(b, n=n, seed=seed))
+    b = pd.DataFrame({"game_date": [f"2024-01-{d:02d}" for d in range(1, 29)], "units": 1.0, "risk": 1.0})
+    assert H.p_one_sided(b) == 0.0
+    assert calls == [H.N_BOOT]
+
+
+def test_the_bars_read_no_p(world, built, tmp_path):
+    data = world["data"]
+    g = group(built, S.FAM_P2)
+    S.write_rows(S.run_group(S.slim(data, g.market, g.times), g, built["close"], built["line"].sig, data.games, "line", seeds=(1, 2)), tmp_path)
+    cells = V.load_cells(tmp_path)
+    cells = cells.assign(pool_n=1000)       # past the first bar, so a bar reading a p would show
+    a = V.house_verdict_bands(cells.assign(p_confirm=0.0, p_choose=0.0), n_placebo=2)
+    b = V.house_verdict_bands(cells.assign(p_confirm=1.0, p_choose=1.0), n_placebo=2)
+    assert a[V.FIFTH_BARS].any().any(), "no bar holds here, so this test tests nothing"
+    assert a[V.FIFTH_BARS].equals(b[V.FIFTH_BARS])
+
+
+def test_every_family_reaches_the_verdict(world, built, tmp_path):
+    data = world["data"]
+    rows = []
+    for fam, m, ref in ((S.FAM_F2, None, "pinnacle"), (S.FAM_F2, None, "consensus"), (S.FAM_F6D, None, None),
+                        (S.FAM_F1, "h2h", None), (S.FAM_F1, "spreads", None), (S.FAM_P1, None, None), (S.FAM_P2, None, None)):
+        g = group(built, fam, m, ref)
+        rows += S.run_group(S.slim(data, g.market, g.times), g, built["close"], built["line"].sig, data.games, "line", seeds=(1, 2))
+    S.write_rows(rows, tmp_path)
+    v = V.house_verdict_bands(V.load_cells(tmp_path), n_placebo=2)
+    assert set(v["family"]) == set(S.FAMILIES) and len(v) == len(rows)
+    f2 = v[v["family"] == S.FAM_F2]
+    assert set(f2["side"]) == {"fav", "dog"} and set(f2["axis_ref"]) == {"pinnacle", "consensus"}
+    # the blind bet the fourth bar reads exists on a label that is not a real side
+    assert f2["pool_share_fav"].notna().any() and f2["blind_pool_fav"].notna().any()
+    assert all(len(x) == 2 for x in v["placebo_rois"])
+    for fam, x in v.groupby("family"):
+        assert x["band0_n"].notna().all() and (x["band0_n"] > 0).any(), f"{fam} has no bands"
+
+
+def test_the_groups_emit_the_registered_cells_at_every_point(world):
+    built_all = S.synthetic_groups(world, points=S.POINTS_ALL)
+    assert S.groups_plan(built_all["groups"]) == set(S.cell_plan())
 
 
 def test_full_refuses_without_its_settings(tmp_path):
