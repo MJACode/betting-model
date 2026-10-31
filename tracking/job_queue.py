@@ -548,6 +548,16 @@ NCAAB_ODDS_HISTORY_MODES = {
     "deriv_open": {"cap": 800_000, "seasons": (2024, 2026),
                    "argv": ["--derivatives", "open"]},
     "probe": {"cap": 200, "seasons": (2026, 2026), "argv": ["--probe"]},
+    # BUILT 2026-10-30, NOT APPROVED AND NOT QUEUED: the opener grid, a bulk
+    # snapshot every 60 or 30 minutes from 72 hours before each tip, so each
+    # book's first posted line is dated to the step (ncaab_odds_history
+    # --opener-grid). No worker_jobs row or declared job until mike approves
+    # the spend. The ceiling is the largest scope it can be asked for: every
+    # half hour with the pre-start window, 2020-21..2025-26, 38,028 snapshots
+    # at 30 credits (1,140,840, the dry run on 2026-10-30), plus room for calls
+    # billed above 30 (job 805227's 7,403 snapshots averaged 30.56 in
+    # api_call_log). The job's own max_credits is set when it is approved.
+    "opener_grid": {"cap": 1_170_000, "seasons": (2021, 2026), "argv": ["--opener-grid"]},
 }
 # 300,000 = 3.5 of October's worst organic days (84,534 credits on 2026-10-04,
 # odds_api_quota) ahead of a refill that lands about 00:00Z on the 1st (the
@@ -578,11 +588,55 @@ def _job_ncaab_odds_history(**kw):
                                      "--dry-run" if kw.get("dry_run") else "--apply"]
         return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
     mode = NCAAB_ODDS_HISTORY_MODES[kw["mode"]]
-    first, last = mode["seasons"]
-    argv = list(mode["argv"]) + ["--seasons", str(first), str(last), "--apply",
-                                 "--max-credits", str(kw["max_credits"]),
-                                 "--floor", str(kw["floor"])]
+    first, last = kw.get("seasons") or mode["seasons"]
+    argv = list(mode["argv"]) + ["--seasons", str(first), str(last)]
+    if kw["mode"] == "opener_grid":
+        argv += ["--step", str(kw["step_min"])] + (["--pre-start"] if kw.get("pre_start") else [])
+        if kw.get("dry_run"):
+            return _run_script_main("data.ingestors.ncaab_odds_history",
+                                    argv + ["--dry-run"])[-4000:]
+    argv += ["--apply", "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
     return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
+
+
+def _validate_ncaab_opener_grid(args: dict) -> dict:
+    """The opener grid's args: step_min 60 or 30; pre_start and dry_run true or
+    false; seasons [first, last] inside the mode's (2020-21..2025-26). A dry run
+    buys nothing and takes no credit limit; a purchase takes both, under the
+    mode's ceiling and over the floor."""
+    extra = sorted(set(args) - {"mode", "step_min", "pre_start", "seasons", "dry_run",
+                                "max_credits", "floor"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; opener_grid takes step_min, pre_start, seasons, "
+                         f"dry_run, max_credits and floor")
+    step = args.get("step_min")
+    if isinstance(step, bool) or step not in (60, 30):
+        raise ValueError(f"step_min must be 60 or 30, got {step!r}")
+    out: dict = {"mode": "opener_grid", "step_min": step}
+    for flag in ("pre_start", "dry_run"):
+        v = args.get(flag, False)
+        if not isinstance(v, bool):
+            raise ValueError(f"{flag} must be true or false, got {v!r}")
+        out[flag] = v
+    lo, hi = NCAAB_ODDS_HISTORY_MODES["opener_grid"]["seasons"]
+    seasons = args.get("seasons", [lo, hi])
+    if (not isinstance(seasons, (list, tuple)) or len(seasons) != 2
+            or any(isinstance(x, bool) or not isinstance(x, int) for x in seasons)
+            or not lo <= seasons[0] <= seasons[1] <= hi):
+        raise ValueError(f"seasons must be [first, last] within {lo}..{hi}, got {seasons!r}")
+    out["seasons"] = (seasons[0], seasons[1])
+    if out["dry_run"]:
+        if "max_credits" in args or "floor" in args:
+            raise ValueError("a dry run buys nothing; it takes no max_credits or floor")
+        return out
+    cap = int(args.get("max_credits") or 0)
+    top = NCAAB_ODDS_HISTORY_MODES["opener_grid"]["cap"]
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for opener_grid must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {**out, "max_credits": cap, "floor": floor}
 
 
 def _validate_ncaab_odds_history(args: dict) -> dict:
@@ -595,6 +649,8 @@ def _validate_ncaab_odds_history(args: dict) -> dict:
         if not isinstance(dry, bool):
             raise ValueError(f"dry_run must be true or false, got {dry!r}")
         return {"mode": args["mode"], "dry_run": dry}
+    if args.get("mode") == "opener_grid":
+        return _validate_ncaab_opener_grid(args)
     extra = sorted(set(args) - {"mode", "max_credits", "floor"})
     if extra:
         raise ValueError(f"unknown args {extra}; this job takes mode, max_credits and floor")
