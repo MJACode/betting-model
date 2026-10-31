@@ -333,15 +333,22 @@ def market_quotes(props: pd.DataFrame, games: pd.DataFrame, log: pd.DataFrame, a
     return ML.build_quotes()
 
 
+def fair_under_of(over_price, under_price) -> np.ndarray:
+    """Pinnacle's proportional no-vig under, bit for bit models.nba_prop_market.fair_under. The floor
+    is EV >= 0.00, so an offer worth exactly nothing is a bet, and which side of zero it lands on is
+    decided by this arithmetic: 1 / decimal lands some of them one rounding step below it."""
+    o, u = nb.implied(over_price), nb.implied(under_price)
+    return u / (o + u)
+
+
 def market_rows(q: pd.DataFrame, clock: bool) -> pd.DataFrame:
     """Every bettable book's under at Pinnacle's exact line, both quotes coherent, one row per offer.
     `clock`: refuse a book more than STALE_SOFT_MAX_MIN behind Pinnacle (a quote with no clock counts)."""
     u = q[q.usable & q.x.notna() & q.market.isin(PM.MARKETS)]
-    pin = u[(u.bookmaker == PM.SHARP_BOOK) & u.coherent][[*KEY, "line", "od", "ud", "game_date", "season"]
+    pin = u[(u.bookmaker == PM.SHARP_BOOK) & u.coherent][[*KEY, "line", "over_price", "under_price", "game_date", "season"]
                                                          + (["book_last_update"] if "book_last_update" in u else [])].copy()
     pin = pin.rename(columns={"line": "pin_line", "book_last_update": "pin_clock"})
-    io, iu = 1 / pin.od, 1 / pin.ud
-    pin["fair_under"] = (iu / (io + iu)).to_numpy()
+    pin["fair_under"] = fair_under_of(pin.over_price, pin.under_price)
     soft = u[u.bookmaker.isin(H.BETTABLE) & u.coherent & u.has_u]
     m = soft.merge(pin[[*KEY, "pin_line", "fair_under"] + (["pin_clock"] if "pin_clock" in pin else [])], on=KEY)
     m = m[m.line == m.pin_line].copy()
@@ -521,6 +528,11 @@ def apply_caps(bets: pd.DataFrame) -> dict:
     from scripts.nba_props_card import choose
     chosen, _ = choose(cap_rows(bets), set(), {})
     return {r["pid"]: r["pick_side"] for r in chosen}
+
+
+def rule_keys_of(bets: pd.DataFrame) -> set:
+    """(game, player, market) of every nba_prop_market bet: the projection cells never bet one (4.2)."""
+    return {tuple(k.split("|")) for k in bets.game_id}
 
 
 def qualifying(cand: pd.DataFrame, cut: float, side: str, strength: str = "ev") -> pd.DataFrame:
@@ -1027,7 +1039,7 @@ def prepare(cache: Path, work: Path, frozen: bool = True) -> dict:
     pm_pricer = MarketPricer(pm_off, pm_rows.fair_under.to_numpy())
     pm_noclock = MarketPricer(pm_off_nc, pm_rows_nc.fair_under.to_numpy())
     pm_bets = qualifying(pm_pricer.priced(), PM_FLOOR, "under")
-    rule_keys = {tuple(k.split("|")) for k in pm_bets.game_id}
+    rule_keys = rule_keys_of(pm_bets)
     say(f"nba_prop_market: {len(pm_off):,} offers, {pm_off.game_id.nunique():,} propositions; {time.time() - t0:.0f}s")
 
     # nba_prop_projection
@@ -1107,6 +1119,62 @@ def check_regular_rule(work: Path, raw: dict) -> dict:
     a = set(zip(best.game_id, best.player_id.astype(str), best.market))
     b = set(zip(stored.game_id, stored.player_id.astype(str), stored.market))
     return {"rebuilt": len(a), "stored": len(b), "in_both": len(a & b), "by_season": best.groupby("season").size().to_dict()}
+
+
+def shipped_rule_bets(quotes: pd.DataFrame, names: pd.DataFrame, teams: dict) -> pd.DataFrame:
+    """models.nba_prop_market.find_bets itself, one game at a time on the raw quotes, each game's tip
+    set 54 minutes after its snapshot because the registration lifts the shipped window (section 2).
+    `names`: (game_id, player_name, player_id) from the research matching. `teams`: {game: (home, away)}.
+    Reads prices and names only."""
+    bets = []
+    who = {g: list(zip(x.player_id.astype(str), x.player_name)) for g, x in names.groupby("game_id")}
+    for gid, g in quotes[quotes.market.isin(PM.MARKETS)].groupby("game_id"):
+        now = PM.parse_ts(g.snapshot_at.iloc[0])
+        home, away = teams[gid]
+        roster = PM.Roster([(p, n, home) for p, n in who.get(gid, [])])
+        rows = [{"game_id": gid, "player": r.player_name, "market": r.market, "book": r.bookmaker, "line": r.line,
+                 "over_price": None if pd.isna(r.over_price) else float(r.over_price),
+                 "under_price": None if pd.isna(r.under_price) else float(r.under_price),
+                 "snapshot_at": r.snapshot_at, "snapshot_type": "open",
+                 "book_last_update": None if pd.isna(r.book_last_update) else r.book_last_update}
+                for r in g.itertuples()]
+        info = {gid: {"home": home, "away": away, "tip": now + pd.Timedelta(minutes=54).to_pytimedelta(),
+                      "game_date": g.game_date.iloc[0]}}
+        bets += PM.find_bets(rows, info, roster, now)[0]
+    return pd.DataFrame([{"game_id": f"{b.game_id}|{b.player_id}|{b.market}", "book": b.book, "price": b.price,
+                          "line": b.line, "ev": b.ev} for b in bets], columns=["game_id", "book", "price", "line", "ev"])
+
+
+def compare_to_shipped(lab: pd.DataFrame, shipped: pd.DataFrame) -> dict:
+    """Bet for bet: the lab's nba_prop_market bets against the shipped code's."""
+    m = shipped.merge(lab[["game_id", "book", "price", "line"]], on="game_id", how="outer", suffixes=("_ship", "_lab"),
+                      indicator=True)
+    both = m[m._merge == "both"]
+    same = (both.book_ship == both.book_lab) & (both.price_ship == both.price_lab) & (both.line_ship == both.line_lab)
+    return {"shipped": int(len(shipped)), "lab": int(len(lab)), "in_both": int(len(both)), "same_book_price_line": int(same.sum()),
+            "shipped_only": sorted(m.game_id[m._merge == "left_only"]), "lab_only": sorted(m.game_id[m._merge == "right_only"])}
+
+
+def check_shipped_rule(prep: dict) -> dict:
+    """The lab's rule on these games against the shipped code, on the real quotes. check_regular_rule
+    compares to the research lab's stored list, which proves research parity and not this."""
+    q = prep["q_pm"]
+    names = q[q.usable & q.x.notna()][["game_id", "player_name", "player_id"]].drop_duplicates()
+    pg = prep["pg"]
+    teams = dict(zip(pg.game_id, zip(pg.home_team, pg.away_team)))
+    clean = prep["clean"]
+    shipped = shipped_rule_bets(clean[clean.game_id.isin(prep["kept"])], names, teams)
+    return compare_to_shipped(qualifying(prep["pm_pricer"].priced(), PM_FLOOR, "under"), shipped)
+
+
+def floor_ties(prep: dict, within: float = 1e-9) -> dict:
+    """Offers within a rounding step of their cell's floor: the only offers this arithmetic can decide."""
+    ev = prep["pm_pricer"].priced().ev - PM_FLOOR
+    out = {LABEL_PM: {"at_the_floor": int(ev.abs().lt(within).sum()), "just_below": int((ev.lt(0) & ev.gt(-within)).sum())}}
+    for mk, g in prep["pj_pricer"].priced().groupby("real_market"):
+        out[mk] = {"at_the_floor": int(g.margin.abs().lt(within).sum()),
+                   "just_below": int((g.margin.lt(0) & g.margin.gt(-within)).sum())}
+    return out
 
 
 def check_regular_card(prep_like: dict) -> dict:
@@ -1399,6 +1467,9 @@ def synthetic_checks() -> dict:
     assert set(zip(r.player_id, r.bookmaker)) == {("P1", "draftkings"), ("P2", "draftkings")}, r
     r2 = market_rows(q, clock=False)
     assert ("P2", "betmgm") in set(zip(r2.player_id, r2.bookmaker))
+    # 3b. Pinnacle +116 / -140 against -126 is worth exactly nothing, and the floor takes it
+    assert fair_under_of(116.0, -140.0) * nb.decimal(-126.0) - 1.0 == 0.0
+    assert fair_under_of(-130.0, 107.0) * nb.decimal(117.0) - 1.0 == 0.0
     # 4. a prop settles through the harness: over, under, push; a void leaves the record
     bets = pd.DataFrame({"game_id": ["a|1|m", "b|1|m", "c|1|m", "d|1|m", "e|1|m"], "market": "totals",
                          "side": ["over", "under", "under", "over", "under"], "line": [5.5, 5.5, 5.0, 5.5, 5.5],
@@ -1480,7 +1551,9 @@ def smoke(cache: Path, work: Path) -> dict:
         "bad_rows": prep["refused"], "line_range": LINE_RANGE,
         "regular_archive_rows_outside_line_range": archive_outside(prep["raw"]["nba_props"]),
         "artifact_reproduced": check_artifact(prep), "input_state": input_state(prep),
-        "regular_season_reproduced": regular_checks(prep, cache, work)}, indent=1, default=str), flush=True)
+        "regular_season_reproduced": regular_checks(prep, cache, work),
+        "nba_prop_market_vs_the_shipped_code": check_shipped_rule(prep),
+        "offers_at_a_floor_to_a_rounding_step": floor_ties(prep)}, indent=1, default=str), flush=True)
     print("extremes of every line and price read\n" + extremes(prep["clean"]).to_string(), flush=True)
     print("nba_postseason_prop_odds before the rule\n" + extremes(prep["props"][prep["props"].market.isin(COUNT_MARKETS)]).to_string(),
           flush=True)

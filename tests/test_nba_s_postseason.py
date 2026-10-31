@@ -5,12 +5,17 @@ database. Each rule test below was watched failing with its rule broken (the mut
 the search's doc, section 8)."""
 from __future__ import annotations
 
+from fractions import Fraction
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from models import nba_prop_market as PM
 from models import nba_prop_projection as pj
 from models import nba_props as nb
+from models.honest_ev import gate
 from scripts import nba_game_harness as H
 from scripts import nba_s_postseason as S
 from scripts.nba_game2_verdict import house_verdict_bands
@@ -176,6 +181,94 @@ def test_the_rules_ev_is_pinnacles_no_vig_under_times_the_price(market):
     x = p[(p.player_id == "P1") & (p.book == "draftkings")].iloc[0]
     assert x.p_win == pytest.approx(0.5) and x.ev == pytest.approx(0.5 * 2.05 - 1)
     assert x.lead_min == pytest.approx(54.0)
+
+
+# Pinnacle's over, Pinnacle's under, DraftKings' under. Each is worth exactly nothing: Paul George
+# under 5.5 rebounds on 2026-04-21 is 63/113 x 113/63, Julian Champagnie under 4.5 rebounds on
+# 2026-06-10 is 100/217 x 217/100.
+WORTH_NOTHING = [(116.0, -140.0, -126.0), (-130.0, 107.0, 117.0)]
+
+
+def _exact_ev(over, under, price):
+    def dec(a):
+        a = Fraction(int(a))
+        return 1 + (a / 100 if a > 0 else 100 / abs(a))
+    io, iu = 1 / dec(over), 1 / dec(under)
+    return iu / (io + iu) * dec(price) - 1
+
+
+def _rule_quotes(props):
+    """props: (player, Pinnacle over, Pinnacle under, DraftKings under). DraftKings' over keeps its
+    two-way quote coherent, so the shipped code reads the same offer."""
+    base = {"game_id": "G", "season": 2024, "game_date": "2024-04-20", "snapshot_at": "2024-04-20T22:06:00Z",
+            "usable": True, "x": 10.0, "has_o": True, "has_u": True, "coherent": True, "market": "player_rebounds",
+            "line": 5.5, "book_last_update": "2024-04-20T22:05:00Z"}
+
+    def row(pl, book, over, under):
+        return {**base, "player_id": pl, "player_name": f"Player {pl}", "bookmaker": book, "over_price": over,
+                "under_price": under, "od": float(nb.decimal(over)), "ud": float(nb.decimal(under))}
+    rows = []
+    for pl, po, pu, px in props:
+        rows += [row(pl, "pinnacle", po, pu), row(pl, "draftkings", 100.0 if px < 0 else -140.0, px)]
+    return pd.DataFrame(rows)
+
+
+def _priced_rule(props):
+    r = S.with_lead(S.market_rows(_rule_quotes(props), clock=False), {"G": "2024-04-20T23:00:00Z"})
+    return S.MarketPricer(S.offers_frame(r, _meta(), S.RULE_ID), r.fair_under.to_numpy()).priced()
+
+
+@pytest.mark.parametrize("over,under,price", WORTH_NOTHING)
+def test_an_offer_worth_exactly_nothing_clears_the_floor_as_the_shipped_gate_has_it(over, under, price):
+    assert _exact_ev(over, under, price) == 0
+    shipped = gate(S.RULE_ID, PM.fair_under({"over_price": over, "under_price": under}), price)
+    assert shipped.ev == 0.0 and shipped.clears
+    bets = S.qualifying(_priced_rule([("P", over, under, price)]), S.PM_FLOOR, "under")
+    assert list(bets.game_id) == ["G|P|player_rebounds"] and bets.ev.iloc[0] == shipped.ev
+
+
+def test_the_rules_ev_equals_the_shipped_gate_to_the_last_bit():
+    rng = np.random.default_rng(11)
+    prices = np.r_[np.arange(-300.0, -99.0), np.arange(100.0, 301.0)]
+    props = [(str(i), *rng.choice(prices, 3)) for i in range(3000)]
+    lab = _priced_rule(props).set_index("player_id").ev
+    assert len(lab) == len(props)
+    differ = [pl for pl, po, pu, px in props
+              if lab[pl] != gate(S.RULE_ID, PM.fair_under({"over_price": po, "under_price": pu}), px).ev]
+    assert differ == []
+
+
+@pytest.mark.parametrize("over,under,price", WORTH_NOTHING)
+def test_a_rule_bet_worth_exactly_nothing_is_never_a_projection_bet(over, under, price):
+    bets = S.qualifying(_priced_rule([("1", over, under, price)]), S.PM_FLOOR, "under")
+    at = S.card_rows(_card_q(), clock=False)
+    assert "1" in set(S.card_offers(at, _means(), _inputs(), set(), _meta()).player_id)
+    assert "1" not in set(S.card_offers(at, _means(), _inputs(), S.rule_keys_of(bets), _meta()).player_id)
+
+
+def test_the_lab_bets_what_the_shipped_code_bets_at_and_around_zero():
+    props = [("1", *WORTH_NOTHING[0]), ("2", *WORTH_NOTHING[1]), ("3", -110.0, -110.0, -115.0), ("4", -110.0, -110.0, 105.0)]
+    q = _rule_quotes(props)
+    shipped = S.shipped_rule_bets(q, q[["game_id", "player_name", "player_id"]].drop_duplicates(), {"G": ("AAA", "BBB")})
+    assert sorted(shipped.game_id) == [f"G|{p}|player_rebounds" for p in ("1", "2", "4")]
+    c = S.compare_to_shipped(S.qualifying(_priced_rule(props), S.PM_FLOOR, "under"), shipped)
+    assert (c["shipped_only"], c["lab_only"], c["in_both"], c["same_book_price_line"]) == ([], [], 3, 3)
+
+
+def test_the_comparison_to_the_shipped_code_finds_a_missing_bet_and_a_different_offer():
+    ship = pd.DataFrame({"game_id": ["a", "b", "c"], "book": "draftkings", "price": [-110.0, -110.0, 100.0], "line": 5.5, "ev": 0.0})
+    lab = pd.DataFrame({"game_id": ["a", "b", "d"], "book": "draftkings", "price": [-110.0, -105.0, 100.0], "line": 5.5})
+    c = S.compare_to_shipped(lab, ship)
+    assert (c["shipped_only"], c["lab_only"], c["in_both"], c["same_book_price_line"]) == (["c"], ["d"], 2, 1)
+
+
+def test_floor_ties_counts_offers_a_rounding_step_from_their_floor_and_no_others():
+    pm = pd.DataFrame({"ev": [0.0, -1.1e-16, 2.2e-16, 0.004, -0.004]})
+    pjf = pd.DataFrame({"real_market": ["player_steals"] * 3, "margin": [-1.1e-16, 0.0, 0.001]})
+    prep = {"pm_pricer": SimpleNamespace(priced=lambda: pm), "pj_pricer": SimpleNamespace(priced=lambda: pjf)}
+    out = S.floor_ties(prep)
+    assert out[S.LABEL_PM] == {"at_the_floor": 3, "just_below": 1}
+    assert out["player_steals"] == {"at_the_floor": 2, "just_below": 1}
 
 
 def test_the_rule_bets_one_under_a_proposition_at_the_best_price_above_the_floor():
