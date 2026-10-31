@@ -1005,6 +1005,7 @@ def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
 def _job_publish_oct13_nhl_reply(**kw):
     """Reply the Oct 13 line under the correction tweet. Discord is skipped
     when that follow-up is already in push_sent."""
+    config.require_record_restatement_approval("record_correction:2026-10-13-nhl")
     from data.db import get_connection
     from scripts.post_record_correction import publish_oct13_reply
 
@@ -1025,6 +1026,7 @@ def _validate_publish_oct13_nhl_line(args: dict) -> dict:
 
 def _job_publish_oct13_nhl_line(**kw):
     """Post the Oct 13 NHL line once. The longer correction has already gone."""
+    config.require_record_restatement_approval("record_correction:2026-10-13-nhl")
     from data.db import get_connection
     from scripts.post_record_correction import publish_oct13_line
 
@@ -1037,6 +1039,7 @@ def _job_publish_oct13_nhl_line(**kw):
 
 def _job_publish_full_record_standard(**kw):
     """Full record in the standard recap embed, once, Discord only."""
+    config.require_record_restatement_approval("full_record_std:2026-10-14")
     from data.db import get_connection
     from scripts.post_record_correction import publish_full_record_standard
 
@@ -1063,6 +1066,7 @@ def _validate_publish_full_record(args: dict) -> dict:
 
 def _job_publish_full_record(**kw):
     """Post the 2026-10-14 full record once to Discord results. Not X."""
+    config.require_record_restatement_approval("full_record:2026-10-14")
     from data.db import get_connection
     from scripts.post_record_correction import publish_full_record
 
@@ -1087,6 +1091,7 @@ def _job_publish_record_correction(**kw):
     The words live in scripts/post_record_correction.py. This job does not
     take a text argument, and a retry skips any surface already in push_sent.
     """
+    config.require_record_restatement_approval("record_correction:2026-10-14")
     from data.db import get_connection
     from scripts.post_record_correction import publish_record_correction
 
@@ -1117,6 +1122,9 @@ def _job_publish_x_results(**kw):
     The day-is-over guard in notify_x_results is NOT bypassed: this clears the
     ledger and calls the ordinary path, so a date that is not over still posts
     nothing. That is the safety property, and re-posting must not cost it.
+
+    A date that has already posted needs mike's approval. Clearing the ledger
+    is what turns a second post into a "first".
     """
     from data.db import get_connection
     from tracking.x_publisher import notify_x_results
@@ -1135,6 +1143,8 @@ def _job_publish_x_results(**kw):
             "SELECT count(*) FROM push_sent "
             "WHERE lock_key = %s AND kind = 'x_results'",
             (lock_key,)).fetchone()[0])
+        if removed:
+            config.require_record_restatement_approval(game_date)
         conn.execute(
             "DELETE FROM push_sent WHERE lock_key = %s AND kind = 'x_results'",
             (lock_key,))
@@ -1164,6 +1174,9 @@ def _job_publish_results(**kw):
     the ordinary paths, so a date that is not over still posts nothing. The
     results_snapshots row for the date is overwritten by the Discord post
     (ON CONFLICT ... DO UPDATE), so the stored receipt matches the re-post.
+
+    A date that has already posted needs mike's approval. Clearing the ledger
+    is what turns a second post into a "first".
     """
     from data.db import get_connection
     from tracking.discord_notifier import notify_discord_results
@@ -1179,6 +1192,8 @@ def _job_publish_results(**kw):
             "SELECT count(*) FROM push_sent "
             "WHERE lock_key = ANY(%s) AND kind IN ('discord_results', 'x_results')",
             (keys,)).fetchone()[0])
+        if removed:
+            config.require_record_restatement_approval(game_date)
         conn.execute(
             "DELETE FROM push_sent "
             "WHERE lock_key = ANY(%s) AND kind IN ('discord_results', 'x_results')",

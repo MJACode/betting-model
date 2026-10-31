@@ -1370,82 +1370,46 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
 # published.
 DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
 
-# ── Restating a published recap ──────────────────────────────────────────────
+# ── A published record is never re-posted ────────────────────────────────────
 #
-# A recap can only count what has settled when it posts. A sport that settles
-# LATER -- UFC results the next afternoon, an NCAAF score that lands two days
-# on, the NFL props of 2026-09-09 that graded an hour after the 6am post --
-# leaves a published number that is wrong and stays wrong, because the date is
-# ledgered. Until 2026-09-10 the only remedy was a hand-run job (or, for
-# 2026-08-29, a date hard-coded here).
+# mike, 2026-10-30: "No restated records of any kind unless I give the approval."
+# From 2026-09-10 every settle pass re-posted any recap a late grade had changed,
+# on Discord and on X: 19 days each in the 45 days to 10-30 (push_sent). That
+# path is gone, and neither notifier can post a second copy of a day.
 #
-# Now every settle pass asks: for each recap published in the last week, did
-# any pick in its universe settle AFTER it was published? If so, both surfaces
-# re-post the date labelled "restated", and the Discord post overwrites the
-# snapshot (new published_at), so the same late batch never fires twice. The
-# ledger key carries the published_at of the recap being corrected, so a
-# SECOND late batch (new published_at) restates again, and a repeat pass over
-# the same batch does not.
+# The hold in front of both notifiers (record_held_for_grading) is what keeps a
+# recap from going out short. If one still does, the pick reaches the all-time
+# line of the next recap and the published day stands. Ops hears once, because
+# mike is the only one who can approve anything else
+# (config.RECORD_RESTATEMENT_APPROVALS, then the publish_results job).
 #
-# THE TRIGGER IS LATE SETTLEMENT, NOT A COUNT DIFFERENCE. Measured 2026-09-10:
+# A LATE GRADE IS THE ONLY SIGNAL, NOT A COUNT DIFFERENCE. Measured 2026-09-10:
 # every daily snapshot from 09-01 to 09-08 disagrees with the count the recap
 # query returns today (09-01: 56 then, 33 now), because the query applies the
-# CURRENT action cuts and those moved (the live cut re-sweep of 09-09, pauses).
-# A count trigger would have restated eight days for nothing. settled_at >
-# published_at is the only thing that means "this recap missed a pick".
-#
-# Recaps published before RESULTS_RESTATE_FROM are never restated
-# automatically. Set to 2026-09-04 (mike, 2026-09-10: "ensure what's there is
-# accurate"): the 09-04 and 09-05 recaps each carry picks that settled after
-# they posted (2 NCAAF; 4 NCAAF + 2 UFC) and are corrected in place, labelled.
-RESULTS_RESTATE_FROM = "2026-09-04"
-RESULTS_RESTATE_LOOKBACK_DAYS = 7
+# CURRENT action cuts and those moved. settled_at > published_at is the only
+# thing that means "this recap missed a pick".
+RECAP_LATE_LOOKBACK_DAYS = 7
+RECORD_SHORT_KIND = "record_short"
 
 
-def results_restate_note(late: int, prev_settled: int, now_settled: int) -> str:
-    """The correction, stated: what settled late, and what the two counts are.
+def recaps_gone_short(conn, through: str | None = None,
+                      lookback_days: int = RECAP_LATE_LOOKBACK_DAYS) -> list[dict]:
+    """Published recaps with a pick that graded after they were posted.
 
-    When the two counts differ by more than the late picks, the rest is the
-    action cuts having moved since the recap first posted (the recap query
-    applies the CURRENT cuts) -- and the note says so, because "2 settled
-    late, 56 then, 33 now" without that sentence reads as a contradiction."""
-    picks = "pick" if late == 1 else "picks"
-    note = (f"Restated. {late} {picks} settled after this recap was first "
-            f"posted ({prev_settled} settled then, {now_settled} now).")
-    if now_settled - prev_settled != late:
-        note += (" The rest of the difference is the action cuts, which have "
-                 "moved since; this is the day under the current cuts.")
-    return note + (" Same picks, same results \u2014 this is the full day as "
-                   "the record stands now.")
-
-
-def recaps_needing_restatement(conn, through: str | None = None,
-                               lookback_days: int = RESULTS_RESTATE_LOOKBACK_DAYS,
-                               game_date: str | None = None) -> list[dict]:
-    """Published recaps with a pick that settled after they were posted.
-
-    One dict per date: game_date, published_at (of the snapshot being
-    corrected -- the ledger key), settled (what it published), late (how many
-    of the CURRENT universe settled after that). Dates < `through` (today ET)
-    only, so a day still in play is never touched; bounded below by the
-    lookback and by RESULTS_RESTATE_FROM."""
+    One dict per date: game_date, published_at, settled (what it published),
+    late (how many of the CURRENT universe graded after that). Dates before
+    `through` (today ET) only, so a day still in play is never read."""
     if through is None:
         through = datetime.now(ET).date().isoformat()
-    floor = max(RESULTS_RESTATE_FROM,
-                (datetime.fromisoformat(through).date()
-                 - timedelta(days=lookback_days)).isoformat())
-    params: list = [through, floor]
-    date_clause = ""
-    if game_date is not None:
-        date_clause = " AND game_date = %s"
-        params.append(game_date)
-    snaps = conn.execute(f"""
+    floor = (datetime.fromisoformat(through).date()
+             - timedelta(days=lookback_days)).isoformat()
+    snaps = conn.execute("""
         SELECT game_date, published_at, settled
         FROM results_snapshots
         WHERE scope = 'daily' AND sport IS NULL
-          AND game_date < %s AND game_date >= %s{date_clause}
+          AND game_date < %s AND game_date >= %s
         ORDER BY game_date
-    """, tuple(params)).fetchall()
+    """, (through, floor)).fetchall()
     out = []
     for d, published_at, settled in snaps:
         d = str(d)
@@ -1459,40 +1423,46 @@ def recaps_needing_restatement(conn, through: str | None = None,
     return out
 
 
-def restate_published_recaps(through: str | None = None,
-                             dry_run: bool = False,
-                             now: datetime | None = None) -> int:
-    """Re-post every recap a late settlement has invalidated, both surfaces.
+def flag_recaps_gone_short(through: str | None = None,
+                           now: datetime | None = None) -> int:
+    """Tell ops about a recap that went out short. Never posts a recap.
 
-    Called at the end of every settle pass, and only from 6:00am through
-    noon ET. A game of that sport in progress waits for a later pass.
-    Discord first, then X, off the same scan result, so the two carry the
-    same correction and the same key. Returns the number of posts made."""
+    Called at the end of every settle pass, 6:00am through noon ET. One alert
+    per published recap. A failed alert is not ledgered, so a later pass asks
+    again. Returns the number of alerts sent."""
+    from tracking.watch_util import post_ops_alert
+
     now = _as_et(now)
     if not in_daily_recap_window(now):
         return 0
     conn = get_connection()
+    sent = 0
     try:
-        due = recaps_needing_restatement(conn, through)
+        for item in recaps_gone_short(conn, through or now.date().isoformat()):
+            lock = restate_lock_key(RECORD_SHORT_KIND, item["game_date"],
+                                    item["published_at"])
+            if conn.execute(
+                "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+                (lock, RECORD_SHORT_KIND),
+            ).fetchone():
+                continue
+            if not post_ops_alert(
+                "Daily record went out short",
+                f"The {item['game_date']} record posted {item['settled']} settled "
+                f"picks. {item['late']} more graded after it went out. It was not "
+                f"re-posted, and will not be without mike's approval. The next "
+                f"recap's all-time line counts them.",
+            ):
+                continue
+            conn.execute(
+                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, %s, %s) "
+                "ON CONFLICT (lock_key, kind) DO NOTHING",
+                (lock, RECORD_SHORT_KIND, now.isoformat()))
+            conn.commit()
+            sent += 1
     finally:
         conn.close()
-    if not due:
-        return 0
-    from tracking.x_publisher import notify_x_results
-    posted = 0
-    for item in due:
-        try:
-            posted += notify_discord_results(item["game_date"], dry_run=dry_run,
-                                             restate=item, now=now)
-        except Exception as exc:                          # noqa: BLE001
-            logger.error(f"Discord restate {item['game_date']} failed: {exc}")
-            _record_restate_exception(item, exc)
-        try:
-            posted += notify_x_results(item["game_date"], dry_run=dry_run,
-                                       restate=item, now=now)
-        except Exception as exc:                          # noqa: BLE001
-            logger.error(f"X restate {item['game_date']} failed: {exc}")
-    return posted
+    return sent
 
 
 # ── A recap the 6am run could not post ───────────────────────────────────────
@@ -1525,7 +1495,7 @@ RECAP_DAILY_HOUR_ET = 6
 RECAP_MORNING_END_HOUR_ET = 12
 # A missed day keeps trying each morning for this many days, the same span
 # a week stays due.
-DAILY_CATCHUP_DAYS = RESULTS_RESTATE_LOOKBACK_DAYS
+DAILY_CATCHUP_DAYS = RECAP_LATE_LOOKBACK_DAYS
 # A started game with no final score is still in progress for this long.
 # Past it, a missing score is not a game that is being played.
 SPORT_LIVE_HOURS = 8
@@ -1567,8 +1537,7 @@ def post_missed_recap(now: datetime | None = None,
     """Post a day the morning window has not posted yet, on both surfaces.
 
     Called by step_settle on a refresh pass (one that settles TODAY), after
-    the ordinary attempt and BEFORE restate_published_recaps. Yesterday is
-    the usual date. A day that missed its morning stays eligible on later
+    the ordinary attempt. Yesterday is the usual date. A day that missed its morning stays eligible on later
     mornings, oldest first, for DAILY_CATCHUP_DAYS. The post names that
     date. After noon, nothing runs, and the next morning asks again.
 
@@ -1603,49 +1572,20 @@ def post_missed_recap(now: datetime | None = None,
             continue
         logger.info(f"Results recap for {game_date} did not post at 6am; "
                     f"posting it now that a counting pick has settled")
-        discord_posted = 0
         try:
-            discord_posted = notify_discord_results(
+            posted += notify_discord_results(
                 game_date, dry_run=dry_run, now=now)
-            posted += discord_posted
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"Discord recap retry {game_date} failed: {exc}")
         try:
             posted += notify_x_results(game_date, dry_run=dry_run, now=now)
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X recap retry {game_date} failed: {exc}")
-        if discord_posted and x_sent_at is not None:
-            posted += _restate_x_if_behind(game_date, x_sent_at, dry_run, now)
     return posted
 
 
-def _restate_x_if_behind(game_date: str, x_sent_at, dry_run: bool,
-                         now: datetime | None = None) -> int:
-    """Restate X for a date when a counting pick settled after its tweet."""
-    from tracking.x_publisher import notify_x_results
-    conn = get_connection()
-    try:
-        late = _execute_settled(
-            conn,
-            _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
-            (game_date, x_sent_at)).fetchall()
-    finally:
-        conn.close()
-    if not late:
-        return 0
-    try:
-        return notify_x_results(game_date, dry_run=dry_run, restate={
-            "game_date": game_date, "published_at": x_sent_at,
-            "late": len(late)}, now=now)
-    except Exception as exc:                              # noqa: BLE001
-        logger.error(f"X restate {game_date} after the Discord retry "
-                     f"failed: {exc}")
-        return 0
-
-
 def restate_lock_key(kind: str, game_date: str, published_at) -> str:
-    """`{kind}:{date}:{published_at of the recap being corrected}` -- one key
-    per correction generation, shared in shape by both surfaces."""
+    """`{kind}:{date}:{published_at of the recap concerned}`."""
     stamp = published_at.isoformat() if hasattr(published_at, "isoformat") else str(published_at)
     return f"{kind}:{game_date}:{stamp}"
 
@@ -1671,10 +1611,15 @@ def notify_discord_restate(target_date: str | None = None,
 
     Renders through the SAME _post_picks/_signal_field path as a normal slate, so
     a restated stake cannot drift from what the next slate would publish.
+
+    Needs mike's approval for that date as well (config.RECORD_RESTATEMENT_APPROVALS).
     """
     if target_date is None:
         target_date = date.today().isoformat()
     if target_date not in DISCORD_RESTATE_DATES or not _configured():
+        return 0
+    if not config.record_restatement_approved(target_date):
+        logger.error(f"Discord restate {target_date} refused: no approval recorded")
         return 0
 
     conn = get_connection()
@@ -2254,8 +2199,8 @@ def notify_discord_free_pick(target_date: str | None = None,
 # condition_status = config.DUPLICATE_STATUS and counts once, here and on
 # every other record surface. Its result is never touched.
 #
-# POSTED TO DISCORD (owner, 2026-10-14). Daily, the 7-day restatement, and
-# all-time all read this query, and X and the snapshot builder read it too.
+# POSTED TO DISCORD (owner, 2026-10-14). Daily and
+# all-time both read this query, and X and the snapshot builder read it too.
 # A settled BET Discord never carried is not in that record. The lock is
 # posted_sql: push_sent discord_signal / discord_live, the same key
 # v_discord_published joins, dropped when a newer discord_void notice holds.
@@ -2443,6 +2388,111 @@ def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None
     )
     row = execute(sql, (start, end, *sports, start, end)).fetchone()
     return row is not None
+
+
+# ── Every pick graded before a record goes out ───────────────────────────────
+# mike, 2026-10-30: "checks prior to the daily record going out to ensure all
+# picks are graded, if not grade them. games are all long finished by the time."
+#
+# Both surfaces and both record lengths ask this before they read a single
+# result, so no path can post a record that a later grade would change. The
+# picks are the record's own: _SETTLED_SQL with its result clause swapped, so a
+# paused model's row or a pick that never posted cannot hold anything.
+#
+# A pick that stays ungraded after the attempt holds the record. It does not post
+# short. The morning passes ask again (post_missed_recap, DAILY_CATCHUP_DAYS), and
+# ops hears once a morning, with the picks named.
+_UNGRADED_SQL = (
+    "SELECT p.sport, p.model_id, p.pick_label, p.game_id, p.game_date\n"
+    "         FROM picks p"
+    + _SETTLED_SQL.split("FROM picks p", 1)[1].replace(
+        "p.result IN ('WIN', 'LOSS', 'PUSH')", "p.result IS NULL"))
+RECORD_HELD_KIND = "record_held"
+
+
+def ungraded_picks(conn, start: str, end: str | None = None) -> list[tuple]:
+    """Picks this record will count that have no result yet."""
+    execute = getattr(conn, "execute", None)
+    if execute is None:
+        return []
+    if end is None or end == start:
+        return execute(_UNGRADED_SQL.format(window="= %s"), (start,)).fetchall()
+    return execute(_UNGRADED_SQL.format(window="BETWEEN %s AND %s"),
+                   (start, end)).fetchall()
+
+
+def _grade_outstanding(rows: list[tuple]) -> None:
+    """Try to grade these picks. Never raises: the re-count that follows decides.
+
+    NHL goes first. A goalie prop grades only on a goalie flagged as the
+    starter, the evening box often has no start flagged for him, and the box is
+    never fetched twice. The stats pull has the flag and overwrites the row:
+    measured 2026-10-30, Jake Oettinger's row was written at 22:46, flagged by
+    the 06:09 pull, and his pick graded on the next settle at 07:24."""
+    dates = sorted({str(r[4]) for r in rows})
+    if any(r[0] == "NHL" for r in rows):
+        try:
+            from data.ingestors.nhl_game_logs import top_up
+            from data.ingestors.nhl_stats_ingestor import LOG_TOPUP_DAYS
+            today = config.today_et()
+            back = (date.fromisoformat(today) - date.fromisoformat(dates[0])).days + 1
+            top_up(max(LOG_TOPUP_DAYS, back), apply=True, today=today)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"NHL logs before grading failed: {exc}")
+    from tracking.paper_tracker import settle_picks
+    for game_date in dates:
+        try:
+            settle_picks(game_date)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"Grading {game_date} before its record failed: {exc}")
+
+
+def _alert_record_held(conn, label: str, rows: list[tuple], now: datetime) -> None:
+    """One ops alert per record per morning, naming the picks. Both surfaces hold
+    the same record on the same pass, and the second finds the first's row."""
+    from tracking.watch_util import post_ops_alert
+
+    lock = f"{RECORD_HELD_KIND}:{label}:{now.date().isoformat()}"
+    if conn.execute(
+        "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+        (lock, RECORD_HELD_KIND),
+    ).fetchone():
+        return
+    names = "; ".join(str(r[2] or r[1]) for r in rows[:10])
+    more = f" and {len(rows) - 10} more" if len(rows) > 10 else ""
+    if post_ops_alert(
+        "Record held: picks not graded",
+        f"{label}: {len(rows)} pick(s) still have no result after a grading "
+        f"attempt, so the record did not post on Discord or X. It tries again "
+        f"on the next morning pass. {names}{more}",
+    ):
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock, RECORD_HELD_KIND, now.isoformat()))
+        conn.commit()
+
+
+def record_held_for_grading(conn, start: str, end: str | None = None, *,
+                            label: str, dry_run: bool = False,
+                            now: datetime | None = None) -> bool:
+    """True when this record may not post, because a pick it counts has no result.
+
+    Grades first. A dry run reports the hold and writes nothing."""
+    rows = ungraded_picks(conn, start, end)
+    if not rows:
+        return False
+    logger.info(f"Record {label}: {len(rows)} ungraded pick(s)")
+    if dry_run:
+        return True
+    conn.commit()         # no read held open across the grading, which has its own
+    _grade_outstanding(rows)
+    rows = ungraded_picks(conn, start, end)
+    if not rows:
+        return False
+    logger.warning(f"Record {label} held: {len(rows)} pick(s) still ungraded")
+    _alert_record_held(conn, label, rows, _as_et(now))
+    return True
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:
@@ -2695,8 +2745,7 @@ def _recap_missing_id_recorded(conn, lock_key: str, kind: str) -> bool:
 
 def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
                             lock_key: str, *, recorded: bool) -> None:
-    """One ops alert. The lock key is the row to delete, and a restatement's
-    key includes the published_at of the recap it corrects.
+    """One ops alert. The lock key is the row to delete.
 
     recorded means that row is in push_sent, so later passes do not post.
     An insert that failed leaves nothing to stop the next pass, and the
@@ -2720,23 +2769,6 @@ def _alert_recap_missing_id(game_date: str, kind: str, reason: str,
         )
     except Exception as exc:                       # noqa: BLE001
         logger.error(f"recap no-message-id alert failed ({type(exc).__name__})")
-
-
-def _record_restate_exception(item: dict, exc: BaseException) -> None:
-    """A restatement that raised still leaves a row. The log line alone is
-    gone when the container is."""
-    conn = get_connection()
-    try:
-        key = restate_lock_key("discord_results_restate", item["game_date"],
-                               item["published_at"])
-        _record_delivery_failure(
-            conn, key, "discord_results_restate",
-            f"{type(exc).__name__}: {exc}")
-    except Exception as inner:                            # noqa: BLE001
-        logger.error(f"Discord restate failure was not recorded "
-                     f"({type(inner).__name__})")
-    finally:
-        conn.close()
 
 
 def render_all_time_fields(rows: list[tuple], since: str) -> list[dict]:
@@ -2782,19 +2814,11 @@ def all_time_embed(conn, through: str) -> dict:
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
-                           restate=None, now: datetime | None = None) -> int:
+                           now: datetime | None = None) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
     per-sport breakdown. Ledgered per date so re-running settle can't repost,
-    and refuses any date that is not already over. Returns 1 if posted, else 0.
-
-    `restate` re-posts a date whose published recap a later settlement has
-    invalidated (recaps_needing_restatement): pass the scan's dict, or True
-    to resolve it here. Its own ledger kind, keyed on the published_at of the
-    recap being corrected, so one late batch fires exactly once and cannot
-    collide with the original. The original is left in place: a channel that
-    quietly loses a number people saw is worse than one carrying a visible
-    correction. Renders through the SAME path as a normal recap, so a restated
-    figure cannot drift from what tomorrow's recap would publish.
+    refuses any date that is not already over, and holds until every pick it
+    counts is graded. Returns 1 if posted, else 0.
     """
     clock = _as_et(now)
     if game_date is None:
@@ -2808,7 +2832,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
     # `--step settle` (run on every refresh pass by scripts/refresh_pass.sh)
     # settles TODAY, grading games as they finish — recapping that would post
     # a partial record mid-slate and then ledger it, so the real end-of-day
-    # recap could never post. The same window binds a restatement. A pass
+    # recap could never post. A pass
     # after noon returns here, unledgered, and the next morning asks again.
     # The daily 6am pipeline settles yesterday, which is the run this is
     # meant to fire on; when it cannot (nothing counting settled yet, or the
@@ -2820,14 +2844,8 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
 
     conn = get_connection()
     try:
-        if restate is True:
-            found = recaps_needing_restatement(conn, game_date=game_date)
-            restate = found[0] if found else None
-            if restate is None:
-                return 0                  # nothing settled late: no correction
-        kind = "discord_results_restate" if restate else "discord_results"
-        lock_key = (restate_lock_key(kind, game_date, restate["published_at"])
-                    if restate else f"discord_results:{game_date}")
+        kind = "discord_results"
+        lock_key = f"discord_results:{game_date}"
         if conn.execute(
             "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
             (lock_key, kind),
@@ -2837,6 +2855,9 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # The message may already be in the channel. Another pass would post
         # another copy. One such row stops this recap for good.
         if _recap_missing_id_recorded(conn, lock_key, kind):
+            return 0
+        if record_held_for_grading(conn, game_date, label=game_date,
+                                   dry_run=dry_run, now=clock):
             return 0
 
         rows = _settled_rows(conn, game_date)
@@ -2881,13 +2902,9 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
 
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
         embed = {
-            "title": (f"\U0001F4CA Results — {pretty}"
-                      + ("  ·  restated" if restate else "")),
-            "description": (
-                (results_restate_note(restate["late"], restate["settled"],
-                                      len(rows)) + "\n\n") if restate else ""
-            ) + f"**{_tally_line(overall, with_clv=True)}**  ·  "
-                f"{len(rows)} settled",
+            "title": f"\U0001F4CA Results — {pretty}",
+            "description": (f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                            f"{len(rows)} settled"),
             "color": color,
             "fields": fields,
         }
@@ -2899,7 +2916,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # _post appends ?wait=true and returns the message id. A 2xx with no
         # id used to be ledgered as a success. The row then
         # blocked every retry, and the message could not be opened. Measured
-        # 2026-10-14: the Oct 13 restatement is that row (null message_id)
+        # 2026-10-14: an Oct 13 post is that row (null message_id)
         # and it is not a message anyone can find. No id is not a delivery.
         # It is also not a miss we can safely repeat: the body may have
         # landed. One error row, one alert, and no later pass posts it.
@@ -2909,8 +2926,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
                      and message_id not in ("", _POST_OK_NO_ID) else None)
         if not stored_id:
             reason = _delivery_failure_reason(raw)
-            logger.error(f"Discord(results) {game_date} "
-                         f"{'restate ' if restate else ''}not confirmed ({reason})")
+            logger.error(f"Discord(results) {game_date} not confirmed ({reason})")
             _record_delivery_failure(conn, lock_key, kind, reason)
             if isinstance(raw, str) and raw == _POST_OK_NO_ID:
                 try:
@@ -2938,20 +2954,16 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
         # reconnects and raises ConnectionLost) or a failed snapshot statement
         # (PostgreSQL turns the COMMIT into a ROLLBACK and raises nothing)
         # silently took this row with it. With the refresh passes retrying a
-        # missed recap (post_missed_recap) and restating late ones on every
-        # pass, a lost row means the same post again on every pass until
-        # midnight.
+        # missed recap (post_missed_recap), a lost row means the same post again
+        # on every pass until noon.
         conn.commit()
-        # The snapshot is the published record for that date, so a restatement
-        # OVERWRITES it rather than adding a second row: the corrected numbers
-        # are the ones that should reproduce later, and two rows for one date
-        # would leave which-is-authoritative to whoever reads them next.
+        # The snapshot is the published record for that date. A re-post mike has
+        # approved overwrites it rather than adding a second row: two rows for
+        # one date would leave which-is-authoritative to whoever reads them next.
         _store_snapshot(conn, snapshot_rows(
             game_date, published_at, overall, by_sport, all_overall,
             all_by_sport, len(rows), len(all_rows)))
-        logger.success(
-            f"✓ Discord(results): {'restated' if restate else 'posted'} "
-            f"recap for {game_date}")
+        logger.success(f"✓ Discord(results): posted recap for {game_date}")
         return 1
     finally:
         conn.close()
@@ -3079,6 +3091,10 @@ def notify_discord_period(span: str, start: date, end: date,
             "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
             (lock_key, kind),
         ).fetchone():
+            return 0
+        if record_held_for_grading(conn, start.isoformat(), end.isoformat(),
+                                   label=f"{span} of {start.isoformat()}",
+                                   dry_run=dry_run, now=now):
             return 0
         rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
         if not rows:

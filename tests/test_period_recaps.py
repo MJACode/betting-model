@@ -203,6 +203,7 @@ def test_discord_period_uses_the_results_webhook_and_ledgers_once(monkeypatch):
     monkeypatch.setattr(dn, "_post", lambda url, body: posted.append((url, body)) or "99")
     rows = [("MLB", "mlb_ml", "WIN", 0.02, -110, None, False, 1.0, 1.1)]
     monkeypatch.setattr(dn, "_settled_rows_since", lambda conn, a, b: rows)
+    monkeypatch.setattr(dn, "ungraded_picks", lambda *a, **k: [])
 
     class _Conn:
         def __init__(self):

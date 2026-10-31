@@ -1,19 +1,14 @@
-"""A recap that a later settlement invalidated is restated, on both surfaces.
+"""A recap a later grade left short is noticed. It is never posted again.
 
-2026-09-10. The 6am run posted the 2026-09-09 recap MLB-only at 06:02; the
-three NFL props settled at 07:24 against a ledgered date and nothing
-re-posted. Measured the same morning: 2026-09-04 (2 NCAAF settled three days
-late) and 2026-09-05 (4 NCAAF, 2 UFC) had the same shape. The remedy was a
-hand-run job each time.
+2026-09-10. The 6am run posted the 2026-09-09 recap MLB-only at 06:02; the three
+NFL props settled at 07:24. From that day every settle pass re-posted any such
+recap, labelled "restated", until mike ended it on 2026-10-30. The behaviour now
+is pinned in tests/test_record_never_restated.py. This file keeps the scan, which
+only tells ops, and the nflverse fetch retry that shipped alongside it.
 
-Now every settle pass scans the last week's published recaps for a pick that
-settled AFTER the recap's published_at, and re-posts Discord then X labelled
-"restated", ledgered per correction on the published_at being corrected.
-
-THE TRIGGER IS LATE SETTLEMENT, NOT A COUNT DIFFERENCE: every daily snapshot
-from 09-01 to 09-08 disagrees with today's count because the recap query
-applies the CURRENT cuts and those moved. A count trigger would have restated
-eight days for nothing.
+A LATE GRADE IS THE SIGNAL, NOT A COUNT DIFFERENCE: every daily snapshot from 09-01
+to 09-08 disagrees with today's count because the recap query applies the CURRENT
+cuts and those moved.
 """
 from __future__ import annotations
 
@@ -26,7 +21,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tracking import discord_notifier as dn  # noqa: E402
-from tracking import x_publisher as xp  # noqa: E402
 
 ROOT = Path(__file__).parent.parent
 PUB = datetime(2026, 9, 10, 10, 2, 22, tzinfo=timezone.utc)
@@ -61,190 +55,49 @@ class _Conn:
 
 # ── the scan ─────────────────────────────────────────────────────────────────
 
-def test_a_recap_with_a_late_settlement_is_due():
+def test_a_recap_with_a_late_grade_is_short():
     conn = _Conn([("2026-09-09", PUB, 7)], {"2026-09-09": 3})
-    due = dn.recaps_needing_restatement(conn, through="2026-09-10")
+    due = dn.recaps_gone_short(conn, through="2026-09-10")
     assert due == [{"game_date": "2026-09-09", "published_at": PUB,
                     "settled": 7, "late": 3}]
 
 
-def test_a_recap_whose_count_merely_drifted_is_not_due():
-    """Nothing settled after it was posted: not a correction, whatever the
-    recap query returns today."""
+def test_a_recap_whose_count_merely_drifted_is_not_short():
     conn = _Conn([("2026-09-01", PUB, 56)], {"2026-09-01": 0})
-    assert dn.recaps_needing_restatement(conn, through="2026-09-10") == []
+    assert dn.recaps_gone_short(conn, through="2026-09-10") == []
 
 
-def test_the_scan_is_bounded_to_finished_days_the_lookback_and_the_floor():
+def test_the_scan_is_bounded_to_finished_days_and_the_lookback():
     conn = _Conn([], {})
-    dn.recaps_needing_restatement(conn, through="2026-09-20")
+    dn.recaps_gone_short(conn, through="2026-09-20")
     sql, params = conn.sql[0]
     assert "game_date < %s" in sql and "game_date >= %s" in sql
-    assert params[0] == "2026-09-20"
-    assert params[1] == "2026-09-13", "lookback of 7 days from `through`"
-    conn = _Conn([], {})
-    dn.recaps_needing_restatement(conn, through="2026-09-11")
-    assert conn.sql[0][1][1] == dn.RESULTS_RESTATE_FROM, (
-        "recaps published before the floor are never restated automatically")
+    assert params == ("2026-09-20", "2026-09-13")
 
 
 def test_the_late_query_is_the_recap_universe_plus_settled_after():
-    """The late count must be taken over the SAME universe the recap counts,
-    or a pick outside the cut could trigger a restatement it never appears in."""
+    """Over the SAME universe the recap counts, or a pick outside the cut could
+    raise an alert for a record it never appears in."""
     conn = _Conn([("2026-09-09", PUB, 7)], {"2026-09-09": 1})
-    dn.recaps_needing_restatement(conn, through="2026-09-10")
+    dn.recaps_gone_short(conn, through="2026-09-10")
     late_sql, late_params = conn.sql[1]
     assert late_sql.startswith(dn._SETTLED_SQL.format(window="= %s"))
     assert late_sql.rstrip().endswith("AND p.settled_at > %s")
     assert late_params == ("2026-09-09", PUB)
 
 
-# ── the key and the note ─────────────────────────────────────────────────────
-
-def test_the_key_carries_the_published_at_being_corrected():
-    """One key per correction GENERATION: a second late batch (new
-    published_at after the first restatement) fires again; a repeat pass over
-    the same batch does not."""
-    k = dn.restate_lock_key("discord_results_restate", "2026-09-09", PUB)
-    assert k == "discord_results_restate:2026-09-09:2026-09-10T10:02:22+00:00"
-    assert dn.restate_lock_key("x_results_restate", "2026-09-09", PUB).endswith(
-        k.split(":", 1)[1]), "both surfaces share the key shape"
-
-
-def test_the_note_says_what_settled_late_and_both_counts():
-    n = dn.results_restate_note(3, 7, 10)
-    assert n.startswith("Restated.")
-    assert "3 picks settled after" in n
-    assert "7 settled then, 10 now" in n
-    assert "Same picks, same results" in n
-    assert "action cuts" not in n, "counts that add up need no cut caveat"
-    assert "1 pick settled" in dn.results_restate_note(1, 7, 8)
-
-
-def test_the_note_explains_a_count_change_the_late_picks_do_not_account_for():
-    """2026-09-04: 2 picks settled late, but the recap query returns 33 rows
-    today against 56 published, because the cuts moved. Without a sentence
-    for that the note is a contradiction."""
-    n = dn.results_restate_note(2, 56, 33)
-    assert "2 picks settled after" in n and "56 settled then, 33 now" in n
-    assert "action cuts, which have moved since" in n
-
-
-def test_the_floor_covers_the_two_dates_being_corrected():
-    assert dn.RESULTS_RESTATE_FROM <= "2026-09-04"
-
-
-# ── the notifiers ────────────────────────────────────────────────────────────
-
-def test_the_discord_notifier_resolves_restate_true_and_no_ops_without_a_late_pick(monkeypatch):
-    conn = _Conn([("2026-01-01", PUB, 7)], {"2026-01-01": 0})
-    monkeypatch.setattr(dn, "get_connection", lambda *a, **k: conn)
-    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_RESULTS", "https://x", raising=False)
-    morning = datetime(2026, 1, 2, 8, 0, tzinfo=dn.ET)
-    assert dn.notify_discord_results(
-        game_date="2026-01-01", restate=True, now=morning) == 0
-
-
-def test_a_restatement_after_noon_does_not_scan(monkeypatch):
+def test_the_check_after_noon_does_not_touch_the_database(monkeypatch):
     opened = []
     monkeypatch.setattr(dn, "get_connection", lambda *a, **k: opened.append(1))
-    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
     evening = datetime(2026, 10, 21, 21, 56, tzinfo=dn.ET)
-    assert dn.restate_published_recaps(now=evening) == 0
-    assert dn.notify_discord_results(
-        game_date="2026-10-20", restate={
-            "published_at": "2026-10-21T06:02:00-04:00", "late": 1, "settled": 2,
-        }, now=evening) == 0
-    from datetime import date
-    assert dn.notify_discord_period(
-        "week", date(2026, 10, 12), date(2026, 10, 18),
-        "Week of Oct 12-18", now=evening) == 0
+    assert dn.flag_recaps_gone_short(now=evening) == 0
     assert opened == []
 
 
-def test_a_restatement_waits_out_a_live_game_and_posts_the_next_morning(monkeypatch):
-    posted = []
-    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
-    monkeypatch.setattr(dn, "_post", lambda url, body: posted.append(body) or "44")
-    monkeypatch.setattr(
-        "tracking.x_publisher.notify_x_results", lambda *a, **k: 0)
-    item = {
-        "game_date": "2026-10-20",
-        "published_at": "2026-10-21T06:02:00-04:00",
-        "late": 1, "settled": 2,
-    }
-    monkeypatch.setattr(dn, "recaps_needing_restatement", lambda *a, **k: [item])
-
-    class Conn:
-        def __init__(self):
-            self.inserts = []
-            self.sql = ""
-            self.live = "2026-10-21T09:00:00-04:00"
-
-        def execute(self, sql, params=()):
-            self.sql = sql
-            if "INSERT INTO push_sent" in sql:
-                self.inserts.append(params)
-            return self
-
-        def fetchone(self):
-            return None
-
-        def fetchall(self):
-            if "commence_time" in self.sql:
-                return [(self.live,)]
-            return [("NHL", "nhl_moneyline", "WIN", 0.02, -110.0,
-                     None, False, 1.0, 1.1)]
-
-        def commit(self):
-            pass
-
-        def close(self):
-            pass
-
-    conn = Conn()
-    monkeypatch.setattr(dn, "get_connection", lambda *a, **k: conn)
-    held = datetime(2026, 10, 21, 10, 0, tzinfo=dn.ET)
-    assert dn.restate_published_recaps(now=held) == 0
-    assert posted == [] and conn.inserts == []
-    morning = datetime(2026, 10, 22, 8, 0, tzinfo=dn.ET)
-    assert dn.restate_published_recaps(now=morning) == 1
-    assert len(posted) == 1
-    assert "restated" in posted[0]["embeds"][0]["title"]
-    assert conn.inserts[0][1] == "discord_results_restate"
-    assert "2026-10-20" in conn.inserts[0][0]
-
-
-def test_the_tweet_header_says_restated():
-    recap = {"wins": 5, "losses": 5, "pushes": 0, "units": -0.537, "risked": 11.16,
-             "by_sport": []}
-    plain = xp.render_results(recap, "2026-09-09")
-    again = xp.render_results(recap, "2026-09-09", restate=True)
-    assert again.startswith("\U0001F4CA Sep 9 results (restated): 5-5")
-    assert plain != again, "a restated tweet must not be a duplicate of the original"
-
-
-def test_the_x_notifier_ledgers_the_restate_under_its_own_kind_and_key():
-    import inspect
-    src = inspect.getsource(xp.notify_x_results)
-    assert 'kind = "x_results_restate" if restate else "x_results"' in src
-    assert 'restate_lock_key(kind, game_date, restate["published_at"])' in src
-    assert "_ledger(conn, lock, kind, tweet_id)" in src
-    assert "restate=bool(restate)" in src, "the tweet must say it is restated"
-
-
-def test_settle_restates_on_every_pass_after_both_ordinary_posts():
+def test_the_short_recap_check_never_fails_settle():
     src = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
     fn = src[src.index("def step_settle("):src.index("\ndef ", src.index("def step_settle(") + 10)]
-    assert "restate_published_recaps()" in fn
-    assert fn.index("notify_x_results(settle_date)") < fn.index("restate_published_recaps()")
-    assert "DISCORD_RESULTS_RESTATE_DATES" not in src, "the hard-coded date list is gone"
-
-
-def test_the_restatement_never_fails_settle():
-    src = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
-    fn = src[src.index("def step_settle("):src.index("\ndef ", src.index("def step_settle(") + 10)]
-    tail = fn[fn.index("restate_published_recaps"):]
+    tail = fn[fn.index("flag_recaps_gone_short"):]
     assert "except Exception" in tail and "return True" in tail
 
 

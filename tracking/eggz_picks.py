@@ -1845,6 +1845,10 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
         return 0
     kind = f"{capper.results_prefix}_{span}"
     if restate_published_at is not None:
+        if not config.record_restatement_approved(start):
+            logger.error(f"{capper.display_name} {start} correction refused: "
+                         f"no approval recorded")
+            return 0
         kind = f"{kind}_restate"
         lock = restate_lock_key(kind, start, restate_published_at)
     else:
@@ -2069,8 +2073,9 @@ def restate_eggz_day(game_date: str, dry_run: bool = False,
     """Post a Corrected recap for a day that already has a sent recap.
 
     The original push_sent row stays. One correction per that row's
-    sent_at. Unresolved legs, an unfinished slate, and a sport in progress
-    return 0 and post nothing. This does not ingest and does not grade.
+    sent_at. Unresolved legs, an unfinished slate, a sport in progress, and a
+    date with no approval in config.RECORD_RESTATEMENT_APPROVALS return 0 and
+    post nothing. This does not ingest and does not grade.
     dry_run returns 1 when a post would go out, and writes nothing.
     """
     if not configured_to_post(capper):

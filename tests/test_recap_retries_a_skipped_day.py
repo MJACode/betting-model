@@ -135,7 +135,7 @@ def _schema(db):
         decision_odds REAL, clv_pct REAL, clv_method TEXT, is_live INTEGER,
         downgrade_reason TEXT,
         condition_status TEXT, settled_at TEXT, game_id TEXT, pick_side TEXT,
-        player_id TEXT, player_key TEXT, prop_market TEXT)""")
+        player_id TEXT, player_key TEXT, prop_market TEXT, pick_label TEXT)""")
     db.execute("""CREATE TABLE push_sent (
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")
@@ -210,6 +210,8 @@ class World:
         self.discord_fails = False
         self.x_fails = False
         self.retry_calls = 0
+        self.gradable_on_request: list = []  # what the hold's own attempt can grade
+        self.ops: list = []            # every alert sent to the ops channel
         self._patch(monkeypatch)
 
     def _patch(self, mp):
@@ -257,6 +259,17 @@ class World:
             return {"settled": graded}
 
         mp.setattr(rp, "_import_step", lambda name: _settle)
+
+        def _grade_on_request(rows):
+            for row in world.gradable_on_request:
+                _grade(world.db, row)
+            world.db.commit()
+            world.gradable_on_request = []
+
+        mp.setattr(dn, "_grade_outstanding", _grade_on_request)
+        import tracking.watch_util
+        mp.setattr(tracking.watch_util, "post_ops_alert",
+                   lambda title, detail, **k: world.ops.append(title) or True)
 
     def daily(self, hhmmss: str, *grade):
         """The 6am run: step_settle(yesterday)."""
@@ -314,7 +327,7 @@ def test_the_day_posts_once_on_both_surfaces_at_the_first_pass_that_can(monkeypa
         "the receipt is stamped when it was actually published")
 
     # Every later pass that day: nothing new on either surface, and the
-    # restatement scan does not mistake the 07:24 grading for a late pick.
+    # short-recap check does not mistake the 07:24 grading for a late pick.
     for hhmmss in ("08:24:00", "12:24:00", "23:54:00"):
         assert w.refresh(hhmmss) is True
     assert len(w.discord) == 1 and len(w.tweets) == 1
@@ -335,10 +348,9 @@ def test_an_overnight_pass_never_posts_yesterday(monkeypatch):
     assert len(w.discord) == 1 and len(w.tweets) == 1
 
 
-def test_a_late_pick_after_the_retry_is_restated_once_not_reposted(monkeypatch):
-    """The recap posted at 07:24 counts what had settled. A counting pick
-    graded later is a correction: restated once on both surfaces, through the
-    existing path -- never a second ordinary post."""
+def test_a_pick_graded_after_the_post_is_never_posted_again(monkeypatch):
+    """The recap posted at 07:24 counts what had settled. A counting pick graded
+    later leaves that post standing: ops hears once, and no channel hears at all."""
     w = World(monkeypatch)
     w.daily("06:02:33", NFL_PAUSED)
     w.refresh("07:24:30", *NHL_COUNTING)
@@ -347,12 +359,46 @@ def test_a_late_pick_after_the_retry_is_restated_once_not_reposted(monkeypatch):
     _add_pick(w.db, late, graded=False)
     w.refresh("09:24:30", late)
     w.refresh("10:24:30")
-    assert len(w.discord) == 2 and len(w.tweets) == 2
-    assert "restated" in w.discord[1]["title"]
-    assert "1 pick settled after this recap was first posted" in (
-        w.discord[1]["description"])
-    assert "2-1" in w.discord[1]["description"]
-    assert w.tweets[1].startswith("\U0001F4CA Oct 12 results (restated): 2-1")
+    w.refresh("11:24:30")
+    assert len(w.discord) == 1 and len(w.tweets) == 1
+    assert "restated" not in w.discord[0]["title"]
+    assert w.ops.count("Daily record went out short") == 1
+
+
+def test_the_morning_of_10_30_replayed_posts_once_in_full(monkeypatch):
+    """Both NHL props are ungraded when the 6am run reaches the recap, as Jake
+    Oettinger's was. The hold grades them and the day posts once, whole, at 6am.
+    Nothing happens at 07:24 because there is nothing left to happen."""
+    w = World(monkeypatch)
+    w.gradable_on_request = [row[:5] + ("2026-10-13T06:02:20.000000-04:00",) + row[6:]
+                             for row in NHL_COUNTING]
+    w.daily("06:02:33", NFL_PAUSED)
+    assert len(w.discord) == 1 and len(w.tweets) == 1
+    assert "2-0" in w.discord[0]["description"]
+    assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-0")
+    for hhmmss in ("07:24:30", "08:24:30", "09:24:30"):
+        w.refresh(hhmmss)
+    assert len(w.discord) == 1 and len(w.tweets) == 1
+    assert w.ops == []
+    assert w.ledger() == {f"discord_results:{DAY}", f"x_results:{DAY}"}
+
+
+def test_a_pick_grading_cannot_reach_holds_the_day_until_it_can(monkeypatch):
+    """Nothing counting graded and the attempt could not help: no post, ops told
+    once. When the 07:24 pass grades it, both surfaces post the full day."""
+    w = World(monkeypatch, nhl_graded_by_midnight=True)
+    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
+            "2026-10-13T07:24:06.000000-04:00", -110.0)
+    _add_pick(w.db, late, graded=False)
+    w.daily("06:02:33", NFL_PAUSED)
+    assert w.discord == [] and w.tweets == []
+    assert w.ops == ["Record held: picks not graded"]
+    w.refresh("07:24:30", late)
+    assert len(w.discord) == 1 and len(w.tweets) == 1
+    assert "2-1" in w.discord[0]["description"]
+    assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-1")
+    w.refresh("08:24:30")
+    assert len(w.discord) == 1 and len(w.tweets) == 1
 
 
 # ── one surface failed ──────────────────────────────────────────────────────
@@ -372,29 +418,6 @@ def test_x_failing_at_6am_is_retried_alone_at_the_next_pass(monkeypatch):
     assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-0")
 
 
-def test_x_failing_at_6am_then_a_late_pick_ends_on_the_same_numbers(monkeypatch):
-    """X failed at 6am, Discord posted 2-0, a counting pick grades at 07:24.
-    The retry tweets the day (2-1); the restatement scan in the same pass
-    sees Discord's 06:02 recap is behind and restates both. X ends with two
-    tweets carrying the same record -- the second says "(restated)", so it is
-    not duplicate content -- and Discord with its original plus one restated."""
-    w = World(monkeypatch, nhl_graded_by_midnight=True)
-    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
-            "2026-10-13T07:24:06.000000-04:00", -110.0)
-    _add_pick(w.db, late, graded=False)
-    w.x_fails = True
-    w.daily("06:02:33", NFL_PAUSED)
-    assert len(w.discord) == 1 and w.tweets == []
-    w.x_fails = False
-    w.refresh("07:24:30", late)
-    w.refresh("08:24:30")
-    assert len(w.discord) == 2 and "restated" in w.discord[1]["title"]
-    assert "2-1" in w.discord[1]["description"]
-    assert [t.split("\n")[0].split(",")[0] for t in w.tweets] == [
-        "\U0001F4CA Oct 12 results: 2-1",
-        "\U0001F4CA Oct 12 results (restated): 2-1"]
-
-
 def test_discord_failing_at_6am_is_retried_alone_at_the_next_pass(monkeypatch):
     w = World(monkeypatch, nhl_graded_by_midnight=True)
     w.discord_fails = True
@@ -408,26 +431,21 @@ def test_discord_failing_at_6am_is_retried_alone_at_the_next_pass(monkeypatch):
     assert "2-0" in w.discord[0]["description"]
 
 
-def test_a_tweet_left_behind_by_a_late_discord_post_is_restated_once(monkeypatch):
-    """Discord failed at 6am, X tweeted 2-0. A counting pick grades at 07:24
-    and Discord's retry posts 2-1. The restatement scan measures lateness
-    against Discord's snapshot (07:24), so it would never see that the tweet
-    missed a pick -- X would say 2-0 for good. The retry restates it once."""
+def test_a_tweet_that_went_out_is_never_tweeted_again(monkeypatch):
+    """Discord failed at 6am and X tweeted 2-0. A new pick lands and grades, and
+    Discord's retry posts what it finds. The tweet stands. It is not posted again."""
     w = World(monkeypatch, nhl_graded_by_midnight=True)
-    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
-            "2026-10-13T07:24:06.000000-04:00", -110.0)
-    _add_pick(w.db, late, graded=False)
     w.discord_fails = True
     w.daily("06:02:33", NFL_PAUSED)
     assert w.discord == [] and len(w.tweets) == 1
-    assert w.tweets[0].startswith("\U0001F4CA Oct 12 results: 2-0")
+    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
+            "2026-10-13T07:24:06.000000-04:00", -110.0)
+    _add_pick(w.db, late, graded=False)
     w.discord_fails = False
     w.refresh("07:24:30", late)
     w.refresh("08:24:30")
-    w.refresh("09:24:30")
-    assert len(w.discord) == 1 and "2-1" in w.discord[0]["description"]
-    assert len(w.tweets) == 2
-    assert w.tweets[1].startswith("\U0001F4CA Oct 12 results (restated): 2-1")
+    assert len(w.discord) == 1 and len(w.tweets) == 1
+    assert "restated" not in w.tweets[0]
 
 
 # ── a delivered post stays ledgered when its receipt fails ──────────────────
@@ -461,25 +479,6 @@ def test_a_failed_receipt_never_reposts_the_day(monkeypatch, failure):
         "the post went out: its ledger row must land even though the "
         "snapshot did not")
     assert w.db.execute("SELECT count(*) FROM results_snapshots").fetchone()[0] == 0
-
-
-@pytest.mark.parametrize("failure", ["lost", "error"])
-def test_a_failed_receipt_on_a_restatement_never_repeats_it(monkeypatch, failure):
-    """The same shape on the existing restatement path: a correction whose
-    snapshot write fails must still be ledgered, or every pass restates it."""
-    w = World(monkeypatch)
-    w.daily("06:02:33", NFL_PAUSED)
-    w.refresh("07:24:30", *NHL_COUNTING)
-    late = (3599999, "NHL", "nhl_prop_shots_on_goal", "LOSS", None,
-            "2026-10-13T09:24:06.000000-04:00", -110.0)
-    _add_pick(w.db, late, graded=False)
-    for hhmmss, grade in (("09:24:30", (late,)), ("10:24:30", ()),
-                          ("11:24:30", ()), ("23:54:30", ())):
-        w.conn.fail_snapshot = failure
-        w.refresh(hhmmss, *grade)
-    assert len(w.discord) == 2, f"Discord posted {len(w.discord)} recaps"
-    assert "restated" in w.discord[1]["title"]
-    assert len(w.tweets) == 2
 
 
 def test_a_later_snapshot_still_lands_after_the_ledger_commits(monkeypatch):

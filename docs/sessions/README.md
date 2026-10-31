@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, the 10-30 recap posted short and restated because the no-restatement rule was still unmerged; current master merged into that PR. |
+| 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, no restated records without mike's approval (automatic restatement removed, approval register empty, every re-post route refuses). Every record holds until each pick it counts is graded; the 6am run pulls NHL logs before settle. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, NCAAB box scores and period scores from ESPN's game summary on the hourly refresh passes (step ncaab-box, after the results step; red when the newest 5 finals were all refused), into ncaab_team_game_stats under espn_summary and a new ncaab_period_scores. Period backfill 2020-21 to 2025-26 and 2026-27 box backfill declared off. No production write. PR #1103, not merged. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters worker job: a False step returns {"ok": false} and is recorded once, instead of raising and being retried up to 3 times. pipeline_log error row unchanged. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters: fill_gaps commits as it goes and one ESPN failure no longer drops the season; the 6am run writes the reason to pipeline_log. No production write. |
