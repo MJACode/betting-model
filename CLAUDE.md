@@ -601,6 +601,7 @@ to be known BEFORE deciding which file to open.
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
 | **App crashes: `app_errors`, what each kind means, the queries** | `docs/app_errors.md` |
+| **App load times: `app_timings` (per read, per screen, cold start), the queries** | `docs/app_timings.md` |
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
