@@ -20,6 +20,22 @@
 export const PAGE_ROWS = 1000;
 const MAX_PAGES = 100;
 
+/**
+ * A page that hits the database's statement timeout (57014) is asked for once
+ * more before the read fails. The first read of the day runs on a cold cache:
+ * on 2026-10-31 the Stats board's first NBA page timed out at 15:35:43 and
+ * 15:37:10 UTC (anon's limit is 3s, the read took 3.6s cold) and the same
+ * request succeeded right after. Only a timeout is retried, and only once per
+ * read (not per page), so a real failure still reaches the error state and a
+ * slow read cannot double its wait on every page.
+ */
+export function isStatementTimeout(error: unknown): boolean {
+  if (error == null || typeof error !== 'object') return false;
+  const o = error as Record<string, unknown>;
+  if (o.code === '57014') return true;
+  return typeof o.message === 'string' && /statement timeout/i.test(o.message);
+}
+
 export async function fetchAllPages<T>(
   page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
   /** A row's identity, when the caller has one. The refresh pass writes between
@@ -30,8 +46,13 @@ export async function fetchAllPages<T>(
   const out: T[] = [];
   const seen = keyOf ? new Set<string>() : null;
   let from = 0;
+  let retried = false;
   for (let i = 0; i < MAX_PAGES; i++) {
-    const { data, error } = await page(from, from + PAGE_ROWS - 1);
+    let { data, error } = await page(from, from + PAGE_ROWS - 1);
+    if (error && !retried && isStatementTimeout(error)) {
+      retried = true;
+      ({ data, error } = await page(from, from + PAGE_ROWS - 1));
+    }
     if (error) throw error;
     const rows = (data ?? []) as T[];
     if (rows.length === 0) break;
