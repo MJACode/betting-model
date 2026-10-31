@@ -148,9 +148,10 @@ totals (difference 0.00 on 1,107 games).
     fetches reading home +1.5 at -115 / -105. It is 3.0 points from the median. No cell bets it on
     the real inputs. In 49 of the 200 placebo runs the game gets the away side at gap 5 or more, and
     the row is that side's best offer, at EV 0.021. One bet at most in each of those runs.
-  - On a game near level, a book can sit on the other side of the median without being wrong. 127
-    other rows at C are 2 or more points from the median and on its other side. Every one has a
-    median within 1.5 of level and a number within 2 of level, and the largest distance is 3.0.
+  - On a game near level, a book can sit on the other side of the median without being wrong. Besides
+    FanDuel's row, 127 rows at C are 2 or more points from the median and on its other side, the
+    BetMGM row above among them. Every one has a median within 1.5 of level and a number within 2 of
+    level, and the largest distance is 3.0.
 - **Prices:** a price with a size under 100 is not a price (none stored); an incoherent pair is
   never an offer (1 stored).
 - **Ticket shares:** a share at or outside 0 and 100 is not a share (none on the clean rows; spread
@@ -346,13 +347,36 @@ national-broadcast number is under 200, so the report's answer for each is "too 
 **C and D:** 7,230 games have a decision at C and 7,219 at D. Of the 7,219 with both, 7,205 are the
 same fetch.
 
-**Run time, measured on the real data with other jobs holding the processor at 100%:** the load and
-market pricing took 340 seconds. One placebo run across the 9 cells took 2.2 seconds, so 200 take
-about 7.4 minutes. One group of three cells, placebo aside, took 66 seconds, and there are 11
-groups, so about 12 minutes. The written reports took 6 seconds. All of it was graded against
-made-up scores (`dummy_games`), so no real result was computed. **Projected
-`--full`: about 25 minutes, peak memory 2.85 GB.** It prints a progress line per placebo batch and
-per group.
+**The swapped rule, counted 2026-10-31:** at C and at D it removes FanDuel's spread and moneyline on
+NBA_2021-12-10_BOS_PHX and nothing else. The next distances are 4.0, 3.5 and 3.0 (the `--smoke`
+list of farthest spreads). The game is still bet at another book in both markets. The highest
+spread EV among all deciding offers at C falls from 0.339 to 0.255. The 0.251 in the table above
+counts only bets at the registered cuts and did not move.
+
+**The credit line's games, counted 2026-10-31 from the choice, pooled 2021-22 to 2025-26.** `--smoke`
+and `--full` stop if the control holds a game the cell cannot bet, or if a game only the cell bets
+is not a level market.
+
+| Cell | Cell's bets | Control's bets | Only the control | Only the cell, all level markets | Games the floor keeps out of both |
+|---|---|---|---|---|---|
+| Spread, gap ≥ 5 | 3,039 | 3,039 | 0 | 0 | 0 |
+| Spread, gap ≥ 10 | 1,438 | 1,438 | 0 | 0 | 0 |
+| Spread, gap ≥ 15 | 524 | 524 | 0 | 0 | 0 |
+| Moneyline, gap ≥ 5 | 2,845 | 2,839 | 0 | 6 | 194 |
+| Moneyline, gap ≥ 10 | 1,373 | 1,369 | 0 | 4 | 65 |
+| Moneyline, gap ≥ 15 | 510 | 509 | 0 | 1 | 14 |
+
+**Neither change moved a count above.** The bets per cell and season, the bands, the television
+split, the prices, the games with a number, the fetches and the placebo table are the same as the
+run before them.
+
+**Run time, measured 2026-10-31 on the real data, sharing the machine with a test run:** the load
+and market pricing took 192 seconds. One placebo run across the 9 cells took 1.0 second, so 200 take
+about 3.4 minutes. One group of three cells, placebo aside, took 56 seconds, and there are 11 groups,
+so about 10 minutes. The written reports took 17 seconds. All of it was graded against made-up
+scores (`dummy_games`), so no real result was computed. **Projected `--full`: about 17 minutes, peak
+memory 2.81 GB.** The first measurement, with other jobs holding the processor at 100%, projected
+about 25 minutes. It prints a progress line per placebo batch and per group.
 
 **To grade it** (the owner runs this; nothing below has been run):
 
