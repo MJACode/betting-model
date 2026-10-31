@@ -215,10 +215,10 @@ same-line, pre-game and DK-only guards live.
   | `ufc_moneyline` | 3 | 2-1 | +0.57u |
   | `ncaaf_live_win_prob` | 2 | 1-1 | -0.58u |
 
-  That is the whole of UFC and every live lane looking like a broken pipeline
+  That is the whole of UFC and every in-play model looking like a broken pipeline
   (CLAUDE.md §7). The query now has a second `agg` arm reading those models out
   of `picks`, scoped by **`NOT EXISTS` against the matview on `model_id`** —
-  not by a `_live_` name pattern, which would have fixed the five live lanes
+  not by a `_live_` name pattern, which would have fixed the five in-play models
   and left UFC broken, and not by `is_live`, which would fold every pre-game
   prop model's in-play picks into its pre-game row (§6 keeps those apart).
   The anti-join makes the two arms disjoint by construction, so `UNION ALL`
@@ -291,6 +291,58 @@ pass, so the process making the calls is never the process serving the
 dashboard. The database is the only place they meet — and it is also what makes
 the local viewer show the worker's traffic, and what makes history survive a
 redeploy.
+
+**A short process writes its last calls before it exits** (fixed 2026-10-31).
+The writer thread takes a batch off the queue every 0.75 s and only then
+connects and inserts, which takes 0.3–0.45 s from the worker. The exit hook used
+to drain the queue and write what it found itself. When the writer had already
+taken the rows and was still connecting, the hook found nothing, and the
+interpreter stopped the writer (a daemon thread) with the rows in hand.
+
+- **What it cost.** From 05:25 to 11:20Z on 2026-10-31 the NCAAB odds capture
+  (one Odds API call in a ~1.3 s process, every five minutes) made 72 calls and
+  `api_call_log` kept 31. Each of the 41 missing calls shows as exactly its 3
+  credits missing from the Odds API's remaining count between the logged calls
+  either side of it. In the scheduler log, a run whose row was lost exits within
+  0.1 s of its last line; a run whose row was kept exits 0.3–0.45 s after it,
+  the time the exit hook spent writing it.
+- **The reproduction.** A child process made one call to a local stub and
+  exited, against a scratch Postgres behind a proxy adding 25 ms each way.
+  Before the fix it lost 29 of 140 rows, and 12 of 20 when the process lived
+  0.4 s past its call. In every lost run the writer was inside its connect,
+  `ensure_table` or insert when the process ended. After the fix it lost 0 of
+  140, with no duplicates. On Python 3.12, the worker's version, a shorter run
+  lost 29 of 60 before the fix and 0 of 60 after it.
+- **The fix.** The exit hook sets a stop flag and waits for the writer, which
+  finishes the batch it holds, drains the rest and stops. The main thread never
+  touches the database, so the wait is the whole bound:
+  `API_LOG_EXIT_WAIT_SEC` (default 3 s). Past it the rows are lost and the
+  process exits. A failed last batch is dropped, never retried. A process whose
+  calls were already stored exits at once; one with an unwritten row waits one
+  connect and insert (~0.4 s).
+- **How to see a loss of paid calls.** The Odds API reports the account's
+  remaining credits on every reply, so every credit spent between two logged
+  calls that is not on a logged row is a call the log does not have:
+
+  ```sql
+  WITH r AS (
+    SELECT ts, credits, quota_remaining,
+           lag(quota_remaining) OVER (ORDER BY ts) AS prev_rem
+    FROM api_call_log
+    WHERE api = 'The Odds API' AND quota_remaining IS NOT NULL
+      AND ts >= now() - interval '6 hours')
+  SELECT date_trunc('minute', ts) AS minute,
+         sum(prev_rem - quota_remaining - credits) AS unlogged_credits
+  FROM r WHERE prev_rem IS NOT NULL
+  GROUP BY 1 HAVING sum(prev_rem - quota_remaining - credits) <> 0
+  ORDER BY 1;
+  ```
+
+  Concurrent calls finish out of order, so single rows show +N and −N pairs;
+  summed by minute they cancel. A credit spent by a caller outside both Railway
+  services (a run on another machine) shows here too, so check the worker and
+  pollers logs for that minute before calling it a logging loss. A call that
+  bills 0 credits cannot be seen this way.
 
 **Three rules the probe lives by**, each with a test:
 1. It never changes what a call returns and never raises into a caller.
@@ -446,6 +498,7 @@ TTL rather than behind the meta tick.
 | `PIPELINE_TELEMETRY=0` | Stops recording everywhere (the probe never installs). |
 | `API_LOG_RETENTION_DAYS` | Prune horizon, default 7. |
 | `API_LOG_FLUSH_SEC` | Writer flush interval, default 0.75. |
+| `API_LOG_EXIT_WAIT_SEC` | Longest a process's exit waits for its last calls to be written, default 3. |
 | `MONITOR_POLL_SEC` | Stream poll interval, default 1.0. |
 | `DISCORD_BOT_TOKEN` | Enables the Discord member/online tiles (with the guild id). |
 | `DISCORD_GUILD_ID` | The server id. Both are needed; neither is used for posting. |
@@ -460,6 +513,13 @@ A call made by a process that never imports `monitoring` is invisible. The four
 entrypoints are wired (`scheduler.py`, `run_pipeline.py`, the live orchestrator,
 both live gameday loops); a one-off script run by hand is not, unless it goes
 through `run_pipeline.py`.
+
+One scheduled job is in that state today: `nfl-schedule-refresh`
+(`python -m data.ingestors.nfl_props_data_ingestor --schedule-only`, every 15
+minutes) fetches the nflverse schedule and never installs the probe. It ran 24
+times from 05:22 to 11:22Z on 2026-10-31 and has no rows. The tripwire in
+`tests/test_monitoring.py` only checks the `scripts.*` modules the scheduler
+runs, so a `data.ingestors.*` entrypoint passes it.
 
 
 ---

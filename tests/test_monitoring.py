@@ -7,6 +7,7 @@ public Railway URL. Both are places where a mistake is silent.
 
 import http.server
 import json
+import os
 import re
 import threading
 import time
@@ -337,6 +338,123 @@ def test_curl_cffi_is_patched_only_once(http_server):
 
     cc.Session().get(http_server + "/x")
     assert len(probe._drain()) == 1
+
+
+# ── a short process keeps its last call ──────────────────────────────────────
+# 2026-10-31: the NCAAB odds capture (one call, ~1.3 s per process) made 72
+# calls in six hours and api_call_log kept 31. The writer thread had taken each
+# lost row off the queue and was still connecting when the process exited; the
+# exit flush found the queue empty, and the interpreter stopped the thread with
+# the row in hand. These run a real child process with the real writer, against
+# a sqlite file and a connect slowed down on purpose, so the race is not left
+# to chance.
+
+_EXIT_CHILD = r'''
+import os, sqlite3, sys, threading, time
+db_path, url, connect_delay, mode = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+
+from monitoring import probe, store
+import data.db
+
+connecting = threading.Event()
+
+
+class Conn:
+    """Just enough of data.db.DBConnection for the writer: INSERT_SQL's ?
+    placeholders are sqlite's own."""
+    def __init__(self):
+        self.c = sqlite3.connect(db_path, check_same_thread=False)
+
+    def executemany(self, sql, rows):
+        self.c.executemany(sql, [tuple(v.isoformat() if hasattr(v, "isoformat") else v
+                                       for v in r) for r in rows])
+
+    def execute(self, sql, params=()):
+        return self.c.execute(sql, params)
+
+    def commit(self):
+        self.c.commit()
+
+    def rollback(self):
+        self.c.rollback()
+
+    def close(self):
+        self.c.close()
+
+
+def slow_connect(*a, **k):
+    connecting.set()
+    time.sleep(connect_delay)          # the pooler's round trips, made long
+    return Conn()
+
+
+data.db.get_connection = slow_connect
+store.ensure_table = lambda conn: None
+probe.install("exit-flush-test")
+
+import requests
+requests.get(url + "/v4/sports/basketball_ncaab/odds", params={"apiKey": "SECRET"}, timeout=5)
+if mode == "drained":
+    # The writer has taken the row off the queue and is connecting: the
+    # state 41 of the 72 production exits were in.
+    assert connecting.wait(10), "the writer never picked the row up"
+print(f"MAIN_DONE {time.time():.3f}", flush=True)
+sys.exit(0)
+'''
+
+
+def _run_exit_child(tmp_path, url, *, connect_delay, mode, env_extra, timeout):
+    import sqlite3
+    import subprocess
+    import sys
+    db_path = tmp_path / "api_call_log.sqlite"
+    cols = ", ".join(store.INSERT_COLUMNS)
+    with sqlite3.connect(db_path) as c:
+        c.execute(f"CREATE TABLE IF NOT EXISTS api_call_log ({cols})")
+    script = tmp_path / "exit_child.py"
+    script.write_text(_EXIT_CHILD, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("API_LOG_")}
+    # A sentinel, never a real database: data.db loads .env without
+    # overriding, so a child whose patch failed fails to resolve instead of
+    # writing a test row into production.
+    env.update({"DATABASE_URL": "postgresql://exit-flush-test.invalid:1/none",
+                "PYTHONPATH": str(ROOT), "PIPELINE_TELEMETRY": "1",
+                "PYTHONIOENCODING": "utf-8", **env_extra})
+    proc = subprocess.run(
+        [sys.executable, str(script), str(db_path), url, str(connect_delay), mode],
+        cwd=str(tmp_path), env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=timeout)
+    ended = time.time()
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    main_done = float(re.search(r"MAIN_DONE (\d+\.\d+)", proc.stdout).group(1))
+    with sqlite3.connect(db_path) as c:
+        rows = c.execute("SELECT source, status FROM api_call_log").fetchall()
+    return rows, ended - main_done
+
+
+def test_a_short_process_writes_its_last_call_before_it_exits(http_server, tmp_path):
+    rows, _ = _run_exit_child(
+        tmp_path, http_server, connect_delay=0.5, mode="drained",
+        env_extra={"API_LOG_FLUSH_SEC": "0.05"}, timeout=60)
+    assert rows == [("exit-flush-test", 200)], (
+        "the process exited while its writer held the row, and the row was lost")
+
+
+def test_exit_waits_a_bounded_time_for_a_database_that_never_answers(http_server, tmp_path):
+    """No connect timeout is set anywhere on this path, so an unreachable
+    database can hold a connect for minutes. The exit gives up after
+    API_LOG_EXIT_WAIT_SEC and loses the rows, rather than holding the job."""
+    import subprocess
+    try:
+        _, exit_took = _run_exit_child(
+            tmp_path, http_server, connect_delay=30, mode="queued",
+            env_extra={"API_LOG_FLUSH_SEC": "60", "API_LOG_EXIT_WAIT_SEC": "0.5"},
+            timeout=20)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the process was still exiting 20 s later: exit waited on the "
+                    "database connect with no bound")
+    assert exit_took < 5, f"exit took {exit_took:.1f}s past the end of main"
 
 
 # ── coverage tripwire ────────────────────────────────────────────────────────

@@ -17,6 +17,8 @@ THE RULES THIS MODULE LIVES BY
     kept independent of the telemetry kill switch.
   * It must never make a call slower. Recording is a bounded in-memory queue and
     a daemon thread; nothing touches the database on the request path.
+  * A process's last calls are written before it exits, and the exit waits a
+    bounded time for that (API_LOG_EXIT_WAIT_SEC). See _flush_on_exit.
   * It must never leak a key. The query string is dropped except for an
     allowlist of descriptive params — `apiKey`, `key` and friends can therefore
     never be persisted, not even by accident on a new host.
@@ -80,12 +82,21 @@ _DEFAULT_TIMEOUT = (
 _MAX_QUEUE = int(os.environ.get("API_LOG_QUEUE", "5000"))
 _FLUSH_SEC = float(os.environ.get("API_LOG_FLUSH_SEC", "0.75"))
 _PRUNE_EVERY_SEC = 3600
+# The longest a process's exit waits for its writer to store what it recorded.
+# A normal final write from the worker is one connect plus one insert, which
+# the scheduler log puts at 0.3-0.45 s. Nothing on this path sets a connect
+# timeout, so without this bound an unreachable database could hold an exit for
+# as long as the TCP connect takes. The shortest timeout scheduler.py puts on any
+# job is 60 s, so the wait cannot push a job past its own.
+_EXIT_WAIT_SEC = float(os.environ.get("API_LOG_EXIT_WAIT_SEC", "3"))
 
 _installed = False
 _timeout_floor_installed = False
 _lock = threading.Lock()
 _q: queue.Queue = queue.Queue(maxsize=_MAX_QUEUE)
 _source = "unknown"
+_stop = threading.Event()               # set once, at exit
+_writer: threading.Thread | None = None
 
 # Odds API credits are not in the response body. Each response carries
 # x-requests-last, the API's own bill for THAT call, and it is what is
@@ -261,50 +272,76 @@ def _writer_loop() -> None:
     # prune hourly.
     last_prune = time.time()
     while True:
-        time.sleep(_FLUSH_SEC)
-        rows = _drain()
-        if not rows:
-            continue
-        try:
-            if conn is None:
-                from data.db import get_connection
-                conn = get_connection()
-                ensured = False
-            if not ensured:
-                store.ensure_table(conn)
-                ensured = True
-            conn.executemany(store.INSERT_SQL, rows)
-            conn.commit()
-
-            now = time.time()
-            if now - last_prune > _PRUNE_EVERY_SEC:
-                last_prune = now
-                store.prune(conn)
-        except Exception:
-            # A dead connection (the Supabase pooler drops idle ones) or a
-            # transient failure: drop this batch, reconnect next tick. Telemetry
-            # is never worth retrying into a backlog.
+        # A wait on the stop flag rather than a sleep: at exit the flag is set
+        # and the writer goes straight to its last pass instead of finishing
+        # the nap. A batch already in hand is written first, because the exit
+        # waits for this thread (_flush_on_exit), not for the queue.
+        stopping = _stop.wait(_FLUSH_SEC)
+        rows = _drain(max_rows=_MAX_QUEUE if stopping else 500)
+        if rows:
             try:
-                if conn is not None:
-                    conn.close()
+                if conn is None:
+                    from data.db import get_connection
+                    conn = get_connection()
+                    ensured = False
+                if not ensured:
+                    store.ensure_table(conn)
+                    ensured = True
+                conn.executemany(store.INSERT_SQL, rows)
+                conn.commit()
+
+                now = time.time()
+                if not stopping and now - last_prune > _PRUNE_EVERY_SEC:
+                    last_prune = now
+                    store.prune(conn)
             except Exception:
-                pass
-            conn = None
+                # A dead connection (the Supabase pooler drops idle ones) or a
+                # transient failure: drop this batch, reconnect next tick.
+                # Telemetry is never worth retrying into a backlog -- and that
+                # holds at exit too: a failed last batch is lost, not retried.
+                try:
+                    if conn is not None:
+                        conn.close()
+                except Exception:
+                    pass
+                conn = None
+        if stopping:
+            break
+    try:
+        if conn is not None:
+            conn.close()
+    except Exception:
+        pass
 
 
 def _flush_on_exit() -> None:
-    rows = _drain(max_rows=_MAX_QUEUE)
-    if not rows:
-        return
-    try:
-        from data.db import get_connection
-        conn = get_connection()
-        store.ensure_table(conn)
-        conn.executemany(store.INSERT_SQL, rows)
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
+    """Let the writer store what this process recorded, for at most
+    _EXIT_WAIT_SEC, then let the process go.
+
+    WHY THE WRITER DOES IT, NOT THIS FUNCTION. This used to drain the queue and
+    write the rows itself. But the writer may already have drained them: it
+    takes a batch off the queue and only then connects and inserts, 0.3-0.45 s
+    from the worker. A process that exited inside that window found the queue empty
+    here, and the interpreter then stopped the writer -- a daemon thread --
+    with the rows in hand. Measured 2026-10-31: the NCAAB odds capture, one
+    call in a ~1.3 s process, made 72 calls in six hours and api_call_log kept
+    31; each of the 41 lost calls shows as its 3 credits missing from the Odds
+    API's remaining count. In the scheduler log a lost run exits within 0.1 s
+    of its last line, and a kept one 0.3-0.45 s after it: the kept rows were
+    the ones this function still found on the queue and wrote. So this now
+    sets the stop flag and joins the writer, which finishes the batch it
+    holds, drains the rest and stops.
+
+    The main thread never touches the database here, so the join's timeout is
+    the whole bound. Past it the rows are lost and the exit goes ahead: a
+    process must not hang on its telemetry. If the writer is gone (it catches
+    every Exception, so only something like a KeyboardInterrupt inside it could
+    end it), its rows go with it rather than the exit waiting on a connect.
+    """
+    _stop.set()
+    t = _writer
+    if t is not None and t.is_alive():
+        t.join(_EXIT_WAIT_SEC)
 
 
 # ── the patch ────────────────────────────────────────────────────────────────
@@ -392,7 +429,7 @@ def install_timeout_floor() -> bool:
 
 def install(source: str = "unknown", start_writer: bool = True) -> bool:
     """Patch requests and start the writer. Idempotent; returns True if it took."""
-    global _installed, _source, _timeout_floor_installed
+    global _installed, _source, _timeout_floor_installed, _writer
     if os.environ.get("PIPELINE_TELEMETRY", "1") == "0":
         # The deadline still applies -- see install_timeout_floor.
         install_timeout_floor()
@@ -468,8 +505,12 @@ def install(source: str = "unknown", start_writer: bool = True) -> bool:
         _installed = True
 
     if start_writer:
-        threading.Thread(target=_writer_loop, name="api-telemetry",
-                         daemon=True).start()
+        # Still a daemon: a process that never reaches atexit (os._exit, a
+        # kill) must not be held open by its telemetry. _flush_on_exit is what
+        # gives it the time to finish.
+        _writer = threading.Thread(target=_writer_loop, name="api-telemetry",
+                                   daemon=True)
+        _writer.start()
         atexit.register(_flush_on_exit)
     return True
 
