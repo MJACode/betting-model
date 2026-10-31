@@ -140,8 +140,8 @@ totals (difference 0.00 on 1,107 games).
 | Market | Lowest | Median | Highest | Bets on the underdog |
 |---|---|---|---|---|
 | Spread, against the popular team, gap ≥ 5 / 10 / 15 | -120 | -110 | +102 | 81% / 86% / 90% |
-| Moneyline, against the popular team, gap ≥ 5 / 10 / 15 | -200 | +220 / +260 / +295 | +2500 / +2250 / +1300 | 86% / 90% / 92% |
-| Total under | -125 | | +105 | |
+| Moneyline, against the popular team, gap ≥ 5 / 10 / 15 | -200 | +220 / +260 / +290 | +2500 / +2250 / +1300 | 86% / 90% / 92% |
+| Total under, habit ≥ 1 / 2 / 3 | -115 | -110 | +100 | |
 
 So the moneyline cells are long-price underdog bets, sized to win one unit: a bet at +1300 risks
 0.077 units.
@@ -227,7 +227,11 @@ above the 95th percentile of 200 placebo runs.
 | Total tickets report | each POPT cell on 2021-22 to 2023-24 and on 2024-25 to 2025-26 apart (1) |
 | Step 1 report | the popular side's (or the under's) result minus Pinnacle's no-vig close at the close's number, a push left out, per band and as a slope per ticket point, with a whole-day bootstrap interval. Graded data, so `--full` only. |
 
-## 9. Counts that set the rules (measured 2026-10-30, no result read)
+## 9. Counts before grading (measured 2026-10-30, re-counted by the lab 2026-10-31, no result read)
+
+Everything in this section is printed by `python -m scripts.nba_s_popular --smoke` and was read
+before any bet was graded. Only the table below stood when the rules were committed; the rest was
+added after the lab's first runs.
 
 Bets each cell would place at C with a deciding offer at or above the floor. Counted from the
 choice, never the grade:
@@ -247,13 +251,91 @@ choice, never the grade:
 The moneyline counts are lower because the -200 floor removes a price when the team bet against
 the public is itself a heavy favourite.
 
+**Games with a number at all** (both teams 10 or more earlier games): 919 of 1,080 / 1,073 of 1,230
+/ 1,073 / 1,057 / 1,075 / 1,075, 2020-21 to 2025-26.
+
+**Pooled bets per band, 2021-22 to 2025-26:**
+
+| Cell | Band 1 | Band 2 | Band 3 | Top band |
+|---|---|---|---|---|
+| Spread | [0, 5): 2,311 | [5, 10): 1,601 | [10, 15): 914 | 15+: 524 |
+| Moneyline | [0, 5): 1,943 | [5, 10): 1,472 | [10, 15): 863 | 15+: 510 |
+| Total under | [0, 1): 640 | [1, 2): 538 | [2, 3): 245 | 3+: 159 |
+
+**National television, bets by group (national broadcast / NBA TV only / neither).** Every
+national-broadcast number is under 200, so the report's answer for each is "too few games to tell".
+
+| Cell | 2025-26 | 2020-21 |
+|---|---|---|
+| Spread, gap ≥ 5 / 10 / 15 | 116, 27, 497 / 58, 15, 260 / 13, 9, 108 | 36, 22, 198 / 5, 4, 38 / 1, 0, 4 |
+| Moneyline, gap ≥ 5 / 10 / 15 | 101, 26, 462 / 50, 15, 250 / 10, 9, 107 | 32, 20, 198 / 5, 4, 38 / 1, 0, 4 |
+| Total under, habit ≥ 1 / 2 / 3 | 86, 15, 121 / 47, 6, 51 / 9, 2, 15 | 23, 13, 60 / 11, 3, 26 / 2, 3, 9 |
+
+**The placebo is a null on the real data** (seeds 1-3, all six seasons, under the rule in 10):
+
+| Cell | Real bets | Placebo bets, mean | Placebo bets that are not real bets | Real bets a placebo repeats | Underdog share, real / placebo |
+|---|---|---|---|---|---|
+| Spread, gap ≥ 5 | 3,295 | 3,295 | 71.3% | 28.7% | 80.7% / 49.6% |
+| Spread, gap ≥ 10 | 1,485 | 1,485 | 85.3% | 14.7% | 85.9% / 50.0% |
+| Spread, gap ≥ 15 | 529 | 529 | 93.6% | 6.4% | 89.6% / 49.6% |
+| Moneyline, gap ≥ 5 | 3,095 | 2,409 | 63.1% | 28.7% | 86.0% / 68.1% |
+| Moneyline, gap ≥ 10 | 1,420 | 1,079 | 80.6% | 14.7% | 90.1% / 68.8% |
+| Moneyline, gap ≥ 15 | 515 | 389 | 91.4% | 6.5% | 92.4% / 67.2% |
+| Total under, habit ≥ 1 | 1,038 | 1,038 | 85.4% | 14.6% | |
+| Total under, habit ≥ 2 | 444 | 444 | 93.2% | 6.8% | |
+| Total under, habit ≥ 3 | 173 | 173 | 96.3% | 3.7% | |
+
+- The repeats at the lowest cut are the rule's own reach: at gap ≥ 5 the rule fires on most games,
+  so a donor from the same night often lands on the same side.
+- On the moneyline a placebo places 22-24% fewer bets, because a shuffled side can be a favourite
+  beyond the -200 floor. That is also why its underdog share is 67-69%, not about half.
+
+**Extremes of every number read, after the rule for impossible numbers:**
+
+| Number | Lowest | Highest |
+|---|---|---|
+| Ticket share, clean rows: spread sides / over / under | 7 / 15 / 2 | 93 / 98 / 85 |
+| A team's popularity | 26.44 | 72.37 |
+| The gap's size | 0.00 | 36.19 |
+| A team's mean over share | 43.93 | 92.10 |
+| The smaller over habit | -16.78 | +6.77 |
+| Deciding offers at C, spread number (HOME) / price | -24.5 / -135 | +21.5 / +110 |
+| Deciding offers at C, total number / price | 195.5 / -125 | 262.0 / +105 |
+| Deciding offers at C, moneyline price | -200 | +2500 |
+| Highest EV on an offer a cell bets: spread / moneyline / total | | 0.251 / 0.676 / 0.075 |
+
+**No rule reads a game that has not started.** The latest tip any game's number reads is at least
+20 hours before that game's decision (1st percentile 22, median 47).
+
+**C and D:** 7,230 games have a decision at C and 7,219 at D. Of the 7,219 with both, 7,205 are the
+same fetch.
+
+**Run time, measured on the real data with other jobs holding the processor at 100%:** the load and
+market pricing took 340 seconds. One placebo run across the 9 cells took 2.2 seconds, so 200 take
+about 7.4 minutes. One group of three cells, placebo aside, took 66 seconds, and there are 11
+groups, so about 12 minutes. The written reports took 6 seconds. All of it was graded against
+made-up scores (`dummy_games`), so no real result was computed. **Projected
+`--full`: about 25 minutes, peak memory 2.85 GB.** It prints a progress line per placebo batch and
+per group.
+
+**To grade it** (the owner runs this; nothing below has been run):
+
+```bash
+NBA_RESEARCH_CACHE=C:/Users/micha/documents/bm-nba-q1trend/data/local/nba \
+NBA_GAME2_GO=1 NBA_GAME2_RESULTS=C:/Users/micha/AppData/Local/Temp/nba_s/popular/results \
+NBA_GAME2_BETS=C:/Users/micha/AppData/Local/Temp/nba_s/popular/results/bets \
+PYTHONPATH=. PYTHONIOENCODING=utf-8 python -W ignore -m scripts.nba_s_popular --full
+PYTHONPATH=. python -m scripts.nba_game2_verdict --results C:/Users/micha/AppData/Local/Temp/nba_s/popular/results --house5
+PYTHONPATH=. python -m scripts.nba_s_popular --credit --results C:/Users/micha/AppData/Local/Temp/nba_s/popular/results
+```
+
 ## 10. Changes after the first smoke run, before any bet was graded
 
 **2026-10-31: no game keeps its own inputs in the placebo.** The first `--smoke` used a plain
 permutation per date. On the real data 62% / 73% / 81% of the placebo's spread bets differed from
 the real bets at gap ≥ 5 / 10 / 15 (53% / 66% / 75% on the moneyline, 74% / 81% / 83% on the total).
-A plain permutation leaves about one game in seven on its own inputs, because a date averages about
-seven games, and those games repeat their real bets. A placebo that shares bets with the real rule
-shares its luck, which makes the bar harder to read. So each date's permutation now leaves no game
-in its place (`no_fixed_points`). This reads no result. The share measured under the new rule is in
+A plain permutation leaves about one game in eight on its own inputs (956 dates over 7,230 games),
+and those games repeat their real bets. A placebo that shares bets with the real rule shares its
+luck, which makes the bar harder to read. So each date's permutation now leaves no game in its
+place (`no_fixed_points`). This reads no result. The share measured under the new rule is in
 section 9.
