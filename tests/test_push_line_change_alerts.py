@@ -58,6 +58,7 @@ def _alerts(monkeypatch, model_id, side, locked_odds, locked_line, dk_row):
 
 @pytest.mark.parametrize("model_id, side, line, moved_to, col", [
     ("nba_team_total_luck", "under", 115.5, 113.5, "total_line"),
+    ("nba_first_half_total_luck", "over", 112.5, 113.5, "total_line"),
     ("nba_total_luck", "over", 225.5, 227.5, "total_line"),
     ("wnba_spread", "home", -4.5, -6.5, "spread_home"),
 ])

@@ -253,5 +253,7 @@ def test_the_sql_recompute_reads_a_team_total_close_from_close_rows_only(alias):
     other market keeps its pre-game rows. Text, because the recompute runs
     only in Postgres; checked there with EXPLAIN."""
     body = _lateral(MIGRATION.read_text(encoding="utf-8"), alias)
-    assert ("(s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close') OR "
-            "(s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play')") in body
+    assert ("((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1') "
+            "AND o.snapshot_type = 'close') OR "
+            "(s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1' "
+            "AND o.snapshot_type <> 'in_play')") in body

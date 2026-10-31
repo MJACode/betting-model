@@ -163,6 +163,40 @@ def run(start: str, end: str) -> dict:
         conn.close()
 
 
+# The model whose picks settle on these rows, and how many of its dates one pass
+# may fetch: one scoreboard call a date, newest first.
+FIRST_HALF_MODEL = "nba_first_half_total_luck"
+MAX_PENDING_DATES = 20
+
+
+def ensure_first_half_period_scores(get=requests.get) -> dict:
+    """Fetch the quarters of every game holding a pending first-half BET that has
+    a final and no period row, on this connection's own commits, for
+    tracking/paper_tracker.settle_picks. One scoreboard call per such date; none
+    when no pick waits, so it costs one read on every other pass. The connection
+    holds no transaction across a call."""
+    conn = get_connection()
+    try:
+        ensure_table(conn)
+        todo = [str(r[0]) for r in conn.execute(
+            "SELECT DISTINCT p.game_date FROM picks p JOIN games g ON g.game_id = p.game_id "
+            "WHERE p.model_id = %s AND p.signal_type = 'BET' AND p.result IS NULL "
+            "AND g.home_score IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM nba_period_scores s WHERE s.game_id = p.game_id) "
+            "ORDER BY p.game_date DESC LIMIT %s",
+            (FIRST_HALF_MODEL, MAX_PENDING_DATES)).fetchall()]
+        conn.rollback()
+        stats = {"dates": len(todo), "rows": 0}
+        for d in todo:
+            data = fetch_date(d, get=get)
+            if data is None:
+                continue
+            stats["rows"] += write(conn, parse_period_rows(data))
+        return stats
+    finally:
+        conn.close()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--start")
