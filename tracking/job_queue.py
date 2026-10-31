@@ -1270,9 +1270,23 @@ def _job_discord_probe(**kw):
         except Exception as exc:                              # noqa: BLE001
             out[label] = {"error": str(exc)[:200]}
 
+    # A sport that posts through its channel id and the bot token
+    # (DISCORD_CHANNEL_<SPORT>, NCAAB from 2026-10-30) has no webhook variable
+    # to probe: report the bot's webhook in that channel instead, read by GET
+    # only and never with its token. A webhook variable, when set, wins in the
+    # notifier, so it is what was probed above.
+    from tracking.discord_notifier import channel_hook_info
+    by_channel = [s for s in sorted(getattr(config, "DISCORD_CHANNELS", {}) or {})
+                  if s not in config.DISCORD_WEBHOOKS]
+    for sport in by_channel:
+        try:
+            out[f"sport:{sport}"] = channel_hook_info(sport)
+        except Exception as exc:                              # noqa: BLE001
+            out[f"sport:{sport}"] = {"error": type(exc).__name__}
+
     channels = [v.get("channel_id") for v in out.values() if v.get("channel_id")]
     out["_summary"] = {
-        "probed": len(targets),
+        "probed": len(targets) + len(by_channel),
         "distinct_channels": len(set(channels)),
         "collisions": sorted({c for c in channels if channels.count(c) > 1}),
     }

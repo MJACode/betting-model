@@ -156,6 +156,9 @@ def test_decision_hours_are_22z_the_evening_before_then_15z_on_until_tip():
 # ── box scores ───────────────────────────────────────────────────────────────
 
 def test_the_play_by_play_row_wins_and_the_key_is_espns_game_id():
+    """One source per game: where NCAA's play-by-play rows hold a game, only
+    they are kept, never a mix of NCAA's row for one side and ESPN's for the
+    other (a mix averaged three estimates into the possessions)."""
     import models.ncaab_total_blend as nb
     rows = pd.DataFrame([
         {"contest_id": "espn:9", "espn_game_id": 9, "team_espn_id": 1, "source": "espn_summary", "fga": 60.0},
@@ -164,9 +167,78 @@ def test_the_play_by_play_row_wins_and_the_key_is_espns_game_id():
         {"contest_id": "777", "espn_game_id": None, "team_espn_id": 3, "source": nb.PLAY_BY_PLAY_SOURCE, "fga": 50.0},
     ])
     d = nb.dedupe_box(rows)
-    assert len(d) == 3
+    assert len(d) == 2
+    assert set(d["source"]) == {nb.PLAY_BY_PLAY_SOURCE}
     assert d[d["team_espn_id"] == 1]["fga"].tolist() == [61.0]
     assert set(d["_key"]) == {"espn:9", "contest:777"}
+
+
+def _box_row(contest, team, tid, source, fga, orb, tov, fta, eid=401487517.0):
+    return {"contest_id": contest, "team": team, "espn_game_id": eid, "team_espn_id": tid,
+            "source": source, "fga": fga, "orb": orb, "tov": tov, "fta": fta}
+
+
+def test_a_game_whose_two_rows_both_lack_a_team_id_keeps_both_rows():
+    """NCAA's rows for 145 games (31 of them from 2022-23 on) carry no ESPN
+    team id on either side: Mercy at FDU, contest 2335540, event 401487517.
+    Deduplicating on (game, team id) read the two blank ids as one team and
+    kept one row, so the game's possessions were one team's estimate (84.075)
+    and the hold saw one box row where it needs two."""
+    import models.ncaab_total_blend as nb
+    pbp = nb.PLAY_BY_PLAY_SOURCE
+    rows = pd.DataFrame([_box_row("2335540", "Mercy", np.nan, pbp, 61.0, 6.0, 23.0, 13.0),
+                         _box_row("2335540", "FDU", np.nan, pbp, 76.0, 15.0, 15.0, 17.0)])
+    d = nb.dedupe_box(rows)
+    assert sorted(d["team"]) == ["FDU", "Mercy"]
+    d["game_id"] = "g"
+    assert nb.game_possessions(d)["g"] == pytest.approx((84.175 + 84.075) / 2)
+
+
+def test_a_game_both_sources_hold_keeps_one_sources_rows():
+    """Farmingdale State at Stony Brook (event 401827274): NCAA's two rows, the
+    non-Division I side with no team id, and the ESPN feed's two rows, both
+    with ids. Deduplicating on (game, team id) kept three rows, NCAA's two and
+    ESPN's Farmingdale row, so that side counted twice in the possessions."""
+    import models.ncaab_total_blend as nb
+    pbp, eid = nb.PLAY_BY_PLAY_SOURCE, 401827274.0
+    ncaa = [_box_row("6400001", "Stony Brook", 2619.0, pbp, 62.0, 9.0, 12.0, 20.0, eid),
+            _box_row("6400001", "Farmingdale St.", np.nan, pbp, 66.0, 11.0, 16.0, 12.0, eid)]
+    espn = [_box_row("espn:401827274", "Stony Brook", 2619.0, "espn_summary", 62.0, 9.0, 12.0, 20.0, eid),
+            _box_row("espn:401827274", "Farmingdale State", 3149.0, "espn_summary", 67.0, 10.0, 16.0, 12.0, eid)]
+    for order in (ncaa + espn, espn + ncaa):
+        d = nb.dedupe_box(pd.DataFrame(order))
+        assert len(d) == 2 and set(d["source"]) == {pbp}, d[["team", "source"]]
+        d["game_id"] = "g"
+        assert nb.game_possessions(d)["g"] == pytest.approx(
+            ((62 - 9 + 12 + 0.475 * 20) + (66 - 11 + 16 + 0.475 * 12)) / 2)
+
+
+def test_a_team_whose_old_games_have_no_team_ids_is_not_held():
+    """The live card's hold needs two box rows on a game. With NCAA's rows for
+    FDU's games (no team id on either side), each such game kept one row, so
+    two of them held every FDU game as box_missing for the rest of the season
+    (2024-25: FDU and Saint Francis had five each)."""
+    import models.ncaab_total_blend as nb
+    games, box = _season()
+    sg0, _ = _prepared(games, box)
+    t0, at = _late_target(sg0)
+    gid = t0["game_id"].iloc[0]
+    home = int(t0["home_espn_id"].iloc[0])
+    cut_ns = nb.floor_hour_ns(nb.to_ns(at))
+    mine = sg0[((sg0["home_espn_id"] == home) | (sg0["away_espn_id"] == home)) & (sg0["end_ns"] <= cut_ns)]
+    old = mine.sort_values("end_ns")["game_id"].iloc[-4:-2].tolist()     # ended days before the quote
+    ev = dict(zip(games["game_id"], games["espn_event_id"]))
+    ncaa = box.copy()
+    on_old = ncaa["espn_game_id"].isin([ev[g] for g in old])
+    ncaa.loc[on_old, "team_espn_id"] = np.nan
+    ncaa.loc[on_old, "source"] = nb.PLAY_BY_PLAY_SOURCE
+    ncaa.loc[on_old, "contest_id"] = ncaa.loc[on_old, "espn_game_id"].astype("int64").astype(str) + "0"
+    sg, b = _prepared(games, ncaa)
+    assert b[b["game_id"].isin(old)].groupby("game_id").size().tolist() == [2, 2]
+    art = _art(sorted(set(sg["home_espn_id"])))
+    t = sg[sg["game_id"] == gid]
+    (d,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, sg, b, art, 0.04)
+    assert d.status == "bets", d.detail
 
 
 def test_possessions_are_the_box_estimate_averaged_and_bounded():
@@ -463,6 +535,105 @@ def test_the_kill_switch_reads_nothing(monkeypatch):
     assert card.run_card(do_publish=True)["off"] is True
 
 
+# ── a run that cannot decide its games fails, after publishing the rest ──────
+
+class _ClosingConn:
+    def close(self):
+        pass
+
+
+def _card_run(monkeypatch, art, extra_season=None, drop_boxes=()):
+    """run_card over the synthetic season's last game, read through stubs:
+    no database. `extra_season` adds a game of that season to the slate;
+    `drop_boxes` removes those games' box rows. -> (card, published calls)."""
+    import scripts.ncaab_total_card as card
+    monkeypatch.delenv("RUN_NCAAB_TOTAL_CARD", raising=False)
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    t, at = _late_target(sg)
+    gid = t["game_id"].iloc[0]
+    tip = datetime.fromisoformat(t["commence_time"].iloc[0].replace("Z", "+00:00"))
+    slate = {gid: {"season": 2027, "game_date": t["game_date"].iloc[0], "tip": tip,
+                   "commence_time": t["commence_time"].iloc[0], "home": "Duke", "away": "Kansas"}}
+    if extra_season:
+        slate["NCAAB_next_season"] = dict(slate[gid], season=extra_season)
+    box = box[~box["espn_game_id"].isin(games[games["game_id"].isin(drop_boxes)]["espn_event_id"])]
+    monkeypatch.setattr(card, "get_connection", lambda: _ClosingConn())
+    monkeypatch.setattr(card, "slate", lambda conn, now: slate)
+    monkeypatch.setattr(card, "decided_games", lambda conn, ids: set())
+    monkeypatch.setattr(card, "ensure_decisions_table", lambda conn: None)
+    monkeypatch.setattr(card, "artifact", lambda: art)
+    monkeypatch.setattr(card, "load_season", lambda conn, season: (games, box))
+    monkeypatch.setattr(card, "load_quotes", lambda conn, g, now: {
+        x: _quote(x, line=100.5, at=at) for x in g if x == gid})
+    import models.scorer as scorer
+    monkeypatch.setattr(scorer, "_get_current_bankroll", lambda conn: 1000.0)
+    calls = []
+    monkeypatch.setattr(card, "publish", lambda conn, rows, decisions, hour, refused:
+                        calls.append([d.status for d in decisions]) or (len(rows), len(decisions)))
+    now = at.replace(minute=0) + timedelta(hours=1, minutes=5)   # 22:05Z, the evening before
+    assert now.hour == 22
+    return card, calls, now, (sg, t, at)
+
+
+def test_an_artifact_for_another_season_fails_the_run_after_publishing(monkeypatch):
+    """November 2027 with nobody having rebuilt the artifact: every game of
+    season 2028 is skipped. The run used to log an error and exit 0, so the
+    heartbeat stayed green and the model placed nothing all season."""
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, calls, now, _ = _card_run(monkeypatch, art, extra_season=2028)
+    with pytest.raises(card.CardIncomplete, match="season 2028"):
+        card.run_card(do_publish=True, now=now)
+    assert calls == [["bets"]]          # season 2027's bet still went to the ledger first
+
+
+def test_a_missing_blend_fails_the_run(monkeypatch):
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    art["blend"]["Dec+"] = None
+    card, calls, now, _ = _card_run(monkeypatch, art)
+    with pytest.raises(card.CardIncomplete, match="no_blend"):
+        card.run_card(do_publish=False, now=now)
+
+
+def test_a_season_long_box_hold_fails_the_run(monkeypatch):
+    """box_missing holds every game of a team until its old boxes land, which
+    can be all season: the run fails so the failure alerter says so."""
+    import models.ncaab_total_blend as nb
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    t, at = _late_target(sg)
+    home = int(t["home_espn_id"].iloc[0])
+    cut_ns = nb.floor_hour_ns(nb.to_ns(at))
+    mine = sg[((sg["home_espn_id"] == home) | (sg["away_espn_id"] == home)) & (sg["end_ns"] <= cut_ns)]
+    old = mine.sort_values("end_ns")["game_id"].iloc[-3:-1].tolist()
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, calls, now, _ = _card_run(monkeypatch, art, drop_boxes=old)
+    with pytest.raises(card.CardIncomplete, match="box_missing"):
+        card.run_card(do_publish=False, now=now)
+
+
+def test_a_complete_run_does_not_raise(monkeypatch):
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, calls, now, _ = _card_run(monkeypatch, art)
+    out = card.run_card(do_publish=True, now=now)
+    assert out["bets"] == 1 and calls == [["bets"]]
+
+
+def test_an_incomplete_run_exits_non_zero(monkeypatch):
+    import scripts.ncaab_total_card as card
+    monkeypatch.setattr(card, "run_card", lambda do_publish=False: (_ for _ in ()).throw(
+        card.CardIncomplete("season 2028: no artifact")))
+    with pytest.raises(SystemExit) as e:
+        card.main(["--publish"])
+    assert e.value.code == 1
+
+
 # ── the job ──────────────────────────────────────────────────────────────────
 
 def _jobs(monkeypatch):
@@ -495,9 +666,35 @@ def test_the_job_runs_the_card_and_publishes(monkeypatch):
     scheduler.run_ncaab_total_card()
     assert ran[0][-3:] == ["-m", "scripts.ncaab_total_card", "--publish"]
     assert pub == ["ncaab-total-card"]
+    # a run that fails still publishes what it wrote, THEN raises
     monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw: "fail")
     with pytest.raises(RuntimeError):
         scheduler.run_ncaab_total_card()
+    assert pub == ["ncaab-total-card", "ncaab-total-card"]
+
+
+def test_a_failed_card_run_beats_error_and_the_alerter_reports_it(monkeypatch):
+    """The whole chain for a card that exits non-zero: the scheduled job raises,
+    its heartbeat records 'error', and the failure alerter's read of the
+    heartbeats lists the job."""
+    import scheduler
+    from tracking import job_heartbeat as jh
+    beats = []
+    job = _jobs(monkeypatch)["ncaab_total_card"]
+    monkeypatch.setattr(jh, "beat", lambda jid, status, detail="": beats.append((jid, status, detail)))
+    monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw: "fail")
+    monkeypatch.setattr(scheduler, "_publish_new_signals", lambda label: None)
+    with pytest.raises(RuntimeError):
+        job.func()
+    assert beats and beats[-1][:2] == ("ncaab_total_card", "error")
+
+    class C:
+        def execute(self, sql, params=None):
+            class R:
+                def fetchall(self_inner):
+                    return [("ncaab_total_card", "error", beats[-1][2])]
+            return R()
+    assert [j for j, _ in jh.failing_jobs(C())] == ["ncaab_total_card"]
 
 
 # ── Discord ──────────────────────────────────────────────────────────────────
@@ -554,6 +751,8 @@ def test_a_channel_without_a_bot_webhook_gets_one_created(monkeypatch):
     monkeypatch.setattr(dn.requests, "post", post)
     assert dn._webhook_for_sport("NCAAB") == "https://discord.com/api/webhooks/7/new"
     assert made and made[0][0].endswith("/channels/123/webhooks")
+    # named after the sport, as every other sport's webhook is ('ncaaf', 'nba')
+    assert made[0][1] == {"name": "ncaab"}
 
 
 def test_a_webhook_variable_wins_and_failures_never_log_the_url(monkeypatch):
@@ -584,9 +783,28 @@ def test_the_channel_script_clones_the_ncaaf_channels_place_and_permissions():
     assert body["name"] == "ncaab" and body["type"] == 0
     assert body["parent_id"] == "77" and body["position"] == 10
     assert body["permission_overwrites"] == src["permission_overwrites"]
+    # the football channel's topic would describe the basketball one wrongly
+    assert "topic" not in body
     channels = [src, {"id": "12", "name": "ncaab-live", "type": 0}]
     assert sc.find_channel(channels, "ncaaf")["id"] == "11"
     assert sc.find_channel(channels, "ncaab") is None
+
+
+def test_the_channel_script_says_to_set_the_id_on_the_worker_only(monkeypatch, capsys):
+    """The pollers have no DISCORD_BOT_TOKEN, so a channel id set there
+    resolves nothing; the worker, which runs the card, posts NCAAB."""
+    import scripts.discord_create_sport_channel as sc
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "BOTSECRET")
+    src = {"id": "11", "name": "ncaaf", "type": 0, "parent_id": "77", "position": 9,
+           "permission_overwrites": []}
+    monkeypatch.setattr(sc.requests, "get", lambda url, headers=None, timeout=None:
+                        _Resp(200, [src] if "/channels" in url else [{"id": "5", "name": "g"}]))
+    monkeypatch.setattr(sc.requests, "post", lambda url, headers=None, json=None, timeout=None:
+                        _Resp(201, {"id": "55", "name": "ncaab"}))
+    sc.main(["--name", "ncaab", "--like", "ncaaf"])
+    out = capsys.readouterr().out
+    assert "DISCORD_CHANNEL_NCAAB=55 on the worker" in out
+    assert "pollers" not in out and "BOTSECRET" not in out
 
 
 def test_the_channel_job_is_a_dry_run_unless_told_to_apply(monkeypatch):

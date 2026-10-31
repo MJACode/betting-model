@@ -1551,15 +1551,18 @@ def run_ncaab_total_card() -> None:
     its date or, failing a DraftKings total then, at 15:00Z on the day and
     each hour after, so a run at any other hour decides nothing and returns
     after one read. The script returns at once when RUN_NCAAB_TOTAL_CARD=0;
-    the job still beats. A run that fails raises, so the heartbeat records
-    "error" and the failure alerter reports it; nothing is published from a
-    run that did not finish.
+    the job still beats. A run that fails or is killed raises AFTER
+    publishing, so the heartbeat records "error" and the failure alerter
+    reports it, while a bet that was written still goes out. The script exits
+    1 when a due game could not be decided for a reason that will not clear
+    by itself (an artifact for another season, a season-long box hold, a
+    missing blend), after writing every game it could.
     """
     outcome = _run([sys.executable, "-m", "scripts.ncaab_total_card", "--publish"],
                    "ncaab-total-card", timeout=NCAAB_TOTAL_CARD_TIMEOUT_S)
+    _publish_new_signals("ncaab-total-card")
     if outcome != "ok":
         raise RuntimeError(f"NCAAB totals card did not finish: {outcome}")
-    _publish_new_signals("ncaab-total-card")
 
 
 def run_nfl_opener_card() -> None:

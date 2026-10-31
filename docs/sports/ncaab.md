@@ -53,16 +53,34 @@ the last 90 minutes. The decision, bet or not, goes into
 `ncaab_total_decisions` with the quote, the cutoff and the reason, and the game
 is never decided again (CLAUDE.md §1c). Only BET rows go into `picks`.
 
-**A hold is not a decision.** If a team's earlier game ended before the quote
-but its final score or either box score is not stored yet, the game waits for
-its next decision hour. A box still missing 36 hours after its game ended stops
-holding (the evidence also had a few games with no possessions), unless a team
-is missing two or more; then its games keep waiting and the card logs an error.
-The boxes come from the ESPN box feed (`data/ingestors/ncaab_espn_box.py`,
-source `espn_summary`, on branch `feat/ncaab-espn-box-feed` as of this
-writing). Until that feed runs, every game after a team's first holds and
-nothing is bet. When a game is stored under both sources, the NCAA
-play-by-play row wins (key: ESPN game id and team).
+**A hold is not a decision.** A game waits for its next decision hour while
+either team has, among its games that ended before the quote, one from the
+last 36 hours without a final score or both box rows (`box_pending`), or two
+or more older ones without them (`box_missing`). One older game without a box
+does not hold (the evidence also had a few games with no possessions). The
+boxes come from the ESPN box feed (`data/ingestors/ncaab_espn_box.py`, source
+`espn_summary`, PR #1103). **Before that feed runs no box is stored**: a
+team's first game, and its second if the first ended more than 36 hours
+before the quote, is decided `below_10_games`, which is final; from the third
+game on its games hold. Nothing reaches 10 boxed games, so nothing is bet
+(measured 2026-10-31 on the tests' synthetic season with no box rows, games
+three days apart).
+
+**A run that cannot decide a due game fails.** `box_missing` can hold a
+team's games all season, so it fails the run, as do an artifact built for
+another season and a missing blend. The card first decides and writes every
+other game, then exits 1: the job's heartbeat records `error` and the failure
+alerter reports it (`CardIncomplete` in `scripts/ncaab_total_card.py`). The
+worker log names the games and the teams.
+
+**One box source per game.** The game key is ESPN's game id where the row
+has one, else its contest id. Where NCAA's play-by-play rows hold a game, only
+they are kept, both of them; otherwise the ESPN feed's rows. This is the source
+rule the box feed (#1103) documents for `ncaab_team_game_stats`: choose the
+source first. Never by team id: in 145 of NCAA's games (31 from 2022-23 on)
+neither row has one (Mercy at FDU, 2022-11-09), and a key on the team id kept
+one row of each, so its possessions were one team's estimate and the hold
+counted it unboxed. Fixed 2026-10-31; the frozen numbers were rebuilt with it.
 
 **Under the 10-game rule it has never bet in November.** Expect a card of
 `below_10_games` decisions and no bets until about the first week of December.
@@ -104,22 +122,41 @@ scored game: 0.70% on 2021-2025, 2.72% on 2025-26. No bet in November in any
 season. The round-2 research version (NCAA possessions, returning minutes) made
 +6.82% on 1,085 bets at the same cut; the live inputs did not weaken it.
 
-**The shipped code reproduces it.** `scripts/ncaab_total_blend_build.py`
+**The shipped code reproduces it** (re-measured 2026-10-31, after the
+one-source-per-game fix and the rebuild). `scripts/ncaab_total_blend_build.py`
 replays the repo's own model walk-forward (blend fit on the paid seasons before
-each one) on 2022-2026: 1,156 bets at 0.04 against the evidence's 1,158, 1,146
-of them the same game (mean edge difference 0.0004; the rest come from how a
-few hundred old box scores are matched to their games, which moves the
-residual's coefficients slightly). 2022-2025: 808 bets, +62.28 units, +7.07%
-(the evidence: 809, +67.30, +7.63%). 2025-26: 348 bets, +25.76 units, +6.78%
-(the evidence: 349, +26.76, +7.03%). The build prints this replay and stores it
-in the artifact. **The card's own code path** (the season load, the hold, the
-refit at one cutoff, the decision) run over 2025-26 at each game's DraftKings
-first stored total, with numbers built through 2024-25, writes the same 348 bets
-on the same sides (largest edge difference 5e-9), +25.76 units, and holds no
-game. Three defects were found this way and fixed before shipping: a game
-against an opponent with no ESPN id was dropped from the luck and style inputs
-and read as unboxed (which held 2,857 of 5,586 games), and the build pooled a
-team by another season's schedule.
+each one) on 2022-2026: 1,157 bets at 0.04 against the evidence's 1,158, 1,147
+of them the same game (mean edge difference 0.0004). 2022-2025: 809 bets,
++63.28 units, +7.17% (the evidence: 809, +67.30, +7.63%). 2025-26: 348 bets,
++25.76 units, +6.78% (the evidence: 349, +26.76, +7.03%). The build prints this
+replay and stores it in the artifact. **The card's own code path** (the season
+load, the hold, the refit at one cutoff, the decision) run over 2025-26 at each
+game's DraftKings first stored total, with numbers built through 2024-25, writes
+the same 348 bets as the build on the same sides (largest edge difference
+7e-9), and holds no game.
+
+**Where the port differs from the evidence on 2025-26, measured game by game**
+against the evidence's own predictions (5,586 quoted games): the 10-game counts
+agree on every game, the model totals differ by a mean of 0.011 points, and the
+edges by a mean of 0.0001. The one bet the evidence makes and the card does not
+is Iowa vs Ohio State, 2026-03-12, over 140.5 at -110: edge 0.039946 against the
+evidence's 0.040012, at the cut. The model total does not move it (the
+evidence's total with the card's blend gives 0.039943). The blend does: the
+build refits c and beta on its own predictions (Dec+ c 0.721, beta 0.367,
+against the evidence's 0.719 and 0.368), and the card's total with the
+evidence's blend gives 0.040016, a bet. The model-total differences that remain
+sit on the 22 teams that played one of NCAA's 31 games from 2022-23 on with no
+team id on either row: the build places those games and the evidence never did.
+Their 110 games differ by a mean of 0.158 points, every other game by 0.008,
+and 18 of the 20 games that differ by more than 0.3 involve one of them.
+
+Four defects were found by replaying the card's path or in review, and
+fixed: a game against an opponent with no ESPN id was dropped from the luck
+and style inputs; the same game was read as unboxed (which held 2,857 of 5,586
+games); the build pooled a team by another season's schedule; and a game with
+no team id on either NCAA row kept one row, which on 2024-25 would have held
+Fairleigh Dickinson and Saint Francis as `box_missing` all season (five such
+games each).
 
 **The risks, plainly:**
 

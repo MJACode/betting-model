@@ -133,17 +133,24 @@ def decision_hour(game_date, tip: datetime, hour: datetime) -> bool:
 # ── box scores ─────────────────────────────────────────────────────────────────
 
 def dedupe_box(box: pd.DataFrame) -> pd.DataFrame:
-    """One row per (game, team). The same game can be stored twice: NCAA's
-    play-by-play row (source sportsdataverse_ncaa) and the in-season ESPN feed.
-    The key is ESPN's game id when the row has one, else its contest id; the
-    play-by-play row wins."""
+    """One source per game, and every row of it. The same game can be stored
+    twice: NCAA's play-by-play rows (source sportsdataverse_ncaa) and the
+    in-season ESPN feed's. The game key is ESPN's game id when the row has
+    one, else its contest id; where NCAA's rows hold the game, only they are
+    kept (the source rule in docs/sports/ncaab.md, "choose the source first").
+
+    Never by team id. NCAA's row for a non-Division I side has none, and in
+    145 games neither row has one (Mercy at FDU, 2022-11-09): a (game, team
+    id) key read the two blank ids as one team and kept one row, and kept
+    three rows of a game both sources hold (NCAA's two and ESPN's for the
+    side NCAA left blank)."""
     b = box.copy()
     eg = pd.to_numeric(b.get("espn_game_id"), errors="coerce") if "espn_game_id" in b else pd.Series(np.nan, index=b.index)
     b["_key"] = np.where(eg.notna(), "espn:" + eg.fillna(0).astype("int64").astype(str),
                          "contest:" + b["contest_id"].astype(str))
     b["_pref"] = (b["source"] != PLAY_BY_PLAY_SOURCE).astype(int)
-    b = b.sort_values(["_key", "team_espn_id", "_pref"], kind="stable")
-    b = b.drop_duplicates(["_key", "team_espn_id"], keep="first")
+    b = b[b["_pref"] == b.groupby("_key")["_pref"].transform("min")]
+    b = b.sort_values(["_key", "team_espn_id"], kind="stable")
     return b.drop(columns=["_pref"])
 
 
@@ -604,8 +611,8 @@ def load_artifact(path: str | Path | None = None) -> dict:
 
 # ── the live decision ──────────────────────────────────────────────────────────
 
-DIAG_KEYS = ("games", "not_decision_hour", "already_decided", "no_dk_total", "box_pending",
-             "box_missing", "below_10_games", "no_blend", "below_cut", "bets")
+DIAG_KEYS = ("games", "not_decision_hour", "already_decided", "wrong_season", "no_dk_total",
+             "box_pending", "box_missing", "below_10_games", "no_blend", "below_cut", "bets")
 # Hold a game while a team's earlier game that ended before the quote has no
 # final score or no box yet, for this long after it ended. A box that never
 # lands is then treated as absent (the evidence also had a few games with no

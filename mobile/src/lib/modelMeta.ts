@@ -438,17 +438,6 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
-  // NCAAB full-game totals (models/ncaab_total_blend.py, 2026-10-30): team
-  // ratings plus shooting luck and style, blended with DraftKings' total,
-  // decided once the evening before or on the morning of the game. The label
-  // is the platform's "Duke vs Kansas Over 145.5". A game line.
-  ncaab_total_blend: {
-    shortLabel: 'O/U',
-    longLabel: 'NCAAB Totals',
-    type: 'game',
-    statKey: null,
-    statLabel: '',
-  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -584,6 +573,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
   ncaaf_over_under: {
     shortLabel: 'O/U',
     longLabel: 'NCAAF Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // ── NCAAB ─────────────────────────────────────────────────────────────────
+  // Men's college basketball, full-game totals. Named like the other totals
+  // ("NCAAB Totals", badge O/U). The id is the one the model writes its picks
+  // under (models/ncaab_total_blend.py MODEL_ID). It has no 'over_under' in
+  // it, so markets.ts names it for the totals rows. The build plan's id,
+  // ncaab_over_under, is not a model. tests/test_mobile_pick_categories.py
+  // fails if config scores an id with no label here.
+  ncaab_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAAB Totals',
     type: 'game',
     statKey: null,
     statLabel: '',

@@ -7,13 +7,15 @@ members who can see #ncaaf can see #ncaab:
   * the same category (parent_id),
   * the position right after it,
   * the same permission overwrites, role by role and member by member,
-  * the same topic, slow mode and age flag.
+  * the same slow mode and age flag. Not the topic: #ncaaf's would describe
+    football.
 
 It prints the new channel's id, which goes into DISCORD_CHANNEL_NCAAB on the
-worker and the pollers; the notifier then makes the channel's webhook itself
-through the bot token (tracking/discord_notifier._channel_webhook). A channel
-id is not a secret; the token and any webhook URL are, and this script prints
-neither.
+worker. The worker runs the NCAAB totals card and holds DISCORD_BOT_TOKEN; the
+pollers have no bot token, so a channel id there resolves nothing. The notifier
+makes the channel's webhook itself through the bot token
+(tracking/discord_notifier._channel_webhook). A channel id is not a secret;
+the token and any webhook URL are, and this script prints neither.
 
     python -m scripts.discord_create_sport_channel --name ncaab --like ncaaf --dry-run
     python -m scripts.discord_create_sport_channel --name ncaab --like ncaaf
@@ -33,7 +35,8 @@ import requests
 
 API = "https://discord.com/api/v10"
 TEXT = 0
-COPIED = ("topic", "nsfw", "rate_limit_per_user")
+# Not "topic": the source sport's topic would describe the new channel wrongly.
+COPIED = ("nsfw", "rate_limit_per_user")
 
 
 def find_channel(channels: list[dict], name: str) -> dict | None:
@@ -105,7 +108,8 @@ def main(argv=None) -> None:
         sys.exit(f"Discord refused the new channel: {r.status_code} {r.text[:300]}")
     made = r.json()
     print(f"created #{made.get('name')}: {made['id']}")
-    print(f"set DISCORD_CHANNEL_{a.name.upper()}={made['id']} on the worker and the pollers")
+    print(f"set DISCORD_CHANNEL_{a.name.upper()}={made['id']} on the worker, where the bot "
+          f"token is, then redeploy it")
 
 
 if __name__ == "__main__":

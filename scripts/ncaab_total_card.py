@@ -25,6 +25,13 @@ them after each final), the game waits for its next decision hour. A box still
 missing BOX_WAIT_H hours after its game ended stops holding (the evidence had a
 few games with no possessions too), unless a team is missing more than one.
 
+A RUN THAT CANNOT DECIDE ITS GAMES FAILS. A due game skipped because the
+artifact is for another season, held as box_missing (a team missing two or
+more old boxes, which can hold it all season), or missing its blend makes the
+run raise CardIncomplete AFTER every other game is decided and written, so
+the script exits 1, the job's heartbeat records "error" and the failure
+alerter reports it. It never stops quietly with the heartbeat green.
+
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_total_decisions in the same transaction as the game's bet, under the
 model's transaction-scoped advisory lock. A game with a decision row, or with
@@ -394,6 +401,11 @@ def publish(conn, rows: list[dict], decisions: list[nb.Decision], check_hour: da
 
 # ── the run ───────────────────────────────────────────────────────────────────
 
+class CardIncomplete(RuntimeError):
+    """A due game the card could not decide for a reason that will not clear
+    by itself: raised after the rest of the run is written."""
+
+
 _ART: dict = {}
 
 
@@ -445,12 +457,16 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             return {"games": len(games), "bets": 0, "published": 0, "decided": 0, "diag": diag}
         art = artifact()
         decisions: list[nb.Decision] = []
+        problems: list[str] = []          # why a due game was not decided; fails the run
         for season in sorted({v["season"] for v in due.values()}):
             gids = sorted(g for g, v in due.items() if v["season"] == season)
             if int(art["season"]) != season:
-                logger.error(f"NCAAB totals card: the artifact is for season {art['season']}; "
-                             f"season {season} needs one built through {season - 1} "
-                             f"(scripts/ncaab_total_blend_build.py). {len(gids)} game(s) not decided.")
+                msg = (f"the artifact is for season {art['season']}; season {season} needs one "
+                       f"built through {season - 1} (scripts/ncaab_total_blend_build.py). "
+                       f"{len(gids)} game(s) not decided")
+                logger.error(f"NCAAB totals card: {msg}.")
+                diag["wrong_season"] += len(gids)
+                problems.append(msg)
                 continue
             games_df, box_df = load_season(conn, season)
             sg, box = prepare_season(games_df, box_df)
@@ -463,8 +479,10 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                     logger.error(f"NCAAB totals card: {d.game_id} held, {d.detail}. The ESPN box "
                                  f"feed fills ncaab_team_game_stats after each final; a game it "
                                  f"never filled keeps every game of these teams waiting.")
+                    problems.append(f"box_missing {d.game_id} ({d.detail})")
                 elif d.status == "no_blend":
                     logger.error(f"NCAAB totals card: {d.game_id}: {d.detail}; the artifact is incomplete.")
+                    problems.append(f"no_blend {d.game_id} ({d.detail})")
             decisions += got
         published = n_decided = 0
         if do_publish and decisions:
@@ -473,17 +491,27 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             published, n_decided = publish(conn, rows, decisions, hour, refused)
         logger.info("\n" + render(decisions, diag, published if do_publish else None,
                                   n_decided if do_publish else None))
+        if problems:
+            # After the writes: every game that could be decided was, and its
+            # bet still goes out; this one fails the heartbeat.
+            raise CardIncomplete(f"{len(problems)} problem(s): " + "; ".join(problems)[:1500])
         return {"games": len(games), "bets": diag["bets"], "published": published,
                 "decided": n_decided, "diag": diag}
     finally:
         conn.close()
 
 
-def main() -> None:
+def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--publish", action="store_true")
-    a = ap.parse_args()
-    print(run_card(do_publish=a.publish))
+    a = ap.parse_args(argv)
+    try:
+        print(run_card(do_publish=a.publish))
+    except CardIncomplete as exc:
+        # exit 1: scheduler.run_ncaab_total_card then raises, so the job's
+        # heartbeat records "error" and the failure alerter reports it.
+        logger.error(f"NCAAB totals card did not decide every due game: {exc}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

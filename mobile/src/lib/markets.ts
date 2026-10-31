@@ -49,7 +49,7 @@ export function gameMarketForModel(modelId: string): string | null {
   // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
   if (modelId === 'nba_total_luck') return 'totals';
-  // NCAAB full-game totals: no 'over_under' in the id either.
+  // The NCAAB totals model (models/ncaab_total_blend.py): same trap.
   if (modelId === 'ncaab_total_blend') return 'totals';
   // The NBA home team total (unders): the home team's own points, stored
   // under its own market, never the game's 'totals' rows.
