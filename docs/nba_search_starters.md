@@ -297,11 +297,11 @@ highest cell in each market.
   control's at the same market, side and cut. A control with no bet counts as 0.
 - **A total cell earns no credit for the starters (added 2026-10-31, before any cell was graded).** A
   total cell and its control place nearly the same bets: on the first-half over at the lowest cut, 0
-  bets are only the cell's and 1 only the control's, of about 1,620 (section 11.5). One beating the other
-  is then a few games' luck, not a reading of the starters. It is settled now because changing it after a
-  result would be choosing a rule with the result in view. A total cell is still judged under the six
-  bars and reported, and a pass there reads as the league-share idea's. Only the 16 spread cells can earn
-  credit.
+  bets are only the cell's and 1 only the control's, of about 1,620. The widest of the 16, the first-half
+  under at 2, has 100 and 15 of about 1,700 (section 11.5). One beating the other is then luck on a small
+  share of the games, not a reading of the starters. It is settled now because changing it after a result
+  would be choosing a rule with the result in view. A total cell is still judged under the six bars and
+  reported, and a pass there reads as the league-share idea's. Only the 16 spread cells can earn credit.
 - **Read credit from `python -m scripts.nba_s_starters --credit --results DIR`.** The verdict's own
   printed "credited" count knows only §9's control, so for S1 it equals the passes. The lab calls the
   verdict's own function with this search's pairing (`house_verdict_bands(credit={"S1": "S1_league"})`),
