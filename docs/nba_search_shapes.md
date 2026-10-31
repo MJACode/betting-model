@@ -304,6 +304,26 @@ PYTHONPATH=. python -m scripts.nba_game2_verdict --results <folder> --house5
 - **Speed:** the 200 placebo runs reprice arrays built once (one grade of every offer, one sort per
   run), and a test holds that they choose the harness's bets. A real cell goes through `H.run_cells`.
 
+**Dated 2026-10-31, after the lab's first `--smoke` and before any cell was graded.** None of this is a
+rule a result could have touched; the rules above stand as written.
+
+- **A p-value stays at 4,000 resamples here.** `H.p_one_sided` recomputes any p under 0.01 with 400,000
+  resamples, for the first search's multiple-testing bar. Section 9's bars read the pooled interval and
+  never a p (a test changes every p and watches the verdict not move), and the timing passes run on
+  scrambled scores where no p comes under 0.01. So a real run with many strong cells would run for
+  hours past its projection for a number nothing reads. `p_choose` and `p_confirm` are still stored.
+- **The run reads saved projection frames.** `NBA_S_PROJ_DIR` belongs in the `--full` command above. The
+  engine's rebuild was measured once at 6,468 s (hyperparameter setup 6,114 s, then the four decision
+  points), with other jobs on the machine. Without the folder `--full` pays that first. A frame is used
+  only if every game in it was projected at the time this run decides that game; otherwise it is
+  rebuilt. So F1 stays in: the rebuild is once, and the run after it is what the 2-hour limit reads.
+- **The projection's "deterministic" in section 4 was read from its code, not measured:** it holds no
+  random draw outside its placebo and its made-up data. It was not rebuilt twice to compare.
+- **`--smoke` prints a benchmark beside the placebo share.** A cell that bets half its games lands on one
+  of them half the time by chance, so no shuffle can show a share above one minus the cell's own bet
+  rate. That figure and the share of opinions left on their own game are printed with it.
+- **`--smoke` checks the 256 cells from the groups it builds,** instead of at the end of a `--full`.
+
 ## 14. Not covered, so nobody reads this as closing them
 
 Totals, because §10.7 measured no line-size shape for them. First-half and first-quarter spreads,
