@@ -250,7 +250,7 @@ every event it cannot place raw in `ncaab_odds_unmatched`, which then held
 
 `python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2021 2026 --apply`
 re-reads the events the purchase kept raw and stores the ones that resolve
-now, as the purchase would have stored them: ESPN's game, ESPN's home number,
+now, as the game-line purchase would have stored them: ESPN's game, ESPN's home number,
 the in-play label from ESPN's tip, and the same filter of what is kept (the
 first quote, the evening-before and morning anchors, and the three hours
 before the tip). It makes no paid call, never writes the pull ledger, never
@@ -302,6 +302,86 @@ second run stores nothing new. Each insert into `odds` also updates
   `odds_api_historical`): 1,201,028 rows on 11,296 games, every game in
   `games`, no row after its game's tip.
 
+## The opener grid (built 2026-10-30, not queued)
+
+`python -m data.ingestors.ncaab_odds_history --opener-grid --step 30 --seasons 2021 2026 --dry-run`
+prints what the grid would buy. **Nothing is queued.** The spend needs mike's
+approval before a `worker_jobs` row is added.
+
+- **Why.** The game-line purchase bought fixed hours: the evening before
+  (22Z), mid-morning (15Z) and the hour before each tip. A book's first posted
+  line is then dated only to the gap between two of those hours, and that gap
+  is over two hours for 42% to 68% of first spreads and totals, depending on
+  the book (41.6% for BetMGM totals to 67.6% for betPARX totals; the
+  opener-route design, 2026-10-30, against the pull ledger). The grid buys
+  the same bulk snapshot (moneyline, spread and total at the ten fetched
+  books, 30 credits for the whole listed slate) at every clock time, every
+  hour or every half hour, from 72 hours before each tip up to the tip. Each
+  book's first post is then dated to the hour or the half hour.
+- **Grid times are on the clock, not on the tip.** A 01:20Z tip wants 01:00Z
+  and not 01:30Z; its window starts at the first grid time at or after 01:20Z
+  three days earlier. One snapshot serves every game whose window holds it.
+- **`--pre-start`** adds every grid time from 240 to 72 hours before each
+  season's first tip, for boards posted before the first window opens: 168
+  snapshots a season every hour, 336 every half hour.
+- **What it costs** (the dry run on 2026-10-30, against ESPN's schedule and
+  the pull ledger, both checked equal to production that day; 30 credits a
+  snapshot):
+
+  | Every | Grid times | Already bought | To buy | Credits | With `--pre-start` |
+  |---|---|---|---|---|---|
+  | 60 minutes | 21,710 | 7,403 | 14,307 | 429,210 | 15,315 snapshots, 459,450 credits |
+  | 30 minutes | 43,415 | 7,403 | 36,012 | 1,080,360 | 38,028 snapshots, 1,140,840 credits |
+
+  At the game-line purchase's pace (7,403 snapshots in 2 hours 40 minutes on
+  2026-10-29) that is about 5 hours every hour and 13 hours every half hour.
+  These are estimates from that one run, not measurements of this one.
+- **What is stored.** Each book's first quote on each game and market, and
+  every quote that differs from the one before it in price or line. A repeat
+  is not kept, and an in-play price never is. Each row's time is the market's
+  own last update, as the feed sends it. A book's first row is therefore the
+  time it posted, unless it changed that line again before the first snapshot
+  that shows it.
+- **A quote already stored is not stored again.** The filter above only
+  knows what the current run has seen. The game-line purchase stored its own
+  hours' quotes before the grid existed, and the grid skips those hours as
+  already bought. A run that stops and starts again also begins with an empty
+  filter. So before writing, the grid reads `odds` back, as the replay does.
+  A quote with the same game, market, book, feed time, prices and line is not
+  stored again, whoever stored it first. `odds` has no unique index on a
+  quote, so this read is the only thing that stops a second copy. It happens
+  inside the write, so a retry after a dropped connection stores nothing
+  twice. How many rows the grid stores is not measured. At most it is one row
+  per game, market, book, feed time and quote.
+- **Raw events.** Events that resolve onto no ESPN game are kept raw in
+  `ncaab_odds_unmatched`, as the game-line purchase keeps them. The replay
+  stores those with the game-line purchase's filter, which keeps every
+  snapshot in the three hours before the tip. So a replay of grid events can
+  store a price there again under a later feed time, where the grid itself
+  would not.
+- **Where a bought time is recorded.** A time on the hour goes in
+  `odds_history_pulls`, keyed on (sport, date, hour), exactly as the game-line
+  purchase records it. So an hour either one bought is never bought again. A
+  half hour goes in `odds_history_fetches`, keyed on (sport, exact time),
+  with `why = 'opener_grid'`. That is the table the NBA purchase already uses
+  for its off-the-hour times, and every NBA reader of it filters on sport.
+  The shared ledger's key is not changed. Every sport's history purchase
+  writes to it naming those three columns, so a different key would make
+  any copy of that code pay for a snapshot and then lose it. The replay of
+  kept raw events reads both tables, so a feed time of 22:25 maps to the
+  22:30 snapshot, not to 23:00.
+- **The floor.** The same 300,000-credit floor as the other purchases, and
+  its own ceiling (1,170,000, the half-hour grid with the pre-start window
+  plus room for calls billed above 30). Before its first call it reads the
+  newest balance on record (`odds_api_quota`) and refuses to start without
+  one, so the first call is checked against the floor too.
+- **On the worker, once approved:** job `ncaab_odds_history` with
+  `{"mode": "opener_grid", "step_min": 30, "max_credits": N, "floor":
+  300000}`; add `"pre_start": true` for the pre-start window and
+  `"seasons": [2024, 2026]` to narrow the seasons. `{"mode": "opener_grid",
+  "step_min": 30, "dry_run": true}` prints the plan against production and
+  buys nothing.
+
 ## What runs, and where it lands
 
 | Piece | What | Where |
@@ -316,6 +396,7 @@ second run stores nothing new. Each insert into `odds` also updates
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 | Replay of kept raw events | Stores the kept raw events that resolve now; no paid call (Replaying the kept raw events, above) | `data/ingestors/ncaab_odds_history.py --replay-unmatched`, job `ncaab_odds_history` mode `replay_unmatched` |
 | Box and period scores (2026-27 on) | Each final's team box score into `ncaab_team_game_stats` (source `espn_summary`) and its half and overtime scores into `ncaab_period_scores`, one ESPN game summary per final, on the hourly refresh passes after the results step (Box scores and period scores, below) | `data/ingestors/ncaab_espn_box.py`, step `ncaab-box`; backfill job `ncaab_box_backfill` |
+| Opener grid (built, not queued) | Game lines every hour or half hour from 72 hours before each tip, so each book's first post is dated to the step (The opener grid, above) | `data/ingestors/ncaab_odds_history.py --opener-grid`, job `ncaab_odds_history` mode `opener_grid` |
 
 ## Box scores and period scores (ESPN, from 2026-27)
 
