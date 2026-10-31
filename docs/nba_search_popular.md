@@ -195,7 +195,9 @@ above the 95th percentile of 200 placebo runs.
   --credit --results DIR` applies it to the verdict's file.
 - **Placebo, 200 runs, seeds 1-200.** Each game's four inputs (both teams' popularity and both
   teams' over share) move together to another game with a number on the same date, by one
-  permutation per date. Each game keeps its own prices, and the rule is recomputed.
+  permutation per date. No game keeps its own inputs (changed 2026-10-31, section 10), unless it is
+  the only game with a number on its date. Each game keeps its own prices, and the rule is
+  recomputed.
   - The shuffle runs over every game with a number on the date, not over the games past a cut.
     Only 0.1-0.5% of games with a number are alone on their date, but 39% of games at gap ≥ 15 are
     the only such game on their date. Shuffling those alone would repeat the real bets. `--smoke`
@@ -244,3 +246,14 @@ choice, never the grade:
 
 The moneyline counts are lower because the -200 floor removes a price when the team bet against
 the public is itself a heavy favourite.
+
+## 10. Changes after the first smoke run, before any bet was graded
+
+**2026-10-31: no game keeps its own inputs in the placebo.** The first `--smoke` used a plain
+permutation per date. On the real data 62% / 73% / 81% of the placebo's spread bets differed from
+the real bets at gap ≥ 5 / 10 / 15 (53% / 66% / 75% on the moneyline, 74% / 81% / 83% on the total).
+A plain permutation leaves about one game in seven on its own inputs, because a date averages about
+seven games, and those games repeat their real bets. A placebo that shares bets with the real rule
+shares its luck, which makes the bar harder to read. So each date's permutation now leaves no game
+in its place (`no_fixed_points`). This reads no result. The share measured under the new rule is in
+section 9.
