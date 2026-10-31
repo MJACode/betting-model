@@ -202,12 +202,13 @@ const hasTeams = (teams: SlateTeams): teams is readonly string[] =>
  * cap, which returns an arbitrary 1,000 and says nothing.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  if (sport === 'GOLF') return []; // no golf leaderboard v1
+  // No golf leaderboard (v1), and no NCAAB player stats in the app yet.
+  if (sport === 'GOLF' || sport === 'NCAAB') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -273,7 +274,7 @@ const totalsRowKey = (r: SeasonTotalsRow): string =>
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -289,14 +290,15 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  if (sport === 'GOLF') return []; // no golf leaderboard v1
+  // No golf leaderboard (v1), and no NCAAB player stats in the app yet.
+  if (sport === 'GOLF' || sport === 'NCAAB') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -374,7 +376,7 @@ function pageRpc<T>(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
@@ -454,7 +456,7 @@ const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
@@ -572,7 +574,7 @@ function h2hSeasonCandidates(sport: string, season: number): number[] {
  * ask about, and an unnarrowed H2H read is the cross product.
  */
 export async function fetchH2HStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   matchups: H2HMatchups,
@@ -646,7 +648,7 @@ export async function fetchSeasonStarted(
  * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   seasons: number[],
   statKey: string,
   posGroup: string,
@@ -1174,7 +1176,25 @@ export async function fetchPicksForDate(
       .limit(5000),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
-    supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
+    // Paged, on an order the request names, and only the markets a pick reads
+    // (gameMarketForModel returns none of the others). Unnarrowed, a full
+    // college basketball day was over the 1,000-row response cap: 1,132
+    // DraftKings rows for 2026-01-10, 743 of them in these markets, most of
+    // them NCAAB (measured 2026-10-30). Past the cap PostgREST returns an
+    // arbitrary 1,000 and says nothing, so any sport's line pill could go
+    // blank. Wrapped so a failure stays an {error}.
+    fetchAllPages<LatestDkOddsRow>(
+      (from, to) =>
+        supabase
+          .from('v_latest_dk_odds')
+          .select(LATEST_ODDS_COLUMNS)
+          .eq('game_date', date)
+          .in('market', [...MAIN_GAME_ODDS_MARKETS])
+          .order('game_id')
+          .order('market')
+          .range(from, to),
+      (r) => `${r.game_id}|${r.market}`,
+    ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -1649,6 +1669,109 @@ export async function fetchUpcomingNcaafPicks(
   }
 
   return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      ...bookEnrichment(pick, booksByGameMarket),
+    };
+  });
+}
+
+/**
+ * Upcoming NCAAB picks AFTER `afterDate` through `throughDate`.
+ *
+ * The NCAAB totals model is planned to decide the evening before the game, so
+ * a same-day board would hide each of its picks until game day. The window is
+ * the NHL card's; the reads are not. A college basketball week is far bigger
+ * than any other sport's: measured 2026-10-30 (read only), 182 games on
+ * 2026-11-02, and over 2025-26 the biggest day held 4,417 main-market rows
+ * across all books and the biggest seven days 10,424. Reading every game in
+ * the window would be up to eleven 1,000-row pages per mount, for cards the
+ * board never draws.
+ *
+ * So the picks are read first, and every other read asks only for the games
+ * those picks are on, 80 ids at a time. The picks read is drained on an order
+ * the request names (signals first, then a unique key), so no row cap can
+ * cost a BET. Per 80 games the DraftKings read is at most 720 rows (one per
+ * game and main market), under the cap.
+ */
+export async function fetchUpcomingNcaabPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const rawPicks = await fetchAllPages<Pick>(
+    (from, to) =>
+      supabase
+        .from('picks')
+        .select(PICK_COLUMNS)
+        .eq('sport', 'NCAAB')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('signal_type', { ascending: true })
+        .order('created_at', { ascending: false })
+        .order('pick_id', { ascending: true })
+        .range(from, to),
+    (p) => String(p.pick_id),
+  );
+
+  const seen = new Map<string, Pick>();
+  for (const p of rawPicks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+  const picks = Array.from(seen.values());
+  const gameIds = Array.from(new Set(picks.map((p) => p.game_id)));
+  if (gameIds.length === 0) return [];
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < gameIds.length; i += 80) chunks.push(gameIds.slice(i, i + 80));
+  const eachChunk = <T,>(read: (chunk: string[]) => Promise<T[]>): Promise<T[]> =>
+    Promise.all(chunks.map(read)).then((parts) => parts.flat());
+
+  const [games, latestOdds, allBooks] = await Promise.all([
+    // The matchup and the time: a failure here fails the card.
+    eachChunk(async (chunk) => {
+      const { data, error } = await supabase.from('games').select(GAME_COLUMNS).in('game_id', chunk);
+      if (error) throw error;
+      return (data ?? []) as unknown as GameRow[];
+    }),
+    // Enrichment only: a failure shouldn't take down the NCAAB card.
+    eachChunk(async (chunk) => {
+      const { data, error } = await supabase
+        .from('v_latest_dk_odds')
+        .select(LATEST_ODDS_COLUMNS)
+        .in('game_id', chunk)
+        .in('market', [...MAIN_GAME_ODDS_MARKETS]);
+      if (error) throw error;
+      return (data ?? []) as unknown as LatestDkOddsRow[];
+    }).catch(() => [] as LatestDkOddsRow[]),
+    eachChunk((chunk) =>
+      fetchAllPages<OddsByBookRow>(
+        (from, to) =>
+          supabase
+            .from('v_latest_odds_all_books')
+            .select(ODDS_BY_BOOK_COLUMNS)
+            .in('game_id', chunk)
+            .in('market', [...MAIN_GAME_ODDS_MARKETS])
+            .order('game_id')
+            .order('market')
+            .order('bookmaker')
+            .range(from, to),
+        (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
+      ),
+    ).catch(() => [] as OddsByBookRow[]),
+  ]);
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+  const booksByGameMarket = groupBooksByGameMarket(allBooks);
+
+  return picks.map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
       pick,
@@ -2778,10 +2901,11 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
  * Returns [] for sports with no teams (UFC, golf) rather than erroring.
  */
 export async function fetchTeamStats(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
 ): Promise<TeamSeasonStats> {
-  if (sport === 'UFC' || sport === 'GOLF') return { season: null, rows: [] };
+  // NCAAB has no Teams board yet (teamStatCatalog BALL).
+  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without

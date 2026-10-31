@@ -727,6 +727,40 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
     return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
 
 
+# NCAAB box scores and period scores from ESPN (data/ingestors/ncaab_espn_box.py,
+# free, no key). kind "periods": one scoreboard call per date, every final of
+# the seasons that has no period row (2020-21 to 2025-26 is 855 dates and
+# 35,323 finals, counted 2026-10-30). kind "box": one summary call per final
+# with no 'espn_summary' box row, box and period scores together. Both skip
+# what is stored, so a re-run stores nothing twice. The box backfill is held
+# to the current season, the only one sportsdataverse does not cover; an
+# older season would put a second source on games NCAA's rows already hold.
+NCAAB_BOX_BACKFILL_SPANS = {"periods": (2011, 2027), "box": (2027, 2027)}
+
+
+def _validate_ncaab_box_backfill(args: dict) -> dict:
+    extra = sorted(set(args) - {"kind", "first", "last"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes kind, first and last")
+    kind = str(args.get("kind") or "")
+    if kind not in NCAAB_BOX_BACKFILL_SPANS:
+        raise ValueError(f"kind must be one of {sorted(NCAAB_BOX_BACKFILL_SPANS)}, got {kind!r}")
+    lo, hi = NCAAB_BOX_BACKFILL_SPANS[kind]
+    try:
+        first, last = int(args.get("first", lo)), int(args.get("last", hi))
+    except (TypeError, ValueError):
+        raise ValueError("first and last must be whole seasons") from None
+    if not (lo <= first <= last <= hi):
+        raise ValueError(f"{kind} seasons must sit inside {lo}..{hi}, got {first}..{last}")
+    return {"kind": kind, "first": first, "last": last}
+
+
+def _job_ncaab_box_backfill(**kw) -> str:
+    flag = "--periods" if kw["kind"] == "periods" else "--box"
+    return _run_script_main("data.ingestors.ncaab_espn_box",
+                            [flag, "--seasons", str(kw["first"]), str(kw["last"])])[-4000:]
+
+
 # Free NCAAB history into Supabase on the worker. Built here because the local
 # DATABASE_URL was stale from 2026-10-26 (password authentication failed on
 # both pooler ports) until mike replaced it on 2026-10-29. Each kind is one
@@ -1326,12 +1360,64 @@ def _job_discord_probe(**kw):
         except Exception as exc:                              # noqa: BLE001
             out[label] = {"error": str(exc)[:200]}
 
+    # A sport that posts through its channel id and the bot token
+    # (DISCORD_CHANNEL_<SPORT>, NCAAB from 2026-10-30) has no webhook variable
+    # to probe: report the bot's webhook in that channel instead, read by GET
+    # only and never with its token. A webhook variable, when set, wins in the
+    # notifier, so it is what was probed above.
+    from tracking.discord_notifier import channel_hook_info
+    by_channel = [s for s in sorted(getattr(config, "DISCORD_CHANNELS", {}) or {})
+                  if s not in config.DISCORD_WEBHOOKS]
+    for sport in by_channel:
+        try:
+            out[f"sport:{sport}"] = channel_hook_info(sport)
+        except Exception as exc:                              # noqa: BLE001
+            out[f"sport:{sport}"] = {"error": type(exc).__name__}
+
     channels = [v.get("channel_id") for v in out.values() if v.get("channel_id")]
     out["_summary"] = {
-        "probed": len(targets),
+        "probed": len(targets) + len(by_channel),
         "distinct_channels": len(set(channels)),
         "collisions": sorted({c for c in channels if channels.count(c) > 1}),
     }
+    return out
+
+
+def _job_discord_create_channel(**kw):
+    """Create a sport's Discord channel as a copy of another sport's
+    (scripts/discord_create_sport_channel.py): the same category, the position
+    after it, the same permission overwrites. The worker holds
+    DISCORD_BOT_TOKEN and no laptop does, so it runs here. apply defaults
+    false: a dry run reads the guild's channels and prints the body it would
+    send. The printout carries the new channel's id (not a secret) and never
+    the token."""
+    argv = ["--name", kw["name"], "--like", kw["like"]]
+    if kw.get("guild"):
+        argv += ["--guild", kw["guild"]]
+    if not kw["apply"]:
+        argv.append("--dry-run")
+    return _run_script_main("scripts.discord_create_sport_channel", argv)[-3000:]
+
+
+def _validate_discord_create_channel(args: dict) -> dict:
+    import re
+    extra = sorted(set(args) - {"name", "like", "guild", "apply"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes name, like, guild, apply")
+    out = {}
+    for k in ("name", "like"):
+        v = str(args.get(k) or "").strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v):
+            raise ValueError(f"{k} must be a channel name like 'ncaab', got {v!r}")
+        out[k] = v
+    guild = str(args.get("guild") or "").strip()
+    if guild and not guild.isdigit():
+        raise ValueError("guild must be a numeric id")
+    out["guild"] = guild or None
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError("apply must be true or false")
+    out["apply"] = apply
     return out
 
 
@@ -2315,6 +2401,10 @@ JOBS = {
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
+    # One-off: a sport's channel cloned from another's (NCAAB from NCAAF,
+    # 2026-10-30). apply defaults false. See _job_discord_create_channel.
+    "discord_create_channel": (_job_discord_create_channel,
+                               _validate_discord_create_channel),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
@@ -2332,6 +2422,8 @@ JOBS = {
                              _validate_ncaab_history_import),
     "ncaab_schedule_backfill": (_job_ncaab_schedule_backfill,
                                 _validate_ncaab_schedule_backfill),
+    # Free ESPN box and period scores; see NCAAB_BOX_BACKFILL_SPANS.
+    "ncaab_box_backfill": (_job_ncaab_box_backfill, _validate_ncaab_box_backfill),
     # Derivative totals (team, alternate, first period). No credit ceiling:
     # Michael, 2026-10-03. Dry run is apply=false. See
     # _job_nhl_derivative_odds_history.

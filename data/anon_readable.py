@@ -307,6 +307,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_archive_lines",
     "ncaab_player_season",
     "ncaab_team_game_stats",
+    # NCAAB period scores and the ESPN box-score miss ledger. Created on
+    # demand by data/ingestors/ncaab_espn_box.py (and by
+    # add_ncaab_period_scores_2026_10_30.sql); model and grading input,
+    # never read by the app.
+    "ncaab_period_scores",
+    "ncaab_box_misses",
     "model_artifacts",
     # NCAAB odds events the history purchase paid for but could not place on
     # an ESPN game, kept raw so a later name fix can replay them. Created on
@@ -363,6 +369,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # bet or not, with the reason (scripts/nba_total_luck_card.py, which
     # creates it on demand). Read by the card, never by the app.
     "nba_total_luck_decisions",
+    # The NCAAB totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaab_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaab_total_decisions",
     # The NBA home team-total model's two: its decisions ledger, one row per
     # decided game with the home team's part of the gap and the best under
     # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one
