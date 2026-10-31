@@ -486,6 +486,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # and the lock-down exist. Does not touch picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_ncaab_period_scores_2026_10_30.sql",
+    # 2026-10-31 (Matt): the Stats board timed out on first open. Season
+    # index on the NBA and WNBA game logs, which had none, so
+    # player_recent_games_* reads one season instead of the whole log.
+    # Returns on a catalog read once both exist. Does not touch picks,
+    # odds or the record. Sits before the posted-stake pair.
+    "nba_wnba_game_log_season_index_2026_10_31.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
