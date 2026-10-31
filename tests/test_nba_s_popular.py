@@ -103,11 +103,12 @@ def test_a_filtered_games_frame_reads_each_games_own_numbers():
     assert list(keep.index[:2]) == [0, 3]
     inp = S.game_inputs(keep, closing_rows(keep, [60.0 + i for i in range(len(keep))]))
     assert inp["game_id"].tolist() == keep["game_id"].tolist()
-    assert inp.loc[0, "h_n"] == 0 and inp.loc[9, "h_n"] == 9
-    # ten games: 60..69 for the eleventh would need 11 rows; every number sits on its own game
+    assert inp["h_n"].tolist() == [float(i) for i in range(10)]
+    # read by position: a frame assigned by row label would hold these on other games
     more = schedule(30).iloc[1:].copy()
     inp2 = S.game_inputs(more, closing_rows(more, [50.0] * 10 + [90.0] * 19))
-    assert inp2.loc[10, "h_pop"] == 50.0 and np.isnan(inp2.loc[9, "h_pop"])
+    assert inp2["h_pop"].iloc[10] == 50.0 and np.isnan(inp2["h_pop"].iloc[9])
+    assert inp2["h_pop"].iloc[11] == pytest.approx((500.0 + 90.0) / 11)
 
 
 # ── the rules ───────────────────────────────────────────────────────────────
@@ -170,7 +171,8 @@ def test_each_pop_bet_is_on_the_side_against_the_popular_team_at_its_cut(prep):
 def test_popt_bets_are_unders_at_the_smaller_habit(prep):
     g = S.cell_groups(prep)[2]
     sig = prep["signal"].set_index("game_id")
-    b = S.pick(g.cand, 1.0, "under")
+    assert g.side == "under"
+    b = S.pick(g.cand, 1.0, g.side)
     assert len(b) and (b["side"] == "under").all()
     assert (sig.reindex(b["game_id"])["habit"].to_numpy() >= 1.0).all()
 
@@ -407,6 +409,35 @@ def test_smoke_never_grades_a_real_score(prep, monkeypatch):
     text = "\n".join(printed)
     for needle in ("EXTREMES", "HIGHEST-EV OFFERS", "PLACEBO NULL", "TIMING", "same_fetch"):
         assert needle in text
+
+
+def test_full_then_the_verdict_then_the_credit_line_run_end_to_end_on_synthetic_games(prep, monkeypatch, tmp_path, capsys):
+    cache, out, bets = tmp_path / "cache", tmp_path / "out", tmp_path / "bets"
+    cache.mkdir()
+    for name in ("nba_fetch_ledger.parquet", "nba_public_splits.parquet", "nba_schedule.parquet"):
+        (cache / name).write_bytes(b"")
+    monkeypatch.setenv("NBA_GAME2_GO", "1")
+    monkeypatch.setenv("NBA_GAME2_RESULTS", str(out))
+    monkeypatch.setenv("NBA_GAME2_BETS", str(bets))
+    signals = S.placebo_signals
+    monkeypatch.setattr(S, "synthetic_checks", lambda: {})
+    monkeypatch.setattr(S, "prepare", lambda c, require: prep)
+    monkeypatch.setattr(S, "N_PLACEBO", 2)
+    monkeypatch.setattr(S, "placebo_signals", lambda inp: signals(inp, seeds=(1, 2)))
+    S.full(cache)
+    text = capsys.readouterr().out
+    assert "cells written" in text and "REPORT step1" in text and "min]" in text
+    for name in ("POP", "POPT", S.CONTROL_WITH, S.CONTROL_DOG, S.CONTROL_OVER, S.CONTROL_POP_D, S.CONTROL_TOT_D):
+        assert (out / f"cells_{name}.parquet").exists(), name
+    for name in ("national_tv", "total_regimes", "step1"):
+        assert len(pd.read_parquet(out / f"report_{name}.parquet")), name
+    written = list(bets.glob("bets_*.parquet"))
+    assert written and all("sigma" not in pd.read_parquet(p).columns for p in written)
+    v = V.house_verdict_bands(V.load_cells(out), n_placebo=2)
+    v.drop(columns=["placebo_rois"]).to_parquet(out / "verdict_house5.parquet")
+    got = S.credit_table(out)
+    assert len(got) == 9 and got["credited_popularity"].dtype == bool
+    assert got.loc[got["family"] == "POP", "dog_pool_roi"].notna().all()
 
 
 def test_a_read_of_a_game_not_yet_started_stops_the_smoke(prep, monkeypatch):
