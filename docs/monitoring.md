@@ -303,9 +303,9 @@ interpreter stopped the writer (a daemon thread) with the rows in hand.
   (one Odds API call in a ~1.3 s process, every five minutes) made 72 calls and
   `api_call_log` kept 31. Each of the 41 missing calls shows as exactly its 3
   credits missing from the Odds API's remaining count between the logged calls
-  either side of it. In the scheduler log, a run whose row was lost exits within
-  0.1 s of its last line; a run whose row was kept exits 0.3–0.45 s after it,
-  the time the exit hook spent writing it.
+  either side of it. In the scheduler log from 02:30 to 04:25Z (24 runs, 9
+  rows), each of the 15 lost runs exited 34–98 ms after its last line, and each
+  kept run 320–444 ms after it: the time the exit hook spent writing its row.
 - **The reproduction.** A child process made one call to a local stub and
   exited, against a scratch Postgres behind a proxy adding 25 ms each way.
   Before the fix it lost 29 of 140 rows, and 12 of 20 when the process lived
@@ -340,7 +340,7 @@ interpreter stopped the writer (a daemon thread) with the rows in hand.
 
   Concurrent calls finish out of order, so single rows show +N and −N pairs;
   summed by minute they cancel. A credit spent by a caller outside both Railway
-  services (a run on another machine) shows here too, so check the worker and
+  services (a script run on another machine, say) shows here too, so check the worker and
   pollers logs for that minute before calling it a logging loss. A call that
   bills 0 credits cannot be seen this way.
 
