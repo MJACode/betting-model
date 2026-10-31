@@ -617,8 +617,16 @@ def emit(g: Group, games: pd.DataFrame, times: pd.DataFrame, seeds=PLACEBO_SEEDS
     frames = None
     if g.placebo is not None and seeds:
         frames = _placebo_frames(g, seeds)
-    rows = H.run_cells(dd, g.family, POINT, g.cand, g.neutral, list(g.cuts), {LABEL: [g.side]}, placebo=frames,
-                       strength="ev", choose_seasons=g.choose, times=t, market_groups={LABEL: (HMARKET,)})
+    # H.p_one_sided re-draws a small p with 400,000 resamples for the first search's false-discovery bar, about 40
+    # seconds each under this machine's load. Section 9.1's bars do not read that p, and a zero-result smoke run
+    # would never show the cost. Off for this search only: put back as soon as the harness returns.
+    refine = H.P_REFINE_BELOW
+    H.P_REFINE_BELOW = 0.0
+    try:
+        rows = H.run_cells(dd, g.family, POINT, g.cand, g.neutral, list(g.cuts), {LABEL: [g.side]}, placebo=frames,
+                           strength="ev", choose_seasons=g.choose, times=t, market_groups={LABEL: (HMARKET,)})
+    finally:
+        H.P_REFINE_BELOW = refine
     for r in rows:
         if g.bands:
             bounds = G5.band_bounds(g.cuts, r["cut_index"], lowest=g.lowest)

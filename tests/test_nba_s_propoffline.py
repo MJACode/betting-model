@@ -477,6 +477,25 @@ def test_credit_compares_each_anchored_cell_with_its_own_reference_kind():
     assert t.loc[("pinnacle", "over"), "beats_control"]              # a control with no bet counts as 0
 
 
+def test_a_strong_cell_never_runs_the_slow_refinement(monkeypatch):
+    # the planted edge's p is far under the refinement's limit, so only the switch keeps its 400,000 draws away
+    groups, props, stat, _ = S.world_groups(S.synthetic_world(seed=2))
+    games, times = S.games_table(props, stat), S.times_table(props)
+    g = next(x for x in groups if x.family == S.FAMILY_OL and x.side == "under")
+    draws = []
+    real_boot = H.boot
+
+    def spy(b, n=200, seed=H.SEED):
+        draws.append(n)
+        return real_boot(b, n=200, seed=seed)
+
+    monkeypatch.setattr(H, "boot", spy)
+    before = H.P_REFINE_BELOW
+    rows = S.emit(g, games, times, seeds=())
+    assert draws and max(draws) == 200 and min(r["p_choose"] for r in rows) < before
+    assert H.P_REFINE_BELOW == before                   # every other lab in the process keeps the harness as it was
+
+
 def test_a_planted_edge_can_pass_every_bar_of_the_verdict(fast_boot):
     # a bar the prop-as-game encoding left dead would never say yes: on a planted edge it has to
     groups, props, stat, _ = S.world_groups(S.synthetic_world(seed=2))
