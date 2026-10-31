@@ -362,6 +362,36 @@ def test_the_bad_rows_in_the_world_reach_no_offer():
     assert ((prep["removed_tt"]["game_id"] == gid) & (prep["removed_tt"]["line"] == line)).any()
 
 
+def test_the_impossible_total_is_removed_by_its_own_rule_before_any_decision():
+    """The off-market rule at a decision would also catch this deciding book's 9.5, so an
+    offer's absence cannot show the impossible-number rule ran. The rule's own output can,
+    and it is what keeps such a number out of Pinnacle's close, which no decision rule reads."""
+    prep, (gid, book, line) = (lambda r: (r["prep"], r["world"]["bad"]["total"]))(S.synthetic_run())
+    gone = prep["removed_full"]
+    assert ((gone["game_id"] == gid) & (gone["book"] == book) & (gone["line"] == line)).any()
+    kept = prep["data"].quotes
+    assert not ((kept["game_id"] == gid) & (kept["book"] == book) & (kept["line"] == line)).any()
+
+
+def test_a_pinnacle_row_is_not_spared_by_the_impossible_number_rule():
+    q = _quotes([("g", "totals", "pinnacle", 1.0, True), ("g", "totals", "fanduel", 225.5, True),
+                 ("g", "totals", "betmgm", 226.5, True)])
+    kept, removed = S.drop_impossible(q)
+    assert removed["book"].tolist() == ["pinnacle"] and "pinnacle" not in set(kept["book"])
+
+
+def test_the_synthetic_checks_pass_and_refuse_a_world_with_no_bad_row():
+    assert S.synthetic_checks()["synthetic_checks"] == "pass"
+    run = S.synthetic_run()
+    saved = run["prep"]["removed_full"]
+    run["prep"]["removed_full"] = saved.iloc[:0]
+    try:
+        with pytest.raises(AssertionError):
+            S.synthetic_checks()
+    finally:
+        run["prep"]["removed_full"] = saved
+
+
 def test_a_decision_without_the_rule_would_take_the_flipped_number():
     """The check above tests something: with the off-market rule off, the flipped spread
     is the home side's highest-EV offer on its game."""
@@ -442,6 +472,21 @@ def test_the_placebo_is_a_null_on_the_world():
     share = 1.0 - by["placebo_same"] / by["placebo_bets"]
     assert set(by.index) == {"A", "C", "D"} and (share > 0.5).all(), share
     assert (dates["games_per_date"] > 1).all()
+
+
+def test_the_share_at_random_is_worked_by_hand_and_reads_by_date_not_position():
+    # date a: 2 of 4 games fire, date b: 1 of 1. Same-bet share (4/4 + 1/1) / 3 = 2/3.
+    fired = pd.Series({"b": 1, "a": 2})
+    games = pd.Series({"a": 4, "b": 1, "c": 9})
+    assert S.share_different_at_random(fired, games) == pytest.approx(1.0 / 3.0)
+    assert np.isnan(S.share_different_at_random(pd.Series({"a": 0}), games))
+
+
+def test_the_measured_placebo_matches_a_perfect_shuffle_on_the_world():
+    cells, _ = S.placebo_null(S.synthetic_run()["prep"], seeds=tuple(range(1, 21)))
+    big = cells[cells["real_bets"] >= 100]
+    assert len(big) >= 12
+    assert (big["share_different"] - big["share_different_at_random"]).abs().max() < 0.03
 
 
 def test_placebo_null_counts_a_repeat_as_the_same_bet():
@@ -530,6 +575,17 @@ def test_full_game_cells_pool_five_seasons_and_team_totals_three():
     rows = pd.DataFrame(S.synthetic_run()["rows"])
     assert set(rows.loc[rows["point"] != "D", "pool_seasons"]) == {"2022,2023,2024,2025,2026"}
     assert set(rows.loc[rows["point"] == "D", "pool_seasons"]) == {"2024,2025,2026"}
+
+
+def test_each_family_asks_for_its_own_choosing_seasons():
+    """The harness drops a season with no quotes, which hides a wrong ask in pool_seasons:
+    the ask itself is the only place a team total reading the full game's seasons shows."""
+    rows = pd.DataFrame(S.synthetic_run()["rows"])
+    assert set(rows.loc[rows["point"] != "D", "choose_seasons_asked"]) == {"2022,2023,2024,2025"}
+    assert set(rows.loc[rows["point"] == "D", "choose_seasons_asked"]) == {"2024,2025"}
+    assert set(rows.loc[rows["point"] == "D", "choose_seasons"]) == {"2024,2025"}
+    for point, _m, _s, _n, _d, choose, *_rest in S.groups(S.synthetic_run()["prep"]):
+        assert tuple(choose) == ((2024, 2025) if point == "D" else (2022, 2023, 2024, 2025)), point
 
 
 def test_the_counts_never_grade():

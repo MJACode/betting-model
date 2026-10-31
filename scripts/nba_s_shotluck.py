@@ -602,14 +602,27 @@ def overlap(prep: dict) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def share_different_at_random(fired_by_date: pd.Series, games_by_date: pd.Series) -> float:
+    """What a perfect within-date shuffle gives. If k of a date's N games fire for real,
+    a shuffled gap lands on one of the k with chance k/N, whatever the shuffle does; so
+    this share is the most any within-date placebo can differ from a cell that broad."""
+    k = fired_by_date.to_numpy(float)
+    if not k.sum():
+        return float("nan")
+    n = games_by_date.reindex(fired_by_date.index).to_numpy(float)
+    return 1.0 - float((k * k / n).sum() / k.sum())
+
+
 def placebo_null(prep: dict, seeds=tuple(range(1, 21))) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(per cell, per decision): the share of placebo bets that are not the real
-    cell's bets, by the harness's own shuffle, and how crowded the dates are."""
+    cell's bets, by the harness's own shuffle, what a perfect shuffle would give, and
+    how crowded the dates are."""
     cells, dates = [], []
     for point, market, sides, neutral, dat, _ch, _t, _c, _s in groups(prep):
         nm, s, cand = group_frames(neutral, prep["signals"]["zone"], market)
         by_date = s.merge(dat.games[["game_id", "game_date"]], on="game_id").groupby("game_date").size()
         by_date_ids = set(s["game_id"])
+        date_of = dict(zip(dat.games["game_id"], dat.games["game_date"]))
         dates.append({"point": point, "market": market, "games": int(by_date.sum()), "dates": int(len(by_date)),
                       "games_per_date": float(by_date.mean()),
                       "share_alone_on_their_date": float(by_date[by_date == 1].sum() / by_date.sum())})
@@ -629,6 +642,8 @@ def placebo_null(prep: dict, seeds=tuple(range(1, 21))) -> tuple[pd.DataFrame, p
                 cells.append({"point": point, "market": market, "side": side, "cut": cut, "real_bets": len(real),
                               "placebo_bets": n, "placebo_same": same,
                               "share_different": 1.0 - same / n if n else np.nan,
+                              "share_different_at_random": share_different_at_random(
+                                  real["game_id"].map(date_of).value_counts(), by_date),
                               "share_of_games_firing": fired})
     return pd.DataFrame(cells), pd.DataFrame(dates)
 
@@ -813,6 +828,8 @@ def smoke(cache: Path = H.CACHE) -> dict:
     summary["share_different"] = 1.0 - summary["placebo_same"] / summary["placebo_bets"]
     print("PLACEBO BY DECISION:\n", summary.round(3).to_string())
     print("lowest cell:", pc.sort_values("share_different").head(5).round(3).to_string(index=False))
+    away = (pc["share_different"] - pc["share_different_at_random"]).abs()
+    print(f"farthest any cell sits from a perfect within-date shuffle: {away.max():.3f}")
     log("timing on real offers, scrambled scores")
     tm = timing(prep, setup_seconds)
     print("TIMING:", json.dumps(tm, indent=1, default=float))
