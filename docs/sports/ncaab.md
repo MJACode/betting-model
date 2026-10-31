@@ -317,6 +317,64 @@ score, and it was built by a script outside the repo. The period backfill
 re-reads the same ESPN scoreboards through the repo's own code, so every
 stored row names its endpoint.
 
+## In the app (2026-10-30)
+
+- **NCAAB is a sport chip beside NCAAF** on the Picks, Models and Stats tabs
+  (`mobile/src/hooks/useSportFilter.ts`). A push that names NCAAB opens its
+  board, because the push router accepts only the sports on that list.
+- **A model whose id starts `ncaab` is filed under NCAAB.** Before this, the
+  app had no `ncaab` prefix and filed every such model under MLB
+  (`modelMeta.sportOfModel`, and its copy in `ModelsScreen`).
+- **The totals model's label is "NCAAB Totals", badge O/U, under the id
+  `ncaab_total_blend`**, the id the model writes its picks under
+  (`models/ncaab_total_blend.py`). The app first used `ncaab_over_under`, the
+  id in the model's build plan; no model writes that id. If config scores an
+  id the app has no label for, `tests/test_mobile_pick_categories.py` fails.
+- **It is priced off the `totals` rows because it is named.** An id with
+  `over_under` in it reaches the totals rows on its own; `ncaab_total_blend`
+  does not, so `markets.gameMarketForModel` names it (else every price,
+  movement and line-shop lookup reads the moneyline rows), and so does
+  `marketClassForModel` (else a parlay treats it as independent of the same
+  game's other legs).
+- **Its page and its picks say when it decides.** The model page says it
+  decides each game once, the evening before, at DraftKings' total, and that a
+  posted bet is never re-priced (`modelMeta.modelPageTiming`). It prints no
+  Eastern clock time: the card runs at 22:00 UTC, which is 6pm ET until
+  1 November and 5pm ET after it. Pick Detail says "Posted" once, not "the
+  first scoring run of the day" (`markets.pickTimingInfo`). A row for a game
+  that is not today shows its day as well as its time, as the Signals card
+  does.
+- **The Today board reads NCAAB picks up to 7 days ahead**
+  (`fetchUpcomingNcaabPicks`), because the totals model decides the evening
+  before the game. It reads the picks first, then only those
+  picks' games and lines, 80 game ids per request. Reading the whole window
+  instead would have been too big: over 2025-26 the biggest day held 4,417
+  main-market rows across all books, and the biggest seven days held 10,424
+  (Supabase, read only, 2026-10-30).
+- **Today's DraftKings lines are read in pages, main markets only.** The
+  same-day read was one request, and a full college basketball day went past
+  the 1,000-row response cap: 1,132 DraftKings rows for 2026-01-10, of which
+  743 were in the markets a pick reads. Past the cap the server returns an
+  arbitrary 1,000 rows without saying so, which could blank any sport's line
+  pill.
+- **When a game leaves the board.** Three hours after the tip if ESPN's final
+  has not landed by then (`format.GAME_DURATION_HOURS`); it stops reading
+  LIVE on the clock alone after four (`BLIND_LIVE_WINDOW_MS`).
+- **Not in the app yet.** NCAAB player and team stats (the Stats tab shows its
+  "No player leaderboard" state, and every Stats read returns nothing for
+  NCAAB before it asks the server). School abbreviations: cards show the
+  school name, because the app cannot read `ncaab_teams` (anon has no SELECT
+  on it, RLS is on and it has no policy; read only, 2026-10-30). Opening it is
+  a worker-side change as well as an app one: the code that creates the table
+  (`data/ingestors/ncaab_teams.py`, `ensure_tables`) re-runs its create and
+  lock-down whenever it finds anon holding a grant, so a grant alone would be
+  revoked the next time that runs. Every school name on the games from 1 to
+  8 November matches `ncaab_teams.school` (492 of 492). Nine school names
+  appear twice in `ncaab_teams`, six of them with two different
+  abbreviations, so those six must keep the school name. Live scores and the
+  Scoreboard: the live scoreboard poller (`data/ingestors/live_scoreboard.py`)
+  does not cover NCAAB.
+
 ## Data accounts and sources (measured 2026-10-28)
 
 - **cbbdata (Torvik's API).** Account created 2026-10-28 (mike: "articulate the
