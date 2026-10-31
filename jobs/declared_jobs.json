@@ -1373,6 +1373,30 @@
     }
   },
   {
+    "key": "ncaab-period-scores-2021-2026",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "mike",
+    "enabled": true,
+    "note": "ON (mike, 2026-10-30: do all outstanding tasks). Free, no key: ESPN's NCAAB scoreboard, one call per date, stores the first-half, second-half and overtime scores of every 2020-21 to 2025-26 final that has none in ncaab_period_scores (855 dates, 35,323 finals counted 2026-10-30; about 15-20 minutes at one call a second). Skips what is stored, so a re-run stores nothing twice. Replaces the research round's halves file that lived only on one laptop.",
+    "args": {
+      "kind": "periods",
+      "first": 2021,
+      "last": 2026
+    }
+  },
+  {
+    "key": "ncaab-box-scores-2027",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF until someone turns it on after the merge (set enabled to true). Free, no key: one ESPN game summary per 2026-27 final with no 'espn_summary' row in ncaab_team_game_stats, box and period scores together. The refresh pass already covers the last 3 ET dates, so this is only needed if the merge lands after 2026-11-04, a pass missed games, or ESPN refused every game for a while (step ncaab-box red with espn-box-refused): it tries refused games again, ignoring their attempt count. Skips what is stored.",
+    "args": {
+      "kind": "box",
+      "first": 2027,
+      "last": 2027
+    }
+  },
+  {
     "key": "ncaab-history-probe-2026-10-26",
     "job_type": "ncaab_odds_history",
     "requested_by": "mike",

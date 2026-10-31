@@ -866,8 +866,13 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
-    assert sorted(k for k in keys if k.startswith("ncaab-")) == sorted(DECLARED)
     by = {e["key"]: e for e in entries}
+    # Every NCAAB declaration is one of the approved ones, except the free
+    # ESPN box and period backfills (job ncaab_box_backfill, 2026-10-30): they
+    # spend no credits, so they need no credit approval, and whether each is
+    # on is a one-line switch that tests/test_ncaab_espn_box.py checks.
+    assert sorted(k for k in keys if k.startswith("ncaab-")
+                  and by[k]["job_type"] != "ncaab_box_backfill") == sorted(DECLARED)
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True

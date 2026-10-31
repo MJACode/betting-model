@@ -671,6 +671,40 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
     return {"first": d0.date().isoformat(), "last": d1.date().isoformat()}
 
 
+# NCAAB box scores and period scores from ESPN (data/ingestors/ncaab_espn_box.py,
+# free, no key). kind "periods": one scoreboard call per date, every final of
+# the seasons that has no period row (2020-21 to 2025-26 is 855 dates and
+# 35,323 finals, counted 2026-10-30). kind "box": one summary call per final
+# with no 'espn_summary' box row, box and period scores together. Both skip
+# what is stored, so a re-run stores nothing twice. The box backfill is held
+# to the current season, the only one sportsdataverse does not cover; an
+# older season would put a second source on games NCAA's rows already hold.
+NCAAB_BOX_BACKFILL_SPANS = {"periods": (2011, 2027), "box": (2027, 2027)}
+
+
+def _validate_ncaab_box_backfill(args: dict) -> dict:
+    extra = sorted(set(args) - {"kind", "first", "last"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes kind, first and last")
+    kind = str(args.get("kind") or "")
+    if kind not in NCAAB_BOX_BACKFILL_SPANS:
+        raise ValueError(f"kind must be one of {sorted(NCAAB_BOX_BACKFILL_SPANS)}, got {kind!r}")
+    lo, hi = NCAAB_BOX_BACKFILL_SPANS[kind]
+    try:
+        first, last = int(args.get("first", lo)), int(args.get("last", hi))
+    except (TypeError, ValueError):
+        raise ValueError("first and last must be whole seasons") from None
+    if not (lo <= first <= last <= hi):
+        raise ValueError(f"{kind} seasons must sit inside {lo}..{hi}, got {first}..{last}")
+    return {"kind": kind, "first": first, "last": last}
+
+
+def _job_ncaab_box_backfill(**kw) -> str:
+    flag = "--periods" if kw["kind"] == "periods" else "--box"
+    return _run_script_main("data.ingestors.ncaab_espn_box",
+                            [flag, "--seasons", str(kw["first"]), str(kw["last"])])[-4000:]
+
+
 # Free NCAAB history into Supabase on the worker. Built here because the local
 # DATABASE_URL was stale from 2026-10-26 (password authentication failed on
 # both pooler ports) until mike replaced it on 2026-10-29. Each kind is one
@@ -2332,6 +2366,8 @@ JOBS = {
                              _validate_ncaab_history_import),
     "ncaab_schedule_backfill": (_job_ncaab_schedule_backfill,
                                 _validate_ncaab_schedule_backfill),
+    # Free ESPN box and period scores; see NCAAB_BOX_BACKFILL_SPANS.
+    "ncaab_box_backfill": (_job_ncaab_box_backfill, _validate_ncaab_box_backfill),
     # Derivative totals (team, alternate, first period). No credit ceiling:
     # Michael, 2026-10-03. Dry run is apply=false. See
     # _job_nhl_derivative_odds_history.

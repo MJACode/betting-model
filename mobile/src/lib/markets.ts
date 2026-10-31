@@ -1933,12 +1933,16 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
   // once, about an hour before tip, and is a game line: nothing to void. The
   // NBA home team-total unders post the same way, in the same hour.
+  // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
+  // once, the evening before, and never re-prices: not "the first scoring run
+  // of the day".
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
     pick.model_id === 'nba_total_luck' ||
     pick.model_id === 'nba_team_total_luck' ||
+    pick.model_id === 'ncaab_total_blend' ||
     nbaPosted
   ) {
     return {
