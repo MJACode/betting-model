@@ -32,6 +32,7 @@ crons had).
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+| NCAAB totals card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_total_card()` → `python -m scripts.ncaab_total_card --publish`, then publish. Decides each game once, at 22:00 UTC the evening before its date, else at 15:00 UTC on the day and each hour to tip, on DraftKings' standing total. Kill switch: `RUN_NCAAB_TOTAL_CARD=0` (the job still beats). A run that cannot decide a due game for a reason that will not clear by itself (an artifact for another season, a team missing two or more old box scores, a missing blend) exits 1 after writing the rest: the heartbeat records `error` and the failure alerter reports it. Added 2026-10-30; `docs/sports/ncaab.md` |
 
 Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
@@ -346,6 +347,9 @@ Notes:
      the NFL card on a dedicated key/quota.
    - `DISCORD_WEBHOOK_*` — OPTIONAL, see [Discord](#discord-picks-to-your-server)
      below. Omit them all and nothing Discord-related runs.
+   - `RUN_NCAAB_TOTAL_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     totals card before it reads anything; its job still beats, so the
+     silence still means stopped. Worker only (the card is a worker job).
    - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` /
      `MLB_TOTAL_PUBLIC_FADE_PUBLISH` — OPTIONAL, default `0`. MLB game-line
      cards log every pass; they INSERT picks only when the matching flag is
@@ -435,6 +439,8 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_UFC` | `#ufc-picks` |
 | `DISCORD_WEBHOOK_GOLF` | `#golf-picks` |
 | `DISCORD_WEBHOOK_NCAAF` | `#ncaaf-picks` |
+| `DISCORD_WEBHOOK_NCAAB` | `#ncaab`. Optional: NCAAB can post through `DISCORD_CHANNEL_NCAAB` instead (next row). When both are set, the webhook wins. |
+| `DISCORD_CHANNEL_<SPORT>` | A sport's channel ID, in place of its webhook (added 2026-10-30 for NCAAB: `DISCORD_CHANNEL_NCAAB`). Not a secret. It only works on a service that also has `DISCORD_BOT_TOKEN`, which is the `worker`, where the NCAAB totals card runs; `pollers` has no bot token, so the ID set there resolves nothing and pollers' publish passes skip NCAAB without marking it sent. The notifier uses the token to reuse the bot's own webhook in that channel, or creates one named after the sport (`ncaab`), and keeps its URL in memory only. The ID comes from the one-off `discord_create_channel` worker job (`scripts/discord_create_sport_channel.py`). Redeploy after setting. The `discord_probe` job reports such a sport by the channel and the bot's webhook ID and name. |
 | `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
 | `DISCORD_WEBHOOK_LIVE_NFL` / `_LIVE_MLB` / `_LIVE_NCAAF` | **The sport's live channel** (`#nfl-live`, `#mlb-live`, `#ncaaf-live`; mike, 2026-09-09). Set on BOTH `worker` (runs the NFL in-play worker) and `pollers` (runs the MLB and NCAAF loops). Any `DISCORD_WEBHOOK_LIVE_{SPORT}` over the sport list works. |
 | `DISCORD_WEBHOOK_LIVE` | Shared in-play channel, the fallback for a sport with no live channel of its own. Falls back to the sport's channel if unset too. |
@@ -449,7 +455,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_PARLAYMATT` | ParlayMatt recaps in his channel only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
 | `DISCORD_PARLAYMATT_CHANNEL_ID` | The `#parlaymatt-picks` channel id the bot reads. Unset, his poll does not call Discord. |
 | `DISCORD_PARLAYMATT_AUTHOR_ID` | Discord user id of the only ParlayMatt author stored. The username is not the filter. |
-| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. |
+| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. A sport that posts through `DISCORD_CHANNEL_<SPORT>` also needs **Manage Webhooks** on that channel, and the `discord_create_channel` job needs **Manage Channels** in the guild (plus whatever permissions the copied overwrites grant). It is on `worker` only (variable names read 2026-10-30: `pollers` has none). |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |

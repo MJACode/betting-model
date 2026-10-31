@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 import random
@@ -323,7 +324,7 @@ def fmt_units(u: float) -> str:
 
 _SPORT_EMOJI = {
     "MLB": "\u26be", "NFL": "\U0001f3c8", "NCAAF": "\U0001f3c8",
-    "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NHL": "\U0001f3d2",
+    "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NCAAB": "\U0001f3c0", "NHL": "\U0001f3d2",
     "UFC": "\U0001f94a", "GOLF": "\u26f3",
 }
 
@@ -610,7 +611,109 @@ def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
 
 
 def _webhook_for_sport(sport: str) -> str | None:
-    return config.DISCORD_WEBHOOKS.get(sport) or config.DISCORD_WEBHOOK_DEFAULT or None
+    return (config.DISCORD_WEBHOOKS.get(sport) or _channel_webhook(sport)
+            or config.DISCORD_WEBHOOK_DEFAULT or None)
+
+
+# A sport that names its channel (config.DISCORD_CHANNELS, a channel id) and no
+# webhook: the bot token finds or makes the channel's webhook. Cached per
+# process; the URL is a bearer credential, so it lives in memory only and no
+# log line, error or job result ever carries it.
+_DISCORD_API = "https://discord.com/api/v10"
+_CHANNEL_HOOKS: dict = {}
+
+
+def _channel_hook_name(sport: str) -> str:
+    """The name a created webhook posts under: the sport's, lower case, as the
+    other sports' webhooks are named ('ncaaf', 'nba')."""
+    return sport.lower()
+
+
+def _bot_hook_in_channel(sport: str, channel: str, headers: dict) -> tuple[dict | None, str | None]:
+    """(the bot's own webhook in `channel`, None) or (None, why not). GET
+    only: creates nothing. 'why not' is None with no hook when the bot simply
+    has no webhook there yet."""
+    me = requests.get(f"{_DISCORD_API}/users/@me", headers=headers, timeout=15)
+    if me.status_code != 200:
+        return None, f"bot identity read failed for {sport} ({me.status_code})"
+    bot_id = str(me.json().get("id"))
+    got = requests.get(f"{_DISCORD_API}/channels/{channel}/webhooks", headers=headers,
+                       timeout=15)
+    if got.status_code != 200:
+        return None, (f"listing webhooks of the {sport} channel failed "
+                      f"({got.status_code}); the bot needs Manage Webhooks there")
+    return next((h for h in (got.json() or [])
+                 if str((h.get("user") or {}).get("id")) == bot_id and h.get("token")), None), None
+
+
+def _bot_headers() -> dict | None:
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    if not token:
+        return None
+    return {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
+
+
+def channel_hook_info(sport: str) -> dict:
+    """What `sport`'s configured channel posts through, for the discord_probe
+    job: the channel id, the bot's webhook id and name. GET only, and never
+    the webhook's token or URL (a bearer credential)."""
+    channel = config.DISCORD_CHANNELS.get(sport)
+    if not channel:
+        return {"error": f"no DISCORD_CHANNEL_{sport}"}
+    headers = _bot_headers()
+    if headers is None:
+        return {"channel_id": channel, "error": "no DISCORD_BOT_TOKEN on this service"}
+    try:
+        hook, why = _bot_hook_in_channel(sport, channel, headers)
+    except (requests.RequestException, ValueError) as exc:
+        return {"channel_id": channel, "error": type(exc).__name__}
+    if why:
+        return {"channel_id": channel, "error": why}
+    if hook is None:
+        return {"status": "no bot webhook in the channel yet", "channel_id": channel}
+    return {"status": 200, "channel_id": str(hook.get("channel_id") or channel),
+            "guild_id": hook.get("guild_id"), "webhook_id": str(hook.get("id")),
+            "webhook_name": hook.get("name"), "via": "channel id + bot token"}
+
+
+def _channel_webhook(sport: str) -> str | None:
+    """The webhook URL for `sport`'s configured channel, or None.
+
+    Reuses a webhook in that channel that the bot itself created (its `user`
+    is the bot), else creates one named after the sport. Needs
+    DISCORD_BOT_TOKEN with Manage Webhooks on the channel. A failure is logged
+    by status code and returns None, so the sport is skipped exactly as an
+    unset webhook is (its picks stay unsent and post once the channel
+    resolves)."""
+    channel = config.DISCORD_CHANNELS.get(sport)
+    if not channel:
+        return None
+    if sport in _CHANNEL_HOOKS:
+        return _CHANNEL_HOOKS[sport]
+    headers = _bot_headers()
+    if headers is None:
+        return None
+    try:
+        hook, why = _bot_hook_in_channel(sport, channel, headers)
+        if why:
+            logger.error(f"Discord: {why}")
+            return None
+        if hook is None:
+            made = requests.post(f"{_DISCORD_API}/channels/{channel}/webhooks", headers=headers,
+                                 json={"name": _channel_hook_name(sport)}, timeout=15)
+            if made.status_code not in (200, 201):
+                logger.error(f"Discord: creating the {sport} channel's webhook failed "
+                             f"({made.status_code})")
+                return None
+            hook = made.json()
+            logger.info(f"Discord: created a webhook in the {sport} channel")
+    except (requests.RequestException, ValueError) as exc:
+        logger.error(f"Discord: resolving the {sport} channel's webhook failed: "
+                     f"{type(exc).__name__}")
+        return None
+    url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
+    _CHANNEL_HOOKS[sport] = url
+    return url
 
 
 def _live_webhook_for_sport(sport: str) -> str | None:
@@ -629,6 +732,7 @@ def _live_webhook_for_sport(sport: str) -> str | None:
 
 def _configured() -> bool:
     return bool(config.DISCORD_WEBHOOKS
+                or config.discord_sports_wired()
                 or config.DISCORD_WEBHOOKS_LIVE
                 or config.DISCORD_WEBHOOK_DEFAULT
                 or config.DISCORD_WEBHOOK_LIVE

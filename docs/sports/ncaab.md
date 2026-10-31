@@ -9,13 +9,174 @@
 
 ## The models
 
-None yet. A model goes live when it passes bars written down before its first
-test (the build prompt's acceptance list: walk-forward by season with the
-newest season held out; units, ROI with a confidence interval and closing-line
-value against Pinnacle's vig-free close; its record against the opening and the
-updated line on the Prediction Tracker's games; early season against late).
-The research and its results will be recorded here once the first grid has
-run.
+### The NCAAB totals model (`ncaab_total_blend`), live from 2026-10-30
+
+mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model
+(CLAUDE.md §2). Code: `models/ncaab_total_blend.py` (the model),
+`scripts/ncaab_total_card.py` (the card that writes its picks),
+`scripts/ncaab_total_blend_build.py` (the frozen numbers),
+`models/saved/ncaab_total_blend_2027.json` (those numbers for 2026-27).
+
+**What it does, per game, as of the moment DraftKings' total is read:**
+
+1. **Ratings.** Every team's offence, defence and pace, refit on this
+   season's finals that had ENDED (tip + 2.5 hours) by DraftKings' own time on
+   the quote, rounded down to the hour. Recent games weigh more (half-life 45
+   days). The starting point is last season's final rating, carried at 0.72
+   (scoring) and 0.9 (pace); a team new to Division I starts near the bottom.
+   A team with fewer than 10 games on the schedule is pooled into one "other"
+   team. Possessions are the box-score estimate (field-goal attempts minus
+   offensive rebounds plus turnovers plus 0.475 free-throw attempts, the two
+   teams averaged), because that is all the in-season ESPN feed gives. It runs
+   0.30-0.46 possessions a game below NCAA's play-by-play count.
+2. **A correction for luck and style.** A fixed linear adjustment on each
+   team's three-point and free-throw percentages made and allowed so far, and
+   its free-throw rate, three-point attempt rate, offensive-rebound rate and
+   turnover rate, each pulled toward last season's league rate. Fitted on the
+   2012-2026 seasons.
+3. **Blended with DraftKings' total:** mean = line + c + beta x (model −
+   line), normal spread sigma, with c, beta and sigma fitted separately for
+   November and for December on, on the paid seasons 2021-2026.
+4. **Priced at DraftKings' own two prices** on that total: the chance the bet
+   wins, a push left out, minus the price's implied chance. The better side
+   is bet when that edge is above **0.04**. DraftKings only: the evidence
+   priced DraftKings and nothing else, so the line is not shopped.
+5. **Both teams 10+ games** that ended before the quote (CLAUDE.md §3).
+
+**When a game is decided.** The evidence bet DraftKings' FIRST stored total,
+and the history it bought was snapshots at 22:00 UTC the evening before, at
+15:00 UTC on the day and the hour before tip. So the card (hourly at five
+past, UTC) decides a game at 22:00 UTC the evening before its date if
+DraftKings has a total up then, else at 15:00 UTC on the day, else at each
+hour after until tip. "Up" means DraftKings' newest pre-game row was stored in
+the last 90 minutes. The decision, bet or not, goes into
+`ncaab_total_decisions` with the quote, the cutoff and the reason, and the game
+is never decided again (CLAUDE.md §1c). Only BET rows go into `picks`.
+
+**A hold is not a decision.** A game waits for its next decision hour while
+either team has, among its games that ended before the quote, one from the
+last 36 hours without a final score or both box rows (`box_pending`), or two
+or more older ones without them (`box_missing`). One older game without a box
+does not hold (the evidence also had a few games with no possessions). The
+boxes come from the ESPN box feed (`data/ingestors/ncaab_espn_box.py`, source
+`espn_summary`, PR #1103). **Before that feed runs no box is stored**: a
+team's first game, and its second if the first ended more than 36 hours
+before the quote, is decided `below_10_games`, which is final; from the third
+game on its games hold. Nothing reaches 10 boxed games, so nothing is bet
+(measured 2026-10-31 on the tests' synthetic season with no box rows, games
+three days apart).
+
+**A run that cannot decide a due game fails.** `box_missing` can hold a
+team's games all season, so it fails the run, as do an artifact built for
+another season and a missing blend. The card first decides and writes every
+other game, then exits 1: the job's heartbeat records `error` and the failure
+alerter reports it (`CardIncomplete` in `scripts/ncaab_total_card.py`). The
+worker log names the games and the teams.
+
+**One box source per game.** The game key is ESPN's game id where the row
+has one, else its contest id. Where NCAA's play-by-play rows hold a game, only
+they are kept, both of them; otherwise the ESPN feed's rows. This is the source
+rule the box feed (#1103) documents for `ncaab_team_game_stats`: choose the
+source first. Never by team id: in 145 of NCAA's games (31 from 2022-23 on)
+neither row has one (Mercy at FDU, 2022-11-09), and a key on the team id kept
+one row of each, so its possessions were one team's estimate and the hold
+counted it unboxed. Fixed 2026-10-31; the frozen numbers were rebuilt with it.
+
+**Under the 10-game rule it has never bet in November.** Expect a card of
+`below_10_games` decisions and no bets until about the first week of December.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.04 (P(win, push left out) minus DraftKings' implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.04: the edge filter IS the card's cut, because model_probability is that same P(win, push left out) | `ACTION_THRESHOLDS` |
+| EV floor | 0.07, just under the smallest EV the cut admitted on 2021-2025 (+0.0743; median +0.0996), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned (it laid -120 to +102) | `MODEL_MIN_ODDS` |
+| decision hours | 22:00 UTC the evening before; else 15:00 UTC on the day and each hour to tip | `models/ncaab_total_blend.decision_hour` |
+| decided once | a row in `ncaab_total_decisions`, bet or not | `scripts/ncaab_total_card.py` |
+| settlement | full-game total, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
+| kill switch | `RUN_NCAAB_TOTAL_CARD=0` | the card |
+| frozen numbers | built from 2011-2026 | `models/saved/ncaab_total_blend_2027.json` |
+
+**The evidence, graded exactly as it runs live** (scratch chain of
+2026-10-30: box-score possessions in every season, no returning-minutes input,
+ratings and inputs as of the hour-floored DraftKings first stored total, the
+10-game rule, stake_for; 95% interval resampled by date):
+
+| Cut | Seasons | Bets | Units | ROI | 95% interval | Close EV | Seasons positive |
+|---|---|---|---|---|---|---|---|
+| 0.02 | 2021-2025 | 3,380 | +191.68 | +5.18% | [1.9, 8.9] | -0.80% | 5/5 |
+| 0.03 | 2021-2025 | 1,983 | +118.27 | +5.45% | [1.3, 9.7] | -0.31% | 5/5 |
+| **0.04** | **2021-2025** | **1,094** | **+87.48** | **+7.32%** | **[2.0, 12.7]** | **+0.27%** | **5/5** |
+| 0.05 | 2021-2025 | 605 | +65.02 | +9.85% | [2.7, 16.9] | +0.58% | 4/5 |
+| 0.06 | 2021-2025 | 329 | +37.53 | +10.45% | [0.6, 20.5] | +1.17% | 4/5 |
+| 0.02 | 2025-26 | 1,041 | +50.25 | +4.41% | [-1.5, 10.2] | +1.58% | |
+| 0.03 | 2025-26 | 631 | +28.05 | +4.07% | [-3.3, 10.6] | +2.76% | |
+| **0.04** | **2025-26** | **349** | **+26.76** | **+7.03%** | **[-2.0, 16.2]** | **+3.89%** | |
+| 0.05 | 2025-26 | 182 | +23.27 | +11.74% | [-2.9, 26.0] | +4.86% | |
+| 0.06 | 2025-26 | 85 | +20.05 | +21.64% | [0.3, 41.8] | +8.62% | |
+
+At 0.04 by season: 2021 +6.46% (285 bets), 2022 +10.90% (110), 2023 +21.14%
+(46), 2024 +4.14% (271), 2025 +7.57% (382), 2026 +7.03% (349). Record
+606-475-13 on 2021-2025 and 195-154-0 on 2025-26. Calibration error over every
+scored game: 0.70% on 2021-2025, 2.72% on 2025-26. No bet in November in any
+season. The round-2 research version (NCAA possessions, returning minutes) made
++6.82% on 1,085 bets at the same cut; the live inputs did not weaken it.
+
+**The shipped code reproduces it** (re-measured 2026-10-31, after the
+one-source-per-game fix and the rebuild). `scripts/ncaab_total_blend_build.py`
+replays the repo's own model walk-forward (blend fit on the paid seasons before
+each one) on 2022-2026: 1,157 bets at 0.04 against the evidence's 1,158, 1,147
+of them the same game (mean edge difference 0.0004). 2022-2025: 809 bets,
++63.28 units, +7.17% (the evidence: 809, +67.30, +7.63%). 2025-26: 348 bets,
++25.76 units, +6.78% (the evidence: 349, +26.76, +7.03%). The build prints this
+replay and stores it in the artifact. **The card's own code path** (the season
+load, the hold, the refit at one cutoff, the decision) run over 2025-26 at each
+game's DraftKings first stored total, with numbers built through 2024-25, writes
+the same 348 bets as the build on the same sides (largest edge difference
+7e-9), and holds no game.
+
+**Where the port differs from the evidence on 2025-26, measured game by game**
+against the evidence's own predictions (5,586 quoted games): the 10-game counts
+agree on every game, the model totals differ by a mean of 0.011 points, and the
+edges by a mean of 0.0001. The one bet the evidence makes and the card does not
+is Iowa vs Ohio State, 2026-03-12, over 140.5 at -110: edge 0.039946 against the
+evidence's 0.040012, at the cut. The model total does not move it (the
+evidence's total with the card's blend gives 0.039943). The blend does: the
+build refits c and beta on its own predictions (Dec+ c 0.721, beta 0.367,
+against the evidence's 0.719 and 0.368), and the card's total with the
+evidence's blend gives 0.040016, a bet. The model-total differences that remain
+sit on the 22 teams that played one of NCAA's 31 games from 2022-23 on with no
+team id on either row: the build places those games and the evidence never did.
+Their 110 games differ by a mean of 0.158 points, every other game by 0.008,
+and 18 of the 20 games that differ by more than 0.3 involve one of them.
+
+Four defects were found by replaying the card's path or in review, and
+fixed: a game against an opponent with no ESPN id was dropped from the luck
+and style inputs; the same game was read as unboxed (which held 2,857 of 5,586
+games); the build pooled a team by another season's schedule; and a game with
+no team id on either NCAA row kept one row, which on 2024-25 would have held
+Fairleigh Dickinson and Saint Francis as `box_missing` all season (five such
+games each).
+
+**The risks, plainly:**
+
+- **92% of its bets are overs** (1,007 of 1,094 on 2021-2025; 344 of 349 in
+  2025-26). Betting every over blind at the same prices lost 1.75% on
+  2021-2025, so it is not just an over lean, but expect an over-heavy card.
+- **Closing-line value is thin.** Close EV against Pinnacle's no-vig close is
+  +0.27% at 0.04, and its interval in the research version ([-0.28, 0.90])
+  includes zero. At 0.03 it is negative. The realised return runs well above
+  what the close implies, which holds only if the model's information against
+  the close is real.
+- **2025-26 rests on its best days.** Without its 5 best dates the research
+  version's 2025-26 was -0.78% (282 bets); without its 10 best, -6.88%.
+- **The 10-game rule decides whether it clears.** Without it the same cut is
+  +4.36% with an interval that crosses zero (research version).
+- **The cut was chosen on the seasons it is graded on**, though the returns
+  form a plateau (+5.18% to +10.45% across 0.02-0.06), not a peak.
+- **Pinnacle had posted no 2026-27 NCAAB totals** when this shipped (seven
+  books in `odds` for season 2027 on 2026-10-30), so the closing-value
+  columns start empty.
 
 ## Identity: ESPN owns the games row
 
@@ -147,6 +308,7 @@ second run stores nothing new. Each insert into `odds` also updates
 |---|---|---|
 | ESPN schedule + results | Teams, venues, every game (neutral flag, conference game), finals for settlement; the daily pipeline refreshes 14 days ahead, every refresh pass fills finals for started games | `data/ingestors/ncaab_espn_ingestor.py`, steps `ncaab-schedule` / `ncaab-results` |
 | Live odds | Full-game moneyline, spread and total from the ten line-shop books on every refresh pass; NCAAB is exempt from the DraftKings-must-list gate so every book's first post is kept | `data/ingestors/odds_ingestor.py` |
+| Totals model card | Hourly at five past, UTC: decides each game once at DraftKings' standing total (22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip), writes the bets, then publishes them | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
 | Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
 | Price-path retention | NCAAB keeps every book's whole price path (the clean-up job only removes unchanged middles), and the close it keeps for any sport is the last price before the start | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |
 | Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close. Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |

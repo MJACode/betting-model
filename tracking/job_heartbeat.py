@@ -103,6 +103,9 @@ MAX_SILENCE: dict = {
     # of ncaab_events, then return, all off-season), so 20 minutes is four
     # missed ticks: a stopped capture, and opener times going unrecorded.
     "ncaab_odds_capture": 20,
+    # Hourly at five past, 24x7 UTC, and it beats on the idle hours too (one
+    # read of today's slate), so two missed hours and some: a stopped card.
+    "ncaab_total_card": 150,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,
