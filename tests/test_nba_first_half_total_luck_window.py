@@ -150,18 +150,157 @@ def test_a_first_half_tick_fetches_exactly_the_planned_games_then_decides(monkey
     assert published == ["nba-total-luck-window"]
 
 
-def test_all_three_models_due_run_in_order_and_publish_once(monkeypatch):
+def test_all_three_models_due_each_run_their_own_steps_in_order_and_publish_once(monkeypatch):
     plan = pw.PregamePlan(total_luck=["GA"],
                           team_total=ttw.Plan(decide=["GB"], close=["GC"]),
                           first_half=ttw.Plan(decide=["GD"], close=["GE"]))
     ran, published = _tick(monkeypatch, plan)
-    assert [r[0] for r in ran] == ["nba-total-luck-fetch", "nba-total-luck",
-                                   "nba-team-total-luck-fetch", "nba-team-total-luck",
-                                   "nba-team-total-luck-close",
-                                   "nba-first-half-total-luck-fetch", "nba-first-half-total-luck",
-                                   "nba-first-half-total-luck-close"]
-    assert ran[-1][1][-4:] == ["-m", "scripts.nba_first_half_total_luck_window", "--close", "GE"]
+    labels = [r[0] for r in ran]
+    assert [x for x in labels if x.startswith("nba-total-luck")] == [
+        "nba-total-luck-fetch", "nba-total-luck"]
+    assert [x for x in labels if x.startswith("nba-team-total-luck")] == [
+        "nba-team-total-luck-fetch", "nba-team-total-luck", "nba-team-total-luck-close"]
+    assert [x for x in labels if x.startswith("nba-first-half-total-luck")] == [
+        "nba-first-half-total-luck-fetch", "nba-first-half-total-luck",
+        "nba-first-half-total-luck-close"]
+    close = next(r for r in ran if r[0] == "nba-first-half-total-luck-close")
+    assert close[1][-4:] == ["-m", "scripts.nba_first_half_total_luck_window", "--close", "GE"]
     assert published == ["nba-total-luck-window"]
+
+
+def test_the_report_of_a_failed_tick_lists_the_models_in_one_order(monkeypatch):
+    """The steps finish in any order; what the heartbeat records does not move."""
+    plan = pw.PregamePlan(total_luck=["GA"], team_total=ttw.Plan(decide=["GB"]),
+                          first_half=ttw.Plan(decide=["GD"]))
+    with pytest.raises(RuntimeError) as e:
+        _tick(monkeypatch, plan, fail={"nba-first-half-total-luck", "nba-total-luck"})
+    message = str(e.value)
+    assert message.index("'nba-total-luck'") < message.index("'nba-first-half-total-luck'")
+
+
+# ── a slow card holds nobody else's look at the game ─────────────────────────
+
+def test_one_model_s_card_does_not_hold_another_model_s_fetch(monkeypatch):
+    """RULE: the models run side by side. Run one after the other, the first-half
+    fetch waited for the team-total card, which the worker killed at its 180-second
+    limit on 60 of 74 attempts from 2026-10-24 to 10-31. Here the team-total card
+    holds until the first half's fetch has started: one after the other, it never
+    does."""
+    import threading
+
+    import scheduler
+    first_half_fetched = threading.Event()
+    seen = {}
+
+    def run(cmd, label, **kw):
+        if label == "nba-first-half-total-luck-fetch":
+            first_half_fetched.set()
+        if label == "nba-team-total-luck":
+            seen["started_while_the_card_ran"] = first_half_fetched.wait(timeout=3)
+        return "ok"
+    monkeypatch.setattr(pw, "plan_tick", lambda now=None: pw.PregamePlan(
+        team_total=ttw.Plan(decide=["G"]), first_half=ttw.Plan(decide=["G"])))
+    monkeypatch.setattr(scheduler, "_run", run)
+    monkeypatch.setattr(scheduler, "_publish_new_signals", lambda label: None)
+    scheduler.run_nba_total_luck_window()
+    assert seen == {"started_while_the_card_ran": True}
+
+
+FETCH_S, PUBLISH_S = 3.0, 2.0     # the worker's logs, 2026-10-30: 1.9-3.3 s; 2 s
+
+
+def _window(monkeypatch, cards):
+    """The REAL tick through one game's window, on a clock: each step advances its
+    own thread's time by a stated duration, a tick lasts as long as its slowest
+    thread plus publishing, and the next tick starts on the next cron minute after it
+    ends (max_instances=1 skips the ones during it). `cards` is {"team": (seconds,
+    outcome), "first": ...}. -> ({model: minutes before tip of each fetch}, {model:
+    what the model's own timing rule said of the fetch when its card read it})."""
+    import math
+    import threading
+    from datetime import datetime, timezone
+
+    import scheduler
+    tip = datetime(2026, 11, 6, 2, 0, tzinfo=timezone.utc)
+    lead = lambda t: (tip - t).total_seconds() / 60.0  # noqa: E731
+    tick = {"at": tip - timedelta(minutes=70)}
+    decided, fetched = set(), {}
+    fetches, timings = {"team": [], "first": []}, {"team": [], "first": []}
+
+    def plan(now=None):
+        lo, hi = fh.FETCH_LEAD_MIN
+        out = pw.PregamePlan()
+        if lo <= lead(tick["at"]) <= hi:
+            if "team" not in decided:
+                out.team_total = ttw.Plan(decide=["G"])
+            if "first" not in decided:
+                out.first_half = ttw.Plan(decide=["G"])
+        tick["spent"] = {}
+        # Holds each model's first step until the others have started, so each is
+        # on a thread of its own. One after the other, it gives up and they share one.
+        due = sum(bool(p.decide) for p in (out.team_total, out.first_half))
+        tick["met"] = threading.Barrier(due) if due else None
+        return out
+
+    def run(cmd, label, cwd=None, env=None, timeout=None):
+        me = threading.get_ident()
+        model = "team" if "team-total" in label else "first"
+        if label.endswith("-fetch"):
+            try:
+                tick["met"].wait(timeout=1.0)
+            except threading.BrokenBarrierError:
+                pass
+        at = tick["at"] + timedelta(seconds=tick["spent"].get(me, 0.0))
+        if label.endswith("-fetch"):
+            fetches[model].append(round(lead(at), 1))
+            fetched[model] = at
+            tick["spent"][me] = tick["spent"].get(me, 0.0) + FETCH_S
+            return "ok"
+        seconds, outcome = cards[model]
+        timings[model].append(fh.timing(tip, fetched[model], at))
+        tick["spent"][me] = tick["spent"].get(me, 0.0) + min(seconds, timeout)
+        if outcome == "ok":
+            decided.add(model)
+        return outcome
+    monkeypatch.setattr(pw, "plan_tick", plan)
+    monkeypatch.setattr(scheduler, "_run", run)
+    monkeypatch.setattr(scheduler, "_publish_new_signals", lambda label: None)
+    while lead(tick["at"]) > 30:
+        try:
+            scheduler.run_nba_total_luck_window()
+        except RuntimeError:
+            pass
+        took = max(tick["spent"].values(), default=None)
+        end = tick["at"] + timedelta(seconds=0 if took is None else took + PUBLISH_S)
+        tick["at"] = datetime.fromtimestamp(
+            math.floor(end.timestamp() / 60 + 1e-9) * 60 + 60, tz=timezone.utc)
+    return fetches, timings
+
+
+def test_both_cards_killed_at_their_limit_still_leave_each_model_three_attempts(monkeypatch):
+    """RULE: the attempts a window gives a model do not depend on another model's
+    card. 56, 52 and 48 minutes before tip are what the team-total model has had
+    alone, and what the worker's logs show for it (01:04, 01:08 and 01:12Z on a
+    02:00Z tip, 2026-10-30). One after the other, each model got two: the team total
+    56 and 49 minutes out, the first half 53 and 46."""
+    killed = (180.0, "timeout")
+    fetches, timings = _window(monkeypatch, {"team": killed, "first": killed})
+    assert fetches == {"team": [56.0, 52.0, 48.0], "first": [56.0, 52.0, 48.0]}
+    assert set(timings["first"]) == {"decide"} and set(timings["team"]) == {"decide"}
+
+
+@pytest.mark.parametrize("cards, attempts", [
+    ({"team": (180.0, "timeout"), "first": (111.0, "ok")},
+     {"team": [56.0, 52.0, 48.0], "first": [56.0]}),
+    ({"team": (84.0, "ok"), "first": (180.0, "timeout")},
+     {"team": [56.0], "first": [56.0, 52.0, 48.0]}),
+    ({"team": (84.0, "ok"), "first": (84.0, "ok")}, {"team": [56.0], "first": [56.0]}),
+    ({"team": (114.0, "fail"), "first": (114.0, "fail")},
+     {"team": [56.0, 54.0, 52.0, 50.0, 48.0, 46.0], "first": [56.0, 54.0, 52.0, 50.0, 48.0, 46.0]}),
+])
+def test_one_model_s_outcome_never_changes_the_other_s_attempts(monkeypatch, cards, attempts):
+    fetches, _ = _window(monkeypatch, cards)
+    assert fetches == attempts
 
 
 def test_a_close_alone_runs_only_the_close(monkeypatch):

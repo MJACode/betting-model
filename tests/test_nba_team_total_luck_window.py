@@ -227,14 +227,17 @@ def test_a_team_total_tick_fetches_exactly_the_planned_games_then_decides(monkey
     assert published == ["nba-total-luck-window"]
 
 
-def test_both_models_due_run_the_full_game_model_first_and_publish_once(monkeypatch):
+def test_both_models_due_each_run_their_own_steps_in_order_and_publish_once(monkeypatch):
     plan = pw.PregamePlan(total_luck=["GA"],
                           team_total=ttw.Plan(decide=["GB"], close=["GC"]))
     ran, published = _tick(monkeypatch, plan)
-    assert [r[0] for r in ran] == ["nba-total-luck-fetch", "nba-total-luck",
-                                   "nba-team-total-luck-fetch", "nba-team-total-luck",
-                                   "nba-team-total-luck-close"]
-    assert ran[-1][1][-4:] == ["-m", "scripts.nba_team_total_luck_window", "--close", "GC"]
+    labels = [r[0] for r in ran]
+    assert [x for x in labels if x.startswith("nba-total-luck")] == [
+        "nba-total-luck-fetch", "nba-total-luck"]
+    assert [x for x in labels if x.startswith("nba-team-total-luck")] == [
+        "nba-team-total-luck-fetch", "nba-team-total-luck", "nba-team-total-luck-close"]
+    close = next(r for r in ran if r[0] == "nba-team-total-luck-close")
+    assert close[1][-4:] == ["-m", "scripts.nba_team_total_luck_window", "--close", "GC"]
     assert published == ["nba-total-luck-window"]
 
 
@@ -317,8 +320,8 @@ def test_a_failing_team_total_plan_still_runs_the_full_game_model_then_fails(mon
         scheduler.run_nba_total_luck_window()
     # The other two models' steps run; none of the team total's. G50 is 50 minutes
     # out, so the first half's plan holds it too.
-    assert ran == ["nba-total-luck-fetch", "nba-total-luck",
-                   "nba-first-half-total-luck-fetch", "nba-first-half-total-luck"]
+    assert sorted(ran) == ["nba-first-half-total-luck", "nba-first-half-total-luck-fetch",
+                           "nba-total-luck", "nba-total-luck-fetch"]
     assert published == ["nba-total-luck-window"]
 
 
