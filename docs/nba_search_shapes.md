@@ -394,7 +394,7 @@ Summed over points, sides and references. "Same bet" is the same game, side, boo
 
 ### 15.4 The highest-EV offers, read one at a time
 
-The rule catches a broken quote, not a strong opinion. All of these are below stay in, in both arms.
+The rule catches a broken quote, not a strong opinion. Every offer below stays in, in both arms.
 
 - **S_F1:** the home team at +810 (`NBA_2026-04-10_PHI_IND`, 47.9%) and +560 (`NBA_2026-04-12_ORL_BOS`, 58.5%),
   EV 3.4 and 2.9. Six books hang the first game's price, +700 to +810. Both are the last week of the season, and
