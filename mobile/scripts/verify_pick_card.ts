@@ -857,6 +857,12 @@ check(
 // ── splitPickTitle (PickCard two-line prop titles) ─────────────────────────
 {
   // The header above the title already reads "BOS @ MIL".
+  const h1 = splitPickTitle({ pick_label: 'BOS @ MIL — First Half Over 112.5' });
+  check('a first-half total\'s bold line is the bet, quoted from the label after the dash',
+    h1.primary === 'First Half Over 112.5' && h1.secondary === null,
+    JSON.stringify(h1));
+  check('a one-line pick row keeps a first half\'s matchup: the bet alone names no team',
+    pickRowTitle({ pick_label: 'BOS @ MIL — First Half Over 112.5' }) === 'BOS @ MIL — First Half Over 112.5');
   const tt = splitPickTitle({ pick_label: 'BOS @ MIL — MIL Team Total Under 115.5' });
   check(
     'a team total titles the bet, quoted from the label',
@@ -1036,6 +1042,7 @@ check(
   );
   check(
     'a team total names the club the market belongs to',
+    signalsBetHeadline({ side: 'over', line: 112.5, market: 'totals_h1', homeTeam: 'MIL', awayTeam: 'BOS' }) === 'First Half Over 112.5' &&
     signalsBetHeadline({ side: 'over', line: 3.5, market: 'team_totals_home', homeTeam: 'Boston Bruins', awayTeam: 'NYY' }) === 'Boston Bruins Team Total Over 3.5' &&
       signalsBetHeadline({ side: 'under', line: 2.5, market: 'team_totals_away', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Los Angeles Team Total Under 2.5' &&
       signalsBetHeadline({ side: 'over', line: 8.5, market: 'totals', homeTeam: 'New York', awayTeam: 'Los Angeles' }) === 'Over 8.5',
