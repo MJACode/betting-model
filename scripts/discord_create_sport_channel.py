@@ -20,6 +20,12 @@ the token and any webhook URL are, and this script prints neither.
     python -m scripts.discord_create_sport_channel --name ncaab --like ncaaf --dry-run
     python -m scripts.discord_create_sport_channel --name ncaab --like ncaaf
 
+--like takes the source channel's name or its id. The server's college
+football channel is not called "ncaaf" (the first dry run, 2026-10-31,
+stopped on "no #ncaaf channel"); its id is the one the webhook probe reports
+for sport:NCAAF. When the source is not found, the stop message lists the
+guild's text channels by name and id. Channel names and ids are not secrets.
+
 Needs DISCORD_BOT_TOKEN, and the bot needs Manage Channels in the guild (and,
 to copy an overwrite, the permissions that overwrite grants). It refuses when a
 channel with the new name already exists, and prints that one's id instead.
@@ -40,9 +46,9 @@ COPIED = ("nsfw", "rate_limit_per_user")
 
 
 def find_channel(channels: list[dict], name: str) -> dict | None:
-    """The text channel called exactly `name`, else None."""
+    """The text channel called exactly `name`, or whose id is `name`, else None."""
     for c in channels:
-        if c.get("name") == name and c.get("type", TEXT) == TEXT:
+        if c.get("type", TEXT) == TEXT and (c.get("name") == name or str(c.get("id")) == name):
             return c
     return None
 
@@ -95,9 +101,11 @@ def main(argv=None) -> None:
         return
     src = find_channel(channels, a.like)
     if src is None:
-        sys.exit(f"no #{a.like} channel in guild {guild}")
+        text = sorted(f"{c.get('name')} ({c.get('id')})" for c in channels
+                      if c.get("type", TEXT) == TEXT)
+        sys.exit(f"no #{a.like} channel in guild {guild}; its text channels: {', '.join(text)}")
     body = create_body(src, a.name)
-    print(f"cloning #{a.like} ({src['id']}): category {body['parent_id']}, position "
+    print(f"cloning #{src.get('name')} ({src['id']}): category {body['parent_id']}, position "
           f"{body['position']}, {len(body['permission_overwrites'])} permission overwrite(s)")
     if a.dry_run:
         print(body)

@@ -1405,10 +1405,16 @@ def _validate_discord_create_channel(args: dict) -> dict:
     if extra:
         raise ValueError(f"unknown args {extra}; this job takes name, like, guild, apply")
     out = {}
+    # A name has a letter in it; `like` may instead be the source channel's
+    # id (17-20 digits), because the server's college football channel is
+    # not called "ncaaf" (dry run, 2026-10-31).
     for k in ("name", "like"):
         v = str(args.get(k) or "").strip()
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v):
-            raise ValueError(f"{k} must be a channel name like 'ncaab', got {v!r}")
+        is_name = bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v)) and not v.isdigit()
+        is_id = k == "like" and bool(re.fullmatch(r"[0-9]{17,20}", v))
+        if not (is_name or is_id):
+            raise ValueError(f"{k} must be a channel name like 'ncaab'"
+                             f"{' or a channel id' if k == 'like' else ''}, got {v!r}")
         out[k] = v
     guild = str(args.get("guild") or "").strip()
     if guild and not guild.isdigit():
