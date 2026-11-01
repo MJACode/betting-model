@@ -391,6 +391,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # writer; read by the card and the window job, never by the app.
     "nba_team_total_luck_decisions",
     "nba_team_total_fetches",
+    # The NBA first-half model's two, the same pair
+    # (scripts/nba_first_half_total_luck_card.py,
+    # data/ingestors/nba_first_half_odds.py).
+    "nba_first_half_total_luck_decisions",
+    "nba_first_half_total_fetches",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.

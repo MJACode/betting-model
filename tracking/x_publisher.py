@@ -1206,7 +1206,9 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
     Discord's sport channels release, including a game dated ahead of today,
     excluding live and started games. Discord's free-pick choice is not
     consulted. Order is that query's order. This posts the first one that
-    is not already ledgered and whose game has not started.
+    is not already ledgered and whose game has not started. A pick whose label
+    disagrees with its side and line is refused here, as on every other surface
+    (tracking/pick_integrity).
 
     One confirmed tweet per call. The previous x_pick sent_at must be at
     least PICK_MIN_GAP old. From 1:00am through 8:00am ET the call posts
@@ -1233,7 +1235,11 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
             return 0
         try:
             from tracking.discord_notifier import _new_signals
-            picks = _new_signals(conn, target_date, include_already_posted=True)
+            from tracking.pick_integrity import refuse_mismatched
+            # A refused pick stays unledgered, so it retries and keeps logging,
+            # as on Discord.
+            picks = refuse_mismatched(
+                _new_signals(conn, target_date, include_already_posted=True), "X")
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X slate failed: {exc}")
             return 0

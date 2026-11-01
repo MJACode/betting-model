@@ -25,9 +25,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         from tip; scripts/nba_team_total_luck_window.py: one team-total call
         per game, and the nba_team_total_luck card run, when an undecided
         game is 45-56 minutes from tip, and the closing team totals of its bet
-        games 12-25 minutes out. One planning read for both,
-        scripts/nba_pregame_window.py; a tick with nothing due makes no API
-        call)
+        games 12-25 minutes out; scripts/nba_first_half_total_luck_window.py:
+        the same for the first half's total and nba_first_half_total_luck. One
+        planning read for all three, scripts/nba_pregame_window.py; a tick with
+        nothing due makes no API call)
         (scripts/nba_prop_window.py: props for exactly the NBA games 40-62
         minutes from tip and not yet decided, then the nba_prop_market card,
         the closing snapshot for bet games 12-25 minutes out, and publish.
@@ -109,6 +110,7 @@ import sys
 import threading
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -484,7 +486,7 @@ def run_failure_alerter() -> None:
 
     Every 10 minutes rather than hourly, because the thing it reports is
     produced every pass and a delivery lag longer than the detection interval
-    just moves the blind spot. It is cheap -- two indexed reads -- and its own
+    just moves the blind spot. It is cheap -- a few indexed reads -- and its own
     throttle (2h for CRIT, 12h for WARN) is what stops a standing failure
     posting 144 times a day.
     """
@@ -751,8 +753,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes picks through the same card as the refresh pass,
                   # so it lives beside the passes, not with the loops.
                   "nba_prop_window",
-                  # Writes picks through its own cards (nba_total_luck and
-                  # nba_team_total_luck), with their own fetches.
+                  # Writes picks through its own cards (nba_total_luck,
+                  # nba_team_total_luck and nba_first_half_total_luck), with
+                  # their own fetches.
                   "nba_total_luck_window",
                   # Writes NHL picks through the scorer and the NHL cards, and
                   # takes turns with the refresh passes in this process.
@@ -1444,18 +1447,42 @@ def run_nhl_goalie_window() -> None:
 # The NBA totals window's steps are bounded, so a stuck step cannot hold the
 # job past the ticks that follow it (max_instances=1): the fetch is one bulk
 # Odds API call; the card reads one season of box scores and the due games'
-# quotes and prices them in seconds.
+# quotes, and prices them from the table its artifact stores.
 NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180}
 # nba_team_total_luck's steps in the same job, bounded the same way: the fetch
 # is the event list plus one event call per due game (15 s each at most,
 # odds_ingestor._get_event_odds); the card is the full-game card's reads; the
 # close is the same calls for the bet games.
 NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
+# nba_first_half_total_luck's steps, bounded the same way: its own event list and
+# one event call per due game, then the same card reads.
+NBA_FIRST_HALF_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
+
+
+def _run_models_side_by_side(models: list[list[tuple[str, list[str], float]]]) -> dict[str, str]:
+    """Run each model's steps in order and the models at the same time. -> {step:
+    outcome}, every model's in the order given, so the report reads the same every
+    tick. Each step is a subprocess, and _run never raises, so a thread here only
+    waits. A tick then lasts as long as its slowest model, not all of them added up."""
+    models = [steps for steps in models if steps]
+    if not models:
+        return {}
+
+    def run_steps(steps):
+        return {label: _run(cmd, label, timeout=timeout) for label, cmd, timeout in steps}
+
+    with ThreadPoolExecutor(max_workers=len(models), thread_name_prefix="nba-window") as pool:
+        running = [pool.submit(run_steps, steps) for steps in models]
+    outcomes: dict[str, str] = {}
+    for done in running:
+        outcomes.update(done.result())
+    return outcomes
 
 
 def run_nba_total_luck_window() -> None:
-    """One NBA totals window tick: every game due a decision from either NBA
-    totals model, and every team-total bet game due its closing snapshot.
+    """One NBA totals window tick: every game due a decision from any of the NBA
+    game total models, and every team-total or first-half bet game due its
+    closing snapshot.
 
     nba_total_luck decides a game once, on a fetch that landed 60-66 minutes
     before tip (models/nba_total_luck.py). Riding the refresh pass it had one
@@ -1463,57 +1490,72 @@ def run_nba_total_luck_window() -> None:
     skip the next tick, and with it every game that tick would have decided.
     So this job runs every minute, 24x7. nba_team_total_luck decides a game
     once, on its own team-total fetch 45-66 minutes before tip
-    (models/nba_team_total_luck.py), planned 45-56 minutes out. ONE planning
-    read serves both (scripts/nba_pregame_window.plan), and the tick returns
-    without an API call when nothing is due -- most ticks of most days.
+    (models/nba_team_total_luck.py), planned 45-56 minutes out, and
+    nba_first_half_total_luck the same way on its own first-half fetch
+    (models/nba_first_half_total_luck.py). ONE planning read serves all three
+    (scripts/nba_pregame_window.plan), and the tick returns without an API call
+    when nothing is due -- most ticks of most days.
 
-    Otherwise, nba_total_luck first, as it ran alone: fetch the NBA board, run
-    its card. Then nba_team_total_luck: its team-total fetch for exactly the
-    due games, its card; then the closing team totals of its bet games. Then
-    publish what the cards wrote. A tick that runs both models can pass a
-    minute and the next tick coalesces into it; each window holds six ticks or
-    more, so one skipped tick loses no game. A step that fails or is killed
-    raises AFTER publishing, so the heartbeat records "error" and the failure
-    alerter reports it, while a bet that was written still goes out. The next
-    tick, a minute later, tries any game still undecided again. A model whose
-    plan raises runs nothing that tick; the other model's steps still run, and
-    the tick raises after them.
+    Otherwise, the three models run side by side, each on its own steps in its
+    own order. nba_total_luck: fetch the NBA board, run its card.
+    nba_team_total_luck: its team-total fetch for exactly the due games, its card,
+    then the closing team totals of its bet games. nba_first_half_total_luck: the
+    same three steps. No step of one model reads another's rows or outcome, so a
+    failed team-total call cannot stop the first half's, and one model's slow card
+    cannot move another's fetch or cost it a look at the game: run one after the
+    other, a team-total card killed at its limit pushed the first-half fetch back
+    about 3 minutes, and with both killed each model lost one of its three attempts
+    a window (tests/test_nba_first_half_total_luck_window.py). The longest tick is
+    6 minutes at the steps' own limits. Then publish what the cards wrote, once, when
+    all of them are done. A tick can pass a minute and the next tick coalesces into
+    it; each window holds six ticks or more, so one skipped tick loses no game. A
+    step that fails or is killed raises AFTER publishing, so the heartbeat records
+    "error" and the failure alerter reports it, while a bet that was written still
+    goes out. The next tick, a minute later, tries any game still undecided again.
+    A model whose plan raises runs nothing that tick; the other models' steps still
+    run, and the tick raises after them.
     """
     from scripts.nba_pregame_window import plan_tick
     plan = plan_tick()
     if not plan:
         return
-    team = plan.team_total
-    outcomes: dict[str, str] = {}
+    total_steps: list[tuple[str, list[str], float]] = []
     if plan.total_luck:
         log.info("NBA totals window: deciding %s", plan.total_luck)
         t = NBA_TOTAL_LUCK_WINDOW_TIMEOUT_S
-        outcomes["nba-total-luck-fetch"] = _run(
-            [sys.executable, "-m", "scripts.nba_total_luck_window", "--fetch"],
-            "nba-total-luck-fetch", timeout=t["fetch"])
-        outcomes["nba-total-luck"] = _run(
-            [sys.executable, "run_pipeline.py", "--step", "nba-total-luck"],
-            "nba-total-luck", timeout=t["card"])
-    t = NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S
-    if team.decide:
-        log.info("NBA totals window: team totals deciding %s", team.decide)
-        outcomes["nba-team-total-luck-fetch"] = _run(
-            [sys.executable, "-m", "scripts.nba_team_total_luck_window", "--fetch",
-             *team.decide],
-            "nba-team-total-luck-fetch", timeout=t["fetch"])
-        outcomes["nba-team-total-luck"] = _run(
-            [sys.executable, "run_pipeline.py", "--step", "nba-team-total-luck"],
-            "nba-team-total-luck", timeout=t["card"])
-    if team.close:
-        log.info("NBA totals window: team totals closing snapshot for %s", team.close)
-        outcomes["nba-team-total-luck-close"] = _run(
-            [sys.executable, "-m", "scripts.nba_team_total_luck_window", "--close",
-             *team.close],
-            "nba-team-total-luck-close", timeout=t["close"])
+        total_steps = [
+            ("nba-total-luck-fetch",
+             [sys.executable, "-m", "scripts.nba_total_luck_window", "--fetch"], t["fetch"]),
+            ("nba-total-luck",
+             [sys.executable, "run_pipeline.py", "--step", "nba-total-luck"], t["card"])]
+
+    def per_event_steps(name, module, step, due, t):
+        """A per-event model's steps: its own fetch of the due games, its card, its
+        closing snapshot of the bet games owed one."""
+        steps = []
+        if due.decide:
+            log.info("NBA totals window: %s deciding %s", name, due.decide)
+            steps += [
+                (f"{step}-fetch", [sys.executable, "-m", module, "--fetch", *due.decide],
+                 t["fetch"]),
+                (step, [sys.executable, "run_pipeline.py", "--step", step], t["card"])]
+        if due.close:
+            log.info("NBA totals window: %s closing snapshot for %s", name, due.close)
+            steps.append((f"{step}-close", [sys.executable, "-m", module, "--close", *due.close],
+                          t["close"]))
+        return steps
+
+    outcomes = _run_models_side_by_side([
+        total_steps,
+        per_event_steps("team totals", "scripts.nba_team_total_luck_window",
+                        "nba-team-total-luck", plan.team_total, NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S),
+        per_event_steps("first-half totals", "scripts.nba_first_half_total_luck_window",
+                        "nba-first-half-total-luck", plan.first_half,
+                        NBA_FIRST_HALF_WINDOW_TIMEOUT_S)])
     if outcomes:
         _publish_new_signals("nba-total-luck-window")
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
-    # A model whose plan raised ran nothing this tick; the other model did.
+    # A model whose plan raised ran nothing this tick; the other models did.
     bad.update({f"{model} plan": err for model, err in plan.errors.items()})
     if bad:
         raise RuntimeError(f"NBA totals window step(s) did not finish: {bad}")
@@ -2507,19 +2549,20 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # NBA totals window -- every minute, 24x7 (run_nba_total_luck_window). The
-    # nba_total_luck and nba_team_total_luck cards decide here and nowhere
-    # else: on the refresh pass a skipped tick lost every game it would have
-    # decided. Every minute so the 61-66-minute window holds six ticks and the
-    # team totals' 45-56 twelve; misfire_grace_time 30 because a tick
-    # overtaken by the next one has nothing left to add. One job for both
-    # models, not two: each job's heartbeat opens a connection every tick
+    # nba_total_luck, nba_team_total_luck and nba_first_half_total_luck cards
+    # decide here and nowhere else: on the refresh pass a skipped tick lost every
+    # game it would have decided. Every minute so the 61-66-minute window holds
+    # six ticks and the team and first-half totals' 45-56 twelve;
+    # misfire_grace_time 30 because a tick overtaken by the next one has nothing
+    # left to add. One job for all of them, not three: each job's heartbeat opens
+    # a connection every tick
     # (scripts/nba_pregame_window.py). No write switch, like the cards.
     sched.add_job(
         run_nba_total_luck_window,
         CronTrigger(minute="*", timezone=TIMEZONE),
         id="nba_total_luck_window",
         name="NBA totals window (every minute, 24x7: full-game totals 61-66 min, "
-             "home team totals 45-56 min from tip)",
+             "home team and first-half totals 45-56 min from tip)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 

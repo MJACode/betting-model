@@ -63,7 +63,7 @@ from scripts.nba_total_luck_replay import FrameConn  # noqa: E402
 
 LAB_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)        # the lab's full-game load (P3 --full)
 REPLAY_SEASONS = (2024, 2025, 2026)
-TT_MARKETS = tuple(NB.ALTERNATE_MARKET)
+TT_MARKETS = ("team_totals_home", "team_totals_away")
 
 
 def lab_bets(path: Path = BETS) -> pd.DataFrame:

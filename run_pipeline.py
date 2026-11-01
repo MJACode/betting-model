@@ -1687,6 +1687,29 @@ def step_nba_team_total_luck(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_first_half_total_luck(dry_run: bool = False) -> bool:
+    """NBA first-half totals, overs (`nba_first_half_total_luck`): the full-game
+    shooting-luck gap on the first half's line.
+
+    Decides each regular-season game once, on this model's own first-half fetch
+    45-66 minutes before tip, and writes the first-half over at the best bettable
+    price when the gap is 2 points or more
+    (scripts/nba_first_half_total_luck_card.py). LIVE, no write switch. Runs only
+    in the NBA totals window job, right after the first-half fetch, under a time
+    limit there (scheduler.run_nba_total_luck_window). A run with no game to
+    decide writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_first_half_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA first-half card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA first-half card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -2654,7 +2677,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
-                                 "nba-total-luck", "nba-team-total-luck",
+                                 "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck",
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
@@ -2749,6 +2772,7 @@ Examples:
             "nba-prop-project": lambda: step_nba_prop_project(),
             "nba-total-luck": lambda: step_nba_total_luck(dry_run=args.dry_run),
             "nba-team-total-luck": lambda: step_nba_team_total_luck(dry_run=args.dry_run),
+            "nba-first-half-total-luck": lambda: step_nba_first_half_total_luck(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),

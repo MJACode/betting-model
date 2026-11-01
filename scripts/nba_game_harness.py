@@ -488,6 +488,26 @@ class ResidDist:
         push = np.where(whole, np.interp(d, self.d, self.push_whole), 0.0)
         return win, push, np.clip(1.0 - win - push, 0.0, 1.0)
 
+    TABLES = ("d", "win_whole", "push_whole", "win_half")
+
+    def state(self) -> dict:
+        """Everything probs() reads, as plain Python numbers: what a live artifact
+        stores, so a card reads the finished table instead of tabulating it on every
+        run (models.nba_total_luck.with_pricing_table). Lists, not arrays: a pickled
+        array names numpy's internal modules, which differ between numpy versions, and
+        the file is written on one machine and opened on the worker. A float survives
+        the round trip exactly."""
+        return {"mean": self.mean, "n": self.n, "sd": self.sd, "label": self.label,
+                **{k: np.asarray(getattr(self, k), float).tolist() for k in self.TABLES}}
+
+    @classmethod
+    def from_state(cls, state: dict) -> "ResidDist":
+        d = cls.__new__(cls)
+        d.mean, d.n, d.sd, d.label = state["mean"], state["n"], state["sd"], state["label"]
+        for k in cls.TABLES:
+            setattr(d, k, np.asarray(state[k], float))
+        return d
+
     def __repr__(self):
         return f"ResidDist({self.label}, n={self.n}, sd={self.sd:.2f})"
 

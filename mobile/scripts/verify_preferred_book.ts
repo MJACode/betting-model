@@ -454,6 +454,11 @@ check('ncaab_total_blend is a game_total for parlay correlation', marketClassFor
 check('nba_team_total_luck resolves to team_totals_home', gameMarketForModel('nba_team_total_luck') === 'team_totals_home',
   String(gameMarketForModel('nba_team_total_luck')));
 check('nba_team_total_luck is a game_total for parlay correlation', marketClassForModel('nba_team_total_luck') === 'game_total');
+// nba_first_half_total_luck bets the first half's points: its prices, line shop
+// and movement read the totals_h1 rows, never the game's totals rows.
+check('nba_first_half_total_luck resolves to totals_h1', gameMarketForModel('nba_first_half_total_luck') === 'totals_h1',
+  String(gameMarketForModel('nba_first_half_total_luck')));
+check('nba_first_half_total_luck is a game_total for parlay correlation', marketClassForModel('nba_first_half_total_luck') === 'game_total');
 {
   // A team total's number is stored in total_line, like a game total. Read
   // anywhere else, no other book's row is the same bet and the line shop is empty.
