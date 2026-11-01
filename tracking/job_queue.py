@@ -687,6 +687,20 @@ def _job_ncaab_feed_probe(**kw):
             "truncated": len(text) > _NCAAB_FEED_PROBE_STDOUT_CAP}
 
 
+def _job_ncaab_injury_probe(**kw):
+    """Both injury pages: HTTP status and parsed player count. Writes nothing."""
+    from scripts.ncaab_injury_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.ncaab_injury_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_ncaab_injury_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
 def _validate_ncaab_feed_probe(args: dict) -> dict:
     extra = sorted(set(args) - {"market_events"})
     if extra:
@@ -1405,10 +1419,16 @@ def _validate_discord_create_channel(args: dict) -> dict:
     if extra:
         raise ValueError(f"unknown args {extra}; this job takes name, like, guild, apply")
     out = {}
+    # A name has a letter in it; `like` may instead be the source channel's
+    # id (17-20 digits), because the server's college football channel is
+    # not called "ncaaf" (dry run, 2026-10-31).
     for k in ("name", "like"):
         v = str(args.get(k) or "").strip()
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v):
-            raise ValueError(f"{k} must be a channel name like 'ncaab', got {v!r}")
+        is_name = bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v)) and not v.isdigit()
+        is_id = k == "like" and bool(re.fullmatch(r"[0-9]{17,20}", v))
+        if not (is_name or is_id):
+            raise ValueError(f"{k} must be a channel name like 'ncaab'"
+                             f"{' or a channel id' if k == 'like' else ''}, got {v!r}")
         out[k] = v
     guild = str(args.get("guild") or "").strip()
     if guild and not guild.isdigit():
@@ -2417,6 +2437,8 @@ JOBS = {
     "ncaab_odds_history": (_job_ncaab_odds_history, _validate_ncaab_odds_history),
     # Free NCAAB feed and College Basketball Data check (at most 10 credits).
     "ncaab_feed_probe": (_job_ncaab_feed_probe, _validate_ncaab_feed_probe),
+    # Reachability of the two public NCAAB injury pages. Writes nothing.
+    "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),
