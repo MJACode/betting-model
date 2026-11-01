@@ -12,8 +12,12 @@
  *            screen left before it loaded writes its row anyway, status 0,
  *            timed to when it was left, so slow screens are not lost.
  *   launch   the same, for the first screen, measured from when this module
- *            was first evaluated (JS start). Status 0 if left before loaded. Time the OS spends before JS runs
- *            is not visible from here.
+ *            was first evaluated (JS start). Status 0 if left before loaded.
+ *            The launch window stays open until navigation names that screen.
+ *            Pre-nav reads (auth, access, hydration) can finish and go quiet
+ *            first; settling then would record "unknown" and the real first
+ *            screen would never get a launch row. Time the OS spends before
+ *            JS runs is not visible from here.
  *
  * No imports, so it runs under bare node (scripts/verify_perf_log.ts). It must
  * never break a request: every line of bookkeeping is wrapped, and the wrapped
@@ -100,10 +104,21 @@ function openWindow(name: string | null, start: number, joinMs: number, launch: 
   return { name, start, namedAt: start, joinMs, launch, pending: new Set(), count: 0, lastEnd: start, quietTimer: null };
 }
 
+function screenName(name: string | null): name is string {
+  return name != null && name !== 'unknown';
+}
+
 function closeWindow(): void {
   const w = windowState;
   if (!w) return;
   if (w.quietTimer) clearTimeout(w.quietTimer);
+  w.quietTimer = null;
+  // Named, and every request it joined has finished: the quiet timer had not
+  // fired yet. Leaving must not drop the only launch row.
+  if (w.launch && w.pending.size === 0 && w.count > 0 && screenName(w.name)) {
+    settle(w);
+    return;
+  }
   // Left before it loaded: still a wait the member had, and the slowest one.
   if (w.name != null && w.count > 0 && w.pending.size > 0) {
     const at = now();
@@ -121,13 +136,23 @@ export function setPerfScreen(name: string | null | undefined): void {
     const n = name ?? null;
     if (n === currentScreen) return;
     currentScreen = n;
-    if (windowState && windowState.launch && windowState.name == null) {
-      windowState.name = n;
-      windowState.namedAt = now();
+    if (windowState && windowState.launch && !screenName(windowState.name)) {
+      // Still no real screen. A null or "unknown" name must not close the
+      // launch window; the next navigation will name it.
+      if (!screenName(n)) return;
+      const w = windowState;
+      w.name = n;
+      w.namedAt = now();
       // Restart the join clock: on a slow start the screen's reads begin after
       // navigation is ready, which can be past LAUNCH_JOIN_MS from JS start.
       // `launch` is still timed from launchAt.
-      windowState.start = windowState.namedAt;
+      w.start = w.namedAt;
+      // Pre-nav reads may already be finished, so nothing else will arm the
+      // quiet timer. Arm it now. A read that starts inside QUIET_MS clears it
+      // (begin) and the launch row waits for that read.
+      if (w.pending.size === 0 && w.count > 0) {
+        w.quietTimer = setTimeout(() => settle(w), QUIET_MS);
+      }
       return;
     }
     closeWindow();
@@ -139,7 +164,11 @@ export function setPerfScreen(name: string | null | undefined): void {
 
 function settle(w: ScreenWindow): void {
   if (windowState !== w || w.pending.size > 0 || w.count === 0) return;
-  const name = w.name ?? 'unknown';
+  // Launch opens unnamed, at configurePerfLog. Do not close it as "unknown"
+  // while auth/access/hydration have gone quiet and navigation has not named
+  // the first screen yet. setPerfScreen arms the quiet timer once it has.
+  if (!screenName(w.name)) return;
+  const name = w.name;
   push({ kind: 'screen', name, ms: Math.max(0, Math.round(w.lastEnd - w.namedAt)), status: null, screen: name, requestCount: w.count }, w.lastEnd);
   if (w.launch) {
     push({ kind: 'launch', name, ms: Math.round(w.lastEnd - launchAt), status: null, screen: name, requestCount: w.count }, w.lastEnd);
@@ -240,8 +269,22 @@ export function timedFetch(real: Fetch): Fetch {
 }
 
 /**
- * Send what is buffered, MAX_BATCH at a time. A failed send keeps the rows for
- * the next flush. One flush at a time.
+ * A send the server rejected (4xx, or a Postgres/PostgREST SQLSTATE such as
+ * `invalid device` or an integer overflow). Retrying that batch cannot
+ * succeed, and leaving it at the head of the buffer backs off forever.
+ * A network failure has neither of these and is retried.
+ */
+function permanentSendFailure(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: unknown; code?: unknown };
+  if (typeof e.status === 'number' && e.status >= 400 && e.status < 500) return true;
+  return typeof e.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code);
+}
+
+/**
+ * Send what is buffered, MAX_BATCH at a time. A network failure keeps the rows
+ * and backs off. A batch the server rejects is dropped, and the next batch is
+ * sent. One flush at a time.
  */
 export function flushPerfLog(): Promise<void> {
   if (flushing) return flushing;
@@ -252,7 +295,11 @@ export function flushPerfLog(): Promise<void> {
         const batch = buffer.slice(0, MAX_BATCH);
         try {
           await deps.send(batch);
-        } catch {
+        } catch (err) {
+          if (permanentSendFailure(err)) {
+            buffer = buffer.slice(batch.length);
+            continue;
+          }
           backoffMs = Math.min(MAX_BACKOFF_MS, backoffMs > 0 ? backoffMs * 2 : FIRST_BACKOFF_MS);
           backoffUntil = now() + backoffMs;
           return;
