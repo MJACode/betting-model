@@ -535,6 +535,8 @@ INSTRUMENTED_ENTRYPOINTS = [
     "scripts/nba_prop_projection_card.py",
     "scripts/nhl_goalie_window.py",
     "scripts/ncaab_odds_capture.py",
+    "scripts/ncaab_injury_feed.py",
+    "scripts/ncaab_injury_probe.py",
     "scripts/ncaab_total_card.py",
 ]
 

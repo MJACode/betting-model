@@ -4524,6 +4524,17 @@ NCAAB_ODDS_API_MAP: dict = {
     "Valparaiso Crusaders": 2674,           # ESPN "Valparaiso Beacons"; 36 of 37
 }
 
+# Injury-page team string -> ESPN team id. Checked before
+# ncaab_teams.resolve_team_name, and only for that exact string. Empty until
+# a miss log names a string the resolver cannot place. Do not guess an id.
+NCAAB_INJURY_TEAM_MAP: dict = {}
+
+# "espn_team_id|player_key" -> player_key on that team's roster. Used when the
+# feed spells a name the roster does not. The value is applied only when it is
+# on the roster; a value that is not is a miss, not a match. Empty until a
+# miss is confirmed by hand.
+NCAAB_INJURY_PLAYER_MAP: dict = {}
+
 # The Odds API team name → CFBD canonical school name.
 #
 # LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD

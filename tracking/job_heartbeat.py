@@ -103,6 +103,10 @@ MAX_SILENCE: dict = {
     # of ncaab_events, then return, all off-season), so 20 minutes is four
     # missed ticks: a stopped capture, and opener times going unrecorded.
     "ncaab_odds_capture": 20,
+    # Every five minutes, 24x7. The tick beats when it returns, including the
+    # ones that poll nothing because the cadence has not elapsed, so 20
+    # minutes is four missed ticks: a stopped feed, not a quiet afternoon.
+    "ncaab_injury_feed": 20,
     # Hourly at five past, 24x7 UTC, and it beats on the idle hours too (one
     # read of today's slate), so two missed hours and some: a stopped card.
     "ncaab_total_card": 150,

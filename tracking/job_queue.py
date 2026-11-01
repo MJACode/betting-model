@@ -687,6 +687,20 @@ def _job_ncaab_feed_probe(**kw):
             "truncated": len(text) > _NCAAB_FEED_PROBE_STDOUT_CAP}
 
 
+def _job_ncaab_injury_probe(**kw):
+    """Both injury pages: HTTP status and parsed player count. Writes nothing."""
+    from scripts.ncaab_injury_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.ncaab_injury_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_ncaab_injury_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
 def _validate_ncaab_feed_probe(args: dict) -> dict:
     extra = sorted(set(args) - {"market_events"})
     if extra:
@@ -2423,6 +2437,8 @@ JOBS = {
     "ncaab_odds_history": (_job_ncaab_odds_history, _validate_ncaab_odds_history),
     # Free NCAAB feed and College Basketball Data check (at most 10 credits).
     "ncaab_feed_probe": (_job_ncaab_feed_probe, _validate_ncaab_feed_probe),
+    # Reachability of the two public NCAAB injury pages. Writes nothing.
+    "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),
