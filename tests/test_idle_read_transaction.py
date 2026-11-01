@@ -101,7 +101,8 @@ _CREDIT_SQL = """
     SELECT COALESCE(SUM(credits), 0) FROM api_call_log
     WHERE host = 'api.the-odds-api.com'
       AND source = 'pregame_poller'
-      AND ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York')
+      AND ts >= (date_trunc('day', now() AT TIME ZONE 'America/New_York')
+                 AT TIME ZONE 'America/New_York')
 """
 
 

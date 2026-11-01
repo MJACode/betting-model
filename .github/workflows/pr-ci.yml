@@ -201,6 +201,7 @@ jobs:
             tests/test_mobile_pick_cta.py \
             tests/test_mobile_line_movement.py \
             tests/test_mobile_a11y.py \
+            tests/test_stats_board_a11y.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_discord_void_notice.py \
@@ -227,6 +228,7 @@ jobs:
             tests/test_ncaab_odds_replay_pg.py \
             tests/test_ncaab_injury_feed.py \
             tests/test_idle_read_transaction.py \
+            tests/test_monitoring.py \
             tests/test_view_migration_lock_noop.py \
             tests/test_record_correction_post.py \
             tests/test_voided_pick_not_rechosen.py \

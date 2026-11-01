@@ -443,7 +443,8 @@ def test_the_lines_purchase_resumes_from_the_ledger(monkeypatch):
     monkeypatch.setattr(h, "check_process_events_contract", lambda: None)
     monkeypatch.setattr(h, "_ensure_tables", lambda conn: None)
     monkeypatch.setattr(h, "_season_games", lambda conn, a, b: [UK_DUKE])
-    monkeypatch.setattr(h, "_held_hours", lambda conn: {("2025-11-18", 15), ("2025-11-17", 22)})
+    monkeypatch.setattr(h, "_held_instants",
+                        lambda conn: {_t("2025-11-18T15:00Z"), _t("2025-11-17T22:00Z")})
     monkeypatch.setattr(h, "_resolver", lambda conn, games: h.EventResolver(REGISTRY, games))
     bought = []
     monkeypatch.setattr(h, "_buy_snapshot",
@@ -719,7 +720,8 @@ def test_the_tables_are_created_only_when_the_catalog_says_so(monkeypatch):
     conn = FakeConn()
     h._ensure_tables(conn)
     assert conn.sql == [] and conn.commits == 0
-    assert {t for t, _ in seen} == {"odds_history_pulls", "ncaab_odds_unmatched"}
+    assert {t for t, _ in seen} == {"odds_history_pulls", "odds_history_fetches",
+                                    "ncaab_odds_unmatched"}
     assert all(kw["rls"] is True and kw["revoked_from"] for _, kw in seen)
 
 
@@ -812,7 +814,8 @@ def test_the_approved_scopes_and_floor():
     modes = jq.NCAAB_ODDS_HISTORY_MODES
     assert {m: (v["cap"], v["seasons"]) for m, v in modes.items()} == {
         "lines": (420_000, (2021, 2026)), "deriv_close": (800_000, (2024, 2026)),
-        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026))}
+        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026)),
+        "opener_grid": (1_170_000, (2021, 2026))}
     assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 300_000
     # the probe mode may carry the same floor as the purchases
     assert jq._validate_ncaab_odds_history({"mode": "probe", "max_credits": 200, "floor": 500_000})
@@ -866,8 +869,13 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
-    assert sorted(k for k in keys if k.startswith("ncaab-")) == sorted(DECLARED)
     by = {e["key"]: e for e in entries}
+    # Every NCAAB declaration is one of the approved ones, except the free
+    # ESPN box and period backfills (job ncaab_box_backfill, 2026-10-30): they
+    # spend no credits, so they need no credit approval, and whether each is
+    # on is a one-line switch that tests/test_ncaab_espn_box.py checks.
+    assert sorted(k for k in keys if k.startswith("ncaab-")
+                  and by[k]["job_type"] != "ncaab_box_backfill") == sorted(DECLARED)
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True

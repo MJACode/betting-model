@@ -51,6 +51,13 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         every 10 minutes, every 5 while a game tips within three hours;
         Covers' public page about every 30. Change rows, including cleared.
         Tags only. Writes no picks. RUN_NCAAB_INJURY=0 stops it.)
+  * NCAAB totals card     hourly at :05, 24x7, UTC -> run_ncaab_total_card
+        (scripts/ncaab_total_card.py: the NCAAB totals model decides each
+        game once, at 22:00Z the evening before or else at 15:00Z on the day
+        and each hour after, on DraftKings' standing total; then publishes.
+        UTC, not Eastern, because those are the hours its evidence bought;
+        an Eastern cron would drift an hour when DST returns on 2027-03-14.
+        RUN_NCAAB_TOTAL_CARD=0 stops it.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -754,7 +761,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # passes' own NCAAB fetch, not a loop.
                   "ncaab_odds_capture",
                   # Writes injury tags, not picks.
-                  "ncaab_injury_feed"}
+                  "ncaab_injury_feed",
+                  # Writes NCAAB totals picks through its own card, reading
+                  # the odds the passes and the capture stored.
+                  "ncaab_total_card"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -1569,6 +1579,32 @@ def run_ncaab_injury_feed() -> None:
         why = alert or (lines[-1] if lines else f"exit {result.returncode}")
         raise RuntimeError(f"NCAAB injury feed: {why[:500]}")
     log.info("DONE  ncaab-injury-feed (exit 0)")
+
+
+# The card reads one season of NCAAB games and box scores and refits the
+# ratings once per quote hour; seconds to a minute in practice.
+NCAAB_TOTAL_CARD_TIMEOUT_S = 600
+
+
+def run_ncaab_total_card() -> None:
+    """One NCAAB totals card run (scripts/ncaab_total_card.py), then publish.
+
+    Hourly at five past, UTC. A game is decided at 22:00Z the evening before
+    its date or, failing a DraftKings total then, at 15:00Z on the day and
+    each hour after, so a run at any other hour decides nothing and returns
+    after one read. The script returns at once when RUN_NCAAB_TOTAL_CARD=0;
+    the job still beats. A run that fails or is killed raises AFTER
+    publishing, so the heartbeat records "error" and the failure alerter
+    reports it, while a bet that was written still goes out. The script exits
+    1 when a due game could not be decided for a reason that will not clear
+    by itself (an artifact for another season, a season-long box hold, a
+    missing blend), after writing every game it could.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaab_total_card", "--publish"],
+                   "ncaab-total-card", timeout=NCAAB_TOTAL_CARD_TIMEOUT_S)
+    _publish_new_signals("ncaab-total-card")
+    if outcome != "ok":
+        raise RuntimeError(f"NCAAB totals card did not finish: {outcome}")
 
 
 def run_nfl_opener_card() -> None:
@@ -2524,6 +2560,21 @@ def build_scheduler() -> BlockingScheduler:
         id="ncaab_injury_feed",
         name="NCAAB injury feed (every 5 min, 24x7: tags only, change rows)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # NCAAB totals card -- hourly at five past, UTC (run_ncaab_total_card).
+    # UTC on purpose: the model decides at 22:00Z the evening before and from
+    # 15:00Z on the day, the hours its evidence bought, and an Eastern cron
+    # would move them an hour when DST returns. Five past, so the hour's
+    # standing DraftKings total is the one stored by the capture job's ticks
+    # up to then. Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_ncaab_total_card,
+        CronTrigger(minute=5, timezone="UTC"),
+        id="ncaab_total_card",
+        name="NCAAB totals card (hourly at :05 UTC: decide at 22Z the evening before, "
+             "else 15Z on the day and each hour to tip)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 
     # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow

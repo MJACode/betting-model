@@ -107,6 +107,9 @@ MAX_SILENCE: dict = {
     # ones that poll nothing because the cadence has not elapsed, so 20
     # minutes is four missed ticks: a stopped feed, not a quiet afternoon.
     "ncaab_injury_feed": 20,
+    # Hourly at five past, 24x7 UTC, and it beats on the idle hours too (one
+    # read of today's slate), so two missed hours and some: a stopped card.
+    "ncaab_total_card": 150,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

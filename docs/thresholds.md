@@ -930,6 +930,43 @@ does not end just before, and that run fails, so the window job reports an error
 on every tick until the artifact is refitted (and buys the game again each
 tick in its window).
 
+## NCAAB — `ncaab_total_blend`, full-game totals (2026-10-30, mike)
+
+mike, 2026-10-30: *"Yes to the totals model."* Team ratings refit as of
+DraftKings' total, a correction for shooting luck and playing style, blended
+with DraftKings' total; bet the side whose chance of winning (a push left out)
+beats DraftKings' implied chance by more than 0.04, both teams 10+ games
+(`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
+evidence and its risks are `docs/sports/ncaab.md` "The models").
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.04 | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.04. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.07, on its own probability. The smallest EV the 0.04 cut admitted on 2021-2025 was +0.0743 (median +0.0996, 1,094 bets); an edge above 0.04 at -120 or longer is EV above 0.073, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; it laid -120 to +102 (median -110) | `MODEL_MIN_ODDS` |
+| early season | both teams 10+ games ended before the quote; never a November bet in the evidence | `models/ncaab_total_blend.MIN_GAMES` |
+| decided once | 22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip, at DraftKings' standing total; a row in `ncaab_total_decisions`, bet or not | `scripts/ncaab_total_card.py`, `scheduler.run_ncaab_total_card` |
+
+**The neighbourhood** (graded as it runs live, 2026-10-30; both teams 10+
+games; date-resampled 95% interval):
+
+| Cut | 2021-2025 bets | 2021-2025 ROI | interval | close EV | 2025-26 bets | 2025-26 ROI |
+|---|---|---|---|---|---|---|
+| 0.02 | 3,380 | +5.18% | [1.9, 8.9] | -0.80% | 1,041 | +4.41% |
+| 0.03 | 1,983 | +5.45% | [1.3, 9.7] | -0.31% | 631 | +4.07% |
+| **0.04** | **1,094** | **+7.32%** | **[2.0, 12.7]** | **+0.27%** | **349** | **+7.03%** |
+| 0.05 | 605 | +9.85% | [2.7, 16.9] | +0.58% | 182 | +11.74% |
+| 0.06 | 329 | +10.45% | [0.6, 20.5] | +1.17% | 85 | +21.64% |
+
+0.04 is where closing value first turns positive; every cut from 0.02 to 0.06
+clears zero on 2021-2025. Chosen on the seasons it is graded on; 2025-26 was
+never used to choose.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
+ROI, calibration within 5%). Read the close EV and the over share beside the
+ROI: the edge rests on information the close only partly confirms.
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the

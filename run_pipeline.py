@@ -813,7 +813,8 @@ def step_nba_quarters(run_date: str) -> bool:
       1. quarter scores for every finished game this season that lacks them
          (data/ingestors/nba_period_scores.py; only missing games are fetched)
       2. play-by-play and possessions for the same games
-         (data/ingestors/nba_pbp.fill_gaps; it refuses past MAX_GAPS)
+         (data/ingestors/nba_pbp.fill_gaps; at most MAX_GAPS a run, oldest
+         first, and one game's failure does not drop the games already built)
       3. nba_team_q1_games rebuilt for this season and the last, since the
          last-10 window reaches back into last season early on
          (data/ingestors/nba_team_q1.py)
@@ -845,10 +846,19 @@ def step_nba_quarters(run_date: str) -> bool:
     try:
         try:
             from data.ingestors.nba_pbp import fill_gaps
-            logger.success(f"✓ NBA play-by-play: {fill_gaps(conn, season)}")
+            pbp = fill_gaps(conn, season)
+            if pbp.get("errors"):
+                # Last ERROR line is what _timed_step stores in pipeline_log.
+                # One game's failure is already committed around; the run stays
+                # red until a later pass has none, so a real error is not hidden.
+                detail = f"; first: {pbp['first_error']}" if pbp.get("first_error") else ""
+                logger.error(f"✗ NBA play-by-play failed: {pbp['errors']} game(s){detail}")
+                ok = False
+            else:
+                logger.success(f"✓ NBA play-by-play: {pbp}")
         except Exception as exc:
             conn.rollback()
-            logger.error(f"✗ NBA play-by-play failed: {exc}")
+            logger.error(f"✗ NBA play-by-play failed: {type(exc).__name__}: {exc}")
             ok = False
         try:
             from data.ingestors.nba_team_q1 import rebuild
@@ -953,6 +963,33 @@ def step_ncaab_results(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ NCAAB results failed: {exc}")
+        return False
+
+
+def step_ncaab_box(run_date: str) -> bool:
+    """
+    NCAAB team box scores and period scores from ESPN's game summary
+    (data/ingestors/ncaab_espn_box.py) into ncaab_team_game_stats (source
+    'espn_summary') and ncaab_period_scores. Runs AFTER ncaab-results, which
+    writes the finals it reads, on the HOURLY refresh passes only
+    (scripts/refresh_pass.sh). Self-limiting: no ESPN call unless a final of
+    the last 3 ET dates has no ESPN box row; at most 80 games and about 150
+    seconds of fetching a pass. A game ESPN cannot answer usefully is logged
+    and skipped, not raised. False when ESPN refused the worker, a fetch
+    failed, a write failed, or the newest 5 finals ESPN answered for were all
+    refused (the summary changed for every game), so pipeline_runs names it.
+    """
+    try:
+        from data.ingestors.ncaab_espn_box import run_recent
+        t = run_recent(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAAB box scores (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAAB box scores (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAB box scores failed: {exc}")
         return False
 
 
@@ -2198,7 +2235,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # Quarter scores, play-by-play possessions, then nba_team_q1_games, which
     # the NBA team page reads. Free ESPN endpoints; only missing games fetched.
     logger.info("Step 0c1: NBA quarter scores, possessions and 1Q team stats...")
-    results["nba_quarters"] = step_nba_quarters(run_date)
+    # _timed_step is what writes pipeline_log.error_msg. --step already uses
+    # it; the 6am run did not, so a failed nba_quarters left no reason.
+    results["nba_quarters"] = _timed_step(
+        "nba-quarters", lambda: step_nba_quarters(run_date), run_date)
 
     # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
     # Keeps the table (public track record + mobile action filter + Discord)
@@ -2620,7 +2660,7 @@ Examples:
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
-                                 "ncaab-results", "ncaab-schedule",
+                                 "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -2723,6 +2763,7 @@ Examples:
             "ncaaf-weather": lambda: step_ncaaf_weather(run_date),
             "ncaab-results": lambda: step_ncaab_results(run_date),
             "ncaab-schedule": lambda: step_ncaab_schedule(run_date),
+            "ncaab-box": lambda: step_ncaab_box(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),
