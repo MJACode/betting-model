@@ -407,9 +407,22 @@ class Model:
     dec: np.ndarray                 # per row: decimal price
     t: np.ndarray                   # per row: the threshold (spreads)
     shape_groups: list              # (rows, ResidDist) (spreads)
+    shared: tuple | None = None     # keyed by game and book: one shuffle of games, read by every book
 
     def values_at(self, perm: np.ndarray) -> np.ndarray:
-        return self.base + self.orient * (self.orient * (self.value - self.base))[perm]
+        """A perm of -1: no such key to read from, so no opinion in this run."""
+        moved = (self.orient * (self.value - self.base))[perm]
+        return self.base + self.orient * np.where(perm < 0, np.nan, moved)
+
+    def perm(self, seed: int) -> np.ndarray:
+        if self.shared is None:
+            return permute_within(self.groups, len(self.value), seed)
+        game, book, dates, table = self.shared
+        rng = np.random.default_rng(seed)
+        moved = np.arange(table.shape[0])
+        for ids in dates:
+            moved[ids] = ids[rng.permutation(len(ids))]
+        return table[moved[game], book]
 
     def ev(self, v: np.ndarray) -> np.ndarray:
         if self.kind == "ml":
@@ -426,10 +439,12 @@ class Model:
 
 
 def build_model(pool: pd.DataFrame, market: pd.DataFrame, key_cols, kind: str, orient: pd.Series | None = None,
-                group_cols=("game_date",)) -> Model:
+                by_book: bool = False) -> Model:
     """`pool` carries the family's own mu / sigma or p_home; `market` the market's number per key
-    (key_cols + mu or p_home). Built with merges, once."""
+    (key_cols + mu or p_home). Built with merges, once. `by_book`: the keys are a game at a book, and
+    a run shuffles the games of a date once, so every book reads the same other game (§10.1)."""
     key_cols = list(key_cols)
+    group_cols = ("game_date",)
     keys = pool[list(dict.fromkeys(key_cols + list(group_cols)))].drop_duplicates(key_cols).reset_index(drop=True)
     keys["_k"] = np.arange(len(keys))
     row_key = pool[key_cols].merge(keys[key_cols + ["_k"]], on=key_cols, how="left")["_k"].to_numpy()
@@ -453,14 +468,21 @@ def build_model(pool: pd.DataFrame, market: pd.DataFrame, key_cols, kind: str, o
         t = H.threshold(pool["market"], pool["line"])
         shape_groups = [(np.flatnonzero(m), dist) for m, dist, _ in H._groups(pool["sigma"].to_numpy(dtype=object))
                         if dist is not None]
+    shared = None
+    if by_book:
+        game, games = pd.factorize(keys["game_id"])
+        book, books = pd.factorize(keys["book"])
+        table = np.full((len(games), len(books)), -1, int)
+        table[game, book] = keys["_k"].to_numpy()
+        shared = (game, book, [np.unique(game[g]) for g in groups], table)
     return Model(kind, row_key, value, base, o, groups, pool["side"].isin(["home", "over"]).to_numpy(),
-                 np.asarray(H.dec(pool["price"]), float), np.asarray(t, float), shape_groups)
+                 np.asarray(H.dec(pool["price"]), float), np.asarray(t, float), shape_groups, shared)
 
 
 def run_model(fast: Fast, model: Model, cuts, seed: int | None) -> dict:
     """{(label, cut_index): chosen rows} for one run; `seed` None: the real numbers."""
     n = len(model.value)
-    perm = np.arange(n) if seed is None else permute_within(model.groups, n, seed)
+    perm = np.arange(n) if seed is None else model.perm(seed)
     ev = model.ev(model.values_at(perm))
     out = {}
     for lab in fast.idx:
@@ -531,11 +553,12 @@ def differ_shares(fast: Fast, spec, cuts, seeds) -> pd.DataFrame:
 def kept_own_share(spec, seeds) -> float:
     """The share of opinions (or of a rule's gaps) a run leaves on their own game or offer. If most
     candidates were alone on their date this would be near 1 and the placebo would repeat the bets."""
-    n = len(spec.value) if isinstance(spec, Model) else len(spec.strength)
     idx = np.concatenate(spec.groups) if spec.groups else np.zeros(0, int)
     if not len(idx) or not seeds:
         return np.nan
-    return float(np.mean([(permute_within(spec.groups, n, s)[idx] == idx).mean() for s in seeds]))
+    if isinstance(spec, Model):
+        return float(np.mean([(spec.perm(s)[idx] == idx).mean() for s in seeds]))
+    return float(np.mean([(permute_within(spec.groups, len(spec.strength), s)[idx] == idx).mean() for s in seeds]))
 
 
 # ── one group of cells: the same cells, the two arms ────────────────────────
@@ -646,8 +669,7 @@ def f6d_group(point: str, times, vis, off, neutral0, line: Pricing, one: Pricing
     return Group(FAM_F6D, point, "h2h", HOME_AWAY, F6D_CUTS, 0.0, "ev", times, _both(a, HOME_AWAY),
                  _both(b, HOME_AWAY), _both(neutral0, HOME_AWAY), _both(neutral0, HOME_AWAY), a,
                  _side_masks(a, HOME_AWAY),
-                 {"market": own_book_ml(vis), "key_cols": ("game_id", "book"), "kind": "ml",
-                  "group_cols": ("game_date", "book")})
+                 {"market": own_book_ml(vis), "key_cols": ("game_id", "book"), "kind": "ml", "by_book": True})
 
 
 def f1_groups(point: str, times, vis, off, proj, games, line: Pricing, one: Pricing,
@@ -676,6 +698,9 @@ def f1_groups(point: str, times, vis, off, proj, games, line: Pricing, one: Pric
 def p1_cand(off: pd.DataFrame, fair: pd.DataFrame, base: pd.DataFrame, games: pd.DataFrame, label: str,
             min_train: int) -> pd.DataFrame:
     rows = P1.model_rows(label, fair, base, games)
+    # Above zero only on a neutral-site game's designated home team. Five rows of about 6,000 would
+    # otherwise move all five such games of 2025-26 by 9 to 20 points (§10.1).
+    rows["h_road_no"] = 0.0
     mv, _ = P1.walk_forward(rows, label, P1.FULL_GRADED, None, min_train=min_train)
     return H.fair_offers(off[off["market"] == label], P1.model_fair(fair, mv))
 
@@ -805,12 +830,17 @@ def compare_group(g: Group, games: pd.DataFrame | None) -> list[dict]:
             for side, gid in zip(b["side"], b["game_id"]):
                 side_o.setdefault(gid, set()).add(side)
             if games is not None:
+                pooled = (*H.CHOOSE, H.CONFIRM)
                 ga, gb = H.grade(a, games), H.grade(b, games)
+                ga, gb = ga[ga["season"].isin(pooled)], gb[gb["season"].isin(pooled)]
                 only_a = set(ga["game_id"]) - set(gb["game_id"])
                 only_b = set(gb["game_id"]) - set(ga["game_id"])
-                row.update({"pool_seasons": ",".join(str(s) for s in (*H.CHOOSE, H.CONFIRM)),
+                other = (set(ga["game_id"]) & set(gb["game_id"])) - set(ka["game_id"])
+                row.update({"pool_seasons": ",".join(str(s) for s in pooled),
                             "units_only_line": float(ga.loc[ga["game_id"].isin(only_a), "units"].sum()),
                             "units_only_one": float(gb.loc[gb["game_id"].isin(only_b), "units"].sum()),
+                            "units_other_offer_line": float(ga.loc[ga["game_id"].isin(other), "units"].sum()),
+                            "units_other_offer_one": float(gb.loc[gb["game_id"].isin(other), "units"].sum()),
                             "units_line": float(ga["units"].sum()), "units_one": float(gb["units"].sum()),
                             "roi_line": H.roi(ga) if len(ga) else np.nan,
                             "roi_one": H.roi(gb) if len(gb) else np.nan})

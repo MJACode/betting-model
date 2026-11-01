@@ -60,7 +60,7 @@ through it.
 | P2 same-number, moneyline and spread, 64 | **No.** The rule's chance is Pinnacle's no-vig share (§8.2). Only its blind bets move | graded once, control, never judged |
 | P1, full-game moneyline, 24 | **No.** The offset is the no-vig log-odds | graded once, control, never judged |
 | Every total: F1 48, P1 24, P2 full game 64, F6d 8 | **No line-size shape exists.** §10.7 measured totals and kept one shape | not re-graded |
-| F1b 48, F5 36 | **Hardly.** They cut on a gap in points; the shape only ranks offers on one side, and 90% of spread quotes sit at Pinnacle's number (measured, section 5) | not re-graded |
+| F1b 48, F5 36 | **Hardly.** They cut on a gap in points, and the shape only ranks offers on one side. On S_P2, the family that reads spreads this way, it moves 81 of 25,610 bets (§15.2). 61% to 63% of spread quotes sit at Pinnacle's number (corrected 2026-11-01: this line first said 90%, a figure measured nowhere) | not re-graded |
 | First half, first quarter, team totals in P1 and P2 | No shape was measured for period lines. Team totals have one (§10.7) but are not a spread or moneyline | not re-graded |
 
 **The 256 cells re-graded are the ones a shape reaches.** F1's is one definition beyond a plain swap:
@@ -259,6 +259,44 @@ usual: the same rate of bets, the same spread of EV, no game-specific informatio
   placebo bets that are not the real bets, per family and cut. A date holds 7.5 games on average and
   0.08% to 0.33% of a season's games are alone on theirs, so the shuffle has room (counted 2026-10-30).
 
+### 10.1 Rule changes from the independent review, dated 2026-11-01, before any cell is graded
+
+The review ran after §15 was written. Nothing in it read a bet's result, apart from the three final scores
+§15.4 discloses. Each change below is stated before grading.
+
+- **S_F6d's placebo now uses one shuffle of games per date, read by every book.** As first built, each book
+  shuffled on its own, so one game took up to eight other games' opinions. Some book cleared the cut far more
+  often than in the real rule, and the best of those was a random offer at the vig: 1,509 placebo bets against
+  752 real at home .01, 2,602 against 1,357 at away .01. More bets and worse prices lower the bar, so the old
+  version was easier to clear. If the other game has no number at this book, this book has no opinion in that
+  run and cannot be bet. Keeping its own opinion would hand the placebo real information. The real rule also
+  picks generous moneylines, about 3 points of market-fair EV better than the placebo, and this fix does not
+  close that gap.
+- **S_P2's placebo is not a null for information at gap 1 and above.** The first sentence of this section,
+  "the same rate of bets, the same spread of EV", is false for it. Real off-number offers cluster in a game and
+  lie on the favoured side; shuffled gaps scatter over more games, mostly onto offers at Pinnacle's number. A
+  real gap-1 bet starts about 5 points of market-fair EV ahead of its placebo. So bar 6 carries little weight
+  for S_P2 at gap 1 and above, and bars 2 and 4 do that work. The shuffle itself is unchanged: it is the
+  original P2 placebo. The same sentence fails on thin S_F2 favourite cells at D, EV .05 and above: 56 real
+  against 134 placebo at Pinnacle's reference.
+- **S_P1 reads the home team's road-trip count as 0, in both arms and in the moneyline control.** On a
+  neutral-site game the schedule's designated home team gets a road count. That count is above zero on 5 games
+  of 2024-25 and 5 of 2025-26 and on no other game. Fit on those 5 rows of about 6,000, it moves every priced
+  neutral-site game of 2025-26 by 9 to 20 points toward the away team, and all five are bet in all 12 S_P1 away
+  cells. This corrects §15.4, which called it one game. **One of the five scores was seen** before this rule
+  was written (`NBA_2026-01-18_ORL_MEM`, §15.4). The rule is about an input and is not a filter on games: all
+  five stay eligible, priced without the count.
+- **A pass in S_F2, S_F6d or S_F1 moneyline has one more test before it is credited to the shape.** A game
+  reads the results of its whole size group, so a chance read far from the number can step at a group's edge:
+  the review measured the underdog's chance falling 5 to 7 points across half a point at the 5 and 10 edges,
+  while the market's moves 1 to 2. On a long underdog that is enough to choose a bet by where its line sits in
+  the group. Its second checker could not finish, so this is not treated as settled, and the test below does
+  not depend on it, because it can only remove a pass. For each passing cell in these families, the report
+  gives the share of its bets within 0.5 of a size edge and the cell's pooled return with the same bets
+  re-priced through a shape from earlier games within 1 point of that game's number (floor 300, widened until
+  met), keeping only bets that still clear the cut. **If that return is not above zero with a 95% interval
+  above zero, the pass is not credited to the shape.** It is computed only if such a cell passes.
+
 ## 11. Controls, and how the two runs compare
 
 **Every registered cell is emitted twice in one run.** `control_<family>_oneshape` is the same cell
@@ -328,8 +366,8 @@ rule a result could have touched; the rules above stand as written.
 
 Totals, because §10.7 measured no line-size shape for them. First-half and first-quarter spreads,
 because no shape was measured for period lines. Team totals, which have a measured shape (§10.7) and
-are not a spread or moneyline. F1b and F5, where the shape only ranks offers on one side. Each could
-be a later search; none is decided here.
+are not a spread or moneyline. F1b and F5, where the shape only ranks offers on one side. F3, F4 and
+F6c, which read spreads the way F5 does. Each could be a later search; none is decided here.
 
 ## 15. Counts before grading
 
@@ -402,7 +440,8 @@ The rule catches a broken quote, not a strong opinion. Every offer below stays i
 - **S_F2 and S_F6d:** underdogs at +430 to +1,300 with EV .44 to .60, all in 2020-21 and 2021-22. The same 26.7%
   appears on seven of these games: one number in one season reads one chance.
 - **S_P2:** EV up to .16, ordinary spread prices of -105 to -112.
-- **S_P1: one game is an input fault, flagged and not fixed here.** `NBA_2026-01-18_ORL_MEM`, the London game,
+- **S_P1, corrected 2026-11-01: this was not one game, and it is now fixed by rule (§10.1).** As first written:
+  one game is an input fault, flagged and not fixed here. `NBA_2026-01-18_ORL_MEM`, the London game,
   reads 92.6% for the away team at the home number +4.5, EV .83. The input that stands out on it is the home
   team's road-trip count, 29 standard deviations from the average game. It is above zero on 5 games in 2024-25
   and 5 in 2025-26, the same counts as the schedule's neutral-site games, so P1's 2025-26 fit has at most five

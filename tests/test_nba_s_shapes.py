@@ -394,8 +394,7 @@ def test_fast_real_choice_is_the_harness_choice_on_every_family(world, built):
 def slow_placebo_roi(g, spec, games, seed, lab, cut):
     """The harness's route for one placebo run: price the moved numbers through H.fair_offers, choose
     and grade with the harness. What fast_placebo must equal."""
-    perm = S.permute_within(spec.groups, len(spec.value), seed)
-    v = spec.values_at(perm)
+    v = spec.values_at(spec.perm(seed))
     keys = g.pool.iloc[pd.DataFrame({"k": spec.key}).drop_duplicates("k").index]
     moved = g.pool.drop(columns=["ev"]).copy()
     if spec.kind == "ml":
@@ -470,6 +469,67 @@ def test_the_placebo_moves_opinions_only_within_a_date_and_keeps_the_market():
     v = spec.values_at(np.array([1, 0, 2, 3, 4]))
     # game 0 keeps its own market number 9 and takes game 1's disagreement of 2
     assert v[0] == 11.0 and v[1] == 19.0 and v[2] == 30.0
+
+
+def test_every_book_reads_the_same_other_game_in_a_run():
+    """§10.1: one shuffle of games per date. A game a book does not price leaves it no opinion."""
+    pool = pd.DataFrame({"game_id": ["a", "a", "b", "b", "c"], "book": ["x", "y", "x", "y", "x"],
+                         "game_date": ["d"] * 5, "p_home": [.5, .6, .5, .6, .5], "market": ["h2h"] * 5,
+                         "side": ["home"] * 5, "price": [100.0] * 5, "line": [np.nan] * 5})
+    market = pool[["game_id", "book"]].assign(p_home=.5)
+    spec = S.build_model(pool, market, ("game_id", "book"), "ml", by_book=True)
+    keys = pool[["game_id", "book"]].drop_duplicates().reset_index(drop=True)
+    seen = set()
+    for seed in range(1, 30):
+        perm = spec.perm(seed)
+        moved = {}
+        for k, p in enumerate(perm):
+            if p < 0:
+                assert keys.loc[k, "book"] == "y", "only book y lacks a game"
+                continue
+            assert keys.loc[p, "book"] == keys.loc[k, "book"], "a book keeps its own numbers"
+            moved.setdefault(keys.loc[k, "game_id"], set()).add(keys.loc[p, "game_id"])
+        assert all(len(v) == 1 for v in moved.values()), "one game reads one other game, at every book"
+        seen |= {(g, next(iter(v))) for g, v in moved.items()}
+    assert len(seen) > 3, "the shuffle moves"
+    v = spec.values_at(np.array([-1, 1, 2, 3, 4]))
+    assert np.isnan(v[0]) and np.isfinite(v[1:]).all()
+
+
+def test_a_placebo_keyed_by_book_bets_about_as_often_as_the_real_rule():
+    """One shuffle per date keeps the bet rate; a shuffle per book more than doubled it (§10.1)."""
+    rng = np.random.default_rng(3)
+    rows = []
+    for d in range(120):
+        for g in range(8):
+            shift = rng.normal(0, .25)
+            for b in range(6):
+                rows.append({"game_id": f"g{d}_{g}", "book": f"b{b}", "game_date": f"d{d}",
+                             "p_home": float(S._expit(shift + rng.normal(0, .01))), "market": "h2h", "side": "home",
+                             "price": 100.0, "line": np.nan})
+    pool = pd.DataFrame(rows)
+    market = pool[["game_id", "book"]].assign(p_home=.5)
+    spec = S.build_model(pool, market, ("game_id", "book"), "ml", by_book=True)
+    ev_real = spec.ev(spec.values_at(np.arange(len(spec.value))))
+    real = pd.Series(ev_real >= .1).groupby(pool["game_id"].to_numpy()).any().sum()
+    for seed in range(1, 6):
+        run = pd.Series(spec.ev(spec.values_at(spec.perm(seed))) >= .1).groupby(pool["game_id"].to_numpy()).any().sum()
+        assert abs(run - real) <= .2 * real, (seed, real, run)
+
+
+def test_s_p1_reads_no_home_road_count(monkeypatch):
+    """§10.1: above zero only on a neutral site's designated home team, so it is read as 0."""
+    seen = {}
+    monkeypatch.setattr(S.P1, "model_rows", lambda *a: pd.DataFrame({"h_road_no": [0.0, 1.0, 3.0], "a_road_no": [1.0, 2.0, 0.0]}))
+
+    def stop(rows, *a, **k):
+        seen["rows"] = rows.copy()
+        raise KeyboardInterrupt
+    monkeypatch.setattr(S.P1, "walk_forward", stop)
+    with pytest.raises(KeyboardInterrupt):
+        S.p1_cand(pd.DataFrame({"market": []}), None, None, None, "spreads", 10)
+    assert seen["rows"]["h_road_no"].eq(0.0).all()
+    assert seen["rows"]["a_road_no"].tolist() == [1.0, 2.0, 0.0], "the away team's road count is real"
 
 
 def test_the_favourite_keeps_its_side_when_the_opinion_moves():
