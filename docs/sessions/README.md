@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, `ncaab-injury-reachability-2026-10-30` added to the NCAAB declared-job allowlist, last, after the credit purchases. Its note stays "writes nothing" and is not marked as a credit approval. |
 | 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, merged origin/master into the NCAAB pre-tip injury feed branch for #1098. Injury job, migration, and probe kept beside the totals card, box scores, and app timings. Pull request not merged. |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, app load times measured on the phone: `app_timings` (per read, per screen, cold start) via a wrapped Supabase fetch and `log_app_timings`. Migration applied to production. Step B (instant last picks) waits on the data. |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, Stats board "slow to respond" on first open: player_recent_games_nba timed out cold (3.6s vs anon 3s; no season index on the NBA log). Season index on NBA and WNBA logs via ACTIVE_MIGRATIONS; fetchAllPages retries one statement timeout per read. Settings back button (iOS 27.2) investigated, not fixed. |
