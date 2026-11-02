@@ -1486,8 +1486,10 @@ full-game model, and chance. Replication and look-ahead found no fault in either
 reproduces exactly, every bet settles the same way from the cache, and changing a game's own
 box score moves none of the signals.
 
-**C1 is not built.** It passed the house standard, which section 8 says is built live; this is
-a judgement against that, made after looking, and is reported as such.
+**C1 was not built at first; it is now, as `nba_first_half_total_luck`** (mike, 2026-10-30:
+"Build the model that passed."). It passed the house standard, which section 8 says is built
+live. The first decision, made after looking and reported as such, went against that. The reasons
+it gave stand as the model's known weaknesses:
 - The effect is incoherent. A total set wrong by shooting luck should be wrong in both halves.
   Against games with a gap between -1 and +1, C1's games ran +1.89 points over in the first half
   (interval +0.68 to +3.09) and -0.45 in the second (-1.80 to +0.87); the difference is +2.34
@@ -1500,6 +1502,29 @@ a judgement against that, made after looking, and is reported as such.
   out after looking and is not a registered strategy.
 - By chance: in 5,000 shuffled 24-cell families, a pass at +8.0% or better appears in 3.0% to
   4.1% of them, depending on the shuffle.
+- Its quotes are not all main numbers, which this section's first paragraph implies. The
+  first-half purchase kept one listed pair per book, the last one listed
+  (`odds_ingestor._parse_total_outcomes`), so the main-number rule had nothing to choose among.
+  Against Pinnacle's number in the same game, the stored rows sit at least 1.5 points off it at
+  BetRivers 84.6%, betPARX 82.7% and Hard Rock 34.0% of the time, and 1.1% or less at every
+  other deciding book. That reads as a ladder cut to one rung; the ladder is inferred, because
+  no raw response was stored. 78 of the 595 bets are at those three books, including all ten
+  priced above +105 and all eleven at -125 or worse. **The prices it lays are -130 to +114 across
+  all books, and -118 to +105 at the four books whose rows look like main numbers (517 bets).**
+  Live takes each book's real main number, so it will not be offered the quotes behind some
+  bets. That does not change which games are bet, because the gap decides the game. Re-graded
+  through the live code (`python -m scripts.nba_first_half_total_luck_replay --quote-bounds`):
+
+  | Quotes | Bets | Units | Return | 95% interval | Offers changed | Results flipped |
+  |---|---|---|---|---|---|---|
+  | The lab's | 595 | +51.49 | +8.01% | +0.43% to +15.37% | | |
+  | BetRivers and betPARX rows with prices over 6 points of probability apart removed | 595 | +51.32 | +7.97% | +0.40% to +15.30% | 10 | 0 |
+  | The same, including Hard Rock | 595 | +52.16 | +8.05% | +0.69% to +15.39% | 45 | 1 |
+  | All three books removed entirely | 595 | +48.12 | +7.44% | -0.04% to +14.85% | 79 | 3 |
+
+  Fanatics has no purchase rows at all, so it is a deciding book the graded bets never saw. The
+  first live ticks replace the inference with a measurement: the `totals_h1_alternate` rows per
+  book in `odds`.
 
 **C2 is built live** as `nba_team_total_luck`.
 - Not one book: DraftKings alone 340 bets, +14.8% (interval +4.4% to +24.8%); FanDuel alone
@@ -2143,6 +2168,76 @@ below the cut to the top positive; beats the 95th percentile of 200 placebo shuf
 - Both checks are synthetic-tested: the lab drops a ladder 30 minutes older than its purchase,
   and it fails when the favourite's shape is mirrored the wrong way.
 
+### 10.8 A change after the first grade: impossible total rungs (2026-10-29)
+
+**Made after the first grade had been read, and stated as such.** The first full run (run
+`2026-10-29-sixth`, stored in Supabase, superseded by `2026-10-29-sixth-r2`) passed 0 of 30
+cells. Two cells cleared the 95% interval: full-game alternate totals, over, EV ≥ 0.08 (35 bets,
++81.6%) and ≥ 0.10 (30 bets, +94.2%). Their bets showed why. 26 of the 35 were Fanatics rows filed
+as full-game alternate totals with lines from 9.5 to 107.5, between 2025-10-29 and 2025-11-02.
+One more was a FanDuel 57.5. No full-game total is 9.5, so each was priced as a near-certain over
+and won.
+
+- **Measured on the whole purchase** (2,224,067 rungs): every full-game total rung sits within 40
+  points of the median of its game's stored total rungs, except 191 rows (Fanatics 160, FanDuel
+  31, 36 games, 2023-12-23 to 2025-11-02) that sit 120 or more away. Nothing lies between 40 and
+  120. Alternate spreads and both team totals have no such rows.
+- **The rule:** a full-game total rung 40 or more points from the median of the game's stored
+  total rungs is not a full-game total and is not eligible (`IMPOSSIBLE_GAP`,
+  `scripts/nba_game6_alt.frame_alt`). It removes exactly those 191 rows. The cut sits in the empty
+  gap, so 30 or 100 would remove the same rows.
+- A synthetic check builds a total ladder with one 9.5 rung. It fails with the rule removed.
+- Every cell is graded again under the rule, as run `2026-10-29-sixth-r2`. The first run stays in
+  Supabase as the record of what the defect did.
+- Also fixed: the first run's bet file was not written (a price-shape column cannot be stored);
+  the lab now drops that column before writing.
+
+### 10.9 Results (graded 2026-10-29, run `2026-10-29-sixth-r2`)
+
+Graded on the research cache refreshed 2026-10-29 (2,224,067 stored rungs on 3,690 games), under
+10.8's rule, then `python -m scripts.nba_game2_verdict --house5`. Stored in Supabase as run
+`2026-10-29-sixth-r2`; the first run, before 10.8, is `2026-10-29-sixth`.
+
+**0 of the 30 cells pass, and none clears the 95% interval on its own** (about 0.75 would by
+chance). The 14 cells with 200 or more bets have a median return of +0.2%; 8 are positive.
+
+| Family | Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | Fails |
+|---|---|---|---|---|---|---|---|
+| A1 alternate spreads | away, EV ≥ 0.04 | 868 | +22.1 | +5.2% | −3.9% to +14.7% | +8.7% / +10.0% / −1.9% | interval, bands |
+| A1 alternate spreads | home, EV ≥ 0.04 | 628 | +17.5 | +5.6% | −5.8% to +16.6% | +6.4% / +12.7% / −2.2% | interval, bands |
+| A2 alternate totals | under, EV ≥ 0.02 | 254 | −33.5 | −11.5% | −23.9% to +0.5% | −15.5% / −9.0% / −12.0% | all but bets |
+| A2 alternate totals | over, EV ≥ 0.02 | 147 | −4.5 | −3.7% | −21.2% to +13.1% | −17.2% / −11.7% / +22.3% | all |
+| A3 alternate team totals | under, EV ≥ 0.04 | 616 | +7.5 | +2.5% | −8.9% to +13.6% | −1.1% / +5.6% / +1.9% | interval, bands, placebo |
+| A3 alternate team totals | over, EV ≥ 0.02 | 217 | +0.2 | +0.1% | −10.7% to +11.2% | −16.3% / −1.1% / +8.4% | interval, seasons, bands, placebo |
+
+**Reported, never bars, for the best cell (A1 away, EV ≥ 0.04):**
+- DraftKings alone, the rule re-run with DraftKings as the only book: 247 bets, −6.6%. (The cell's
+  own 108 DraftKings bets: +5.1%. The two differ because the re-run picks other rungs.)
+- Without BetMGM, its biggest book (473 of 868 bets), re-run: 518 bets, +2.8%.
+- By distance from the book's main number: 1.5-4 points 100 bets +4.7%; 4-8 points 272 bets
+  −4.0%; 8 or more points 496 bets +17.6%. The far bets are all away underdogs priced +260 to
+  +400 (26.4% won). At DraftKings alone they lose (167 bets, −2.1%), and by book they run from
+  +12.3% (BetRivers) to −20.6% (Fanatics). That split was found after looking, inside a failed
+  cell.
+- Closing-line value is not independent evidence here (11.5, item 3), and the team-total cells
+  have none: the derivative purchase holds one Pinnacle team-total quote per game, at the
+  decision.
+
+**Independent verification** (workflow `nba-alt-lines-regrade-verify`, scripts under
+`%TEMP%/q1trend/verify6/` on the build machine):
+- All 3,709 bets of six headline cells settled again from final scores: 0 differ. Every bet's rung
+  is in the purchase at that book, line and price, before tip, 1.5 or more from the book's main,
+  priced −200 to +400, from a ladder no more than 15 minutes old.
+- **A gap in 11.5's first change, flagged and not fixed.** That change takes each book's main
+  number from the hourly archive, up to 60 minutes old, so "the book's main is within 1 point of
+  Pinnacle" no longer tests the ladder itself. 54,905 priced offers come from ladders more than 1
+  point from Pinnacle at the purchase; 475 bets used them. Recomputed without them: the best cell
+  is 838 bets, +6.3% (−3.4% to +15.8%); A3 under at 0.04 falls from +2.5% to −4.6%. **0 of 30
+  pass under every cleaning tried.** One FanDuel totals ladder (ORL at CHI, 2023-11-15), centred
+  15 points from the market, made the search's single highest-EV bet (under 216.5 at +310) and won.
+
+**Closed for 2026-27: alternate spreads, totals and team totals.** Nothing is built.
+
 ## 11. Seventh search: the minutes after an injury report (pre-registered 2026-10-24, before any of its prices were bought)
 
 mike, 2026-10-24: *"Buy alts and do #2 as well. Go"*. Section 10.1's second check found that
@@ -2335,3 +2430,281 @@ Share of games with one, 2023-24 / 2024-25 / 2025-26:
 So the team-total cells (A3) mostly test BetRivers, DraftKings, FanDuel and Caesars. BetMGM's,
 Hard Rock's and Fanatics' alternate team totals are mostly out of scope. A thin A3 result means
 those books were not tested, not that their ladders hold nothing.
+
+
+### 11.7 Results (graded 2026-10-30, run `2026-10-30-seventh`)
+
+Graded on the research cache refreshed 2026-10-29: the ledger holds all 8,810 injury-report
+requests the plan called for; 9 fetches are filed by the snapshot the feed returned rather than the
+one asked for (11.6, item 2). Of the plan's 1,927 events, 1,894 have a window at R+5 and R+10 and
+1,888 at R+15, on 1,328 games. Stored in Supabase as run `2026-10-30-seventh`.
+
+**0 of the 26 cells pass.** The verdict counts 10 that clear the 95% interval; every one holds 1 to
+4 bets.
+
+**N1, the stale book: almost never a bet.** 0 to 4 bets per cell over two seasons (3 spread bets at
+R+5). An independent recount from the raw quotes (workflow `nba-injury-news-verify`, scripts under
+`%TEMP%/q1trend/verify7/` on the build machine) found the same candidates row for row, so the rule
+saw every stale quote the data holds. What it showed instead:
+- After Pinnacle's number moves a point or more, a deciding book's quote is often unchanged: 18% to
+  41% of the time, by book.
+- But 89% to 93% of those unchanged books were already on the number Pinnacle then moved to (median
+  distance from Pinnacle's new number: 0 points). Pinnacle was catching up to them. Bet, they carry
+  a median EV of −4% to −5%: the price of the bet.
+- A book truly left on Pinnacle's old number, still unmoved and fresh: 5 to 25 games per market and
+  offset over two seasons (an upper bound), and even those average slightly negative EV, because a
+  1-point move is about the size of the vig.
+- Five minutes after a report, Pinnacle's spread had not moved at all about two-thirds of the time,
+  and had moved a full point after about one report in thirty.
+
+**N2, nobody has moved: loses.**
+
+| Cell | Bets | Units | Return | 95% interval | 2024-25 / 2025-26 |
+|---|---|---|---|---|---|
+| R+5, spread, EV ≥ 0.02 | 222 | −14.2 | −6.0% | −18.9% to +7.2% | −10.9% / −0.8% |
+| R+5, moneyline, EV ≥ 0.02 | 243 | −8.0 | −4.9% | −20.1% to +10.0% | −4.4% / −5.3% |
+| R+10, spread, EV ≥ 0.02 | 197 | −17.3 | −8.2% | −20.7% to +4.4% | −15.8% / −1.2% |
+| R+10, moneyline, EV ≥ 0.02 | 218 | −13.2 | −9.1% | −25.2% to +7.5% | −9.9% / −8.3% |
+
+The EV ≥ 0.04 cells (72 spread bets +2.6%, 150 moneyline bets +2.4%) are under 200 with intervals
+through zero. The rule picks exactly the games where the move never came: Pinnacle's close moved
+about 0.2 points toward the news after an R+5 decision, against the 0.65 the rule assumed. It did no
+better than bets on shuffled sides. Over all events the market does price the news at about the
+size assumed: roughly 30% in the hour before the report, about a fifth more by five minutes after,
+most of the rest over the next 20 minutes.
+
+**Verification.** All 880 bets of the four N2 cells above settled again from final scores and found
+in their fetch at that book, number and price, fresh: 0 differ. 22 R+10 bets were priced from an
+hourly or gap-fill fetch at the same five-minute mark (the purchase did not re-buy marks the archive
+held); without them R+10 spreads is −11.1% and R+10 moneyline −8.1%.
+
+**Flagged, not fixed (none changes a result):**
+- **The N1 placebo is not a null on the real data.** Most N1 candidates are the only event on their
+  date in that market and offset, so the within-date shuffle has nothing to swap: in the four R+5
+  and R+10 spread cells all 200 runs reproduce the real return. Those cells could not have passed
+  bar 6. They fail on bet count anyway. The synthetic world put 4 events on every date, so its check
+  could not see this.
+- The share of Pinnacle's move before R is blank on the N2 cells (the column the lab reads exists
+  only on N1 candidates), and the DraftKings-alone returns carry no count.
+- The first `--full` ran 9 hours without finishing: each candidate pass looked Pinnacle's centres up
+  one key at a time, and N2's placebo repeats the pass 200 times. The lookup now uses a dictionary
+  built once; old and new candidates are identical on 400 real windows (n1 222 s to 9 s, n2 76 s to
+  7 s). The second run took 41 minutes.
+
+**Closed for 2026-27: the minutes after an injury report.** Nothing is built, and the live report
+poller 11.4 named is not needed.
+
+## 12. Eighth search: the first-quarter trend method (pre-registered 2026-10-28, before any cell was graded)
+
+mike, 2026-10-28, describing how he picks first-quarter bets by hand:
+
+> *"I use EV analytics website for 1Q ATS records and home/away numbers … and team rankings
+> website for 1Q PPG and average 1Q margin. So my process was to go through each game looking
+> for teams with a 4-1/5-0 ATS home/away depending where they're playing L5 games vs Teams
+> 1-4/0-5 ATS home/away, from there would look at average 1Q point for/against both sides and
+> average 1Q points margin … I would also look at L10 games sometimes, a example would be you
+> have a team that 4-1 ATS L5 vs a team that's 2-3 ATS L5, I usually bump it out to L10 to see
+> if there's a edge. I was starting to mess around with 1Q totals also, same kind of concept,
+> looking L5/10 O/U, scoring stats and with the totals I would also look at pace of play."*
+
+**What earlier searches tested on first-quarter markets, and what they did not.** The first
+search's market rules (§4.2), the fourth search's market-anchored model, market rules and
+ratings projection (§8.4; best first-quarter cell: away spread, EV ≥ 0.06, 562 bets, 0.0%) and
+the fifth search's team first-quarter scoring shares (§9.9, 0 of 54 cells). **None of them
+graded a team's recent first-quarter cover record or over/under record.** The 2026-10-28 session
+note that cites §9 as the reason no first-quarter model was built is about a different idea.
+This search grades mike's method as he described it.
+
+**Written before any cell was graded. Nothing below changes after a result is seen; a later
+change gets its own dated line and reason.** Lab: `scripts/nba_game8_q1_trends.py`. Pass/fail:
+`scripts/nba_game2_verdict.py --house5` (§9.1's bars). No data is bought.
+
+### 12.1 Data
+
+- **First-quarter prices:** spreads and totals at each game's one purchase 45-75 minutes before
+  tip (decision point D, `H.per_event_times`), 2023-24, 2024-25 and 2025-26, ten books with
+  Pinnacle (`odds`, `source = 'odds_api_nba_derivative_history'`). The feed holds period
+  markets from 2023-05-03, so **no first-quarter number exists before 2023-24**; a team has no
+  record until it has played enough priced games.
+- **First-quarter scores:** `nba_period_scores`, through the first search's check
+  (`H.with_periods`).
+- **Pace:** possessions per team game from the box score (`models.nba_total_luck.team_box`).
+- Read from the research cache of 2026-10-17/18, which holds every first-quarter price bought
+  (all 1,229-1,230 games of each of the three seasons).
+- **Not inspected:** EVAnalytics and TeamRankings themselves (evanalytics.com was blocked from
+  the 2026-10-28 sandbox). Their records may be kept against a different line, such as the
+  close. This search keeps them against the number a bettor saw 45-75 minutes before tip.
+- **This season:** no first-quarter line is stored for any 2026-27 game. `latest_odds` holds
+  full-game spreads and totals for 98 games from 2026-10-20 and no `spreads_q1` or `totals_q1`
+  row (read 2026-10-29 01:30Z). A passing cell needs a first-quarter capture before it can bet.
+
+### 12.2 Definitions
+
+- **The game's first-quarter number:** at the game's purchase, Pinnacle's main first-quarter
+  spread (the HOME number, §4) or total where Pinnacle quotes it; else the median of the
+  deciding books' main numbers (`models.nba_book_numbers.visible_numbers`), rounded to the
+  nearest half point.
+- **A team's result in a game:** against that number, its first-quarter margin covers (W),
+  fails (L) or lands on it (P). For totals: over (O), under (U) or push.
+- **Venue record, last N:** the team's last N games at the SAME venue it plays at today (home
+  games for the home team, road games for the away team) that have a number and trustworthy
+  first-quarter scores, strictly before today's date. It reaches into the previous season, as
+  every NBA last-N read here does (Matt, 2026-10-23). **net = W − L** (or O − U); a push counts
+  0. A team with fewer than N such games has no record, and the game has no bet.
+- **Spreads, the hot team:** the team with the higher venue net; a tie is no bet. The cold team
+  is the other. **k = min(hot net, −cold net).** mike's rule, 4-1 or 5-0 against 1-4 or 0-5, is
+  k ≥ 3 on the last 5. His last-10 version, 7-3 against 3-7, is k ≥ 4 on the last 10.
+- **Totals:** for the over, k = min(home venue net, away venue net); for the under,
+  k = min(−home venue net, −away venue net).
+- **Season-to-date first-quarter averages** (the "1Q PPG and average 1Q margin" check): each
+  team's average first-quarter points scored (PF) and allowed (PA) in this season's games
+  before today, every venue, at least 5 games each, else the filter cell has no bet.
+  - **Spread check:** projected hot-team margin = ((hot PF + cold PA) − (cold PF + hot PA)) / 2.
+    It passes when the projection covers the game's number from the hot team's side. The
+    average margin is PF − PA, so a separate margin check would repeat this one.
+  - **Total check (scoring):** projected total = (home PF + away PA) / 2 + (away PF + home PA) / 2;
+    the over passes when it is above the game's number, the under when it is below.
+  - **Total check (pace):** the two teams' season-to-date possessions per game, averaged, against
+    the league's over the same season's games before today; the over passes when it is higher,
+    the under when lower. At least 5 games each.
+
+### 12.3 The cells (64)
+
+| Family | Market, side | Window | Cut on k | Checks | Cells |
+|---|---|---|---|---|---|
+| Q1A | first-quarter spread, the hot team (a per-game side) | last 5 | ≥ 1 / 3 / 5 | none; the spread check | 6 |
+| Q1A | same | last 10 | ≥ 2 / 4 / 6 | none; the spread check | 6 |
+| Q1A | same: **mike's "bump it out to L10"**: a last-5 hot team at net ≥ 3 against an opponent at net −1 or −2 (2-3), judged on the last-10 k of the same two teams (the last-5 hot team bet) | last 5 then 10 | last-10 k ≥ 2 / 4 | none; the spread check | 4 |
+| Q1T | first-quarter total, over and under | last 5 | ≥ 1 / 3 / 5 | none; scoring; pace; both | 24 |
+| Q1T | same | last 10 | ≥ 2 / 4 / 6 | none; scoring; pace; both | 24 |
+| **Total** | | | | | **64** |
+
+- **The price:** the best deciding offer on the cell's side, at that book's own main number, under
+  the first-quarter market's fair line (`H.market_fair` priced by §8.3's market pricing): the
+  rule mechanism F4 and F7 used. DraftKings alone is reported beside every cell.
+- **Bands (bar 5)** run along k within one window, side and check. Last 5: from −1, edges 1, 3,
+  5. Last 10: from 0, edges 2, 4, 6. The last-10 step: from 0, edges 2, 4. The band just below
+  the cut and every band from the cut up must be positive where they hold 30 or more bets.
+- **Seasons:** 2023-24, 2024-25 and 2025-26 graded and pooled; 2023-24 and 2024-25 are the
+  choosing seasons the placebo reads (`P3.choosing`). Nothing is fitted, so every season is
+  graded.
+- **Settlement:** first-quarter points (`nba_period_scores`); a push returns the stake.
+
+### 12.4 The bars
+
+§9.1's house standard, unchanged: 200 or more pooled bets; the pooled whole-day bootstrap 95%
+interval above zero; seasons mostly positive; beats the blind bet on its dominant real side;
+the bands; the choosing seasons' return above the 95th percentile of 200 placebo runs.
+
+- **Placebo, 200 runs, seeds 1-200:** each game's trend inputs (both teams' venue records, their
+  season-to-date averages and pace) are moved together to another game on the same date. Each
+  game keeps its own first-quarter number and prices, and the rule is recomputed.
+- **Controls, graded and reported, never judged:** the fade of every unchecked cell (the cold
+  team; the other total side).
+- **A thin cell is still reported.** Two venue records landing on 4-1 against 1-4 is rare. A cell
+  under 200 pooled bets fails bar 1, and its bets, units, return, interval and season split are
+  printed anyway. For such a cell the answer is "too few games to tell", not "it loses" (the
+  §9.9 F8 reading).
+- **Expected passes by chance:** 64 × 0.025 ≈ 1.6 cells clear bar 2 alone, before correlation.
+- **A pass is built live** (§2) with its own EV floor and the prices it lays stated before it
+  ships, once first-quarter lines are captured for 2026-27.
+
+### 12.5 Counts before grading (2026-10-28)
+
+Counted by `python -m scripts.nba_game8_q1_trends --smoke`, before any cell was graded: the games
+each cell would bet with a deciding offer at or above the price floor. No result of a bet game
+was read.
+
+**Found by the first count, fixed before grading:** every check cell counted 0 bets. The
+season-average and pace inputs were attached to each game by row label instead of by position,
+so almost every game read as having no averages. Fixed in the lab, and
+`test_each_team_reads_its_record_at_todays_venue` now passes a filtered index (it fails on the
+old code).
+
+Games with a decision: 1,225 / 1,224 / 1,218 (2023-24 / 2024-25 / 2025-26). A last-5 venue
+record exists for 1,075 of 2023-24's games and a last-10 record for 925; both exist for every
+game of the two later seasons.
+
+| Cell | 2023-24 | 2024-25 | 2025-26 | Pooled |
+|---|---|---|---|---|
+| **mike's rule: last 5, k ≥ 3, no check** | 71 | 84 | 82 | **237** |
+| last 5, k ≥ 3, the spread check | 41 | 51 | 39 | 131 |
+| last 5, k ≥ 1 / k ≥ 5, no check | 480 / 6 | 574 / 2 | 595 / 0 | 1,649 / 8 |
+| **last 10, k ≥ 4 (7-3 against 3-7), no check** | 41 | 68 | 69 | **178** |
+| last 10, k ≥ 4, the spread check | 25 | 41 | 40 | 106 |
+| last 10, k ≥ 2 / k ≥ 6, no check | 222 / 4 | 311 / 5 | 351 / 11 | 884 / 20 |
+| the last-10 step, k ≥ 2 / k ≥ 4, no check | 35 / 8 | 45 / 14 | 64 / 13 | 144 / 35 |
+| totals, last 5, k ≥ 3, over / under, no check | 20 / 38 | 31 / 51 | 46 / 31 | 97 / 120 |
+| totals, last 10, k ≥ 4, over / under, no check | 9 / 29 | 27 / 36 | 36 / 21 | 72 / 86 |
+
+So mike's own last-5 rule clears the 200-bet bar (237); with his season-average check it does
+not (131), and neither does his last-10 rule (178). Every first-quarter total cell at k ≥ 3
+(last 5) or k ≥ 4 (last 10) is under 200. Those cells are graded and printed in full; by 12.4
+their answer is "too few games to tell". The full table is in the lab's output.
+
+### 12.6 Results (graded 2026-10-28)
+
+Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
+`python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
+build machine under `%TEMP%/q1trend/results/`. **They are not in Supabase yet.**
+`python -m scripts.nba_game2_store --results <folder> --run 2026-10-28-eighth` failed with
+"password authentication failed for user postgres": the local login has been stale since the
+database password changed on 2026-10-24. Storing the run is the first step once it works.
+
+**0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
+1.6 expected by chance. Six of those hold a single bet each. One cell with a real sample clears
+(the last row below).
+
+mike's method, the spread cells (first-quarter spread, the hot team, best deciding price):
+
+| Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | DraftKings alone, 2023-24 and 2024-25 | Fails |
+|---|---|---|---|---|---|---|---|
+| **Last 5, 4-1 or better against 1-4 or worse (k ≥ 3)** | 237 | +15.6 | +6.1% | −6.0% to +18.5% | +11.9% / −12.0% / +20.0% | −0.6% | interval, bands, placebo |
+| same, with the season-average check | 131 | +19.3 | +13.7% | −2.8% to +30.6% | +14.7% / +0.8% / +30.1% | +9.1% | bets, interval, bands, placebo |
+| **Last 10, 7-3 or better against 3-7 or worse (k ≥ 4)** | 178 | −7.7 | −4.0% | −19.0% to +10.5% | −10.6% / −4.4% / +0.2% | −9.2% | bets, interval, seasons, bands, placebo |
+| same, with the season-average check | 106 | −1.7 | −1.5% | −20.9% to +17.8% | −5.5% / +3.2% / −3.9% | −3.1% | bets, interval, blind, bands, placebo |
+| **"Bump it out to L10"** (last 5: 4-1 against 2-3; last 10: k ≥ 2) | 144 | +19.3 | +12.2% | −2.7% to +27.7% | +12.5% / +31.5% / −1.4% | +22.8% | bets, interval, bands |
+| same, with the season-average check | 88 | +26.3 | +27.4% | +8.9% to +44.8% | +21.5% / +49.6% / +11.1% | +36.6% | bets, bands |
+
+- **mike's main rule is not shown to work.** Its pooled +6.1% has an interval from −6.0% to
+  +18.5%. On 2023-24 and 2024-25 together it returned −1.2%. The 200 shuffled versions (each
+  game given another game's records from the same night) have a 95th percentile of +6.2%, so the
+  real records did no better than shuffled ones. The positive pool comes from 2025-26.
+- **Its band below lost.** Games at k 1 to 3 (3-2 against 2-3 and similar) returned −1.3% on
+  1,412 bets. The 5-0 against 0-5 games are 8 bets.
+- **Fading it lost more.** The cold team in the same 237 games returned −13.9% (interval −26.3%
+  to −1.5%). Betting both sides of the same games at the best price averages −4.0%, which is
+  the price of the bet. The hot side sits 10 points above that and the cold side 10 below. The
+  interval's half-width is 12 points, so that is about 1.6 standard errors, and the placebo
+  above says it is ordinary.
+- **The last-10 version loses** (−4.0% on 178).
+- **The one cell whose interval clears zero** is the narrowest: the "bump it out to L10" step
+  with the season-average check, 88 bets in three seasons, 58-29-1, +27.4%, every season
+  positive, ahead of its placebo. DraftKings alone over the three seasons: 86 bets, +24.9%
+  (+5.8% to +44.0%); the table's +36.6% is its first two seasons only. It fails the 200-bet
+  bar, and the band just below it (last-10 k from 0 to 2) lost 5.9% on 88 bets. By 12.4 its
+  answer is **too few games to tell**. An independent stress test (workflow
+  `nba-q1-trend-postgrade-verify`, scripts under `%TEMP%/q1trend/verify/stress0008/`) found:
+  - it is not one team, date or book: leaving any one team out keeps it above +22%;
+  - it clears zero only at the best of the books' numbers: at the worst deciding offer the
+    interval is −1% to +35%, and 17 bets at a number no other book hung went 15-1-1 for
+    +13.9 of its +26.3 units;
+  - it is fading: its first 44 bets by date made +42.7%, its last 44 +12.7%;
+  - all 88 bets sit inside the last-10 spread-check cell at k ≥ 2 (507 bets, +2.5%), whose
+    other 419 bets lost 2.8%;
+  - across the 39 cells with 30 or more bets (the other six that clear the interval hold one
+    bet each), a cell this far above its own placebo appeared in 12 of 200 shuffled runs
+    (about 6.5%);
+  - at about 29 bets a season, telling a true +5% from zero would take about 2,530 bets,
+    roughly 86 seasons. More seasons cannot settle it on any useful timescale.
+- **Closing-line value cannot be measured** for any first-quarter cell: one first-quarter quote
+  is stored per game (median 54 minutes before tip), so the decision quote is the last one.
+
+**Totals: nothing.** The best total cell with 200 or more bets is last 10, over, with the scoring
+check, k ≥ 2: 202 bets, +13.0 units, +5.8%, interval −6.4% to +18.1%. The 17 cells with 200 or
+more bets have a median return of −0.4%; 6 are positive. Both-teams-trending at k ≥ 3 (last 5)
+is 97 overs (+3.6%) and 120 unders (+1.9%).
+
+**Closed for 2026-27: the first-quarter cover-record and over/under-record method.** Nothing is
+built. The step-with-check cell is recorded, not built: it is too thin to decide and too rare
+to become decidable.

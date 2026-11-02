@@ -10,7 +10,7 @@ orientation), and the worker jobs that run it.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -443,7 +443,8 @@ def test_the_lines_purchase_resumes_from_the_ledger(monkeypatch):
     monkeypatch.setattr(h, "check_process_events_contract", lambda: None)
     monkeypatch.setattr(h, "_ensure_tables", lambda conn: None)
     monkeypatch.setattr(h, "_season_games", lambda conn, a, b: [UK_DUKE])
-    monkeypatch.setattr(h, "_held_hours", lambda conn: {("2025-11-18", 15), ("2025-11-17", 22)})
+    monkeypatch.setattr(h, "_held_instants",
+                        lambda conn: {_t("2025-11-18T15:00Z"), _t("2025-11-17T22:00Z")})
     monkeypatch.setattr(h, "_resolver", lambda conn, games: h.EventResolver(REGISTRY, games))
     bought = []
     monkeypatch.setattr(h, "_buy_snapshot",
@@ -719,7 +720,8 @@ def test_the_tables_are_created_only_when_the_catalog_says_so(monkeypatch):
     conn = FakeConn()
     h._ensure_tables(conn)
     assert conn.sql == [] and conn.commits == 0
-    assert {t for t, _ in seen} == {"odds_history_pulls", "ncaab_odds_unmatched"}
+    assert {t for t, _ in seen} == {"odds_history_pulls", "odds_history_fetches",
+                                    "ncaab_odds_unmatched"}
     assert all(kw["rls"] is True and kw["revoked_from"] for _, kw in seen)
 
 
@@ -812,7 +814,8 @@ def test_the_approved_scopes_and_floor():
     modes = jq.NCAAB_ODDS_HISTORY_MODES
     assert {m: (v["cap"], v["seasons"]) for m, v in modes.items()} == {
         "lines": (420_000, (2021, 2026)), "deriv_close": (800_000, (2024, 2026)),
-        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026))}
+        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026)),
+        "opener_grid": (1_170_000, (2021, 2026))}
     assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 300_000
     # the probe mode may carry the same floor as the purchases
     assert jq._validate_ncaab_odds_history({"mode": "probe", "max_credits": 200, "floor": 500_000})
@@ -853,7 +856,9 @@ SWEEPS = [f"ncaab-game-line-market-sweep-{m}-2026-10-26" for m in ("spreads", "t
 DERIVS = ["ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r1",
           "ncaab-history-deriv-close-2024-2026-r2", "ncaab-history-deriv-open-2024-2026",
           "ncaab-history-deriv-open-2024-2026-r2"]
-DECLARED = ["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS + SWEEPS + DERIVS
+INJURY_PROBE = "ncaab-injury-reachability-2026-10-30"
+DECLARED = (["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS
+            + SWEEPS + DERIVS + [INJURY_PROBE])
 
 
 def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
@@ -861,17 +866,31 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     season's ESPN schedule (the current one first, so live odds resolve from
     opening night), the free history, the measured probe call, the game-line
     purchase and its post-refill resume, the sweeps on what it bought, then
-    the first-half purchases."""
+    the first-half purchases. The injury reachability probe is last: public
+    pages, no credits, and it writes nothing."""
     entries = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
-    assert sorted(k for k in keys if k.startswith("ncaab-")) == sorted(DECLARED)
     by = {e["key"]: e for e in entries}
+    # Every NCAAB declaration is in DECLARED, except the free ESPN box and
+    # period backfills (job ncaab_box_backfill, 2026-10-30): they spend no
+    # credits, and whether each is on is a one-line switch that
+    # tests/test_ncaab_espn_box.py checks. The injury probe is in DECLARED
+    # and is not a credit approval.
+    assert sorted(k for k in keys if k.startswith("ncaab-")
+                  and by[k]["job_type"] != "ncaab_box_backfill") == sorted(DECLARED)
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True
-        assert "approved" in e["note"] or "yes" in e["note"]
+        if k == INJURY_PROBE:
+            # Not a credit purchase. The note must not borrow "approved" or
+            # "yes" from the Odds API jobs above.
+            assert e["args"] == {}
+            assert "Writes nothing" in e["note"]
+            assert "approved" not in e["note"] and "yes" not in e["note"]
+        else:
+            assert "approved" in e["note"] or "yes" in e["note"]
         jq.JOBS[e["job_type"]][1](e["args"])
     assert by["ncaab-feed-probe-2026-10-26"]["args"] == {"market_events": 5}
     assert by[SCHEDULES[0]]["args"] == {"first": "2026-11-01", "last": "2027-04-10"}
@@ -976,3 +995,409 @@ def test_seasons_run_newest_first_and_each_season_oldest_first():
             _t("2026-02-01T15:00Z")]
     assert h.season_order(todo) == [_t("2025-11-20T15:00Z"), _t("2026-02-01T15:00Z"),
                                     _t("2024-12-01T15:00Z"), _t("2025-01-10T15:00Z")]
+
+
+# ── the replay of kept raw events (2026-10-29) ───────────────────────────────
+#
+# Job 805227 kept bought event snapshots raw (137,007 rows in
+# ncaab_odds_unmatched; the job counted 137,083), nearly all because their
+# names did not resolve. The replay stores the ones that resolve now, on the
+# purchase's own path, without buying, without touching the ledger or the raw
+# store, and never twice. A real-Postgres run of the same is
+# tests/test_ncaab_odds_replay_pg.py.
+
+REPLAY_TEAMS = [
+    (150, "Duke", "duke", "Blue Devils", "Duke Blue Devils", "Duke", "DUKE", True, None),
+    (96, "Kentucky", "kentucky", "Wildcats", "Kentucky Wildcats", "Kentucky", "UK", True, None),
+    (2306, "Kansas State", "kansas-state", "Wildcats", "Kansas State Wildcats", "Kansas St",
+     "KSU", True, None),
+]
+# Kansas State-Duke (KSU_DUKE) tips 2025-11-20 17:00Z. The feed calls Kansas
+# State "Kansas St Wildcats", which only the 2026-10-29 name rule places.
+KSU_NAME, KSU_TIP = "Kansas St Wildcats", "2025-11-20T17:00:00Z"
+REPLAY_LEDGER = [("2025-11-19", 22), ("2025-11-20", 15), ("2025-11-20", 16), ("2025-11-20", 18)]
+
+
+def _raw(eid, stamp, last_update, home=KSU_NAME, away="Duke Blue Devils", tip=KSU_TIP):
+    return (eid, stamp, _event(eid, home, away, tip, last_update=last_update))
+
+
+REPLAY_RAW = [
+    _raw("e2", "2025-11-19T21:55:38Z", "2025-11-19T21:50:00Z"),   # the 22Z opener (an anchor too)
+    _raw("e2", "2025-11-20T14:55:12Z", "2025-11-20T14:52:00Z"),   # the 15Z anchor
+    _raw("e2", "2025-11-20T15:55:20Z", "2025-11-20T15:51:00Z"),   # 16Z, an hour before the tip
+    _raw("e2", "2025-11-20T17:55:00Z", "2025-11-20T17:20:00Z"),   # 18Z: in play, never stored
+    _raw("e2", "2025-11-18T09:00:00Z", "2025-11-18T08:58:00Z"),   # no instant within an hour
+    _raw("e9", "2025-11-19T21:55:38Z", "2025-11-19T21:50:00Z", home="Mystery Moose"),
+]
+
+
+class ReplayConn:
+    """An in-memory database for the replay: the pull ledger, the registry,
+    ESPN's games, the raw unmatched rows, and the `odds` rows it stores."""
+
+    def __init__(self, ledger=REPLAY_LEDGER, raw=REPLAY_RAW, games=None, odds=None):
+        self.ledger, self.raw = list(ledger), list(raw)
+        self.games = list(GAMES if games is None else games)
+        self.odds = [] if odds is None else odds
+        self.sql: list[tuple[str, object]] = []
+        self.commits = 0
+        self._ans: list = []
+
+    def execute(self, sql, params=None):
+        q = " ".join(sql.split())
+        self.sql.append((q, params))
+        if "FROM odds_history_pulls" in q:
+            self._ans = list(self.ledger)
+        elif "FROM ncaab_teams" in q:
+            self._ans = list(REPLAY_TEAMS)
+        elif "FROM ncaab_events" in q:
+            self._ans = [(g["game_id"], g["game_date"], g["commence_time"], g["home_espn_id"],
+                          g["away_espn_id"]) for g in self.games]
+        elif q.startswith("SELECT event_id, snapshot_at FROM ncaab_odds_unmatched"):
+            source, lo, hi = params
+            self._ans = [(e, s) for e, s, _ in self.raw
+                         if source == oi.HISTORICAL_ODDS_SOURCE and lo <= s < hi]
+        elif "payload FROM ncaab_odds_unmatched" in q:
+            source, stamps, ids = params
+            assert len(ids) <= h.REPLAY_BATCH_ROWS
+            self._ans = [(e, s, json.dumps(p)) for e, s, p in self.raw
+                         if s in stamps and e in ids]
+        elif "FROM odds WHERE" in q:
+            source, gids, stamps = params
+            self._ans = [tuple(r.get(c) for c in ("game_id", "market", "bookmaker", "snapshot_at",
+                                                  *h._ROW_VALUES))
+                         for r in self.odds if r.get("source") == source
+                         and r["game_id"] in gids and r["snapshot_at"] in stamps]
+        else:
+            self._ans = []
+        return self
+
+    def fetchall(self):
+        return self._ans
+
+    def fetchone(self):
+        return self._ans[0] if self._ans else None
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _replay(monkeypatch, conn, apply=True, first=2026, last=2026):
+    monkeypatch.setattr(h, "_insert_odds", lambda c, rows: conn.odds.extend(dict(r) for r in rows))
+    return h.replay_unmatched(conn, first, last, apply=apply)
+
+
+@pytest.mark.parametrize("stamp,want", [
+    ("2025-11-19T21:55:38Z", "2025-11-19T22:00:00Z"),   # the feed's own time, 4m22s early
+    ("2025-11-19T22:00:00Z", "2025-11-19T22:00:00Z"),   # on the instant itself
+    ("2025-11-19T21:00:00Z", "2025-11-19T22:00:00Z"),   # exactly an hour early
+    ("2025-11-19T20:59:59Z", None),                     # just over an hour: never guessed
+    ("2025-11-20T15:10:38Z", "2025-11-20T16:00:00Z"),   # 49 min (the measured widest gap)
+    ("2025-11-20T18:00:01Z", None),                     # after the last instant
+])
+def test_a_raw_stamp_maps_to_the_first_planned_instant_at_or_after_it_within_an_hour(stamp, want):
+    instants = [_t("2025-11-19T22:00Z"), _t("2025-11-20T15:00Z"), _t("2025-11-20T16:00Z"),
+                _t("2025-11-20T18:00Z")]
+    got = h.planned_instant(_t(stamp), instants)
+    assert got == (_t(want) if want else None)
+
+
+def test_the_ledger_instants_are_the_pull_ledger_s_dates_and_hours():
+    assert h._ledger_instants(ReplayConn()) == [
+        _t("2025-11-19T22:00Z"), _t("2025-11-20T15:00Z"), _t("2025-11-20T16:00Z"),
+        _t("2025-11-20T18:00Z")]
+
+
+def test_the_replay_stores_what_the_purchase_would_have_and_a_second_apply_stores_nothing(monkeypatch):
+    conn = ReplayConn()
+    first = _replay(monkeypatch, conn)
+    assert first["stamps_mapped"] == 4 and first["stamps_unmapped"] == 1
+    assert first["event_snapshots_unmapped"] == 1 and first["instants"] == 4
+    assert (first["events_resolved"], first["events_unresolved"]) == (1, 1)
+    assert first["event_snapshots_resolved"] == 4 and first["event_snapshots_unresolved"] == 1
+    assert first["rows_parsed"] == 12 and first["rows_marked_in_play"] == 3
+    assert first["rows_kept"] == 9 and first["rows_inserted"] == 9
+    # ESPN's game, the historical source, and each market's own last_update as
+    # the quote's time, exactly as _buy_snapshot stores a resolved event
+    assert {r["game_id"] for r in conn.odds} == {KSU_DUKE["game_id"]}
+    assert {r["source"] for r in conn.odds} == {oi.HISTORICAL_ODDS_SOURCE}
+    assert {r["snapshot_type"] for r in conn.odds} == {"open"}
+    assert sorted({r["snapshot_at"] for r in conn.odds}) == [
+        "2025-11-19T21:50:00Z", "2025-11-20T14:52:00Z", "2025-11-20T15:51:00Z"]
+    spread = next(r for r in conn.odds if r["market"] == "spreads")
+    assert spread["spread_home"] == -4.5 and spread["home_price"] == -108   # Kansas State, ESPN's home
+
+    second = _replay(monkeypatch, conn)
+    assert second["rows_kept"] == 9 and second["rows_already_stored"] == 9
+    assert second.get("rows_inserted", 0) == 0 and len(conn.odds) == 9
+
+
+def _quote_keys(rows) -> Counter:
+    return Counter(h._row_key(r["game_id"], r["market"], r["bookmaker"], r["snapshot_at"],
+                              *(r.get(c) for c in h._ROW_VALUES)) for r in rows)
+
+
+@pytest.mark.parametrize("server_committed", [True, False])
+def test_a_commit_lost_in_flight_stores_each_quote_once(monkeypatch, server_committed):
+    """data.db raises ConnectionLost when the connection drops at COMMIT, and
+    _write_with_retry runs the unit again. The server may have committed (only
+    the acknowledgement was lost) or not; the retry must read `odds` back
+    inside the unit, so either way every quote is stored exactly once. With
+    the read-back before the retry loop (the 2026-10-29 review), this world
+    stored 3 quotes twice."""
+    from data.db import ConnectionLost
+    conn = ReplayConn()
+    monkeypatch.setattr(nba_odds_history.time, "sleep", lambda s: None)
+    state = {"failed": False, "landed": 0}
+
+    def commit():
+        conn.commits += 1
+        if not state["failed"]:
+            state["failed"] = True
+            if not server_committed:
+                del conn.odds[state["landed"]:]       # the server rolled the unit back
+            raise ConnectionLost("connection lost at commit")
+        state["landed"] = len(conn.odds)
+    monkeypatch.setattr(conn, "commit", commit)
+    out = _replay(monkeypatch, conn)
+    keys = _quote_keys(conn.odds)
+    assert len(conn.odds) == 9 and set(keys.values()) == {1}
+    assert out["rows_inserted"] == 9 and out.get("write_errors", 0) == 0
+
+
+def test_a_listing_placed_on_a_game_twelve_hours_or_more_from_its_tip_is_not_stored(monkeypatch):
+    """ncaab_teams.match_event takes the nearest game within a day either side,
+    so a second feed listing of the same pair a day later lands on the same
+    ESPN game: 24 kept feed events (144 event snapshots) did, every one on a
+    game that also has a listing within the hour (Supabase connector,
+    2026-10-29). The replay stores none of a far listing's quotes, not even at
+    an anchor the keeper would otherwise keep, and counts it apart."""
+    far = _raw("e5", "2025-11-19T21:55:38Z", "2025-11-19T21:40:00Z", tip="2025-11-21T17:00:00Z")
+    conn = ReplayConn(raw=REPLAY_RAW + [far])
+    out = _replay(monkeypatch, conn)
+    assert out["event_snapshots_far_from_tip"] == 1 and out["events_far_from_tip"] == 1
+    assert "2025-11-19T21:40:00Z" not in {r["snapshot_at"] for r in conn.odds}
+    assert out["rows_inserted"] == 9                       # the real listing's, as before
+    assert (out["events_resolved"], out["events_unresolved"]) == (1, 1)
+    # 12 hours to the second is far; a minute under is not
+    assert h._far_from_tip({"commence_time": "2025-11-21T05:00:00Z"}, (KSU_DUKE["game_id"], False),
+                           {KSU_DUKE["game_id"]: KSU_TIP})
+    assert not h._far_from_tip({"commence_time": "2025-11-21T04:59:00Z"},
+                               (KSU_DUKE["game_id"], False), {KSU_DUKE["game_id"]: KSU_TIP})
+    # no ESPN tip, no feed start, or no game: nothing to compare, nothing refused
+    assert not h._far_from_tip({"commence_time": "2025-11-23T00:00:00Z"},
+                               (KSU_DUKE["game_id"], False), {KSU_DUKE["game_id"]: None})
+    assert not h._far_from_tip({}, (KSU_DUKE["game_id"], False), {KSU_DUKE["game_id"]: KSU_TIP})
+    assert not h._far_from_tip({"commence_time": KSU_TIP}, None, {})
+
+
+def test_the_keeper_judges_a_replayed_snapshot_at_the_hour_that_was_bought(monkeypatch):
+    """Kentucky-Duke tips 2025-11-19 00:30Z, game date 11-18. Its 11-18 15Z
+    snapshot is kept only because 15Z is one of its anchors: the tip is 9.5
+    hours away, outside the three-hour window, and the quote was seen the day
+    before. The raw row carries the feed's own time, 14:55:12Z; judged at that
+    time instead of the hour bought, it would be dropped as a repeat."""
+    tip = "2025-11-19T00:30:00Z"
+    ledger = [("2025-11-17", 15), ("2025-11-18", 15)]
+    raw = [("e3", "2025-11-17T14:55:00Z", _event("e3", "Kentucky Wildcats", "Duke Blue Devils",
+                                                 tip, last_update="2025-11-17T14:50:00Z")),
+           ("e3", "2025-11-18T14:55:12Z", _event("e3", "Kentucky Wildcats", "Duke Blue Devils",
+                                                 tip, last_update="2025-11-18T14:52:00Z"))]
+    conn = ReplayConn(ledger=ledger, raw=raw)
+    out = _replay(monkeypatch, conn)
+    assert sorted({r["snapshot_at"] for r in conn.odds}) == ["2025-11-17T14:50:00Z",
+                                                             "2025-11-18T14:52:00Z"]
+    assert out["rows_kept"] == 6 and out["rows_inserted"] == 6
+
+
+def test_the_replay_never_buys_never_writes_the_ledger_and_never_deletes_a_raw_row(monkeypatch):
+    conn = ReplayConn()
+    monkeypatch.setattr(h.Meter, "get", lambda *a, **k: pytest.fail("the replay made a feed call"))
+    _replay(monkeypatch, conn)
+    writes = [q for q, _ in conn.sql
+              if q.split()[0].upper() in ("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP")]
+    assert writes == []                       # its only write is _insert_odds into `odds`
+    assert conn.commits == 3                  # one per instant that stored rows
+
+
+def test_a_dry_run_writes_nothing_and_counts_what_it_would_store(monkeypatch):
+    conn = ReplayConn()
+    monkeypatch.setattr(h, "_insert_odds", lambda c, rows: pytest.fail("the dry run wrote odds"))
+    out = h.replay_unmatched(conn, 2026, 2026, apply=False)
+    assert out["rows_kept"] == 9 and out["rows_to_insert"] == 9
+    assert conn.commits == 0 and "rows_inserted" not in out
+
+
+def test_the_replay_walks_the_planned_instants_in_season_order(monkeypatch):
+    """Seasons newest first, each season oldest first, as the purchase bought
+    them, so the one QuoteKeeper sees each quote's earliest snapshot first."""
+    instants = ["2025-01-10T15:00Z", "2025-11-20T15:00Z", "2024-12-01T15:00Z", "2026-02-01T15:00Z"]
+    ledger = [(w[:10], 15) for w in instants]
+    raw = [(f"e{i}", f"{w[:10]}T14:55:00Z", {"id": f"e{i}"}) for i, w in enumerate(instants)]
+    walked = []
+
+    def record(events, when, resolver, tips):
+        walked.append(when)
+        return {}, [], [], [], 0
+    monkeypatch.setattr(h, "_parse_snapshot", record)
+    h.replay_unmatched(ReplayConn(ledger=ledger, raw=raw), 2025, 2026, apply=False)
+    assert walked == [_t("2025-11-20T15:00Z"), _t("2026-02-01T15:00Z"),
+                      _t("2024-12-01T15:00Z"), _t("2025-01-10T15:00Z")]
+
+
+def test_the_replay_honours_its_seasons(monkeypatch):
+    raw = REPLAY_RAW + [
+        _raw("e7", "2025-01-10T14:55:00Z", "2025-01-10T14:50:00Z"),   # season 2025
+        # 30 minutes before the 2026-27 season's first instant: read inside the
+        # 2025-26 window, but its planned instant is 2026-10-01 00Z, season 2027
+        _raw("e8", "2026-09-30T23:30:00Z", "2026-09-30T23:25:00Z")]
+    ledger = REPLAY_LEDGER + [("2025-01-10", 15), ("2026-10-01", 0)]
+    walked = []
+
+    def record(events, when, resolver, tips):
+        walked.append(when)
+        return {}, [], [], [], 0
+    monkeypatch.setattr(h, "_parse_snapshot", record)
+    out = h.replay_unmatched(ReplayConn(ledger=ledger, raw=raw), 2026, 2026, apply=False)
+    assert _t("2025-01-10T15:00Z") not in walked and _t("2026-10-01T00:00Z") not in walked
+    assert len(walked) == 4 and out["event_snapshots_outside_seasons"] == 1
+    walked.clear()
+    h.replay_unmatched(ReplayConn(ledger=ledger, raw=raw), 2025, 2025, apply=False)
+    assert walked == [_t("2025-01-10T15:00Z")]
+    walked.clear()
+    h.replay_unmatched(ReplayConn(ledger=ledger, raw=raw), 2027, 2027, apply=False)
+    assert walked == [_t("2026-10-01T00:00Z")]
+
+
+def test_the_replay_reads_payloads_by_primary_key_in_batches_of_at_most_500(monkeypatch):
+    raw = [(f"x{i:04d}", "2025-11-19T21:55:38Z", {"id": f"x{i:04d}"}) for i in range(1203)]
+    conn = ReplayConn(raw=raw)
+    monkeypatch.setattr(h, "_parse_snapshot", lambda events, when, r, t: ({}, [], [], [], 0))
+    out = h.replay_unmatched(conn, 2026, 2026, apply=False)
+    reads = [p for q, p in conn.sql if "payload FROM ncaab_odds_unmatched" in q]
+    assert [len(p[2]) for p in reads] == [500, 500, 203]
+    assert all(p[1] == ["2025-11-19T21:55:38Z"] for p in reads)
+    assert out["event_snapshots"] == 1203 and out["payloads_missing"] == 0
+
+
+def test_the_dry_run_connection_cannot_write_and_cannot_reconnect(monkeypatch):
+    class Raw:
+        readonly = None
+
+        def set_session(self, readonly=None):
+            self.readonly = readonly
+
+    class Conn:
+        def __init__(self, state):
+            self._conn, self._url, self.state, self.closed = Raw(), "postgresql://x", state, False
+
+        def execute(self, sql, params=None):
+            assert sql == "SHOW transaction_read_only"
+            return self
+
+        def fetchone(self):
+            return (self.state,)
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            self.closed = True
+    good = Conn("on")
+    monkeypatch.setattr(h, "get_connection", lambda: good)
+    assert h._read_only_connection() is good
+    assert good._conn.readonly is True and good._url is None
+    bad = Conn("off")
+    monkeypatch.setattr(h, "get_connection", lambda: bad)
+    with pytest.raises(RuntimeError, match="not read only"):
+        h._read_only_connection()
+    assert bad.closed
+
+
+def _replay_cli(monkeypatch):
+    calls = []
+
+    class C:
+        def __init__(self, tag):
+            self.tag = tag
+
+        def close(self):
+            calls.append(("close", self.tag))
+    monkeypatch.setattr(h, "_read_only_connection", lambda: C("read-only"))
+    monkeypatch.setattr(h, "get_connection", lambda: C("writable"))
+    monkeypatch.setattr(h, "persist_quota", lambda conn: calls.append(("quota",)))
+    monkeypatch.setattr(h, "replay_unmatched",
+                        lambda conn, a, b, apply: calls.append(("replay", conn.tag, a, b, apply)) or {})
+    return calls
+
+
+def test_the_replay_command_line_is_a_read_only_dry_run_unless_apply(monkeypatch):
+    calls = _replay_cli(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["x", "--replay-unmatched", "--seasons", "2026", "2026"])
+    h.main()
+    monkeypatch.setattr("sys.argv", ["x", "--replay-unmatched", "--seasons", "2026", "2026",
+                                     "--dry-run"])
+    h.main()
+    monkeypatch.setattr("sys.argv", ["x", "--replay-unmatched", "--seasons", "2021", "2026",
+                                     "--apply"])
+    h.main()
+    assert [c for c in calls if c[0] == "replay"] == [
+        ("replay", "read-only", 2026, 2026, False), ("replay", "read-only", 2026, 2026, False),
+        ("replay", "writable", 2021, 2026, True)]
+    assert ("quota",) not in calls            # no feed call, so no quota reading to persist
+
+
+@pytest.mark.parametrize("argv", [
+    ["--replay-unmatched", "--seasons", "2021", "2026", "--apply", "--max-credits", "10"],
+    ["--replay-unmatched", "--seasons", "2021", "2026", "--apply", "--floor", "300000"],
+    ["--replay-unmatched", "--seasons", "2021", "2026", "--apply", "--dry-run"],
+    ["--replay-unmatched", "--lines", "--seasons", "2021", "2026"],
+])
+def test_a_replay_command_line_that_could_buy_or_contradict_itself_is_refused(monkeypatch, argv):
+    calls = _replay_cli(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["x"] + argv)
+    with pytest.raises(SystemExit):
+        h.main()
+    assert [c for c in calls if c[0] == "replay"] == []
+
+
+def test_the_replay_job_runs_with_apply_and_dry_runs_on_request(monkeypatch):
+    seen = []
+    monkeypatch.setattr(jq, "_run_script_main", lambda mod, argv: seen.append((mod, argv)) or "ok")
+    assert jq._validate_ncaab_odds_history({"mode": "replay_unmatched"}) == {
+        "mode": "replay_unmatched", "dry_run": False}
+    jq._job_ncaab_odds_history(**jq._validate_ncaab_odds_history({"mode": "replay_unmatched"}))
+    jq._job_ncaab_odds_history(**jq._validate_ncaab_odds_history(
+        {"mode": "replay_unmatched", "dry_run": True}))
+    assert seen == [
+        ("data.ingestors.ncaab_odds_history",
+         ["--replay-unmatched", "--seasons", "2021", "2026", "--apply"]),
+        ("data.ingestors.ncaab_odds_history",
+         ["--replay-unmatched", "--seasons", "2021", "2026", "--dry-run"])]
+    # the free mode is not a purchase: the approved purchase scopes are unchanged
+    assert "replay_unmatched" not in jq.NCAAB_ODDS_HISTORY_MODES
+
+
+@pytest.mark.parametrize("args", [
+    {"mode": "replay_unmatched", "max_credits": 10},
+    {"mode": "replay_unmatched", "floor": 300_000},
+    {"mode": "replay_unmatched", "dry_run": "yes"},
+    {"mode": "replay_unmatched", "seasons": [2015, 2026]},
+])
+def test_a_replay_job_with_purchase_arguments_is_refused(args):
+    with pytest.raises(ValueError):
+        jq._validate_ncaab_odds_history(args)
+
+
+def test_the_replay_job_runs_the_real_command_line(monkeypatch):
+    """Through _run_script_main and main(), as the worker runs it."""
+    calls = _replay_cli(monkeypatch)
+    jq._job_ncaab_odds_history(**jq._validate_ncaab_odds_history({"mode": "replay_unmatched"}))
+    assert [c for c in calls if c[0] == "replay"] == [("replay", "writable", 2021, 2026, True)]

@@ -9,7 +9,8 @@ reading was wrong, and the app did the same thing in three places.
 Four layers, each tested here:
   1. tracking/pick_integrity -- the check itself, on the REAL row.
   2. every publisher refuses a pick that fails it (Discord pre-game, restate,
-     live and free pick; push pre-game and live), and never ledgers it.
+     live and free pick; push pre-game and live; the X slate), and never ledgers
+     it.
   3. the health check turns a refusal into a CRIT, so it cannot sit quietly.
   4. the app never renders a stored line without converting it to the side.
 """
@@ -26,7 +27,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tracking import discord_notifier, push_notifier
+from tracking import discord_notifier, push_notifier, x_publisher
 from tracking.pick_integrity import pick_problems, refuse_mismatched
 
 # The production row, verbatim from picks_log (INSERT, 2026-09-07 01:37 UTC).
@@ -314,6 +315,79 @@ def test_push_line_change_refuses_and_does_not_ledger(monkeypatch):
     monkeypatch.setattr(push_notifier, "get_connection", lambda: conn)
     push_notifier.notify_line_changes("2026-09-13")
     assert conn.ledgered() == {GOOD["lock_key"]}
+
+
+# The X slate reads Discord's query with the Discord ledger ignored, so nothing
+# upstream has run the check on what it holds.
+FIRST_HALF = "nba_first_half_total_luck"
+
+
+def _first_half_sig(key, label):
+    return {"lock_key": key, "label": label, "sport": "NBA", "pick_id": 2,
+            "model_id": FIRST_HALF, "side": "over", "line": 112.5,
+            "home": "MIL", "away": "BOS", "prob": 0.55, "edge": 0.02,
+            "dk_odds": -110, "kelly": 0.01, "commence": None, "posted_at": None}
+
+
+@pytest.fixture
+def x_tweets(monkeypatch):
+    """The real _post_released_picks with the clock gates, the lock and the send
+    replaced. One confirmed tweet per call, the first pick that survives."""
+    from contextlib import contextmanager
+
+    import tracking.publish_lock as publish_lock
+    tweets: list[str] = []
+
+    @contextmanager
+    def owned(conn, lock, name):
+        yield True
+
+    def deliver(text, dry_run=False, reply_to=None, allow_link=False, media_ids=None):
+        tweets.append(text)
+        return f"id{len(tweets)}", False
+    monkeypatch.setattr(publish_lock, "publish_lock", owned)
+    monkeypatch.setattr(x_publisher, "post_all_picks", lambda: True)
+    monkeypatch.setattr(x_publisher, "_in_pick_quiet_hours", lambda clock: False)
+    monkeypatch.setattr(x_publisher, "_x_pick_gap_open", lambda conn, clock: True)
+    monkeypatch.setattr(x_publisher, "_already_sent", lambda conn, key, kind: False)
+    monkeypatch.setattr(x_publisher, "_game_already_started", lambda pick, clock: False)
+    monkeypatch.setattr(x_publisher, "_college_mascots", lambda conn, picks: {})
+    monkeypatch.setattr(x_publisher, "render_pick", lambda pick, mascots=None: pick["label"])
+    monkeypatch.setattr(x_publisher, "_deliver_tweet", deliver)
+    return tweets
+
+
+def test_x_slate_refuses_and_does_not_ledger(monkeypatch, x_tweets):
+    """A wrong-way spread is tweeted by nobody. It sits first on the slate, so
+    without the check it is the one tweet this call sends."""
+    monkeypatch.setattr(discord_notifier, "_new_signals",
+                        lambda c, d, include_already_posted=False: [BAD, GOOD])
+    conn = _Conn()
+    assert x_publisher._post_released_picks(conn, "2026-09-13") == 1
+    assert x_tweets == [GOOD["label"]]
+    assert conn.ledgered() == {GOOD["lock_key"]}
+
+
+def test_x_slate_refuses_a_first_half_pick_that_reads_as_the_full_game_total(monkeypatch, x_tweets):
+    """The label is what a reader bets: without "First Half" it says the full-game
+    total at a number roughly half of one."""
+    bad = _first_half_sig("G3:nba_first_half_total_luck", "BOS @ MIL — Over 112.5")
+    good = _first_half_sig("G4:nba_first_half_total_luck", "BOS @ MIL — First Half Over 112.5")
+    monkeypatch.setattr(discord_notifier, "_new_signals",
+                        lambda c, d, include_already_posted=False: [bad, good])
+    conn = _Conn()
+    assert x_publisher._post_released_picks(conn, "2026-09-13") == 1
+    assert x_tweets == [good["label"]]
+    assert conn.ledgered() == {good["lock_key"]}
+
+
+def test_a_refused_x_pick_is_never_ledgered_so_it_retries(monkeypatch, x_tweets):
+    monkeypatch.setattr(discord_notifier, "_new_signals",
+                        lambda c, d, include_already_posted=False: [BAD])
+    conn = _Conn()
+    assert x_publisher._post_released_picks(conn, "2026-09-13") == 0
+    assert x_tweets == []
+    assert conn.ledgered() == set()
 
 
 # ── 3. the health check makes a refusal loud ─────────────────────────────────

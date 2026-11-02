@@ -60,6 +60,7 @@ const def = (sport: Sport, group: string, key: string) =>
 const WANT_SEGMENTS: Record<Sport, StatSegment[]> = {
   NFL: ['qb', 'rb', 'wrte', 'def', 'teams'],
   NCAAF: ['qb', 'rb', 'wrte', 'def', 'teams'],
+  NCAAB: ['players'], // no NCAAB stats or Teams board yet → no row
   MLB: ['hitters', 'pitchers', 'teams'],
   NBA: ['players', 'teams'],
   WNBA: ['players', 'teams'],
@@ -105,9 +106,11 @@ check(
 
 // ── 2. Chips per segment, in order ──────────────────────────────────────────
 const WANT_CHIPS: [Sport, StatSegment, string[]][] = [
+  // QBs run touchdowns in too (Matt, 2026-11-02). NFL only.
   ['NFL', 'qb', [
     'Passing:passing_yards', 'Passing:passing_tds', 'Passing:completions',
     'Passing:attempts', 'Passing:interceptions', 'Rushing:rushing_yards',
+    'Rushing:rush_rec_tds',
   ]],
   ['NFL', 'rb', [
     'Rushing:rushing_yards', 'Rushing:carries', 'Rushing:rush_rec_tds',
@@ -196,6 +199,8 @@ const cases: [string, Sport, StatDef | null, StatSegment, string][] = [
   ['WR/TE Anytime TD → RB keeps Anytime TD (the Rushing chip)', 'NFL', def('NFL', 'Receiving', 'rush_rec_tds'), 'rb', 'Rushing:rush_rec_tds'],
   ['WR/TE Rec Yards → RB keeps Rec Yards', 'NFL', def('NFL', 'Receiving', 'receiving_yards'), 'rb', 'Receiving:receiving_yards'],
   ['RB Rush Yards → QB keeps Rush Yards', 'NFL', def('NFL', 'Rushing', 'rushing_yards'), 'qb', 'Rushing:rushing_yards'],
+  ['RB Anytime TD → QB keeps Anytime TD', 'NFL', def('NFL', 'Rushing', 'rush_rec_tds'), 'qb', 'Rushing:rush_rec_tds'],
+  ['WR/TE Anytime TD → QB keeps Anytime TD', 'NFL', def('NFL', 'Receiving', 'rush_rec_tds'), 'qb', 'Rushing:rush_rec_tds'],
   ['DEF Sacks → QB lands on Pass Yards', 'NFL', def('NFL', 'Defense', 'def_sacks'), 'qb', 'Passing:passing_yards'],
   ['QB Pass TDs → DEF lands on Sacks', 'NFL', def('NFL', 'Passing', 'passing_tds'), 'def', 'Defense:def_sacks'],
   ['NCAAF RB Carries → WR/TE lands on Receptions', 'NCAAF', def('NCAAF', 'Rushing', 'carries'), 'wrte', 'Receiving:receptions'],
@@ -365,8 +370,8 @@ check('StatsScreen: positionEmptied measures across the cut (before/after the po
   const m = stats.match(/const positionEmptied =[\s\S]*?;\n/);
   check('StatsScreen: positionEmptied never reads the banded list', !!m && !/hitRatePlayers|inHitRateBand/.test(m[0]), m ? '' : 'not found');
 }
-check('StatsScreen: the fallback caption reuses the no-lines caption, and only renders when set',
-  /\{positionNote \? \(\s*<View style=\{styles\.noLinesRow\}>\s*<Ionicons name="information-circle-outline" size=\{13\} color=\{colors\.textTertiary\} \/>\s*<Text style=\{styles\.noLinesText\}>\{positionNote\}<\/Text>\s*<\/View>\s*\) : null\}/.test(stats));
+check('StatsScreen: the fallback note joins the board notes behind the ⓘ, and only when set',
+  /if \(positionNote\) boardNotes\.push\(positionNote\);/.test(stats));
 check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed set',
   /positionFallbackNote\(sport, segment, boardMode, segmentPositions\)/.test(stats));
 {

@@ -254,6 +254,15 @@ import {
   type MatchupTier,
 } from '@/lib/anytimeMatchup';
 import { nflPositionGroup } from '@/lib/positionVsOpponent';
+import {
+  HEADLINE_WRAP_FONT_SCALE,
+  PICKER_AFTER_DISMISS_MS,
+  SHEET_DISMISS_FALLBACK_MS,
+  boardNotesAccessibilityLabel,
+  lineHeadlineNumberOfLines,
+  reducePickerHandoff,
+  type PickerHandoffPhase,
+} from '@/lib/statsBoardA11y';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, errorKind, friendlyCause, isAbortError, type ErrorKind } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -456,6 +465,13 @@ export function StatsScreen() {
   // The "hasn't posted lines" note is the switch — an instruction sits with
   // the control that performs it.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Mirrors pickerOpen. A present iOS refuses does not clear the flag, and
+  // writing true again does not present. The sheet hand-off reads this.
+  const pickerOpenRef = useRef(false);
+  const setPickerOpenTracked = (open: boolean) => {
+    pickerOpenRef.current = open;
+    setPickerOpen(open);
+  };
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -495,6 +511,18 @@ export function StatsScreen() {
   const [failedGroups, setFailedGroups] = useState<ReadonlySet<string>>(new Set());
   const [rankReload, setRankReload] = useState(0);
   const [matchupInfoOpen, setMatchupInfoOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  // About sheet → sportsbook picker. iOS presents the picker only after the
+  // sheet has dismissed (reducePickerHandoff). The timer is the fallback
+  // when onDismiss does not arrive, and the short defer after it does.
+  const pickerHandoff = useRef<PickerHandoffPhase>('idle');
+  const pickerHandoffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickerHandoffToken = useRef(0);
+  useEffect(() => {
+    return () => {
+      if (pickerHandoffTimer.current != null) clearTimeout(pickerHandoffTimer.current);
+    };
+  }, []);
   // Default ON: a dash means we hold no rating for that defence, not that the
   // spot is bad, and on an NCAAF Saturday the ungraded rows are the FCS
   // visitors — the softest spots on the board. Excluding them by default made
@@ -690,6 +718,15 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = etDay;
+    // A sport with no player leaderboard and no Teams board (NCAAB today)
+    // draws only its empty state. Its week of games would be read and thrown
+    // away: 472 NCAAB games for 2026-11-02 to 11-08.
+    if (!defaultStatFor(sport) && !supportsTeamBoard(sport)) {
+      setSlate(EMPTY_SLATE);
+      setSlateGames([]);
+      setSlateFor(sport);
+      return;
+    }
     // BOUNDED, because .finally() is not a guarantee that anything happens.
     // The supabase client is created with no fetch timeout, so a request that
     // hangs never settles: no `.finally`, no `error` to render the Retry banner
@@ -2287,7 +2324,11 @@ export function StatsScreen() {
   // Does Hit Rates | Averages still fit on the end of the window row? Read at
   // render rather than cached in state: a Dynamic Type change re-renders the
   // tree, and a stale flag here is a clipped control.
-  const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
+  const fontScale = PixelRatio.getFontScale();
+  // Accessibility sizes wrap the bet headline (it names the bet, and a
+  // one-line cap ellipsizes it). The same cut stacks Hit Rates | Averages.
+  const stackModeTabs = fontScale >= HEADLINE_WRAP_FONT_SCALE;
+  const headlineLines = lineHeadlineNumberOfLines(fontScale);
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // NHL says the bet once, in words ("3 or more shots"), on the caption and
   // on the sheet. Every other sport keeps the ruler's idiom ("25+ Points",
@@ -2607,6 +2648,108 @@ export function StatsScreen() {
     </FilterSection>
   );
 
+  // BOARD NOTES live behind ONE ⓘ at the end of the window strip (Matt,
+  // 2026-10-29: "way too much room at the top… language we feel we need to
+  // have should be on a tool tip"). Each was a full-width caption row; on the
+  // Anytime TD board two of them pushed the first player below the fold. The
+  // retry row is NOT here — it is a control, not a note. Same strings, same
+  // conditions as the captions they replace.
+  const boardNotes: string[] = [];
+  if (positionNote) boardNotes.push(positionNote);
+  if (effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0) {
+    boardNotes.push(
+      'H2H · each player against their next opponent, last 2 seasons. Many are a single meeting — the count is under every rate.',
+    );
+  }
+  if (noLinesNote) boardNotes.push(noLinesNote.text);
+  if (atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values())) {
+    boardNotes.push(ATD_COPY.earlySeason);
+  }
+  const notesCanSwitch = noLinesNote?.canSwitch === true;
+  // The price column is absent exactly when showOdds is false. That is when
+  // the note explains missing prices. A one-sided book (dirLockNote) keeps
+  // the column, so it stays in the sheet body and is not spoken as "prices
+  // are missing". Dash cells are not mounted in the absent-column case.
+  const missingPriceReason = showOdds ? null : (noLinesNote?.text ?? null);
+  // The notes can empty while the sheet is open (a stat change, a refetch);
+  // close it then, or it would pop back open on the next note.
+  // Not an effect: this sits below the `!stat` early return, so a hook here
+  // would change the hook count. A same-render state reset is allowed.
+  if (notesOpen && boardNotes.length === 0) setNotesOpen(false);
+  const windowStripHidden =
+    sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0;
+  const notesButton =
+    boardNotes.length > 0 ? (
+      <Pressable
+        onPress={() => {
+          // A leftover arm (the fallback presented, onDismiss never came)
+          // must not open the picker when this sheet is later dismissed
+          // with Got it.
+          pickerHandoff.current = 'idle';
+          cancelPickerHandoffTimer();
+          setNotesOpen(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={boardNotesAccessibilityLabel(boardNotes.length, missingPriceReason)}
+        accessibilityHint="Opens notes about this board"
+        style={({ pressed }) => [styles.notesBtn, pressed && styles.pressed]}
+      >
+        <Ionicons name="information-circle-outline" size={20} color={colors.tint} />
+        {/* A dot when a note explains missing prices: the column of dashes
+            is otherwise the only sign anything is behind the ⓘ. */}
+        {noLinesNote ? <View style={styles.notesDot} importantForAccessibility="no" /> : null}
+      </Pressable>
+    ) : null;
+
+  const cancelPickerHandoffTimer = () => {
+    pickerHandoffToken.current += 1;
+    if (pickerHandoffTimer.current != null) {
+      clearTimeout(pickerHandoffTimer.current);
+      pickerHandoffTimer.current = null;
+    }
+  };
+  // iOS will not present a Modal while another is fading out. The tap arms
+  // the hand-off and closes the sheet; the picker opens from onDismiss,
+  // one beat after the fade, so the presenter is free. The fallback covers
+  // a dropped onDismiss. A release that is not armed (Got it) opens nothing.
+  const onChangeSportsbooks = () => {
+    const step = reducePickerHandoff(
+      pickerHandoff.current,
+      Platform.OS === 'ios' ? 'tap-ios' : 'tap-other',
+    );
+    pickerHandoff.current = step.phase;
+    if (step.closeSheet) setNotesOpen(false);
+    if (step.openPicker) setPickerOpenTracked(true);
+    if (!step.armFallback) return;
+    cancelPickerHandoffTimer();
+    const token = pickerHandoffToken.current;
+    pickerHandoffTimer.current = setTimeout(() => {
+      if (pickerHandoffToken.current !== token) return;
+      pickerHandoffTimer.current = null;
+      // Stay armed. If this present is refused because the sheet is still
+      // up, onDismiss presents again.
+      const released = reducePickerHandoff(pickerHandoff.current, 'fallback');
+      pickerHandoff.current = released.phase;
+      if (released.openPicker) setPickerOpenTracked(true);
+    }, SHEET_DISMISS_FALLBACK_MS);
+  };
+  const onNotesSheetDismiss = () => {
+    const step = reducePickerHandoff(pickerHandoff.current, 'release');
+    pickerHandoff.current = step.phase;
+    if (!step.openPicker) return;
+    cancelPickerHandoffTimer();
+    const token = pickerHandoffToken.current;
+    // The fallback may already have set the flag. If iOS refused that
+    // present, writing true again changes nothing. Drop it, then present
+    // once the sheet has released the screen.
+    if (pickerOpenRef.current) setPickerOpenTracked(false);
+    pickerHandoffTimer.current = setTimeout(() => {
+      if (pickerHandoffToken.current !== token) return;
+      pickerHandoffTimer.current = null;
+      setPickerOpenTracked(true);
+    }, PICKER_AFTER_DISMISS_MS);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -2700,21 +2843,19 @@ export function StatsScreen() {
           The pill does not also say the snapshot is old. Prop rows carry
           snapshot_at, and the game-line age rule (markets.priceAgeApplies)
           does not cover props — their normal age is hours. A second caption
-          on this shared cell would be a new flag on every sport's board. */}
+          on this shared cell would be a new flag on every sport's board.
+          It stays INLINE when the other notes moved behind the ⓘ: it names
+          the bet, it is not an explanation (UX review, 2026-10-29). */}
       {!canHitRate && showOdds && lineHeadline ? (
         <View style={styles.noLinesRow}>
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{lineHeadline}</Text>
-        </View>
-      ) : null}
-
-      {/* The position row picked a position the board cannot filter by: say
-          so once, in the same quiet caption as the no-lines note, rather than
-          label a list of every position "QB" (Designer + Reviewer, #830). */}
-      {positionNote ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{positionNote}</Text>
+          <Text
+            style={styles.noLinesText}
+            numberOfLines={headlineLines}
+            accessibilityLabel={lineHeadline}
+          >
+            {lineHeadline}
+          </Text>
         </View>
       ) : null}
 
@@ -2855,7 +2996,9 @@ export function StatsScreen() {
           and the chips scroll; a content-sized basis measured "Hit Rates" and
           "Averages" down to their padding at 390×1. The FlatList below stays
           the one flexible region. */}
-      {sport === 'NHL' && !loading && !error && !rowsAreStale && shownKey === readKey && rows.length === 0 ? null : (
+      {windowStripHidden ? (
+        notesButton ? <View style={styles.notesFallbackRow}>{notesButton}</View> : null
+      ) : (
       <View style={[styles.fixedRow, styles.windowStrip]}>
         <ScrollView
           horizontal
@@ -2889,7 +3032,7 @@ export function StatsScreen() {
             whole strip to its natural height and the FlatList stays the one
             flexible child of the screen column. */}
         {canHitRate && !stackModeTabs ? (
-          <View style={styles.modeSeg}>
+          <View style={[styles.modeSeg, notesButton ? styles.modeSegBeforeNotes : null]}>
             <SegmentTabs
               items={MODES}
               active={effectiveMode}
@@ -2899,6 +3042,7 @@ export function StatsScreen() {
             />
           </View>
         ) : null}
+        {notesButton}
       </View>
       )}
       {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
@@ -2980,49 +3124,6 @@ export function StatsScreen() {
         </ScrollView>
       ) : null}
 
-      {/* WHAT THE COLUMN IS COUNTING. The chip says it in three characters and
-          nothing else on the board expands them: under H2H the percentage is
-          against ONE opponent over two seasons, not a recent-form window, and a
-          reader who has not tapped through to a player has no way to know that.
-          Same quiet caption idiom as the no-lines note below it. */}
-      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitData.length > 0 ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>
-            H2H · each player against their next opponent, last 2 seasons. Many are a
-            single meeting — the count is under every rate.
-          </Text>
-        </View>
-      ) : null}
-
-      {noLinesNote ? (
-        <Pressable
-          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
-          onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
-          disabled={!noLinesNote.canSwitch}
-          accessibilityRole={noLinesNote.canSwitch ? 'button' : undefined}
-          accessibilityLabel={
-            noLinesNote.canSwitch ? `${noLinesNote.text} Switch sportsbook` : noLinesNote.text
-          }
-          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
-        >
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>
-            {noLinesNote.text}
-            {noLinesNote.canSwitch ? (
-              <Text style={styles.noLinesLink}> Change your sportsbooks ›</Text>
-            ) : null}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {atdOn && (rankStatus === 'ok' || rankStatus === 'partial') && anyBlended(defenseRanks.values()) ? (
-        <View style={styles.noLinesRow}>
-          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{ATD_COPY.earlySeason}</Text>
-        </View>
-      ) : null}
-
       {atdOn && (rankStatus === 'error' || rankStatus === 'partial') ? (
         <Pressable
           onPress={() => setRankReload((n) => n + 1)}
@@ -3063,7 +3164,7 @@ export function StatsScreen() {
           atdStack={stackAtd}
           matchupOrder={matchupOrder}
           onMatchupSort={() => setMatchupOrder((current) => nextMatchupSort(current))}
-          onOpenBooks={() => setPickerOpen(true)}
+          onOpenBooks={() => setPickerOpenTracked(true)}
         />
       ) : null}
 
@@ -3195,6 +3296,21 @@ export function StatsScreen() {
       )}
 
       <InfoSheet
+        visible={notesOpen}
+        title="About this board"
+        body={boardNotes.join('\n\n')}
+        onClose={() => setNotesOpen(false)}
+        onDismiss={onNotesSheetDismiss}
+        action={
+          notesCanSwitch
+            ? {
+                label: 'Change your sportsbooks',
+                onPress: onChangeSportsbooks,
+              }
+            : null
+        }
+      />
+      <InfoSheet
         visible={matchupInfoOpen}
         title={ATD_COPY.infoTitle}
         body={ATD_COPY.infoBody}
@@ -3202,7 +3318,7 @@ export function StatsScreen() {
       />
       <SportsbookPickerSheet
         visible={pickerOpen}
-        onClose={() => setPickerOpen(false)}
+        onClose={() => setPickerOpenTracked(false)}
         coverageNote={coverageNote}
       />
       <HitModeSheet
@@ -4421,7 +4537,9 @@ function OddsCell({
       );
     }
     // The dash is not read out: the row's own label already says the player and
-    // the stat, and "em dash" is not information.
+    // the stat, and "em dash" is not information. A column that is absent
+    // entirely is explained on the board-notes ⓘ, not on a cell that is not
+    // mounted.
     return (
       <View style={wrapStyle} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
@@ -5767,6 +5885,33 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  // The board-notes ⓘ: 20pt glyph + 12pt slop each side = 44pt target.
+  notesBtn: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 44,
+    minHeight: 44,
+    marginRight: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notesDot: {
+    position: 'absolute',
+    top: 10,
+    right: 9,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.tint,
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  modeSegBeforeNotes: { paddingRight: spacing.xs },
+  notesFallbackRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingVertical: spacing.xs,
+  },
   modeSeg: {
     flexGrow: 0,
     flexShrink: 0,
@@ -6001,8 +6146,8 @@ const styles = StyleSheet.create({
   // Inside the row the label gives up its own fixed width and shrinks instead,
   // so the arrow beside it can never be truncated away.
   colHeaderSortLabel: { width: undefined, flexShrink: 1 },
-  // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
-  // where a column of dashes would otherwise read as a broken screen.
+  // Caption text on the defense-rank retry row. The board's info notes
+  // moved behind the ⓘ in the window strip (boardNotes).
   noLinesRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -6016,7 +6161,6 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     lineHeight: font.size.caption * 1.35,
   },
-  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   atdRetryRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

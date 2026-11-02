@@ -91,8 +91,9 @@ MAX_SILENCE: dict = {
     "nba_prop_window": 30,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, not a quiet one.
-    # One job for both NBA totals models, nba_total_luck and
-    # nba_team_total_luck (scripts/nba_pregame_window.py), so one entry.
+    # One job for the NBA game total models, nba_total_luck,
+    # nba_team_total_luck and nba_first_half_total_luck
+    # (scripts/nba_pregame_window.py), so one entry.
     "nba_total_luck_window": 20,
     # Every five minutes, 11:00-23:55 ET, and it beats on the idle ticks too.
     # Off overnight by design (23:55 to 11:00 is 665 minutes), so the bound has
@@ -103,6 +104,13 @@ MAX_SILENCE: dict = {
     # of ncaab_events, then return, all off-season), so 20 minutes is four
     # missed ticks: a stopped capture, and opener times going unrecorded.
     "ncaab_odds_capture": 20,
+    # Every five minutes, 24x7. The tick beats when it returns, including the
+    # ones that poll nothing because the cadence has not elapsed, so 20
+    # minutes is four missed ticks: a stopped feed, not a quiet afternoon.
+    "ncaab_injury_feed": 20,
+    # Hourly at five past, 24x7 UTC, and it beats on the idle hours too (one
+    # read of today's slate), so two missed hours and some: a stopped card.
+    "ncaab_total_card": 150,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

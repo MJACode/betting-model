@@ -479,6 +479,25 @@ ACTIVE_MIGRATIONS: list[str] = [
     # a catalog read once both exist. Does not rewrite picks, odds or the
     # record. Sits before the posted-stake pair so those two stay adjacent.
     "add_alt_game_lines_2026_10_29.sql",
+    # 2026-10-30: NCAAB period scores and the ESPN box-score miss ledger,
+    # both written by data/ingestors/ncaab_espn_box.py (which also creates
+    # them at write time behind the schema guard). Worker-only: RLS on,
+    # nothing granted. Returns on a catalog read once both tables, the index
+    # and the lock-down exist. Does not touch picks, odds or the record.
+    # Sits before the posted-stake pair so those two stay adjacent.
+    "add_ncaab_period_scores_2026_10_30.sql",
+    # 2026-10-30: NCAAB pre-tip injury changes, including status 'cleared',
+    # plus the open report, the poll backoff and the name-miss log. Worker
+    # only (RLS, no policy, anon revoked). Tags read injury_status_current.
+    # Not a model feature. Returns on a catalog read once the four tables
+    # exist and anon cannot SELECT the change log.
+    "add_ncaab_injury_changes_2026_10_30.sql",
+    # 2026-10-31 (Matt): the Stats board timed out on first open. Season
+    # index on the NBA and WNBA game logs, which had none, so
+    # player_recent_games_* reads one season instead of the whole log.
+    # Returns on a catalog read once both exist. Does not touch picks,
+    # odds or the record. Sits before the posted-stake pair.
+    "nba_wnba_game_log_season_index_2026_10_31.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

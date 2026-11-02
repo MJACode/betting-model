@@ -15,6 +15,17 @@ period, overtimes after the fourth. One call per date.
 
 period 1-4 are the quarters; 5+ the overtimes. A first half is periods 1-2.
 
+ROWS THAT DISAGREE WITH THE FINAL. first_half_from_periods is the one check a
+first-half settlement trusts. A pick whose game fails it stays pending, and nothing
+else could change that: both pulls below ask only for games with no row, and
+write() never overwrites a stored period. So ensure_first_half_period_scores asks
+ESPN again for such a game on every settle pass, and replaces its rows only with
+rows that agree with the stored final. If ESPN's own quarters still disagree, it is
+the final that does (data/ingestors/nba_stats_ingestor.py overwrites it on the local
+job; nba_results_ingestor.py logs a differing ESPN score without writing it). Then
+the rows and the pick are left alone, and tracking/system_health's settlement_lag
+and settlement_stranded keep reporting the pick.
+
     python -m data.ingestors.nba_period_scores --start 2023-10-24 --end 2026-04-12
     python -m data.ingestors.nba_period_scores --days 3          # the worker path
 """
@@ -123,6 +134,38 @@ def write(conn, rows: list[dict]) -> int:
     return len(keep)
 
 
+def first_half_from_periods(rows, home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in the first half from (period, home_points, away_points)
+    rows, or None when a settlement cannot trust them.
+
+    The rule is the first search's, which the graded bets were settled on
+    (scripts/nba_derivative_lab.build_outcomes, read through
+    scripts/nba_game_harness.with_periods): the periods sum to the stored final,
+    are numbered 1..n with n >= 4, and periods 1 and 2 are both there. Overtime is a
+    period, so it counts in the sum and never in the first half."""
+    if not rows:
+        return None
+    per = {int(r[0]): (r[1], r[2]) for r in rows}
+    n = max(per)
+    if (n < 4 or set(per) != set(range(1, n + 1))
+            or any(v is None for pts in per.values() for v in pts)
+            or sum(p[0] for p in per.values()) != home_score
+            or sum(p[1] for p in per.values()) != away_score):
+        return None
+    return per[1][0] + per[2][0], per[1][1] + per[2][1]
+
+
+def replace_game(conn, game_id: str, rows: list[dict]) -> None:
+    """Swap one game's stored periods for `rows`, in ONE transaction: a failure
+    keeps the old rows, it cannot leave the game with no quarters."""
+    conn.execute("DELETE FROM nba_period_scores WHERE game_id = %s", (game_id,))
+    conn.executemany("""
+        INSERT INTO nba_period_scores (game_id, period, home_points, away_points, source)
+        VALUES (%(game_id)s, %(period)s, %(home_points)s, %(away_points)s, %(source)s)
+    """, rows)
+    conn.commit()
+
+
 COLS = ("game_id", "period", "home_points", "away_points", "source", "fetched_at")
 
 
@@ -158,6 +201,93 @@ def run(start: str, end: str) -> dict:
                 continue
             stats["rows"] += write(conn, parse_period_rows(data))
             time.sleep(0.3)
+        return stats
+    finally:
+        conn.close()
+
+
+# The model whose picks settle on these rows, and how many of its dates one pass
+# may fetch: one scoreboard call a date, newest first.
+FIRST_HALF_MODEL = "nba_first_half_total_luck"
+MAX_PENDING_DATES = 20
+
+
+def _stored_periods(conn, game_id: str) -> list:
+    return conn.execute(
+        "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+
+
+def _refused_games(conn) -> dict[str, dict]:
+    """{game_id: {date, home, away}} for every game holding a pending first-half
+    BET with a final and period rows that first_half_from_periods refuses."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.game_id, p.game_date, g.home_score, g.away_score "
+        "FROM picks p JOIN games g ON g.game_id = p.game_id "
+        "WHERE p.model_id = %s AND p.signal_type = 'BET' AND p.result IS NULL "
+        "AND g.home_score IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM nba_period_scores s WHERE s.game_id = p.game_id) "
+        "ORDER BY p.game_date DESC LIMIT %s",
+        (FIRST_HALF_MODEL, MAX_PENDING_DATES)).fetchall()
+    return {gid: {"date": str(d), "home": home, "away": away} for gid, d, home, away in rows
+            if first_half_from_periods(_stored_periods(conn, gid), home, away) is None}
+
+
+def _repair(conn, gid: str, game: dict, fresh: list[dict]) -> bool:
+    """Replace a refused game's stored rows, only with rows that agree with the
+    stored final. -> whether the game's rows now agree."""
+    if first_half_from_periods(_stored_periods(conn, gid), game["home"], game["away"]) is not None:
+        return True          # write() filled in the period it was missing
+    rows = [r for r in fresh if r["game_id"] == gid]
+    agree = first_half_from_periods(
+        [(r["period"], r["home_points"], r["away_points"]) for r in rows],
+        game["home"], game["away"])
+    if agree is None:
+        logger.error(f"{gid}: ESPN's quarters do not add up to the stored final "
+                     f"({game['away']}-{game['home']}) either"
+                     f"{'' if rows else ' (the scoreboard did not return the game)'}, so the "
+                     f"rows are left as they are and its first-half pick stays pending. "
+                     f"Check the final.")
+        return False
+    logger.warning(f"{gid}: replacing its period rows {_stored_periods(conn, gid)} with ESPN's "
+                   f"{[(r['period'], r['home_points'], r['away_points']) for r in rows]}, which "
+                   f"add up to the stored final ({game['away']}-{game['home']})")
+    replace_game(conn, gid, rows)
+    return True
+
+
+def ensure_first_half_period_scores(get=requests.get) -> dict:
+    """Fetch the quarters of every game holding a pending first-half BET that has
+    a final and no period row, or period rows that disagree with the final (repaired
+    per game, module docstring), on this connection's own commits, for
+    tracking/paper_tracker.settle_picks. One scoreboard call per such date; none
+    when no pick waits, so it costs two reads on every other pass. The connection
+    holds no transaction across a call."""
+    conn = get_connection()
+    try:
+        ensure_table(conn)
+        todo = [str(r[0]) for r in conn.execute(
+            "SELECT DISTINCT p.game_date FROM picks p JOIN games g ON g.game_id = p.game_id "
+            "WHERE p.model_id = %s AND p.signal_type = 'BET' AND p.result IS NULL "
+            "AND g.home_score IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM nba_period_scores s WHERE s.game_id = p.game_id) "
+            "ORDER BY p.game_date DESC LIMIT %s",
+            (FIRST_HALF_MODEL, MAX_PENDING_DATES)).fetchall()]
+        refused = _refused_games(conn)
+        conn.rollback()
+        dates = sorted({*todo, *(g["date"] for g in refused.values())}, reverse=True)
+        stats = {"dates": len(dates), "rows": 0}
+        if refused:
+            stats.update(repaired=0, still_refused=0)
+        for d in dates:
+            data = fetch_date(d, get=get)
+            parsed = parse_period_rows(data) if data is not None else []
+            if data is not None:
+                stats["rows"] += write(conn, parsed)
+            for gid, game in refused.items():
+                if game["date"] == d:
+                    stats["repaired" if _repair(conn, gid, game, parsed) else "still_refused"] += 1
+                    conn.rollback()      # the reads above: no transaction across a call
         return stats
     finally:
         conn.close()

@@ -315,6 +315,35 @@ def test_an_offense_only_log_leaves_a_defender_as_a_non_participant():
     assert fact["under_result"] is None
 
 
+def test_a_missing_quote_team_is_the_one_log_team():
+    """DraftKings NFL rows stored no team. The log fills it when one
+    team matches the name and that team is in the game."""
+    facts = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
+           team=None),
+    ], [_log("Lamar Jackson", team="BAL", passing_yards=250)])
+    assert _one(facts, "player_pass_yds")["team"] == "BAL"
+
+
+def test_two_log_teams_leave_the_fact_unset():
+    facts = facts_for_game(_game(), [
+        _q("Josh Allen", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
+           team=None),
+    ], [
+        _log("Josh Allen", team="BUF", passing_yards=280),
+        _log("Josh Allen", team="NYJ", passing_yards=40),
+    ])
+    assert _one(facts, "player_pass_yds", "Josh Allen")["team"] is None
+
+
+def test_a_quote_team_is_kept():
+    facts = facts_for_game(_game(), [
+        _q("Lamar Jackson", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,
+           team="BAL"),
+    ], [_log("Lamar Jackson", team="KC", passing_yards=250)])
+    assert _one(facts, "player_pass_yds")["team"] == "BAL"
+
+
 def test_the_quote_team_breaks_a_shared_name():
     facts = facts_for_game(_game(), [
         _q("Josh Allen", "player_pass_yds", "draftkings", 10, 220.5, -110, -110,

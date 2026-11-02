@@ -17,6 +17,9 @@ THE RULES THIS MODULE LIVES BY
     kept independent of the telemetry kill switch.
   * It must never make a call slower. Recording is a bounded in-memory queue and
     a daemon thread; nothing touches the database on the request path.
+  * A process's last calls are written before it exits, and the exit waits a
+    bounded time for that (twice API_LOG_EXIT_WAIT_SEC at most). See
+    _flush_on_exit.
   * It must never leak a key. The query string is dropped except for an
     allowlist of descriptive params — `apiKey`, `key` and friends can therefore
     never be persisted, not even by accident on a new host.
@@ -80,16 +83,37 @@ _DEFAULT_TIMEOUT = (
 _MAX_QUEUE = int(os.environ.get("API_LOG_QUEUE", "5000"))
 _FLUSH_SEC = float(os.environ.get("API_LOG_FLUSH_SEC", "0.75"))
 _PRUNE_EVERY_SEC = 3600
+# The longest each of the exit's two waits lasts: first for the writer to store
+# what it recorded, then, only if the writer is stuck with calls still queued,
+# for the standby to write those over a fresh connection. A normal final write
+# from the worker is one connect plus one insert, which the scheduler log puts
+# at 0.3-0.45 s. Nothing on this path sets a connect timeout, so without this
+# bound an unreachable database could hold an exit for as long as the TCP
+# connect takes. Both waits together are 6 s by default; the shortest timeout
+# scheduler.py puts on any job is 60 s, so they cannot push a job past its own.
+_EXIT_WAIT_SEC = float(os.environ.get("API_LOG_EXIT_WAIT_SEC", "3"))
 
 _installed = False
 _timeout_floor_installed = False
 _lock = threading.Lock()
 _q: queue.Queue = queue.Queue(maxsize=_MAX_QUEUE)
 _source = "unknown"
+_stop = threading.Event()               # set once, at exit
+_writer: threading.Thread | None = None
+_takeover = threading.Event()           # set at exit, only if calls are still queued
+_standby: threading.Thread | None = None
 
-# Odds API credits are not in the response body — they are the DELTA of the
-# x-requests-used header between consecutive responses. Tracked per process;
-# the first call has no baseline and records NULL rather than a guess.
+# Odds API credits are not in the response body. Each response carries
+# x-requests-last, the API's own bill for THAT call, and it is what is
+# recorded. The DELTA of x-requests-used between this process's consecutive
+# responses is only the fallback for a response without x-requests-last: the
+# counter is the whole account's, so the delta also holds every credit any
+# other process spent in between. Measured 2026-10-29: while the NCAAB history
+# purchase ran on the worker (04:25-07:04Z), the pregame poller's ~600 calls an
+# hour were logged at 40,918, 74,463 and 66,105 credits an hour against 2,000-
+# 5,800 before it, and its daily cap, summed from this column, stopped it at
+# 200,280 for the rest of the ET day. Tracked per process; with no
+# x-requests-last the first call has no baseline and records NULL.
 _last_used: float | None = None
 _used_lock = threading.Lock()
 
@@ -168,18 +192,26 @@ def _scrub(text: str | None) -> str | None:
 
 
 def _credits_from(resp) -> tuple[float | None, float | None]:
-    """(credits spent by this call, credits remaining) from Odds API headers."""
+    """(credits spent by this call, credits remaining) from Odds API headers.
+
+    x-requests-last when the response has it; otherwise the delta of
+    x-requests-used since this process's previous response."""
     global _last_used
     try:
         used_raw = resp.headers.get("x-requests-used")
+        last_raw = resp.headers.get("x-requests-last")
         remaining_raw = resp.headers.get("x-requests-remaining")
         remaining = float(remaining_raw) if remaining_raw not in (None, "") else None
-        if used_raw in (None, ""):
+        prev = used = None
+        if used_raw not in (None, ""):
+            used = float(used_raw)
+            with _used_lock:            # keep the baseline current for the fallback
+                prev = _last_used
+                _last_used = used
+        if last_raw not in (None, ""):
+            return (float(last_raw), remaining)
+        if used is None:
             return (None, remaining)
-        used = float(used_raw)
-        with _used_lock:
-            prev = _last_used
-            _last_used = used
         # A negative delta means the billing period reset — report nothing
         # rather than a nonsense figure.
         if prev is None or used < prev:
@@ -245,50 +277,127 @@ def _writer_loop() -> None:
     # prune hourly.
     last_prune = time.time()
     while True:
-        time.sleep(_FLUSH_SEC)
-        rows = _drain()
-        if not rows:
-            continue
-        try:
-            if conn is None:
-                from data.db import get_connection
-                conn = get_connection()
-                ensured = False
-            if not ensured:
-                store.ensure_table(conn)
-                ensured = True
-            conn.executemany(store.INSERT_SQL, rows)
-            conn.commit()
-
-            now = time.time()
-            if now - last_prune > _PRUNE_EVERY_SEC:
-                last_prune = now
-                store.prune(conn)
-        except Exception:
-            # A dead connection (the Supabase pooler drops idle ones) or a
-            # transient failure: drop this batch, reconnect next tick. Telemetry
-            # is never worth retrying into a backlog.
+        # A wait on the stop flag rather than a sleep: at exit the flag is set
+        # and the writer goes straight to its last pass instead of finishing
+        # the nap. A batch already in hand is written first, because the exit
+        # waits for this thread (_flush_on_exit), not for the queue.
+        stopping = _stop.wait(_FLUSH_SEC)
+        rows = _drain(max_rows=_MAX_QUEUE if stopping else 500)
+        if rows:
             try:
-                if conn is not None:
-                    conn.close()
+                if conn is None:
+                    from data.db import get_connection
+                    conn = get_connection()
+                    ensured = False
+                if not ensured:
+                    store.ensure_table(conn)
+                    ensured = True
+                conn.executemany(store.INSERT_SQL, rows)
+                conn.commit()
+
+                now = time.time()
+                if not stopping and now - last_prune > _PRUNE_EVERY_SEC:
+                    last_prune = now
+                    store.prune(conn)
             except Exception:
-                pass
-            conn = None
+                # A dead connection (the Supabase pooler drops idle ones) or a
+                # transient failure: drop this batch, reconnect next tick.
+                # Telemetry is never worth retrying into a backlog -- and that
+                # holds at exit too: a failed last batch is lost, not retried.
+                try:
+                    if conn is not None:
+                        conn.close()
+                except Exception:
+                    pass
+                conn = None
+        if stopping:
+            break
+    try:
+        if conn is not None:
+            conn.close()
+    except Exception:
+        pass
 
 
-def _flush_on_exit() -> None:
+def _standby_loop() -> None:
+    """The exit's second writer, for calls a stuck writer cannot reach.
+
+    Idle until _flush_on_exit sets _takeover, which it does only when calls
+    remain on the queue after the wait for the writer: the writer is stuck
+    (say its connection is hung inside an insert on a socket that died without
+    a reset) or gone. It takes everything left, writes it once over its own
+    fresh connection, and stops. It is started with the writer at install, so the
+    exit never has to start a thread while the interpreter is shutting down.
+
+    Nothing is written twice. The queue hands each row to one taker, and the
+    batch the stuck writer holds is not on the queue. That batch is lost:
+    there is no way to reach it.
+    """
+    _takeover.wait()
     rows = _drain(max_rows=_MAX_QUEUE)
     if not rows:
         return
+    conn = None
     try:
         from data.db import get_connection
         conn = get_connection()
         store.ensure_table(conn)
         conn.executemany(store.INSERT_SQL, rows)
         conn.commit()
-        conn.close()
     except Exception:
-        pass
+        pass                    # a failed last write is lost, not retried
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _flush_on_exit() -> None:
+    """Let the writer store what this process recorded, for at most
+    _EXIT_WAIT_SEC; if it is stuck with calls still queued, let the standby
+    write those, for at most _EXIT_WAIT_SEC more; then let the process go.
+
+    WHY THE WRITER DOES IT, NOT THIS FUNCTION. This used to drain the queue and
+    write the rows itself. But the writer may already have drained them: it
+    takes a batch off the queue and only then connects and inserts, 0.3-0.45 s
+    from the worker. A process that exited inside that window found the queue empty
+    here, and the interpreter then stopped the writer -- a daemon thread --
+    with the rows in hand. Measured 2026-10-31: the NCAAB odds capture, one
+    call in a ~1.3 s process, made 72 calls in six hours and api_call_log kept
+    31; each of the 41 lost calls shows as its 3 credits missing from the Odds
+    API's remaining count. In the scheduler log a lost run exits within 0.1 s
+    of its last line, and a kept one 0.3-0.45 s after it: the kept rows were
+    the ones this function still found on the queue and wrote. So this now
+    sets the stop flag and joins the writer, which finishes the batch it
+    holds, drains the rest and stops.
+
+    WHY A STANDBY. The writer holds one connection. If that connection hangs
+    inside an insert, the writer cannot reach the calls still on the queue,
+    and waiting longer does not help. The old exit drained those itself and
+    wrote them over a new connection, so the standby keeps that: it writes them
+    over its own fresh connection (_standby_loop). It runs only when the queue
+    is not empty after the writer's wait, so a healthy exit never opens a
+    second connection. If the writer is gone (it catches every Exception, so
+    only something like a KeyboardInterrupt inside it could end it), the
+    standby writes what it left on the queue the same way.
+
+    The main thread never touches the database here, so the two joins'
+    timeouts are the whole bound: twice _EXIT_WAIT_SEC at most. Past that the
+    rows are lost and the exit goes ahead: a process must not hang on its
+    telemetry.
+    """
+    _stop.set()
+    t = _writer
+    if t is not None and t.is_alive():
+        t.join(_EXIT_WAIT_SEC)
+    if _q.empty():
+        return
+    s = _standby
+    if s is not None and s.is_alive():
+        _takeover.set()
+        s.join(_EXIT_WAIT_SEC)
 
 
 # ── the patch ────────────────────────────────────────────────────────────────
@@ -376,7 +485,7 @@ def install_timeout_floor() -> bool:
 
 def install(source: str = "unknown", start_writer: bool = True) -> bool:
     """Patch requests and start the writer. Idempotent; returns True if it took."""
-    global _installed, _source, _timeout_floor_installed
+    global _installed, _source, _timeout_floor_installed, _writer, _standby
     if os.environ.get("PIPELINE_TELEMETRY", "1") == "0":
         # The deadline still applies -- see install_timeout_floor.
         install_timeout_floor()
@@ -452,8 +561,15 @@ def install(source: str = "unknown", start_writer: bool = True) -> bool:
         _installed = True
 
     if start_writer:
-        threading.Thread(target=_writer_loop, name="api-telemetry",
-                         daemon=True).start()
+        # Still a daemon: a process that never reaches atexit (os._exit, a
+        # kill) must not be held open by its telemetry. _flush_on_exit is what
+        # gives it the time to finish.
+        _writer = threading.Thread(target=_writer_loop, name="api-telemetry",
+                                   daemon=True)
+        _writer.start()
+        _standby = threading.Thread(target=_standby_loop,
+                                    name="api-telemetry-exit", daemon=True)
+        _standby.start()
         atexit.register(_flush_on_exit)
     return True
 

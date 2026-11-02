@@ -169,6 +169,45 @@ function rpcFilters(
   return checked;
 }
 
+export interface ByomPlayerSearch {
+  names: string[];
+  /** The name RPC is not on this database yet. */
+  missing: boolean;
+}
+
+/**
+ * Distinct player names on byom_prop_facts. Two characters minimum.
+ * A database without byom_player_names returns missing, not a throw.
+ */
+export async function searchByomPlayerNames(
+  sport: ByomSport,
+  query: string,
+): Promise<ByomPlayerSearch> {
+  const q = query.trim().replace(/[%_\\]/g, '');
+  if (q.length < 2) return { names: [], missing: false };
+  const { data, error } = await supabase.rpc('byom_player_names', {
+    p_sport: sport,
+    p_query: q,
+  });
+  if (error) {
+    const code = typeof error.code === 'string' ? error.code : '';
+    const message = typeof error.message === 'string' ? error.message : '';
+    if (code === 'PGRST202' || /could not find the function/i.test(message)) {
+      return { names: [], missing: true };
+    }
+    throw error;
+  }
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const row of asRows(data)) {
+    const name = text(row.player_name);
+    if (name === '' || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return { names, missing: false };
+}
+
 export async function fetchByomBacktest(
   season: number | null,
   filters?: ByomFilters,
@@ -249,6 +288,30 @@ export async function fetchByomModels(): Promise<ByomModel[]> {
   const { data, error } = await supabase.rpc('byom_list_models');
   if (error) throw error;
   return asRows(data).map(parseByomModel);
+}
+
+/** True once this process has seen one NBA byom_game_facts row. */
+let nbaGameFactsKnown = false;
+
+export function nbaGameFactsAreKnown(): boolean {
+  return nbaGameFactsKnown;
+}
+
+/**
+ * Whether NBA game facts exist. An empty table is 'missing'. A hit stays
+ * 'ready' for the rest of this process. A failed read throws.
+ */
+export async function fetchNbaGameFactsReady(): Promise<'ready' | 'missing'> {
+  if (nbaGameFactsKnown) return 'ready';
+  const { data, error } = await supabase
+    .from('byom_game_facts')
+    .select('canonical_key')
+    .eq('sport', 'NBA')
+    .limit(1);
+  if (error) throw error;
+  if (!Array.isArray(data) || data.length === 0) return 'missing';
+  nbaGameFactsKnown = true;
+  return 'ready';
 }
 
 export async function deleteByomModel(modelId: string): Promise<void> {

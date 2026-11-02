@@ -470,9 +470,9 @@ def test_a_one_sided_rung_is_never_the_main_one():
     assert main == [] and len(alt) == 1
 
 
-def test_the_split_reads_team_totals_only():
+def test_the_split_reads_per_event_totals_only():
     assert NB.split_main_rungs([]) == ([], [])
-    with pytest.raises(ValueError, match="not a team-total market"):
+    with pytest.raises(ValueError, match="not a per-event total market"):
         NB.split_main_rungs([_tt_row("fanduel", 221.5, -110, -110, market="totals")])
 
 

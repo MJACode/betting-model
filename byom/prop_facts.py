@@ -273,6 +273,35 @@ def line_key(line) -> str:
     return text
 
 
+def team_for_fact(quote: dict, matches: list[dict],
+                  home: str | None = None, away: str | None = None) -> str | None:
+    """The player's team on this fact.
+
+    The quote's team wins when the book sent one. DraftKings NFL rows in
+    production did not, so the log is the fill: exactly one team among
+    the name matches, and that team is one of the two in the game.
+    Two teams, or a team that is neither side, stays unset. No guess.
+    """
+    quoted = str(quote.get("team") or "").strip()
+    if quoted:
+        return quoted
+    found: list[str] = []
+    for row in matches:
+        team = str(row.get("team") or "").strip().upper()
+        if team and team not in found:
+            found.append(team)
+    if len(found) != 1:
+        return None
+    sides = {
+        str(side or "").strip().upper()
+        for side in (home, away)
+        if str(side or "").strip()
+    }
+    if sides and found[0] not in sides:
+        return None
+    return found[0]
+
+
 def _rows_for_player(log_rows: list[dict], key: str, team: str | None = None) -> list[dict]:
     """Name matches. When more than one remains, the quote's team breaks
     the tie if it matches exactly one log row."""
@@ -397,15 +426,17 @@ def facts_for_game(game: dict, quotes: list[dict],
         line = quote["point"]
         matches = _rows_for_player(log_rows, key, quote.get("team"))
         status = log_status(played, game_rows, len(matches) if played else 0)
+        team = team_for_fact(
+            quote, matches, game.get("home_team"), game.get("away_team"))
         out.append(_one(
             canonical, season, week, key, market, line, quote,
-            status, matches, sport,
+            status, matches, sport, team,
         ))
     return out
 
 
 def _one(canonical, season, week, key, market, line, quote,
-         status, matches, sport=SPORT) -> dict:
+         status, matches, sport=SPORT, team=None) -> dict:
     actual = None
     graded = None
     # Anyone who did not play, and any row still missing a line, stays
@@ -424,7 +455,7 @@ def _one(canonical, season, week, key, market, line, quote,
         "week": week,
         "player_name": quote.get("player_name") or key,
         "player_key": key,
-        "team": quote.get("team"),
+        "team": team,
         "market": market,
         "line": line,
         "over_price": american_odds(quote.get("over_price")),

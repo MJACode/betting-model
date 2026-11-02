@@ -49,9 +49,14 @@ export function gameMarketForModel(modelId: string): string | null {
   // 'h2h', and every price, movement and line-shop lookup reads moneyline rows.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
   if (modelId === 'nba_total_luck') return 'totals';
+  // The NCAAB totals model (models/ncaab_total_blend.py): same trap.
+  if (modelId === 'ncaab_total_blend') return 'totals';
   // The NBA home team total (unders): the home team's own points, stored
   // under its own market, never the game's 'totals' rows.
   if (modelId === 'nba_team_total_luck') return 'team_totals_home';
+  // The NBA first half's total (overs): stored under its own market, never the
+  // game's 'totals' rows, whose number is about twice as big.
+  if (modelId === 'nba_first_half_total_luck') return 'totals_h1';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
@@ -172,28 +177,41 @@ export function playerNameFromPickLabel(label: string): string | null {
  * (CLAUDE.md §00 / §1c).
  */
 /**
- * A team total's bet, quoted from its label after the dash:
- * "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total Under 115.5".
+ * A team total's or a first half's bet, quoted from its label after the dash:
+ * "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total Under 115.5",
+ * "BOS @ MIL — First Half Over 112.5" -> "First Half Over 112.5".
  * Null for any other label. The whole label is wider than a phone's one-line
  * title, so it clipped the side and the number, the part the row is for.
  */
-export function teamTotalBet(label: string): string | null {
+export function matchupLedBet(label: string): string | null {
   const dash = label.indexOf(' — ');
-  if (dash > 0 && label.slice(dash + 3).includes(' Team Total ')) {
-    return label.slice(dash + 3).trim();
-  }
-  return null;
+  if (dash <= 0) return null;
+  const bet = label.slice(dash + 3).trim();
+  return bet.includes(' Team Total ') || bet.startsWith('First Half ') ? bet : null;
 }
 
 /**
  * The text of a one-line pick row (a model's page, the tracked list): a team
- * total's bet without the matchup (the row's date already places the game, the
- * home team plays once a night), every other label as stored. A prop keeps its
- * player name. The row's accessibility label keeps the whole stored label.
+ * total's or a first half's bet without the matchup, every other label as
+ * stored. A team total names its team and the row's date places the game; a
+ * first half names no team, so pickRowMatchup puts it on its own line. A prop
+ * keeps its player name. The row's accessibility label keeps the whole stored
+ * label.
  */
 export function pickRowTitle(pick: { pick_label: string }): string {
   const label = pick.pick_label ?? '';
-  return teamTotalBet(label) ?? label;
+  return matchupLedBet(label) ?? label;
+}
+
+/**
+ * The caption under a first half's row title, quoted from the label before the
+ * dash: "BOS @ MIL — First Half Over 112.5" -> "BOS @ MIL". Null for every other
+ * label, whose title already says who plays.
+ */
+export function pickRowMatchup(pick: { pick_label: string }): string | null {
+  const label = pick.pick_label ?? '';
+  if (!matchupLedBet(label)?.startsWith('First Half ')) return null;
+  return label.slice(0, label.indexOf(' — ')).trim();
 }
 
 export function splitPickTitle(pick: { pick_label: string }): {
@@ -201,9 +219,9 @@ export function splitPickTitle(pick: { pick_label: string }): {
   secondary: string | null;
 } {
   const label = pick.pick_label ?? '';
-  // A team total: the bold line is the bet (the card's header already shows
-  // the matchup).
-  const bet = teamTotalBet(label);
+  // A team total or a first half: the bold line is the bet (the card's header
+  // already shows the matchup).
+  const bet = matchupLedBet(label);
   if (bet) return { primary: bet, secondary: null };
   const player = playerNameFromPickLabel(label);
   if (!player || /\s(?:vs|@)\s/.test(player)) {
@@ -240,8 +258,11 @@ export function marketClassForModel(modelId: string): MarketClass {
   // neither substring.
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
   if (modelId === 'nba_total_luck') return 'game_total';
+  if (modelId === 'ncaab_total_blend') return 'game_total';
   // One team's points move with the game total, so the nearest class.
   if (modelId === 'nba_team_total_luck') return 'game_total';
+  // The first half's points move with the game total too.
+  if (modelId === 'nba_first_half_total_luck') return 'game_total';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1653,14 +1674,16 @@ export function computeMovement(
  * scored_line the main line that book quotes. So it is here too, on either
  * side, since it bets overs as well as unders.
  *
- * The two NBA totals cards (scripts/nba_total_luck_card.py, the full-game
- * overs; scripts/nba_team_total_luck_card.py, the home team-total unders)
+ * The NBA totals cards (scripts/nba_total_luck_card.py, the full-game overs;
+ * scripts/nba_team_total_luck_card.py, the home team-total unders;
+ * scripts/nba_first_half_total_luck_card.py, the first-half overs)
  * store the deciding book's own number too, and leave line_book empty
  * whenever DraftKings hung the same number. Read as DraftKings' line, a move
  * at the deciding book showed as a price move in the bettor's favour
  * (designer review, 2026-10-20).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
+  'nba_first_half_total_luck',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',
@@ -1929,13 +1952,19 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // the same window, the same way, and voids the same way, over or under.
   // The NBA totals overs card (scripts/nba_total_luck_card.py) posts each game
   // once, about an hour before tip, and is a game line: nothing to void. The
-  // NBA home team-total unders post the same way, in the same hour.
+  // NBA home team-total unders and first-half overs post the same way, in the
+  // same hour.
+  // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
+  // once, the evening before, and never re-prices: not "the first scoring run
+  // of the day".
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
     pick.model_id === 'nhl_over_under' ||
     pick.model_id === 'nba_total_luck' ||
     pick.model_id === 'nba_team_total_luck' ||
+    pick.model_id === 'nba_first_half_total_luck' ||
+    pick.model_id === 'ncaab_total_blend' ||
     nbaPosted
   ) {
     return {

@@ -14,6 +14,9 @@
 -- does not hide the under leg from a caller that asks for it.
 -- byom_save_model stores sport on the row and does not store the
 -- sport key inside filters. A missing sport on save is NFL.
+-- A name already saved on the other sport is refused. The same name
+-- on the same sport still replaces that model. Names stay unique
+-- per user. One name cannot live on both sports.
 --
 -- byom_prop_facts.week was NOT NULL. NBA has no week. This file drops
 -- that constraint. NFL rows keep the week they already have.
@@ -397,6 +400,7 @@ BEGIN
       v_month integer;
       v_year integer;
       v_model uuid;
+      v_saved_sport text;
       v_count integer;
       v_bets bigint;
       v_wins bigint;
@@ -542,9 +546,16 @@ BEGIN
              v_summary
         FROM byom_backtest(v_season, v_grade) AS b;
 
-      SELECT m.model_id INTO v_model
+      SELECT m.model_id, m.sport INTO v_model, v_saved_sport
         FROM byom_models m
        WHERE m.user_id = v_uid AND m.name = v_name;
+
+      -- Same name on the other sport must not flip that row. The
+      -- unique key is still (user_id, name), so this refuses instead
+      -- of inserting a second row.
+      IF v_model IS NOT NULL AND v_saved_sport IS DISTINCT FROM v_sport THEN
+        RAISE EXCEPTION 'name is saved on another sport';
+      END IF;
 
       IF v_model IS NULL THEN
         SELECT count(*) INTO v_count

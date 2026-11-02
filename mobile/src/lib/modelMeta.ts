@@ -438,6 +438,21 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first half's total points, overs only (models/nba_first_half_total_luck.py).
+  // The same luck read as nba_total_luck, on the first half's line: when both
+  // teams' plain defensive ratings overstate how good they have been by at least
+  // 2 points of game total, it bets the first half over, once, about an hour
+  // before tip, at the best price. It settles on the first two quarters' points,
+  // never the game total. The label is "BOS @ MIL — First Half Over 112.5". A game
+  // line, not a picker slot.
+  nba_first_half_total_luck: {
+    // 1H O/U is the first half's total. The side is already in the pick label.
+    shortLabel: '1H O/U',
+    longLabel: 'NBA First Half Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -573,6 +588,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
   ncaaf_over_under: {
     shortLabel: 'O/U',
     longLabel: 'NCAAF Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // ── NCAAB ─────────────────────────────────────────────────────────────────
+  // Men's college basketball, full-game totals. Named like the other totals
+  // ("NCAAB Totals", badge O/U). The id is the one the model writes its picks
+  // under (models/ncaab_total_blend.py MODEL_ID). It has no 'over_under' in
+  // it, so markets.ts names it for the totals rows. The build plan's id,
+  // ncaab_over_under, is not a model. tests/test_mobile_pick_categories.py
+  // fails if config scores an id with no label here.
+  ncaab_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAAB Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -805,6 +834,13 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'points, the extra these bets won over the last three NBA seasons (62% won where the market’s fair ' +
     'chance averaged 51%). Read it as an upper bound: plan on a return nearer 8% than the 17% those ' +
     'seasons made.',
+  // The market's fair chance plus the walk-forward uplift (+0.0572 for
+  // 2026-27): on the 595 graded bets, 56.0% won where the market's fair chance
+  // averaged 50.2%. docs/nba_models_2026.md 8.4 has the bets' return, +8.0%.
+  nba_first_half_total_luck:
+    'What our model says is the chance this side hits: the market’s fair chance plus about 6 percentage ' +
+    'points, the extra these bets won over the last three NBA seasons (56% won where the market’s fair ' +
+    'chance averaged 50%). Read it as an upper bound.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -814,15 +850,27 @@ export function modelProbabilityNote(modelId: string): string {
 // The NBA models that check each game once, about an hour before tip, and
 // post only the bets they find: the
 // full-game totals overs (scripts/nba_total_luck_card.py, 60-66 minutes out),
-// the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66) and
+// the home team-total unders (scripts/nba_team_total_luck_card.py, 45-66), the
+// first-half overs (scripts/nba_first_half_total_luck_card.py, 45-66) and
 // the two prop models (scripts/nba_prop_market_card.py,
 // nba_prop_projection_card.py, 45-57). Their page is empty most of the day,
 // and the morning-run copy sent people back at the wrong time.
 const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
+  'nba_first_half_total_luck',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',
   'nba_total_luck',
+];
+
+// The models that decide each game once, the evening before, at DraftKings'
+// total: the NCAAB totals card (scripts/ncaab_total_card.py) runs at 22:00
+// UTC the evening before, else on game day when no total was up yet. Their
+// page fills in one batch in the early evening, so the hourly-refresh copy
+// sent people back at the wrong time. No Eastern clock time is printed:
+// 22:00 UTC is 6pm ET until 1 November and 5pm ET after it.
+const EVENING_BEFORE_MODELS: readonly string[] = [
+  'ncaab_total_blend',
 ];
 
 export interface ModelPageTiming {
@@ -847,6 +895,17 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model checks each game about an hour before tip-off and bets only some of them. ' +
         'Nothing has posted today so far.',
       note: 'Posted about an hour before tip-off and never re-priced.',
+    };
+  }
+  if (EVENING_BEFORE_MODELS.includes(modelId)) {
+    return {
+      title: 'Decided the evening before',
+      body:
+        'This model decides each game once, the evening before, at DraftKings’ total. A game with no ' +
+        'total by then is decided on game day instead. A posted bet is never re-priced.',
+      empty:
+        'This model posts the evening before each game day. Nothing has posted for the next slate yet.',
+      note: 'Posted the evening before and never re-priced.',
     };
   }
   return {
@@ -893,7 +952,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -908,6 +967,7 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('nhl')) return 'NHL';
@@ -945,6 +1005,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NBA',
   'NFL',
   'NCAAF',
+  'NCAAB',
   'UFC',
   'NHL',
   'GOLF',

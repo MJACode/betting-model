@@ -267,16 +267,36 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # connection, no hosting) — one channel per sport. Set only the sports you want:
 #   DISCORD_WEBHOOK_MLB, DISCORD_WEBHOOK_NFL, DISCORD_WEBHOOK_NBA,
 #   DISCORD_WEBHOOK_NHL, DISCORD_WEBHOOK_WNBA, DISCORD_WEBHOOK_UFC,
-#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF
+#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF, DISCORD_WEBHOOK_NCAAB
 # A sport with no webhook is SKIPPED and its signals are NOT marked as sent, so
 # adding that channel later still delivers the rest of the day's picks.
 # (Listed literally rather than derived from SPORTS — that registry is defined
 # further down this file, and a webhook name is a stable, user-facing env var.)
-DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL")
+DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB")
 DISCORD_WEBHOOKS: dict = {
     sport: url for sport in DISCORD_SPORTS
     if (url := os.environ.get(f"DISCORD_WEBHOOK_{sport}", "").strip())
 }
+# A sport with no DISCORD_WEBHOOK_<SPORT> may instead name its CHANNEL:
+# DISCORD_CHANNEL_<SPORT> is a channel id (not a secret). The notifier then
+# resolves that channel's webhook at runtime through DISCORD_BOT_TOKEN, reusing
+# one the bot owns or creating it, and keeps the URL in memory only
+# (tracking/discord_notifier._channel_webhook). Added for NCAAB (2026-10-30),
+# whose channel is created by scripts/discord_create_sport_channel.py; a
+# webhook variable, when set, still wins.
+DISCORD_CHANNELS: dict = {
+    sport: cid for sport in DISCORD_SPORTS
+    if (cid := os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip())
+}
+
+
+def discord_sports_wired() -> set:
+    """The sports whose picks have somewhere to post: a webhook, or a channel
+    id the bot token can resolve one for."""
+    wired = set(DISCORD_WEBHOOKS)
+    if os.environ.get("DISCORD_BOT_TOKEN", "").strip():
+        wired |= set(DISCORD_CHANNELS)
+    return wired
 
 # Catch-all for any sport without its own channel. Leave unset to post nothing
 # for unmapped sports rather than dumping every sport into one channel.
@@ -660,6 +680,32 @@ ACTION_THRESHOLDS: dict = {
     # +64.72 units on 390.37 risked, +16.6%, every season positive. prob / edge
     # are 0.0 for the same reason as nba_total_luck's.
     "nba_team_total_luck":      {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-HALF total, OVER only (the fourth NBA search's cell C1; mike,
+    # 2026-10-30: "Build the model that passed."): written by the
+    # nba_first_half_total_luck card. THE CUT IS THE FULL-GAME SHOOTING-LUCK GAP
+    # (>= 2.0 points, applied in the card), the offer the best expected value
+    # under the market's fair line, decided about an hour before tip. Settles on
+    # Q1 + Q2 points. Graded walk-forward at bought prices, 2023-24..2025-26
+    # pooled: 595 bets, 333-259-3, +51.49 units on 643.19 risked, +8.0%, interval
+    # +0.4% to +15.4%, every season positive. prob / edge are 0.0 for the same
+    # reason as nba_total_luck's.
+    "nba_first_half_total_luck": {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
+    # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
+    # Team ratings refit as of DraftKings' total, a residual on as-of shooting
+    # luck and style rates, blended with DraftKings' total; bet the side whose
+    # P(win | no push) beats DraftKings' implied probability by more than 0.04,
+    # both teams 10+ games. Graded exactly as it runs live (box-score
+    # possessions, no roster input, 2026-10-30): 2021-2025 1,094 bets, +87.48
+    # units, +7.32%, date-resampled 95% interval [2.0, 12.7], 5 of 5 seasons;
+    # 2025-26 349 bets +7.03%. Neighbours (2021-2025): 0.02 +5.18%, 0.03
+    # +5.45%, 0.05 +9.85%, 0.06 +10.45%. 92% overs; prices -120 to +102.
+    # min_edge 0.04 IS the card's cut: model_probability is P(win | no push),
+    # so decision_edge is exactly the edge the card cut on and every publisher
+    # agrees with it. min_prob 0.0: the edge is the cut, and a probability
+    # floor could only hide a pick the card wrote (the smallest written
+    # probability on 2021-2025 is 0.5403).
+    "ncaab_total_blend":        {"min_prob": 0.0, "min_edge": 0.04},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1913,6 +1959,14 @@ MODEL_MIN_ODDS: dict = {
     # (median -112), so -200 admits prices it was never graded at. Pinned so a
     # Railway DEFAULT_MIN_ODDS override cannot move it.
     "nba_team_total_luck":       -200,
+    # NBA first-half overs: it laid -130 to +114 on its 595 graded bets (median
+    # -110), so -200 admits prices it was never graded at. Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it.
+    "nba_first_half_total_luck": -200,
+    # NCAAB totals (2026-10-30, mike): it laid -120 to +102 on its 1,094
+    # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
+    # override cannot move it.
+    "ncaab_total_blend":         -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2167,6 +2221,21 @@ MODEL_OWN_EV_FLOOR: dict = {
     # uplift (+0.1022), it removes one: NBA_2025-01-24_POR_CHA, FanDuel under
     # 109.5 at -118, -0.113. The next smallest is +0.053, the median +0.169.
     "nba_team_total_luck":      0.00,
+    # NBA first-half overs. Same reasoning: the cut is the gap, and this floor is
+    # applied in the card to p_model x decimal - 1 (a push scored as a loss),
+    # p_model being the fair probability plus the walk-forward uplift. On its 595
+    # graded bets, at the 2026-27 uplift (+0.0572), it removes two, both wins:
+    # NBA_2024-11-18_IND_TOR, Hard Rock over 118.5 at -110, -0.051, and
+    # NBA_2025-01-02_BOS_MIN, DraftKings over 109 at -110, -0.030. That takes the
+    # graded record to 593 bets, +49.49 units, +7.7%. The next smallest is +0.005,
+    # the median +0.074.
+    "nba_first_half_total_luck": 0.00,
+    # NCAAB totals (2026-10-30, mike). The cut is the edge (0.04, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
+    # (1,094 bets; median +0.0996). An edge above 0.04 at -120 or longer is EV
+    # above 0.073, so 0.07 never removes a bet the evidence took.
+    "ncaab_total_blend":        0.07,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2302,6 +2371,15 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # walk-forward uplift of the earlier graded seasons, which is what its
     # floor was set on. No record either, so the same reasoning.
     "nba_team_total_luck",
+    # The NBA first-half overs: the market's fair P(over) plus the walk-forward
+    # uplift of the earlier graded seasons, which is what its floor was set on.
+    # No record either, so the same reasoning.
+    "nba_first_half_total_luck",
+    # 2026-10-30 (mike, "Yes to the totals model"). NCAAB totals: its number
+    # is the blend's P(win | no push) at DraftKings' line, which its 0.04 cut
+    # was measured on. It has no record, so its map would be the offset
+    # borrowed from other models.
+    "ncaab_total_blend",
 })
 
 
@@ -2420,6 +2498,15 @@ SCORING_METHODS: dict = {
     # The same shape: a rule whose parameter artifact holds the residual sample
     # and the per-season uplift buckets, loaded by the card, never registered.
     "nba_team_total_luck": "rule",
+    # The same shape again: its artifact holds the rows its first-half pricing is
+    # fitted on and the per-season uplift buckets.
+    "nba_first_half_total_luck": "rule",
+    # A rule with a parameter artifact committed under models/saved/ (last
+    # season's ratings, the residual and blend coefficients,
+    # models/ncaab_total_blend.py), never registered: the card loads it by
+    # its pinned path. Not in SPORTS or MODELS, which the trainer and the
+    # loaders iterate.
+    "ncaab_total_blend":   "rule",
 }
 
 
@@ -2449,6 +2536,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.04,   # 2026-10-30 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2539,6 +2628,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -2794,6 +2885,17 @@ RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
 # in log units; the real plan cost of this change is on the order of +30k API
 # credits a day against 4,661,626 remaining. Read `odds_api_quota`, never this
 # comment, before quoting a number (section 1b).
+#
+# One cause of that overstatement, measured 2026-10-29: each process logged the
+# change in the ACCOUNT's x-requests-used since its own previous call, so it
+# also logged whatever every other process spent in between. The NCAAB history
+# purchase (worker job 805227, 04:25-07:04Z) was charged to this loop that way,
+# 40,918 to 74,463 credits an hour on its usual ~600 calls an hour, and the cap
+# stopped the loop at 200,280 for the rest of the ET day. The fix (branch
+# fix/odds-credits-per-call): monitoring/probe.py logs each call's own
+# x-requests-last, and the day starts at ET midnight, not 00:00Z
+# (data/ingestors/pregame_line_poller.py). The cap now sums this loop's own
+# spend, where it summed roughly everyone's.
 #
 # Set = 0 to run uncapped.
 PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
@@ -4420,11 +4522,50 @@ NCAAF_PROMOTED_TO_FBS: dict = {
 
 # Men's college basketball: an odds-feed team name -> ESPN team id, for the
 # names data.ingestors.ncaab_teams.resolve_team_name cannot place on its own
-# (it matches ESPN's display name, "school mascot", school, short name and
-# alternate names first). Fill it from the unresolved-name list the
-# ncaab_feed_probe worker job prints. A value is an ESPN id, not a name, so a
-# school renaming itself cannot silently re-point an entry.
-NCAAB_ODDS_API_MAP: dict = {}
+# (it matches ESPN's display name, "school mascot", school, short name,
+# alternate names, then the feed's shortened school names like "Michigan St").
+# Fill it from the unresolved-name list the ncaab_feed_probe worker job and
+# the history purchase print. A value is an ESPN id, not a name, so a school
+# renaming itself cannot silently re-point an entry.
+#
+# The entries below (2026-10-29) are the feed names in ncaab_odds_unmatched
+# that no rule can place: a renamed school, a renamed mascot, or a name with
+# nothing in common with ESPN's. Each id is the team ESPN's schedule plays
+# against the feed event's other (resolved) team on the event's date, in the
+# share of that name's events given, measured on the Supabase connector.
+NCAAB_ODDS_API_MAP: dict = {
+    "Albany Great Danes": 399,              # ESPN "UAlbany Great Danes"; 158 of 158 events
+    "Appalachian St Mountaineers": 2026,    # ESPN "App State Mountaineers"; 143 of 143
+    "Arkansas-Little Rock Trojans": 2031,   # ESPN "Little Rock Trojans" (not Arkansas, 8); 118 of 121
+    "Dixie State Trailblazers": 3101,       # ESPN "Utah Tech Trailblazers"; 16 of 16
+    "Fort Wayne Mastodons": 2870,           # ESPN "Purdue Fort Wayne Mastodons"; 119 of 121
+    "George Washington Colonials": 45,      # ESPN "George Washington Revolutionaries"; 85 of 90
+    "GW Revolutionaries": 45,               # ESPN "George Washington Revolutionaries"; 69 of 69
+    "Houston Baptist Huskies": 2277,        # ESPN "Houston Christian Huskies" (not Houston, 248); 68 of 70
+    "IUPUI Jaguars": 85,                    # ESPN "IU Indianapolis Jaguars"; 101 of 101
+    "LIU Brooklyn Blackbirds": 112358,      # ESPN "Long Island University Sharks", NOT 6446 "LIU Brooklyn"; 19 of 19
+    "LIU Sharks": 112358,                   # ESPN "Long Island University Sharks"; 104 of 106
+    "Long Beach St 49ers": 299,             # ESPN "Long Beach State Beach"; 118 of 122
+    "Mcneese St Mcneese": 2377,             # ESPN "McNeese Cowboys"; 27 of 27
+    "New Orleans Privateers": 2443,         # ESPN "LSU New Orleans Privateers"; 121 of 122
+    "Seattle Redhawks": 2547,               # ESPN "Seattle U Redhawks"; 122 of 125
+    "St. Francis (PA) Red Flash": 2598,     # ESPN "Saint Francis Red Wolves"; 129 of 132
+    "Tenn-Martin Skyhawks": 2630,           # ESPN "UT Martin Skyhawks" (not Tennessee, 2633); 103 of 104
+    "Texas A&M-Commerce Lions": 2837,       # ESPN "East Texas A&M Lions" (not Texas A&M or Texas); 62 of 63
+    "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 118 of 120
+    "Valparaiso Crusaders": 2674,           # ESPN "Valparaiso Beacons"; 36 of 37
+}
+
+# Injury-page team string -> ESPN team id. Checked before
+# ncaab_teams.resolve_team_name, and only for that exact string. Empty until
+# a miss log names a string the resolver cannot place. Do not guess an id.
+NCAAB_INJURY_TEAM_MAP: dict = {}
+
+# "espn_team_id|player_key" -> player_key on that team's roster. Used when the
+# feed spells a name the roster does not. The value is applied only when it is
+# on the roster; a value that is not is a miss, not a match. Empty until a
+# miss is confirmed by hand.
+NCAAB_INJURY_PLAYER_MAP: dict = {}
 
 # The Odds API team name → CFBD canonical school name.
 #

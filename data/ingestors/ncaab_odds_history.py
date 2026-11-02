@@ -24,6 +24,30 @@ WHAT IS BOUGHT
            resumable through `odds_history_pulls` (sport 'NCAAB', snapshot_date,
            hour_utc).
 
+  --opener-grid --step 60|30 [--pre-start]  The same bulk snapshot at every
+           grid time on the clock (every hour, or every half hour) from 72
+           hours before any game's tip up to that tip, so each book's first
+           posted full-game line is dated to the step. The lines plan above
+           dates a first post only to the gap between its fixed hours, which
+           is over two hours for 42-68% of first spreads and totals, by book
+           (41.6% BetMGM totals to 67.6% betPARX totals; opener-route design,
+           2026-10-30). --pre-start adds every grid time from 240 to
+           72 hours before each season's first tip, for the season-opening
+           boards. A time on the hour is ledgered in `odds_history_pulls`,
+           exactly as the lines purchase ledgers it, so an hour either one
+           bought is never bought again; a half hour in
+           `odds_history_fetches` (sport 'NCAAB', requested_at, why
+           'opener_grid'), the table the NBA purchase files its off-the-hour
+           fetches in. The shared ledger's key is never changed. What is
+           stored of each snapshot is each book's first quote on each game
+           and market and every quote that differs from the one before it
+           (ChangeKeeper), less any quote already in `odds` (the same game,
+           market, book, feed time, prices and line, stored by the lines
+           purchase or an earlier grid run), and never an in-play price. Its
+           own ceiling (tracking/job_queue.py) and the same floor; it reads
+           the balance on record before its first call, so that call is
+           checked too. NOT QUEUED: the spend needs mike's approval.
+
   --derivatives close|open  The per-event endpoint: first-half moneyline,
            spread and total plus team totals (4 markets; the feed bills 10 a
            market returned, so up to 40 a game, and an empty answer is free per
@@ -38,6 +62,18 @@ WHAT IS BOUGHT
   --probe  One real paid call of each kind, writing nothing, printing the
            MEASURED x-requests-last of each, so the per-call cost is a
            measurement before the big run.
+
+  --replay-unmatched  No paid call. Re-reads the raw events kept in
+           `ncaab_odds_unmatched` and stores the ones that resolve now (after a
+           fix to the team names), as the game-line purchase would have
+           stored them (its QuoteKeeper filter, also for raw events the
+           opener grid kept, which the grid itself thins with ChangeKeeper),
+           with two differences: a listing whose start is 12 hours or more
+           from the ESPN game it lands on is not stored, and an hour the feed
+           answered with an earlier hour's snapshot is replayed only at the
+           earlier hour (the raw table kept that snapshot once). A read-only
+           dry run unless --apply; never writes the ledger, never deletes a raw
+           row, and a second --apply stores nothing new.
 
 WHO OWNS THE GAME. ESPN's schedule (data/ingestors/ncaab_teams.py). The feed
 never mints an NCAAB game: every event resolves onto an ESPN game by its team
@@ -67,12 +103,18 @@ DATE FIRST, so a stop leaves the most recent seasons stored.
     python -m data.ingestors.ncaab_odds_history --probe --seasons 2026 2026 --max-credits 200 --floor 300000 --apply
     python -m data.ingestors.ncaab_odds_history --lines --seasons 2021 2026 --max-credits 420000 --floor 300000 --apply
     python -m data.ingestors.ncaab_odds_history --derivatives close --seasons 2024 2026 --max-credits 800000 --floor 300000 --apply
+    python -m data.ingestors.ncaab_odds_history --opener-grid --step 30 --seasons 2021 2026 --dry-run
+    python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2026 2026 --dry-run
+    python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2021 2026 --apply
 """
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
+from bisect import bisect_left
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -82,7 +124,8 @@ import config
 from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 from data.db import get_connection
-from data.ingestors.nba_odds_history import _ODDS_KEYS, Meter, _write_with_retry
+from data.ingestors.nba_odds_history import (_ODDS_KEYS, FETCH_LEDGER_DDL, Meter,
+                                             _write_with_retry)
 from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window, ncaab_season_label,
                                         load_registry, match_event, reset_registry_cache,
                                         resolve_team_name)
@@ -90,7 +133,7 @@ from data.ingestors.odds_ingestor import (HISTORICAL_ODDS_SOURCE, PULL_LEDGER_DD
                                           _insert_odds, _mark_in_play, _parse_outcomes,
                                           _parse_spread_outcomes, _parse_total_outcomes,
                                           _process_events)
-from data.ingestors.odds_quota import persist_quota
+from data.ingestors.odds_quota import latest_remaining, persist_quota
 
 SPORT = "NCAAB"
 BASE = "https://api.the-odds-api.com/v4/historical/sports/basketball_ncaab"
@@ -128,6 +171,14 @@ CREATE TABLE IF NOT EXISTS ncaab_odds_unmatched (
 )
 """
 PULL_LEDGER_COLS = ("sport", "snapshot_date", "hour_utc", "pulled_at", "rows")
+# The opener grid's half hours. odds_history_pulls is shared by every sport's
+# history purchase and keyed on an integer hour, and its key is not changed:
+# any copy of a purchase whose ON CONFLICT names those three columns would pay
+# for a snapshot and then fail to ledger it. A time off the hour is ledgered
+# here instead, keyed on the instant: the NBA purchase's table
+# (nba_odds_history.FETCH_LEDGER_DDL), whose every NBA reader filters on sport.
+FETCH_LEDGER_COLS = ("sport", "requested_at", "snapshot_ts", "why", "pulled_at", "rows")
+GRID_WHY = "opener_grid"
 
 
 class PreconditionError(RuntimeError):
@@ -243,16 +294,22 @@ def check_process_events_contract() -> None:
 # ── tables ───────────────────────────────────────────────────────────────────
 
 def _ensure_tables(conn) -> None:
-    """The pull ledger and the unmatched store, created once and locked down.
+    """The two ledgers and the unmatched store, created once and locked down.
 
-    Both are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The catalog
-    gate means a run that finds them current fires no DDL (data/ddl_guard.py).
+    All three are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The
+    catalog gate means a run that finds them current fires no DDL
+    (data/ddl_guard.py); production holds all three (2026-10-30).
     """
     changed = False
     if not schema_is_current(conn, "odds_history_pulls", columns=PULL_LEDGER_COLS,
                              rls=True, revoked_from=API_ROLES):
         conn.execute(PULL_LEDGER_DDL)
         lock_down(conn, "odds_history_pulls")
+        changed = True
+    if not schema_is_current(conn, "odds_history_fetches", columns=FETCH_LEDGER_COLS,
+                             rls=True, revoked_from=API_ROLES):
+        conn.execute(FETCH_LEDGER_DDL)
+        lock_down(conn, "odds_history_fetches")
         changed = True
     if not schema_is_current(conn, "ncaab_odds_unmatched", columns=UNMATCHED_COLS,
                              rls=True, revoked_from=API_ROLES):
@@ -453,39 +510,48 @@ def season_order(todo: list[datetime]) -> list[datetime]:
     return sorted(todo, key=lambda w: (-season(w), w))
 
 
-def _held_hours(conn) -> set[tuple[str, int]]:
-    return {(str(r[0]), int(r[1])) for r in conn.execute(
-        "SELECT snapshot_date, hour_utc FROM odds_history_pulls WHERE sport = %s",
-        (SPORT,)).fetchall()}
+def _held_instants(conn) -> set[datetime]:
+    """Every NCAAB instant bought, as aware UTC, from both ledgers: the pull
+    ledger's hours (date, hour) and the fetch ledger's off-the-hour instants
+    (sport 'NCAAB' only; the NBA files its own there). A half hour is its own
+    instant and never reads as its hour.
+
+    A database the fetch ledger has never reached (no NBA or grid purchase
+    has run there) holds no half hour: its hours are the answer. Any other
+    failure of that read is raised."""
+    out = set()
+    for d, hour in conn.execute("SELECT snapshot_date, hour_utc FROM odds_history_pulls "
+                                "WHERE sport = %s", (SPORT,)).fetchall():
+        try:
+            day = date.fromisoformat(str(d)[:10])
+        except ValueError:
+            continue
+        out.add(datetime(day.year, day.month, day.day, int(hour), tzinfo=timezone.utc))
+    try:
+        fetched = conn.execute("SELECT requested_at FROM odds_history_fetches "
+                               "WHERE sport = %s", (SPORT,)).fetchall()
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()
+        if conn.execute("SELECT to_regclass('public.odds_history_fetches')").fetchone()[0]:
+            raise
+        fetched = []
+    for (at,) in fetched:
+        when = _utc(at)
+        if when is not None:
+            out.add(when)
+    return out
 
 
-def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
-                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None) -> bool:
-    """Buy the whole slate at `when`, write it, its unmatched events and its
-    ledger row in one transaction. False = stop (ceiling or floor)."""
-    snap_date, hour = when.date().isoformat(), when.hour
-    held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
-                        "AND snapshot_date = %s AND hour_utc = %s",
-                        (SPORT, snap_date, hour)).fetchone()
-    if held:
-        conn.commit()
-        stats["skipped_held"] += 1
-        return True
-    stop = meter.stop_reason(LINE_SNAPSHOT_COST)
-    if stop:
-        stats["stopped"] = stop
-        logger.warning(f"lines stopping at {when:%Y-%m-%d %H}Z: {stop}")
-        return False
+def _parse_snapshot(events: list[dict], when: datetime, resolver: EventResolver,
+                    tips: dict[str, str]) -> tuple[dict, list[dict], list[dict], list[dict], int]:
+    """One snapshot's events resolved, parsed and labelled: the single path the
+    purchase (_buy_snapshot) and the replay (replay_unmatched) both take.
+
+    Returns (hits, unmatched, odds_rows, dropped, marked_in_play). `when` is the
+    planned on-the-hour instant, handed to the parser as the snapshot time; a
+    market's own `last_update`, which the feed sends, wins over it in the rows.
+    """
     snapshot_at = _stamp(when)
-    r = meter.get(f"{BASE}/odds", {"date": snapshot_at, "markets": ",".join(LINE_MARKETS),
-                                   "bookmakers": BOOKS, "oddsFormat": "american"})
-    if r is None or r.status_code != 200:
-        stats["errors"] += 1
-        logger.warning(f"lines {snapshot_at}: HTTP {getattr(r, 'status_code', 'network')}")
-        return True
-    body = r.json()
-    events = body.get("data") or []
-    stamp = body.get("timestamp") or snapshot_at
     hits, unmatched = resolver.split(events)
     # The contract: _process_events takes (game_id, flipped) and swaps the
     # names itself before parsing (proved by check_process_events_contract).
@@ -499,14 +565,11 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
     # The backstop for the same loss: an event that DID resolve and carried
     # prices but produced no row (a filter inside the parser, which this
     # module does not own) is kept raw beside the unmatched ones, because the
-    # ledger row below means this snapshot is never bought again.
+    # ledger row means this snapshot is never bought again.
     kept = {o["game_id"] for o in odds_rows}
     dropped = [ev for ev in events
                if (hit := hits.get(_event_key(ev))) and hit[0] not in kept
                and any(b.get("markets") for b in ev.get("bookmakers") or [])]
-    if dropped:
-        logger.warning(f"lines {snapshot_at}: {len(dropped)} resolved event(s) produced no "
-                       f"odds row; kept raw in {UNMATCHED_TABLE}")
     # With a resolver _process_events emits no game rows, so the in-play
     # relabel takes each game's tip from ESPN's schedule (the feed's own start
     # where ESPN has none). Without this a 22Z price on a 19Z tip is stored
@@ -517,7 +580,59 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
     for gid in kept:
         tip = _utc(tips.get(gid)) or _utc(fed.get(gid))
         starts.append({"game_id": gid, "commence_time": tip.isoformat() if tip else None})
-    stats["marked_in_play"] += _mark_in_play(starts, odds_rows)
+    marked = _mark_in_play(starts, odds_rows)
+    return hits, unmatched, odds_rows, dropped, marked
+
+
+def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
+                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None,
+                  taken: set | None = None) -> bool:
+    """Buy the whole slate at `when`, write it, its unmatched events and its
+    ledger row in one transaction. False = stop (ceiling or floor).
+
+    On the hour the ledger is odds_history_pulls (sport, date, hour), as every
+    purchase has it; off the hour (the grid's half hours) odds_history_fetches,
+    keyed on the instant. One routing rule for the check and the write, so
+    22:30 and 22:00 are two snapshots and neither reads as the other bought.
+
+    With `taken` (the opener grid) a kept row whose identical quote is already
+    in `odds`, or was stored by this run (`taken`), is not stored again: the
+    keeper knows only what this run has seen, and the lines purchase stored
+    its hours' quotes before. `odds` is read back INSIDE the write unit, as
+    the replay does, so a retry after a lost commit stores nothing twice."""
+    snap_date, hour = when.date().isoformat(), when.hour
+    on_hour = when.minute == 0 and when.second == 0
+    if on_hour:
+        held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
+                            "AND snapshot_date = %s AND hour_utc = %s",
+                            (SPORT, snap_date, hour)).fetchone()
+    else:
+        held = conn.execute("SELECT 1 FROM odds_history_fetches WHERE sport = %s "
+                            "AND requested_at = %s", (SPORT, when)).fetchone()
+    if held:
+        conn.commit()
+        stats["skipped_held"] += 1
+        return True
+    stop = meter.stop_reason(LINE_SNAPSHOT_COST)
+    if stop:
+        stats["stopped"] = stop
+        logger.warning(f"lines stopping at {when:%Y-%m-%d %H:%M}Z: {stop}")
+        return False
+    snapshot_at = _stamp(when)
+    r = meter.get(f"{BASE}/odds", {"date": snapshot_at, "markets": ",".join(LINE_MARKETS),
+                                   "bookmakers": BOOKS, "oddsFormat": "american"})
+    if r is None or r.status_code != 200:
+        stats["errors"] += 1
+        logger.warning(f"lines {snapshot_at}: HTTP {getattr(r, 'status_code', 'network')}")
+        return True
+    body = r.json()
+    events = body.get("data") or []
+    stamp = body.get("timestamp") or snapshot_at
+    _, unmatched, odds_rows, dropped, marked = _parse_snapshot(events, when, resolver, tips)
+    if dropped:
+        logger.warning(f"lines {snapshot_at}: {len(dropped)} resolved event(s) produced no "
+                       f"odds row; kept raw in {UNMATCHED_TABLE}")
+    stats["marked_in_play"] += marked
     bought = len(odds_rows)
     if keeper is not None:
         odds_rows = [r for r in odds_rows if keeper.wanted(r, when)]
@@ -525,25 +640,48 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
     lost = [(stamp, str(ev.get("id")), ev.get("home_team"), ev.get("away_team"),
              ev.get("commence_time"), json.dumps(ev), HISTORICAL_ODDS_SOURCE)
             for ev in unmatched + dropped]
+    # The rows this snapshot stored, by one attempt or another: a retry after a
+    # commit the server did make finds them in `odds` and stores none.
+    stored = {"n": 0}
 
     def _write():
-        if odds_rows:
-            _insert_odds(conn, odds_rows)
+        rows = odds_rows
+        if taken is not None:
+            rows = [r for _, r in _not_yet_stored(conn, odds_rows, taken)]
+        if rows:
+            _insert_odds(conn, rows)
+        stored["n"] = max(stored["n"], len(rows))
         if lost:
             conn.executemany(_UNMATCHED_INSERT, lost)
-        conn.execute("""
-            INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
-            VALUES (%s, %s, %s, NOW(), %s)
-            ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
-               SET pulled_at = NOW(), rows = EXCLUDED.rows
-        """, (SPORT, snap_date, hour, len(odds_rows)))
+        if on_hour:
+            conn.execute("""
+                INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
+                VALUES (%s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                   SET pulled_at = NOW(), rows = EXCLUDED.rows
+            """, (SPORT, snap_date, hour, stored["n"]))
+        else:
+            conn.execute("""
+                INSERT INTO odds_history_fetches
+                       (sport, requested_at, snapshot_ts, why, pulled_at, rows)
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, requested_at) DO UPDATE
+                   SET snapshot_ts = EXCLUDED.snapshot_ts, pulled_at = NOW(),
+                       rows = EXCLUDED.rows
+            """, (SPORT, when, body.get("timestamp"), GRID_WHY, stored["n"]))
         conn.commit()
 
     if not _write_with_retry(conn, _write, f"lines {snapshot_at}"):
         stats["errors"] += 1
         return True
+    if taken is not None:
+        # every kept row is in `odds` now; the next snapshot need not store it
+        taken.update(_row_key(r["game_id"], r.get("market"), r.get("bookmaker"),
+                              r.get("snapshot_at"), *(r.get(c) for c in _ROW_VALUES))
+                     for r in odds_rows)
+        stats["rows_already_stored"] += len(odds_rows) - stored["n"]
     stats["calls"] += 1
-    stats["odds_rows"] += len(odds_rows)
+    stats["odds_rows"] += stored["n"]
     stats["unmatched_events"] += len(unmatched)
     stats["dropped_by_parser"] += len(dropped)
     if stats["calls"] % 50 == 0:
@@ -557,11 +695,11 @@ def plan_lines(conn, first: int, last: int) -> tuple[list[dict], list[datetime],
     games = _season_games(conn, first, last)
     pairs = line_snapshots(games)
     try:
-        done = _held_hours(conn)
+        done = _held_instants(conn)
     except Exception:                                           # noqa: BLE001
         conn.rollback()                    # a database the ledger has never reached
         done = set()
-    todo = [w for w in pairs if (w.date().isoformat(), w.hour) not in done]
+    todo = [w for w in pairs if w not in done]
     return games, pairs, todo
 
 
@@ -826,6 +964,215 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
     return dict(totals)
 
 
+# ── the opener grid: a snapshot every step before every tip ─────────────────
+#
+# WHY. The lines plan buys three kinds of hour per game date, so a book's first
+# post is dated only to the gap between two of them: over two hours for 42-68%
+# of first spreads and totals, by book (41.6% BetMGM totals to 67.6% betPARX
+# totals; opener-route design, 2026-10-30, against this ledger). The grid buys a snapshot at every grid time on the clock, every 60
+# or 30 minutes, from 72 hours before each tip up to the tip. One bulk snapshot
+# covers the whole listed slate, so the plan is a set of times, not of games.
+#
+# THE SIZE, 2020-21 to 2025-26 (the --dry-run against ESPN's stored schedule and
+# this ledger, both fingerprinted against production on 2026-10-30): every
+# hour, 21,710 grid times, 7,403 already bought, 14,307 to buy; every half
+# hour, 43,415, 7,403 and 36,012. At 30 credits a snapshot that is 429,210 and
+# 1,080,360 credits. The pre-start window adds 168 a season every hour and 336
+# every half hour, none held.
+
+GRID_LEAD = timedelta(hours=72)          # how long before a tip its grid starts
+GRID_STEPS = (60, 30)                    # minutes; the feed keeps 5-minute snapshots
+PRE_START = timedelta(days=10)           # --pre-start: from 240 hours before a season's first tip
+# The lines purchase's measured pace, for the dry run's time estimate: 7,403
+# snapshots from 04:25:12Z to 07:04:47Z on 2026-10-29 (job 805227, api_call_log).
+LINES_PACE_PER_MIN = 7_403 / 159.6
+
+
+@dataclass
+class GridPlan:
+    """The grid times a run would buy, ascending.
+
+    window: every grid time inside some game's 72-hour lead.
+    pre: the pre-start grid times (240 to 72 hours before each season's first
+         tip) not already in `window`; empty unless asked for.
+    todo: window and pre, less the times the ledger holds.
+    """
+    window: list
+    pre: list
+    todo: list
+    window_held: int
+    pre_held: int
+
+
+def _grid_times(spans: list[tuple[int, int]], step: int) -> list[int]:
+    """Every multiple of `step` seconds inside the union of the [lo, hi) spans."""
+    out: list[int] = []
+    end = None
+    for lo, hi in sorted(spans):
+        if end is not None and lo < end:
+            lo = end                     # the overlap was already walked
+        if hi <= lo:
+            continue
+        t = -(-lo // step) * step        # the first grid time at or after lo
+        out.extend(range(t, hi, step))
+        end = hi if end is None else max(end, hi)
+    return out
+
+
+def grid_plan(games: list[dict], step_min: int, held: set, pre_start: bool = False) -> GridPlan:
+    """The opener grid for `games`. Pure, so the plan is testable.
+
+    A grid time is on the clock (every hour, or :00 and :30), never on a tip:
+    a game tipping at 01:20Z wants 01:00 and not 01:30, and its first time is
+    the first one at or after 01:20Z three days earlier. A game with no stored
+    tip adds nothing. Games that share a time share the snapshot.
+    """
+    if step_min not in GRID_STEPS:
+        raise ValueError(f"the grid steps every {GRID_STEPS} minutes, not {step_min}")
+    step, lead = step_min * 60, int(GRID_LEAD.total_seconds())
+    spans: list[tuple[int, int]] = []
+    first_tip: dict[int, int] = {}
+    for g in games:
+        tip = _utc(g.get("commence_time"))
+        if tip is None:
+            continue
+        t = int(tip.timestamp())
+        spans.append((t - lead, t))
+        season = ncaab_season_label(str(g["game_date"])[:10])
+        first_tip[season] = min(first_tip.get(season, t), t)
+
+    def as_dt(ts: list[int]) -> list[datetime]:
+        return [datetime.fromtimestamp(x, tz=timezone.utc) for x in ts]
+
+    window = as_dt(_grid_times(spans, step))
+    pre: list[datetime] = []
+    if pre_start:
+        early = int(PRE_START.total_seconds())
+        inside = set(window)
+        pre = [w for w in as_dt(_grid_times([(t - early, t - lead) for t in first_tip.values()],
+                                            step)) if w not in inside]
+    todo = sorted(w for w in window + pre if w not in held)
+    return GridPlan(window=window, pre=pre, todo=todo,
+                    window_held=sum(1 for w in window if w in held),
+                    pre_held=sum(1 for w in pre if w in held))
+
+
+def plan_opener_grid(conn, first: int, last: int, step_min: int,
+                     pre_start: bool = False) -> tuple[list[dict], GridPlan]:
+    """(every season game, the grid plan against the ledger). Reads only."""
+    games = _season_games(conn, first, last)
+    try:
+        held = _held_instants(conn)
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()                    # a database the ledger has never reached
+        held = set()
+    return games, grid_plan(games, step_min, held, pre_start)
+
+
+class ChangeKeeper:
+    """What the grid stores of each bought snapshot: each book's first quote on
+    each game and market, and every quote that differs from the one before it
+    in price or line. A repeat is not kept (a half-hourly grid over 72 hours
+    would otherwise store the same quote up to 144 times), and an in-play
+    price never is. What it keeps is then read back against `odds`
+    (_buy_snapshot with `taken`), so a quote already stored is not stored
+    again.
+
+    The first quote is the point of the purchase: its feed time (the market's
+    own last_update, which the parser stores as snapshot_at) dates the book's
+    first post to within the step. Storing each change as well keeps every
+    distinct quote the grid paid for, the way the live opener capture
+    (scripts/ncaab_odds_capture.py) stores changes only. One keeper a season,
+    so its memory is bounded. It knows only what this run has seen: the
+    quotes the lines purchase stored at its hours (which the grid skips as
+    bought), and those an earlier run stored before a stop, are caught by the
+    read-back of `odds`, not here.
+    """
+
+    def __init__(self):
+        self.last: dict[tuple[str, str, str], tuple] = {}
+
+    def wanted(self, row: dict, when: datetime) -> bool:
+        if row.get("snapshot_type") == "in_play":
+            return False
+        key = (row["game_id"], row.get("market") or "", row.get("bookmaker") or "")
+        quote = tuple(None if row.get(c) is None else round(float(row[c]), 4)
+                      for c in _ROW_VALUES)
+        if self.last.get(key) == quote:
+            return False
+        self.last[key] = quote
+        return True
+
+
+def buy_opener_grid(conn, meter: Meter, first: int, last: int, step_min: int,
+                    pre_start: bool = False) -> dict:
+    """Buy every grid time the ledgers lack, newest season first and each
+    season oldest first, through _buy_snapshot (odds, unmatched events and the
+    ledger row in one transaction; the hour in odds_history_pulls, the half
+    hour in odds_history_fetches).
+
+    Two things the lines purchase does not do. Each snapshot's kept rows are
+    read back against `odds` (one `taken` set a season, beside the keeper),
+    so a quote the lines purchase or an earlier run stored is not stored
+    twice. And the balance must be known before the first call: the meter
+    reads it off each response, so without the stored reading the first call
+    would go unchecked against the floor."""
+    if step_min not in GRID_STEPS:
+        raise ValueError(f"the grid steps every {GRID_STEPS} minutes, not {step_min}")
+    check_precondition(conn, list(range(first, last + 1)))
+    check_process_events_contract()
+    _ensure_tables(conn)
+    if meter.remaining is None:
+        meter.remaining = latest_remaining(conn)
+        if meter.remaining is None:
+            raise PreconditionError(
+                "no Odds API balance on record in odds_api_quota, so the floor cannot be "
+                "checked before the first call")
+    games, plan = plan_opener_grid(conn, first, last, step_min, pre_start)
+    resolver = _resolver(conn, games)
+    tips = {g["game_id"]: g.get("commence_time") for g in games}
+    logger.info(f"opener grid every {step_min} min: {len(games):,} games -> "
+                f"{len(plan.window) + len(plan.pre):,} grid times, {len(plan.todo):,} to buy "
+                f"(~{LINE_SNAPSHOT_COST * len(plan.todo):,} credits); balance on record "
+                f"{meter.remaining:,}, floor {meter.floor:,}, ceiling {meter.ceiling:,}")
+    # End the planning reads' transaction before the first paid call.
+    conn.commit()
+    stats: dict = defaultdict(int)
+    season, keeper, taken = None, None, None
+    for when in season_order(plan.todo):
+        label = ncaab_season_label(when.date().isoformat())
+        if label != season:            # no game spans two seasons: bound the memory
+            season, keeper, taken = label, ChangeKeeper(), set()
+        if not _buy_snapshot(conn, meter, tips, resolver, when, stats, keeper, taken):
+            break
+    print("opener grid", resolver.report())
+    return dict(stats)
+
+
+def _dry_run_grid(conn, first: int, last: int, step_min: int, pre_start: bool) -> None:
+    """The grid's plan and its credits, printed. Reads only; buys nothing."""
+    print("precondition:", check_precondition(conn, list(range(first, last + 1))))
+    games, full = plan_opener_grid(conn, first, last, step_min, pre_start=True)
+    pre = set(full.pre)
+    todo = full.todo if pre_start else [w for w in full.todo if w not in pre]
+    n_win = len(full.window) - full.window_held
+    n_pre = len(full.pre) - full.pre_held
+    by_season = Counter(ncaab_season_label(w.date().isoformat()) for w in todo)
+    print(f"dry run: opener grid every {step_min} minutes, seasons {first}-{last}, "
+          f"{len(games):,} games")
+    print(f"  72 hours before each tip, up to the tip: {len(full.window):,} grid times, "
+          f"{full.window_held:,} already bought, {n_win:,} to buy "
+          f"(~{LINE_SNAPSHOT_COST * n_win:,} credits)")
+    print(f"  pre-start, 240 to 72 hours before each season's first tip: {len(full.pre):,} grid "
+          f"times, {full.pre_held:,} already bought, {n_pre:,} to buy "
+          f"(~{LINE_SNAPSHOT_COST * n_pre:,} credits); "
+          + ("included" if pre_start else "not included (add --pre-start)"))
+    print(f"  to buy: {len(todo):,} snapshots, ~{LINE_SNAPSHOT_COST * len(todo):,} credits at "
+          f"{LINE_SNAPSHOT_COST} a snapshot; about {len(todo) / LINES_PACE_PER_MIN / 60:.1f} hours "
+          f"at the lines purchase's pace; by season {dict(sorted(by_season.items()))}")
+    print("re-run with --apply --max-credits N --floor N")
+
+
 # ── the probe: one measured call of each kind ────────────────────────────────
 
 PROBE_FALLBACK_DATE = "2026-01-17"   # a full Saturday slate in 2025-26
@@ -904,33 +1251,387 @@ def probe(conn, meter: Meter, season: int) -> dict:
     return out
 
 
+# ── the replay: kept raw events that resolve now ─────────────────────────────
+#
+# WHY. ncaab_odds_unmatched holds every event the purchase bought and could
+# not place on an ESPN game: 137,007 rows after the lines job (worker job
+# 805227, 2026-10-29; the job counted 137,083, and the table keeps one row per
+# event and feed time), nearly all because the feed's shortened school names
+# ("Michigan St Spartans") placed no team. Those snapshots are ledgered as
+# bought, so the purchase never asks for them again. Once the names resolve,
+# this stores them from the raw JSON on the purchase's own path
+# (_parse_snapshot, one QuoteKeeper, seasons in season_order). It makes no
+# paid call, never writes odds_history_pulls, never deletes a raw row, and a
+# quote already in `odds` is never stored twice, so a second --apply stores
+# nothing new.
+#
+# TWO DIFFERENCES FROM THE PURCHASE. (1) A listing placed on an ESPN game
+# whose tip is REPLAY_MAX_TIP_GAP or more from the listing's own start is not
+# stored (_far_from_tip). (2) When the feed answered several bought hours
+# with the same stale snapshot, the raw table kept it once, under the first
+# of them, so it is replayed at that hour only: a later hour's pre-tip copy of
+# the same quote is not stored again (2020-11-27 18Z-20Z, measured by the
+# 2026-10-29 review).
+#
+# THE STAMP. _buy_snapshot keyed each raw row on the feed's own timestamp
+# (21:55:38Z for the 22Z snapshot), not on the instant it asked for. The
+# keeper's anchors (D-1 22Z, D 15Z) and its pre-tip window are measured from
+# the asked-for instant, so each stamp maps back to it: the smallest
+# odds_history_pulls instant at or after the stamp, within an hour. A stamp
+# with none is counted and skipped, never guessed.
+
+REPLAY_BATCH_ROWS = 500                     # rows per fetch, never more
+REPLAY_MAX_STAMP_GAP = timedelta(minutes=60)
+REPLAY_MAX_TIP_GAP = timedelta(hours=12)
+_CURSOR_IDS = itertools.count(1)
+
+_UNMATCHED_KEYS_SQL = ("SELECT event_id, snapshot_at FROM ncaab_odds_unmatched "
+                       "WHERE source = %s AND snapshot_at >= %s AND snapshot_at < %s")
+_UNMATCHED_PAYLOADS_SQL = ("SELECT event_id, snapshot_at, payload FROM ncaab_odds_unmatched "
+                           "WHERE source = %s AND snapshot_at = ANY(%s) AND event_id = ANY(%s)")
+_ROW_VALUES = ("home_price", "away_price", "draw_price", "spread_home", "total_line",
+               "over_price", "under_price")
+_STORED_ROWS_SQL = ("SELECT game_id, market, bookmaker, snapshot_at, " + ", ".join(_ROW_VALUES)
+                    + " FROM odds WHERE source = %s AND game_id = ANY(%s) AND snapshot_at = ANY(%s)")
+
+
+def planned_instant(stamp: datetime, instants: list[datetime]) -> datetime | None:
+    """The instant a raw row was bought at: the smallest of `instants` (sorted
+    ascending, the pull ledger's) at or after the feed's `stamp`, within an
+    hour. None when there is none: the caller counts it and skips it."""
+    i = bisect_left(instants, stamp)
+    if i < len(instants) and instants[i] - stamp <= REPLAY_MAX_STAMP_GAP:
+        return instants[i]
+    return None
+
+
+def _far_from_tip(ev: dict, hit, tips: dict[str, str]) -> bool:
+    """Is this feed listing placed on an ESPN game whose tip is
+    REPLAY_MAX_TIP_GAP or more from the listing's own start?
+
+    match_event takes the nearest game within a day either side of the
+    listing's date, so a second listing of the same pair a day later lands on
+    the same game, and at that game's anchors the keeper would store its
+    quotes beside the real listing's. Among the kept raw events, 24 feed
+    events (144 event snapshots) landed 12 to 29 hours from their game's tip,
+    and every one of those games also has a listing within the hour; below
+    12 hours the widest was 9.0 (SQL on the Supabase connector, 2026-10-29).
+    False when the game, its tip or the listing's start is unknown: nothing
+    to compare, so the purchase's answer stands."""
+    if not hit:
+        return False
+    espn, feed = _utc(tips.get(hit[0])), _utc(ev.get("commence_time"))
+    return bool(espn and feed and abs(espn - feed) >= REPLAY_MAX_TIP_GAP)
+
+
+def _ledger_instants(conn) -> list[datetime]:
+    """Every NCAAB instant bought, ascending, from both ledgers (the hours in
+    odds_history_pulls, the grid's half hours in odds_history_fetches): a
+    feed time maps back to the half hour the grid bought, not to the hour
+    after it."""
+    return sorted(_held_instants(conn))
+
+
+def _stream(conn, sql: str, params: tuple):
+    """Yield the answer to `sql` in lists of at most REPLAY_BATCH_ROWS rows.
+
+    A real connection reads through a server-side (named) cursor, so no
+    query's whole answer is held at once. It lives inside the caller's
+    transaction (a commit closes it), so read it to the end first. A test
+    double with no raw psycopg2 connection is read with execute().fetchall()
+    in the same batches."""
+    raw = getattr(conn, "_conn", None)
+    if raw is None:
+        rows = conn.execute(sql, params).fetchall()
+        for i in range(0, len(rows), REPLAY_BATCH_ROWS):
+            yield rows[i:i + REPLAY_BATCH_ROWS]
+        return
+    cur = raw.cursor(name=f"ncaab_replay_{next(_CURSOR_IDS)}")
+    try:
+        cur.itersize = REPLAY_BATCH_ROWS
+        cur.execute(sql, params)
+        while True:
+            rows = cur.fetchmany(REPLAY_BATCH_ROWS)
+            if not rows:
+                break
+            yield rows
+    finally:
+        cur.close()
+
+
+def _end_read(conn) -> None:
+    """End a transaction that only read, so its locks go with it."""
+    try:
+        conn.rollback()
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def _payloads(conn, wanted: dict[str, str]) -> list[dict]:
+    """The raw events of one planned instant ({event_id: stamp}), by primary
+    key, at most REPLAY_BATCH_ROWS ids a query, ordered by event id."""
+    ids, stamps = sorted(wanted), sorted(set(wanted.values()))
+    found: dict[str, dict] = {}
+    for i in range(0, len(ids), REPLAY_BATCH_ROWS):
+        chunk = ids[i:i + REPLAY_BATCH_ROWS]
+        for batch in _stream(conn, _UNMATCHED_PAYLOADS_SQL,
+                             (HISTORICAL_ODDS_SOURCE, stamps, chunk)):
+            for event_id, stamp, payload in batch:
+                if wanted.get(event_id) != stamp:
+                    continue
+                found[event_id] = payload if isinstance(payload, dict) else json.loads(payload)
+    return [found[k] for k in sorted(found)]
+
+
+def _row_key(game_id, market, bookmaker, snapshot_at, *values) -> tuple:
+    """What makes two odds rows the same stored quote: game, market, book, the
+    quote's own time, and its prices and line (as numbers: the table's NUMERIC
+    reads back as float, the feed's prices arrive as int)."""
+    at = _utc(snapshot_at)
+    return (game_id, market or "", bookmaker or "", _stamp(at) if at else str(snapshot_at),
+            *(None if v is None else round(float(v), 4) for v in values))
+
+
+def _not_yet_stored(conn, rows: list[dict], taken: set) -> list[tuple[tuple, dict]]:
+    """(key, row) for each row whose identical quote is neither in `odds` under
+    the historical source nor already taken by this run (`taken`)."""
+    if not rows:
+        return []
+    game_ids = sorted({r["game_id"] for r in rows})
+    stamps = sorted({str(r["snapshot_at"]) for r in rows})
+    stored = {_row_key(*rec) for rec in conn.execute(
+        _STORED_ROWS_SQL, (HISTORICAL_ODDS_SOURCE, game_ids, stamps)).fetchall()}
+    out, here = [], set()
+    for r in rows:
+        key = _row_key(r["game_id"], r.get("market"), r.get("bookmaker"), r.get("snapshot_at"),
+                       *(r.get(c) for c in _ROW_VALUES))
+        if key in stored or key in taken or key in here:
+            continue
+        here.add(key)
+        out.append((key, r))
+    return out
+
+
+def replay_unmatched(conn, first: int, last: int, apply: bool) -> dict:
+    """Store the kept raw events of seasons first..last that resolve now.
+
+    Pass 1 reads only the raw rows' keys (event id, stamp) through one
+    server-side cursor and maps each stamp to its planned instant. Pass 2 walks
+    the instants in season_order; for each it reads that instant's payloads
+    by primary key, sets aside any listing _far_from_tip refuses, resolves
+    the rest over ESPN's stored games, parses and labels them through
+    _parse_snapshot exactly as _buy_snapshot does, filters them through ONE
+    QuoteKeeper for the run, drops any quote already stored, and with `apply`
+    inserts the rest with _insert_odds (source odds_api_historical),
+    committing per instant. The read-back of `odds` is repeated inside each
+    write, so a retry after a commit whose acknowledgement was lost stores
+    nothing twice. Without `apply` it writes nothing; main() also hands it a
+    read-only connection. Returns the counts.
+    """
+    st: Counter = Counter()
+    instants = _ledger_instants(conn)
+    games = _season_games(conn, first, last)
+    resolver = _resolver(conn, games)
+    tips = {g["game_id"]: g.get("commence_time") for g in games}
+    keeper = QuoteKeeper(games)
+    _end_read(conn)
+
+    lo = _stamp(datetime(first - 1, 10, 1, tzinfo=timezone.utc) - REPLAY_MAX_STAMP_GAP)
+    hi = _stamp(datetime(last, 10, 1, tzinfo=timezone.utc))
+    mapped: dict[str, datetime | None] = {}
+    by_instant: dict[datetime, dict[str, str]] = defaultdict(dict)
+    for batch in _stream(conn, _UNMATCHED_KEYS_SQL, (HISTORICAL_ODDS_SOURCE, lo, hi)):
+        for event_id, stamp in batch:
+            if stamp not in mapped:
+                at = _utc(stamp)
+                mapped[stamp] = planned_instant(at, instants) if at else None
+            when = mapped[stamp]
+            if when is None:
+                st["event_snapshots_unmapped"] += 1
+                continue
+            if not first <= ncaab_season_label(when.date().isoformat()) <= last:
+                st["event_snapshots_outside_seasons"] += 1
+                continue
+            have = by_instant[when].get(event_id)
+            if have is None or stamp > have:        # one raw row per event per instant
+                by_instant[when][event_id] = stamp
+    _end_read(conn)
+    st["stamps_mapped"] = sum(1 for w in mapped.values() if w is not None)
+    st["stamps_unmapped"] = sum(1 for w in mapped.values() if w is None)
+    st["instants"] = len(by_instant)
+
+    seen, placed, far_events = set(), set(), set()
+    taken: set = set()
+    season = None
+    for when in season_order(list(by_instant)):
+        label = ncaab_season_label(when.date().isoformat())
+        if label != season:            # no game spans two seasons: bound the memory
+            season, taken = label, set()
+        wanted = by_instant.pop(when)
+        events = _payloads(conn, wanted)
+        st["event_snapshots"] += len(events)
+        st["payloads_missing"] += len(wanted) - len(events)
+        far = {id(ev) for ev in events if _far_from_tip(ev, resolver(*_event_key(ev)), tips)}
+        if far:
+            st["event_snapshots_far_from_tip"] += len(far)
+            far_events.update(str(ev.get("id")) for ev in events if id(ev) in far)
+            events = [ev for ev in events if id(ev) not in far]
+        _, unmatched, odds_rows, dropped, marked = _parse_snapshot(events, when, resolver, tips)
+        missed = {str(ev.get("id")) for ev in unmatched}
+        for ev in events:
+            seen.add(str(ev.get("id")))
+            if str(ev.get("id")) not in missed:
+                placed.add(str(ev.get("id")))
+        st["event_snapshots_resolved"] += len(events) - len(unmatched)
+        st["event_snapshots_unresolved"] += len(unmatched)
+        st["dropped_by_parser"] += len(dropped)
+        st["rows_parsed"] += len(odds_rows)
+        st["rows_marked_in_play"] += marked
+        kept = [r for r in odds_rows if keeper.wanted(r, when)]
+        st["rows_kept"] += len(kept)
+        fresh = _not_yet_stored(conn, kept, taken)
+        st["rows_already_stored"] += len(kept) - len(fresh)
+        if not apply or not fresh:
+            if not apply:
+                taken.update(k for k, _ in fresh)
+                st["rows_to_insert"] += len(fresh)
+            _end_read(conn)
+            continue
+
+        def _write(kept=kept):
+            # Read `odds` back INSIDE the unit: data.db raises ConnectionLost
+            # at a commit whose acknowledgement was lost, although the server
+            # may have committed, and _write_with_retry then runs this again.
+            now = _not_yet_stored(conn, kept, taken)
+            if now:
+                _insert_odds(conn, [r for _, r in now])
+            conn.commit()
+        if _write_with_retry(conn, _write, f"replay {_stamp(when)}"):
+            taken.update(k for k, _ in fresh)       # stored now, by one attempt or another
+            st["rows_inserted"] += len(fresh)
+        else:
+            st["write_errors"] += 1
+    st["events_resolved"] = len(placed)
+    st["events_unresolved"] = len(seen - placed)
+    st["events_far_from_tip"] = len(far_events)
+
+    mode = "applied" if apply else "dry run, read only, nothing written"
+    print(f"replay seasons {first}-{last} ({mode})")
+    print(f"  stamps: {st['stamps_mapped']:,} mapped to a planned instant, "
+          f"{st['stamps_unmapped']:,} unmapped ({st['event_snapshots_unmapped']:,} event "
+          f"snapshots skipped); {st['instants']:,} instants; "
+          f"{st['event_snapshots_outside_seasons']:,} event snapshots outside the seasons")
+    print(f"  events: {st['events_resolved']:,} resolved, {st['events_unresolved']:,} unresolved "
+          f"(event snapshots: {st['event_snapshots_resolved']:,} resolved, "
+          f"{st['event_snapshots_unresolved']:,} unresolved, {st['payloads_missing']:,} "
+          f"payloads missing)")
+    print(f"  far: {st['events_far_from_tip']:,} events ({st['event_snapshots_far_from_tip']:,} "
+          f"event snapshots) placed on an ESPN game whose tip is "
+          f"{REPLAY_MAX_TIP_GAP.total_seconds() / 3600:g} hours or more from their own start, "
+          f"not stored")
+    print(f"  rows: {st['rows_parsed']:,} parsed, {st['rows_marked_in_play']:,} marked in-play, "
+          f"{st['rows_kept']:,} kept by the keeper, {st['rows_already_stored']:,} already stored, "
+          + (f"{st['rows_inserted']:,} inserted, {st['write_errors']:,} instants failed to write"
+             if apply else f"{st['rows_to_insert']:,} would be inserted"))
+    print("  replay", resolver.report())
+    return dict(st)
+
+
+def _read_only_connection():
+    """get_connection(), unable to write: the dry run's connection.
+
+    psycopg2's set_session(readonly=True) opens EVERY transaction as BEGIN
+    READ ONLY, which holds through Supabase's transaction pooler, the port
+    get_connection() dials. A SET SESSION CHARACTERISTICS AS TRANSACTION READ
+    ONLY is not used: on that port a session setting stays on whichever server
+    connection ran it, where another client's next transaction would inherit
+    it (data/db.py: no session settings on the transaction port). Reconnecting
+    is switched off, because a fresh connection would not be read only.
+    Raises unless the server reports transaction_read_only = on."""
+    conn = get_connection()
+    conn._url = None
+    conn._conn.set_session(readonly=True)
+    state = conn.execute("SHOW transaction_read_only").fetchone()[0]
+    conn.rollback()
+    if state != "on":
+        conn.close()
+        raise RuntimeError(f"the dry run's connection is not read only "
+                           f"(transaction_read_only = {state!r})")
+    return conn
+
+
+def _run_replay(first: int, last: int, apply: bool) -> dict:
+    conn = get_connection() if apply else _read_only_connection()
+    try:
+        out = replay_unmatched(conn, first, last, apply=apply)
+    finally:
+        conn.close()
+    print("replay:", out)
+    return out
+
+
 # ── command line ─────────────────────────────────────────────────────────────
 
-def main() -> None:
+def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     what = ap.add_mutually_exclusive_group(required=True)
     what.add_argument("--lines", action="store_true", help="bulk game lines, every planned snapshot")
+    what.add_argument("--opener-grid", action="store_true",
+                      help="bulk game lines at every grid time from 72 hours before each tip")
     what.add_argument("--derivatives", choices=("close", "open"),
                       help="first-half lines and team totals, one snapshot a game")
     what.add_argument("--probe", action="store_true",
                       help="one measured paid call of each kind, writes nothing")
+    what.add_argument("--replay-unmatched", action="store_true",
+                      help="store the kept raw events that resolve now; no paid call; "
+                           "a read-only dry run unless --apply")
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"), required=True,
                     help="ending years (2026 = the 2025-26 season)")
     ap.add_argument("--max-credits", type=int, help="the ceiling; required with --apply")
     ap.add_argument("--floor", type=int,
                     help=f"stop before the balance falls below this; required with --apply, "
                          f">= {MIN_FLOOR:,}")
-    ap.add_argument("--apply", action="store_true", help="spend; without it, print the plan")
+    ap.add_argument("--apply", action="store_true",
+                    help="spend (the purchases) or write (the replay); without it, a dry run")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="write nothing: the default without --apply")
+    ap.add_argument("--step", type=int, choices=GRID_STEPS,
+                    help="--opener-grid only: minutes between grid times")
+    ap.add_argument("--pre-start", action="store_true",
+                    help="--opener-grid only: add 240 to 72 hours before each season's first tip")
+    return ap
+
+
+def main() -> None:
+    ap = _parser()
     a = ap.parse_args()
     first, last = a.seasons
     if first > last:
         ap.error("--seasons FIRST must not be after LAST")
+    if a.apply and a.dry_run:
+        ap.error("--apply and --dry-run contradict each other")
+    if a.replay_unmatched:
+        if a.max_credits is not None or a.floor is not None:
+            ap.error("--replay-unmatched buys nothing; it takes no --max-credits or --floor")
+        _run_replay(first, last, apply=a.apply)
+        return
     if a.floor is not None and a.floor < MIN_FLOOR:
         ap.error(f"--floor must be at least {MIN_FLOOR:,} (the live feeds' reserve)")
     if a.apply and (not a.max_credits or a.max_credits <= 0):
         ap.error("--apply needs --max-credits")
     if a.apply and a.floor is None:
         ap.error("--apply needs --floor")
+    if a.opener_grid and a.step is None:
+        ap.error("--opener-grid needs --step 60 or --step 30")
+    if not a.opener_grid and (a.step is not None or a.pre_start):
+        ap.error("--step and --pre-start belong to --opener-grid")
+    if a.opener_grid and not a.apply:
+        conn = _read_only_connection()     # the dry run cannot write, by the server's word
+        try:
+            _dry_run_grid(conn, first, last, a.step, a.pre_start)
+        finally:
+            conn.close()
+        return
     conn = get_connection()
     try:
         if not a.apply:
@@ -939,6 +1640,9 @@ def main() -> None:
         meter = Meter(ceiling=a.max_credits, floor=a.floor)
         if a.probe:
             print("probe:", probe(conn, meter, last))
+        elif a.opener_grid:
+            print(f"opener grid every {a.step} min:",
+                  buy_opener_grid(conn, meter, first, last, a.step, pre_start=a.pre_start))
         elif a.lines:
             print("lines:", buy_lines(conn, meter, first, last))
         else:
