@@ -34,6 +34,16 @@ WHAT IS BOUGHT (cost MEASURED on 2026-10-15 from x-requests-last):
            The event list (1 credit a date) also gives each game's start, which
            fills `games.commence_time` where it is NULL.
 
+  --postseason-props  (2026-10-30, mike approved about 37,000 credits.) The same 14
+           markets and one snapshot at tip minus `--lead-min`, for the play-in, the
+           playoffs and the Cup final, which no NBA model has ever been graded on.
+           Those games are in `nba_schedule` and NOT in `games`, and
+           player_prop_odds.game_id has a foreign key to `games`. Adding them to
+           `games` would put postseason rows in every rating, rest and record
+           reader, so they land in their own worker-only table,
+           `nba_postseason_prop_odds`, which nothing live reads. A game holding
+           player_points rows there is skipped, so a re-run buys nothing twice.
+
   --extra-hours / --fill-gaps  (2026-10-17, the second game-market search,
            docs/nba_models_2026.md §6.5.) More hours on every game date, and
            tip-relative fetches -- tip - 60 and tip - 240, the 5-minute snapshot
@@ -120,6 +130,28 @@ CREATE TABLE IF NOT EXISTS odds_history_fetches (
     PRIMARY KEY (sport, requested_at)
 )
 """
+POSTSEASON_PROP_TABLE = "nba_postseason_prop_odds"
+POSTSEASON_TYPES = ("playin", "playoff", "cup_final")
+POSTSEASON_PROP_DDL = f"""
+CREATE TABLE IF NOT EXISTS {POSTSEASON_PROP_TABLE} (
+    prop_id          BIGSERIAL PRIMARY KEY,
+    game_id          TEXT NOT NULL,
+    game_date        TEXT NOT NULL,
+    player_name      TEXT NOT NULL,
+    team             TEXT,
+    market           TEXT NOT NULL,
+    bookmaker        TEXT NOT NULL,
+    snapshot_type    TEXT NOT NULL,
+    snapshot_at      TEXT NOT NULL,
+    line             DOUBLE PRECISION,
+    over_price       DOUBLE PRECISION,
+    under_price      DOUBLE PRECISION,
+    book_last_update TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+POSTSEASON_PROP_INDEX = (f"CREATE INDEX IF NOT EXISTS idx_{POSTSEASON_PROP_TABLE}_game_market "
+                         f"ON {POSTSEASON_PROP_TABLE} (game_id, market)")
 ET = ZoneInfo("America/New_York")
 
 
@@ -486,7 +518,10 @@ def _props_done(conn, game_ids: list[str]) -> set[str]:
 
 
 def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
-                   lead_min: int, apply: bool = True, limit: int | None = None) -> dict:
+                   lead_min: int, apply: bool = True, limit: int | None = None,
+                   write=_insert_prop_odds, stamp_games: bool = True) -> dict:
+    """One date's props. `write` stores the rows; `stamp_games` fills games.commence_time,
+    which a postseason game (not in `games`) has no row to take."""
     stats = {"date": game_date, "events": 0, "prop_rows": 0, "markets": defaultdict(set)}
     # The event list at noon Eastern lists the whole slate with its starts.
     noon = datetime.fromisoformat(f"{game_date}T12:00:00").replace(tzinfo=ET)
@@ -513,7 +548,7 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
         if why:
             stats["stopped"] = why
             break
-        if apply and not g.get("commence_time"):
+        if apply and stamp_games and not g.get("commence_time"):
             conn.execute("UPDATE games SET commence_time = %s WHERE game_id = %s "
                          "AND commence_time IS NULL",
                          (start.astimezone(timezone.utc).isoformat(), g["game_id"]))
@@ -545,7 +580,7 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
                 stats["markets"][row["market"]].add(bk)
         if apply and rows:
             def _write(rows=rows):
-                _insert_prop_odds(conn, rows)
+                write(conn, rows)
                 conn.commit()
             if _write_with_retry(conn, _write, g["game_id"]):
                 stats["prop_rows"] += len(rows)
@@ -585,6 +620,77 @@ def buy_props(conn, meter: Meter, first_season: int, last_season: int, lead_min:
             totals["stopped"] = s["stopped"]
             logger.warning(f"props stopping at {d}: {s['stopped']}")
             break
+    return dict(totals)
+
+
+def _insert_postseason_props(conn, rows: list[dict]) -> int:
+    """The parser's prop rows into nba_postseason_prop_odds (no foreign key to `games`)."""
+    if not rows:
+        return 0
+    conn.executemany(f"""
+        INSERT INTO {POSTSEASON_PROP_TABLE} (
+            game_id, game_date, player_name, team, market, bookmaker, snapshot_type,
+            snapshot_at, line, over_price, under_price, book_last_update
+        ) VALUES (
+            %(game_id)s, %(game_date)s, %(player_name)s, %(team)s, %(market)s, %(bookmaker)s,
+            %(snapshot_type)s, %(snapshot_at)s, %(line)s, %(over_price)s, %(under_price)s,
+            %(book_last_update)s
+        )
+    """, [{**r, "book_last_update": r.get("book_last_update")} for r in rows])
+    return len(rows)
+
+
+def _postseason_games(conn, first_season: int, last_season: int) -> dict[str, dict]:
+    rows = conn.execute("""
+        SELECT game_id, game_date, home_team, away_team
+          FROM nba_schedule
+         WHERE game_type = ANY(%s) AND season BETWEEN %s AND %s
+    """, (list(POSTSEASON_TYPES), first_season, last_season)).fetchall()
+    return {r[0]: {"game_id": r[0], "game_date": str(r[1])[:10], "home": r[2], "away": r[3]}
+            for r in rows}
+
+
+def buy_postseason_props(conn, meter: Meter, first_season: int, last_season: int,
+                         lead_min: int) -> dict:
+    """Props for every play-in, playoff and Cup final game, newest first, into their own table."""
+    from data.ddl_guard import schema_is_current
+    if not schema_is_current(conn, POSTSEASON_PROP_TABLE):
+        conn.execute(POSTSEASON_PROP_DDL)
+        conn.execute(POSTSEASON_PROP_INDEX)
+    lock_down(conn, POSTSEASON_PROP_TABLE)
+    conn.commit()
+    games = _postseason_games(conn, first_season, last_season)
+    done = {r[0] for r in conn.execute(
+        f"SELECT DISTINCT game_id FROM {POSTSEASON_PROP_TABLE} WHERE market = 'player_points'"
+    ).fetchall()}
+    for gid in done & set(games):
+        games[gid]["done"] = True
+    by_date: dict[str, list[dict]] = defaultdict(list)
+    for g in games.values():
+        by_date[g["game_date"]].append(g)
+    todo = sorted((d for d, gs in by_date.items() if not all(g.get("done") for g in gs)),
+                  reverse=True)
+    n = sum(1 for d in todo for g in by_date[d] if not g.get("done"))
+    logger.info(f"postseason props: {len(games)} games, {len(done)} stored, {n} to buy on "
+                f"{len(todo)} dates")
+    totals = defaultdict(int)
+    for d in todo:
+        s = buy_props_date(conn, meter, d, by_date[d], lead_min,
+                           write=_insert_postseason_props, stamp_games=False)
+        totals["events"] += s["events"]
+        totals["prop_rows"] += s["prop_rows"]
+        if s.get("unmatched"):
+            totals["unmatched"] += len(s["unmatched"])
+        logger.info(f"postseason props {d}: {s['events']} games, {s['prop_rows']} rows | "
+                    f"spent {meter.spent:,}, balance {meter.remaining}")
+        if s.get("error"):
+            totals["date_errors"] += 1
+            logger.warning(f"{d}: event list answered {s['error']}")
+        if s.get("stopped"):
+            totals["stopped"] = s["stopped"]
+            logger.warning(f"postseason props stopping at {d}: {s['stopped']}")
+            break
+    totals["games_planned"] = n
     return dict(totals)
 
 
@@ -846,6 +952,8 @@ def main() -> None:
     ap.add_argument("--lines", action="store_true")
     ap.add_argument("--props", action="store_true")
     ap.add_argument("--derivatives", action="store_true")
+    ap.add_argument("--postseason-props", action="store_true",
+                    help="play-in, playoff and Cup final props, into nba_postseason_prop_odds")
     ap.add_argument("--alternates", action="store_true",
                     help="every book's alternate spread / total / team-total ladder, one purchase a game")
     ap.add_argument("--dates", nargs=2, metavar=("FIRST", "LAST"),
@@ -882,7 +990,7 @@ def main() -> None:
             print(f"MEASURED {meter.spent} credits for {s['events']} games; balance {meter.remaining}")
             return
         if not a.seasons or not (a.lines or a.props or a.derivatives or a.alternates or a.fill_gaps
-                                 or a.instants):
+                                 or a.instants or a.postseason_props):
             ap.error("give --lines, --fill-gaps, --props, --derivatives or --alternates "
                      "with --seasons FIRST LAST")
         if not a.apply:
@@ -899,6 +1007,8 @@ def main() -> None:
             print("gaps:", buy_gaps(conn, meter, *a.seasons, season_order=a.season_order))
         if a.props:
             print("props:", buy_props(conn, meter, *a.seasons, a.lead_min))
+        if a.postseason_props:
+            print("postseason props:", buy_postseason_props(conn, meter, *a.seasons, a.lead_min))
         if a.derivatives:
             print("derivatives:", buy_derivatives(conn, meter, *a.seasons, a.lead_min))
         if a.alternates:

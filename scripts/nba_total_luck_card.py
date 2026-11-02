@@ -137,9 +137,25 @@ def slate(conn, now: datetime, skipped: list | None = None,
     does not list yet (an NBA Cup quarterfinal or semifinal, a game scheduled
     around them) is priced, as the lab priced it, and the Cup final, play-in
     and playoffs are skipped and named in `skipped`."""
-    from models.nba_prop_market import tip_of
+    horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
+                              else tl.DECISION_LEAD_MIN[1] + 5)
     today = now.astimezone(_ET).date()
-    dates = [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)]
+    return _regular_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)],
+                          lambda tip: now < tip <= horizon, skipped)
+
+
+def tipped_games(conn, now: datetime, hours: float) -> dict[str, dict]:
+    """The regular-season NBA games that tipped in the `hours` before `now`: the
+    slate's own read and rule, looking back instead of ahead."""
+    oldest = now - timedelta(hours=hours)
+    today = now.astimezone(_ET).date()
+    return _regular_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-2, -1, 0)],
+                          lambda tip: oldest <= tip <= now)
+
+
+def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) -> dict[str, dict]:
+    """The regular-season games on these ET dates whose tip `wanted` accepts."""
+    from models.nba_prop_market import tip_of
     rows = conn.execute("""
         SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
                g.commence_time, s.commence_time, s.game_type
@@ -147,12 +163,10 @@ def slate(conn, now: datetime, skipped: list | None = None,
         LEFT JOIN nba_schedule s ON s.game_id = g.game_id
         WHERE g.sport = 'NBA' AND g.game_date = ANY(%s)
     """, (dates,)).fetchall()
-    horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
-                              else tl.DECISION_LEAD_MIN[1] + 5)
     cand = {}
     for gid, home, away, gd, season, g_ct, s_ct, game_type in rows:
         tip = tip_of(s_ct, g_ct)
-        if tip is None or tip <= now or tip > horizon or gid in cand:
+        if tip is None or not wanted(tip) or gid in cand:
             continue
         cand[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
                      "season": int(season) if season is not None else None, "tip": tip,

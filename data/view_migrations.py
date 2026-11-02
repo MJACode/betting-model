@@ -486,6 +486,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # and the lock-down exist. Does not touch picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_ncaab_period_scores_2026_10_30.sql",
+    # 2026-10-30: NCAAB pre-tip injury changes, including status 'cleared',
+    # plus the open report, the poll backoff and the name-miss log. Worker
+    # only (RLS, no policy, anon revoked). Tags read injury_status_current.
+    # Not a model feature. Returns on a catalog read once the four tables
+    # exist and anon cannot SELECT the change log.
+    "add_ncaab_injury_changes_2026_10_30.sql",
     # 2026-10-31 (Matt): the Stats board timed out on first open. Season
     # index on the NBA and WNBA game logs, which had none, so
     # player_recent_games_* reads one season instead of the whole log.

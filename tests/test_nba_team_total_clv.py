@@ -223,11 +223,14 @@ def test_a_clv_failure_does_not_stop_settlement(monkeypatch):
                  "_settle_golf_picks"):
         monkeypatch.setattr(pt, name, lambda *a, _n=name, **k: calls.append(_n) or zero)
     import data.ingestors.cfbd_ingestor as cfbd
+    import data.ingestors.nba_period_scores as periods
     import data.ingestors.prop_box_scores as box
     import tracking.opening_signals as opening
     import tracking.parlay_track_record as parlay
     monkeypatch.setattr(cfbd, "mirror_stored_finals", lambda *a, **k: None)
     monkeypatch.setattr(box, "ensure_prop_box_scores", lambda *a, **k: {})
+    # Opens its own connection and may call ESPN, as the box-score pull does.
+    monkeypatch.setattr(periods, "ensure_first_half_period_scores", lambda *a, **k: {})
     monkeypatch.setattr(opening, "settle_opening_signals", lambda *a, **k: None)
     monkeypatch.setattr(parlay, "settle_parlay_track_record", lambda *a, **k: None)
     pt.settle_picks("2026-10-10")
@@ -253,5 +256,7 @@ def test_the_sql_recompute_reads_a_team_total_close_from_close_rows_only(alias):
     other market keeps its pre-game rows. Text, because the recompute runs
     only in Postgres; checked there with EXPLAIN."""
     body = _lateral(MIGRATION.read_text(encoding="utf-8"), alias)
-    assert ("(s.game_market LIKE 'team_totals%' AND o.snapshot_type = 'close') OR "
-            "(s.game_market NOT LIKE 'team_totals%' AND o.snapshot_type <> 'in_play')") in body
+    assert ("((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1') "
+            "AND o.snapshot_type = 'close') OR "
+            "(s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1' "
+            "AND o.snapshot_type <> 'in_play')") in body

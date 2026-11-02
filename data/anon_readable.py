@@ -328,6 +328,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_events",
     "ncaab_teams",
     "ncaab_venues",
+    # NCAAB pre-tip injury change log, the open report it diffs against, the
+    # poll backoff and the name misses. Created by
+    # data/ingestors/ncaab_injury_feed.py and
+    # data/migrations/add_ncaab_injury_changes_2026_10_30.sql. Tags only,
+    # via injury_status_current; the app does not read these four.
+    "ncaab_injury_changes",
+    "ncaab_injury_open",
+    "ncaab_injury_polls",
+    "ncaab_injury_misses",
     # The league's NBA injury report archive and its pull ledger. Created on
     # demand by data/ingestors/nba_injury_report.py; model input, never read
     # by the app.
@@ -382,6 +391,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # writer; read by the card and the window job, never by the app.
     "nba_team_total_luck_decisions",
     "nba_team_total_fetches",
+    # The NBA first-half model's two, the same pair
+    # (scripts/nba_first_half_total_luck_card.py,
+    # data/ingestors/nba_first_half_odds.py).
+    "nba_first_half_total_luck_decisions",
+    "nba_first_half_total_fetches",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.

@@ -227,6 +227,7 @@ jobs:
             tests/test_ncaab_teams.py \
             tests/test_ncaab_odds_history.py \
             tests/test_ncaab_odds_replay_pg.py \
+            tests/test_ncaab_injury_feed.py \
             tests/test_idle_read_transaction.py \
             tests/test_monitoring.py \
             tests/test_view_migration_lock_noop.py \

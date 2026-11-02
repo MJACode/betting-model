@@ -680,6 +680,16 @@ ACTION_THRESHOLDS: dict = {
     # +64.72 units on 390.37 risked, +16.6%, every season positive. prob / edge
     # are 0.0 for the same reason as nba_total_luck's.
     "nba_team_total_luck":      {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-HALF total, OVER only (the fourth NBA search's cell C1; mike,
+    # 2026-10-30: "Build the model that passed."): written by the
+    # nba_first_half_total_luck card. THE CUT IS THE FULL-GAME SHOOTING-LUCK GAP
+    # (>= 2.0 points, applied in the card), the offer the best expected value
+    # under the market's fair line, decided about an hour before tip. Settles on
+    # Q1 + Q2 points. Graded walk-forward at bought prices, 2023-24..2025-26
+    # pooled: 595 bets, 333-259-3, +51.49 units on 643.19 risked, +8.0%, interval
+    # +0.4% to +15.4%, every season positive. prob / edge are 0.0 for the same
+    # reason as nba_total_luck's.
+    "nba_first_half_total_luck": {"min_prob": 0.0, "min_edge": 0.0},
     # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
     # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
     # Team ratings refit as of DraftKings' total, a residual on as-of shooting
@@ -1949,6 +1959,10 @@ MODEL_MIN_ODDS: dict = {
     # (median -112), so -200 admits prices it was never graded at. Pinned so a
     # Railway DEFAULT_MIN_ODDS override cannot move it.
     "nba_team_total_luck":       -200,
+    # NBA first-half overs: it laid -130 to +114 on its 595 graded bets (median
+    # -110), so -200 admits prices it was never graded at. Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it.
+    "nba_first_half_total_luck": -200,
     # NCAAB totals (2026-10-30, mike): it laid -120 to +102 on its 1,094
     # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
     # override cannot move it.
@@ -2207,6 +2221,15 @@ MODEL_OWN_EV_FLOOR: dict = {
     # uplift (+0.1022), it removes one: NBA_2025-01-24_POR_CHA, FanDuel under
     # 109.5 at -118, -0.113. The next smallest is +0.053, the median +0.169.
     "nba_team_total_luck":      0.00,
+    # NBA first-half overs. Same reasoning: the cut is the gap, and this floor is
+    # applied in the card to p_model x decimal - 1 (a push scored as a loss),
+    # p_model being the fair probability plus the walk-forward uplift. On its 595
+    # graded bets, at the 2026-27 uplift (+0.0572), it removes two, both wins:
+    # NBA_2024-11-18_IND_TOR, Hard Rock over 118.5 at -110, -0.051, and
+    # NBA_2025-01-02_BOS_MIN, DraftKings over 109 at -110, -0.030. That takes the
+    # graded record to 593 bets, +49.49 units, +7.7%. The next smallest is +0.005,
+    # the median +0.074.
+    "nba_first_half_total_luck": 0.00,
     # NCAAB totals (2026-10-30, mike). The cut is the edge (0.04, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
@@ -2348,6 +2371,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # walk-forward uplift of the earlier graded seasons, which is what its
     # floor was set on. No record either, so the same reasoning.
     "nba_team_total_luck",
+    # The NBA first-half overs: the market's fair P(over) plus the walk-forward
+    # uplift of the earlier graded seasons, which is what its floor was set on.
+    # No record either, so the same reasoning.
+    "nba_first_half_total_luck",
     # 2026-10-30 (mike, "Yes to the totals model"). NCAAB totals: its number
     # is the blend's P(win | no push) at DraftKings' line, which its 0.04 cut
     # was measured on. It has no record, so its map would be the offset
@@ -2471,6 +2498,9 @@ SCORING_METHODS: dict = {
     # The same shape: a rule whose parameter artifact holds the residual sample
     # and the per-season uplift buckets, loaded by the card, never registered.
     "nba_team_total_luck": "rule",
+    # The same shape again: its artifact holds the rows its first-half pricing is
+    # fitted on and the per-season uplift buckets.
+    "nba_first_half_total_luck": "rule",
     # A rule with a parameter artifact committed under models/saved/ (last
     # season's ratings, the residual and blend coefficients,
     # models/ncaab_total_blend.py), never registered: the card loads it by
@@ -2506,6 +2536,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.04,   # 2026-10-30 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2597,6 +2628,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
+    "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -4523,6 +4555,17 @@ NCAAB_ODDS_API_MAP: dict = {
     "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 118 of 120
     "Valparaiso Crusaders": 2674,           # ESPN "Valparaiso Beacons"; 36 of 37
 }
+
+# Injury-page team string -> ESPN team id. Checked before
+# ncaab_teams.resolve_team_name, and only for that exact string. Empty until
+# a miss log names a string the resolver cannot place. Do not guess an id.
+NCAAB_INJURY_TEAM_MAP: dict = {}
+
+# "espn_team_id|player_key" -> player_key on that team's roster. Used when the
+# feed spells a name the roster does not. The value is applied only when it is
+# on the roster; a value that is not is a miss, not a match. Empty until a
+# miss is confirmed by hand.
+NCAAB_INJURY_PLAYER_MAP: dict = {}
 
 # The Odds API team name → CFBD canonical school name.
 #

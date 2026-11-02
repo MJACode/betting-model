@@ -361,6 +361,13 @@ export function TeamStatsScreen() {
                   : `${d.pickRecords.teamTotals} of them are team-total bets (one team’s points), which the tiles above leave out.`}
               </Text>
             ) : null}
+            {d.pickRecords.firstHalves > 0 ? (
+              <Text style={styles.footnote}>
+                {d.pickRecords.firstHalves === 1
+                  ? '1 of them is a first-half total bet, which the tiles above leave out.'
+                  : `${d.pickRecords.firstHalves} of them are first-half total bets, which the tiles above leave out.`}
+              </Text>
+            ) : null}
             {d.pickRecords.ledgerUnread ? (
               <Text style={styles.footnote}>
                 The Discord check did not finish, so this record can include picks whose posting status is unknown.
