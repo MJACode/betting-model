@@ -383,6 +383,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # (scripts/ncaab_total_card.py, which creates it on demand). Read by the
     # card, never by the app.
     "ncaab_total_decisions",
+    # The NCAAB spread card's decisions ledger: one row per game it has
+    # decided at 15:00 UTC, bet or not, with every book's quote, the
+    # consensus and the reason (scripts/ncaab_spread_card.py, which creates it
+    # on demand). Read by the card, never by the app.
+    "ncaab_spread_decisions",
     # The NBA home team-total model's two: its decisions ledger, one row per
     # decided game with the home team's part of the gap and the best under
     # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one

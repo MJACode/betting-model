@@ -217,6 +217,178 @@ games each).
   books in `odds` for season 2027 on 2026-10-30), so the closing-value
   columns start empty.
 
+### The NCAAB spread model (`ncaab_spread_market`), live from 2026-11-02
+
+mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
+what"*, and the same day, *"we do not need to wait 10 games ... I want these
+models live now"*. Real money, like every model (CLAUDE.md §2), with no
+games-played wait. Code: `models/ncaab_spread_market.py` (the rule),
+`models/ncaab_book_quotes.py` (every book's quote at 15:00 UTC),
+`models/ncaab_margin_dist.py` (the final-margin distribution),
+`scripts/ncaab_spread_card.py` (the card that writes its picks),
+`scripts/ncaab_spread_market_build.py` (the frozen numbers and the replay),
+`models/saved/ncaab_spread_market_2027.json` (those numbers for 2026-27). The
+quote reader and the distribution are separate modules so the moneyline and
+first-half models planned next can use them.
+
+**What it bets.** Line shopping against the books' own consensus. At 15:00 UTC
+on game day (10 a.m. ET in winter, 11 a.m. ET from mid-March) it reads each of
+the eight bettable books' full-game spread (DraftKings, FanDuel, BetMGM,
+Caesars, Fanatics, BetRivers, Hard Rock, betPARX), takes the middle line, and
+looks for one book whose line is better than the others for one side. When the
+best quote's edge is above **0.03** and at least three other books quote the
+game, it bets that quote, at that book's line and price.
+
+**How a quote is priced, step by step:**
+
+1. **Each book's quote** is its newest pre-game spread stamped in the hour up
+   to 15:00 UTC. A game that tips at or before 15:00 UTC is not bet.
+2. **Sign errors out.** A quote on the other side of zero from the other books'
+   middle line is a pick'em sign error in the feed and is dropped.
+3. **The consensus** is the middle (median) line of the remaining quotes, the
+   book being priced included.
+4. **The expected home margin** is minus the consensus plus a small offset:
+   +0.25 points in November, -0.08 from December on. The offset is the average
+   of (final margin + the Prediction Tracker opener) over the 2012-2020 free
+   archive. It was fitted once and used for every season the research graded,
+   including 2025-26. It was never refit on the paid seasons, so it is not
+   refit here. The same average over the 2021-2026 paid seasons' 15:00 UTC
+   consensus would be +0.31 / -0.02, numbers nobody has tested.
+5. **The chance each side covers** comes from the distribution of final
+   margins in earlier games whose closing line implied a similar margin (fitted
+   on 2012-2026 for this season, 70,268 games). It keeps the real shape of
+   basketball margins (few one-point games, overtime), so a push is possible
+   only on a whole-number line.
+6. **The edge** of a side is its chance of winning with a push left out, minus
+   the implied chance of that side's own price, vig included. Each quote is
+   priced on its better side (the home side on a tie). Across the books, the
+   best quote is the largest edge; a tie goes to the better line, then the
+   better price, then the book's name in alphabetical order. A tie on line and
+   price is the same bet at two books, so the last step only names which.
+
+**When a game is decided: at 15:00 UTC on its date, once.** The card runs
+hourly at five past (UTC), but only the run in the 15:00 hour decides
+anything, and it reads the quotes as of 15:00 UTC even if it runs late in that
+hour. The decision, bet or not, goes into `ncaab_spread_decisions` with every
+book's quote, the consensus and the reason, and the game is never decided
+again (CLAUDE.md §1c). Only BET rows go into `picks`.
+
+**A missed 15:00 is a failure, never a late bet.** The research tested no
+other hour that held up: 22:00 UTC the evening before failed, and the hour
+before tip made +0.43%. So when a later run finds one of the day's games with
+no decision (the 15:05 run died, was skipped, or the card was switched off),
+it records the game as `missed` with no bet and the run exits 1: the heartbeat
+records an error and the failure alerter reports it. The one exception is the
+card's very first run: games whose 15:00 came before the card existed are
+recorded as `missed` without an error. Two other conditions fail the run after
+it writes what it can: every due game with no quote at all (the odds steps
+have stopped), and a best quote at a book `config.BEST_LINE_BOOKMAKERS` no
+longer lists. The next-best quote is not bet instead, because that is not the
+quote the research chose.
+
+**Is a fresh quote there at 15:00?** Measured on the 2026-27 slate on
+2026-11-02 (119 games with odds): the hourly refresh pass at :17 past 9 a.m. ET
+stores every listed book's spread, so at 15:00 UTC the median quote is 42
+minutes old and inside the one-hour window. Across that day's hours, 83% to 96%
+of book-and-game pairs had a quote inside the window. Caesars was missing from
+the 14:00-16:00 UTC passes that day (3% of its games fresh at 15:00). The
+five-minute capture job writes a row only when a number moves, so an unchanged
+quote keeps the refresh pass's stamp. The research's quotes came from a bought
+snapshot taken at 15:00 UTC (its bet quotes were a median 5.5 minutes old).
+Live quotes are the
+refresh pass's plus any changes since. They give the same number unless a book
+takes its line down without the feed showing it.
+
+**The bet row.** `scored_line` is the bet book's home number (CLAUDE.md §4).
+The label is the platform's ("Duke -8.0"), checked against side and line
+before it is written. `decision_*` and `best_*` are the bet book's price. When
+DraftKings had the same line at 15:00 UTC, `line_book` is empty and `dk_odds`
+/ `dk_implied_prob` / `edge` are DraftKings' own price on that side, the
+reference. Otherwise `line_book` names the bet book and `dk_odds` is empty, the
+same convention as a pick scored off another book's line. `model_probability`
+is the chance of winning with a push left out, the number the 0.03 cut was
+measured on, so the publishers' edge filter agrees with the card. Settlement:
+full-game spread, overtime included.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.03 (P(win, push left out) minus the bet price's implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| other books | at least 3 other books in the consensus | `models/ncaab_spread_market.MIN_OTHER_BOOKS`, the artifact |
+| prob / edge filter | 0.0 / 0.03: the edge filter IS the card's cut | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.05, just under the smallest EV the cut admitted in the replay (+0.0563; median +0.0697, 542 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; the replay laid -120 to +114 (median -110) | `MODEL_MIN_ODDS` |
+| decision instant | 15:00 UTC on the game's date; quotes stamped 14:00-15:00 UTC | `models/ncaab_book_quotes.py` |
+| decided once | a row in `ncaab_spread_decisions`, bet or not | `scripts/ncaab_spread_card.py` |
+| settlement | full-game spread, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
+| kill switch | `RUN_NCAAB_SPREAD_CARD=0` | the card |
+| frozen numbers | offset from 2012-2020, distribution from 2012-2026 | `models/saved/ncaab_spread_market_2027.json` |
+
+**The evidence: the card's own code, replayed** (2026-11-02,
+`scripts/ncaab_spread_market_build.py` on the copy of the Supabase reads taken
+for the research; each season priced with the distribution fitted on the
+seasons before it; stake_for; units; 95% interval resampled by date). It
+matched all 613 of the research's bets game by game (game, side, line, price,
+and the same book on all 613). Its distributions equal the research's to the
+last digit (largest difference 0.0).
+
+| Population | Seasons | Bets | Record | Units | ROI | 95% interval |
+|---|---|---|---|---|---|---|
+| **Live: 3+ other books** | **2021-2025** | **409** | **230-170-9** | **+44.60** | **+9.97%** | **[0.8, 18.4]** |
+| **Live: 3+ other books** | **2025-26** | **133** | **84-49-0** | **+30.34** | **+20.96%** | **[6.3, 35.4]** |
+| Every game (the research's version) | 2021-2025 | 478 | 271-197-10 | +57.23 | +10.97% | [3.1, 18.7] |
+| Every game | 2025-26 | 135 | 86-49-0 | +32.34 | +22.01% | [7.0, 36.4] |
+
+By season, live version: 2020-21 +10.69% (14 bets), 2021-22 +15.55% (120),
+2022-23 +1.29% (53), 2023-24 +11.59% (77), 2024-25 +7.59% (145), 2025-26
++20.96% (133). The three-other-books minimum was tested after the research had
+seen its results; it removes 71 bets that leaned on one or two other books.
+Neighbouring cuts (research, every game, 2021-2025): 0.02 +4.72% on 1,511 bets
+[-0.4, 9.7]; 0.04 +23.32% on 163 [9.6, 36.1]. With three other books: 0.02
++4.21% on 1,342 [-1.1, 9.4]; 0.04 +19.39% on 129 [3.4, 34.6].
+
+**The risks, plainly:**
+
+- **The true edge is probably about +2% a bet, not +10%.** Against Pinnacle's
+  closing line, the 613 bets were worth +2.28% a bet on 2021-2025 and -0.05% on
+  2025-26 (the live version: +1.83% and -0.15%). The +10% and +21% are a
+  favourable draw inside wide intervals. Without its 10 best dates the live
+  version made +3.76% on 2021-2025 and +3.25% on 2025-26.
+- **The edge is the off-market number, not a read on the game.** The
+  research's 478 bets on 2021-2025, re-bet on the same sides at the consensus
+  line at -110, made +1.71% [-6.1, 9.4]. In the live version the profit comes
+  from quotes 1 point or more better than the
+  other books: +13.6% on 187 bets at 1 to 1.5 points and +29.0% on 58 at 1.5 or
+  more, against -4.4% on 134 at half a point to 1 (2021-2025). On 2021-2025 it
+  sits in lines of 12.5 or more (250 bets, +17.58%); the 159 bets on smaller
+  lines lost 2.22%. In 2025-26 the smaller lines made more (54 bets, +21.09
+  units, against 79 bets, +9.25 units), so where the edge sits is not settled.
+- **Nobody has measured how often a 15:00 UTC off-market number can actually
+  be bet.** At the bet book's next poll (median 6 hours later) 48% of the
+  research's 2021-2025 bets (41% in 2025-26) had already moved to the
+  consensus. A number that is gone by the time a member opens the
+  app is a bet of record they could not get. The ledger keeps every book's
+  quote, so this is the first thing to measure live.
+- **2025-26 is a second look, not a clean hold-out.** The research had already
+  opened that season in an earlier round before choosing this rule.
+- **Early-season games are in.** 185 of the 409 live 2021-2025 bets (45%) are
+  in November (+9.97%), and a 10-game wait would have kept them all out. With
+  that wait the live version made +6.56% on 178 bets on 2021-2025, interval
+  [-7.5, 20.8].
+- **The book mix depends on the feed.** FanDuel, BetMGM, betPARX, DraftKings and
+  Caesars carry most bets (95, 93, 89, 84 and 83 of 542). A book the feed stops
+  sending is simply absent; one whose quote is stale falls out of the window.
+
+**The build's tables depend on read order in one place.** 140 games have two
+archive rows from the same source (`ncaab_archive_lines`); the build keeps the
+first as read, as the research did. Read in another order (sorted by row key),
+the tables move by up to 0.0009. The 2026-11-02 build read the research's copy and reproduced
+its tables exactly.
+
+**Before the 2027-28 season** rebuild the frozen numbers through 2026-27
+(`python -m scripts.ncaab_spread_market_build --cache <copy> --last-season
+2027`). The card refuses a season the artifact was not built for, and those
+games are then recorded as missed.
+
 ## Identity: ESPN owns the games row
 
 `data/ingestors/ncaab_teams.py` is the contract every other piece reads.
