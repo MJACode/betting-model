@@ -835,9 +835,9 @@ def _po_quotes(gid=PO_GID, line=24.5):
 class _LookConn:
     """One stored world: a look reads it by shape, and the door writes to it."""
 
-    def __init__(self, games, quotes=(), sched=SCHED_2027, night=None):
+    def __init__(self, games, quotes=(), sched=SCHED_2027, night=None, starts=None):
         self.games, self.sched, self.quotes = list(games), list(sched), _rows_of(quotes)
-        self.night = dict(night or {})
+        self.night, self.starts = dict(night or {}), dict(starts or {})
         self.decisions, self.picks, self.sql = {}, [], []
 
     def execute(self, sql, params=None):
@@ -850,6 +850,8 @@ class _LookConn:
             self._all = sorted({(r[1], r[2], r[3]) for r in self.sched})
         elif "FROM nba_schedule s LEFT JOIN games g" in s and "in_games" in s:
             self._all = self.sched
+        elif s.startswith("SELECT game_id, commence_time FROM nba_schedule"):
+            self._all = [(g, t) for g, t in self.starts.items() if g in params[0]]
         elif "FROM player_prop_odds" in s:
             self._all = [r for r in self.quotes if r[0] in params[0]]
         elif "FROM nba_player_game_log" in s:
@@ -1032,27 +1034,84 @@ def test_a_tip_with_no_schedule_row_is_marked_as_the_feeds(monkeypatch):
     assert "game_type=unlisted tip_source=feed" in conn.decisions[PO_GID]["detail"]
 
 
-def test_two_starts_far_apart_are_named_and_the_earlier_is_used(monkeypatch):
-    """ESPN alone sets a postseason row's tip. When it and the feed sit further apart than the feed
-    ever lags (30 minutes, FEED_LAG), one is wrong. Earlier is safe for the decision: it can never
-    run past the real start."""
-    import data.ingestors.nba_schedule_refresh as nsr
+def _quotes_at(when, gid=PO_GID):
+    snap = (when - timedelta(minutes=2)).isoformat()
+    return [q("pinnacle", -115, -105, gid=gid, snap=snap), q("fanduel", -125, +105, gid=gid, snap=snap)]
+
+
+def test_a_false_early_start_from_espn_writes_no_bet_at_its_window_and_one_at_the_feeds(monkeypatch):
+    """ESPN alone sets a postseason row's tip, and it has been five hours early (CHI @ MIL, 2026-10-23).
+    The feed's start has run 2.3 to 20.2 minutes after the league's and never before it, so over the gap the
+    feed's is the one read. On the earlier start this bet was written 355 minutes before the feed's start."""
     import scripts.nba_total_luck_card as tlcard
-    assert timedelta(minutes=tlcard.START_GAP_MIN) == nsr.FEED_LAG[1]
     warned = []
     monkeypatch.setattr(tlcard.logger, "warning", lambda m: warned.append(m))
-    late = (TIP + timedelta(hours=5)).isoformat()
-    conn = _LookConn([_po_game(s_ct=TIP.isoformat(), g_ct=late)], _po_quotes())
-    _, out = _one_look(conn, monkeypatch)
-    assert out["written"] == 1 and conn.picks[0]["game_time"] == TIP.isoformat()
+    late = TIP + timedelta(hours=5)
+    conn = _LookConn([_po_game(s_ct=TIP.isoformat(), g_ct=late.isoformat())], _po_quotes())
+    got, out = _one_look(conn, monkeypatch)                 # ESPN's window, Pinnacle up
+    assert got["games"] == {} and out["written"] == 0 and conn.picks == [] and conn.decisions == {}
+    # and the game is not lost: the feed's window still decides it
+    later = late - timedelta(minutes=55)
+    conn.quotes = _rows_of(_quotes_at(later))
+    got, out = _one_look(conn, monkeypatch, now=later)
+    assert out["written"] == 1 and conn.picks[0]["game_time"] == late.isoformat()
     assert any(PO_GID in w for w in warned)
     detail = conn.decisions[PO_GID]["detail"]
-    assert f"schedule_start={TIP.isoformat()}" in detail and f"feed_start={late}" in detail
-    # 25 minutes is the feed's ordinary lag: nothing to say
-    warned.clear()
+    assert "tip_source=feed" in detail
+    assert f"schedule_start={TIP.isoformat()}" in detail and f"feed_start={late.isoformat()}" in detail
+
+
+def test_a_start_inside_the_feeds_ordinary_lag_stays_on_the_earlier_and_says_nothing(monkeypatch):
+    import scripts.nba_total_luck_card as tlcard
+    warned = []
+    monkeypatch.setattr(tlcard.logger, "warning", lambda m: warned.append(m))
     near = (TIP + timedelta(minutes=25)).isoformat()
-    card.rule_slate(_LookConn([_po_game(s_ct=TIP.isoformat(), g_ct=near)]), NOW)
+    got = card.rule_slate(_LookConn([_po_game(s_ct=TIP.isoformat(), g_ct=near)]), NOW)
+    assert got[PO_GID]["tip"] == TIP and got[PO_GID]["tip_source"] == "schedule"
     assert warned == []
+
+
+def test_a_regular_season_game_stays_on_the_earlier_start():
+    """Only the postseason read trusts the feed over the schedule. A regular-season row is the league's,
+    and a moved league tip is seconded by the feed (data/ingestors/nba_schedule_refresh)."""
+    late = (TIP + timedelta(hours=5)).isoformat()
+    row = _po_game(kind="regular", s_ct=TIP.isoformat(), g_ct=late)
+    assert card.rule_slate(_LookConn([row]), NOW)[PO_GID]["tip"] == TIP
+    assert card.slate(_LookConn([row]), NOW)[PO_GID]["tip"] == TIP
+
+
+FLIPPED_FEED, FLIPPED_ESPN = "NBA_2026-12-11_LAL_GSW", "NBA_2026-12-11_GSW_LAL"
+
+
+def test_a_feed_row_the_other_way_round_reads_espns_tip(monkeypatch):
+    """The schedule join on the feed's id finds nothing, so the bet's game_time would be the feed's
+    late start, and that is what bounds its close."""
+    late = (TIP + timedelta(minutes=15)).isoformat()
+    sched = [*SCHED_2027, (FLIPPED_ESPN, 2027, "2026-12-11", "cup_final", "LAL", "GSW", False, False)]
+    row = _po_game(gid=FLIPPED_FEED, kind=None, day="2026-12-11", home="GSW", away="LAL", g_ct=late)
+    conn = _LookConn([row], _po_quotes(FLIPPED_FEED), sched=sched, starts={FLIPPED_ESPN: TIP.isoformat()})
+    got = card.rule_slate(conn, NOW)
+    assert got[FLIPPED_FEED]["tip"] == TIP and got[FLIPPED_FEED]["tip_source"] == "schedule"
+    assert got[FLIPPED_FEED]["game_type"] is None, "the start only: the row keeps its own type"
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1 and conn.picks[0]["game_time"] == TIP.isoformat()
+
+
+def test_the_regular_season_read_takes_the_same_tip_at_a_neutral_court():
+    """DEN at IND in Mexico City, the feed the other way round: every model's slate reads ESPN's tip."""
+    feed, espn = "NBA_2026-11-07_IND_DEN", "NBA_2026-11-07_DEN_IND"
+    late = (TIP + timedelta(minutes=15)).isoformat()
+    sched = [*SCHED_2027, (espn, 2027, "2026-11-07", "regular", "IND", "DEN", True, False)]
+    row = _po_game(gid=feed, kind=None, day="2026-11-07", home="DEN", away="IND", g_ct=late)
+    got = card.slate(_LookConn([row], sched=sched, starts={espn: TIP.isoformat()}), NOW)
+    assert got[feed]["tip"] == TIP
+
+
+def test_an_ordinary_night_makes_no_read_for_the_other_way_round():
+    """This runs on every window tick. A night of listed games costs no second read."""
+    conn = _LookConn([_po_game(kind="regular")])
+    card.rule_slate(conn, NOW)
+    assert not any(s.startswith("SELECT game_id, commence_time FROM nba_schedule") for s in conn.sql)
 
 
 # ── a second row for one real game ───────────────────────────────────────────

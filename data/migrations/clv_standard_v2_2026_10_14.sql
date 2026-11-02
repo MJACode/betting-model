@@ -375,6 +375,19 @@ BEGIN
       AND g.commence_time IS NOT NULL
       AND p.created_at::timestamptz <= g.commence_time::timestamptz
       AND g.commence_time::timestamptz <= now()
+      -- An NBA bet whose only start is the odds feed's has no close: that start runs up to 20 minutes
+      -- behind the real tip, and refresh passes store in-play rows typed 'open'. Left to the Python
+      -- capture, which leaves it empty (tracking/paper_tracker._nba_league_tip, the same test).
+      AND (
+        split_part(p.game_id, '_', 1) <> 'NBA'
+        OR EXISTS (
+          SELECT 1 FROM public.nba_schedule ns
+          WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
+            AND ns.commence_time IS NOT NULL
+            AND (ns.game_type NOT IN ('playin', 'playoff', 'cup_final')
+                 OR g.commence_time::timestamptz <= ns.commence_time::timestamptz + interval '30 minutes')
+        )
+      )
   ) INTO work_left;
 
   IF work_left THEN
@@ -389,12 +402,20 @@ BEGIN
         p.scored_line,
         p.clv_method AS old_method,
         g.commence_time::timestamptz AS commence_ts,
-        CASE
-          WHEN p.game_time IS NOT NULL
-           AND p.game_time::timestamptz < g.commence_time::timestamptz
-          THEN p.game_time::timestamptz
-          ELSE g.commence_time::timestamptz
-        END AS close_bound,
+        LEAST(
+          CASE
+            WHEN p.game_time IS NOT NULL
+             AND p.game_time::timestamptz < g.commence_time::timestamptz
+            THEN p.game_time::timestamptz
+            ELSE g.commence_time::timestamptz
+          END,
+          -- The league's tip, when a bet was written before the schedule listed its game.
+          CASE WHEN split_part(p.game_id, '_', 1) = 'NBA' THEN (
+            SELECT min(ns.commence_time::timestamptz) FROM public.nba_schedule ns
+            WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
+              AND ns.commence_time IS NOT NULL
+          ) END
+        ) AS close_bound,
         CASE
           WHEN p.decision_odds IS NOT NULL AND btrim(COALESCE(p.decision_book, '')) <> ''
             THEN p.decision_odds::double precision
@@ -437,6 +458,16 @@ BEGIN
         AND g.commence_time IS NOT NULL
         AND p.created_at::timestamptz <= g.commence_time::timestamptz
         AND g.commence_time::timestamptz <= now()
+        AND (
+          split_part(p.game_id, '_', 1) <> 'NBA'
+          OR EXISTS (
+            SELECT 1 FROM public.nba_schedule ns
+            WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
+              AND ns.commence_time IS NOT NULL
+              AND (ns.game_type NOT IN ('playin', 'playoff', 'cup_final')
+                   OR g.commence_time::timestamptz <= ns.commence_time::timestamptz + interval '30 minutes')
+          )
+        )
     ),
     joined AS (
       SELECT

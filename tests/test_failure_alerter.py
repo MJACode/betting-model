@@ -532,7 +532,7 @@ def _listed(gid=TODAY, kind="playoff", tip=PO_TIP, updated=None, status="Schedul
 
 
 def _watch(out):
-    return {k: v for k, v in out.items() if k.startswith(("undecided:", "refused:", "stranded:", "check:"))}
+    return {k: v for k, v in out.items() if k.startswith(("undecided:", "refused:", "stranded:", "start_gap:", "check:"))}
 
 
 class TestTheRulesOwnWatch:
@@ -644,6 +644,24 @@ class TestTheRulesOwnWatch:
         assert "void_picks" not in played and "Write the final and the box lines" in played
         assert "NO_ACTION" in postponed and f"void_picks.py --game-id {PO}" in postponed
         assert "--allow-posted" in postponed and "RECORD_EXCLUSIONS" in postponed and "naming who asked" in postponed
+
+    def test_two_starts_that_disagree_reach_the_channel_not_just_the_log(self):
+        """Before the game, while someone can still read the real start. If the feed is the stale one
+        a bet could land after the real tip, and nothing else would say so."""
+        espn = (NOW + timedelta(hours=1)).isoformat()
+        feed = (NOW + timedelta(hours=6)).isoformat()
+        row = (PO, "BOS", "MIA", "2027-04-20", 2027, feed, espn, "playoff")
+        out = _watch(fa._conditions(NbaConn([row], sched=WATCH_SCHED), NOW))
+        assert list(out) == [f"start_gap:nba_prop_market:{PO}"]
+        sev, title, detail = out[f"start_gap:nba_prop_market:{PO}"]
+        assert sev == "WARN" and PO in title
+        assert espn in detail and feed in detail and "real start" in detail
+
+    def test_two_starts_inside_the_feeds_ordinary_lag_say_nothing(self):
+        espn = (NOW + timedelta(hours=1)).isoformat()
+        feed = (NOW + timedelta(hours=1, minutes=20)).isoformat()
+        row = (PO, "BOS", "MIA", "2027-04-20", 2027, feed, espn, "playoff")
+        assert not _watch(fa._conditions(NbaConn([row], sched=WATCH_SCHED), NOW))
 
     def test_a_game_still_inside_twelve_hours_is_given_its_time(self):
         tip = (NOW - timedelta(hours=11)).isoformat()

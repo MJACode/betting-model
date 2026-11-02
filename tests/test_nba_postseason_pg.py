@@ -53,7 +53,7 @@ CREATE TABLE nba_schedule (
 CREATE TABLE picks (
     pick_id SERIAL PRIMARY KEY, game_id TEXT REFERENCES games(game_id), model_id TEXT NOT NULL,
     game_date TEXT NOT NULL, game_time TEXT, signal_type TEXT NOT NULL, result TEXT,
-    condition_status TEXT, decision_odds NUMERIC, dk_odds NUMERIC);
+    condition_status TEXT, decision_odds NUMERIC, dk_odds NUMERIC, prop_market TEXT);
 CREATE TABLE nba_prop_market_decisions (
     game_id TEXT PRIMARY KEY, decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), fetch_at TEXT NOT NULL,
     n_quotes INTEGER NOT NULL, n_bets INTEGER NOT NULL, detail TEXT);
@@ -205,6 +205,57 @@ def test_an_older_stranded_bet_stays_named_inside_the_look_back_and_leaves_after
     _bet(conn, "NBA_2027-04-01_MIA_BOS", tip="2027-04-01T23:00:00+00:00", day="2027-04-01")
     assert list(pregame.stranded_prop_bets(conn, NOW)) == ["NBA_2027-04-01_MIA_BOS"]
     assert pregame.stranded_prop_bets(conn, NOW + timedelta(days=40)) == {}
+
+
+def test_a_feed_row_the_other_way_round_takes_espns_tip_through_the_real_reads(conn):
+    _sched(conn, "F1", "NBA_2027-04-20_MIA_BOS", "playoff", _at(1))
+    _game(conn, "NBA_2027-04-20_BOS_MIA", _at(1.25))              # the feed's row, 15 minutes late
+    got = _rule_slate(conn)
+    assert list(got) == ["NBA_2027-04-20_BOS_MIA"]
+    assert got["NBA_2027-04-20_BOS_MIA"]["tip"] == NOW + timedelta(hours=1)
+    assert got["NBA_2027-04-20_BOS_MIA"]["tip_source"] == "schedule"
+    assert got["NBA_2027-04-20_BOS_MIA"]["game_type"] is None
+
+
+def test_a_misdated_row_beside_a_listed_final_stays_off_the_regular_slate_through_the_real_reads(conn):
+    final = "NBA_2027-04-05_MIA_BOS"
+    _sched(conn, "S0", "NBA_2026-10-20_NYK_BOS", "regular", "2026-10-20T23:00:00+00:00")    # the season's first day
+    _sched(conn, "C1", final, "cup_final", "2027-04-05T23:00:00+00:00")
+    _game(conn, "NBA_2027-04-04_MIA_BOS", "2027-04-04T23:00:00+00:00")
+    _game(conn, "NBA_2027-04-04_NYK_ATL", "2027-04-04T23:00:00+00:00")          # a real unlisted game
+    night = datetime(2027, 4, 4, 22, 10, tzinfo=timezone.utc)
+    skipped = []
+    assert list(rule_card.slate(conn, night, skipped, horizon_min=90)) == ["NBA_2027-04-04_NYK_ATL"]
+    assert skipped == [f"NBA_2027-04-04_MIA_BOS (the schedule lists this game as {final})"]
+
+
+def test_a_false_early_start_moves_the_window_and_reaches_the_alert_through_the_real_reads(conn):
+    gid = "NBA_2027-04-20_MIA_BOS"
+    _sched(conn, "P1", gid, "playoff", _at(1))
+    _game(conn, gid, _at(6))
+    assert _rule_slate(conn) == {}
+    later = NOW + timedelta(hours=5)
+    got = rule_card.rule_slate(conn, later, horizon_min=90)
+    assert got[gid]["tip"] == NOW + timedelta(hours=6) and got[gid]["tip_source"] == "feed"
+    assert list(rule_card.disputed_start_games(conn, NOW, 24.0)) == [gid]
+
+
+def test_the_close_reads_the_right_tip_through_the_real_reads(conn):
+    import data.ingestors.nba_prop_close_ingestor as close_ing
+    false_early, flipped = "NBA_2027-04-20_MIA_BOS", "NBA_2027-04-20_CHA_ATL"
+    _sched(conn, "P1", false_early, "playoff", _at(1))
+    _game(conn, false_early, _at(6))
+    _sched(conn, "P2", "NBA_2027-04-20_ATL_CHA", "playoff", _at(6))
+    _game(conn, flipped, _at(6.25))
+    for gid in (false_early, flipped):
+        conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, prop_market) "
+                     "VALUES (%s, 'nba_prop_market', '2027-04-20', 'BET', 'player_points')", (gid,))
+    # 14 minutes before ESPN's false start: neither is owed a close
+    assert close_ing.bet_games(conn, NOW + timedelta(minutes=46)) == {}
+    # 14 minutes before the real ones
+    got = close_ing.bet_games(conn, NOW + timedelta(hours=6) - timedelta(minutes=14))
+    assert got[false_early]["tip"] == NOW + timedelta(hours=6)
+    assert got[flipped]["tip"] == NOW + timedelta(hours=6)
 
 
 def test_the_report_in_the_doc_sizes_units_as_stake_for_does_and_counts_only_graded_bets(conn):

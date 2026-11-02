@@ -1912,6 +1912,52 @@ def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
     return {"over_price": row[0], "under_price": row[1], "line": row[2]}
 
 
+# How long an NBA bet with no league tip stays open for one to arrive (a schedule row the morning
+# refresh has not written yet) before it is stamped empty and leaves the backfill's queue.
+_NBA_NO_TIP_WAIT_DAYS = 2
+
+
+def _reversed_nba_id(game_id: str) -> str:
+    """NBA_<date>_<away>_<home> with home and away the other way round."""
+    parts = str(game_id).split("_")
+    return "_".join((parts[0], parts[1], parts[3], parts[2])) if len(parts) == 4 else str(game_id)
+
+
+def _nba_schedule_rows(conn: DBConnection, game_ids: list[str]) -> dict[str, tuple]:
+    """{game_id: (start, type)} for these NBA games, under their own id and the other way round."""
+    ids = sorted(set(game_ids) | {_reversed_nba_id(g) for g in game_ids})
+    if not ids:
+        return {}
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT game_id, commence_time, game_type FROM nba_schedule WHERE game_id = ANY(%s)",
+        (ids,)).fetchall()}
+
+
+def _nba_league_tip(game_id: str, feed_start, schedule: dict[str, tuple]) -> "datetime | None":
+    """The start an NBA bet's close can be bounded on, or None when there is none.
+
+    The odds feed's start runs 2 to 20 minutes behind the real tip on every game it has written
+    (2026-10-20..11-02), and refresh passes store in-play rows typed 'open', so a close bounded on it
+    can be an in-play price. That is every bet whose only start is the feed's: a game the schedule
+    does not list and one with no tip there. A game the schedule holds the other way round reads
+    that row. A postseason start far before the feed's is read as ESPN's error
+    (models.nba_prop_market.postseason_tip), so that game has no start to trust either.
+    data/migrations/clv_standard_v2_2026_10_14.sql holds the same test: it recomputes any bet not
+    yet stamped, so a test here alone would be overwritten on its next pass."""
+    from models.nba_prop_market import START_GAP_MIN, parse_ts
+    from models.nba_total_luck import POSTSEASON_TYPES
+    for gid in (game_id, _reversed_nba_id(game_id)):
+        start, kind = schedule.get(gid, (None, None))
+        tip = parse_ts(start)
+        if tip is None:
+            continue
+        feed = _as_utc(feed_start)
+        if kind in POSTSEASON_TYPES and feed is not None and feed - tip > timedelta(minutes=START_GAP_MIN):
+            return None
+        return tip
+    return None
+
+
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     Record closing line value for each official (BET) pick on game_date.
@@ -1984,6 +2030,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
     now_utc = datetime.now(timezone.utc)
     updated = 0
+    nba_schedule = _nba_schedule_rows(conn, sorted({r[1] for r in rows if str(r[1]).startswith("NBA_")}))
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
          pick_label, scored_line, created_at, row_prop_market,
          _row_clv_method, decision_odds, decision_book, game_time) in rows:
@@ -2088,6 +2135,18 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
                 WHERE pick_id = %s
             """, (CLV_METHOD_STANDARD, book, pick_id))
             return 1
+
+        # AN NBA BET WITH NO LEAGUE TIP HAS NO CLOSE. The closing-line columns stay empty rather
+        # than holding an in-play price, and it is stamped once a schedule row is no longer coming.
+        if str(game_id).startswith("NBA_"):
+            league_tip = _nba_league_tip(game_id, commence_time, nba_schedule)
+            if league_tip is None:
+                waited = (now_utc.astimezone(ZoneInfo("America/New_York")).date()
+                          - datetime.strptime(str(game_date)[:10], "%Y-%m-%d").date()).days
+                updated += _stamp_empty(revisiting=revisiting or waited >= _NBA_NO_TIP_WAIT_DAYS)
+                continue
+            if league_tip < _as_utc(close_bound):
+                close_bound = league_tip.isoformat()
 
         has_line = False
         moved_snap = None

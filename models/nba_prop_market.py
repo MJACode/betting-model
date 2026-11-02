@@ -271,6 +271,37 @@ def tip_of(schedule_ct, games_ct) -> datetime | None:
     return min(a, b)
 
 
+# How far the odds feed's start runs behind the league's tip (FEED_LAG in
+# data/ingestors/nba_schedule_refresh.py, pinned by test). A wider gap means one of the two is wrong.
+START_GAP_MIN = 30
+
+
+def postseason_tip(schedule_ct, games_ct) -> tuple[datetime | None, str | None]:
+    """(the tip, 'schedule' or 'feed') for a play-in, playoff or Cup final game.
+
+    `tip_of`, unless the schedule's start sits more than START_GAP_MIN before the feed's. Every one of
+    these schedule rows is ESPN's and ESPN alone sets its tip (data/ingestors/nba_schedule_refresh.plan,
+    with no second source), and ESPN has been five hours early: CHI @ MIL, 2026-10-23, 1 of 1,200 league
+    rows. The feed's start ran 2.3 to 20.2 minutes after the league's on all 107 games it wrote
+    2026-10-20..11-02, and never before it. So in that gap the feed's start is the one read: the earlier
+    would have the rule bet hours ahead, or lose the game when Pinnacle is not up by ESPN's window.
+    tracking/failure_alerter names the game, because the feed could be the wrong one.
+    """
+    s, g = parse_ts(schedule_ct), parse_ts(games_ct)
+    if s is not None and g is not None and g - s > timedelta(minutes=START_GAP_MIN):
+        return g, "feed"
+    tip = tip_of(s, g)
+    if tip is None:
+        return None, None
+    return tip, "schedule" if tip == s else "feed"
+
+
+def starts_disagree(schedule_ct, games_ct) -> bool:
+    """The two starts sit further apart than the feed has any reason to run."""
+    s, g = parse_ts(schedule_ct), parse_ts(games_ct)
+    return s is not None and g is not None and abs((g - s).total_seconds()) > START_GAP_MIN * 60
+
+
 def minutes_to_tip(tip: datetime, now: datetime) -> float:
     return (tip - now).total_seconds() / 60.0
 

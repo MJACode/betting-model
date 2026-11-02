@@ -226,7 +226,8 @@ regular-season day once the schedule lists the real game with its teams
 models and can be bet by them** (`docs/followups.md`). The Cup final's slot has no teams until ESPN sets them.
 Results, settlement, closing-line capture and publishing read
 `picks` and `games` with no game-type filter, so these bets settle, post and count like any
-other. Prices are `player_prop_odds`' `open` rows, the same as any game; never
+other, with one exception: a bet whose only start is the odds feed's records no closing-line value
+(the tip, below, and `docs/clv.md`). Prices are `player_prop_odds`' `open` rows, the same as any game; never
 `nba_postseason_prop_odds`, which is research only.
 
 **What watches them** (`tracking/failure_alerter.py`, all warnings, one key per game):
@@ -248,11 +249,15 @@ tip on a game with no final, `stranded:nba_prop:<game>`, which takes a person, o
   rows, all seasons, 2026-11-02), so there is no real row to build or test that trigger against.
 
 **The tip.** Every one of these schedule rows is ESPN's, and ESPN alone sets its tip, where an
-NBA.com row needs the feed to second a move. So when the schedule and the feed sit over 30
-minutes apart the card warns, decides on the earlier so it can never run past the real start,
-and writes both to the ledger. With no ESPN tip (the Cup final's slot has none today) the tip is
-the feed's, which has run 2 to 22 minutes late, so the first look lands nearer the tip than
-anything graded. The ledger says `tip_source=feed` and those bets can be reported apart.
+NBA.com row needs the feed to second a move. So when ESPN's start sits over 30 minutes before the feed's, it is
+read as ESPN's error and the decision window and the closing snapshot are measured from the feed's start. Measuring from
+ESPN's would bet hours early, or lose the game when Pinnacle has no price yet. The feed's start ran 2.3 to 20.2 minutes
+after the league's on all 107 games it wrote 2026-10-20..11-02 and never before it, while ESPN has been five hours
+early (`models.nba_prop_market.postseason_tip`). **If the feed is ever the stale one, this writes the bet after the real
+tip**, so the game is named, `start_gap:nba_prop_market:<game>`, and both starts go to the ledger. With no ESPN tip (the Cup
+final's slot has none today) the tip is the feed's too, so the first look lands nearer the real tip than anything graded. In
+both cases the ledger says `tip_source=feed`, and the bet's closing-line value stays empty, because the feed's start is no
+bound for a close. A feed row with home and away the other way round from ESPN reads ESPN's row for its tip.
 
 **Season-long numbers.** Once these games land in `games` and `nba_player_game_log`, the season
 stats functions, the team board and the first-quarter card read them as season games. On those

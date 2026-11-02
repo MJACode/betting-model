@@ -273,6 +273,8 @@ _ALLOWED = {
     "rule_slate": {"scripts/nba_prop_market_card.py", "scripts/nba_prop_window.py"},
     # read-only: the alert's look back at what tipped
     "tipped_rule_games": {"scripts/nba_prop_market_card.py", "scripts/nba_pregame_window.py"},
+    # read-only: the alert's look at two starts that disagree
+    "disputed_start_games": {"scripts/nba_prop_market_card.py", "tracking/failure_alerter.py"},
 }
 
 

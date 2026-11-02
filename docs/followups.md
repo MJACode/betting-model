@@ -41,7 +41,9 @@ to be read off production. All read-only. No paid call.
    `nba_schedule.game_type = 'cup_final'` on the real row. If `games` holds two rows for it, the rule refuses
    the unlisted one and the game has no prices to bet: read before the first look. The tip is unknown until
    ESPN's row carries one, because the 8pm stored today belongs to the placeholder, which never joins the real
-   game. Then, with the tip known, read-only: `python -c "from datetime import datetime, timedelta, timezone as z;
+   game. If ESPN's start and the feed's sit over 30 minutes apart, `start_gap:nba_prop_market:<game>` is in the ops
+   channel and the rule is measuring from the feed's. Read the real start then: if the feed is the stale one, a bet can
+   land after the real tip. Then, with the tip known, read-only: `python -c "from datetime import datetime, timedelta, timezone as z;
    from scripts.nba_prop_window import plan_tick as p; print(p(<tip> - timedelta(minutes=60)))"`, and expect
    the final in `decide` and `project` empty.
 4. **12-12: the result.** The ledger row (`detail` holds `game_type=cup_final` and the `tip_source`), the bet if

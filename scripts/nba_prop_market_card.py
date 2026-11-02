@@ -200,6 +200,16 @@ def tipped_rule_games(conn, now: datetime, hours: float,
     return {**{g: v for g, v in post.items() if g not in games}, **games}
 
 
+def disputed_start_games(conn, now: datetime, hours: float) -> dict[str, dict]:
+    """The play-in, playoff and Cup final games within `hours` of `now`, either side, whose schedule
+    and feed starts sit over mk.START_GAP_MIN apart: {game_id: game}. For the alert. Reads only."""
+    oldest, until = now - timedelta(hours=hours), now + timedelta(hours=hours)
+    today = now.astimezone(_ET).date()
+    post = tlcard.postseason_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)],
+                                   lambda tip: oldest <= tip <= until)
+    return {g: v for g, v in post.items() if mk.starts_disagree(v["schedule_start"], v["games_start"])}
+
+
 def _postseason_detail(game: dict) -> str:
     """What a decision on one of these games adds to its ledger row, so its bets can be reported
     apart: the type, and which start the window was measured against."""

@@ -149,8 +149,10 @@ def _prop_watch_conditions(conn, now: datetime) -> dict:
     try:
         from scripts.nba_pregame_window import (
             STRANDED_AFTER_HOURS, UNDECIDED_LOOKBACK_HOURS, stranded_prop_bets, undecided_rule_games)
+        from scripts.nba_prop_market_card import disputed_start_games
         watch = undecided_rule_games(conn, now)
         stranded = stranded_prop_bets(conn, now)
+        disputed = disputed_start_games(conn, now, UNDECIDED_LOOKBACK_HOURS)
     except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
         logger.warning(f"failure alerter: the NBA prop watch failed: {exc}")
         try:
@@ -175,6 +177,14 @@ def _prop_watch_conditions(conn, now: datetime) -> dict:
             f"The odds feed wrote `{gid}`, and the schedule lists these two teams as `{twin}` with no "
             f"final. A bet settles on its own id, so none was allowed on `{gid}`. Read both rows: if "
             f"`{twin}` holds no prices, the game had nothing to bet.")
+    for gid, g in disputed.items():
+        out[f"start_gap:nba_prop_market:{gid}"] = (
+            "WARN", f"Two starts for {gid}: the schedule and the odds feed disagree",
+            f"The schedule (ESPN) says `{g['schedule_start']}` and the odds feed says `{g['games_start']}`. "
+            f"`nba_prop_market` measures its decision window and the closing snapshot from "
+            f"`{g['tip'].isoformat()}`, the {g['tip_source']}'s, and this bet's closing-line value stays empty. "
+            f"ESPN has been hours early and the feed has not been, but if the feed is the wrong one "
+            f"a bet could land after the real tip: read the game's real start.")
     for gid, n in stranded.items():
         out[f"stranded:nba_prop:{gid}"] = (
             "WARN", f"{n} open NBA prop bet(s) on a game with no final: {gid}",

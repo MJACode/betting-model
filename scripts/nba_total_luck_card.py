@@ -156,10 +156,25 @@ def tipped_games(conn, now: datetime, hours: float) -> dict[str, dict]:
                           lambda tip: oldest <= tip <= now)
 
 
-def _read_games(conn, dates: list[str], wanted) -> dict[str, dict]:
+def _reversed_starts(conn, rows) -> dict[str, str]:
+    """The schedule's start under the id with home and away the other way round, for the rows that
+    have none of their own. At a neutral court the odds feed and ESPN can disagree on who is home, and
+    the feed's start runs up to 20 minutes behind the real tip, so a bet on the feed's row needs
+    ESPN's. A second read, and none at all on a night with no such row. Only the start: the row keeps
+    its own type, or lack of one, so this moves no gate."""
+    ids = sorted({f"NBA_{str(gd)[:10]}_{home}_{away}" for _, home, away, gd, _, _, s_ct, _ in rows if not s_ct})
+    if not ids:
+        return {}
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT game_id, commence_time FROM nba_schedule WHERE game_id = ANY(%s)", (ids,)).fetchall() if r[1]}
+
+
+def _read_games(conn, dates: list[str], wanted, tip_rule=None) -> dict[str, dict]:
     """Every NBA `games` row on these ET dates whose tip `wanted` accepts, with its
-    schedule type and both starts. It decides nothing: the gate is the caller's."""
+    schedule type and both starts. It decides nothing: the gate is the caller's.
+    `tip_rule(schedule_start, games_start)` chooses the tip, `tip_of` unless told otherwise."""
     from models.nba_prop_market import tip_of
+    tip_rule = tip_rule or tip_of
     rows = conn.execute("""
         SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
                g.commence_time, s.commence_time, s.game_type
@@ -167,9 +182,11 @@ def _read_games(conn, dates: list[str], wanted) -> dict[str, dict]:
         LEFT JOIN nba_schedule s ON s.game_id = g.game_id
         WHERE g.sport = 'NBA' AND g.game_date = ANY(%s)
     """, (dates,)).fetchall()
+    reversed_start = _reversed_starts(conn, rows)
     cand = {}
     for gid, home, away, gd, season, g_ct, s_ct, game_type in rows:
-        tip = tip_of(s_ct, g_ct)
+        s_ct = s_ct or reversed_start.get(f"NBA_{str(gd)[:10]}_{home}_{away}")
+        tip = tip_rule(s_ct, g_ct)
         if tip is None or not wanted(tip) or gid in cand:
             continue
         cand[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
@@ -216,11 +233,6 @@ def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) 
 
 SCHEDULE_ROW_COLS = ["game_id", "season", "game_date", "game_type", "home_team", "away_team",
                      "in_games", "scored"]
-# The odds feed's start runs up to this far after the league's tip (FEED_LAG in
-# data/ingestors/nba_schedule_refresh.py, pinned by test). A wider gap means one of the
-# two sources is wrong.
-START_GAP_MIN = 30
-
 
 def schedule_rows(conn, seasons) -> pd.DataFrame:
     """These seasons' nba_schedule rows with their teams, whether each has a `games` row
@@ -241,17 +253,18 @@ def postseason_games(conn, dates: list[str], wanted, refused: dict | None = None
     """The play-in, playoff and Cup final games on these ET dates whose tip `wanted` accepts.
 
     Each dict also carries `postseason` (True), `game_type` (None when the schedule does not
-    list it) and where the tip came from: `tip_source` is 'schedule' when the schedule holds one
-    and 'feed' when only the odds feed does, because a tip with no schedule row can run up to 22
-    minutes late and those bets are reported apart.
+    list it) and where the tip came from: `tip_source` is 'schedule' when the window is measured
+    from the schedule's start and 'feed' when from the odds feed's, because the feed's can run up
+    to 22 minutes late and those bets are reported apart.
 
-    Every one of these schedule rows is ESPN's, and ESPN alone sets its tip (the second source the
-    refresh wants for an NBA.com row does not apply: nba_schedule_refresh.plan). The file's own
-    measured case had ESPN five hours early. So when the two starts sit more than START_GAP_MIN
-    apart this says so; the tip stays the earlier, so a decision never runs past the real start,
-    and the card writes both to the game's decision row. `refused`: {game_id: the listed id} for
-    a row models.nba_total_luck.listed_twin turned away."""
-    cand = {g: v for g, v in _read_games(conn, dates, wanted).items()
+    Every one of these schedule rows is ESPN's, and ESPN alone sets its tip, so a schedule start
+    far before the feed's is read as ESPN's error and the window is measured from the feed's
+    (models.nba_prop_market.postseason_tip). Here only: `slate` stays on `tip_of`. The card writes
+    both starts to the game's decision row, and tracking/failure_alerter names the game.
+    `refused`: {game_id: the listed id} for a row models.nba_total_luck.listed_twin turned away."""
+    from models.nba_prop_market import postseason_tip
+    cand = {g: v for g, v in _read_games(conn, dates, wanted,
+                                         tip_rule=lambda s, f: postseason_tip(s, f)[0]).items()
             if v["game_type"] is None or v["game_type"] in tl.POSTSEASON_TYPES}
     if not cand:
         return {}
@@ -269,17 +282,17 @@ def postseason_games(conn, dates: list[str], wanted, refused: dict | None = None
                 refused[gid] = twin
             continue
         out[gid] = {**v, "postseason": True,
-                    "tip_source": "schedule" if v["schedule_start"] else "feed"}
-        _say_if_starts_disagree(gid, v["schedule_start"], v["games_start"])
+                    "tip_source": postseason_tip(v["schedule_start"], v["games_start"])[1]}
+        _say_if_starts_disagree(gid, v)
     return out
 
 
-def _say_if_starts_disagree(gid: str, schedule_start, games_start) -> None:
-    from models.nba_prop_market import parse_ts
-    a, b = parse_ts(schedule_start), parse_ts(games_start)
-    if a is not None and b is not None and abs((a - b).total_seconds()) > START_GAP_MIN * 60:
-        logger.warning(f"NBA postseason: {gid} schedule start {schedule_start}, odds feed start "
-                       f"{games_start}, over {START_GAP_MIN} minutes apart; deciding on the earlier")
+def _say_if_starts_disagree(gid: str, game: dict) -> None:
+    from models.nba_prop_market import START_GAP_MIN, starts_disagree
+    if starts_disagree(game["schedule_start"], game["games_start"]):
+        logger.warning(f"NBA postseason: {gid} schedule start {game['schedule_start']}, odds feed start "
+                       f"{game['games_start']}, over {START_GAP_MIN} minutes apart; measuring from "
+                       f"{game['tip'].isoformat()}")
 
 
 # The books the rule reads: the deciding books and Pinnacle, whose no-vig line
