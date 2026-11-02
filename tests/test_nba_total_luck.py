@@ -97,7 +97,7 @@ def _decide(art, quotes, gap, tip=None, monkeypatch=None, **kw):
     games = t.assign(tip=pd.Timestamp(tip))
     q = tl.quote_frame(_rows(t.game_id[0], fetch, quotes), games)
     proj = t.assign(gap_total=gap, gap_margin=0.0)
-    monkeypatch.setattr(tl, "f4_projections", lambda targets, tb: proj)
+    monkeypatch.setattr(tl, "f4_projections", lambda targets, tb, **_: proj)
     monkeypatch.setattr(tl, "missing_inputs", lambda targets, *a: {
         g: {"score_missing": [], "box_missing": [], "box_mismatch": [], "presumed_unplayed": []}
         for g in targets["game_id"]})
@@ -152,11 +152,11 @@ def test_the_gap_uses_only_games_before_the_game_date():
     assert moved["gap_total"].iloc[0] != pytest.approx(base)
 
 
-# ── the ten-game rule ────────────────────────────────────────────────────────
+# ── no ten-game wait ────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("n,priced", [(9, False), (10, True)])
-def test_both_teams_need_ten_games(monkeypatch, art, n, priced):
-    """RULE: CLAUDE.md section 3 -- no bet until both teams have played 10 games."""
+@pytest.mark.parametrize("n,priced", [(0, False), (1, True), (9, True), (10, True)])
+def test_a_team_needs_one_game_not_ten(monkeypatch, art, n, priced):
+    """mike, 2026-11-02: no 10-game wait. A team with no game has no number."""
     games, box = _season(n)
     day = (pd.Timestamp("2026-10-21") + pd.Timedelta(days=n)).strftime("%Y-%m-%d")
     t = _target(day)

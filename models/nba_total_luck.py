@@ -54,8 +54,10 @@ THE RULE, per regular-season game:
   2. PROJECTION: pace = mean of the two teams' possessions per game;
        total = pace/100 x [ORtg_H + DRtg_A + ORtg_A + DRtg_H - 2 x league rating]
      gap = adjusted total - raw total, in points.
-  3. BOTH TEAMS NEED 10+ GAMES this season (CLAUDE.md section 3). The first
-     bets therefore come in mid-November.
+  3. NO 10-GAME WAIT (mike, 2026-11-02). A team needs one game this season so
+     it has a number at all (LIVE_MIN_GAMES). The evidence above is the games
+     with both teams on 10+ (MIN_GAMES, which the labs and replays keep);
+     docs/sports/nba.md, "No 10-game wait" has the replay with no wait.
   4. DECISION TIME (decision point C: "the newest fetch 60-180 minutes before
      tip"): the newest fetch, when it landed 60 to 66 minutes before tip and
      is at most 5 minutes old (timing below). A job of its own makes that
@@ -157,7 +159,8 @@ STALE_FETCH_MAX_MIN = 5.0
 # ── F4: team box scores and as-of ratings (moved from scripts/nba_game2_luck.py) ──
 
 FTA_POSS = 0.44              # Oliver / Hollinger possession estimate
-MIN_GAMES = 10               # CLAUDE.md section 3 early-season rule
+MIN_GAMES = 10               # the population every lab and replay graded
+LIVE_MIN_GAMES = 1           # the live models: no 10-game wait (mike, 2026-11-02)
 
 BOX_COLS = {"points": "pts", "fg_att": "fga", "fg3_made": "fg3m", "fg3_att": "fg3a",
             "ft_made": "ftm", "ft_att": "fta", "offensive_reb": "oreb", "turnovers": "tov"}
@@ -206,7 +209,7 @@ def as_of_ratings(tb: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
         # empty box is object dtype, and the cumulative sums below raised
         # "function is not implemented for this dtype: cumsum": both NBA game
         # cards failed every tick of 2026-10-20 until the first game was final.
-        # No games means no ratings and n = 0, which the 10-game rule declines.
+        # No games means no ratings and n = 0, which every caller declines.
         out = targets[["season", "team", "game_date"]].copy().reset_index(drop=True)
         out["n"] = 0.0
         for c in ("pace", "lg_rtg", "ortg_raw", "drtg_raw", "ortg_adj", "drtg_adj"):
@@ -258,19 +261,20 @@ def pair_ratings(games: pd.DataFrame, r: pd.DataFrame) -> pd.DataFrame:
     return g.merge(h, on=["season", "game_date", "home_team"]).merge(a, on=["season", "game_date", "away_team"])
 
 
-def f4_projections(games: pd.DataFrame, tb: pd.DataFrame) -> pd.DataFrame:
+def f4_projections(games: pd.DataFrame, tb: pd.DataFrame,
+                   min_games: int = MIN_GAMES) -> pd.DataFrame:
     """Per game: raw and adjusted projected margin (no home court) and total,
-    and the gaps. Games where either team has < MIN_GAMES are dropped."""
+    and the gaps. Games where either team has < min_games are dropped."""
     r = as_of_ratings(tb, team_targets(games))
     x = pair_ratings(games, r)
-    x = x[(x["h_n"] >= MIN_GAMES) & (x["a_n"] >= MIN_GAMES)].copy()
+    x = x[(x["h_n"] >= min_games) & (x["a_n"] >= min_games)].copy()
     return project_ratings(x)
 
 
 def project_ratings(x: pd.DataFrame) -> pd.DataFrame:
     """Raw and adjusted projected margin and total, and the gaps, on a frame of
     paired ratings (pair_ratings); a game with no gap is dropped. No games
-    filter: f4_projections applies the 10-game rule before calling this, and
+    filter: f4_projections applies its games rule before calling this, and
     the fifth search's early-season versions (scripts/nba_game5.py) call it on
     blended ratings."""
     x = x.copy()
@@ -649,9 +653,11 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
            final_games: pd.DataFrame, times: pd.DataFrame, art: dict, *,
            scheduled: pd.DataFrame,
            books=None, min_odds: float | None = None, gap_cut: float = GAP_CUT,
-           bucket_uplift: float | None = None) -> tuple[list[TotalLuckBet], list[Decision], dict]:
+           bucket_uplift: float | None = None, min_games: int = LIVE_MIN_GAMES
+           ) -> tuple[list[TotalLuckBet], list[Decision], dict]:
     """The rule on frames. Pure given its inputs, so the card and the replay of
-    the lab run the same code.
+    the lab run the same code; a replay passes min_games=MIN_GAMES, the
+    population the lab graded.
 
     targets      game_id, season, game_date, home_team, away_team (one season)
     quotes       the harness quote frame (scripts.nba_game_harness.frame_quotes),
@@ -686,7 +692,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     sig = {(season, MARKET): pricing_dist(art, season)}
 
     tb = team_box(box, final_games)
-    proj = f4_projections(targets, tb)
+    proj = f4_projections(targets, tb, min_games=min_games)
     gaps = dict(zip(proj["game_id"], proj["gap_total"]))
     missing = missing_inputs(targets, scheduled_games(scheduled), final_games, tb)
 
@@ -732,8 +738,8 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             continue
         if gap is None:
             diag["early_season"] += 1
-            decisions.append(Decision(gid, T, None, 0, "early_season: a team has under "
-                                                         f"{MIN_GAMES} games"))
+            decisions.append(Decision(gid, T, None, 0,
+                                      f"early_season: a team has under {min_games} games"))
             continue
         if gap < gap_cut:
             diag["gap_below_cut"] += 1
