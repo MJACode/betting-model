@@ -79,6 +79,22 @@ Expect about +2% live: the top cell of a search carries winner's curse, and
 of the units and is decaying (+16 / +8 / +3% by season); the rule clears
 without it (+2.29%). Closing-line value could not be measured (one archived
 snapshot a game), so the card stores a closing snapshot for every bet.
+
+THE PLAY-IN, THE PLAYOFFS AND THE CUP FINAL (2026-11-02, mike). The same rule, cut,
+floor and caps also bet these, and no other NBA model does (the card's own slate, with
+its gate in models/nba_total_luck.py; docs/nba_search_postseason.md, branch
+nba-searches-graded). On the 272 such games of 2023-24..2025-26:
+    every qualifying proposition    1,953 bets  +138.87 units  +6.8%   95% +2.1..+11.3
+                                    prices -192 to +210, median -104
+    the top bet in each game        251 bets    +23.36 units   +9.71%  95% -3.82..+22.81
+    (what the one-a-game cap writes) prices -155 to +188, median +106, 5th-95th -125..+145,
+                                    64.5% plus money, 2 worse than -150, 0 worse than -180
+The second line is the live expectation and its interval crosses zero; by season it is
++1.08 / +19.99 / +2.28 units. An independent check rebuilt all 1,953 bets exactly, and
+found most of the return is a general lean to unders in this sample, larger than in the
+regular seasons; at the regular-season lean the same bets would return about +4.4%.
+Settlement is ESPN's box alone here, as for a regular-season bet: the search's second source
+for a game it left out (18 of 272) has no live copy, and a placed bet cannot be left out.
 """
 from __future__ import annotations
 

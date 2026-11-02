@@ -17,7 +17,7 @@
 | `nba_total_luck` | The full-game OVER, when the projected total with the opponents' three-point and free-throw shooting luck taken out is at least 3 points above the plain projected total. At the best bettable price under the market's fair line; each game decided once, on a fetch 60-66 minutes before tip made by its own one-minute job; regular-season games only (the NBA Cup final never counts); both teams need 10 games, so the first bets come in mid-November. | **LIVE** (rule with a parameter artifact — `models/nba_total_luck.py`, card `scripts/nba_total_luck_card.py`, step `nba-total-luck`, job `nba_total_luck_window`) |
 | `nba_first_half_total_luck` | The FIRST-HALF total OVER, when the full-game shooting-luck gap (`nba_total_luck`'s number, unscaled) is at least 2 points. At the best bettable price under the market's fair line; each game decided once, on this model's own first-half fetch 45-66 minutes before tip, made by the same one-minute job; settled on Q1 + Q2 points; a game with no trustworthy quarter scores stays pending; regular-season games only; both teams need 10 games. | **LIVE** (rule with a parameter artifact — `models/nba_first_half_total_luck.py`, card `scripts/nba_first_half_total_luck_card.py`, step `nba-first-half-total-luck`, job `nba_total_luck_window`) |
 | `nba_team_total_luck` | The HOME team total UNDER, when the home team's own part of that shooting-luck gap is at least 2 points toward the under (the away defence's luck, in the home team's points). At the best bettable price under the market's fair line; each game decided once, on this model's own team-total fetch 45-66 minutes before tip, made by the same one-minute job; settled on the home team's final score, overtime included; regular-season games only; both teams need 10 games. | **LIVE** (rule with a parameter artifact — `models/nba_team_total_luck.py`, card `scripts/nba_team_total_luck_card.py`, step `nba-team-total-luck`, job `nba_total_luck_window`) |
-| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most four a night, each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
+| `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most four a night, each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20). The only NBA model that bets the play-in, the playoffs and the Cup final (below). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
 
 Graded on 2023-24 → 2025-26, the population it bets (every qualifying
 proposition, −200 floor, no double/triple-double): 24,572 bets, +781.3 units,
@@ -181,11 +181,65 @@ as stored, the step goes red, and the health check warns after 36 hours.
 **What the prop models price.** Every regular-season game, the Cup quarterfinals
 and semifinals included, whether or not the schedule lists it yet (a game the
 odds feed wrote on a regular-season day counts, the totals model's rule,
-`models.nba_total_luck.regular_season`). **Not the play-in, the playoffs or the
-Cup final:** neither prop model has been graded on one. The stored prop history
-holds 0 of those 272 games of 2023-24..2025-26 and all 3,690 regular-season
-games; grading them means buying those props first. The totals models are
-regular season only too (the Cup final never counts).
+`models.nba_total_luck.regular_season`). **The play-in, the playoffs and the Cup
+final: `nba_prop_market` only.** A pre-registered search graded both prop models
+on those 272 games of 2023-24..2025-26 (`docs/nba_search_postseason.md`, branch
+`nba-searches-graded`). The rule passed, and none of the projection model's six
+cells did. The totals models were graded on the regular season only, and stay
+there (the Cup final never counts). How these games arrive and what watches them
+is in the next section; the numbers are in `docs/thresholds.md`.
+
+**How a play-in, playoff or Cup final game arrives.** Picks and prices both need a
+`games` row (foreign keys), so that row is the route. Three things can write it:
+
+- **The odds feed**, on every NBA event it quotes, normally days ahead. It has written
+  NBA rows since 2026-06-17, after the 2026 Finals, so this is **not yet observed** for
+  these games. The same sport key's historical event list carried all 272.
+- **The schedule refresh, on the game's own day** (`data/ingestors/nba_schedule_refresh.py`,
+  6am ET). Never sooner, so a series that ends early leaves no row for a game nobody
+  plays. It also lists the game in `nba_schedule` once ESPN sets its teams, and types it:
+  ESPN's type 3 playoff, 5 play-in, and a type-2 game is the Cup final when its note says
+  "Championship" or when it falls on the date the league's own placeholder gives the final.
+  That matters: a listed `regular` row would pass all four other NBA models' gates.
+- **Nothing else.** The results step adds a regular-season game only.
+
+The rule takes a game the schedule does not list, on a day only these games fall on: a day
+the schedule gives one of them, or after the season's last regular-season day and by June
+30. So a failed refresh does not lose it. **A second row for one real game is refused.** A bet
+settles on its own id and ESPN's final lands on ESPN's, so a bet on any other row can stay open
+for good, and one bet a game counts by id. An unlisted row is refused when the schedule lists
+those two teams, either way round, within two days under another id with no final
+(`models.nba_total_luck.listed_twin`; the feed wrote four such rows in the 2026 WNBA playoffs).
+If the feed has the two teams the other way round from ESPN on the same date (a neutral court)
+and ESPN's id has no row, the refresh leaves it that way and the results step scores the feed's
+row with each team's own score (`nba_results_ingestor.match_game`).
+
+**Who reads them.** `slate` and everything built on it refuse them: the three total models'
+cards and windows, the projection model, the ten-game gates, the ratings. Only
+`scripts/nba_prop_market_card.rule_slate` adds them, and `tests/test_nba_postseason_gate.py`
+fails on any other reader. Results, settlement, closing-line capture and publishing read
+`picks` and `games` with no game-type filter, so these bets settle, post and count like any
+other. Prices are `player_prop_odds`' `open` rows, the same as any game; never
+`nba_postseason_prop_odds`, which is research only.
+
+**What watches them** (`tracking/failure_alerter.py`, all warnings, one key per game):
+a game the rule did not decide, regular-season games included (it decided all 92 of
+2026-10-20..11-01), `undecided:nba_prop_market:<game>`. A listed game counts only if the
+refresh confirmed it on its own date, so an unplayed Game 6 is not named. A refused row,
+`refused:nba_prop_market:<game>`. An open NBA prop bet of either model over 12 hours past tip
+on a game with no final, `stranded:nba_prop:<game>`, which takes a person: void it with
+`scripts/void_picks.py`.
+
+**The tip.** Every one of these schedule rows is ESPN's, and ESPN alone sets its tip, where an
+NBA.com row needs the feed to second a move. So when the schedule and the feed sit over 30
+minutes apart the card warns, decides on the earlier so it can never run past the real start,
+and writes both to the ledger. With no ESPN tip (the Cup final's slot has none today) the tip is
+the feed's, which has run 2 to 22 minutes late, so the first look lands nearer the tip than
+anything graded. The ledger says `tip_source=feed` and those bets can be reported apart.
+
+**Season-long numbers.** Once these games land in `games` and `nba_player_game_log`, the season
+stats functions, the team board and the first-quarter card read them as season games. That is
+display only and changes no bet. See `docs/followups.md`.
 
 **Rest.** The projection model's rest, back-to-back, games-in-four-days and
 road trip, and every player's history, read every regular-season game in
@@ -254,7 +308,7 @@ than 10 minutes behind Pinnacle's.
 | `nba-prop-close` | after the card; also in the window job | a `close` prop snapshot 12-25 minutes before tip for every game holding a bet (CLV; `NBA_PROP_CLOSE_*` in config) |
 | window job `nba_prop_window` | every 5 minutes, 24x7 (`scheduler.run_nba_prop_window`) | props for exactly the games 40-62 minutes from tip that either NBA prop model has not decided, then both cards, then any close that is due, then publish, then the projections due; no API call when nothing is near |
 | window job `nba_total_luck_window` | every minute, 24x7 (`scheduler.run_nba_total_luck_window`; one planning read for all three game total models, `scripts/nba_pregame_window.py`) | The three models side by side, each on its own steps in order (`scheduler._run_models_side_by_side`), so a tick lasts as long as its slowest model and one model's slow card moves no other model's fetch. `nba_total_luck`, when an undecided game is 61-66 minutes from tip: the NBA board (the refresh pass's own NBA odds fetch, 90-second limit), then `nba-total-luck`. `nba_team_total_luck`, when an undecided game is 45-56 minutes from tip: one `team_totals` call per due game (`scripts/nba_team_total_luck_window.py --fetch`, 90-second limit), then `nba-team-total-luck`; and for each game holding its bet, the closing team totals 12-25 minutes before tip (`--close`, 90-second limit, filed `close`, for closing-line value). `nba_first_half_total_luck`, the same three steps on its own `totals_h1` call (`scripts/nba_first_half_total_luck_window.py`); no step reads another model's outcome. Then one publish, when all of them are done. No API call when nothing is due. Six ticks fit the full-game window and twelve the team-total one, so one skipped tick loses nothing; with every card killed at its limit each model still gets three attempts a window (56, 52, 48 minutes out). A game that tips with no decision from one of the three is reported by name per model (`tracking/failure_alerter`, `scripts/nba_pregame_window.undecided_games`), as a critical alert, for the next 24 hours. One job for all three, not three: every job opens a database connection each tick for its heartbeat. On the refresh pass a skipped tick lost the game: 27 of 504 evening ticks never started over 2026-10-03..16 |
-| `nba-schedule` | the 6am run, before `nba-results` | ESPN's schedule for this month and the next eight (one call a month) → `nba_schedule`: games it lacks under an `espn:` key (the NBA Cup week and knockout games once set, play-in, playoffs), postponements, and a moved tip only when the odds feed shows the same start. Fail-open: a month ESPN does not answer is left as stored; the step goes red and the health check `nba_schedule_refresh` goes STALE after 36 hours with no row confirmed |
+| `nba-schedule` | the 6am run, before `nba-results` | ESPN's schedule for this month and the next eight (one call a month) → `nba_schedule`: games it lacks under an `espn:` key (the NBA Cup week and knockout games once set, play-in, playoffs), postponements, and a moved tip only when the odds feed shows the same start. A play-in, playoff or Cup final game also gets a `games` row, on its own day only. Fail-open: a month ESPN does not answer is left as stored; the step goes red and the health check `nba_schedule_refresh` goes STALE after 36 hours with no row confirmed |
 | `nba-results` | every pass, before settle | ESPN finals → `games`, every box line → `nba_player_game_log` |
 | `nba-quarters` | the 6am run, after view migrations | for the current season: quarter scores for every finished game lacking them (`nba_period_scores`), play-by-play and possessions for every game lacking them (`nba_pbp.fill_gaps`, ESPN summary; at most 100 games a run, oldest first, the rest on the next run), then `nba_team_q1_games` rebuilt for this season and the last. One game's summary failing does not drop the games already built. Free ESPN endpoints. Added 2026-10-28: before it, the 2026-27 season had 0 of 56 finished games with quarter scores and no play-by-play after 2026-06-13 |
 | box repair (by hand) | from a residential machine, when the totals card logs `box_missing` or `box_mismatch` | `python -m data.ingestors.nba_stats_ingestor --repair-boxes 2027` replaces each game of the season whose box is missing or does not add up to its final score with NBA.com's, one game per transaction, and writes a game only when NBA.com's box adds up. Not `--game-log-date`: it loads every game of the date and doubles any player ESPN stored under a fallback id |

@@ -21,6 +21,56 @@
 
 ---
 
+## [ ] nba_prop_market on the Cup final: the reads before it can bet (2026-11-02)
+
+The play-in, playoffs and Cup final went live with no game to run on, so what the tests cannot see has
+to be read off production. All read-only. No paid call.
+
+1. **Every day 12-01 to 12-09: rows the schedule does not list and that have no score.** The Cup
+   quarterfinals and semifinals (12-04, 12-05, 12-08) are the likely place for a feed row on the wrong date,
+   because their schedule slots have no teams. `SELECT g.game_id, g.game_date, g.commence_time FROM games g
+   LEFT JOIN nba_schedule s ON s.game_id = g.game_id WHERE g.sport = 'NBA' AND g.game_date BETWEEN
+   '2026-11-25' AND '2026-12-12' AND s.game_id IS NULL AND g.home_score IS NULL`. See the next item for why a
+   wrong one matters more than it looks.
+2. **12-09: one semifinal, end to end.** Its `games` row, `nba_schedule` row and box rows, and whether
+   the feed and ESPN agree on who is home at a neutral court. This rehearses the feed writing a knockout game,
+   the first ESPN-keyed writes and settlement. It does NOT run the new code: those games are typed regular.
+3. **12-11 after the 6am run: the final itself.** Both ids, in `games` and in `nba_schedule`, and
+   `nba_schedule.game_type = 'cup_final'` on the real row. If `games` holds two rows for it, the rule refuses
+   the unlisted one and the game has no prices to bet: read before the first look. The tip is unknown until
+   ESPN's row carries one, because the 8pm stored today belongs to the placeholder, which never joins the real
+   game. Then, with the tip known, read-only: `python -c "from datetime import datetime, timedelta, timezone as z;
+   from scripts.nba_prop_window import plan_tick as p; print(p(<tip> - timedelta(minutes=60)))"`, and expect
+   the final in `decide` and `project` empty.
+4. **12-12: the result.** The ledger row (`detail` holds `game_type=cup_final` and the `tip_source`), the bet if
+   there is one, and its grade. `stranded:nba_prop:<game>` in the ops channel means the final landed elsewhere.
+
+## [ ] NBA: a feed row on the wrong date stops three live models (2026-11-02, flagged, not caused by the Cup work)
+
+A wrong-date feed row on a regular-season day counts as a regular-season game the season owes
+(`scripts/nba_total_luck_card.load_season`), and `models/nba_total_luck.missing_inputs` then makes
+`nba_total_luck`, `nba_team_total_luck` and `nba_first_half_total_luck` decline every game for up to 14 days. The
+prop slate would price it too. Measured: the feed wrote four such rows in the 2026 WNBA playoffs
+(`WNBA_2026-09-25_NY_MIN`, `10-01_DAL_GSV`, `10-03_NY_ATL`, `10-22_GSV_ATL`, the real games one to two days later).
+`final_scores` goes STALE at WARN on those, and was STALE on most days of 09-24 to 10-10. NBA has none yet (0
+unscored rows 08-01 to 11-01). The same-teams test in `models.nba_total_luck.listed_twin` would close it, but
+it changes those three models, so it needs its own `Updated-By: mike` commit, and it is not in the Cup work.
+
+## [ ] NBA: an unlisted All-Star row would count as a regular-season game (2026-11-02, flagged)
+
+Season 2027 holds no `allstar` rows (`nba_schedule`), and ESPN's type is not stored
+(`nba_schedule_refresh.ESPN_TYPES`), so `regular_season` has no other kind of game on that day. Past seasons do
+hold them (2026-02-13..15). Whether the feed ever lists an All-Star event is not measured. nba_prop_market's new
+gate refuses it; the regular-season gate does not. The fix is a row of type `allstar` on that date.
+
+## [ ] A bet on a game with no final, in the other sports (2026-11-02, flagged)
+
+`stranded:nba_prop:<game>` (`scripts/nba_pregame_window.stranded_prop_bets`) covers the two NBA prop models. Nothing
+says so for anything else: settlement and both settlement health checks start from a final score. A priced game
+then postponed does this in any sport (`MLB_2026-10-16_TB_CLE`, rained out, holds 128,768 prop rows at 10 books).
+Moving it into `tracking/system_health.py` for every model is the shape it should end up in. No bet of that kind
+was found on the 12 rows examined, so this has not cost anything yet.
+
 ## [ ] NBA game total models: read what could not be measured before they ran live (2026-10-31)
 
 Three reads, none possible from the branch that made the changes (no production

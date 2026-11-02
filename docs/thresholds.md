@@ -550,6 +550,48 @@ every bar are in `docs/nba_models_2026.md` 4.3).
 | decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions` (whether or not its bet survived the cap; `detail` names what the cap dropped), never looked at again | `scripts/nba_prop_market_card.py`, `scripts/nba_props_card.py` |
 | looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-62 min from tip | `scheduler.run_nba_prop_window` |
 | stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
+| games | regular season, and the play-in, playoffs and Cup final (2026-11-02, mike) | `scripts/nba_prop_market_card.rule_slate` |
+
+**The play-in, the playoffs and the Cup final, 2026-11-02 (mike).** A pre-registered
+search graded the rule on the 272 such games of 2023-24..2025-26. Its rule, cut, floor and
+caps are unchanged, so nothing in `config.py` moved. No other NBA model bets these games: none of
+the six `nba_prop_projection` cells passed, and nothing else was graded on them. Full record:
+`docs/nba_search_postseason.md` (branch `nba-searches-graded`) sections 9 and 9.1.
+
+| Population | Bets | Units | Return | 95% interval | Prices |
+|---|---|---|---|---|---|
+| every qualifying proposition (what passed) | 1,953 | +138.87 | +6.8% | +2.1% to +11.3% | -192 to +210, median -104, 61 worse than -150 |
+| **what the live caps write: the rule's top bet in each game** | **251** | **+23.36** | **+9.71%** | **-3.82% to +22.81%** | **-155 to +188, median +106** |
+
+Read the second row as the live expectation, and it **does not clear zero**. It is the rule alone
+at one bet a game, section 9.1's control. Section 9's other 251-bet control is both models
+sharing the game's bet (+12.37 units, only 20 of them this rule's), and with the projection model
+off these games that one no longer applies. By season: +1.08 / +19.99 / +2.28 units over 84 / 81 /
+86 bets, so one season carries most of it. The first row says the rule found something; the checker
+found most of it is a general lean to unders in this sample, larger than in the regular seasons, and
+at the regular-season lean the same bets would return about +4.4%.
+
+**Prices it lays at one a game:** -155 to +188, median +106, 5th to 95th percentile -125 to +145,
+64.5% plus money, 2 worse than -150, 0 worse than -180. The -200 floor stays. Measured from the
+independent checker's 1,953 bets, keeping the highest EV per game
+(`%TEMP%/pm_postseason_build/one_a_game_prices.py` on `nba_s/verify_postseason/lab_bridged.parquet`).
+The most games with a bet on any date is 4, so the night cap does not bind.
+
+**To report these bets apart.** Every decision on one of these games carries
+`game_type=<playin|playoff|cup_final|unlisted> tip_source=<schedule|feed>` in its ledger row. Read
+that rather than joining `nba_schedule`, which holds no row for an unlisted game:
+
+```sql
+SELECT substring(d.detail from 'game_type=(\S+)') AS game_type,
+       substring(d.detail from 'tip_source=(\S+)') AS tip_source,
+       count(*) AS bets,
+       count(*) FILTER (WHERE p.result IN ('WIN', 'LOSS', 'PUSH')) AS graded,
+       round(sum(p.profit_flat) FILTER (WHERE COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL) / 100.0, 2) AS units
+FROM picks p JOIN nba_prop_market_decisions d ON d.game_id = p.game_id
+WHERE p.model_id = 'nba_prop_market' AND p.signal_type = 'BET'
+  AND p.condition_status IS DISTINCT FROM 'VOID' AND d.detail LIKE '%game_type=%'
+GROUP BY 1, 2;
+```
 
 **The caps, 2026-10-20 (mike: "Only the strongest picks need to be sent, like
 NHL").** Opening night wrote 36 NBA prop bets on one game (all VOIDed). The rule

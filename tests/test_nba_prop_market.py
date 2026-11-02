@@ -857,7 +857,9 @@ class _LookConn:
         elif s.startswith("SELECT game_date, count(*) FROM picks"):
             self._all = [(d, n) for d, n in self.night.items() if d in params[1]]
         elif "SELECT DISTINCT game_id FROM picks" in s:
-            self._all = [(g,) for g in params[1] if any(p["game_id"] == g for p in self.picks)]
+            models = params[0] if isinstance(params[0], list) else [params[0]]
+            self._all = [(g,) for g in params[1]
+                         if any(p["game_id"] == g and p["model_id"] in models for p in self.picks)]
         elif s.startswith("SELECT game_id FROM nba_prop_market_decisions"):
             self._all = [(g,) for g in params[0] if g in self.decisions]
         elif s.startswith("INSERT INTO nba_prop_market_decisions"):
@@ -939,6 +941,18 @@ def test_a_rerun_with_a_moved_line_writes_nothing(monkeypatch):
     assert any(s.startswith("SELECT game_id FROM nba_prop_market_decisions") for s in conn.sql)
 
 
+def test_a_game_decided_with_no_bet_is_not_decided_again_on_a_better_price(monkeypatch):
+    """The ledger is the only thing that says so: no pick holds this game. The search looked at each
+    game once, and a look at every later price would draw a wider population than it graded."""
+    conn = _LookConn([_po_game()], [q("pinnacle", -110, -110, gid=PO_GID), q("fanduel", -110, -110, gid=PO_GID)])
+    got, out = _one_look(conn, monkeypatch)
+    assert got["bets"] == [] and out["written"] == 0 and list(conn.decisions) == [PO_GID]
+    conn.quotes = _rows_of(_po_quotes())            # now the same game clears
+    got, out = _one_look(conn, monkeypatch, now=NOW + timedelta(minutes=5))
+    assert got["bets"] == [] and got["decisions"] == [] and got["diag"]["already_decided"] == 1
+    assert out["written"] == 0 and conn.picks == []
+
+
 def test_postseason_bets_share_the_night_cap(monkeypatch):
     """Four a night across both NBA prop models. The game is still decided, and the ledger says why
     it has no bet."""
@@ -954,7 +968,8 @@ def test_the_two_models_share_one_bet_a_game_on_a_postseason_game(monkeypatch):
     conn = _LookConn([_po_game()], _po_quotes())
     conn.picks.append({"game_id": PO_GID, "model_id": "nba_prop_projection"})
     got, out = _one_look(conn, monkeypatch)
-    assert out["written"] == 0 and len(conn.picks) == 1
+    assert got["bets"], "the rule's own look must clear it, so the door is what stops it"
+    assert out["written"] == 0 and len(conn.picks) == 1 and out["dropped"]["cap_game_already_bet"] >= 1
 
 
 def test_a_priced_postseason_game_is_not_logged_as_not_priced():

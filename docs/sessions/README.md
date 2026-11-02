@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, nba_prop_market bets the play-in, playoffs and Cup final with its rule, cut, floor and caps unchanged; no other NBA model reaches them; alerts for a lost game and for an open bet with no final (mike) |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |
