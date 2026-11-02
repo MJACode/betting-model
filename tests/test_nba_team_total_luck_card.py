@@ -50,7 +50,7 @@ def card_world(monkeypatch, part=-3.0, **kw):
     monkeypatch.setattr(card.tlcard, "slate", fake_slate)
     monkeypatch.setattr(card.tlcard, "load_season",
                         lambda conn, season, before: (EMPTY_FINAL, EMPTY_BOX, EMPTY_FINAL))
-    monkeypatch.setattr(tt, "f4_projections", lambda targets, tb: _proj(targets, part))
+    monkeypatch.setattr(tt, "f4_projections", lambda targets, tb, **_: _proj(targets, part))
     _no_missing(monkeypatch)
     import models.scorer as scorer
     monkeypatch.setattr(scorer, "_get_current_bankroll", lambda conn: 1000.0)
