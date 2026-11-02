@@ -19,7 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, alt lines: the every-pass buy uses ALT_GAME_LINES_ENABLED and ALT_GAME_LINES_MAX_GAMES; FETCH_ALT_GAME_LINES stays a pass-only gate. At kickoff an alt betslip leg is held and marked pre-game, not removed. Draft. |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, alt lines: the every-pass buy uses ALT_GAME_LINES_ENABLED and ALT_GAME_LINES_MAX_GAMES; FETCH_ALT_GAME_LINES stays a pass-only gate. At kickoff an alt betslip leg is held and marked pre-game, not removed. A started main-number leg is priced from main rows only. Draft. |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |
 | 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, app_timings CE Mediums from #1110. Launch window stays open until the first screen is named. 45-day retention on the daily pipeline. Hand-applied cap migration (signed-in callers keyed on auth.uid()); not applied. |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, `nba_first_half_total_luck` reviewers' findings fixed: the graded quotes' caveat and both price ranges on the record, quarter rows that disagree with the final repaired and reported at any age, X runs the label check, the price table stored in all three NBA game total artifacts, the three models run side by side in a tick, a critical alert names a game that tipped undecided; no production write |
