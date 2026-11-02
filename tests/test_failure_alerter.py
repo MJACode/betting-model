@@ -49,12 +49,14 @@ class FakeConn:
             self._last = "health"
         elif "job_heartbeats" in sql:
             self._last = "beats"
+        elif "FROM games g" in sql:    # the undecided-game read: nothing tipped
+            self._last = "tipped"
         else:
             self._last = "runs"
         return self
 
     def fetchall(self):
-        return list({"health": self._health, "beats": self._beats}.get(
+        return list({"health": self._health, "beats": self._beats, "tipped": []}.get(
             self._last, self._runs))
 
 
@@ -365,3 +367,127 @@ class TestHealthCheckOnlyIsNotADirtyPass:
 
     def test_an_empty_window_is_identity(self):
         assert fa._clean_rate(FakeConn(health=[], runs=[])) == (0, 0, [])
+
+
+# ── a real-money model that lost a game ──────────────────────────────────────
+
+class NbaConn(FakeConn):
+    """Answers the undecided-game read by shape, with the real SQL running against
+    what a test stores: games, the schedule, each model's decisions and BETs. A
+    table not in `tables` does not exist yet."""
+
+    ALL = ("nba_total_luck_decisions", "nba_team_total_luck_decisions",
+           "nba_first_half_total_luck_decisions")
+
+    def __init__(self, games=(), decisions=None, bets=(), tables=ALL, health=(), boom=False):
+        super().__init__(health=health, runs=_clean_runs())
+        self._games, self._decisions = list(games), decisions or {}
+        self._bets, self._tables, self._boom = list(bets), set(tables), boom
+        self._rows = None
+        self.rollbacks = 0
+
+    def execute(self, sql, params=()):
+        self._rows = None
+        if "FROM games g" in sql:
+            if self._boom:
+                raise RuntimeError("the read failed")
+            self._rows = self._games
+        elif "FROM nba_schedule" in sql:
+            self._rows = [(2027, "2026-10-21", "regular"), (2027, "2027-04-11", "regular")]
+        elif "information_schema.tables" in sql:
+            self._rows = [(1,)] if params[0] in self._tables else []
+        elif "_decisions WHERE game_id" in sql:
+            table = next(t for t in self.ALL if t in sql)
+            self._rows = [(g,) for g in self._decisions.get(table, ())]
+        elif "FROM picks" in sql:
+            model = params[0]
+            self._rows = [(g,) for m, g in self._bets if m == model]
+        else:
+            return super().execute(sql, params)
+        return self
+
+    def fetchall(self):
+        if self._rows is not None:
+            return list(self._rows)
+        return super().fetchall()
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+GAME = "NBA_2026-10-30_DEN_PHX"
+TIPPED = (GAME, "PHX", "DEN", "2026-10-30", 2027, (NOW - timedelta(hours=2)).isoformat(),
+          None, "regular")
+
+
+def _decided_by(*tables):
+    return {t: [GAME] for t in tables}
+
+
+class TestAModelThatLostAGame:
+    def test_a_tipped_game_with_no_team_total_decision_is_critical_and_names_the_game(self):
+        conn = NbaConn([TIPPED], _decided_by("nba_total_luck_decisions",
+                                             "nba_first_half_total_luck_decisions"))
+        out = fa._conditions(conn, NOW)
+        assert [k for k in out if k.startswith("undecided:")] == ["undecided:nba_team_total_luck"]
+        sev, title, detail = out["undecided:nba_team_total_luck"]
+        assert sev == "CRIT"
+        assert GAME in detail and "nba_team_total_luck" in title
+
+    def test_each_model_is_named_on_its_own(self):
+        out = fa._conditions(NbaConn([TIPPED]), NOW)
+        assert sorted(k for k in out if k.startswith("undecided:")) == [
+            "undecided:nba_first_half_total_luck", "undecided:nba_team_total_luck",
+            "undecided:nba_total_luck"]
+
+    def test_a_game_all_three_decided_says_nothing(self):
+        out = fa._conditions(NbaConn([TIPPED], _decided_by(*NbaConn.ALL)), NOW)
+        assert not [k for k in out if k.startswith(("undecided:", "check:"))]
+
+    def test_a_decisions_table_that_does_not_exist_is_no_decision(self):
+        """query_rows-style silence on a missing table would hide a model whose card
+        has never once run, the most expensive case there is."""
+        tables = [t for t in NbaConn.ALL if "first_half" not in t]
+        conn = NbaConn([TIPPED], _decided_by(*tables), tables=tables)
+        out = fa._conditions(conn, NOW)
+        assert [k for k in out if k.startswith("undecided:")] == [
+            "undecided:nba_first_half_total_luck"]
+
+    def test_a_bet_with_no_decision_row_counts_as_decided_as_the_plan_reads_it(self):
+        tables = ("nba_total_luck_decisions", "nba_first_half_total_luck_decisions")
+        conn = NbaConn([TIPPED], _decided_by(*tables), bets=[("nba_team_total_luck", GAME)])
+        assert not [k for k in fa._conditions(conn, NOW) if k.startswith("undecided:")]
+
+    def test_a_game_that_has_not_tipped_is_owed_nothing_yet(self):
+        later = list(TIPPED)
+        later[5] = (NOW + timedelta(minutes=30)).isoformat()
+        assert not [k for k in fa._conditions(NbaConn([tuple(later)]), NOW)
+                    if k.startswith("undecided:")]
+
+    def test_a_game_that_tipped_over_a_day_ago_has_left_the_window(self):
+        old = list(TIPPED)
+        old[5] = (NOW - timedelta(hours=25)).isoformat()
+        assert not [k for k in fa._conditions(NbaConn([tuple(old)]), NOW)
+                    if k.startswith("undecided:")]
+
+    def test_a_preseason_game_is_nobody_s_to_decide(self):
+        pre = list(TIPPED)
+        pre[7] = "preseason"
+        assert not [k for k in fa._conditions(NbaConn([tuple(pre)]), NOW)
+                    if k.startswith("undecided:")]
+
+    def test_a_cup_placeholder_with_no_teams_is_never_planned_so_never_lost(self):
+        tbd = list(TIPPED)
+        tbd[1] = "TBD"
+        assert not [k for k in fa._conditions(NbaConn([tuple(tbd)]), NOW)
+                    if k.startswith("undecided:")]
+
+    def test_a_failed_read_is_reported_and_leaves_every_other_alert_standing(self):
+        conn = NbaConn([TIPPED], health=[("settlement_lag", "STALE", "WARN", "1 pick")], boom=True)
+        out = fa._conditions(conn, NOW)
+        assert out["check:nba_undecided_games"][0] == "WARN"
+        assert "health:settlement_lag" in out
+        assert conn.rollbacks == 1

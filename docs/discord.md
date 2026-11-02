@@ -77,6 +77,11 @@ football. It prints the new channel's id, which goes into
 `DISCORD_CHANNEL_NCAAB` on the worker (then redeploy it).
 `--dry-run` prints what it would create. It refuses when `#ncaab` already
 exists and prints that channel's id instead. The bot needs Manage Channels.
+`--like` takes the source channel's name or its id. The server's college
+football channel is not called `ncaaf`: the first dry run (2026-10-31) stopped
+on "no #ncaaf channel". Its id is the one the webhook probe reports for
+`sport:NCAAF`, 1541173382190596311 (2026-09-06). When the source is not found,
+the stop message lists the guild's text channels by name and id.
 
 ### Producers (`tracking/discord_notifier.py`)
 

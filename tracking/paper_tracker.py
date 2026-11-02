@@ -1433,11 +1433,13 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
     nba_team_total_odds.py): the decision fetch, filed 'open', and the close,
     filed 'close'. The decision fetch is the price taken, so read as the close
     it graded a pick whose close was never stored at exactly 0.0, for good.
-    With no 'close' row the pick is unmeasured.
+    With no 'close' row the pick is unmeasured. A first-half total is the same
+    shape (data/ingestors/nba_first_half_odds.py).
     """
     if not commence_time:
         return None
-    snapshot_filter = ("snapshot_type = 'close'" if market.startswith("team_totals")
+    snapshot_filter = ("snapshot_type = 'close'"
+                       if market.startswith("team_totals") or market == "totals_h1"
                        else "snapshot_type != 'in_play'")
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
@@ -2264,7 +2266,10 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "draw":
             won = (went_to_ot == 1)
 
-    elif market in ("totals", "totals_1st_5_innings"):
+    elif market in ("totals", "totals_1st_5_innings", "totals_h1"):
+        # totals_h1: the caller passes the FIRST HALF's points as the two scores
+        # (_first_half_points), as it passes the first five innings' for an F5
+        # market. Never reach this with the full-game final.
         if total_line is None:
             return "NO_ACTION", 0.0, 0.0
         if total == total_line:
@@ -2336,6 +2341,11 @@ _RULE_MODEL_MARKETS = {
     # team's final score, overtime included, as DraftKings settles a team
     # total. NEVER "totals": that sums both teams and grades every under a loss.
     "nba_team_total_luck": "team_totals_home",
+    # NBA first half's points, overs (models/nba_first_half_total_luck.py).
+    # scored_line is the first half's line; it settles on Q1 + Q2 from
+    # nba_period_scores (_first_half_points). NEVER "totals": that sums the two
+    # finals and grades every over a win.
+    "nba_first_half_total_luck": "totals_h1",
     # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
     # total; the stored final includes overtime, as books settle it.
     "ncaab_total_blend": "totals",
@@ -2421,6 +2431,29 @@ _GAME_LEVEL_MODEL_FILTER = """
           AND p.model_id NOT LIKE 'ufc_%%'
           AND p.model_id NOT LIKE 'golf_%%'
 """
+
+
+def _first_half_points(conn: DBConnection, game_id: str,
+                       home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in the first half, or None when the game has no
+    period rows this settlement can trust. Then the pick stays PENDING: no result,
+    never the full-game score, never a made-up one.
+
+    The check is data/ingestors/nba_period_scores.first_half_from_periods, which
+    the repair of rows that disagree with the final also reads.
+    """
+    from data.ingestors.nba_period_scores import first_half_from_periods
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    points = first_half_from_periods(rows, home_score, away_score)
+    if points is None:
+        logger.warning(f"{game_id}: its period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
+    return points
 
 
 def _game_settle_window_days(conn: DBConnection, game_date: str) -> int:
@@ -2709,6 +2742,12 @@ def _settle_game_picks(
             settle_home = home_score_f5
             settle_away = away_score_f5
             settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
+        elif market == "totals_h1":
+            first_half = _first_half_points(conn, game_id, home_score, away_score)
+            if first_half is None:
+                continue  # stays pending: no period rows, no result
+            settle_home, settle_away = first_half
+            settle_home_win = None
         else:
             settle_home = home_score
             settle_away = away_score
@@ -2852,6 +2891,22 @@ def settle_picks(game_date: str = None) -> dict:
         except Exception as exc:
             logger.warning(
                 f"Prop box scores failed ({exc}) — props grade on whatever is stored")
+
+        # First-half picks grade off nba_period_scores, and the only other writer
+        # of those rows is the 6am run's nba-quarters step, which runs AFTER the
+        # 6am settle and in no refresh pass. Pull a missing game's quarters the
+        # same way, on its own connection, so a finished game's first-half pick
+        # grades on this pass and is in the morning recap. Stored rows that
+        # disagree with the final are asked for again and replaced by rows that
+        # agree. A failure leaves the pick pending; the next pass asks again.
+        try:
+            from data.ingestors.nba_period_scores import ensure_first_half_period_scores
+            quarters = ensure_first_half_period_scores()
+            if quarters.get("dates"):
+                logger.info(f"NBA quarter scores for first-half picks: {quarters}")
+        except Exception as exc:
+            logger.warning(
+                f"NBA quarter scores failed ({exc}) — first-half picks stay pending")
 
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0

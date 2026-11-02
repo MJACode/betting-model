@@ -856,7 +856,9 @@ SWEEPS = [f"ncaab-game-line-market-sweep-{m}-2026-10-26" for m in ("spreads", "t
 DERIVS = ["ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r1",
           "ncaab-history-deriv-close-2024-2026-r2", "ncaab-history-deriv-open-2024-2026",
           "ncaab-history-deriv-open-2024-2026-r2"]
-DECLARED = ["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS + SWEEPS + DERIVS
+INJURY_PROBE = "ncaab-injury-reachability-2026-10-30"
+DECLARED = (["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS
+            + SWEEPS + DERIVS + [INJURY_PROBE])
 
 
 def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
@@ -864,22 +866,31 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     season's ESPN schedule (the current one first, so live odds resolve from
     opening night), the free history, the measured probe call, the game-line
     purchase and its post-refill resume, the sweeps on what it bought, then
-    the first-half purchases."""
+    the first-half purchases. The injury reachability probe is last: public
+    pages, no credits, and it writes nothing."""
     entries = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
     by = {e["key"]: e for e in entries}
-    # Every NCAAB declaration is one of the approved ones, except the free
-    # ESPN box and period backfills (job ncaab_box_backfill, 2026-10-30): they
-    # spend no credits, so they need no credit approval, and whether each is
-    # on is a one-line switch that tests/test_ncaab_espn_box.py checks.
+    # Every NCAAB declaration is in DECLARED, except the free ESPN box and
+    # period backfills (job ncaab_box_backfill, 2026-10-30): they spend no
+    # credits, and whether each is on is a one-line switch that
+    # tests/test_ncaab_espn_box.py checks. The injury probe is in DECLARED
+    # and is not a credit approval.
     assert sorted(k for k in keys if k.startswith("ncaab-")
                   and by[k]["job_type"] != "ncaab_box_backfill") == sorted(DECLARED)
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True
-        assert "approved" in e["note"] or "yes" in e["note"]
+        if k == INJURY_PROBE:
+            # Not a credit purchase. The note must not borrow "approved" or
+            # "yes" from the Odds API jobs above.
+            assert e["args"] == {}
+            assert "Writes nothing" in e["note"]
+            assert "approved" not in e["note"] and "yes" not in e["note"]
+        else:
+            assert "approved" in e["note"] or "yes" in e["note"]
         jq.JOBS[e["job_type"]][1](e["args"])
     assert by["ncaab-feed-probe-2026-10-26"]["args"] == {"market_events": 5}
     assert by[SCHEDULES[0]]["args"] == {"first": "2026-11-01", "last": "2027-04-10"}

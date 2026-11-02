@@ -385,7 +385,9 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 No picks until a team has played >= 10 games; prior-season stats are the
 baseline in that window. Season-to-date rates are noise early — blend toward
 the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
-`docs/sports/nhl.md`).
+`docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02:
+*"we do not need to wait 10 games, I never approved that"*;
+`docs/sports/ncaab.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -566,7 +568,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 67 models carry
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 68 models carry
   their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
@@ -607,6 +609,7 @@ to be known BEFORE deciding which file to open.
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
 | **App crashes: `app_errors`, what each kind means, the queries** | `docs/app_errors.md` |
+| **App load times: `app_timings` (per read, per screen, cold start), the queries** | `docs/app_timings.md` |
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |

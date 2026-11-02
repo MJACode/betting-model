@@ -361,7 +361,9 @@ def test_a_game_is_decided_at_its_quote_with_both_teams_past_ten_games():
     assert near[0].status in ("below_cut", "bets")
 
 
-def test_no_draftkings_total_and_early_season_are_not_bets():
+def test_an_early_game_is_priced_with_no_games_played_wait():
+    """mike, 2026-11-02: no 10-game wait. A team's first games are decided on
+    the price; with no DraftKings total there is still nothing to decide."""
     import models.ncaab_total_blend as nb
     games, box = _season()
     sg, b = _prepared(games, box)
@@ -370,7 +372,10 @@ def test_no_draftkings_total_and_early_season_are_not_bets():
     gid = early["game_id"].iloc[0]
     at = (pd.Timestamp(early["game_date"].iloc[0]) - pd.Timedelta(hours=2)).tz_localize("UTC").to_pydatetime()
     (d,) = nb.decide(early, {gid: _quote(gid, line=100.5, at=at)}, sg, b, art, 0.04)
-    assert d.status == "below_10_games"
+    assert min(d.ng) < 10, d.ng
+    assert d.status == "bets" and d.priced.side == "over"
+    assert f"games {d.ng[0]}/{d.ng[1]}" in d.detail
+    assert "below_10_games" not in nb.DIAG_KEYS
     (d2,) = nb.decide(early, {}, sg, b, art, 0.04)
     assert d2.status == "no_dk_total"
 
@@ -505,6 +510,21 @@ def test_publish_writes_the_decision_and_the_bet_once_and_never_a_hold(monkeypat
     # the next hour: decided already, nothing written
     assert card.publish(conn, rows, [d], hour + timedelta(hours=1), refused) == (0, 0)
     assert len(conn.picks) == 1
+
+
+def test_a_row_from_the_old_10_game_wait_does_not_stop_a_game_being_decided():
+    """98 untipped games of 2026-11-02 held a row that never looked at a price.
+    They are decided now; a real decision still stands for good."""
+    import scripts.ncaab_total_card as card
+    insert = " ".join(card._INSERT_DECISION.split())
+    assert ("ON CONFLICT (game_id) DO UPDATE" in insert
+            and insert.endswith("WHERE split_part(ncaab_total_decisions.detail, ':', 1) = "
+                                "'below_10_games' RETURNING game_id"))
+    conn = _Conn()
+    card.decided_games(conn, ["g"])
+    (read,) = [s for s, _ in conn.sql if "FROM ncaab_total_decisions" in s]
+    assert "split_part(detail, ':', 1) <> 'below_10_games'" in read
+    assert "below_10_games" not in card.FINAL
 
 
 def test_the_quote_read_is_pregame_draftkings_and_fresh():
@@ -877,3 +897,49 @@ def test_a_box_whose_opponent_row_has_no_espn_id_does_not_hold_the_game():
     no_id.loc[(no_id["game_id"] == last["game_id"]) & (no_id["team_espn_id"] == opp), "team_espn_id"] = np.nan
     (d,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, recent, no_id, art, 0.04)
     assert d.status == "bets", d.detail
+
+
+def test_the_channel_script_copies_a_channel_named_by_its_id():
+    """The server's college football channel is not called 'ncaaf' (the
+    2026-10-31 dry run: 'no #ncaaf channel in guild'). Its id is known from
+    the webhook probe, so the copy source can be named by id."""
+    import scripts.discord_create_sport_channel as sc
+    src = {"id": "1541173382190596311", "name": "college-football", "type": 0}
+    channels = [{"id": "9", "name": "general", "type": 0}, src]
+    assert sc.find_channel(channels, "1541173382190596311") is src
+    assert sc.find_channel(channels, "college-football") is src
+    # a voice channel with that id is not a text channel to copy
+    assert sc.find_channel([{"id": "7", "name": "x", "type": 2}], "7") is None
+
+
+def test_the_channel_script_lists_the_text_channels_when_the_source_is_missing(monkeypatch):
+    import scripts.discord_create_sport_channel as sc
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "BOTSECRET")
+    chans = [{"id": "11", "name": "college-football", "type": 0},
+             {"id": "12", "name": "voice", "type": 2}]
+    monkeypatch.setattr(sc.requests, "get", lambda url, headers=None, timeout=None:
+                        _Resp(200, chans if "/channels" in url else [{"id": "5", "name": "g"}]))
+    with pytest.raises(SystemExit) as e:
+        sc.main(["--name", "ncaab", "--like", "ncaaf", "--dry-run"])
+    msg = str(e.value)
+    assert "college-football (11)" in msg and "voice" not in msg and "BOTSECRET" not in msg
+
+
+def test_the_channel_dry_run_names_the_source_channel_it_copies(monkeypatch, capsys):
+    import scripts.discord_create_sport_channel as sc
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "BOTSECRET")
+    src = {"id": "11", "name": "college-football", "type": 0, "parent_id": "77", "position": 9,
+           "permission_overwrites": []}
+    monkeypatch.setattr(sc.requests, "get", lambda url, headers=None, timeout=None:
+                        _Resp(200, [src] if "/channels" in url else [{"id": "5", "name": "g"}]))
+    sc.main(["--name", "ncaab", "--like", "11", "--dry-run"])
+    assert "cloning #college-football (11)" in capsys.readouterr().out
+
+
+def test_the_channel_job_takes_the_source_channel_by_id():
+    import tracking.job_queue as jq
+    _, validate = jq.JOBS["discord_create_channel"]
+    assert validate({"name": "ncaab", "like": "1541173382190596311"})["like"] == "1541173382190596311"
+    for bad in ({"name": "1541173382190596311", "like": "ncaaf"}, {"name": "ncaab", "like": "12"}):
+        with pytest.raises(ValueError):
+            validate(bad)

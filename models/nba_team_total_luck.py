@@ -94,8 +94,10 @@ exactly one, NBA_2025-01-24_POR_CHA, FanDuel under 109.5 at -118 (scripts/
 nba_team_total_luck_replay.py measures it).
 
 THE ARTIFACT (models/saved/, ARTIFACT_PATH; scripts/nba_team_total_luck_build.py):
-the team-total residuals per season (2020-21 .. 2025-26) and the bucket's
-per-season counts. It must be refitted before 2027-28: the card refuses a
+the team-total residuals per season (2020-21 .. 2025-26), the bucket's
+per-season counts, and the finished price table of 2026-27
+(models/nba_total_luck.py, THE PRICE TABLE IS STORED). It must be refitted before
+2027-28: the card refuses a
 season the artifact does not end just before.
 """
 from __future__ import annotations
@@ -124,7 +126,7 @@ GAP_CUT = 2.0
 REFERENCE_BOOK = "draftkings"
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACT_PATH = "models/saved/nba_team_total_luck_20261018_014024.pkl"
+ARTIFACT_PATH = "models/saved/nba_team_total_luck_20261031_095356.pkl"
 ARTIFACT_KIND = "nba_team_total_luck"
 # Two residuals per game, 300 games: scripts/nba_game2_market.team_total_dist.
 MIN_PRIOR_ROWS = 600
@@ -206,23 +208,28 @@ _DIST_CACHE: dict = {}
 
 def pricing_dist(art: dict, season: int):
     """The empirical team-total distribution season `season` is priced with:
-    every stored residual of the seasons BEFORE it, re-centred
+    the table the artifact stores for it (models.nba_total_luck, THE PRICE TABLE IS
+    STORED), else every stored residual of the seasons BEFORE it, re-centred
     (scripts.nba_game_harness.ResidDist), the rows in the order
     scripts/nba_game2_market.team_total_resid wrote them, so it is the lab's
     team_total_dist exactly. Fewer than MIN_PRIOR_ROWS refuses: there is no
-    fallback to the season's own results. Built once per artifact and season
-    in a process."""
-    from scripts import nba_game_harness as H
+    fallback to the season's own results. Once per artifact and season in a
+    process."""
     key = (art.get("built_at"), len(art["tt_resid"]), int(season))
     if key not in _DIST_CACHE:
-        r = pd.DataFrame(art["tt_resid"], columns=["season", "resid"])
-        prior = r[r["season"].astype(int) < int(season)]
-        if len(prior) < MIN_PRIOR_ROWS:
-            raise ValueError(f"{MODEL_ID}: {len(prior)} team-total residuals before {season} "
-                             f"(need {MIN_PRIOR_ROWS}); no own-season fallback")
-        _DIST_CACHE[key] = H.ResidDist(prior["resid"].to_numpy(float),
-                                       f"{season} team_totals (seasons before)")
+        stored = tl.stored_dist(art, season)
+        _DIST_CACHE[key] = stored if stored is not None else _build_dist(art, season)
     return _DIST_CACHE[key]
+
+
+def _build_dist(art: dict, season: int):
+    from scripts import nba_game_harness as H
+    r = pd.DataFrame(art["tt_resid"], columns=["season", "resid"])
+    prior = r[r["season"].astype(int) < int(season)]
+    if len(prior) < MIN_PRIOR_ROWS:
+        raise ValueError(f"{MODEL_ID}: {len(prior)} team-total residuals before {season} "
+                         f"(need {MIN_PRIOR_ROWS}); no own-season fallback")
+    return H.ResidDist(prior["resid"].to_numpy(float), f"{season} team_totals (seasons before)")
 
 
 def uplift(art: dict, season: int) -> float:
@@ -246,18 +253,20 @@ QUOTE_ROW_COLS = ("game_id", "bookmaker", "market", "snapshot_type", "snapshot_a
                   "under_link")
 
 
-def quote_frame(rows: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+def quote_frame(rows: pd.DataFrame, games: pd.DataFrame, market: str = MARKET) -> pd.DataFrame:
     """Stored `odds` rows (QUOTE_ROW_COLS; the links may be absent) -> the
     harness's quote frame, through scripts.nba_game_harness.frame_quotes:
-    line = total_line, price_a = the over, price_b = the under.
+    line = total_line, price_a = the over, price_b = the under. `market` is
+    this model's, unless another per-event total model shares the shaping
+    (models/nba_first_half_total_luck.py).
 
     The fetch instant is `created_at` (one fetch, one transaction). The
     harness's staleness rule reads snapshot_at, and for this market it is set
     to the fetch instant, as in the lab (STALENESS, above); the book's own
-    last_update is kept as `book_update_at`. Pre-game ('open') home team
-    totals only; `games` carries season, game_date and tip."""
+    last_update is kept as `book_update_at`. Pre-game ('open') rows of `market`
+    only; `games` carries season, game_date and tip."""
     from scripts import nba_game_harness as H
-    o = rows[(rows["market"] == MARKET) & (rows["snapshot_type"] == "open")].copy()
+    o = rows[(rows["market"] == market) & (rows["snapshot_type"] == "open")].copy()
     o["fetch_at"] = pd.to_datetime(o["created_at"], utc=True, format="mixed")
     o["book_update_at"] = pd.to_datetime(o["snapshot_at"], utc=True, format="mixed")
     o["snapshot_at"] = o["fetch_at"]

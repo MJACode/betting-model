@@ -1779,6 +1779,34 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             r.add("settlement_lag", OK, "WARN", "no settled-score picks awaiting settlement")
 
+        # The same picks past settlement_lag's window, with no ceiling. A pick that
+        # cannot settle went quiet after a fortnight, and it still walks every
+        # settle pass back to its date (paper_tracker._game_settle_window_days). A
+        # first-half pick lands here when its quarters disagree with the final
+        # (data/ingestors/nba_period_scores.py asks ESPN again on every pass).
+        stranded_before = (d - timedelta(days=14)).strftime("%Y-%m-%d")
+        n_stranded = _scalar(conn, """
+            SELECT COUNT(*) FROM picks p JOIN games g ON g.game_id = p.game_id
+            WHERE p.signal_type = 'BET' AND p.result IS NULL
+              AND p.game_date < ?
+              AND g.home_score IS NOT NULL AND p.is_live IS NOT TRUE
+        """, (stranded_before,)) or 0
+        if n_stranded > 0:
+            oldest = conn.execute("""
+                SELECT p.model_id, p.game_id, p.game_date
+                FROM picks p JOIN games g ON g.game_id = p.game_id
+                WHERE p.signal_type = 'BET' AND p.result IS NULL
+                  AND p.game_date < ?
+                  AND g.home_score IS NOT NULL AND p.is_live IS NOT TRUE
+                ORDER BY p.game_date LIMIT 10
+            """, (stranded_before,)).fetchall()
+            r.add("settlement_stranded", STALE, "WARN",
+                  f"{n_stranded} BET pick(s) over 14 days old with final scores but no "
+                  f"result; oldest: " + ", ".join(f"{m} {g}" for m, g, _ in oldest))
+        else:
+            r.add("settlement_stranded", OK, "WARN",
+                  "no BET older than 14 days is waiting on a result")
+
         # Opening-signal capture. This is the step that feeds Discord posts, the
         # mobile signal push AND the shadow track — and when it dies it dies
         # SILENTLY as far as the data is concerned: picks keep scoring, so every

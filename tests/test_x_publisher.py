@@ -689,7 +689,7 @@ def test_x_posts_without_reading_discords_free_pick(monkeypatch):
         dn, "_new_signals",
         lambda conn, d, include_already_posted=False: [
             {"lock_key": "k-slate", "label": "NYY ML", "sport": "MLB",
-             "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home"}])
+             "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home", "line": None}])
     monkeypatch.setattr(data.db, "get_connection",
                         lambda *a, **k: _fake_conn("k17"))
     monkeypatch.setattr(xp, "_already_sent", lambda *a, **k: False)
@@ -783,13 +783,13 @@ def test_a_split_that_cannot_fit_says_how_many_it_dropped():
 def _slate():
     return [
         {"lock_key": "k-free", "label": "NYY ML", "sport": "MLB",
-         "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home",
+         "dk_odds": -115, "home": "NYY", "away": "BOS", "side": "home", "line": None,
          "good_to": None},
         {"lock_key": "k-total", "label": "NYY vs BOS Over 8.5", "sport": "MLB",
-         "dk_odds": -110, "home": "NYY", "away": "BOS", "side": "over",
+         "dk_odds": -110, "home": "NYY", "away": "BOS", "side": "over", "line": 8.5,
          "good_to": None},
         {"lock_key": "k-nfl", "label": "SF -3.5", "sport": "NFL",
-         "dk_odds": -110, "home": "SF", "away": "SEA", "side": "home",
+         "dk_odds": -110, "home": "SF", "away": "SEA", "side": "home", "line": -3.5,
          "good_to": None},
     ]
 

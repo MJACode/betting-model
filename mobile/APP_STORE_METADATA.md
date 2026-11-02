@@ -184,8 +184,9 @@ Not used for tracking. The app does not use the data below for advertising or to
 
 Collect these for the default source configuration, linked to the user through the app-generated device id, purpose App Functionality:
 
-- **Identifiers — Device ID.** An install UUID. It is sent with crash reports, feedback, and the sportsbook checklist, and with push registration if notifications are on.
+- **Identifiers — Device ID.** An install UUID. It is sent with crash reports, load timings, feedback, and the sportsbook checklist, and with push registration if notifications are on.
 - **Diagnostics — Crash Data.** Error text, the screen, and the app version, sent to fix crashes.
+- **Diagnostics — Performance Data.** How long screens and requests take to load, with the screen name and app version, sent to make the app faster (`app_timings`, from the build after 2026-10-31).
 - **User Content — Customer Support.** Only if the user sends feedback.
 - **User Content — Other User Content.** The sportsbooks the user checks, stored with the device id.
 - **Identifiers.** If the user turns notifications on, the Expo push token is stored so those notifications can be sent. Leave this off the label if you ship a build with notifications removed.

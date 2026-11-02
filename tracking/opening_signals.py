@@ -257,8 +257,8 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
     """
     # Lazy imports to avoid a circular import (paper_tracker imports this module).
     from tracking.paper_tracker import (
-        _compute_result, _first_game_close, _market_for_pick, _SIDE_PRICE_COL,
-        _line_clv_pts,
+        _compute_result, _first_game_close, _first_half_points, _market_for_pick,
+        _SIDE_PRICE_COL, _line_clv_pts,
     )
     from tracking.clv_math import same_book_clv
 
@@ -306,6 +306,12 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
             settle_away = away_score_f5
             settle_home_win = (int(home_score_f5 > away_score_f5)
                                if home_score_f5 != away_score_f5 else None)
+        elif market == "totals_h1":
+            first_half = _first_half_points(conn, game_id, home_score, away_score)
+            if first_half is None:
+                continue  # stays pending, as the live record's copy does
+            settle_home, settle_away = first_half
+            settle_home_win = None
         else:
             settle_home = home_score
             settle_away = away_score

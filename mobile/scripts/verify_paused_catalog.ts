@@ -109,6 +109,11 @@ check('the NBA totals model\'s chip is the market, not the side',
 // Team total, not the game total. TT is the chip.
 check('the NBA team-total model\'s chip is TT',
   MODEL_META.nba_team_total_luck?.shortLabel === 'TT', String(MODEL_META.nba_team_total_luck?.shortLabel));
+// The first half's total, not the game total. 1H O/U is the chip.
+check('the NBA first-half model\'s chip is 1H O/U',
+  MODEL_META.nba_first_half_total_luck?.shortLabel === '1H O/U', String(MODEL_META.nba_first_half_total_luck?.shortLabel));
+check('the NBA first-half model is named NBA First Half Totals',
+  modelLong('nba_first_half_total_luck') === 'NBA First Half Totals', modelLong('nba_first_half_total_luck'));
 check('the NBA team-total model is named NBA Team Totals',
   modelLong('nba_team_total_luck') === 'NBA Team Totals', modelLong('nba_team_total_luck'));
 {
@@ -146,6 +151,7 @@ check('the "Why this bet?" card reads that note for the pick\'s own model',
       navShowsSportOnly(1.5) &&
       navShowsSportOnly(2) &&
       sportOfModel('nba_team_total_luck') === 'NBA' &&
+      sportOfModel('nba_first_half_total_luck') === 'NBA' &&
       sportOfModel('ncaaf_spread_premium') === 'NCAAF');
   check('the on-screen title breaks Double-Double after the hyphen and does not ellipsize',
     modelDetailTitle('nba_prop_player_dd') === 'NBA Double-\u200BDouble' &&
@@ -214,7 +220,8 @@ check('an active batter prop is still a bet type you can build on',
   check('the NBA totals overs are a game line the picker does not offer as a slot',
     MODEL_META.nba_total_luck?.type === 'game' && betSlotForModel('nba_total_luck', 'game') === null);
   check('the NBA home team-total unders are a game line the picker does not offer as a slot',
-    MODEL_META.nba_team_total_luck?.type === 'game' && betSlotForModel('nba_team_total_luck', 'game') === null);
+    MODEL_META.nba_team_total_luck?.type === 'game' && betSlotForModel('nba_team_total_luck', 'game') === null &&
+    MODEL_META.nba_first_half_total_luck?.type === 'game' && betSlotForModel('nba_first_half_total_luck', 'game') === null);
   check('the NBA projection model is titled with its long name',
     betTypeLabel('nba_prop_projection') === 'NBA Projected Props', betTypeLabel('nba_prop_projection'));
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',

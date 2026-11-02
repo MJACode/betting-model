@@ -291,6 +291,35 @@ def step_prune_odds(run_date: str) -> bool:
         return False
 
 
+def step_prune_app_timings(run_date: str) -> bool:
+    """Delete app_timings rows older than 45 days.
+
+    Non-fatal: a failed prune costs disk, never picks, so the run goes on,
+    and the step is marked failed. A database that has not had the hand
+    migration yet has no table; that is a skip, not a red daily.
+    """
+    try:
+        from data.app_timings_retention import (
+            APP_TIMINGS_RETENTION_DAYS, prune_app_timings,
+        )
+        n = prune_app_timings()
+        logger.success(
+            f"✓ app_timings prune: {n:,} rows older than "
+            f"{APP_TIMINGS_RETENTION_DAYS} days removed")
+        return True
+    except Exception as exc:
+        missing = getattr(exc, "pgcode", None) == "42P01" or (
+            "app_timings" in str(exc) and "does not exist" in str(exc))
+        if missing:
+            logger.warning(
+                "⚠ app_timings prune skipped: table is not there "
+                "(hand migration add_app_timings.sql)")
+            return True
+        logger.warning(
+            f"⚠ app_timings prune failed (non-fatal, step marked failed): {exc}")
+        return False
+
+
 
 def _minutes_since(sql: str, params: tuple = ()) -> float | None:
     """How long ago the newest row of some feed was written, in minutes.
@@ -807,18 +836,27 @@ def step_alt_game_lines(run_date: str) -> bool:
     call's credits are recorded in alt_game_line_fetches. Stores every rung in
     `odds` and the current ladder in alt_game_lines, which the betslip's
     game-line edit reads (data/ingestors/alt_game_lines.py). Runs after the
-    opening odds so today's games exist. A failed game is logged and the rest
-    stand; the step reports failure so the pass shows it."""
+    opening odds so today's games exist.
+
+    ALT_GAME_LINES_ENABLED=0 skips the buy (default 1). ALT_GAME_LINES_MAX_GAMES,
+    when set to a whole number, caps event-odds calls for this process. One
+    game's failure is logged and the rest stand; the step fails when every
+    game call failed, or when the cap is not a whole number."""
     try:
         from data.ingestors.alt_game_lines import run as alt_run
+        from data.ingestors.alt_game_lines import step_succeeded
         summary = alt_run()
     except Exception as exc:
         logger.error(f"✗ Alternate game lines failed: {exc}")
         return False
     logger.info(f"Alternate game lines: {summary.get('games')} games, {summary.get('rows')} rungs, "
                 f"{summary.get('failed')} failed, {summary.get('credits')} credits reported "
-                f"({summary.get('credits_unreported')} calls unreported)")
-    return not summary.get("failed")
+                f"({summary.get('credits_unreported')} calls unreported)"
+                + (f", skipped: {summary['skipped']}" if summary.get("skipped") else "")
+                + (f", cap left {summary.get('capped')} game(s) and "
+                   f"{summary.get('capped_sports')} sport(s) unbought"
+                   if summary.get("capped") or summary.get("capped_sports") else ""))
+    return step_succeeded(summary)
 
 
 def step_nba_quarters(run_date: str) -> bool:
@@ -1702,6 +1740,29 @@ def step_nba_team_total_luck(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_first_half_total_luck(dry_run: bool = False) -> bool:
+    """NBA first-half totals, overs (`nba_first_half_total_luck`): the full-game
+    shooting-luck gap on the first half's line.
+
+    Decides each regular-season game once, on this model's own first-half fetch
+    45-66 minutes before tip, and writes the first-half over at the best bettable
+    price when the gap is 2 points or more
+    (scripts/nba_first_half_total_luck_card.py). LIVE, no write switch. Runs only
+    in the NBA totals window job, right after the first-half fetch, under a time
+    limit there (scheduler.run_nba_total_luck_window). A run with no game to
+    decide writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_first_half_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA first-half card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA first-half card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -2449,6 +2510,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 11b: Pruning line-shop (non-DK) odds history...")
     results["prune_odds"] = step_prune_odds(run_date)
 
+    # Load-time rows. A dry run writes nothing, including this delete.
+    # 45 days: data/app_timings_retention.py. Skipped when the table is absent.
+    if not dry_run:
+        logger.info("Step 11c: Pruning app_timings older than 45 days...")
+        results["prune_app_timings"] = step_prune_app_timings(run_date)
+
     # ── Step 12: System health check (feed freshness — after all ingestion) ────
     # Daily: CRIT failure returns False → the run shows red. Results land in
     # system_health_checks (anon-readable) for Claude mobile / the app.
@@ -2673,7 +2740,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
-                                 "nba-total-luck", "nba-team-total-luck",
+                                 "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck",
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
@@ -2684,6 +2751,7 @@ Examples:
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
+                                 "prune-app-timings",
                                  "check-lines", "settle", "health-check",
                                  "model-quality"],
                         help="Run a single pipeline step")
@@ -2768,6 +2836,7 @@ Examples:
             "nba-prop-project": lambda: step_nba_prop_project(),
             "nba-total-luck": lambda: step_nba_total_luck(dry_run=args.dry_run),
             "nba-team-total-luck": lambda: step_nba_team_total_luck(dry_run=args.dry_run),
+            "nba-first-half-total-luck": lambda: step_nba_first_half_total_luck(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
@@ -2796,6 +2865,7 @@ Examples:
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
             "prune-odds":   lambda: step_prune_odds(run_date),
+            "prune-app-timings": lambda: step_prune_app_timings(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             # Observe-only: refresh_pass.sh (hourly/evening/overnight) is the
             # caller. A standing CRIT still WRITES system_health_checks; it

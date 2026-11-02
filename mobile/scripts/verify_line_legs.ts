@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, pregameLadderVisible, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
 import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
@@ -481,10 +481,54 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the betslip reads the ladder and folds it, and a failed ladder read keeps the main lines',
     /\.from\('alt_game_lines'\)/.test(readFileSync(join(ROOT, 'src/lib/queries.ts'), 'utf-8'))
       && /if \(altRes\.error\) \{[\s\S]{0,120}return main;/.test(readFileSync(join(ROOT, 'src/lib/queries.ts'), 'utf-8')));
+  const kick = Date.parse('2026-10-29T18:00:00Z');
+  check('the pre-game ladder stays up before kickoff', pregameLadderVisible('2026-10-29T23:00:00Z', kick));
+  check('the pre-game ladder is hidden once the game has started', !pregameLadderVisible('2026-10-29T17:00:00Z', kick));
+  check('the pre-game ladder is hidden at the scheduled start', !pregameLadderVisible('2026-10-29T18:00:00Z', kick));
+  check('a missing or unparseable start still shows the ladder',
+    pregameLadderVisible(null, kick) && pregameLadderVisible(undefined, kick)
+      && pregameLadderVisible('', kick) && pregameLadderVisible('soon', kick));
+  check('a space-separated start is read with parseStamp',
+    !pregameLadderVisible('2026-10-29 17:00:00+00', kick)
+      && pregameLadderVisible('2026-10-29 23:00:00+00', kick)
+      && /parseStamp\(commenceTime\)/.test(read('src/lib/lineLegs.ts')));
+  const startedRows = Object.assign(spreadRows.slice(), { ladderHidden: 'started' as const });
+  const startedMenu = gameEditMenu(kc, startedRows);
+  check('a started game says the morning alternates are off',
+    startedMenu.ladderHidden === 'started'
+      && startedMenu.subtitle.includes('The game has started')
+      && !startedMenu.subtitle.includes('hanging right now'));
+  check('the sheet says why a missing line is gone after kickoff',
+    read('src/components/EditLineLegSheet.tsx').includes('this morning’s alternate lines are off'));
   const queries = read('src/lib/queries.ts');
   check('board and pick reads ask for main markets, not the alternate ladder',
     (queries.match(/\.in\('market', \[\.\.\.MAIN_GAME_ODDS_MARKETS\]\)/g) ?? []).length >= 6
       && !/MAIN_GAME_ODDS_MARKETS = \[[^\]]*alternate_spreads/.test(queries));
+  {
+    const fnStart = queries.indexOf('export async function fetchGameLineRows');
+    const fn = queries.slice(fnStart, queries.indexOf('\nexport async function', fnStart + 10));
+    check('the ladder read checks the start before it asks for alt rungs',
+      fn.indexOf('pregameLadderVisible') >= 0
+        && fn.indexOf('pregameLadderVisible') < fn.indexOf(".from('alt_game_lines')"));
+  }
+  {
+    const needle = ".from('v_latest_odds_all_books')";
+    let at = 0;
+    let reads = 0;
+    let unfiltered = 0;
+    while (true) {
+      const i = queries.indexOf(needle, at);
+      if (i < 0) break;
+      reads += 1;
+      const window = queries.slice(i, i + 1200);
+      const nextFrom = window.indexOf(".from('", needle.length);
+      const block = nextFrom < 0 ? window : window.slice(0, nextFrom);
+      if (!block.includes(".in('market'") && !block.includes(".eq('market'")) unfiltered += 1;
+      if (block.includes('alternate_spreads') || block.includes('alternate_totals')) unfiltered += 1;
+      at = i + needle.length;
+    }
+    check('every all-books read names a main market', reads >= 9 && unfiltered === 0, `${reads} reads, ${unfiltered} unfiltered`);
+  }
   check('a game edit is never refused as sidelined (no player to look up)',
     lineLegsAfterEdit([kc], lineLegKey(kc), bufSpec, EMPTY_INJURY_INDEX).outcome === 'ok');
 }

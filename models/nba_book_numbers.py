@@ -1,9 +1,13 @@
 """Which quote is a book's number: ONE copy of the main-number rule.
 
 Some books hang a whole ladder of lines for one market in one fetch (betrivers
-and betparx 5-7 team-total rungs, betmgm up to 21), and a few list a single
-first-half or first-quarter rung 2+ points off every other book at a lopsided
-price. A bettor reading "the book's number" means the main rung, so every
+and betparx 5-7 team-total rungs, betmgm up to 21). In the first-half and
+first-quarter purchase a few show a single rung 2+ points off every other book at
+a lopsided price: that purchase kept the last pair each book listed
+(data/ingestors/odds_ingestor._parse_total_outcomes), which reads as a ladder cut
+to one rung, so this rule had nothing to choose among there
+(models/nba_first_half_total_luck.py, THE GRADED QUOTES). A bettor reading "the
+book's number" means the main rung, so every
 reader of these markets goes through the rule below. It moved here from the
 fourth search's lab (scripts/nba_game4_p2.py) so that the lab's three families
 (P1, P2, P3) and the live model nba_team_total_luck read the SAME code; the lab
@@ -21,9 +25,9 @@ imports it from here.
                 not ladders.
 
 The live fetch applies the main rung once more, at WRITE time
-(split_main_rungs): it stores each book's main team-total rung under
-team_totals_home / team_totals_away and the rest under the _alternate names,
-so every reader of one row per (game, market, book) lands on the main number.
+(split_main_rungs): it stores each book's main rung under team_totals_home /
+team_totals_away / totals_h1 and the rest under the _alternate names, so every
+reader of one row per (game, market, book) lands on the main number.
 The replay of the lab (scripts/nba_team_total_luck_replay.py) passes the
 archived ladders through the same splitter before deciding.
 
@@ -99,16 +103,18 @@ def visible_numbers(q: pd.DataFrame, times: pd.DataFrame, books=None) -> pd.Data
 
 # ── the write-time split: the main rung under the market's own name ─────────
 
-# The market a stored team-total row is filed under when it is NOT the book's
-# main rung in that fetch. The prop ladders are named the same way
+# The market a stored row is filed under when it is NOT the book's main rung in
+# that fetch. The prop ladders are named the same way
 # (data/migrations/latest_line_state_tables.sql: *_alternate).
 ALTERNATE_MARKET = {"team_totals_home": "team_totals_home_alternate",
-                    "team_totals_away": "team_totals_away_alternate"}
+                    "team_totals_away": "team_totals_away_alternate",
+                    "totals_h1": "totals_h1_alternate"}
 
 
 def split_main_rungs(rows: list[dict]) -> tuple[list[dict], list[dict]]:
-    """One fetch's team-total rows (odds-table dicts: game_id, bookmaker,
-    market, total_line, over_price, under_price, ...) -> (main, alternates).
+    """One fetch's per-event total rows, team totals or the first half
+    (odds-table dicts: game_id, bookmaker, market, total_line, over_price,
+    under_price, ...) -> (main, alternates).
 
     For each (game, book, market) the main rung (main_rungs: coherent first,
     closest to even, ties to the lower number) keeps its market name; every
@@ -126,7 +132,7 @@ def split_main_rungs(rows: list[dict]) -> tuple[list[dict], list[dict]]:
         return [], []
     bad = sorted({str(r.get("market")) for r in rows} - set(ALTERNATE_MARKET))
     if bad:
-        raise ValueError(f"split_main_rungs: not a team-total market: {bad}")
+        raise ValueError(f"split_main_rungs: not a per-event total market: {bad}")
 
     def num(v):
         try:
