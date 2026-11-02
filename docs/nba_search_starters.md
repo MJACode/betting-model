@@ -519,3 +519,26 @@ An offer at a deciding book at −200 or better; counted, never graded.
 - **Peak memory in `--smoke` was 2.9 GB.** The engine's own build did not record its peak.
 - **`--full`'s own path ran on the real cache up to the line before the first cell,** stopped there by a
   scratch script: its coverage check passed and the betas matched. No cell ran.
+
+
+## 12. Results (graded 2026-11-01)
+
+Run `2026-11-01-starters`, stored in Supabase. 32 cells, and the same 32 on the league share alone as the control.
+
+**0 of the 32 cells pass, and none clears the 95% interval. The family stays closed.** Of the 64 rows, 51 hold 200+
+bets, with a median return of -1.82% and 8 positive. The grade took 297 seconds.
+
+| Market | Cells | Most bets | Best units | Best return | Worst return |
+|---|---|---|---|---|---|
+| First-quarter spread | 8 | 1,322 | +1.22 | +0.6% | -23.4% |
+| First-quarter total | 8 | 1,986 | +12.28 | +0.8% | -1.6% |
+| First-half spread | 8 | 866 | +2.85 | +37.0% | -8.9% |
+| First-half total | 8 | 2,016 | -1.33 | -0.1% | -3.6% |
+
+The first-half spread's +37.0% is 7 bets, and not a near miss. The best cell with a real sample is the
+first-quarter total, over, tilt 1.0: 1,346 bets, +12.28 units, +0.8%, interval -4.4% to +6.0%. The league-share
+control's best with a real sample is the same market and side at 0.75: 1,509 bets, +7.46 units, +0.4%, interval
+-4.3% to +5.5%. So knowing who starts, and how much of the first quarter they play, did not separate from
+the market. **This closes the starters idea for the first quarter, and does not close first-quarter betting**:
+first-quarter player props and first-quarter team totals have not been graded, because their prices have not been
+bought.

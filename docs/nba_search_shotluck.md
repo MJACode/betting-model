@@ -426,3 +426,25 @@ has been graded.**
 - **Time and memory, `--full`:** projected 1.44 hours, peak 3.1 GB. One placebo run across the 48 cells
   takes 11.9 seconds, so the 200 take about 40 minutes. The same offers measured 1.64 hours on the run
   above, so the clock moves by that much between runs. Another job ran on the machine during both.
+
+
+## 10. Results (graded 2026-10-31)
+
+Run `2026-10-31-shotluck`, stored in Supabase. 48 cells, 192 controls.
+
+**0 of the 48 cells pass, and none clears the 95% interval. The family stays closed.** All 48 hold 200+ bets. The
+median return is -1.44%, with 13 positive.
+
+| Market, side | Cells | Most bets | Best units | Best return | Worst return |
+|---|---|---|---|---|---|
+| Full-game total, over | 8 | 2,348 | +71.08 | +3.9% | -0.4% |
+| Full-game total, under | 8 | 2,308 | -1.67 | -0.1% | -2.4% |
+| Spread, home | 8 | 2,399 | +16.29 | +1.0% | -3.7% |
+| Spread, away | 8 | 2,342 | -35.04 | -1.8% | -4.1% |
+| Away team total, over | 4 | 1,325 | +27.01 | +3.9% | -1.0% |
+| Away team total, under | 4 | 1,374 | -48.19 | -5.7% | -7.4% |
+| Home team total, over | 4 | 1,332 | +11.53 | +1.5% | -1.4% |
+| Home team total, under | 4 | 1,325 | +14.12 | +1.9% | -2.4% |
+
+The nearest miss is the full-game over at decision point C, cut 3: 1,690 bets, +71.08 units, +3.9%, interval
+-0.8% to +8.5%. It fails the interval and the bands. The live totals models are unchanged.

@@ -417,3 +417,26 @@ best home offer in both markets (EV 0.339 and 0.333). It sat in the band below g
 reads, and in the placebo runs that give the game the home side at a cut, which bar 6 reads. The rule
 and what it leaves in are in section 2. A checker found this from prices alone. No cell had been
 graded.
+
+
+## 11. Results (graded 2026-10-31)
+
+Run `2026-10-31-popular`, stored in Supabase. 9 cells and 24 controls.
+
+**0 of the 9 cells pass, and none clears the 95% interval. The family stays closed.**
+
+| Cell | Bets | Units | Return | 95% interval |
+|---|---|---|---|---|
+| Against the popular team, spread, gap 5 | 3,039 | -74.68 | -2.3% | -5.6% to +1.0% |
+| same, gap 10 | 1,438 | -6.09 | -0.4% | -5.5% to +4.5% |
+| same, gap 15 | 524 | +21.09 | +3.7% | -4.3% to +11.6% |
+| Against the popular team, moneyline, gap 5 | 2,845 | -39.52 | -2.4% | -7.1% to +2.4% |
+| same, gap 10 | 1,373 | -10.93 | -1.6% | -8.9% to +5.9% |
+| same, gap 15 | 510 | +16.81 | +7.2% | -5.7% to +20.3% |
+| Full-game total, under, over habit 1 or more | 942 | -30.04 | -2.9% | -9.2% to +3.2% |
+| same, over habit 2 or more | 404 | -53.73 | -12.3% | -21.0% to -2.8% |
+| same, over habit 3 or more | 159 | -17.77 | -10.3% | -25.8% to +4.3% |
+
+The return rises with the gap on both markets, and the two largest gaps stop well short of the interval. That
+is a pattern in cells this search did not pass, and is not a result. The under at over habit 2 or more loses
+clearly. That does not make the over a bet: the opposite side was not a registered cell.

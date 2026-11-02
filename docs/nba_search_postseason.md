@@ -477,3 +477,58 @@ pass on a price that is merely close.
 
 2026-10-31: the dated rows hold seven breaks, each made once, and all seven were caught. On the
 unbroken code 66 tests pass.
+
+
+## 9. Results (graded 2026-10-31)
+
+Run `2026-10-31-postseason`, stored in Supabase. 7 cells and 5 controls, 272 games, three postseasons.
+
+**1 of the 7 cells passes: `nba_prop_market`'s same-line under, five markets, EV 0.00 or better.**
+
+| Cell | Bets | Units | Return | 95% interval | Seasons positive | Fails |
+|---|---|---|---|---|---|---|
+| **`nba_prop_market`, under, five markets** | 1,953 | +138.87 | +6.8% | +2.1% to +11.3% | 3 of 3 | none |
+| Projection, rebounds + assists, under, EV .04 | 910 | +44.82 | +5.1% | -0.9% to +11.0% | 3 of 3 | interval, bands, placebo |
+| Projection, blocks + steals, EV .05 | 1,241 | +36.31 | +2.9% | -2.5% to +8.5% | 2 of 3 | interval, bands |
+| Projection, blocks, under, EV .02 | 1,215 | +16.07 | +1.2% | -3.9% to +6.7% | 2 of 3 | interval, bands |
+| Projection, threes, EV .04 | 1,546 | +10.16 | +0.7% | -3.9% to +5.3% | 1 of 3 | interval, seasons, bands |
+| Projection, rebounds, under, EV .01 | 1,581 | +9.61 | +0.6% | -4.1% to +5.3% | 2 of 3 | interval, bands, placebo |
+| Projection, steals, EV .02 | 1,788 | -7.40 | -0.4% | -5.1% to +4.0% | 1 of 3 | interval, seasons, blind, bands |
+
+Controls, never judged: the shipped caps, one bet a game shared by both models and four a night, 251 bets, +12.37
+units, +6.7%, -8.7% to +20.9%. The rule with no decision clock, 1,955 bets, +140.87 units, +6.9%. The six
+projection cells as one card, 8,281 bets, +109.57 units, +1.3%, -1.2% to +3.9%.
+
+### 9.1 The independent check, 2026-11-01
+
+A separate checker rebuilt the passing cell in plain code from the raw quotes and ESPN's box, using neither this
+lab's chooser nor its grader. Scripts are under `%TEMP%/nba_s/verify_postseason/`.
+
+**The result is real as arithmetic and it holds with caveats. It is not what its name suggests.**
+
+- **Rebuilt exactly.** 1,953 bets in both, 0 differences on player, market, line, side, price, book, result, units
+  or EV. Nothing reads information from after the decision: the rule's only inputs are one snapshot's prices, 54 to
+  64 minutes before tip, and no row is at or after tip.
+- **Most of it is a general lean to unders, and the rule does not pick winners.** The blind under over the same
+  markets returns +2.69% on 11,314 bets (+0.53% to +4.81%). The cell beats that by 4.09 points (+0.06 to +8.05). But
+  its unders beat Pinnacle's fair chance by 2.49 points and the ones it skipped by 3.39, so the rule adds nothing on
+  who covers, and stated EV has a correlation of -0.004 with winning above fair. It works as a price filter on top of
+  the lean. About +41.4 of the +138.87 units would be there if Pinnacle's fair chance were right; the other 70% came
+  from unders winning more often than that.
+- **The floor at zero separates nothing.** The band it refuses, EV -3% to just under 0, returns +6.86% on 2,908 bets.
+- **Do not plan on +6.8%.** The lean in this sample is larger than in the regular seasons (+3.24 points against
+  +1.20). At the regular-season lean the same bets would return about +4.4%.
+- **It rests on few events.** 117 bets on players who played under 15 minutes hold +65.51 units; the other 1,836
+  return +3.82% (-0.84% to +8.39%). Minutes are known only after the game, so this says where the money sits and is
+  not a filter. Removing the top 5 players by units, the best 5 dates, BetMGM's bets, the assists market, or the
+  conference semifinals each takes the interval's low end just below zero.
+- **FanDuel alone is flat.** Rule re-run on one book: DraftKings +6.54% (-0.40% to +12.93%), BetMGM +8.59%, Caesars
+  +5.89%, FanDuel -0.13%. The four main books together: 1,701 bets, +123.13 units, +6.89% (+2.11% to +11.59%).
+- **The live caps change everything.** The pass is with every bet placed. The shipped caps place 251 bets, only 20 of
+  them this rule's. The rule alone at one bet a game is 251 bets, +23.36 units, +9.71% (-3.82% to +22.81%). Neither
+  clears the interval.
+- **Prices:** -192 to +210, median -104. 61 bets are worse than -150 and none is worse than -200.
+- **Latent, did not fire:** `scripts/nba_prop_market_lab.py:190`, the loose name match, could turn one player into a
+  namesake if a priced player were on neither box. All ten pairings it made here read correct. And section 3.3's
+  "second source" is ESPN's own box beside ESPN's feed; NBA.com checks points, threes and most assists, while rebounds
+  rest on ESPN alone.

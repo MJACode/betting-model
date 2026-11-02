@@ -578,3 +578,18 @@ of one placebo run on the real data with the projected total.
 progress lines and writes `cells_FAVB.parquet`, `cells_FAVP2.parquet`, `cells_FAVP1.parquet`, one
 `cells_control_*.parquet` per control, `population_FAV.parquet`, `fits_FAVP1.json` and each family's
 bets. `python -m scripts.nba_game2_verdict --results <folder> --house5` then judges the 40.
+
+
+## 11. Results (graded 2026-10-31)
+
+Run `2026-10-31-fav200`, stored in Supabase (`nba_game2_cells`, `nba_game2_population`). 40 cells and 40 controls.
+
+**0 of the 40 cells pass. The family stays closed.**
+
+- **The blind favourite, 12 cells, 951 to 1,334 bets each.** The best is the blind favourite at decision points C
+  and D: 1,281 bets, +25.35 units, +0.8%, interval -2.8% to +4.3%. It misses the interval, the seasons, the bands and
+  the placebo. Median return over the 12 cells with 200+ bets: -1.75%, with 2 positive.
+- **Too few games to tell: the two model families.** FAVP1 reaches at most 141 bets and FAVP2 at most 40, against a
+  bar of 200.
+- **Five cells clear the 95% interval and none of them means anything.** They hold 1, 2, 2, 4 and 9 bets, and every
+  bet won, so the interval has nothing to spread over. Each fails the 200-bet bar.

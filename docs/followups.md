@@ -43,6 +43,19 @@ connection, no deploy; session log, 2026-10-31):
    odds WHERE market = 'totals_h1_alternate' AND source = 'odds_api_nba_first_half_live'
    GROUP BY 1`, once the model has fetched a few games.
 
+**Read 2026-11-02, after the first evening on the new code (four games, 2026-11-01):**
+
+1. **The killed cards lost no bets.** 35 of the 60 NBA games from 2026-10-24 to 10-31 have no team-total decision.
+   Every team-total decision so far (56 games) reads `early_season: a team has under 10 games`, so those games
+   were inside the ten-game hold and could not have bet. The first possible bet is still ahead.
+2. **The stored price table ended the kills on the first evening.** All 12 card runs on 11-01 exited 0, each in
+   about 3 to 5 seconds, against the 180-second kill on most runs before it. The team-total and first-half cards ran
+   side by side on all four games; the full-game card ran ten minutes earlier, so three at once has not been seen.
+   Leave this item open for a week of evenings, and for the first real bets, when the cards read more than the hold.
+3. **No first-half ladder so far.** On the first four games, `rows_stored` equals `main_rows` on every call (8 and
+   8), and `totals_h1_alternate` has no row. Eight books each hold one row per game, BetRivers, betPARX and Hard Rock
+   among them. A call cost 1 credit. Leave this open until a full slate has been read.
+
 ## [x] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29) — DONE 2026-10-30
 
 `ncaab_odds_unmatched` holds the events the game-lines purchase could not

@@ -2646,10 +2646,8 @@ their answer is "too few games to tell". The full table is in the lab's output.
 
 Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
 `python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
-build machine under `%TEMP%/q1trend/results/`. **They are not in Supabase yet.**
-`python -m scripts.nba_game2_store --results <folder> --run 2026-10-28-eighth` failed with
-"password authentication failed for user postgres": the local login has been stale since the
-database password changed on 2026-10-24. Storing the run is the first step once it works.
+build machine under `%TEMP%/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
+that first blocked storing them was fixed).
 
 **0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
 1.6 expected by chance. Six of those hold a single bet each. One cell with a real sample clears

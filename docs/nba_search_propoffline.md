@@ -640,3 +640,69 @@ building the frame (the refit's logs, 2026-10-31). They are cached, so `--full` 
 took 0.3 to 1.0 seconds by group. The projected `--full` is 26 minutes of cells plus 1 minute of loading, peak memory 4.1 GB, and at most
 0.3 GB more for one group's 200 placebo runs. The smoke run itself took 11 minutes. Smoke runs on this machine that day have now projected
 26, 78, 93 and 105 minutes, all inside the two hours, so the range is the figure to plan on.
+
+
+## Results (graded 2026-10-31)
+
+Run `2026-10-31-propoffline`, stored in Supabase. 36 cells and 15 controls.
+
+**8 of the 36 cells pass the house standard, all unders. An independent check then found none of them is a new model
+to build.**
+
+| Cell | Bets | Units | Return | 95% interval | House standard |
+|---|---|---|---|---|---|
+| Soft-book consensus, same line, under, EV 0.00 | 17,268 | +315.07 | +1.8% | +0.2% to +3.5% | passes |
+| same, EV 0.01 | 11,056 | +274.60 | +2.6% | +0.7% to +4.5% | passes |
+| same, EV 0.02 | 7,060 | +151.52 | +2.3% | 0.0% to +4.6% | passes |
+| same, EV 0.03 | 4,249 | +142.61 | +3.6% | +0.5% to +6.8% | passes |
+| Anchored projection, consensus, under, EV 0.01 | 39,723 | +656.14 | +1.5% | +0.4% to +2.6% | passes |
+| same, EV 0.02 | 31,827 | +614.33 | +1.8% | +0.6% to +3.0% | passes |
+| same, EV 0.04 | 19,297 | +548.59 | +2.7% | +1.2% to +4.3% | passes |
+| Anchored projection, Pinnacle, under, EV 0.04 | 16,084 | +578.11 | +3.3% | +1.6% to +5.0% | passes |
+| Anchored projection, Pinnacle, under, EV 0.01 | 31,767 | +549.63 | +1.6% | +0.2% to +3.0% | fails bands |
+| same, EV 0.02 | 25,859 | +596.88 | +2.1% | +0.6% to +3.6% | fails bands |
+| Off Pinnacle's line, under, EV 0.04 | 4,140 | +162.07 | +3.2% | +0.3% to +6.2% | fails bands |
+| same, EV 0.05 | 3,151 | +180.99 | +4.7% | +1.5% to +8.1% | fails bands |
+
+### The independent check, 2026-11-02
+
+A separate checker rebuilt three cells in plain code from the raw quotes and box scores, with neither this lab's
+chooser nor its grader. Scripts are under `%TEMP%/nba_s/verify_propoffline/`. Each returned 0 differences on player,
+market, line, side, price, book and result, and nothing reads information from after the decision apart from the one
+input below. **The arithmetic is right. The conclusions a pass would suggest are not.**
+
+| | Consensus, same line, EV 0.01 | Anchored, Pinnacle, EV 0.04 | Off Pinnacle's line, EV 0.05 |
+|---|---|---|---|
+| Verdict | **Does not hold** | **Holds as a record, is not a new model** | **Does not hold under its standard; a lead** |
+| Bets the live rule already makes | 0 | 9,142 (56.8%) | 1,083 (34.4%), at another line |
+| Held by neither live model | 7,892, +69.8 units, +0.91% (-1.46% to +3.21%) | 4,281, +52.9 units, +1.13% (-2.19% to +4.43%) | 1,977, +86.9 units, +3.72% (-0.60% to +7.88%) |
+| On the five books the feed returns | 891, -54.1 units, -5.99% (-13.17% to +1.01%) | 10,285, +229.2 units, +2.08% (+0.06% to +4.05%) | 2,737, +171.5 units, +5.15% (+1.39% to +8.68%) |
+| One bet a game, four a night | 1,829, +105.0 units, +6.44% | 1,248, +26.8 units, +2.17% | 1,266, +107.6 units, +7.14% |
+
+The live rule under the same one-a-game, four-a-night cap makes 1,861 bets, +120.1 units, +6.58%, so no cell improves
+on what is already live by more than its own noise.
+
+- **The consensus cell cannot be built on what the live feed returns.** Its median needs books the feed does not
+  serve, and it rests on one book being about 14 cents out of line (85% of its bets have only one book clearing).
+  Without December 2025 it is +1.94% (-0.04% to +3.94%). Stale quotes, its largest risk, cannot be measured: the
+  archive holds no book clocks.
+- **The anchored cell mostly is the live rule.** It does not beat its own control once an interval is added: +0.90
+  points (-0.66 to +2.41). Its part that is not already live is threes, 1,577 bets, +8.83%, and without threes
+  +0.61%. That split was looked for after seeing the result, so it is a question for a new test and not a finding.
+- **The off-line cell's bands really do fail.** The two bands below its cut lose (-1.53% on 989 bets, and -1.00%), with
+  no plateau. It is the only one of the three that survives both the five-book and the overlap limits, and it does
+  so on seasons already known to be good for it before this search was written. It stays closed under this standard.
+  2026-27 is the fresh test.
+- **None of these seasons is a fresh test for this search:** the off-line and consensus ideas were already known to
+  have made money on them.
+
+**Every under rule leans on one situation.** In team-games where a teammate came back from no pre-game roster, the
+blind under returns +5.71%, against -2.60% elsewhere. The live rule is +14.60% there and +1.13% elsewhere (-0.50% to
++2.77%). This is a hindsight split and not a rule, but it says where the unders' money comes from.
+
+**Faults the check found, each measured separately:** the returning-teammates input reads tonight's box, which the
+live card cannot know, and a book's last-listed line can overwrite its main number. Both reach beyond this search, and
+the session log has what was measured. Two smaller ones stand here: 15 files of invented bets from the lab's own
+synthetic check sit in the bets folder (`scripts/nba_s_propoffline.py:1245`), though the verdict never reads them, and
+the verdict's `credited` column reads as credit for the anchored consensus cell at EV 0.04 while it loses to its
+control. `credit_AN.parquet` is the column to read.
