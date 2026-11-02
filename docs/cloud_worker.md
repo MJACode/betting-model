@@ -41,20 +41,29 @@ See `docs/social_posts.md`.
 **Alternate spreads and totals (2026-10-29, Matt approved the cost; every
 pass since the same day, option B).** Every refresh pass's odds step buys
 alternates for games starting in the next 24 hours
-(`ALT_GAME_LINES_WINDOW_HOURS`, default 24; `FETCH_ALT_GAME_LINES=0` turns
-it off) and refreshes `alt_game_lines` for them, one ledger row per sport per
-pass (`endpoint = 'pass'`). The daily full pipeline's Step 2-alt (`--step alt-game-lines`,
+(`ALT_GAME_LINES_WINDOW_HOURS`, default 24) and refreshes `alt_game_lines`
+for them, one ledger row per sport per pass (`endpoint = 'pass'`). The
+daily full pipeline's Step 2-alt (`--step alt-game-lines`,
 `data/ingestors/alt_game_lines.py`) makes one per-event call per game starting
 in the next 3 days, for NFL, NCAAF, NBA, NHL, MLB, WNBA and NCAAB, and stores
 every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
 pruner) and the current ladder in `alt_game_lines`, which the betslip's
 game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
 game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
-one row per call. Kill switch: `ALT_GAME_LINES_ENABLED=0` (default `1`) buys
-nothing, including the event lists. `ALT_GAME_LINES_MAX_GAMES`, unset by
-default, caps event-odds calls for that process when set to a whole number;
-anything else buys nothing and fails the step. Neither flag is a credit
-budget. The app hides that ladder once `games.commence_time` has passed.
+one row per call. Both paths call `buy_allowance()`. Kill switch:
+`ALT_GAME_LINES_ENABLED=0` (default `1`) buys nothing on the daily run,
+including the event lists, and nothing on the pass. `ALT_GAME_LINES_MAX_GAMES`,
+unset by default, caps event-odds calls for that process (sport order, then
+game id) when set to a whole number; anything else buys nothing on both
+paths and fails the daily step. The pass logs that and still stores main
+lines. `FETCH_ALT_GAME_LINES=0` is an extra gate on the pass only (default
+`1`); it does not affect the daily run. A pass spends only when that flag
+is `1` and `buy_allowance()` allows it. Neither flag is a credit budget.
+The app hides that ladder from the edit sheet once `games.commence_time`
+has passed. A slip leg the user already moved to an alternate rung stays,
+marked as a pre-game price, until they remove it. `drop_started_ladders`
+runs on the daily step only, so a pass-written ladder for a started game
+stays in the table until the next daily run; the sheet does not list it.
 The measurement query:
 
     SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
@@ -346,9 +355,13 @@ Notes:
    - `ODDS_API_KEY`
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
-   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips the daily
-     alternate spreads/totals fetch. `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL,
-     unset means no cap. A whole number caps that step's event-odds calls.
+   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips alternate
+     spreads/totals on the daily step and on every odds pass.
+     `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL, unset means no cap. A whole
+     number caps event-odds calls for that process (daily step, or one
+     pass). Anything else buys nothing and fails the daily step.
+     `FETCH_ALT_GAME_LINES` — OPTIONAL, default `1`. `0` skips only the
+     every-pass buy; the daily step still runs.
    - `TZ` = `America/New_York`
    - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
      `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put

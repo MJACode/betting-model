@@ -44,6 +44,7 @@ import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   isValidCombo,
+  legsForPricing,
   lineShopParlay,
   makeCustomLeg,
   CUSTOM_MODEL_ID,
@@ -174,10 +175,15 @@ function ParlayScreenBody() {
   // slipLegs comes from useResolvedSlip (the persisted slip resolved against
   // today's picks, cross-sport, any signal); session custom legs append here.
   const legs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
+  // A pre-game alternate held after kickoff stays in `legs` (the card, the
+  // remove control) and is left out of the price, the book row, and a save.
+  const pricedLegs = useMemo(() => legsForPricing(legs), [legs]);
   const metrics = useMemo(
-    () => computeCorrelatedMetrics(legs, rho, resolveTeam),
-    [legs, rho, resolveTeam],
+    () => computeCorrelatedMetrics(pricedLegs, rho, resolveTeam),
+    [pricedLegs, rho, resolveTeam],
   );
+  // Every card still on the slip counts, including a held pre-game alt.
+  // The price, the book row, and a save use pricedLegs.
   const valid = useMemo(() => isValidCombo(legs), [legs]);
 
   // The sport a saved slip is filed under: the first real pick's sport (custom
@@ -440,6 +446,7 @@ function ParlayScreenBody() {
         ) : (
           <SlipBody
             legs={legs}
+            pricedLegs={pricedLegs}
             metrics={metrics}
             valid={valid}
             staleCount={staleKeys.length}
@@ -561,6 +568,7 @@ function ParlaySaveButton({
   sport,
   editingId,
   droppedCount,
+  pregameCount = 0,
   onSaved,
 }: {
   legs: ParlayLeg[];
@@ -570,6 +578,9 @@ function ParlaySaveButton({
   /** Legs the board could not price back — they are NOT in `legs`, so updating
    *  a save would drop them. The caption says so before the tap. */
   droppedCount: number;
+  /** Pre-game alternates held after kickoff. They stay on the slip and are
+   *  left out of the save. Not the same sentence as a leg that left the board. */
+  pregameCount?: number;
   /** Called with the id the slip now lives under, so a second tap updates it. */
   onSaved: (id: string) => void;
 }) {
@@ -603,19 +614,31 @@ function ParlaySaveButton({
   // undo behind it — so it asks first, naming what goes. An update that keeps
   // every leg does not: confirming a save nobody can lose anything to is noise.
   const onSave = useCallback(() => {
-    if (!editingId || droppedCount === 0) {
+    const leaving = droppedCount + pregameCount;
+    if (!editingId || leaving === 0) {
       applySave();
       return;
     }
+    const bits: string[] = [];
+    if (droppedCount > 0) {
+      bits.push(
+        `${droppedCount} leg${droppedCount === 1 ? '' : 's'} ${droppedCount === 1 ? 'is' : 'are'} no longer on the board`,
+      );
+    }
+    if (pregameCount > 0) {
+      bits.push(
+        `${pregameCount} pre-game leg${pregameCount === 1 ? '' : 's'} ${pregameCount === 1 ? 'isn’t' : 'aren’t'} in the price — the game has started`,
+      );
+    }
     Alert.alert(
       'Update without those legs?',
-      `${droppedCount} leg${droppedCount === 1 ? '' : 's'} in this parlay ${droppedCount === 1 ? 'is' : 'are'} no longer on the board. Updating saves it without ${droppedCount === 1 ? 'it' : 'them'}, and that can't be undone.`,
+      `${bits.join('. ')}. Updating saves this slip without ${leaving === 1 ? 'it' : 'them'}, and that can't be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Update', style: 'destructive', onPress: applySave },
       ],
     );
-  }, [applySave, editingId, droppedCount]);
+  }, [applySave, editingId, droppedCount, pregameCount]);
 
   if (legs.length === 0) return null;
 
@@ -822,6 +845,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
  */
 function SlipBody({
   legs,
+  pricedLegs,
   metrics,
   valid,
   staleCount,
@@ -838,6 +862,9 @@ function SlipBody({
   onSaved,
 }: {
   legs: ParlayLeg[];
+  /** `legs` minus pre-game alternates held after kickoff. The price, the
+   *  book row, and a save use this. The card list uses `legs`. */
+  pricedLegs: ParlayLeg[];
   metrics: CorrelatedMetrics;
   valid: boolean;
   staleCount: number;
@@ -855,19 +882,20 @@ function SlipBody({
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
-  const allDk = legs.every((l) => l.dkPriced !== false);
+  const allDk = pricedLegs.every((l) => l.dkPriced !== false);
   // Every leg a Stats line the user chose themselves? Then nothing on this
   // slip is a model's number, and two labels below must not say it is.
-  const modelBacked = legs.some((l) => !isLineLeg(l));
+  const modelBacked = pricedLegs.some((l) => !isLineLeg(l));
   const dkException = useMemo(() => {
-    const off = legs.filter((l) => l.dkPriced === false);
+    const off = pricedLegs.filter((l) => l.dkPriced === false);
     if (off.length === 0) return null;
     return off.map((l) => `${l.label} at ${bookName(l.pricedAt ?? '')}`).join(' and ');
-  }, [legs]);
+  }, [pricedLegs]);
   const dkExceptionCount = useMemo(
-    () => legs.filter((l) => l.dkPriced === false).length,
-    [legs],
+    () => pricedLegs.filter((l) => l.dkPriced === false).length,
+    [pricedLegs],
   );
+  const pregameCount = legs.length - pricedLegs.length;
   // Past ~1.3 the two-up grid's fixed 45% cells are narrower than their own
   // labels, so it stacks instead of truncating them (UX review).
   const { fontScale } = useWindowDimensions();
@@ -937,6 +965,36 @@ function SlipBody({
     );
   }
 
+  // Every remaining leg is a pre-game alternate held after kickoff. There is
+  // no live price to package. The cards stay so the user can remove them.
+  if (pricedLegs.length === 0) {
+    return (
+      <View>
+        {staleNote}
+        <Text style={styles.heldStatus}>No live price. Remove these pre-game lines.</Text>
+        <View style={styles.heldBlock}>
+          {legs.map((leg) => (
+            <ParlayLegCard
+              key={leg.pickId}
+              leg={leg}
+              onRemove={() => onRemove(leg.pickId)}
+              onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}
+            />
+          ))}
+        </View>
+        <Pressable
+          onPress={confirmClear}
+          accessibilityRole="button"
+          accessibilityLabel="Clear betslip"
+          style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.avoid} />
+          <Text style={styles.clearBtnText}>Clear betslip</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   const stake = parlayRecommendedUnits(metrics);
   const payout = stake.risk * metrics.decimalPayout;
 
@@ -955,7 +1013,7 @@ function SlipBody({
 
       <View style={styles.resultCard}>
         <View style={styles.resultHeader}>
-          <Text style={styles.resultTitle}>{legs.length}-Leg Play</Text>
+          <Text style={styles.resultTitle}>{pricedLegs.length}-Leg Play</Text>
           <View style={styles.resultHeaderRight}>
             <GradeBadge grade={metrics.grade} />
             <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
@@ -990,7 +1048,7 @@ function SlipBody({
         {/* The staleness caveat has to follow the leg to the screen the bet is
             placed from, not stay on the board it was picked off. One line, and
             only when a live leg is actually in the slip. */}
-        {legs.some((l) => l.isLive) ? (
+        {pricedLegs.some((l) => l.isLive) ? (
           <View style={styles.liveLegNote}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.liveLegNoteText}>
@@ -1020,9 +1078,9 @@ function SlipBody({
           />
         ) : null}
 
-        <BetslipBooksRow legs={legs} />
+        <BetslipBooksRow legs={pricedLegs} />
 
-        <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
+        <LineShopRow lineShop={lineShopParlay(pricedLegs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
         {metrics.ev >= 0 ? (
           <ParlayHoldNote
@@ -1034,7 +1092,7 @@ function SlipBody({
         ) : null}
 
         <View style={styles.legsList}>
-          {legs.map((leg) => (
+          {pricedLegs.map((leg) => (
             <ParlayLegCard
               key={leg.pickId}
               leg={leg}
@@ -1045,20 +1103,38 @@ function SlipBody({
         </View>
       </View>
 
+      {pregameCount > 0 ? (
+        <View style={styles.heldBlock}>
+          <Text style={styles.heldHeader}>Not in this price</Text>
+          {legs.filter((leg) => leg.pregameStale).map((leg) => (
+            <ParlayLegCard
+              key={leg.pickId}
+              leg={leg}
+              onRemove={() => onRemove(leg.pickId)}
+              onEdit={canEdit(leg) ? () => onEdit(leg.pickId) : undefined}
+            />
+          ))}
+        </View>
+      ) : null}
+
       {/* The loss, stated before the tap: updating writes the shorter slip over
           the save, and there is no undo. Shaped like the same-game warning
           above, because colour alone is not a signal — colors.med measures
           2.20:1 here, half the AA floor, so the tint, the icon and the wording
           all have to carry it. Above the grid, not inside it: a full-width
           banner as a fifth grid cell splits the two rows apart. */}
-      {editingId && staleCount + removedCount > 0 ? (
+      {editingId && (staleCount + removedCount > 0 || pregameCount > 0) ? (
         <View style={styles.warnBanner}>
           <Ionicons name="warning-outline" size={16} color={colors.medInk} />
           <Text style={styles.warnText}>
-            {staleCount + removedCount} leg{staleCount + removedCount === 1 ? '' : 's'}{' '}
-            {staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board —
+            {staleCount + removedCount > 0
+              ? `${staleCount + removedCount} leg${staleCount + removedCount === 1 ? '' : 's'} ${staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board. `
+              : ''}
+            {pregameCount > 0
+              ? `${pregameCount} pre-game leg${pregameCount === 1 ? '' : 's'} ${pregameCount === 1 ? 'isn’t' : 'aren’t'} in the price — the game has started. `
+              : ''}
             “Update parlay” saves this slip without{' '}
-            {staleCount + removedCount === 1 ? 'it' : 'them'}.
+            {staleCount + removedCount + pregameCount === 1 ? 'it' : 'them'}.
           </Text>
         </View>
       ) : null}
@@ -1076,10 +1152,11 @@ function SlipBody({
           having to do at the DEFAULT size. */}
       <View style={[styles.manualActions, stacked && styles.manualActionsStacked]}>
         <ParlaySaveButton
-          legs={legs}
+          legs={pricedLegs}
           sport={sport}
           editingId={editingId}
           droppedCount={staleCount + removedCount}
+          pregameCount={pregameCount}
           onSaved={onSaved}
         />
         <Pressable
@@ -1516,6 +1593,22 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
+  },
+  heldBlock: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  heldHeader: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  heldStatus: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    fontSize: font.size.body,
+    color: colors.textSecondary,
   },
   pressed: {
     opacity: 0.6,
