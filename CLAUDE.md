@@ -379,7 +379,9 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 No picks until a team has played >= 10 games; prior-season stats are the
 baseline in that window. Season-to-date rates are noise early — blend toward
 the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
-`docs/sports/nhl.md`).
+`docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02:
+*"we do not need to wait 10 games, I never approved that"*;
+`docs/sports/ncaab.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
