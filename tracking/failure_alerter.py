@@ -182,9 +182,9 @@ def _prop_watch_conditions(conn, now: datetime) -> dict:
             "WARN", f"Two starts for {gid}: the schedule and the odds feed disagree",
             f"The schedule (ESPN) says `{g['schedule_start']}` and the odds feed says `{g['games_start']}`. "
             f"`nba_prop_market` measures its decision window and the closing snapshot from "
-            f"`{g['tip'].isoformat()}`, the {g['tip_source']}'s, and this bet's closing-line value stays empty. "
-            f"ESPN has been hours early and the feed has not been, but if the feed is the wrong one "
-            f"a bet could land after the real tip: read the game's real start.")
+            f"`{g['tip'].isoformat()}`, the {g['tip_source']}'s. When ESPN's is the earlier, the bet's closing-line "
+            f"value stays empty. ESPN has been hours early and the feed has not been, but if the feed is the "
+            f"wrong one a bet could land after the real tip: read the game's real start.")
     for gid, n in stranded.items():
         out[f"stranded:nba_prop:{gid}"] = (
             "WARN", f"{n} open NBA prop bet(s) on a game with no final: {gid}",

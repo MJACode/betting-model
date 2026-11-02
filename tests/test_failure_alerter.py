@@ -656,6 +656,7 @@ class TestTheRulesOwnWatch:
         sev, title, detail = out[f"start_gap:nba_prop_market:{PO}"]
         assert sev == "WARN" and PO in title
         assert espn in detail and feed in detail and "real start" in detail
+        assert f"`{feed}`, the feed's" in detail and "closing-line value stays empty" in detail
 
     def test_two_starts_inside_the_feeds_ordinary_lag_say_nothing(self):
         espn = (NOW + timedelta(hours=1)).isoformat()
