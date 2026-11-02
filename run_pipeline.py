@@ -792,18 +792,27 @@ def step_alt_game_lines(run_date: str) -> bool:
     call's credits are recorded in alt_game_line_fetches. Stores every rung in
     `odds` and the current ladder in alt_game_lines, which the betslip's
     game-line edit reads (data/ingestors/alt_game_lines.py). Runs after the
-    opening odds so today's games exist. A failed game is logged and the rest
-    stand; the step reports failure so the pass shows it."""
+    opening odds so today's games exist.
+
+    ALT_GAME_LINES_ENABLED=0 skips the buy (default 1). ALT_GAME_LINES_MAX_GAMES,
+    when set to a whole number, caps event-odds calls for this process. One
+    game's failure is logged and the rest stand; the step fails when every
+    game call failed, or when the cap is not a whole number."""
     try:
         from data.ingestors.alt_game_lines import run as alt_run
+        from data.ingestors.alt_game_lines import step_succeeded
         summary = alt_run()
     except Exception as exc:
         logger.error(f"✗ Alternate game lines failed: {exc}")
         return False
     logger.info(f"Alternate game lines: {summary.get('games')} games, {summary.get('rows')} rungs, "
                 f"{summary.get('failed')} failed, {summary.get('credits')} credits reported "
-                f"({summary.get('credits_unreported')} calls unreported)")
-    return not summary.get("failed")
+                f"({summary.get('credits_unreported')} calls unreported)"
+                + (f", skipped: {summary['skipped']}" if summary.get("skipped") else "")
+                + (f", cap left {summary.get('capped')} game(s) and "
+                   f"{summary.get('capped_sports')} sport(s) unbought"
+                   if summary.get("capped") or summary.get("capped_sports") else ""))
+    return step_succeeded(summary)
 
 
 def step_nba_quarters(run_date: str) -> bool:

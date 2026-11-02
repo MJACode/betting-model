@@ -151,7 +151,11 @@ export function EditLineLegSheet({
             {menu?.subtitle ?? (spec && isGameSpec(spec) ? '' : 'Pick a new line. Only lines a sportsbook posts are listed.')}
           </Text>
           {ownMissing && spec ? (
-            <Text style={styles.ownMissing}>Your line, {lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t posted right now.</Text>
+            <Text style={styles.ownMissing}>
+              {menu?.ladderHidden === 'started'
+                ? `Your line, ${lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t listed. The game has started, so this morning’s alternate lines are off.`
+                : `Your line, ${lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t posted right now.`}
+            </Text>
           ) : null}
 
           {menu && menu.segments.length > 1 ? (
