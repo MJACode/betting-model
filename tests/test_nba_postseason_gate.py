@@ -300,6 +300,8 @@ def test_an_unlisted_row_needs_two_real_teams():
     ("UNLISTEDREG", 2027, "2027-03-01", None, "LAL", "BOS"),
     ("UNLISTEDFINAL", 2027, "2026-12-11", None, "OKC", "NYK"),
     ("UNLISTEDAPRIL", 2027, "2027-04-20", None, "OKC", "NYK"),
+    # the one date the two gates meet: the season's last regular-season day
+    ("LASTDAY", 2027, "2027-04-11", None, "OKC", "NYK"),
     ("PRE", 2027, "2026-10-03", "preseason", "UTA", "DEN"),
     ("ALLSTAR", 2027, "2027-02-14", "allstar", "LAL", "BOS"),
     ("JULY", 2027, "2027-07-02", None, "LAL", "BOS"),

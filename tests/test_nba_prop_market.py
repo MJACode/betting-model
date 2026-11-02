@@ -916,6 +916,17 @@ def test_the_rule_bets_a_postseason_game_through_the_same_door(kind, monkeypatch
     assert conn.decisions[PO_GID]["detail"].count("cap_one_a_game=1") == 1
 
 
+def test_a_regular_season_decision_carries_no_postseason_detail(monkeypatch):
+    """The report in docs/thresholds.md picks these bets out by `game_type=` in the ledger row, so
+    the detail on a regular-season row would count every regular-season bet as an unlisted
+    postseason one."""
+    conn = _LookConn([_po_game(kind="regular")], _po_quotes())
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1 and list(conn.decisions) == [PO_GID]
+    assert "game_type=" not in (conn.decisions[PO_GID]["detail"] or "")
+    assert "tip_source=" not in (conn.decisions[PO_GID]["detail"] or "")
+
+
 def test_a_postseason_look_keeps_the_rule_and_the_floor_as_they_are(monkeypatch):
     """Nothing about the rule moves. Worse than -200 is refused here as on any other night, and a
     fetch that cannot price the game decides nothing."""

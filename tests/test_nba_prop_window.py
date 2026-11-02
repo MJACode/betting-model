@@ -167,7 +167,10 @@ def test_a_postseason_game_is_done_when_the_rule_alone_has_decided_it(monkeypatc
     fetch would buy nothing a decision can use."""
     conn = _PlanConn([_game("PO_OPEN", 55, "playoff"), _game("PO_DONE", 55, "playoff"),
                       _game("PO_BET", 55, "playoff"), _game("PI_DONE", 55, "playin"),
-                      _game("CUP_DONE", 55, "cup_final")],
+                      _game("CUP_DONE", 55, "cup_final"),
+                      # a minute past the far end: plan() has no upper bound of its own, so a
+                      # wider postseason read would fetch this game on every tick
+                      _game("PO_FAR", 63, "playoff")],
                      decided={"PO_DONE", "PI_DONE", "CUP_DONE"}, taken={"PO_BET"}, sched=_SCHED_2027)
     assert _plan(conn, monkeypatch).decide == ["PO_OPEN"]
 
