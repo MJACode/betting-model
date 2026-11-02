@@ -464,9 +464,21 @@ check(`every close control names what it closes (${bareClose.length} bare "Close
 console.log('\nRule 5: text inputs and switches');
 const unlabelled: string[] = [];
 let inputs = 0;
+const rawSwitches: string[] = [];
 for (const f of files) {
   const src = readUtf8(f);
-  for (const m of src.matchAll(/<(TextInput|Switch)\s/g)) {
+  // AppSwitch is the one place a raw <Switch> lives: it forwards the caller's
+  // label through {...rest}, so the label is checked at each <AppSwitch>.
+  const isWrapper = relPosix(f).endsWith('components/AppSwitch.tsx');
+  // An aliased import (`Switch as RNSwitch`) would dodge the tag match below.
+  if (!isWrapper && /import\s*\{[^}]*\bSwitch\b[^}]*\}\s*from\s*'react-native'/.test(src)) {
+    rawSwitches.push(`${relPosix(f)}: imports Switch from react-native`);
+  }
+  for (const m of src.matchAll(/<(TextInput|Switch|AppSwitch)\s/g)) {
+    if (m[1] === 'Switch') {
+      if (isWrapper) continue;
+      rawSwitches.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
+    }
     inputs++;
     if (!/accessibilityLabel=/.test(openTag(src, m.index!))) {
       unlabelled.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
@@ -474,6 +486,7 @@ for (const f of files) {
   }
 }
 check(`every TextInput / Switch has accessibilityLabel (${inputs} checked)`, unlabelled.length === 0, unlabelled.join('; '));
+check('every switch is an AppSwitch (a raw <Switch> has an invisible OFF track on a white card)', rawSwitches.length === 0, rawSwitches.join('; '));
 
 console.log('\nRule 6: M7 — the betslip bar never covers the last row');
 const app = read('App.tsx');
