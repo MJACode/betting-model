@@ -2706,3 +2706,34 @@ is 97 overs (+3.6%) and 120 unders (+1.9%).
 **Closed for 2026-27: the first-quarter cover-record and over/under-record method.** Nothing is
 built. The step-with-check cell is recorded, not built: it is too thin to decide and too rare
 to become decidable.
+
+
+## 13. The searches after the eighth (2026-10-30 to 2026-11-02)
+
+mike, 2026-10-30, on the NBA having no spread or moneyline model: *"whatever is missing, find it."* A sweep ranked what
+had not been tried, and these seven were pre-registered and graded. Each doc holds its rules, written before any cell
+was graded, its counts, and its results at the end. All runs are stored in Supabase (`nba_game2_cells`).
+
+| Search | Doc | Run | Cells | Pass | What it says |
+|---|---|---|---|---|---|
+| Favourites shorter than -200 | `docs/nba_search_fav200.md` | `2026-10-31-fav200` | 40 | 0 | The blind favourite does not pay; the model families have too few games to tell |
+| The popular-team tax | `docs/nba_search_popular.md` | `2026-10-31-popular` | 9 | 0 | Betting against the popular team does not clear |
+| Shooting luck from shot location | `docs/nba_search_shotluck.md` | `2026-10-31-shotluck` | 48 | 0 | Nearest miss +3.9%, -0.8% to +8.5%; the live totals models are unchanged |
+| The starters and the first quarter | `docs/nba_search_starters.md` | `2026-11-01-starters` | 32 | 0 | Knowing who starts does not separate from the first-quarter or first-half market |
+| Result shapes by line size | `docs/nba_search_shapes.md` | `2026-11-02-shapes` | 256 | 0 | The earlier moneyline and spread verdicts did not rest on the pricing choice |
+| Props off Pinnacle's line, the consensus, and an anchored prop model | `docs/nba_search_propoffline.md` | `2026-10-31-propoffline` | 36 | 8 | **All unders. An independent check found none is a new model** |
+| The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
+
+**Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
+That is now tested from the projection, the injury report, the shooting-luck gap, the popular team, the favourite and
+the line-size shape. The pre-game cells that have passed bet totals and player props. The one exception is in-play:
+six of section 7's game-state cells on the live moneyline and spread passed, with every warning sign of stale quotes
+written down beforehand, and that needs an NBA in-play loop that does not exist.
+
+**Where this leaves the first quarter.** No first-quarter spread or total cell has passed in the fifth search, the
+eighth (mike's method) or the starters search. First-quarter player props and first-quarter team totals have not been
+graded, because their prices have not been bought.
+
+**The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
+its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
+of its doc has the check.

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NBA: seven searches land with results written up, starters 0 of 32, line-size shapes 0 of 256, the two passes checked by a separate rebuild; first evening of the first-half model read; no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |
