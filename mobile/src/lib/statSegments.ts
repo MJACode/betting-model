@@ -71,7 +71,9 @@ const FOOTBALL_SEGMENTS: StatSegment[] = ['qb', 'rb', 'wrte', 'def'];
 const MLB_SEGMENTS: StatSegment[] = ['hitters', 'pitchers'];
 
 /**
- * The row for a sport, left to right. Teams rides at the end wherever the
+ * The merged list for a sport, left to right; `boardSegmentsFor` and
+ * `positionSegmentsFor` below split it into the header's two rows.
+ * Originally the single row: Teams rides at the end wherever the
  * sport has a team board, exactly as the old Players | Teams toggle did —
  * so UFC and golf get no row at all (SegmentTabs renders nothing under two
  * items) and the NHL keeps Players | Teams.
@@ -84,15 +86,31 @@ export function segmentsForSport(sport: Sport): StatSegment[] {
   return supportsTeamBoard(sport) ? [...players, 'teams'] : players;
 }
 
+/**
+ * Players | Teams on top, on every sport, as on NBA (Matt, 2026-11-02). The
+ * position segments (QB / RB / WR/TE / DEF, Hitters / Pitchers) are a second
+ * row under Players, shown only on the Players board. `segmentsForSport` stays
+ * the one list; these two split it into the two rows.
+ */
+export function boardSegmentsFor(sport: Sport): ('players' | 'teams')[] {
+  return supportsTeamBoard(sport) ? ['players', 'teams'] : ['players'];
+}
+
+/** The second row: the sport's position segments, or none (NBA, WNBA, NHL). */
+export function positionSegmentsFor(sport: Sport): StatSegment[] {
+  return segmentsForSport(sport).filter((s) => s !== 'teams' && s !== 'players');
+}
+
 /** The segment a sport opens on — the one its default stat lives in. */
 export function defaultSegmentFor(sport: Sport): StatSegment {
   return segmentsForSport(sport).find((s) => s !== 'teams') ?? 'players';
 }
 
 /**
- * Compact labels. The NFL row is five tabs — QB / RB / WR/TE / DEF / Teams,
- * WR/TE being one — and at 393pt each gets 78.6pt; the widest label is about
- * 45pt at font.size.body semibold (verify_stat_segments.ts does the sum).
+ * Compact labels. The football position row is four tabs (QB / RB / WR/TE /
+ * DEF), about 98pt each at 393pt, drawn second-level (uppercase footnote) —
+ * narrower text than the old five-tab body-size row verify_stat_segments.ts
+ * sums, so its width check stays a safe upper bound.
  */
 export function segmentLabel(seg: StatSegment): string {
   switch (seg) {

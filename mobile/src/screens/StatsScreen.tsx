@@ -180,12 +180,14 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import {
+  boardSegmentsFor,
   chipsForSegment,
   defaultSegmentFor,
   emptiedByPosition,
   matchesPosition,
   positionEmptyText,
   positionFallbackNote,
+  positionSegmentsFor,
   positionsForSegment,
   readCarriesPosition,
   segmentAccessibilityLabel,
@@ -630,9 +632,9 @@ export function StatsScreen() {
   }>({ market: '', rows: [], status: 'ok' });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
-  // The position row's player segment (QB / RB / WR/TE / DEF, Hitters /
-  // Pitchers, or Players). Teams stays `boardMode`, so the Teams board and its
-  // sport-switch rule are untouched; the row shows Teams when that is on.
+  // The player segment (QB / RB / WR/TE / DEF, Hitters / Pitchers, or
+  // Players). Teams stays `boardMode` and lives on the top Players | Teams row;
+  // the pick is kept while Teams is on, so tapping Players comes back to it.
   const [segmentPick, setSegmentPick] = useState<StatSegment>(() => defaultSegmentFor(sport));
   // Read through the sport's own list: for the one render between a sport
   // switch and the reset effect below, the stored pick can belong to the old
@@ -1074,7 +1076,7 @@ export function StatsScreen() {
   };
 
   /**
-   * The position row. Teams flips to the Teams board; a player segment keeps
+   * Both header rows call this. Teams flips to the Teams board; a player segment keeps
    * the selected stat when it has one (the same chip, or the same column
    * filed under another group — Anytime TD is Rushing on RB and Receiving on
    * WR/TE) and otherwise lands on its first chip (lib/statSegments.ts).
@@ -2560,7 +2562,7 @@ export function StatsScreen() {
           </View>
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
-        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <TeamsBoard
           sport={sport}
           onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
@@ -2598,7 +2600,7 @@ export function StatsScreen() {
           </View>
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
-        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <EmptyState
           title="No player leaderboard"
           subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
@@ -2804,9 +2806,9 @@ export function StatsScreen() {
         {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
       </View>
 
-      <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+      <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
 
-      {/* Stat selector — the primary control, straight under the position row,
+      {/* Stat selector — the primary control, under the header's tab rows,
           and the one row on this screen that is never allowed to cost less: it
           is the board's subject, one tap, directly manipulated.
           ONE row. It was a chip row per group (4 for NFL), then a group tab row
@@ -4408,36 +4410,51 @@ function LineRuler({
 }
 
 /**
- * The position row (Designer, Option A, Matt 2026-09-25): QB / RB / WR/TE /
- * DEF / Teams on the football boards, Hitters / Pitchers / Teams on MLB, and
- * the old Players | Teams everywhere else. It REPLACES Players | Teams rather
- * than stacking under it, so the header gains no height, and it is the same
- * first-level SegmentTabs (tint underline) the toggle was.
+ * The Stats header's tab rows. Players | Teams on top on every sport, the same
+ * toggle NBA has (Matt, 2026-11-02, reversing the 2026-09-25 single row that
+ * folded Teams into QB / RB / WR/TE / DEF / Teams). Where a sport has
+ * positions — NFL, NCAAF, MLB — they ride a second-level row under Players,
+ * one tap each as before, and the row hides on the Teams board.
  *
- * Width: the row splits the screen evenly. On a 393pt phone the NFL's five
- * segments get 78.6pt each, and the widest label ("WR/TE", "Teams") is about
- * 45pt at font.size.body semibold. `fit` shrinks a label at the largest
- * Dynamic Type sizes rather than truncating it.
+ * Tapping Players returns to the position last picked (`segment`), so a trip
+ * to Teams and back does not reset the board to QB.
  */
 function StatSegmentRow({
   sport,
   active,
+  segment,
   onChange,
 }: {
   sport: Sport;
+  /** 'teams' while the Teams board is on, else the player segment. */
   active: StatSegment;
+  /** The player segment last picked, kept while Teams is on. */
+  segment: StatSegment;
   onChange: (s: StatSegment) => void;
 }) {
+  const positions = positionSegmentsFor(sport);
+  const onTeams = active === 'teams';
   return (
-    <SegmentTabs
-      items={segmentsForSport(sport)}
-      active={active}
-      onChange={onChange}
-      labelFor={segmentLabel}
-      accessibilityLabelFor={segmentAccessibilityLabel}
-      fit
-      tight
-    />
+    <>
+      <SegmentTabs
+        items={boardSegmentsFor(sport)}
+        active={onTeams ? 'teams' : 'players'}
+        onChange={(next) => onChange(next === 'teams' ? 'teams' : positions.length ? segment : 'players')}
+        labelFor={segmentLabel}
+        tight
+      />
+      {!onTeams ? (
+        <SegmentTabs
+          items={positions}
+          active={segment}
+          onChange={onChange}
+          labelFor={segmentLabel}
+          accessibilityLabelFor={segmentAccessibilityLabel}
+          second
+          fit
+        />
+      ) : null}
+    </>
   );
 }
 
