@@ -45,6 +45,44 @@ to be read off production. All read-only. No paid call.
 4. **12-12: the result.** The ledger row (`detail` holds `game_type=cup_final` and the `tip_source`), the bet if
    there is one, and its grade. `stranded:nba_prop:<game>` in the ops channel means the final landed elsewhere.
 
+## [ ] NBA season-long numbers stay regular-season once these games land (2026-11-02, design done, not built)
+
+From the Cup final on, a postseason game's box lines sit in `nba_player_game_log` and its score in `games`, so a
+player's season numbers, opponent ranks, team records and the first-quarter card would count it. Display only:
+it changes no bet. **Land it before 2026-12-11 if the final's two teams matter on those screens, and before the
+play-in (2027-04-13 if the pattern repeats) regardless.** Until then only the final's one game can blend in. It is
+a separate pull request because it carries a migration and is not a model update (no `Updated-By`).
+
+- **The column.** Nullable `games.game_type` with a small partial index on the three postseason types, backfilled
+  from `nba_schedule`. It has to be on `games` because `nba_schedule` is worker-only (`data/anon_readable.py`) and
+  these functions run as the app's reader. No trigger or column-level grant on `games` stands in the way
+  (read 2026-11-02).
+- **Every filter keeps NULLs, never `= 'regular'`.** The column is NULL on every unscored row and on every other
+  sport. Use `NOT IN` the three types, or an anti-join for the functions below that do not read `games`.
+- **Set it whenever a final is seen,** not just in `write_score`'s `fill`: also the `insert` branch
+  (`nba_results_ingestor`), and when `score_action` returns None because another writer stored the score and the
+  box still lands. One helper with `event_rows` (ESPN type 3 playoff, 5 play-in, 2 with the note or the
+  league's date cup_final), so the two cannot disagree.
+- **Filter:** `player_season_stat_values_nba` and `v_player_season_totals_nba` (neither reads `games` today; the view's
+  definition is in `data/supabase_schema.sql`, not a migration), `player_window_totals_nba` when `p_window` is NULL (does
+  not read `games`), `position_vs_opponent_nba` (joins `games`), `team_stats_board_compute` (the `cand` block reads
+  `games`), `data/ingestors/nba_team_q1.py`'s `g` block, `byom/load.py` `_games`, `byom/prop_load.py` `_games`.
+- **Leave unfiltered,** because each row is a real game he played: `player_recent_games_nba`,
+  `player_h2h_stat_values_nba`. Judgement call for mike: during the playoffs a player's last 10 and head-to-head then
+  include playoff games while his season numbers do not. Reversing it means the season numbers count them too.
+- **The migration's shape.** `data/view_migrations.py` runs every active file on every pass, so guard on the property.
+  These functions have several owners, so patch the live definition with one clause, as
+  `record_strikes_nfl_live_prop_2026_10_04.sql` does, rather than copying a body and rolling another owner back.
+  `nba_window_reads_roster_team_2026_10_26.sql` shows the guard. Revoke from `anon` and `authenticated` by name.
+- **`SELECT *` on `games`, the two that a new column breaks.** `scripts/nba_research_cache.py:49` puts the column in the
+  cached games table, and `scripts/nba_total_luck_replay.py:103`'s merge then gives `game_type_x` and `game_type_y`.
+  `scripts/merge_mlb_twin_games.py:107` (`INSERT INTO backup SELECT * FROM games`) fails on a backup table that exists
+  without the column. Name the columns in both. The cache should also export regular-season games and lines only, so a
+  later search does not take postseason rows as regular-season history.
+- **Tests.** A scratch-database test that a playoff box line stays out of each filtered read and stays in last-N and
+  head-to-head, each filter removed once and watched failing. About 25 test files create their own `games`, so a
+  read naming the new column needs them updated (`grep "CREATE TABLE.*games" tests/`).
+
 ## [ ] NBA: a feed row on the wrong date stops three live models (2026-11-02, flagged, not caused by the Cup work)
 
 A wrong-date feed row on a regular-season day counts as a regular-season game the season owes
