@@ -421,6 +421,127 @@ approval before a `worker_jobs` row is added.
   "step_min": 30, "dry_run": true}` prints the plan against production and
   buys nothing.
 
+## Paid calls side by side (2026-11-02)
+
+The opener grid and every first-half purchase (open, close and the three
+game-day times below) send up to 6 paid calls at once by default, at most 10.
+One at a time, the grid bought about 48 snapshots a minute (job 936020).
+
+- **Only the calls run side by side.** Every database write, the parsing,
+  the filters on what is stored and the credit count stay in one place, and
+  each answer is handled in the order it was asked for. So what is stored is
+  what a one-at-a-time run stores.
+- **The floor still holds.** Before every call, the job counts each call
+  still waiting for an answer at its most (30 credits for a grid snapshot, 40
+  for a game's first-half call). A call is sent only if all of them together
+  stay above the 300,000 floor and under the job's limit. Until the balance
+  is known, calls go one at a time.
+- **Rate limits.** The feed asks for requests to be spaced out when it
+  answers 429. Every call then pauses together (2 seconds, doubling to at
+  most 30), the call is asked again, and one fewer call runs at once; 100
+  answers in a row without a 429 add one back. The run's report counts the
+  429s (`rate_limited_429`).
+- **The setting.** Job arg `"concurrency": N` (1 to 10) on the grid and the
+  first-half modes; a job that names none runs at 6. That includes a job the
+  queue runs again after a redeploy, such as the grid's job 936020, whose
+  stored args name none. On the command line, `--concurrency N`.
+- **A rerun buys nothing twice.** The grid's plan skips every time either
+  ledger holds, hours and half hours. Checked 2026-11-02 23:43Z: the grid's
+  dry run counted 11,825 times already bought, between the ledgers' 11,821
+  and 11,826 rows at the start and end of that read, with 31,590 left
+  (947,700 credits). Each time is read against the ledger again just before
+  its call.
+
+## First-half lines and team totals at three game-day times (built 2026-11-02)
+
+The stored first-half and team-total lines are at two times only: the open
+(the evening before, or 20 hours before the tip) and the close (10 minutes
+before the tip). mike approved three more times on 2026-11-02. The code is
+built; **nothing is bought until a worker job is queued.**
+
+- **What is bought.** The same as the open and the close: one call per game
+  for the first-half moneyline, spread and total and the team totals at the
+  ten fetched books. The feed bills 10 credits per market it returns, so at
+  most 40 a game. An empty answer and a "not found" are free. Each game
+  date also costs one event list (1 credit), which names each game's event.
+- **The three times.** The game's date is ESPN's, which is the Eastern date
+  of the tip (all 18,836 games of 2023-24 to 2025-26, read 2026-11-02).
+
+  | Time | Games bought | Stored under source | Job mode | Most it can spend | Measured ceiling |
+  |---|---|---|---|---|---|
+  | 15:00 UTC on the game's date | those that tip after 15:00 UTC (18,816 of 18,836) | `odds_api_ncaab_derivative_15z` | `deriv_15z` | 700,000 | 687,686 |
+  | 18:00 UTC on the game's date | those that tip after 18:00 UTC (17,173) | `odds_api_ncaab_derivative_18z` | `deriv_18z` | 650,000 | 628,965 |
+  | 60 minutes before the tip | every game with a tip (18,836) | `odds_api_ncaab_derivative_tip60` | `deriv_tip60` | 700,000 | 689,286 |
+
+  A game that tips at or before 15:00 or 18:00 UTC is skipped at that time,
+  because its price there could be in play. It is never listed for and never
+  costs a credit. The measured ceiling is 40 credits for each game whose
+  full-game line was already listed at that time, plus 1 for each date
+  (2026-11-02, from the stored full-game lines and the billing log: 17,181
+  games and 446 dates at 15:00, 15,713 and 445 at 18:00, 17,221 and 446 at
+  60 minutes). The dry run prints a higher figure, 40 for every game with
+  that time, because it cannot know which games the feed lists. A game the
+  feed does not list costs nothing, and the job's own limit caps the spend.
+- **Each time is its own source.** So each resumes on its own: a game
+  already holding rows under that source is not bought again, and a later
+  read can tell the times apart. All three are protected from the odds
+  clean-up, like the open and the close (`data/prune_odds.py`).
+- **Newest date first, the same floor.** The same credit meter as the other
+  purchases: the job stops before a call would cross its own limit, or take
+  the balance under the 300,000 floor.
+- **The test buy** (`deriv_15z_test`) buys 50 games at 15:00 UTC, at most
+  2,050 credits (50 x 40, plus at most 50 event lists). It answers whether
+  the books post first-half lines by 15:00 UTC before the full 15:00 buy is
+  spent. Its rows are stored under the full buy's source, so the full buy
+  skips them later.
+  - **How the 50 are chosen.** The games are split by season and by Eastern
+    tip time (before 1pm, 1-4pm, 4-7pm, 7-9pm, 9pm or later): 15 groups,
+    each with at least 264 games. Each group is ordered by a fixed hash of
+    the game's id, and the groups take turns, so each gives 3 or 4 games.
+    Only games with a stored close are drawn, so no slot goes to a game no
+    book ever priced. The hash, not a random draw, means a re-run picks
+    the same 50 and buys none of them twice.
+  - **What it prints**, read back from `odds` after the buy: for each book
+    and each market (first-half moneyline, spread, total, home and away team
+    totals), how many of the 50 games hold a quote at 15:00 UTC, beside how
+    many hold one at the close. Then, for any book, the same by tip time.
+    It prints last, so the worker's copy of the output keeps it.
+- **Commands.**
+  - Test buy, dry run (read only, no call):
+    `python -m data.ingestors.ncaab_odds_history --derivatives 15z --sample 50 --seasons 2024 2026 --dry-run`
+  - Test buy: the same with `--apply --max-credits 2500 --floor 300000`.
+  - A full buy: `--derivatives 15z` (or `18z`, `tip60`) `--seasons 2024 2026`,
+    with `--apply --max-credits 700000 --floor 300000` (650000 for `18z`).
+    Without `--apply` it is a dry run.
+- **Worker jobs** (job type `ncaab_odds_history`):
+
+  | Buy | Args |
+  |---|---|
+  | Test buy, 50 games at 15:00 UTC | `{"mode": "deriv_15z_test", "max_credits": 2500, "floor": 300000}` |
+  | Full 15:00 UTC | `{"mode": "deriv_15z", "max_credits": 700000, "floor": 300000}` |
+  | Full 18:00 UTC (from 2026-12-01) | `{"mode": "deriv_18z", "max_credits": 650000, "floor": 300000}` |
+  | Full 60 minutes before the tip (from 2026-12-01) | `{"mode": "deriv_tip60", "max_credits": 700000, "floor": 300000}` |
+
+  Any of the four with `{"mode": ..., "dry_run": true}` and no limits prints
+  the plan against production and makes no call. Each purchase runs 6 calls
+  at once unless its args name `"concurrency"` (Paid calls side by side,
+  above).
+- **The test buy's dry run, 2026-11-02** (read only, against production):
+  50 games on 45 dates, at most 2,045 credits; by season 16, 17 and 17 (2024,
+  2025, 2026); every group gave 3 or 4. The stored close holds a quote for
+  all 50 on at least one first-half or team-total market (49 of 50 on the
+  first-half moneyline). Nothing is stored at 15:00 UTC yet.
+- **The same snapshot under two times.** A 2pm Eastern tip in winter is at
+  19:00 UTC, so 60 minutes before it is 18:00 UTC. 1,683 games have the same
+  time for the 18:00 buy and the 60-minute buy, and 120 (11am Eastern tips)
+  for the 15:00 buy and the 60-minute buy (2026-11-02). Each buy asks for
+  that snapshot under its own source, so it is paid twice, up to 40 credits
+  a game. One game's close falls on 18:00 UTC; none on 15:00 UTC.
+- **63 games carry a 23:59 Eastern tip** in ESPN's schedule (2023-24 to
+  2025-26). Some may be ESPN's placeholder for a time not yet set. At 15:00
+  and 18:00 UTC that changes nothing. For the 60-minute buy it would set the
+  wrong time, as it already does for the close. Not checked game by game.
+
 ## What runs, and where it lands
 
 | Piece | What | Where |
@@ -430,7 +551,7 @@ approval before a `worker_jobs` row is added.
 | Totals model card | Hourly at five past, UTC: decides each game once at DraftKings' standing total (22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip), writes the bets, then publishes them | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
 | Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
 | Price-path retention | NCAAB keeps every book's whole price path (the clean-up job only removes unchanged middles), and the close it keeps for any sport is the last price before the start | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |
-| Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close. Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |
+| Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close; the same at 15:00 UTC and 18:00 UTC on game day and 60 minutes before the tip (built 2026-11-02, bought only by a queued job; First-half lines and team totals at three game-day times, above). Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
 | Feed probe | Which NCAAB events the odds feed lists and which names fail to resolve; which markets each book prices; whether the football data key opens College Basketball Data | `scripts/ncaab_feed_probe.py`, job `ncaab_feed_probe` |
 | Pre-tip injuries | RotoWire's public injury JSON about every 10 minutes, every 5 while a game tips within three hours; Covers' public page about every 30 minutes as the fallback. Change rows, including a `cleared` row when a listed player leaves a non-empty report. Tags only | `data/ingestors/ncaab_injury_feed.py`, job `ncaab_injury_feed`; reachability `scripts/ncaab_injury_probe.py`, job `ncaab_injury_probe` |

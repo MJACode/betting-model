@@ -538,9 +538,15 @@ def test_the_derivative_done_check_reads_its_own_source_exactly():
 
 
 def test_the_two_derivative_purchases_resume_separately():
+    """Each time is its own source, so each resumes on its own; the three
+    game-day times (2026-11-02) join the close and the open."""
     assert h.NCAAB_DERIV_CLOSE_SOURCE == "odds_api_ncaab_derivative_close"
     assert h.NCAAB_DERIV_OPEN_SOURCE == "odds_api_ncaab_derivative_open"
-    assert h.DERIV_SOURCES == {"close": h.NCAAB_DERIV_CLOSE_SOURCE, "open": h.NCAAB_DERIV_OPEN_SOURCE}
+    assert h.DERIV_SOURCES == {"close": h.NCAAB_DERIV_CLOSE_SOURCE, "open": h.NCAAB_DERIV_OPEN_SOURCE,
+                               "15z": "odds_api_ncaab_derivative_15z",
+                               "18z": "odds_api_ncaab_derivative_18z",
+                               "tip60": "odds_api_ncaab_derivative_tip60"}
+    assert len(set(h.DERIV_SOURCES.values())) == len(h.DERIV_SOURCES)
 
 
 def _deriv_world(monkeypatch, done=frozenset()):
@@ -734,7 +740,9 @@ def _cli(monkeypatch):
     monkeypatch.setattr(h, "buy_lines",
                         lambda conn, m, a, b: called.append(("lines", a, b, m.ceiling, m.floor)) or {})
     monkeypatch.setattr(h, "buy_derivatives",
-                        lambda conn, m, a, b, mode: called.append((mode, a, b, m.ceiling, m.floor)) or {})
+                        lambda conn, m, a, b, mode, sample=None: called.append(
+                            (mode, a, b, m.ceiling, m.floor)
+                            + (() if sample is None else (sample,))) or {})
     monkeypatch.setattr(h, "probe", lambda conn, m, season: called.append(("probe", season, m.ceiling)) or {})
     return called
 
@@ -744,6 +752,10 @@ def _cli(monkeypatch):
     ("deriv_close", ("close", 2024, 2026, 800_000, 500_000)),
     ("deriv_open", ("open", 2024, 2026, 800_000, 500_000)),
     ("probe", ("probe", 2026, 200)),
+    ("deriv_15z", ("15z", 2024, 2026, 700_000, 500_000)),
+    ("deriv_18z", ("18z", 2024, 2026, 650_000, 500_000)),
+    ("deriv_tip60", ("tip60", 2024, 2026, 700_000, 500_000)),
+    ("deriv_15z_test", ("15z", 2024, 2026, 2_500, 500_000, 50)),
 ])
 def test_every_job_mode_runs_the_buyer_through_its_own_argv(monkeypatch, mode, want):
     called = _cli(monkeypatch)
@@ -815,7 +827,10 @@ def test_the_approved_scopes_and_floor():
     assert {m: (v["cap"], v["seasons"]) for m, v in modes.items()} == {
         "lines": (420_000, (2021, 2026)), "deriv_close": (800_000, (2024, 2026)),
         "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026)),
-        "opener_grid": (1_170_000, (2021, 2026))}
+        "opener_grid": (1_170_000, (2021, 2026)),
+        # the game-day times, approved 2026-11-02
+        "deriv_15z": (700_000, (2024, 2026)), "deriv_18z": (650_000, (2024, 2026)),
+        "deriv_tip60": (700_000, (2024, 2026)), "deriv_15z_test": (2_500, (2024, 2026))}
     assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 300_000
     # the probe mode may carry the same floor as the purchases
     assert jq._validate_ncaab_odds_history({"mode": "probe", "max_credits": 200, "floor": 500_000})

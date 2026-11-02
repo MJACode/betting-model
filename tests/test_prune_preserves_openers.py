@@ -153,7 +153,10 @@ def test_the_ncaab_history_purchase_sources_are_protected_in_odds():
     while a live (NULL source) line-shop book beside them is thinned."""
     from data import prune_odds as po
     from tests.test_prune_bounded import ODDS_COLS
-    ncaab = ("odds_api_ncaab_derivative_close", "odds_api_ncaab_derivative_open")
+    ncaab = ("odds_api_ncaab_derivative_close", "odds_api_ncaab_derivative_open",
+             # the game-day times, 2026-11-02
+             "odds_api_ncaab_derivative_15z", "odds_api_ncaab_derivative_18z",
+             "odds_api_ncaab_derivative_tip60")
     params: dict = {}
     po._unprotected(params, table="odds")
     for src in ncaab:
