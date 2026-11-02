@@ -986,6 +986,7 @@ function SlipBody({
           onPress={confirmClear}
           accessibilityRole="button"
           accessibilityLabel="Clear betslip"
+          hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
           style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
         >
           <Ionicons name="trash-outline" size={18} color={colors.avoid} />
