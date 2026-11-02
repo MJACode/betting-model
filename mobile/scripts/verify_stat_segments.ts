@@ -357,10 +357,17 @@ check('empty text: DEF, last 3',
 const stats = readUtf8(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'));
 check('StatsScreen: the chip row reads chipsForSegment', /chipsForSegment\(sport, segment\)\.map/.test(stats));
 check('StatsScreen: no StatGroupSheet (the category dropdown is gone)', !stats.includes('StatGroupSheet'));
+// Two board cuts, plus one read-only use: the Anytime TD matchup column asks
+// for defense ranks only for the position groups left on the board
+// (atdGroupKey, #1033). That one filters no rows. Any other call is new and
+// must be looked at.
+const ATD_GROUP_CALL =
+  /const consider = \(pos: unknown\) => \{\s*if \(!matchesPosition\(pos, activePositions\)\) return;/;
 check('StatsScreen: both boards apply the position filter, last',
   /rankedAll\.filter\(\(r\) => matchesPosition\(r\.row\.pos, activePositions\)\)/.test(stats) &&
     /hitRateAll\.filter\(\(p\) => matchesPosition\(p\.pos, activePositions\)\)/.test(stats) &&
-    (stats.match(/matchesPosition\(/g) ?? []).length === 2);
+    ATD_GROUP_CALL.test(stats) &&
+    (stats.match(/matchesPosition\(/g) ?? []).length === 3);
 check('StatsScreen: a typed search bypasses the position filter',
   /const activePositions = query\.trim\(\) \? null : segmentPositions;/.test(stats));
 check('StatsScreen: a position-emptied board gets the positional empty text',
