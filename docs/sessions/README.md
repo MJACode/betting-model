@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, `nba_first_half_total_luck` reviewers' findings fixed: the graded quotes' caveat and both price ranges on the record, quarter rows that disagree with the final repaired and reported at any age, X runs the label check, the price table stored in all three NBA game total artifacts, the three models run side by side in a tick, a critical alert names a game that tipped undecided; no production write |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, `nba_first_half_total_luck` LIVE: NBA first-half overs when the full-game shooting-luck gap is 2+ (the fourth search's C1: 595 bets, +8.0%; 593 bets, +7.7% under its EV floor); its own per-event fetch storing each book's main number, decided 45-66 minutes before tip inside the NBA totals window job, a closing snapshot for bet games; settles on Q1 + Q2 and stays pending with no trustworthy quarter scores; live code replays 595 of 595 lab bets; no production write |
 | 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, `ncaab-injury-reachability-2026-10-30` added to the NCAAB declared-job allowlist, last, after the credit purchases. Its note stays "writes nothing" and is not marked as a credit approval. |
