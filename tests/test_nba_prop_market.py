@@ -848,7 +848,7 @@ class _LookConn:
             self._all = self.games
         elif s.startswith("SELECT DISTINCT season, game_date, game_type FROM nba_schedule"):
             self._all = sorted({(r[1], r[2], r[3]) for r in self.sched})
-        elif "FROM nba_schedule s LEFT JOIN games g" in s:
+        elif "FROM nba_schedule s LEFT JOIN games g" in s and "in_games" in s:
             self._all = self.sched
         elif "FROM player_prop_odds" in s:
             self._all = [r for r in self.quotes if r[0] in params[0]]
@@ -1097,6 +1097,41 @@ def test_a_wrong_date_feed_row_leaves_one_bet_on_the_real_game(monkeypatch):
     conn.games, conn.quotes = [_po_game(gid=real)], _rows_of(_po_quotes(real))
     _, out = _one_look(conn, monkeypatch)
     assert out["written"] == 1 and [p["game_id"] for p in conn.picks] == [real]
+
+
+@pytest.mark.parametrize("wrong,real,day,real_day,home,away", [
+    # the review's two, neither with a postseason game anywhere near
+    ("NBA_2026-12-06_PHX_MIN", "NBA_2026-12-07_PHX_MIN", "2026-12-06", "2026-12-07", "MIN", "PHX"),
+    ("NBA_2027-03-01_GSW_LAL", "NBA_2027-03-02_GSW_LAL", "2027-03-01", "2027-03-02", "LAL", "GSW"),
+])
+def test_a_row_the_regular_read_prices_is_not_also_called_refused(wrong, real, day, real_day, home, away, monkeypatch):
+    """An unlisted row on a regular-season day beside a listed regular game. The card prices it, so
+    no log line and no alert may say it was refused: the alert's words are 'none was allowed', and
+    this row can hold a bet."""
+    sched = [*SCHED_2027, (real, 2027, real_day, "regular", home, away, True, False)]
+    row = _po_game(gid=wrong, kind=None, day=day, home=home, away=away)
+    skipped = []
+    games = card.rule_slate(_LookConn([row], sched=sched), NOW, skipped)
+    assert list(games) == [wrong] and not games[wrong].get("postseason")
+    assert skipped == []
+    # looking back, as the alert does
+    refused = {}
+    tipped = card.tipped_rule_games(_LookConn([row], sched=sched), TIP + timedelta(hours=1), 24.0, refused)
+    assert list(tipped) == [wrong] and refused == {}
+    import scripts.nba_pregame_window as pregame
+    got = pregame.undecided_rule_games(_LookConn([row], sched=sched), TIP + timedelta(hours=1))
+    assert got == {"lost": {wrong: "regular"}, "refused": {}}
+
+
+def test_a_row_the_regular_read_turned_away_is_still_called_refused():
+    """The control: a row after the last regular-season day that the schedule lists under another id
+    is in neither read, so it is the one the alert names."""
+    wrong, real = "NBA_2027-04-19_GSW_LAL", "NBA_2027-04-20_GSW_LAL"
+    sched = [*SCHED_2027, (real, 2027, "2027-04-20", "playoff", "LAL", "GSW", True, False)]
+    row = _po_game(gid=wrong, kind=None, day="2027-04-19")
+    refused = {}
+    assert card.tipped_rule_games(_LookConn([row], sched=sched), TIP + timedelta(hours=1), 24.0, refused) == {}
+    assert refused == {wrong: real}
 
 
 # ── names: the rule's path is exact ──────────────────────────────────────────

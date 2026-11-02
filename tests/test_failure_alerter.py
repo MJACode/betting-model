@@ -632,6 +632,19 @@ class TestTheRulesOwnWatch:
         sev, title, detail = out[f"stranded:nba_prop:{PO}"]
         assert sev == "WARN" and title.startswith("2 open") and "void_picks" in detail
 
+    def test_the_stranded_alert_keeps_a_played_game_from_being_voided(self):
+        """A played game's bet has a real result, and whoever acts can already see it. CLAUDE.md 1c
+        keeps VOID for a row the model should never have produced, so the alert says so before it
+        names the void command, and names the opt-in a posted bet needs."""
+        tip = (NOW - timedelta(hours=13)).isoformat()
+        conn = NbaConn(rule_decided=None, open_bets=[(PO, "2027-04-20", tip, tip)])
+        detail = _watch(fa._conditions(conn, NOW))[f"stranded:nba_prop:{PO}"][2]
+        played, _, postponed = detail.partition("**The game was postponed or cancelled:**")
+        assert "**The game was played and its final landed on another row:** do not void" in played
+        assert "void_picks" not in played and "Write the final and the box lines" in played
+        assert "NO_ACTION" in postponed and f"void_picks.py --game-id {PO}" in postponed
+        assert "--allow-posted" in postponed and "RECORD_EXCLUSIONS" in postponed and "naming who asked" in postponed
+
     def test_a_game_still_inside_twelve_hours_is_given_its_time(self):
         tip = (NOW - timedelta(hours=11)).isoformat()
         assert not _watch(fa._conditions(NbaConn(open_bets=[(PO, "2027-04-20", tip, tip)]), NOW))

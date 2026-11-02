@@ -207,9 +207,12 @@ The rule takes a game the schedule does not list, on a day only these games fall
 the schedule gives one of them, or after the season's last regular-season day and by June
 30. So a failed refresh does not lose it. **A second row for one real game is refused.** A bet
 settles on its own id and ESPN's final lands on ESPN's, so a bet on any other row can stay open
-for good, and one bet a game counts by id. An unlisted row is refused when the schedule lists
-those two teams, either way round, within two days under another id with no final
-(`models.nba_total_luck.listed_twin`; the feed wrote four such rows in the 2026 WNBA playoffs).
+for good, and one bet a game counts by id. On a day only these games fall on, an unlisted row is
+refused when the schedule lists those two teams, either way round, within two days under another id
+with no final (`models.nba_total_luck.listed_twin`; the feed wrote four such rows in the 2026 WNBA
+playoffs). **That does not hold on a regular-season day:** an unlisted row there beside a listed regular
+game of the same two teams is priced as a regular-season game, as it always has been, and could hold a bet
+that strands. The alert names it if it does (`docs/followups.md`).
 If the feed has the two teams the other way round from ESPN on the same date (a neutral court)
 and ESPN's id has no row, the refresh leaves it that way and the results step scores the feed's
 row with each team's own score (`nba_results_ingestor.match_game`).
@@ -226,9 +229,19 @@ other. Prices are `player_prop_odds`' `open` rows, the same as any game; never
 a game the rule did not decide, regular-season games included (it decided all 92 of
 2026-10-20..11-01), `undecided:nba_prop_market:<game>`. A listed game counts only if the
 refresh confirmed it on its own date, so an unplayed Game 6 is not named. A refused row,
-`refused:nba_prop_market:<game>`. An open NBA prop bet of either model over 12 hours past tip
-on a game with no final, `stranded:nba_prop:<game>`, which takes a person: void it with
-`scripts/void_picks.py`.
+`refused:nba_prop_market:<game>`. A refused row is one neither read keeps: a row the regular
+slate prices (above) is not called refused. An open NBA prop bet of either model over 12 hours past
+tip on a game with no final, `stranded:nba_prop:<game>`, which takes a person, one of two ways:
+
+- **The game was played and its final landed on another row.** Do not void: the bet has a real result,
+  and section 1c keeps VOID for a row the model should never have produced. Write the final and the box
+  lines onto the bet's row, and the next settle pass grades it. There is no command for this yet, as
+  there is for NCAAF (`cfbd_ingestor.mirror_stored_finals`; `docs/followups.md`).
+- **The game was postponed or cancelled.** The bet has no result, so it settles NO_ACTION:
+  `scripts/void_picks.py --game-id <game>`. A bet already posted also needs `--allow-posted` and a
+  `config.RECORD_EXCLUSIONS` entry naming who asked. This is by hand, and not automatic as
+  `_void_postponed_mlb_picks` is, because `nba_schedule.status_text` has never held a postponed value (0
+  rows, all seasons, 2026-11-02), so there is no real row to build or test that trigger against.
 
 **The tip.** Every one of these schedule rows is ESPN's, and ESPN alone sets its tip, where an
 NBA.com row needs the feed to second a move. So when the schedule and the feed sit over 30

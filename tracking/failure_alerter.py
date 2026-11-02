@@ -180,8 +180,13 @@ def _prop_watch_conditions(conn, now: datetime) -> dict:
             "WARN", f"{n} open NBA prop bet(s) on a game with no final: {gid}",
             f"`{gid}` tipped over {STRANDED_AFTER_HOURS:.0f} hours ago, has no final score and holds "
             f"{n} open NBA prop bet(s). Settlement needs that score, so they stay open until someone "
-            f"acts. If the final landed on another row, or the game was postponed, void them by hand "
-            f"(`scripts/void_picks.py`).")
+            f"acts.\n"
+            f"**The game was played and its final landed on another row:** do not void. A played game's "
+            f"bet has a real result, and voiding it takes a real win or loss off the record. Write the "
+            f"final and the box lines onto `{gid}`, and the next settle pass grades them.\n"
+            f"**The game was postponed or cancelled:** the bet has no result, so it settles NO_ACTION "
+            f"(`scripts/void_picks.py --game-id {gid}`). A bet already posted also needs `--allow-posted` "
+            f"and a `config.RECORD_EXCLUSIONS` entry naming who asked.")
     return out
 
 

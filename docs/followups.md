@@ -126,6 +126,15 @@ prop slate would price it too. Measured: the feed wrote four such rows in the 20
 unscored rows 08-01 to 11-01). The same-teams test in `models.nba_total_luck.listed_twin` would close it, but
 it changes those three models, so it needs its own `Updated-By: mike` commit, and it is not in the Cup work.
 
+## [ ] NBA: no command writes a final onto the row a bet sits on (2026-11-02, flagged)
+
+`stranded:nba_prop:<game>` tells a person to write the final and the box lines onto the bet's row when the game was played
+and the final landed elsewhere, because voiding a played game's bet removes a real result. NCAAF does this by itself
+(`cfbd_ingestor.mirror_stored_finals`, called from `settle_picks`); NBA has no equivalent, so today that is hand SQL. Build it
+the first time the alert fires on a played game. The postponed half stays by hand for now too: `nba_schedule.status_text` has
+never held a postponed value (0 rows, all seasons, 2026-11-02), so an automatic NO_ACTION like `_void_postponed_mlb_picks`
+would rest on a trigger no real row has tested.
+
 ## [ ] NBA: an unlisted All-Star row would count as a regular-season game (2026-11-02, flagged)
 
 Season 2027 holds no `allstar` rows (`nba_schedule`), and ESPN's type is not stored

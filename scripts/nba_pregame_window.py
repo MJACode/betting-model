@@ -204,15 +204,16 @@ def undecided_rule_games(conn, now: datetime, hours: float = UNDECIDED_LOOKBACK_
 
 # A bet whose game has no final never settles, and nothing else says so: settlement and the two
 # settlement health checks all start from a final score. 12 hours outlasts any game and the results
-# step's next passes. 30 days keeps a stranded bet named until someone voids it.
+# step's next passes. 30 days keeps a stranded bet named until someone acts on it.
 STRANDED_AFTER_HOURS = 12.0
 STRANDED_LOOKBACK_DAYS = 30
 
 
 def stranded_prop_bets(conn, now: datetime) -> dict[str, int]:
     """{game_id: open bets} for NBA prop bets, of either model, whose tip is over
-    STRANDED_AFTER_HOURS old with no final on their game. It takes a person: a row the final will
-    never reach, or a game that was postponed, is voided by hand (scripts/void_picks.py)."""
+    STRANDED_AFTER_HOURS old with no final on their game. It takes a person, and the alert names both
+    cases: a played game whose final landed on another row gets that final and box written onto
+    this row, never a void; a postponed or cancelled game settles NO_ACTION by scripts/void_picks.py."""
     from scripts.nba_props_card import PROP_MODEL_IDS
     since = (now - timedelta(days=STRANDED_LOOKBACK_DAYS)).astimezone(_ET).date().isoformat()
     rows = conn.execute("""

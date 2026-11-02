@@ -174,6 +174,9 @@ def rule_slate(conn, now: datetime, skipped: list | None = None,
     refused: dict[str, str] = {}
     post = tlcard.postseason_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-1, 0, 1)],
                                    lambda tip: now < tip <= until, refused)
+    # The postseason read names any row it turns away. A row the regular read kept is priced,
+    # and calling it refused would tell whoever is looking for a stranded bet there could be none.
+    refused = {g: t for g, t in refused.items() if g not in games}
     if skipped is not None:
         # `slate` skips what it refuses, and these are the games it refuses: a game priced
         # here is not to be logged as "not priced".
@@ -189,8 +192,11 @@ def tipped_rule_games(conn, now: datetime, hours: float,
     games = tlcard.tipped_games(conn, now, hours)
     oldest = now - timedelta(hours=hours)
     today = now.astimezone(_ET).date()
+    turned_away: dict[str, str] = {}
     post = tlcard.postseason_games(conn, [(today + timedelta(days=d)).isoformat() for d in (-2, -1, 0)],
-                                   lambda tip: oldest <= tip <= now, refused)
+                                   lambda tip: oldest <= tip <= now, turned_away)
+    if refused is not None:             # as in rule_slate: a row the regular read kept could hold a bet
+        refused.update({g: t for g, t in turned_away.items() if g not in games})
     return {**{g: v for g, v in post.items() if g not in games}, **games}
 
 
