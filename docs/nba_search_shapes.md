@@ -376,6 +376,10 @@ Added after the lab's first `--smoke`, dated, before any cell is graded.
 **2026-10-31, `--smoke` on the research cache, started with no other python job on the machine. No cell
 was graded: every timing pass read scrambled scores.**
 
+**Re-counted 2026-11-01 after the rule changes in §10.1, again before any cell was graded.** Only S_P1's bets and
+S_F6d's placebo moved. Those figures below are the new ones. The other four families' 232 per-cell bet counts match in the two
+logs (`smoke2.log`, `smoke3.log`).
+
 ### 15.1 Bets per family and season
 
 Line-size arm, at or above the -200 floor. A game counts once per cell, so these add up across cells
@@ -386,12 +390,12 @@ and the same game recurs.
 | S_F2 | 96 | 72 | 0 | 2,218 | 17,586 | 25,638 | 21,257 | 18,333 | 13,456 | 10,281 |
 | S_F6d | 8 | 8 | 491 | 1,540 | 1,368 | 2,192 | 1,792 | 1,716 | 1,312 | 946 |
 | S_F1 | 96 | 96 | 1,073 | 3,024 | 36,458 | 42,620 | 38,709 | 41,082 | 40,456 | 39,703 |
-| S_P1 | 24 | 21 | 173 | 1,954 | 0 | 3,950 | 4,936 | 3,582 | 3,092 | 3,299 |
+| S_P1 | 24 | 21 | 172 | 1,966 | 0 | 3,950 | 4,936 | 3,582 | 3,092 | 3,339 |
 | S_P2 | 32 | 16 | 37 | 3,013 | 3,398 | 4,169 | 5,223 | 5,358 | 5,519 | 5,815 |
 | Total | 256 | 213 | | | 58,810 | 78,569 | 71,917 | 70,071 | 63,835 | 60,044 |
 
 - **43 cells are thin: "too few games to tell", whatever they show.** S_F2's favourite at EV ≥ .03 (8 cells,
-  62 to 193 bets), .05 (8, 0 to 46) and .08 (8, 0 to 9); S_P1's home side at .08 (3, 173 to 176); S_P2 at a
+  62 to 193 bets), .05 (8, 0 to 46) and .08 (8, 0 to 9); S_P1's home side at .08 (3, 172 to 174); S_P2 at a
   gap of 1.5 or 2 points (16, 37 to 93).
 - **Every cell with 200+ pooled bets has at least two seasons with 30 or more,** so bar 3 can be read.
 - **S_F2 leans on its earliest season.** At EV ≥ .08, 3,014 of 8,311 bets across every point are 2021-22 and
@@ -410,7 +414,7 @@ Summed over points, sides and references. "Same bet" is the same game, side, boo
 | S_F2, EV ≥ .08 | 8,311 | 5,573 | 4,398 | 3,913 | 1,175 | 0 |
 | S_F6d, EV ≥ .01 | 5,735 | 6,723 | 3,247 | 2,296 | 3,284 | 192 |
 | S_F1, EV ≥ 0 | 47,262 | 47,232 | 43,915 | 2,481 | 2,451 | 866 |
-| S_P1, EV ≥ .02 | 8,386 | 8,699 | 7,625 | 524 | 837 | 237 |
+| S_P1, EV ≥ .02 | 8,424 | 8,713 | 7,655 | 534 | 823 | 235 |
 | S_P2, gap ≥ 0.5 | 25,610 | 25,610 | 25,529 | 0 | 0 | 81 |
 
 - **The prior in section 1 was wrong on count.** It said the shape mostly removes bets. At S_F2's top cut it
@@ -440,6 +444,8 @@ The rule catches a broken quote, not a strong opinion. Every offer below stays i
 - **S_F2 and S_F6d:** underdogs at +430 to +1,300 with EV .44 to .60, all in 2020-21 and 2021-22. The same 26.7%
   appears on seven of these games: one number in one season reads one chance.
 - **S_P2:** EV up to .16, ordinary spread prices of -105 to -112.
+- **S_P1 after §10.1's rule:** the top offers are ordinary, EV .24 to .28 on `NBA_2022-04-06_OKC_UTA`,
+  `NBA_2025-12-26_CHA_ORL` and `NBA_2022-03-10_GSW_DEN`, at prices of -114 to +100. No neutral-site game is on the list.
 - **S_P1, corrected 2026-11-01: this was not one game, and it is now fixed by rule (§10.1).** As first written:
   one game is an input fault, flagged and not fixed here. `NBA_2026-01-18_ORL_MEM`, the London game,
   reads 92.6% for the away team at the home number +4.5, EV .83. The input that stands out on it is the home
@@ -460,8 +466,8 @@ Seeds 1 to 5, every cell, weighted by placebo bets.
 |---|---|---|---|---|
 | S_F1 | 0.475 | 0.585 | 0.485 | 0.131 |
 | S_F2 | 0.532 | 0.732 | 0.532 | 0.134 |
-| S_F6d | 0.667 | 0.771 | 0.910 | 0.133 |
-| S_P1 | 0.636 | 0.813 | 0.642 | 0.131 |
+| S_F6d | 0.619 | 0.768 | 0.824 | 0.131 |
+| S_P1 | 0.636 | 0.812 | 0.642 | 0.131 |
 | S_P2 | 0.538 | 0.603 | 0.871 | 0.022 |
 
 - **The shuffle moves.** About 13% of opinions stay on their own game, one in the 7.5 a date holds. S_P2's gaps
@@ -473,10 +479,13 @@ Seeds 1 to 5, every cell, weighted by placebo bets.
   design, and why it runs this high was not broken down. A shared bet settles the same in both, so this
   narrows what the bar can see. It makes bar 6 harder to clear, not easier.
 - **By cut:** the lowest share is S_F1 at EV ≥ 0, 0.429; the highest is S_P2 at gap ≥ 2, 0.864.
+- **S_F6d's placebo now bets close to the real rule's rate.** All points, seeds 1 to 5: 5,735 real against 6,598 per
+  run at EV ≥ .01, and 3,591 against 4,337 at .03. As first built it was 12,124 and 8,703 (§10.1).
 
 ### 15.6 How long `--full` takes
 
-Measured in this run, one placebo run on every group 1.17 s, peak memory 2.93 GB.
+The table is the 2026-10-31 run, one placebo run on every group 1.17 s, peak memory 2.93 GB. The 2026-11-01 re-count
+projects 2,526 s, 0.70 hours, peak memory 2.95 GB.
 
 | Stage | Seconds |
 |---|---|
@@ -499,8 +508,10 @@ Measured in this run, one placebo run on every group 1.17 s, peak memory 2.93 GB
 
 ### 15.7 The tests
 
-- **59 tests pass.** 58 rule-breaks were each applied once to a scratch copy of the final lab and its named test run:
-  all 58 failed it. A `.env`-free copy, no real data.
+- **62 tests pass, 2026-11-01.** The three added for §10.1 each failed with its rule broken: one shuffle per date,
+  no opinion when the other game has no number at this book, and the road-trip count read as 0.
+- **59 tests passed, 2026-10-31.** 58 rule-breaks were each applied once to a scratch copy of the final lab and its
+  named test run: all 58 failed it. A `.env`-free copy, no real data.
 - **Four tests did not fail the first time, and were rewritten until they did:**
   - The ban on Pinnacle as a deciding price: Pinnacle's offer only tied a deciding book's, and a tie never reaches it.
   - The quotes for "still offered at the next fetch": at C the next fetch is the made-up world's last, so first and
