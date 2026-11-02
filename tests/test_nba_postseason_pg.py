@@ -53,7 +53,7 @@ CREATE TABLE nba_schedule (
 CREATE TABLE picks (
     pick_id SERIAL PRIMARY KEY, game_id TEXT REFERENCES games(game_id), model_id TEXT NOT NULL,
     game_date TEXT NOT NULL, game_time TEXT, signal_type TEXT NOT NULL, result TEXT,
-    condition_status TEXT);
+    condition_status TEXT, decision_odds NUMERIC, dk_odds NUMERIC);
 CREATE TABLE nba_prop_market_decisions (
     game_id TEXT PRIMARY KEY, decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), fetch_at TEXT NOT NULL,
     n_quotes INTEGER NOT NULL, n_bets INTEGER NOT NULL, detail TEXT);
@@ -205,6 +205,51 @@ def test_an_older_stranded_bet_stays_named_inside_the_look_back_and_leaves_after
     _bet(conn, "NBA_2027-04-01_MIA_BOS", tip="2027-04-01T23:00:00+00:00", day="2027-04-01")
     assert list(pregame.stranded_prop_bets(conn, NOW)) == ["NBA_2027-04-01_MIA_BOS"]
     assert pregame.stranded_prop_bets(conn, NOW + timedelta(days=40)) == {}
+
+
+def test_the_report_in_the_doc_sizes_units_as_stake_for_does_and_counts_only_graded_bets(conn):
+    """The doc's query, as written, on the shapes it meets. The figure printed above it is sized by
+    stake_for, so its first comparison against the search must be too, and a bet voided because
+    the player sat out is no bet."""
+    from tests.test_nba_postseason_docs import report_sql
+    from tracking.discord_notifier import stake_for
+
+    po, reg = "NBA_2027-04-20_MIA_BOS", "NBA_2027-03-01_NYK_ATL"
+    for gid, detail in ((po, "fair=0.5 game_type=playoff tip_source=schedule schedule_start=x feed_start=y"),
+                        (reg, "fair=0.5")):
+        _game(conn, gid, _at(-3))
+        conn.execute("INSERT INTO nba_prop_market_decisions (game_id, fetch_at, n_quotes, n_bets, detail) "
+                     "VALUES (%s, 'x', 1, 1, %s)", (gid, detail))
+    graded = [("WIN", 106), ("LOSS", 106), ("WIN", -150), ("LOSS", -150), ("WIN", -400), ("LOSS", -400), ("PUSH", -110)]
+    for result, price in graded:
+        conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, result, decision_odds) "
+                     "VALUES (%s, 'nba_prop_market', '2027-04-20', 'BET', %s, %s)", (po, result, price))
+    # dk_odds alone is a price too: the row's price is COALESCE(decision_odds, dk_odds)
+    conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, result, dk_odds) "
+                 "VALUES (%s, 'nba_prop_market', '2027-04-20', 'BET', 'WIN', 120)", (po,))
+    # none of these is a graded bet of this population
+    conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, decision_odds) "
+                 "VALUES (%s, 'nba_prop_market', '2027-04-20', 'BET', 110)", (po,))                    # open
+    conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, result, decision_odds) "
+                 "VALUES (%s, 'nba_prop_market', '2027-04-20', 'BET', 'NO_ACTION', 110)", (po,))       # sat out
+    conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, result, condition_status, decision_odds) "
+                 "VALUES (%s, 'nba_prop_market', '2027-04-20', 'BET', 'NO_ACTION', 'VOID', 110)", (po,))
+    conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, result, decision_odds) "
+                 "VALUES (%s, 'nba_prop_projection', '2027-04-20', 'BET', 'WIN', 110)", (po,))         # the other model
+    conn.execute("INSERT INTO picks (game_id, model_id, game_date, signal_type, result, decision_odds) "
+                 "VALUES (%s, 'nba_prop_market', '2027-03-01', 'BET', 'WIN', 110)", (reg,))            # regular season
+    with conn._conn.cursor() as cur:          # no params: the query's % signs are its own
+        cur.execute(report_sql())
+        rows = cur.fetchall()
+    expected = 0.0
+    for result, price in [*graded, ("WIN", 120)]:
+        s = stake_for(None, price)
+        expected += s.win if result == "WIN" else (-s.risk if result == "LOSS" else 0.0)
+    assert stake_for(None, -400).risk == 3 and stake_for(None, 106).win == 1, "the sizing this test compares with"
+    assert len(rows) == 1
+    game_type, tip_source, bets, still_open, units = rows[0]
+    assert (game_type, tip_source, bets, still_open) == ("playoff", "schedule", 8, 1)
+    assert float(units) == pytest.approx(round(expected, 2))
 
 
 def test_the_postseason_read_never_touches_a_regular_season_night(conn):

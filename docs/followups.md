@@ -34,7 +34,9 @@ to be read off production. All read-only. No paid call.
    wrong one matters more than it looks.
 2. **12-09: one semifinal, end to end.** Its `games` row, `nba_schedule` row and box rows, and whether
    the feed and ESPN agree on who is home at a neutral court. This rehearses the feed writing a knockout game,
-   the first ESPN-keyed writes and settlement. It does NOT run the new code: those games are typed regular.
+   the first ESPN-keyed writes and settlement. It does NOT run the new code: those games are typed regular. So
+   a reversed row on a semifinal can strand a bet, as on any neutral-court regular-season game (the entry below, whose
+   first read is 11-05).
 3. **12-11 after the 6am run: the final itself.** Both ids, in `games` and in `nba_schedule`, and
    `nba_schedule.game_type = 'cup_final'` on the real row. If `games` holds two rows for it, the rule refuses
    the unlisted one and the game has no prices to bet: read before the first look. The tip is unknown until
@@ -48,8 +50,9 @@ to be read off production. All read-only. No paid call.
 ## [ ] NBA season-long numbers stay regular-season once these games land (2026-11-02, design done, not built)
 
 From the Cup final on, a postseason game's box lines sit in `nba_player_game_log` and its score in `games`, so a
-player's season numbers, opponent ranks, team records and the first-quarter card would count it. Display only:
-it changes no bet. **Land it before 2026-12-11 if the final's two teams matter on those screens, and before the
+player's season numbers, opponent ranks, team records and the first-quarter card would count it. On those screens
+this is display only. It is not all display only: the final's `games` row also changes the two finalists' rest inputs
+in the projection model for their next game (next entry). **Land it before 2026-12-11 if the final's two teams matter on those screens, and before the
 play-in (2027-04-13 if the pattern repeats) regardless.** Until then only the final's one game can blend in. It is
 a separate pull request because it carries a migration and is not a model update (no `Updated-By`).
 
@@ -82,6 +85,35 @@ a separate pull request because it carries a migration and is not a model update
 - **Tests.** A scratch-database test that a playoff box line stays out of each filtered read and stays in last-N and
   head-to-head, each filter removed once and watched failing. About 25 test files create their own `games`, so a
   read naming the new column needs them updated (`grep "CREATE TABLE.*games" tests/`).
+
+## [ ] Decision for mike: should the Cup final count toward a finalist's rest? (2026-11-02)
+
+If it counts, as it does today, the projection model reads a finalist playing the next night as short of rest, which
+is true and was never graded. If it does not count, that model reads the team as rested when it is not. It reaches about
+two teams a season, for one game each. Knicks at Miami the day after a 12-11 final: rest 4 becomes 1, back-to-back 0 becomes 1,
+games in four days 1 becomes 2, road trip 2 becomes 3 (`models.nba_props.team_games`, measured by
+`tests/test_nba_postseason_docs.py`). Play-in and playoff rows are not read there. Recommended: leave it counting,
+because the input is true and the alternative feeds the model a number known to be wrong. Code unchanged until he says.
+
+## [ ] NBA: a reversed row on a neutral-court regular-season game can strand a bet (2026-11-02, watch item, first read 11-05)
+
+The fix for a feed row with home and away the other way round from ESPN covers only postseason types. On a neutral
+court typed regular, the final lands on ESPN's id, so a bet on the feed's row stays open, and that row also stops the three
+total models, which read it as a game the season still owes. This is old code, not the Cup work, and it reaches a
+game before any postseason one: DEN at IND in Mexico City on 2026-11-07, then Paris 2027-01-14, Manchester 2027-01-17 and
+the Cup semifinal slots. How often the feed reverses a game is not measured: `games` holds no reversed NBA pair since
+2025-10-01.
+
+**The read, 11-05 to 11-07, read-only, no paid call:** `SELECT game_id, data_source, commence_time FROM games WHERE game_id
+IN ('NBA_2026-11-07_DEN_IND', 'NBA_2026-11-07_IND_DEN')`, and `SELECT game_id, count(*) FROM odds WHERE game_id IN (the
+same two) GROUP BY 1`. Read 2026-11-02: only `NBA_2026-11-07_DEN_IND`, written by the league schedule (`nba_api_schedule`) and
+not by the feed.
+
+- **The feed agrees with ESPN:** this stays a watch item. Read the same way before the Paris and Manchester games.
+- **The feed reverses the game (`NBA_2026-11-07_IND_DEN` appears):** (1) in `nba_schedule_refresh.plan`, apply `flipped_id` to
+  regular types too; (2) in `nba_results_ingestor.match_game`, prefer a reversed `games` row that holds a bet over ESPN's row;
+  (3) apply the `listed_twin` test to the regular-season gate, in its own `Updated-By: mike` commit. Step 3 is needed
+  because Mexico City, Paris and Manchester already have ESPN-id rows in `games`.
 
 ## [ ] NBA: a feed row on the wrong date stops three live models (2026-11-02, flagged, not caused by the Cup work)
 

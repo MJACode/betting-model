@@ -89,8 +89,12 @@ nba-searches-graded). On the 272 such games of 2023-24..2025-26:
     the top bet in each game        251 bets    +23.36 units   +9.71%  95% -3.82..+22.81
     (what the one-a-game cap writes) prices -155 to +188, median +106, 5th-95th -125..+145,
                                     64.5% plus money, 2 worse than -150, 0 worse than -180
-The second line is the live expectation and its interval crosses zero; by season it is
-+1.08 / +19.99 / +2.28 units. An independent check rebuilt all 1,953 bets exactly, and
+    the same, the 54-minute lead    139 bets    +4.34 units    +3.23%  95% -13.72..+20.42
+    (the population the card decides at) prices -155 to +170, median +107
+The third line is the population the card decides at, because its first look lands 53-57 minutes
+out and the 251 pool snapshots at 54, 59 and 64. Its interval crosses zero, and so does the second
+line's, which by season is +1.08 / +19.99 / +2.28 units. The by-lead intervals overlap, so the gap
+may be noise (docs/thresholds.md). An independent check rebuilt all 1,953 bets exactly, and
 found most of the return is a general lean to unders in this sample, larger than in the
 regular seasons; at the regular-season lean the same bets would return about +4.4%.
 Settlement is ESPN's box alone here, as for a regular-season bet: the search's second source

@@ -238,8 +238,18 @@ the feed's, which has run 2 to 22 minutes late, so the first look lands nearer t
 anything graded. The ledger says `tip_source=feed` and those bets can be reported apart.
 
 **Season-long numbers.** Once these games land in `games` and `nba_player_game_log`, the season
-stats functions, the team board and the first-quarter card read them as season games. That is
-display only and changes no bet. See `docs/followups.md`.
+stats functions, the team board and the first-quarter card read them as season games. On those
+screens that is display only (`docs/followups.md`).
+
+**One regular-season input does move: the Cup final's `games` row changes the two finalists' rest in
+`nba_prop_projection` for their next game.** That is about two teams a season. `models.nba_props.team_games`
+counts the final once the schedule lists it, as it did before this work, so any writer's row does this. Knicks at
+Miami the day after a 12-11 final: rest 4 becomes 1, back-to-back 0 becomes 1, games in four days 1 becomes 2,
+road trip 2 becomes 3, and the opponent reads the first two through `opp_rest` and `opp_b2b`. The new
+numbers are true, since the finalists did play, but they are not what was graded: none of the Cup finals of
+2023-24..2025-26 has a `games` row. Player and team rates do not move (`models.nba_prop_projection.box_from_log` keeps regular-season
+games) and neither do the total models (`load_season` filters on the regular season). Play-in and playoff rows
+are not in `team_games`. The code is unchanged. Whether the final should count toward rest is mike's call.
 
 **Rest.** The projection model's rest, back-to-back, games-in-four-days and
 road trip, and every player's history, read every regular-season game in

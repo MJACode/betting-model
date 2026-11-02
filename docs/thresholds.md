@@ -561,15 +561,27 @@ the six `nba_prop_projection` cells passed, and nothing else was graded on them.
 | Population | Bets | Units | Return | 95% interval | Prices |
 |---|---|---|---|---|---|
 | every qualifying proposition (what passed) | 1,953 | +138.87 | +6.8% | +2.1% to +11.3% | -192 to +210, median -104, 61 worse than -150 |
-| **what the live caps write: the rule's top bet in each game** | **251** | **+23.36** | **+9.71%** | **-3.82% to +22.81%** | **-155 to +188, median +106** |
+| the rule's top bet in each game, every snapshot lead | 251 | +23.36 | +9.71% | -3.82% to +22.81% | -155 to +188, median +106 |
+| **what the card decides at: the top bet in each game, on the snapshot 54 minutes before tip** | **139** | **+4.34** | **+3.23%** | **-13.72% to +20.42%** | **-155 to +170, median +107** |
 
-Read the second row as the live expectation, and it **does not clear zero**. It is the rule alone
-at one bet a game, section 9.1's control. Section 9's other 251-bet control is both models
-sharing the game's bet (+12.37 units, only 20 of them this rule's), and with the projection model
-off these games that one no longer applies. By season: +1.08 / +19.99 / +2.28 units over 84 / 81 /
-86 bets, so one season carries most of it. The first row says the rule found something; the checker
-found most of it is a general lean to unders in this sample, larger than in the regular seasons, and
-at the regular-season lean the same bets would return about +4.4%.
+**Read the third row as the population the card decides at, and it does not clear zero.** The card's
+first look lands 53-57 minutes before tip (`models/nba_prop_market.py`). The search's archive holds
+one snapshot a game, at 54 minutes (150 games), 59 (63) or 64 (59), so the 251-bet row pools two
+leads the card never uses. The one-a-game row by lead: 54 minutes +3.23% (the third row), 59 minutes
+60 bets, +15.79 units, +27.43%, interval +2.45% to +51.22%; 64 minutes 52 bets, +3.22 units, +6.63%,
+interval -21.09% to +33.6%. Those intervals overlap, so the gap between leads may be noise. Every
+qualifying proposition at 54 minutes: 1,099 bets, +96.76 units, +8.42%, interval +2.85% to +13.94%.
+The by-lead intervals resample games (20,000 draws,
+`%TEMP%/pm_postseason_build/fix_round_checks.py` on the checker's `lab_bridged.parquet`); that method
+gives -2.99% to +22.22% on the 251-bet row, beside the -3.82% to +22.81% printed from the search.
+None of this changes the rule or the decision to ship it.
+
+The 251-bet row is the rule alone at one bet a game, section 9.1's control. Section 9's other 251-bet
+control is both models sharing the game's bet (+12.37 units, only 20 of them this rule's), and with
+the projection model off these games that one no longer applies. By season: +1.08 / +19.99 / +2.28
+units over 84 / 81 / 86 bets, so one season carries most of it. The first row says the rule found
+something; the checker found most of it is a general lean to unders in this sample, larger than in
+the regular seasons, and at the regular-season lean the same bets would return about +4.4%.
 
 **Prices it lays at one a game:** -155 to +188, median +106, 5th to 95th percentile -125 to +145,
 64.5% plus money, 2 worse than -150, 0 worse than -180. The -200 floor stays. Measured from the
@@ -579,17 +591,31 @@ The most games with a bet on any date is 4, so the night cap does not bind.
 
 **To report these bets apart.** Every decision on one of these games carries
 `game_type=<playin|playoff|cup_final|unlisted> tip_source=<schedule|feed>` in its ledger row. Read
-that rather than joining `nba_schedule`, which holds no row for an unlisted game:
+that rather than joining `nba_schedule`, which holds no row for an unlisted game. `bets` counts a win,
+a loss or a push, so a bet voided because the player sat out is not a bet. `units` is sized as the
+figures above and the Discord recap are, `tracking/discord_notifier.stake_for`: 1 unit to win, risk
+capped at 3. Compare it with +23.36, not with `profit_flat / 100`, which is flat risk and comes to
++21.66 on the same 251 bets.
 
 ```sql
-SELECT substring(d.detail from 'game_type=(\S+)') AS game_type,
-       substring(d.detail from 'tip_source=(\S+)') AS tip_source,
-       count(*) AS bets,
-       count(*) FILTER (WHERE p.result IN ('WIN', 'LOSS', 'PUSH')) AS graded,
-       round(sum(p.profit_flat) FILTER (WHERE COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL) / 100.0, 2) AS units
-FROM picks p JOIN nba_prop_market_decisions d ON d.game_id = p.game_id
-WHERE p.model_id = 'nba_prop_market' AND p.signal_type = 'BET'
-  AND p.condition_status IS DISTINCT FROM 'VOID' AND d.detail LIKE '%game_type=%'
+WITH bet AS (
+    SELECT substring(d.detail from 'game_type=(\S+)') AS game_type,
+           substring(d.detail from 'tip_source=(\S+)') AS tip_source,
+           p.result,
+           CASE WHEN COALESCE(p.decision_odds, p.dk_odds) > 0 THEN COALESCE(p.decision_odds, p.dk_odds) / 100.0
+                ELSE 100.0 / -COALESCE(p.decision_odds, p.dk_odds) END AS pays
+    FROM picks p JOIN nba_prop_market_decisions d ON d.game_id = p.game_id
+    WHERE p.model_id = 'nba_prop_market' AND p.signal_type = 'BET'
+      AND p.condition_status IS DISTINCT FROM 'VOID' AND d.detail LIKE '%game_type=%'
+      AND COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL
+)
+SELECT game_type, tip_source,
+       count(*) FILTER (WHERE result IN ('WIN', 'LOSS', 'PUSH')) AS bets,
+       count(*) FILTER (WHERE result IS NULL) AS still_open,
+       round(sum(CASE WHEN result = 'WIN' THEN LEAST(1 / pays, 3) * pays
+                      WHEN result = 'LOSS' THEN -LEAST(1 / pays, 3)
+                      ELSE 0 END), 2) AS units
+FROM bet
 GROUP BY 1, 2;
 ```
 
