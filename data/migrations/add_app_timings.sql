@@ -1,6 +1,10 @@
 -- Migration: add_app_timings
 -- Apply via Supabase MCP apply_migration (project ref vvprgnrmzeekokzkrkfu) or
 -- the SQL editor. Not in ACTIVE_MIGRATIONS, the same as add_app_errors.sql.
+-- Applied to production 2026-10-31. A fresh database needs this file by hand,
+-- then data/migrations/app_timings_cap_2026_11_01.sql (also hand-applied).
+-- The worker deletes rows older than 45 days; that does not need either file
+-- re-applied. See docs/app_timings.md.
 --
 -- Load times measured on the phone (2026-10-31, Matt: "improve the performance
 -- of the app" — measure first). pg_stat_statements says how long a query ran on
