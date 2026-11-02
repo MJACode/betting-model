@@ -435,7 +435,11 @@ One at a time, the grid bought about 48 snapshots a minute (job 936020).
   still waiting for an answer at its most (30 credits for a grid snapshot, 40
   for a game's first-half call). A call is sent only if all of them together
   stay above the 300,000 floor and under the job's limit. Until the balance
-  is known, calls go one at a time.
+  is known, calls go one at a time. Answers can arrive out of order, so the
+  job keeps the lowest balance any answer reports. A run still going when
+  the monthly refill lands (about 00:00 UTC on the 1st) keeps the old, lower
+  number and may stop at the floor early. That is a stop too soon, never a
+  spend under the floor; running the job again picks up the new balance.
 - **Rate limits.** The feed asks for requests to be spaced out when it
   answers 429. Every call then pauses together (2 seconds, doubling to at
   most 30), the call is asked again, and one fewer call runs at once; 100
