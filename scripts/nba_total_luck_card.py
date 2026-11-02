@@ -136,7 +136,10 @@ def slate(conn, now: datetime, skipped: list | None = None,
     season by models.nba_total_luck.regular_season, so a game the schedule
     does not list yet (an NBA Cup quarterfinal or semifinal, a game scheduled
     around them) is priced, as the lab priced it, and the Cup final, play-in
-    and playoffs are skipped and named in `skipped`."""
+    and playoffs are skipped and named in `skipped`, including a row of one of
+    those games dated onto a regular-season day, once the schedule lists the real
+    game with its teams (models.nba_total_luck.postseason_twin; docs/followups.md
+    says what happens before that)."""
     horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
                               else tl.DECISION_LEAD_MIN[1] + 5)
     today = now.astimezone(_ET).date()
@@ -184,9 +187,21 @@ def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) 
                            "game_type": v["game_type"]} for g, v in cand.items()])
     days = schedule_days(conn, [v["season"] for v in cand.values() if v["season"] is not None])
     keep = set(tl.regular_season(frame, days)["game_id"])
+    # A postseason game the feed dated onto a regular-season day passes the test above, and only the
+    # schedule's own row for it can say so. Read only when an unlisted row exists: no ordinary night has one.
+    twins = {}
+    unlisted = [g for g in keep if cand[g]["game_type"] is None]
+    if unlisted:
+        sched = schedule_rows(conn, [cand[g]["season"] for g in unlisted if cand[g]["season"] is not None])
+        twins = {g: t for g in unlisted
+                 if (t := tl.postseason_twin(cand[g]["game_date"], cand[g]["home"], cand[g]["away"], sched))}
     out = {}
     for gid, v in sorted(cand.items()):
         game_type = v["game_type"]
+        if gid in twins:
+            if skipped is not None:
+                skipped.append(f"{gid} (the schedule lists this game as {twins[gid]})")
+            continue
         if gid not in keep:
             if skipped is not None:
                 skipped.append(f"{gid} ({game_type or 'not a regular-season day'})")

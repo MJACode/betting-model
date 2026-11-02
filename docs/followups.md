@@ -120,7 +120,18 @@ not by the feed.
 A wrong-date feed row on a regular-season day counts as a regular-season game the season owes
 (`scripts/nba_total_luck_card.load_season`), and `models/nba_total_luck.missing_inputs` then makes
 `nba_total_luck`, `nba_team_total_luck` and `nba_first_half_total_luck` decline every game for up to 14 days. The
-prop slate would price it too. Measured: the feed wrote four such rows in the 2026 WNBA playoffs
+prop slate would price it too.
+
+**A postseason game can be bet this way, by all four other NBA models.** `_regular_games`, which every slate reads, now
+drops an unlisted row when the schedule lists the same two teams under a postseason type within two days
+(`models.nba_total_luck.postseason_twin`). So a row dated 12-10 for a final listed 12-11, or dated on the last regular-season
+day for a play-in listed two days on, reaches none of them. **That cannot catch a wrong-date row before the schedule lists
+the real game**: the final's slot has no teams until ESPN sets them, and until it does the row reaches
+`nba_total_luck`, `nba_team_total_luck`, `nba_first_half_total_luck` and `nba_prop_projection`, and any of them can bet it. Pinned by
+`test_before_the_schedule_lists_the_final_a_misdated_row_still_reaches_the_other_models`. It also does not change
+`load_season`, which reads `regular_season` directly, so the decline above is unchanged.
+
+Measured: the feed wrote four such rows in the 2026 WNBA playoffs
 (`WNBA_2026-09-25_NY_MIN`, `10-01_DAL_GSV`, `10-03_NY_ATL`, `10-22_GSV_ATL`, the real games one to two days later).
 `final_scores` goes STALE at WARN on those, and was STALE on most days of 09-24 to 10-10. NBA has none yet (0
 unscored rows 08-01 to 11-01). The same-teams test in `models.nba_total_luck.listed_twin` would close it, but

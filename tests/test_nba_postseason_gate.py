@@ -114,6 +114,28 @@ def _rows():
     return rows
 
 
+# The same schedule once the real games are listed: the row the feed mis-dates has something to be
+# a copy of. Neither is on a date the leaked rows below fall on.
+LISTED_FINAL = ("NBA_2026-12-11_NYK_OKC", 2027, "2026-12-11", "cup_final", "OKC", "NYK", False, False)
+LISTED_PLAYIN = ("NBA_2027-04-13_CHA_MIA", 2027, "2027-04-13", "playin", "MIA", "CHA", False, False)
+SCHED_LISTED = [*SCHED, LISTED_FINAL, LISTED_PLAYIN]
+
+
+def _misdated_rows():
+    """Feed rows dated onto a regular-season day, the real game listed within two days. The review's
+    two, each the same either way round."""
+    rows = []
+    for lead in LEADS:
+        rows += [
+            _row(f"2027-04-20|REG{lead}", "regular", lead),
+            _row(f"2026-12-10|FINALDAYBEFORE{lead}", None, lead, home="OKC", away="NYK"),
+            _row(f"2026-12-10|FINALFLIPPED{lead}", None, lead, home="NYK", away="OKC"),
+            _row(f"2027-04-11|PLAYINLASTDAY{lead}", None, lead, home="MIA", away="CHA"),
+            _row(f"2027-04-11|PLAYINFLIPPED{lead}", None, lead, home="CHA", away="MIA"),
+        ]
+    return rows
+
+
 def _ids(got) -> set[str]:
     if isinstance(got, dict):
         return set(got)
@@ -144,6 +166,62 @@ def test_no_other_nba_model_reaches_a_postseason_game(name, monkeypatch):
     assert any("REG" in g for g in got), f"{name} returned no regular-season game: a vacuous pass"
     leaked = sorted(g for g in got if "REG" not in g)
     assert leaked == [], f"{name} reached {leaked}"
+
+
+@pytest.mark.parametrize("name", sorted(_READERS))
+def test_a_postseason_game_dated_onto_a_regular_season_day_reaches_no_other_model(name, monkeypatch):
+    """The one input the review found that got past their gate: regular_season counts any unlisted
+    row on a regular-season day. The real game is listed a day or two off, either way round."""
+    monkeypatch.setattr(pcard, "ensure_tables", lambda c: None)
+    got = _ids(_READERS[name](_Conn(_misdated_rows(), sched=SCHED_LISTED)))
+    assert any("REG" in g for g in got), f"{name} returned no regular-season game: a vacuous pass"
+    assert sorted(g for g in got if "REG" not in g) == []
+
+
+def test_a_misdated_row_is_named_in_skipped_and_reported_as_refused_by_the_rule():
+    """Not a silent drop: the slate says which listed game it is, and the rule's read does not price it."""
+    rows = [_row("2026-12-10|FINALDAYBEFORE46", None, 46, home="OKC", away="NYK")]
+    skipped = []
+    assert tlcard.slate(_Conn(rows, sched=SCHED_LISTED), NOW, skipped, horizon_min=70) == {}
+    assert skipped == ["2026-12-10|FINALDAYBEFORE46 (the schedule lists this game as NBA_2026-12-11_NYK_OKC)"]
+    skipped = []
+    assert rule_card.rule_slate(_Conn(rows, sched=SCHED_LISTED), NOW, skipped, horizon_min=70) == {}
+    assert skipped == ["2026-12-10|FINALDAYBEFORE46 (the schedule lists this game as NBA_2026-12-11_NYK_OKC)"]
+
+
+@pytest.mark.parametrize("row", [
+    # three days off the final: outside the window
+    _row("2026-12-08|THREEDAYS46", None, 46, home="OKC", away="NYK"),
+    # one team of the final and another
+    _row("2026-12-10|ONETEAM46", None, 46, home="OKC", away="BOS"),
+])
+def test_an_unlisted_row_that_is_no_copy_of_the_listed_game_stays_a_regular_season_game(row):
+    """The Cup week's filler games: unlisted, on a regular-season day, and real."""
+    assert list(tlcard.slate(_Conn([row], sched=SCHED_LISTED), NOW, horizon_min=70)) == [row[0]]
+
+
+def test_a_listed_regular_game_is_never_asked_about_and_costs_no_schedule_read():
+    """The last regular-season day can hold the two teams of a play-in two days on, and the row is real.
+    A listed game never reaches the test. And an ordinary night makes no second read of the schedule."""
+    rows = [_row("2027-04-11|LASTREGULAR46", "regular", 46, home="MIA", away="CHA")]
+    conn = _Conn(rows, sched=SCHED_LISTED)
+    seen = []
+    real = conn.execute
+
+    def spy(sql, params=None):
+        seen.append(" ".join(sql.split()))
+        return real(sql, params)
+
+    conn.execute = spy
+    assert list(tlcard.slate(conn, NOW, horizon_min=70)) == ["2027-04-11|LASTREGULAR46"]
+    assert not any("in_games" in s for s in seen)
+
+
+def test_before_the_schedule_lists_the_final_a_misdated_row_still_reaches_the_other_models():
+    """What the fix cannot do, pinned so the follow-up's warning stays true: the final's slot has no teams,
+    so nothing says this row is the final. Remove this test when something closes that gap."""
+    rows = [_row("2026-12-10|FINALDAYBEFORE46", None, 46, home="OKC", away="NYK")]
+    assert list(tlcard.slate(_Conn(rows), NOW, horizon_min=70)) == ["2026-12-10|FINALDAYBEFORE46"]
 
 
 @pytest.mark.parametrize("name", sorted(_READERS))

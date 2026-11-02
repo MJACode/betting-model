@@ -631,6 +631,30 @@ def listed_twin(game_id: str, game_date, home, away, sched: pd.DataFrame) -> str
     return None
 
 
+def postseason_twin(game_date, home, away, sched: pd.DataFrame) -> str | None:
+    """The play-in, playoff or Cup final row an unlisted `games` row is a misdated copy of, or None.
+
+    `regular_season` counts any unlisted row between the season's first and last regular-season day
+    unless that date holds another kind of game, so a postseason game the feed dated a day early,
+    onto a regular-season day, reaches every other NBA model. The schedule lists the two teams,
+    either way round, under a postseason type within TWIN_DAYS: that row is the game.
+
+    It cannot see a wrong date before the schedule lists the real game with its teams. The Cup
+    final's slot has no teams until ESPN sets them (docs/followups.md). Every real regular-season
+    game is listed, and a listed row is never asked about, so no real game is turned away.
+    """
+    if sched is None or sched.empty:
+        return None
+    pair = {home, away}
+    day = pd.Timestamp(str(game_date)[:10])
+    for x in sched.itertuples(index=False):
+        if x.game_type not in POSTSEASON_TYPES or {x.home_team, x.away_team} != pair:
+            continue
+        if abs((pd.Timestamp(str(x.game_date)[:10]) - day).days) <= TWIN_DAYS:
+            return x.game_id
+    return None
+
+
 def graded_postseason(rows: pd.DataFrame, sched: pd.DataFrame) -> pd.DataFrame:
     """The rows of `games` that are play-in, playoff or Cup final games.
 

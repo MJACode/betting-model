@@ -220,7 +220,11 @@ row with each team's own score (`nba_results_ingestor.match_game`).
 **Who reads them.** `slate` and everything built on it refuse them: the three total models'
 cards and windows, the projection model, the ten-game gates, the ratings. Only
 `scripts/nba_prop_market_card.rule_slate` adds them, and `tests/test_nba_postseason_gate.py`
-fails on any other reader. Results, settlement, closing-line capture and publishing read
+fails on any other reader. That holds for a correctly dated row, and for a row the feed dated onto a
+regular-season day once the schedule lists the real game with its teams
+(`models.nba_total_luck.postseason_twin`). **Before the schedule lists it, such a row reaches all four other
+models and can be bet by them** (`docs/followups.md`). The Cup final's slot has no teams until ESPN sets them.
+Results, settlement, closing-line capture and publishing read
 `picks` and `games` with no game-type filter, so these bets settle, post and count like any
 other. Prices are `player_prop_odds`' `open` rows, the same as any game; never
 `nba_postseason_prop_odds`, which is research only.
