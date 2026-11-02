@@ -154,9 +154,10 @@ def test_the_gap_uses_only_games_before_the_game_date():
 
 # ── no ten-game wait ────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("n,priced", [(0, False), (1, True), (9, True), (10, True)])
+@pytest.mark.parametrize("n,priced", [(1, True), (9, True), (10, True)])
 def test_a_team_needs_one_game_not_ten(monkeypatch, art, n, priced):
-    """mike, 2026-11-02: no 10-game wait. A team with no game has no number."""
+    """mike, 2026-11-02: no 10-game wait. A team with no game has no number:
+    the opening-night test further down."""
     games, box = _season(n)
     day = (pd.Timestamp("2026-10-21") + pd.Timedelta(days=n)).strftime("%Y-%m-%d")
     t = _target(day)
