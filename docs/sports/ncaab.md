@@ -41,7 +41,12 @@ mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model
    wins, a push left out, minus the price's implied chance. The better side
    is bet when that edge is above **0.04**. DraftKings only: the evidence
    priced DraftKings and nothing else, so the line is not shopped.
-5. **Both teams 10+ games** that ended before the quote (CLAUDE.md §3).
+5. **No games-played wait** (mike, 2026-11-02: *"we do not need to wait 10
+   games, I never approved that, that is why we fucking have back testing, I
+   want these models live now"*). Every game with a DraftKings total is priced
+   from the first game of the season, on last season's ratings until this
+   season's games come in. Nothing frozen changed: the November blend was
+   always fitted on every quoted November game.
 
 **When a game is decided.** The evidence bet DraftKings' FIRST stored total,
 and the history it bought was snapshots at 22:00 UTC the evening before, at
@@ -61,10 +66,8 @@ does not hold (the evidence also had a few games with no possessions). The
 boxes come from the ESPN box feed (`data/ingestors/ncaab_espn_box.py`, source
 `espn_summary`, PR #1103). **Before that feed runs no box is stored**: a
 team's first game, and its second if the first ended more than 36 hours
-before the quote, is decided `below_10_games`, which is final; from the third
-game on its games hold. Nothing reaches 10 boxed games, so nothing is bet
-(measured 2026-10-31 on the tests' synthetic season with no box rows, games
-three days apart).
+before the quote, is priced on the prior alone; from the third game on its
+games hold.
 
 **A run that cannot decide a due game fails.** `box_missing` can hold a
 team's games all season, so it fails the run, as do an artifact built for
@@ -82,8 +85,35 @@ neither row has one (Mercy at FDU, 2022-11-09), and a key on the team id kept
 one row of each, so its possessions were one team's estimate and the hold
 counted it unboxed. Fixed 2026-10-31; the frozen numbers were rebuilt with it.
 
-**Under the 10-game rule it has never bet in November.** Expect a card of
-`below_10_games` decisions and no bets until about the first week of December.
+**The 10-game wait ran from 2026-10-30 to 2026-11-02.** It left a
+`below_10_games` row on 106 games, 98 of them not yet tipped on 2026-11-02. That
+row never looked at a price, so it is not a decision: a game with one that has
+not tipped is decided at DraftKings' standing total at its next hour, and the
+row is replaced (`scripts/ncaab_total_card.py`). Those 98 games are priced at
+that later number, not DraftKings' first stored total as the evidence was.
+
+**The replay with no wait** (2026-11-02; the build's own walk-forward replay and
+grade on the copy of 2026-10-30, every quoted game kept, cut 0.04; 95% interval
+resampled by date; the table's "lower team" is whichever of the two has played
+fewer):
+
+| Games | Seasons | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|---|
+| **Every game (live)** | **2022-2026** | **1,513** | **+93.44** | **+5.66%** | **[1.0, 10.3]** |
+| Every game | 2022-2025 | 1,073 | +59.19 | +5.05% | [-0.5, 10.8] |
+| Every game | 2025-26 | 440 | +34.25 | +7.13% | [-1.7, 16.3] |
+| Both teams 10+ (the old wait) | 2022-2026 | 1,157 | +89.04 | +7.06% | [2.1, 12.1] |
+| A team under 10 (what the wait kept out) | 2022-2026 | 356 | +4.40 | +1.13% | [-10.1, 12.1] |
+| Lower team 0 games | 2022-2026 | 6 | -0.26 | -3.98% | too few |
+| Lower team 1-4 games | 2022-2026 | 63 | -2.68 | -3.89% | [-29.1, 23.0] |
+| Lower team 5-9 games | 2022-2026 | 287 | +7.34 | +2.34% | [-10.2, 14.0] |
+| November | 2022-2026 | 97 | -2.10 | -1.98% | [-24.2, 20.9] |
+| December on | 2022-2026 | 1,416 | +95.54 | +6.18% | [1.7, 10.8] |
+
+Bets are sparse at the start of a season. The November blend carries little of
+the model's gap to the line (beta 0.195), so at -110 a November bet needs the
+model about 13 points over or 15.5 under. In these seasons 6 of 565 scored games
+with a team on 0 games cleared the cut.
 
 | Setting | Value | Where |
 |---|---|---|
@@ -170,8 +200,17 @@ games each).
   the close is real.
 - **2025-26 rests on its best days.** Without its 5 best dates the research
   version's 2025-26 was -0.78% (282 bets); without its 10 best, -6.88%.
-- **The 10-game rule decides whether it clears.** Without it the same cut is
-  +4.36% with an interval that crosses zero (research version).
+- **The games the wait kept out are about break-even** (the table above):
+  they add 356 bets and +4.40 units over five seasons, and the seasons split
+  (2022 +25.20%, 2023 -6.02%, 2024 -0.51%, 2025 -10.14%, 2026 +8.46%).
+- **The model reads low on opening night.** It starts from last season's
+  end-of-season scoring, which has sat under the next November's: 145.2 against
+  152.3 in 2025-26, and 148.4 for 2026-27. Model minus DraftKings' first total on
+  each first full slate: +1.20, -1.06, +0.23, +0.24, -2.86 (2022-2026), and -4.45
+  on the 106 games decided by 2026-11-02. In those past slates, 21 games had the
+  model 7+ under the line, and the result beat the line in 15 of them (mean +7.14
+  points). So early unders are the thinnest bets it makes; its November unders
+  were 10-6-1 on 17 bets.
 - **The cut was chosen on the seasons it is graded on**, though the returns
   form a plateau (+5.18% to +10.45% across 0.02-0.06), not a peak.
 - **Pinnacle had posted no 2026-27 NCAAB totals** when this shipped (seven

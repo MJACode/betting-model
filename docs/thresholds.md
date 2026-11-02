@@ -999,8 +999,8 @@ refuses a season it does not end just before.
 mike, 2026-10-30: *"Yes to the totals model."* Team ratings refit as of
 DraftKings' total, a correction for shooting luck and playing style, blended
 with DraftKings' total; bet the side whose chance of winning (a push left out)
-beats DraftKings' implied chance by more than 0.04, both teams 10+ games
-(`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
+beats DraftKings' implied chance by more than 0.04, with no games-played wait
+(mike, 2026-11-02) (`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
 evidence and its risks are `docs/sports/ncaab.md` "The models").
 
 | Setting | Value | Where |
@@ -1009,11 +1009,11 @@ evidence and its risks are `docs/sports/ncaab.md` "The models").
 | prob / edge filter | 0.0 / 0.04. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
 | EV floor | 0.07, on its own probability. The smallest EV the 0.04 cut admitted on 2021-2025 was +0.0743 (median +0.0996, 1,094 bets); an edge above 0.04 at -120 or longer is EV above 0.073, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned; it laid -120 to +102 (median -110) | `MODEL_MIN_ODDS` |
-| early season | both teams 10+ games ended before the quote; never a November bet in the evidence | `models/ncaab_total_blend.MIN_GAMES` |
+| early season | no wait (mike, 2026-11-02: *"we do not need to wait 10 games, I never approved that"*). With no wait the replay is 1,513 bets, +5.66% on 2022-2026, against 1,157 bets, +7.06% with it; the 356 bets it adds are +1.13%, interval [-10.1, 12.1]. `docs/sports/ncaab.md` has the table | `models/ncaab_total_blend.decide` |
 | decided once | 22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip, at DraftKings' standing total; a row in `ncaab_total_decisions`, bet or not | `scripts/ncaab_total_card.py`, `scheduler.run_ncaab_total_card` |
 
-**The neighbourhood** (graded as it runs live, 2026-10-30; both teams 10+
-games; date-resampled 95% interval):
+**The neighbourhood** (the evidence of 2026-10-30, graded while the 10-game
+wait was on, so on both teams 10+ games; date-resampled 95% interval):
 
 | Cut | 2021-2025 bets | 2021-2025 ROI | interval | close EV | 2025-26 bets | 2025-26 ROI |
 |---|---|---|---|---|---|---|
