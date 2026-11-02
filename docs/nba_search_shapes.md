@@ -522,3 +522,37 @@ projects 2,526 s, 0.70 hours, peak memory 2.95 GB.
 - **`--full` was run end to end on made-up games,** every line a real run takes: 256 registered cells, 256 twins, 88
   controls, 200 placebo runs per cell, every table written, then the verdict over them. 4 cells passed there, all
   S_F2 underdogs at C and D, where that world misprices underdogs on purpose.
+
+
+## 16. Results (graded 2026-11-02)
+
+Run `2026-11-02-shapes`, stored in Supabase: 256 cells, 256 one-shape twins and 88 controls. The grade took 2,425
+seconds.
+
+**0 of the 256 cells pass. The families stay closed, and the question this search asked has its answer: the earlier
+moneyline and spread verdicts did not rest on the pricing choice.** Two cells clear the 95% interval, each on 3 bets.
+213 cells hold 200+ bets, with a median return of -1.0% and 79 positive.
+
+| Family | Market | Cells with 200+ bets | Median return, line-size shape | Median return, one shape | Better under the line-size shape | Best return |
+|---|---|---|---|---|---|---|
+| S_F2 | Moneyline | 72 | +2.86% | -2.14% | 56 | +9.75% |
+| S_F6d | Moneyline | 8 | +2.39% | -0.05% | 7 | +5.41% |
+| S_F1 | Moneyline | 48 | -1.30% | -1.44% | 27 | +3.58% |
+| S_F1 | Spread | 48 | -3.11% | -3.39% | 22 | +0.58% |
+| S_P1 | Spread | 21 | -0.14% | 0.00% | 10 | +5.24% |
+| S_P2 | Spread | 16 | -1.50% | -1.51% | 10 | +3.46% |
+
+- **The nearest miss by units is S_F2's underdog at Pinnacle's reference, EV .02, decision point D:** 1,711 bets,
+  +38.44 units, +6.8%, interval -1.9% to +15.4%, 3 of 5 seasons positive. It fails the interval, the seasons and the
+  bands. Its twin at the same cut made 1,148 bets, +0.75 units, +0.3%.
+- **The shape does change who a long underdog looks like, and that is the only family it moves.** Summed over S_F2's
+  cells, the bets only the line-size shape makes earn +607.0 units, and the bets only the one shape makes lose
+  2,214.3. Those totals repeat games across cells, so they are not a record. On spreads the shape moves almost
+  nothing: S_P2's two arms are within 0.01 points, as section 3 predicted.
+- **This does not rescue the underdog.** Section 10.1 registered a further test for any moneyline pass, because a game
+  reads the results of its whole size group and the chance steps at a group's edge. No moneyline cell passed, so the
+  test was not run. The gap between the arms on S_F2 may be that step and is not evidence of a better model.
+- **S_P1 after the road-trip rule:** the best is the home side at decision point A, EV .02: 914 bets, +46.75 units,
+  +4.7%, interval -1.5% to +10.9%, failing the interval, the seasons, the bands and the placebo.
+- **The two families no shape reaches, controls and never judged:** the same-number rule has a median return of +0.1%
+  (the one high figure is a thin cell), and P1's moneyline -3.2%.
