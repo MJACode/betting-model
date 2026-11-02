@@ -264,10 +264,10 @@ def test_an_nba_cup_week_game_the_schedule_does_not_list_is_still_priced():
     assert sorted(s.split()[0] for s in skipped) == ["FINALDAY", "NOSEASON"]
 
 
-def test_the_postseason_is_never_priced():
-    """Neither NBA prop model was graded on a play-in, playoff or Cup final game:
-    the stored prop history holds none of the 272 of 2023-24..2025-26 (and all
-    3,690 regular-season games). Each is skipped and named, by its type."""
+def test_the_regular_season_slate_never_prices_the_postseason():
+    """The slate nba_prop_projection reads. None of its six cells passed on these 272
+    games (docs/nba_search_postseason.md), so it never reads them. Each is skipped and
+    named, by its type. nba_prop_market reads `rule_slate` (below)."""
     rows = [(gid, "LAL", "GSW", "2026-10-21", 2027, _t(0), _t(0), kind)
             for gid, kind in (("PI", "playin"), ("PO", "playoff"), ("CF", "cup_final"),
                               ("PRE", "preseason"))]
@@ -464,7 +464,7 @@ def test_the_card_records_a_decision_when_nothing_qualifies(monkeypatch):
     it, or the next look re-decides the game on a later price."""
     import scripts.nba_props_card as door
     monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
-    monkeypatch.setattr(card, "slate", lambda c, now, skipped=None: dict(GAMES))
+    monkeypatch.setattr(card, "rule_slate", lambda c, now, skipped=None: dict(GAMES))
     monkeypatch.setattr(card, "games_with_a_bet", lambda c, ids: set())
     monkeypatch.setattr(card, "decided_games", lambda c, ids: set())
     monkeypatch.setattr(card, "load_roster", lambda c, g: ROSTER)
@@ -806,3 +806,286 @@ def test_the_pipeline_runs_the_card_under_both_names():
         assert name in choices
     assert '"nba-prop-market": lambda: step_nba_prop_market(' in text
     assert "run_nba_prop_scorer" not in text
+
+
+# ── the play-in, the playoffs and the Cup final ──────────────────────────────
+#
+# nba_prop_market bets them through `rule_slate`. The same door, the same ledger, the same caps as
+# a regular-season game, and nothing else with an NBA model id reaches them.
+
+PO_GID = "NBA_2027-04-20_GSW_LAL"
+PO_DAY = "2027-04-20"
+SCHED_2027 = [("A", 2027, "2026-10-20", "regular", "BOS", "NYK", True, True),
+              ("B", 2027, "2027-04-11", "regular", "BOS", "NYK", True, True),
+              ("C", 2027, "2026-12-11", "cup_final", "NaN", "NaN", False, False)]
+
+
+def _rows_of(quotes):
+    return [(x["game_id"], x["player"], x["market"], x["book"], x["line"], x["over_price"], x["under_price"],
+             x["over_link"], x["under_link"], x["snapshot_at"], x["book_last_update"], x["snapshot_type"])
+            for x in quotes]
+
+
+def _po_quotes(gid=PO_GID, line=24.5):
+    return [q("pinnacle", -115, -105, gid=gid, line=line), q("fanduel", -125, +105, gid=gid, line=line),
+            q("pinnacle", -115, -105, gid=gid, line=6.5, market="player_rebounds"),
+            q("fanduel", -125, +105, gid=gid, line=6.5, market="player_rebounds")]
+
+
+class _LookConn:
+    """One stored world: a look reads it by shape, and the door writes to it."""
+
+    def __init__(self, games, quotes=(), sched=SCHED_2027, night=None):
+        self.games, self.sched, self.quotes = list(games), list(sched), _rows_of(quotes)
+        self.night = dict(night or {})
+        self.decisions, self.picks, self.sql = {}, [], []
+
+    def execute(self, sql, params=None):
+        s = " ".join(sql.split())
+        self.sql.append(s)
+        self._one, self._all = None, []
+        if "FROM games g LEFT JOIN nba_schedule" in s:
+            self._all = self.games
+        elif s.startswith("SELECT DISTINCT season, game_date, game_type FROM nba_schedule"):
+            self._all = sorted({(r[1], r[2], r[3]) for r in self.sched})
+        elif "FROM nba_schedule s LEFT JOIN games g" in s:
+            self._all = self.sched
+        elif "FROM player_prop_odds" in s:
+            self._all = [r for r in self.quotes if r[0] in params[0]]
+        elif "FROM nba_player_game_log" in s:
+            self._all = [("201939", "Stephen Curry", "GSW"), ("2544", "LeBron James", "LAL")]
+        elif s.startswith("SELECT game_date, count(*) FROM picks"):
+            self._all = [(d, n) for d, n in self.night.items() if d in params[1]]
+        elif "SELECT DISTINCT game_id FROM picks" in s:
+            self._all = [(g,) for g in params[1] if any(p["game_id"] == g for p in self.picks)]
+        elif s.startswith("SELECT game_id FROM nba_prop_market_decisions"):
+            self._all = [(g,) for g in params[0] if g in self.decisions]
+        elif s.startswith("INSERT INTO nba_prop_market_decisions"):
+            if params["game_id"] not in self.decisions:
+                self.decisions[params["game_id"]] = params
+                self._one = (params["game_id"],)
+        elif s.startswith("INSERT INTO picks"):
+            self.picks.append(params)
+            self._one = (len(self.picks),)
+        return self
+
+    def fetchone(self):
+        return self._one
+
+    def fetchall(self):
+        return list(self._all)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _po_game(gid=PO_GID, kind="playoff", day=PO_DAY, home="LAL", away="GSW", s_ct=None, g_ct=None):
+    s_ct = TIP.isoformat() if s_ct is None and kind else s_ct
+    g_ct = TIP.isoformat() if g_ct is None else g_ct
+    return (gid, home, away, day, 2027, g_ct, s_ct, kind)
+
+
+def _one_look(conn, monkeypatch, now=NOW):
+    """A look and the door, as scripts/nba_props_card.run_cards runs them."""
+    import scripts.nba_props_card as door
+    monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
+    got = card.look(conn, now)
+    rows = card.pick_rows(got["bets"], bankroll=1000.0)
+    return got, door.publish_across_models(conn, rows, got["decisions"], [])
+
+
+@pytest.mark.parametrize("kind", ["playin", "playoff", "cup_final"])
+def test_the_rule_bets_a_postseason_game_through_the_same_door(kind, monkeypatch):
+    """One ledger row, one bet of the two that clear, and the game's type on the ledger row so the
+    new bets can be reported apart."""
+    conn = _LookConn([_po_game(kind=kind)], _po_quotes())
+    got, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1 and out["dropped"] == {"cap_one_a_game": 1}
+    assert list(conn.decisions) == [PO_GID] and [p["model_id"] for p in conn.picks] == [mk.MODEL_ID]
+    assert f"game_type={kind}" in conn.decisions[PO_GID]["detail"]
+    assert "tip_source=schedule" in conn.decisions[PO_GID]["detail"]
+    assert conn.picks[0]["pick_label"] == "Stephen Curry Under 24.5 Pts"
+    assert conn.decisions[PO_GID]["detail"].count("cap_one_a_game=1") == 1
+
+
+def test_a_postseason_look_keeps_the_rule_and_the_floor_as_they_are(monkeypatch):
+    """Nothing about the rule moves. Worse than -200 is refused here as on any other night, and a
+    fetch that cannot price the game decides nothing."""
+    floor = [q("pinnacle", 100, -120, gid=PO_GID), q("fanduel", 150, -210, gid=PO_GID)]
+    conn = _LookConn([_po_game()], floor)
+    got, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 0 and got["diag"]["below_price_floor"] >= 1 and list(conn.decisions) == [PO_GID]
+    conn = _LookConn([_po_game()], [q("fanduel", -125, +105, gid=PO_GID)])     # no Pinnacle
+    got, out = _one_look(conn, monkeypatch)
+    assert got["decisions"] == [] and conn.decisions == {} and conn.picks == []
+
+
+def test_a_rerun_with_a_moved_line_writes_nothing(monkeypatch):
+    """CLAUDE.md 1c: the pick that exists stands. A later look reads the ledger and leaves it."""
+    conn = _LookConn([_po_game()], _po_quotes())
+    _one_look(conn, monkeypatch)
+    assert len(conn.picks) == 1
+    before = dict(conn.picks[0])
+    conn.quotes = _rows_of(_po_quotes(line=27.5))
+    got, out = _one_look(conn, monkeypatch, now=NOW + timedelta(minutes=5))
+    assert got["bets"] == [] and got["decisions"] == [] and out["written"] == 0
+    assert len(conn.picks) == 1 and conn.picks[0] == before
+    assert any(s.startswith("SELECT game_id FROM nba_prop_market_decisions") for s in conn.sql)
+
+
+def test_postseason_bets_share_the_night_cap(monkeypatch):
+    """Four a night across both NBA prop models. The game is still decided, and the ledger says why
+    it has no bet."""
+    conn = _LookConn([_po_game()], _po_quotes(), night={PO_DAY: 4})
+    got, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 0 and conn.picks == [] and list(conn.decisions) == [PO_GID]
+    assert "cap_night_full" in conn.decisions[PO_GID]["detail"]
+
+
+def test_the_two_models_share_one_bet_a_game_on_a_postseason_game(monkeypatch):
+    """An nba_prop_projection bet on a game cannot arrive here (it does not read these games), but a
+    game already holding one gets no other."""
+    conn = _LookConn([_po_game()], _po_quotes())
+    conn.picks.append({"game_id": PO_GID, "model_id": "nba_prop_projection"})
+    got, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 0 and len(conn.picks) == 1
+
+
+def test_a_priced_postseason_game_is_not_logged_as_not_priced():
+    """`slate` puts it in skipped, and the card used to log what `slate` skipped."""
+    skipped = []
+    games = card.rule_slate(_LookConn([_po_game()]), NOW, skipped)
+    assert list(games) == [PO_GID] and skipped == []
+    # what the rule does not take is still named
+    skipped = []
+    games = card.rule_slate(_LookConn([_po_game(gid="PRE", kind="preseason")]), NOW, skipped)
+    assert games == {} and skipped == ["PRE (preseason)"]
+
+
+def test_the_projection_card_writes_no_decision_and_builds_no_frame_on_these_games(monkeypatch):
+    import scripts.nba_prop_projection_card as pcard
+    monkeypatch.setattr(pcard, "ensure_tables", lambda c: None)
+    games = [_po_game(gid="PO", kind="playoff"), _po_game(gid="PI", kind="playin"),
+             _po_game(gid="CF", kind="cup_final"), _po_game(gid="UL", kind=None, s_ct=None)]
+    conn = _LookConn(games, _po_quotes("PO"))
+    assert pcard.to_project(conn, NOW) == []
+    got = pcard.look(conn, NOW, art={"not": "used"}, rule_deciding={"PO", "PI", "CF", "UL"})
+    assert got["games"] == {} and got["bets"] == [] and got["decisions"] == []
+    # the control: the same read on a regular-season game does return it
+    assert pcard.to_project(_LookConn([_po_game(gid="REG", kind="regular")]), NOW) == ["REG"]
+
+
+def test_both_cards_through_run_cards_write_one_bet_from_the_rule_alone(monkeypatch):
+    """The whole step: the projection card told the rule is deciding this game writes nothing for it."""
+    import models.scorer as scorer
+    import scripts.nba_prop_projection_card as pcard
+    import scripts.nba_props_card as door
+    monkeypatch.setattr(card, "ensure_decisions_table", lambda c: None)
+    monkeypatch.setattr(pcard, "ensure_tables", lambda c: None)
+    monkeypatch.setattr(scorer, "_get_current_bankroll", lambda c: 1000.0)
+    conn = _LookConn([_po_game()], _po_quotes())
+    monkeypatch.setattr(door, "get_connection", lambda: conn)
+    out = door.run_cards(do_publish=True, now=NOW)
+    assert out["published"] == 1 and out["errors"] == {}
+    assert out["decided"] == {mk.MODEL_ID: 1, "nba_prop_projection": 0}
+    assert [p["model_id"] for p in conn.picks] == [mk.MODEL_ID]
+
+
+def test_a_tip_with_no_schedule_row_is_marked_as_the_feeds(monkeypatch):
+    """The feed's start has run up to 22 minutes after the league's. So a game with no schedule row
+    is decided nearer the tip than anything graded, and those bets get reported apart."""
+    conn = _LookConn([_po_game(kind=None, s_ct=None)], _po_quotes())
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1
+    assert "game_type=unlisted tip_source=feed" in conn.decisions[PO_GID]["detail"]
+
+
+def test_two_starts_far_apart_are_named_and_the_earlier_is_used(monkeypatch):
+    """ESPN alone sets a postseason row's tip. When it and the feed sit further apart than the feed
+    ever lags (30 minutes, FEED_LAG), one is wrong. Earlier is safe for the decision: it can never
+    run past the real start."""
+    import data.ingestors.nba_schedule_refresh as nsr
+    import scripts.nba_total_luck_card as tlcard
+    assert timedelta(minutes=tlcard.START_GAP_MIN) == nsr.FEED_LAG[1]
+    warned = []
+    monkeypatch.setattr(tlcard.logger, "warning", lambda m: warned.append(m))
+    late = (TIP + timedelta(hours=5)).isoformat()
+    conn = _LookConn([_po_game(s_ct=TIP.isoformat(), g_ct=late)], _po_quotes())
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1 and conn.picks[0]["game_time"] == TIP.isoformat()
+    assert any(PO_GID in w for w in warned)
+    detail = conn.decisions[PO_GID]["detail"]
+    assert f"schedule_start={TIP.isoformat()}" in detail and f"feed_start={late}" in detail
+    # 25 minutes is the feed's ordinary lag: nothing to say
+    warned.clear()
+    near = (TIP + timedelta(minutes=25)).isoformat()
+    card.rule_slate(_LookConn([_po_game(s_ct=TIP.isoformat(), g_ct=near)]), NOW)
+    assert warned == []
+
+
+# ── a second row for one real game ───────────────────────────────────────────
+#
+# A bet settles on its own id, and ESPN's final lands on ESPN's. These look at the two shapes that
+# can leave a bet on a row with no final, and a second bet on the one real game.
+
+def test_a_flipped_final_with_no_row_of_its_own_is_bet_once_on_the_feeds_row(monkeypatch):
+    feed, espn = "NBA_2026-12-11_LAL_GSW", "NBA_2026-12-11_GSW_LAL"
+    sched = [*SCHED_2027, (espn, 2027, "2026-12-11", "cup_final", "LAL", "GSW", False, False)]
+    conn = _LookConn([_po_game(gid=feed, kind=None, day="2026-12-11", home="GSW", away="LAL")],
+                     _po_quotes(feed), sched=sched)
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1 and [p["game_id"] for p in conn.picks] == [feed]
+    # data/ingestors/nba_results_ingestor.match_game scores that row: test_nba_results_ingestor.py
+
+
+def test_a_flipped_final_with_rows_both_ways_writes_no_bet_on_the_row_the_final_misses(monkeypatch):
+    """ESPN's id has the row the final lands on, and the prices are on the feed's. No bet is possible
+    on the one and none is allowed on the other, so the game is lost, and the alert says so."""
+    feed, espn = "NBA_2026-12-11_LAL_GSW", "NBA_2026-12-11_GSW_LAL"
+    sched = [*SCHED_2027, (espn, 2027, "2026-12-11", "cup_final", "LAL", "GSW", True, False)]
+    games = [_po_game(gid=feed, kind=None, day="2026-12-11", home="GSW", away="LAL"),
+             _po_game(gid=espn, kind="cup_final", day="2026-12-11")]
+    conn = _LookConn(games, _po_quotes(feed), sched=sched)
+    skipped = []
+    assert sorted(card.rule_slate(conn, NOW, skipped)) == [espn]
+    assert skipped == [f"{feed} (the schedule lists this game as {espn})"]
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 0 and conn.picks == [] and conn.decisions == {}
+
+
+def test_a_wrong_date_feed_row_leaves_one_bet_on_the_real_game(monkeypatch):
+    """The feed's row reaches the window first, with a price. Nothing is written on it, and the real
+    game, a day later, takes the game's only bet."""
+    wrong, real = "NBA_2027-04-19_GSW_LAL", "NBA_2027-04-20_GSW_LAL"
+    sched = [*SCHED_2027, (real, 2027, "2027-04-20", "playoff", "LAL", "GSW", True, False)]
+    games = [_po_game(gid=wrong, kind=None, day="2027-04-19")]
+    conn = _LookConn(games, _po_quotes(wrong), sched=sched)
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 0 and conn.picks == [] and conn.decisions == {}
+    conn.games, conn.quotes = [_po_game(gid=real)], _rows_of(_po_quotes(real))
+    _, out = _one_look(conn, monkeypatch)
+    assert out["written"] == 1 and [p["game_id"] for p in conn.picks] == [real]
+
+
+# ── names: the rule's path is exact ──────────────────────────────────────────
+
+def test_a_priced_name_one_letter_off_a_rostered_player_is_unresolved_not_him():
+    """The two Williamses of OKC. Priced "Jalen Williams" with only Jaylin on the roster must not
+    take Jaylin's id: the bet would settle on the wrong player's line. The loose match in
+    scripts/nba_prop_market_lab.py is research only, and never reaches this path."""
+    roster = mk.Roster([("1631119", "Jaylin Williams", "OKC")])
+    assert roster.resolve("Jalen Williams", "OKC", "DEN") == (None, "unresolved")
+    assert roster.resolve("J. Williams", "OKC", "DEN") == (None, "unresolved")
+    both = mk.Roster([("1631119", "Jaylin Williams", "OKC"), ("1631114", "Jalen Williams", "OKC")])
+    assert both.resolve("Jalen Williams", "OKC", "DEN") == ("1631114", "ok")
+    assert both.resolve("Jaylin Williams", "OKC", "DEN") == ("1631119", "ok")
+    bets, diag = run([q("pinnacle", -115, -105, player="Jalen Williams"),
+                      q("fanduel", -125, +105, player="Jalen Williams")],
+                     games={GID: {**GAMES[GID], "home": "OKC", "away": "DEN"}}, roster=roster)
+    assert bets == [] and diag["unresolved"] >= 1

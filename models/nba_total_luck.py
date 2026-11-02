@@ -572,6 +572,102 @@ def regular_season(rows: pd.DataFrame, days: pd.DataFrame) -> pd.DataFrame:
     return rows[keep]
 
 
+# ── the play-in, the playoffs and the Cup final: for one model only ─────────
+#
+# nba_prop_market was graded on these 272 games and passed; nothing else that
+# has an NBA model id was graded on them, or passed (docs/nba_search_postseason.md,
+# branch nba-searches-graded). So `regular_season` above stays exactly as it is
+# for every other card, and only scripts/nba_prop_market_card.py reads this.
+#
+# The schedule's types are ESPN's on the worker, and it lists a game only once
+# its teams are set. The odds feed can write a `games` row sooner, or on a day the
+# refresh failed, so an unlisted row still counts on a day only these games fall on:
+# a day the schedule gives one of them, or after the season's last regular-season
+# day. June 30 bounds that (the latest Finals stored is 2025-06-22), so a summer row
+# is never taken. Every NBA season here is labelled by its ending year, so
+# December 2026 and June 2027 are both season 2027.
+POSTSEASON_TYPES = ("playin", "playoff", "cup_final")
+POSTSEASON_LAST_DAY = "06-30"
+# How far apart a listed game and an unlisted row with the same two teams can be and
+# still be one game filed twice. The four wrong-date rows the feed wrote in the 2026
+# WNBA playoffs sat one to two days before the real game.
+TWIN_DAYS = 2
+
+
+def listed_twin(game_id: str, game_date, home, away, sched: pd.DataFrame) -> str | None:
+    """The schedule row that says this unlisted `games` row is not a game of its own, or None.
+
+    A bet settles on its own game_id, ESPN's final lands on ESPN's id, and one bet a
+    game counts by id. So a bet on a second row for one real game can stay open for
+    good, and the real game can then take a second bet. A row is refused when the
+    schedule lists its two teams, either way round, within TWIN_DAYS under another id,
+    with these two exceptions:
+
+      * that game already has its final. A series plays every two days or so
+        (143 of the 251 playoff games of 2023-24..2025-26 are within two days of the
+        previous one), so Game 4 waiting on a refresh beside a played Game 3 is a real
+        game, not a twin.
+      * it is the same date the other way round and has no `games` row. Then this row
+        is the only one the final can land on: the results step matches it
+        (data/ingestors/nba_results_ingestor.match_game), and the refresh does not give
+        ESPN's id a row of its own. If ESPN's id does have one, the final goes there,
+        so it is a twin.
+    """
+    if sched is None or sched.empty:
+        return None
+    pair = {home, away}
+    day = pd.Timestamp(str(game_date)[:10])
+    for x in sched.itertuples(index=False):
+        if x.game_id == game_id or {x.home_team, x.away_team} != pair:
+            continue
+        gap = abs((pd.Timestamp(str(x.game_date)[:10]) - day).days)
+        if gap > TWIN_DAYS:
+            continue
+        if gap == 0 and not x.in_games:
+            continue
+        if gap != 0 and x.scored:
+            continue
+        return x.game_id
+    return None
+
+
+def graded_postseason(rows: pd.DataFrame, sched: pd.DataFrame) -> pd.DataFrame:
+    """The rows of `games` that are play-in, playoff or Cup final games.
+
+    rows   game_id, season, game_date, home_team, away_team and game_type: the type of
+           the matching nba_schedule row, None when the schedule does not list the game
+    sched  scripts.nba_total_luck_card.schedule_rows: the season's nba_schedule rows of
+           every type (placeholders included), with their teams, in_games and scored
+    A listed game counts when the schedule gives it one of these types and it has two
+    real teams; an unlisted one as the comment above says, unless listed_twin names
+    another row for it. With no schedule for the season, nothing counts. No row is both
+    this and `regular_season`.
+    """
+    if rows is None or rows.empty:
+        return rows
+    d = sched.assign(_d=sched["game_date"].astype(str).str[:10],
+                     season=pd.to_numeric(sched["season"], errors="coerce"))
+    last_regular = d[d["game_type"] == "regular"].groupby("season")["_d"].max().to_dict()
+    post_days = {(int(a), b) for a, b in
+                 d.loc[d["game_type"].isin(POSTSEASON_TYPES), ["season", "_d"]].itertuples(index=False)}
+
+    def counts(r) -> bool:
+        if not (_known_team(r.home_team) and _known_team(r.away_team)):
+            return False
+        if not pd.isna(r.game_type):
+            return r.game_type in POSTSEASON_TYPES
+        season = pd.to_numeric(r.season, errors="coerce")
+        if pd.isna(season):
+            return False
+        season, day = int(season), str(r.game_date)[:10]
+        late = season in last_regular and last_regular[season] < day <= f"{season}-{POSTSEASON_LAST_DAY}"
+        if not late and (season, day) not in post_days:
+            return False
+        return listed_twin(r.game_id, r.game_date, r.home_team, r.away_team, sched) is None
+
+    return rows[[counts(r) for r in rows.itertuples(index=False)]]
+
+
 def scheduled_games(rows: pd.DataFrame) -> pd.DataFrame:
     """The season's scheduled regular-season games, one row per game_id:
     (game_id, game_date, postponed). `rows` may list a game twice (nba_schedule

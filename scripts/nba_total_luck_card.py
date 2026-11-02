@@ -153,8 +153,9 @@ def tipped_games(conn, now: datetime, hours: float) -> dict[str, dict]:
                           lambda tip: oldest <= tip <= now)
 
 
-def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) -> dict[str, dict]:
-    """The regular-season games on these ET dates whose tip `wanted` accepts."""
+def _read_games(conn, dates: list[str], wanted) -> dict[str, dict]:
+    """Every NBA `games` row on these ET dates whose tip `wanted` accepts, with its
+    schedule type and both starts. It decides nothing: the gate is the caller's."""
     from models.nba_prop_market import tip_of
     rows = conn.execute("""
         SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
@@ -170,7 +171,13 @@ def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) 
             continue
         cand[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
                      "season": int(season) if season is not None else None, "tip": tip,
-                     "game_type": game_type}
+                     "game_type": game_type, "schedule_start": s_ct, "games_start": g_ct}
+    return cand
+
+
+def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) -> dict[str, dict]:
+    """The regular-season games on these ET dates whose tip `wanted` accepts."""
+    cand = _read_games(conn, dates, wanted)
     if not cand:
         return {}
     frame = pd.DataFrame([{"game_id": g, "season": v["season"], "game_date": v["game_date"],
@@ -179,13 +186,85 @@ def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) 
     keep = set(tl.regular_season(frame, days)["game_id"])
     out = {}
     for gid, v in sorted(cand.items()):
-        game_type = v.pop("game_type")
+        game_type = v["game_type"]
         if gid not in keep:
             if skipped is not None:
                 skipped.append(f"{gid} ({game_type or 'not a regular-season day'})")
             continue
-        out[gid] = v
+        out[gid] = {k: v[k] for k in ("home", "away", "game_date", "season", "tip")}
     return out
+
+
+# ── the play-in, the playoffs and the Cup final: nba_prop_market's only ───────
+# Read only from scripts/nba_prop_market_card.py, and tests/test_nba_postseason_gate.py
+# fails on any other reader. Every other card reads slate() above, which refuses these.
+
+SCHEDULE_ROW_COLS = ["game_id", "season", "game_date", "game_type", "home_team", "away_team",
+                     "in_games", "scored"]
+# The odds feed's start runs up to this far after the league's tip (FEED_LAG in
+# data/ingestors/nba_schedule_refresh.py, pinned by test). A wider gap means one of the
+# two sources is wrong.
+START_GAP_MIN = 30
+
+
+def schedule_rows(conn, seasons) -> pd.DataFrame:
+    """These seasons' nba_schedule rows with their teams, whether each has a `games` row
+    and whether that row has its final: what models.nba_total_luck.graded_postseason reads."""
+    seasons = sorted({int(x) for x in seasons})
+    if not seasons:
+        return pd.DataFrame(columns=SCHEDULE_ROW_COLS)
+    return pd.DataFrame(conn.execute("""
+        SELECT s.game_id, s.season, s.game_date, s.game_type, s.home_team, s.away_team,
+               g.game_id IS NOT NULL AS in_games, g.home_score IS NOT NULL AS scored
+        FROM nba_schedule s
+        LEFT JOIN games g ON g.game_id = s.game_id
+        WHERE s.season = ANY(%s)
+    """, (seasons,)).fetchall(), columns=SCHEDULE_ROW_COLS)
+
+
+def postseason_games(conn, dates: list[str], wanted, refused: dict | None = None) -> dict[str, dict]:
+    """The play-in, playoff and Cup final games on these ET dates whose tip `wanted` accepts.
+
+    Each dict also carries `postseason` (True), `game_type` (None when the schedule does not
+    list it) and where the tip came from: `tip_source` is 'schedule' when the schedule holds one
+    and 'feed' when only the odds feed does, because a tip with no schedule row can run up to 22
+    minutes late and those bets are reported apart.
+
+    Every one of these schedule rows is ESPN's, and ESPN alone sets its tip (the second source the
+    refresh wants for an NBA.com row does not apply: nba_schedule_refresh.plan). The file's own
+    measured case had ESPN five hours early. So when the two starts sit more than START_GAP_MIN
+    apart this says so; the tip stays the earlier, so a decision never runs past the real start,
+    and the card writes both to the game's decision row. `refused`: {game_id: the listed id} for
+    a row models.nba_total_luck.listed_twin turned away."""
+    cand = {g: v for g, v in _read_games(conn, dates, wanted).items()
+            if v["game_type"] is None or v["game_type"] in tl.POSTSEASON_TYPES}
+    if not cand:
+        return {}
+    frame = pd.DataFrame([{"game_id": g, "season": v["season"], "game_date": v["game_date"],
+                           "game_type": v["game_type"], "home_team": v["home"],
+                           "away_team": v["away"]} for g, v in cand.items()])
+    sched = schedule_rows(conn, [v["season"] for v in cand.values() if v["season"] is not None])
+    keep = set(tl.graded_postseason(frame, sched)["game_id"])
+    out = {}
+    for gid, v in sorted(cand.items()):
+        if gid not in keep:
+            twin = (tl.listed_twin(gid, v["game_date"], v["home"], v["away"], sched)
+                    if v["game_type"] is None else None)
+            if twin and refused is not None:
+                refused[gid] = twin
+            continue
+        out[gid] = {**v, "postseason": True,
+                    "tip_source": "schedule" if v["schedule_start"] else "feed"}
+        _say_if_starts_disagree(gid, v["schedule_start"], v["games_start"])
+    return out
+
+
+def _say_if_starts_disagree(gid: str, schedule_start, games_start) -> None:
+    from models.nba_prop_market import parse_ts
+    a, b = parse_ts(schedule_start), parse_ts(games_start)
+    if a is not None and b is not None and abs((a - b).total_seconds()) > START_GAP_MIN * 60:
+        logger.warning(f"NBA postseason: {gid} schedule start {schedule_start}, odds feed start "
+                       f"{games_start}, over {START_GAP_MIN} minutes apart; deciding on the earlier")
 
 
 # The books the rule reads: the deciding books and Pinnacle, whose no-vig line
