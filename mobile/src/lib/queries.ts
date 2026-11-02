@@ -984,6 +984,7 @@ const MAIN_GAME_ODDS_MARKETS = [
   'team_totals_home',
   'team_totals_away',
   'totals_h1',
+  'spreads_h1',
 ] as const;
 
 /**

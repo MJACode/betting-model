@@ -115,6 +115,10 @@ MAX_SILENCE: dict = {
     # hours too. It decides only in the 15:00 UTC hour, so a stopped card is
     # also caught by the next run's `missed` failure.
     "ncaab_spread_card": 150,
+    # Every minute, 24x7, and it beats on the idle ticks too (one read, then
+    # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
+    # tipping meanwhile undecided by the NCAAB first-half spread model.
+    "ncaab_first_half_window": 20,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

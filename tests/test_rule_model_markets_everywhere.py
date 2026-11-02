@@ -138,9 +138,13 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         "clv-standard-v2-power-80-0.05-12-nba-total-luck",
         "clv-standard-v2-power-80-0.05-12-nba-team-total-luck",
         "clv-standard-v2-power-80-0.05-12-nba-first-half-total-luck",
+        # ncaab_spread_market's (#1127), which production may hold before this
+        # change: ncaab_first_half_spread changes the function again (its
+        # market and the close-only first-half spread), so a stamp of its own.
+        "clv-standard-v2-power-80-0.05-12-ncaab-spread-market",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (ncaab_spread_market) after production may have "
+        "clv_game_market changed (ncaab_first_half_spread) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 

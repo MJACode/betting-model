@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, `ncaab_first_half_spread` LIVE: NCAAB first-half spreads, best bettable quote ten minutes before tip when the edge is above 0.02 (the research's round 4 cell: 1,253 bets, +4.91%, interval [-0.30, 10.63], did not clear the bar; live on mike's instruction); the live first-half capture (four markets, nine calls a game, at most 36 credits); the replay matches all 1,253 research bets; no production write |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Scoreboard splits source probe: stored splits are Action Network consensus, not DraftKings; worker probe of DK Network and AN book ids; writes nothing |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB spread model LIVE (`ncaab_spread_market`): best of eight books' 15:00 UTC spreads vs the books' median line, edge > 0.03, 3+ other books, no games-played wait; replay matched the research's 613 bets |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, no-restated-records merged over 89 master commits (session-log conflicts only). 10-30 and 11-01 restated while it waited; both were goalie saves props. |

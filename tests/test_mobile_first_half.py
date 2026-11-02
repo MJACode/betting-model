@@ -147,7 +147,9 @@ def test_every_pick_row_titles_through_the_component_that_keeps_the_number():
     a first half clips its middle: an opener's number sits in the middle of its label.
     """
     comp = (ROOT / "mobile/src/components/PickRowTitle.tsx").read_text(encoding="utf-8")
-    assert "numberOfLines={1} ellipsizeMode={matchup ? 'middle' : 'tail'}" in comp
+    # A first half's title may take two lines (a first-half spread's middle is
+    # its team, UX review 2026-11-02); every other row stays one line.
+    assert "numberOfLines={matchup ? 2 : 1} ellipsizeMode={matchup ? 'middle' : 'tail'}" in comp
     assert "{matchup ? <Text style={matchupStyle}>{matchup}</Text> : null}" in comp
     for screen, rows in (("BuiltInModelDetailScreen.tsx", 2), ("PerformanceScreen.tsx", 1)):
         src = (ROOT / "mobile/src/screens" / screen).read_text(encoding="utf-8")

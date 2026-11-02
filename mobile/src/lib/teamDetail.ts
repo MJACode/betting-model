@@ -446,7 +446,7 @@ export interface TeamPickRecords {
   settled: number;
   /** Team totals (one team's points): in `settled`, in no tile. */
   teamTotals: number;
-  /** First-half totals (the first two quarters' points): in `settled`, in no tile. */
+  /** First-half bets (a first half's total or spread): in `settled`, in no tile. */
   firstHalves: number;
   /** A ledger read failed. Unknown stamps stayed in the counts. */
   ledgerUnread: boolean;
@@ -515,8 +515,11 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
       continue;
     }
     // A first half's total (nba_first_half_total_luck, over) is the same story:
-    // a different number from the game's total, on two quarters of it.
-    if (gameMarketForModel(p.model_id ?? '') === 'totals_h1') {
+    // a different number from the game's total, on two quarters of it. A first
+    // half's spread (ncaab_first_half_spread) too: a different number from the
+    // game's spread, on half of it.
+    const h1 = gameMarketForModel(p.model_id ?? '');
+    if (h1 === 'totals_h1' || h1 === 'spreads_h1') {
       if (p.discordPublish === 'unknown') out.ledgerUnread = true;
       out.firstHalves += 1;
       out.settled += 1;
