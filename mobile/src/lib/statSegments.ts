@@ -46,7 +46,12 @@ type ChipSpec = ChipRef | ReturnType<typeof WHOLE_GROUP>;
  * other chips come from.
  */
 const FOOTBALL_CHIPS: Record<'qb' | 'rb' | 'wrte' | 'def', ChipSpec[]> = {
-  qb: [WHOLE_GROUP('Passing'), { group: 'Rushing', key: 'rushing_yards' }],
+  // QBs run touchdowns in too (Matt, 2026-11-02: NFL, then NCAAF).
+  qb: [
+    WHOLE_GROUP('Passing'),
+    { group: 'Rushing', key: 'rushing_yards' },
+    { group: 'Rushing', key: 'rush_rec_tds' },
+  ],
   rb: [
     { group: 'Rushing', key: 'rushing_yards' },
     { group: 'Rushing', key: 'carries' },
@@ -61,13 +66,6 @@ const FOOTBALL_CHIPS: Record<'qb' | 'rb' | 'wrte' | 'def', ChipSpec[]> = {
   ],
   def: [WHOLE_GROUP('Defense')],
 };
-
-/**
- * NFL quarterbacks also get Anytime TD: a QB runs touchdowns in, and the book
- * prices him in that market (Matt, 2026-11-02). It is the Rushing chip, the
- * same one the RB segment shows. NFL only; NCAAF keeps the shared list.
- */
-const NFL_QB_CHIPS: ChipSpec[] = [...FOOTBALL_CHIPS.qb, { group: 'Rushing', key: 'rush_rec_tds' }];
 
 const FOOTBALL_SEGMENTS: StatSegment[] = ['qb', 'rb', 'wrte', 'def'];
 const MLB_SEGMENTS: StatSegment[] = ['hitters', 'pitchers'];
@@ -121,7 +119,6 @@ export function segmentAccessibilityLabel(seg: StatSegment): string {
 }
 
 function specFor(sport: Sport, seg: StatSegment): ChipSpec[] {
-  if (sport === 'NFL' && seg === 'qb') return NFL_QB_CHIPS;
   if (sport === 'NFL' || sport === 'NCAAF') {
     return seg === 'qb' || seg === 'rb' || seg === 'wrte' || seg === 'def' ? FOOTBALL_CHIPS[seg] : [];
   }
