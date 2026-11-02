@@ -31,11 +31,14 @@ THE MODEL, per game, as of the moment DraftKings' total is read (the QUOTE):
   4. PRICE at DraftKings' own two prices on that total: P(win | no push) on
      whole points, minus the price's implied probability. Bet the better side
      when that edge is above 0.04 (config.MODEL_EDGE_THRESHOLDS).
-  5. BOTH TEAMS 10+ GAMES that ended before the quote (CLAUDE.md section 3).
-     Under this rule the model has never bet in November.
+  5. NO GAMES-PLAYED WAIT (mike, 2026-11-02: "we do not need to wait 10 games
+     ... I want these models live now"). Every game with a DraftKings total is
+     priced from the first game of the season, on last season's ratings until
+     this season's games come in. The early games are priced with the November
+     blend, fitted on every quoted November game, so nothing frozen changed.
 
-THE EVIDENCE (graded exactly as it runs live, scratch chain of 2026-10-30,
-docs/sports/ncaab.md): cut 0.04, both teams 10+ games, DraftKings' first
+THE EVIDENCE (scratch chain of 2026-10-30, docs/sports/ncaab.md, which also has
+the replay with no wait): cut 0.04, both teams 10+ games, DraftKings' first
 stored total, stake_for. 2021-2025: 1,094 bets, 606-475-13, +87.48 units,
 +7.32%, date-resampled 95% interval [2.0, 12.7], 5 of 5 seasons positive,
 close EV +0.27% against Pinnacle's no-vig close. 2025-26 (never used to
@@ -72,7 +75,6 @@ OTHER = -1                       # the pooled team (fewer than 10 scheduled game
 END_H = 2.5                      # a game has ended this long after its tip
 K_FTA = 0.475                    # possessions = fga - orb + tov + K_FTA x fta
 POSS_RANGE = (40.0, 110.0)       # a contest estimate outside it is not used
-MIN_GAMES = 10                   # CLAUDE.md section 3
 SCHED_MIN = 10                   # scheduled games below which a team is pooled
 PLAY_BY_PLAY_SOURCE = "sportsdataverse_ncaa"
 PHASES = ("Nov", "Dec+")
@@ -612,7 +614,7 @@ def load_artifact(path: str | Path | None = None) -> dict:
 # ── the live decision ──────────────────────────────────────────────────────────
 
 DIAG_KEYS = ("games", "not_decision_hour", "already_decided", "wrong_season", "no_dk_total",
-             "box_pending", "box_missing", "below_10_games", "no_blend", "below_cut", "bets")
+             "box_pending", "box_missing", "no_blend", "below_cut", "bets")
 # Hold a game while a team's earlier game that ended before the quote has no
 # final score or no box yet, for this long after it ended. A box that never
 # lands is then treated as absent (the evidence also had a few games with no
@@ -733,10 +735,6 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
         x, _ = by_gid[r.game_id]
         ng = (int(x.ng_h), int(x.ng_a))
         cutoff = datetime.fromtimestamp(cut_ns / 1e9, tz=timezone.utc)
-        if min(ng) < MIN_GAMES:
-            out.append(Decision(r.game_id, "below_10_games", f"games played {ng[0]}/{ng[1]}",
-                                quote=q, cutoff=cutoff, model_total=float(x.pt), ng=ng))
-            continue
         b = blend.get(phase_of(r.game_date))
         if not b:
             out.append(Decision(r.game_id, "no_blend", f"no blend fit for {phase_of(r.game_date)}",
@@ -745,7 +743,8 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
         pz = price(float(x.pt), q.line, q.over_price, q.under_price, b)
         status = "bets" if pz.edge > cut else "below_cut"
         out.append(Decision(r.game_id, status,
-                            f"{pz.side} {q.line:g} edge {pz.edge:+.4f} model {x.pt:.2f} mean {pz.mean:.2f}",
+                            f"{pz.side} {q.line:g} edge {pz.edge:+.4f} model {x.pt:.2f} mean {pz.mean:.2f} "
+                            f"games {ng[0]}/{ng[1]}",
                             quote=q, cutoff=cutoff, model_total=float(x.pt), priced=pz, ng=ng,
                             extra={"pt_s1": float(x.pt_s1), "rhat": float(x.rhat), "pp": float(x.pp)}))
     return out

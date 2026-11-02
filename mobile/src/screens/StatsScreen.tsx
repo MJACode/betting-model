@@ -13,7 +13,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -25,6 +24,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
+import { AppSwitch } from '@/components/AppSwitch';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { AddLineSheet } from '@/components/AddLineSheet';
@@ -3410,7 +3410,7 @@ export function StatsScreen() {
             <Text style={[styles.ungradedLabel, slateCutDead && styles.rowDisabled]}>
               {hasSlate ? slateLabel : 'Playing today'}
             </Text>
-            <Switch
+            <AppSwitch
               value={tonightActive && !gamesPicked}
               onValueChange={setTonightOnly}
               disabled={slateCutDead}
@@ -3492,7 +3492,7 @@ export function StatsScreen() {
             {minTier ? (
               <View style={styles.ungradedRow}>
                 <Text style={styles.ungradedLabel}>{ATD_COPY.includeUnranked}</Text>
-                <Switch
+                <AppSwitch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
                   accessibilityLabel={ATD_COPY.includeUnranked}
@@ -3552,7 +3552,7 @@ export function StatsScreen() {
             {minGrade ? (
               <View style={styles.ungradedRow}>
                 <Text style={styles.ungradedLabel}>Include matchups we can’t rank</Text>
-                <Switch
+                <AppSwitch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
                   accessibilityLabel="Include matchups we can’t rank"

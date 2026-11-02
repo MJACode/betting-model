@@ -361,7 +361,9 @@ def test_a_game_is_decided_at_its_quote_with_both_teams_past_ten_games():
     assert near[0].status in ("below_cut", "bets")
 
 
-def test_no_draftkings_total_and_early_season_are_not_bets():
+def test_an_early_game_is_priced_with_no_games_played_wait():
+    """mike, 2026-11-02: no 10-game wait. A team's first games are decided on
+    the price; with no DraftKings total there is still nothing to decide."""
     import models.ncaab_total_blend as nb
     games, box = _season()
     sg, b = _prepared(games, box)
@@ -370,7 +372,10 @@ def test_no_draftkings_total_and_early_season_are_not_bets():
     gid = early["game_id"].iloc[0]
     at = (pd.Timestamp(early["game_date"].iloc[0]) - pd.Timedelta(hours=2)).tz_localize("UTC").to_pydatetime()
     (d,) = nb.decide(early, {gid: _quote(gid, line=100.5, at=at)}, sg, b, art, 0.04)
-    assert d.status == "below_10_games"
+    assert min(d.ng) < 10, d.ng
+    assert d.status == "bets" and d.priced.side == "over"
+    assert f"games {d.ng[0]}/{d.ng[1]}" in d.detail
+    assert "below_10_games" not in nb.DIAG_KEYS
     (d2,) = nb.decide(early, {}, sg, b, art, 0.04)
     assert d2.status == "no_dk_total"
 
@@ -505,6 +510,21 @@ def test_publish_writes_the_decision_and_the_bet_once_and_never_a_hold(monkeypat
     # the next hour: decided already, nothing written
     assert card.publish(conn, rows, [d], hour + timedelta(hours=1), refused) == (0, 0)
     assert len(conn.picks) == 1
+
+
+def test_a_row_from_the_old_10_game_wait_does_not_stop_a_game_being_decided():
+    """98 untipped games of 2026-11-02 held a row that never looked at a price.
+    They are decided now; a real decision still stands for good."""
+    import scripts.ncaab_total_card as card
+    insert = " ".join(card._INSERT_DECISION.split())
+    assert ("ON CONFLICT (game_id) DO UPDATE" in insert
+            and insert.endswith("WHERE split_part(ncaab_total_decisions.detail, ':', 1) = "
+                                "'below_10_games' RETURNING game_id"))
+    conn = _Conn()
+    card.decided_games(conn, ["g"])
+    (read,) = [s for s, _ in conn.sql if "FROM ncaab_total_decisions" in s]
+    assert "split_part(detail, ':', 1) <> 'below_10_games'" in read
+    assert "below_10_games" not in card.FINAL
 
 
 def test_the_quote_read_is_pregame_draftkings_and_fresh():

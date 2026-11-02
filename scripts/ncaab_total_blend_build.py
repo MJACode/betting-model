@@ -203,7 +203,8 @@ def grade(x: pd.DataFrame) -> dict:
 
 def replay(d: pd.DataFrame, dk: pd.DataFrame, last: int):
     """Walk-forward blend (paid seasons 2021..S-1) for S = 2022..last, priced
-    at DraftKings' first stored total; the bets at CUT with the 10-game rule."""
+    at DraftKings' first stored total; the bets at CUT, as the card places them
+    (no games-played wait)."""
     x = d.merge(dk, on="game_id")
     x["phase"] = [nb.phase_of(v) for v in x["game_date"]]
     rows = []
@@ -221,7 +222,7 @@ def replay(d: pd.DataFrame, dk: pd.DataFrame, last: int):
                              "edge": pz.edge, "prob": pz.prob,
                              "min_gp": min(r.ng_h, r.ng_a)})
     sc = pd.DataFrame(rows)
-    bets = sc[(sc["edge"] > CUT) & (sc["min_gp"] >= nb.MIN_GAMES)]
+    bets = sc[sc["edge"] > CUT]
     return sc, bets
 
 
@@ -257,8 +258,11 @@ def main(argv=None) -> None:
     sc, bets = replay(d, dk, last)
     dev = bets[bets["season"] <= last - 1]
     newest = bets[bets["season"] == last]
-    summary = {"cut": CUT, "rule": "both teams >= 10 games ended before the quote",
+    summary = {"cut": CUT, "rule": "every quoted game, no games-played wait",
                f"{PAID_FIRST + 1}-{last - 1}": grade(dev), str(last): grade(newest),
+               # the population the 2026-10-30 evidence graded, to check against it
+               "both_teams_10_games": {f"{PAID_FIRST + 1}-{last - 1}": grade(dev[dev["min_gp"] >= 10]),
+                                       str(last): grade(newest[newest["min_gp"] >= 10])},
                "min_prob": round(float(bets["prob"].min()), 4) if len(bets) else None,
                "min_ev": round(float(min(p * nb.dec(pr) - 1 for p, pr in zip(bets["prob"], bets["price"]))), 4)
                if len(bets) else None}
