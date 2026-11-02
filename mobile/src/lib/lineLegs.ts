@@ -769,16 +769,24 @@ export function gameLineHold(
   rows: readonly GameLineRow[],
   game: GameRow | null,
 ): { leg: ParlayLeg | null; hold: 'pregame' | null } {
-  const leg = gameLineLegFromRows(spec, rows, game);
   const marked = rows as { ladderHidden?: 'started'; ladderFailed?: boolean };
   const hidden = marked.ladderHidden === 'started';
-  if (hidden && leg?.pricedFromLadder) return { leg, hold: 'pregame' };
+  if (!hidden) return { leg: gameLineLegFromRows(spec, rows, game), hold: null };
+  // After kickoff a live main-number leg is priced from main rows only.
+  // buildLeg copies every row at the number into bookPrices and credits
+  // DraftKings from any of them, so a pre-game alt rung at the same number
+  // would otherwise leak into the handoff. The ladder is consulted only
+  // when no main row prices the leg, and then only to hold the alt.
+  const live = gameLineLegFromRows(spec, rows.filter((r) => !r.fromLadder), game);
+  if (live) return { leg: live, hold: null };
   // The game has started and the ladder read failed. A number that is not
   // on the main rows may be the alt the user took. Hold it. Do not prune.
-  if (hidden && marked.ladderFailed && leg == null && spec.market !== 'h2h' && spec.line != null) {
+  if (marked.ladderFailed && spec.market !== 'h2h' && spec.line != null) {
     return { leg: null, hold: 'pregame' };
   }
-  return { leg, hold: null };
+  const fromLadder = gameLineLegFromRows(spec, rows, game);
+  if (fromLadder?.pricedFromLadder) return { leg: fromLadder, hold: 'pregame' };
+  return { leg: fromLadder, hold: null };
 }
 
 /** A held alt whose ladder could not be read. No price: the card shows the

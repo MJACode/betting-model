@@ -515,6 +515,29 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const heldMain = gameLineHold(kc, startedWithAlt, null);
   check('the main number still prices after kickoff',
     heldMain.hold === null && heldMain.leg != null && heldMain.leg.pricedFromLadder === false);
+  // CE review of #1115: after kickoff, DraftKings hangs BUF -6 as the main
+  // number. FanDuel's main is -5.5, and its pre-game alt rung is -6. That
+  // rung must not enter the live leg's book prices, DraftKings credit, or
+  // handoff. Before kickoff the same rung is still a price for that book.
+  const dkAt6 = g('draftkings', 'spreads', { spread_home: -6, home_price: -110, away_price: -110, home_link: 'https://dk/main' });
+  const fdMain = g('fanduel', 'spreads', { spread_home: -5.5, home_price: -105, away_price: -115 });
+  const fdAlt6 = g('fanduel', 'alternate_spreads', { spread_home: -6, home_price: 140, away_price: -160, home_link: 'https://fd/alt' });
+  const dkAlt6 = g('draftkings', 'alternate_spreads', { spread_home: -6, home_price: -150, away_price: 130, home_link: 'https://dk/alt' });
+  const leakRows = foldAltGameRows('spreads', [dkAt6, fdMain], [fdAlt6, dkAlt6]);
+  const buf6: GameLineLegSpec = { kind: 'game', game_id: 'KC@BUF', sport: 'NFL', market: 'spreads', team: 'BUF', opponent: 'KC', isHome: true, line: -6, side: null };
+  const beforeKick = gameLineHold(buf6, leakRows, null);
+  const afterKick = gameLineHold(buf6, Object.assign(leakRows.slice(), { ladderHidden: 'started' as const }), null);
+  check('before kickoff another book\'s alt rung at the main number is still a price',
+    beforeKick.hold === null && beforeKick.leg != null
+      && beforeKick.leg.bookPrices.some((b) => b.bookmaker === 'fanduel' && b.link === 'https://fd/alt'));
+  check('after kickoff a main-number leg does not pick up pre-game alt rungs',
+    afterKick.hold === null
+      && afterKick.leg != null
+      && afterKick.leg.pricedFromLadder === false
+      && afterKick.leg.dkPriced === true
+      && afterKick.leg.dkLink === 'https://dk/main'
+      && afterKick.leg.americanOdds === -110
+      && afterKick.leg.bookPrices.every((b) => b.bookmaker !== 'fanduel'));
   check('before kickoff the same alt rung is a normal priced leg',
     gameLineHold(kc65.spec as GameLineLegSpec, ladder, null).hold === null);
   const failedRows = Object.assign(spreadRows.slice(), { ladderHidden: 'started' as const, ladderFailed: true as const });
