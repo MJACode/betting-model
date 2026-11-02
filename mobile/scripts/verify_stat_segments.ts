@@ -106,9 +106,11 @@ check(
 
 // ── 2. Chips per segment, in order ──────────────────────────────────────────
 const WANT_CHIPS: [Sport, StatSegment, string[]][] = [
+  // QBs run touchdowns in too (Matt, 2026-11-02).
   ['NFL', 'qb', [
     'Passing:passing_yards', 'Passing:passing_tds', 'Passing:completions',
     'Passing:attempts', 'Passing:interceptions', 'Rushing:rushing_yards',
+    'Rushing:rush_rec_tds',
   ]],
   ['NFL', 'rb', [
     'Rushing:rushing_yards', 'Rushing:carries', 'Rushing:rush_rec_tds',
@@ -119,9 +121,11 @@ const WANT_CHIPS: [Sport, StatSegment, string[]][] = [
     'Receiving:receptions', 'Receiving:receiving_yards', 'Receiving:rush_rec_tds',
   ]],
   ['NFL', 'def', ['Defense:def_sacks', 'Defense:def_interceptions']],
+  // QBs run touchdowns in too (Matt, 2026-11-02).
   ['NCAAF', 'qb', [
     'Passing:passing_yards', 'Passing:passing_tds', 'Passing:completions',
     'Passing:attempts', 'Passing:interceptions', 'Rushing:rushing_yards',
+    'Rushing:rush_rec_tds',
   ]],
   ['NCAAF', 'rb', [
     'Rushing:rushing_yards', 'Rushing:carries', 'Rushing:rush_rec_tds',
@@ -197,6 +201,9 @@ const cases: [string, Sport, StatDef | null, StatSegment, string][] = [
   ['WR/TE Anytime TD → RB keeps Anytime TD (the Rushing chip)', 'NFL', def('NFL', 'Receiving', 'rush_rec_tds'), 'rb', 'Rushing:rush_rec_tds'],
   ['WR/TE Rec Yards → RB keeps Rec Yards', 'NFL', def('NFL', 'Receiving', 'receiving_yards'), 'rb', 'Receiving:receiving_yards'],
   ['RB Rush Yards → QB keeps Rush Yards', 'NFL', def('NFL', 'Rushing', 'rushing_yards'), 'qb', 'Rushing:rushing_yards'],
+  ['RB Anytime TD → QB keeps Anytime TD', 'NFL', def('NFL', 'Rushing', 'rush_rec_tds'), 'qb', 'Rushing:rush_rec_tds'],
+  ['WR/TE Anytime TD → QB keeps Anytime TD', 'NFL', def('NFL', 'Receiving', 'rush_rec_tds'), 'qb', 'Rushing:rush_rec_tds'],
+  ['NCAAF RB Anytime TD → QB keeps Anytime TD', 'NCAAF', def('NCAAF', 'Rushing', 'rush_rec_tds'), 'qb', 'Rushing:rush_rec_tds'],
   ['DEF Sacks → QB lands on Pass Yards', 'NFL', def('NFL', 'Defense', 'def_sacks'), 'qb', 'Passing:passing_yards'],
   ['QB Pass TDs → DEF lands on Sacks', 'NFL', def('NFL', 'Passing', 'passing_tds'), 'def', 'Defense:def_sacks'],
   ['NCAAF RB Carries → WR/TE lands on Receptions', 'NCAAF', def('NCAAF', 'Rushing', 'carries'), 'wrte', 'Receiving:receptions'],
@@ -350,10 +357,17 @@ check('empty text: DEF, last 3',
 const stats = readUtf8(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'));
 check('StatsScreen: the chip row reads chipsForSegment', /chipsForSegment\(sport, segment\)\.map/.test(stats));
 check('StatsScreen: no StatGroupSheet (the category dropdown is gone)', !stats.includes('StatGroupSheet'));
+// Two board cuts, plus one read-only use: the Anytime TD matchup column asks
+// for defense ranks only for the position groups left on the board
+// (atdGroupKey, #1033). That one filters no rows. Any other call is new and
+// must be looked at.
+const ATD_GROUP_CALL =
+  /const consider = \(pos: unknown\) => \{\s*if \(!matchesPosition\(pos, activePositions\)\) return;/;
 check('StatsScreen: both boards apply the position filter, last',
   /rankedAll\.filter\(\(r\) => matchesPosition\(r\.row\.pos, activePositions\)\)/.test(stats) &&
     /hitRateAll\.filter\(\(p\) => matchesPosition\(p\.pos, activePositions\)\)/.test(stats) &&
-    (stats.match(/matchesPosition\(/g) ?? []).length === 2);
+    ATD_GROUP_CALL.test(stats) &&
+    (stats.match(/matchesPosition\(/g) ?? []).length === 3);
 check('StatsScreen: a typed search bypasses the position filter',
   /const activePositions = query\.trim\(\) \? null : segmentPositions;/.test(stats));
 check('StatsScreen: a position-emptied board gets the positional empty text',

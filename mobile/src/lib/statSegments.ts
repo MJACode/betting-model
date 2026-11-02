@@ -46,7 +46,12 @@ type ChipSpec = ChipRef | ReturnType<typeof WHOLE_GROUP>;
  * other chips come from.
  */
 const FOOTBALL_CHIPS: Record<'qb' | 'rb' | 'wrte' | 'def', ChipSpec[]> = {
-  qb: [WHOLE_GROUP('Passing'), { group: 'Rushing', key: 'rushing_yards' }],
+  // QBs run touchdowns in too (Matt, 2026-11-02: NFL, then NCAAF).
+  qb: [
+    WHOLE_GROUP('Passing'),
+    { group: 'Rushing', key: 'rushing_yards' },
+    { group: 'Rushing', key: 'rush_rec_tds' },
+  ],
   rb: [
     { group: 'Rushing', key: 'rushing_yards' },
     { group: 'Rushing', key: 'carries' },

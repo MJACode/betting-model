@@ -15,6 +15,10 @@
  *   * the first screen also writes a launch row, timed from the launch clock;
  *   * a screen left before it loaded still writes its row, status 0;
  *   * a slow start whose reads begin after LAUNCH_JOIN_MS still gets a launch row;
+ *   * pre-nav reads that go quiet before the first screen is named do not
+ *     close the launch window as "unknown"; the named screen still gets it;
+ *   * a send the server rejects (PostgREST / 4xx) drops that batch instead of
+ *     backing off forever; a network failure still keeps the rows;
  *   * a failed send keeps the rows, backs off, and a later flush delivers them once.
  */
 
@@ -44,14 +48,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const BASE = 'https://abc.supabase.co';
 
 let clock = 1_000_000;
-function setup(sent: TimingRow[][] = [], failSend = () => false) {
+function setup(sent: TimingRow[][] = [], failSend: () => boolean | Error = () => false) {
   resetPerfLogForTests();
   clock = 1_000_000;
   configurePerfLog({
     now: () => clock,
     launchAt: clock - 200,
     async send(rows) {
-      if (failSend()) throw new Error('offline');
+      const failure = failSend();
+      if (failure) throw failure === true ? new Error('offline') : failure;
       sent.push(rows);
     },
   });
@@ -238,6 +243,46 @@ async function main() {
     check('a slow start still gets a launch row, timed from the launch clock', launch.length === 1 && launch[0].ms === 200 + LAUNCH_JOIN_MS + 1_000 + 300, JSON.stringify(launch));
   }
 
+  // --- pre-nav reads go quiet before navigation names the first screen.
+  // Settling then would write a launch row named "unknown" and the real
+  // first screen would never get one (cold start looks faster than it was).
+  {
+    setup();
+    const { f, calls } = controllable();
+    const wrapped = timedFetch(f);
+    const pre = wrapped(`${BASE}/auth/v1/token?grant_type=refresh_token`);
+    clock += 80;
+    calls[0].resolve({ status: 200 });
+    await pre;
+    await sleep(QUIET_MS + 50);
+    const early = peekPerfBufferForTests();
+    check(
+      'a quiet pre-nav read does not close the launch as unknown',
+      !early.some((r) => r.kind === 'launch' || r.kind === 'screen'),
+      JSON.stringify(early),
+    );
+    clock += 2_000;
+    setPerfScreen('Tabs');
+    const screenRead = wrapped(`${BASE}/rest/v1/picks`);
+    clock += 450;
+    calls[1].resolve({ status: 200 });
+    await screenRead;
+    await sleep(QUIET_MS + 50);
+    const launches = peekPerfBufferForTests().filter((r) => r.kind === 'launch');
+    const screens = peekPerfBufferForTests().filter((r) => r.kind === 'screen');
+    check(
+      'the named first screen still gets the launch row',
+      launches.length === 1 && launches[0].name === 'Tabs' && launches[0].requestCount === 2
+        && screens.length === 1 && screens[0].name === 'Tabs' && screens[0].ms === 450 && screens[0].requestCount === 2,
+      JSON.stringify({ launches, screens }),
+    );
+    check(
+      'that launch row runs through the first screen reads, from the launch clock',
+      launches[0]?.ms === 200 + 80 + 2_000 + 450,
+      JSON.stringify(launches),
+    );
+  }
+
   // --- delivery
   {
     const sent: TimingRow[][] = [];
@@ -273,6 +318,36 @@ async function main() {
     await flushPerfLog();
     const delivered = sent.flat().filter((r) => r.kind === 'request');
     check('back online: delivered once', delivered.length === 1 && peekPerfBufferForTests().length === 0, JSON.stringify(sent));
+  }
+
+  // --- a batch the server rejects is dropped; a network failure is not
+  {
+    const sent: TimingRow[][] = [];
+    const rejected = Object.assign(new Error('invalid device'), { code: 'P0001' });
+    let reject = true;
+    setup(sent, () => (reject ? rejected : false));
+    const { f, calls } = controllable();
+    const wrapped = timedFetch(f);
+    const p = wrapped(`${BASE}/rest/v1/picks`);
+    calls[0].resolve({ status: 200 });
+    await p;
+    await flushPerfLog();
+    check(
+      'a rejected batch is dropped instead of retrying forever',
+      sent.length === 0 && peekPerfBufferForTests().length === 0,
+      JSON.stringify(peekPerfBufferForTests()),
+    );
+    reject = false;
+    const p2 = wrapped(`${BASE}/rest/v1/v_latest_dk_odds`);
+    calls[1].resolve({ status: 200 });
+    await p2;
+    await flushPerfLog();
+    const delivered = sent.flat().filter((r) => r.kind === 'request');
+    check(
+      'after a rejected batch, the next rows still send',
+      delivered.length === 1 && delivered[0].name === 'v_latest_dk_odds',
+      JSON.stringify(sent),
+    );
   }
 
   if (failures > 0) {

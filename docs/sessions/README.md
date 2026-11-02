@@ -19,6 +19,10 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |
+| 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, app_timings CE Mediums from #1110. Launch window stays open until the first screen is named. 45-day retention on the daily pipeline. Hand-applied cap migration (signed-in callers keyed on auth.uid()); not applied. |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, `nba_first_half_total_luck` reviewers' findings fixed: the graded quotes' caveat and both price ranges on the record, quarter rows that disagree with the final repaired and reported at any age, X runs the label check, the price table stored in all three NBA game total artifacts, the three models run side by side in a tick, a critical alert names a game that tipped undecided; no production write |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, `nba_first_half_total_luck` LIVE: NBA first-half overs when the full-game shooting-luck gap is 2+ (the fourth search's C1: 595 bets, +8.0%; 593 bets, +7.7% under its EV floor); its own per-event fetch storing each book's main number, decided 45-66 minutes before tip inside the NBA totals window job, a closing snapshot for bet games; settles on Q1 + Q2 and stays pending with no trustworthy quarter scores; live code replays 595 of 595 lab bets; no production write |
 | 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, `ncaab-injury-reachability-2026-10-30` added to the NCAAB declared-job allowlist, last, after the credit purchases. Its note stays "writes nothing" and is not marked as a credit approval. |
@@ -36,6 +40,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM Phase A prop filters. NFL boards 01–05 and the same NBA sheet without kickoff slots. Hand-applied migration. Draft, not merged. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA CI. Abort skips setError. byom_game_facts left AHEAD_OF_THE_APP. Jobs stay off. Migration not applied. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, BYOM NBA follow-up to review 5691932690. Cross-sport names are refused. Game bets and rest chips wait on an NBA game-fact row. Migration not applied. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1084 follow-up. Board reads stay off the ladder. ALT_GAME_LINES_ENABLED and ALT_GAME_LINES_MAX_GAMES. Pre-game ladder hidden after kickoff. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, #1086 M1–M3. Scoreboard splits test is on the PR subset. A percent shows only for the line on the card, and not beside a live DK quote. NFL/NHL ESPN scoreboards are parsed; UTAH maps to UTA. Draft. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, odds_dk_pregame_current leaves out a future slate no book is listing only when the same sport still has a game more than 24 hours out that a book is pricing. Same-day prices do not hide a dead early-lines pass. The 15:25Z NBA 7 of 13 CRIT was the pulled Friday slate. Outage replays stay CRIT. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H review lows from #1075. Fallback remembered. Meetings sorted newest first. H2H retry is H2H only. |
@@ -48,7 +53,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, H2H range chip on the player screen. Stuck Back button not reproduced. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29/30, NBA sixth and seventh searches graded on the bought prices: alternate lines 0 of 30 (191 impossible total rows found and dropped, re-graded), the minutes after an injury report 0 of 26. Nothing built. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate lines every pass for games in the next 24 hours (Matt: option B); the pass now refreshes the app's ladder and ledgers its credits. Draft. |
-| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate spreads and totals fetched once a day (Matt approved the cost); ladder in the betslip's game-line edit. Cost measured by the worker ledger. Draft. |
+| 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Alternate spreads and totals fetched once a day (Matt approved the cost); ladder in the betslip's game-line edit. Cost measured by the worker ledger. Merged as #1084. |
 | 2026-10-29 | [2026-10](./2026-10.md) | 2026-10-29, Edit moneyline, spread and total legs on the betslip. Main numbers only; alternate game lines need Odds API credits (Matt's call). PR #1081. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, NBA eighth search: mike's first-quarter cover-record and over/under-record method, 64 cells pre-registered and graded, 0 pass. Last-5 rule 237 bets +6.1% (interval through zero). Alternate-line and injury-news grades blocked on the stale local database login. |
 | 2026-10-28 | [2026-10](./2026-10.md) | 2026-10-28, Player chart dates and opponents, a readable live Stats ruler, editable betslip line legs. Front end only, ships OTA. Draft, not merged. |

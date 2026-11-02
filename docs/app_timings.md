@@ -24,9 +24,11 @@ Polls (every 30 s / 2 min) appear as `request` rows and do not extend a screen.
 
 | Piece | What |
 |---|---|
-| `data/migrations/add_app_timings.sql` | table + `log_app_timings` RPC (insert-only, returns nothing, ≤100 rows a call, ≤1,000 rows per device per hour) |
+| `data/migrations/add_app_timings.sql` | table + `log_app_timings` RPC. Hand-applied 2026-10-31. Not in `ACTIVE_MIGRATIONS` (a fresh database needs it applied by hand; the worker must not re-run it) |
+| `data/migrations/app_timings_cap_2026_11_01.sql` | replaces the RPC. Hand-applied, not in `ACTIVE_MIGRATIONS`, not applied by this change. Signed-in callers are capped on `auth.uid()`; integer columns are clamped |
 | `mobile/src/lib/perfLog.ts` | the logic, no imports. Wraps the fetch Supabase uses; buffers up to 300 rows in memory |
-| `mobile/src/lib/perfLogSetup.ts` | sends every 60 s and when the app goes to the background. After a failed send it waits 1, 2, 4 … 15 min; returning to the foreground resets that |
+| `mobile/src/lib/perfLogSetup.ts` | sends every 60 s and when the app goes to the background. After a network failure it waits 1, 2, 4 … 15 min; a batch the server rejects is dropped. Returning to the foreground resets the backoff |
+| `data/app_timings_retention.py` | daily delete of rows older than 45 days. `python run_pipeline.py --step prune-app-timings` |
 | `mobile/src/lib/supabase.ts` | `global: { fetch: timedFetch(...) }` |
 | `mobile/scripts/verify_perf_log.ts` + `tests/test_app_timings.py` | the checks |
 
@@ -66,13 +68,32 @@ view) is network plus PostgREST. Compare only over the same window: reset
 
 ## Retention and the cap
 
-None yet. Size it from the first week's row count before adding a prune.
+Rows older than **45 days** are deleted by the daily pipeline
+(`prune-app-timings`, `data/app_timings_retention.py`). The constant is 45,
+inside the 30–60 day range: the queries above read 7 days, and a month behind
+that stays. A dry run does not delete. The step is a skip, not a failure,
+when the table is not there yet.
 
-The RPC drops rows silently past 1,000 per device per hour. The Live tab polls
-three reads every 30 s, so a member who keeps it open through a game could
-approach that. After the first day, check nothing sits at the cap:
+The RPC still drops rows silently past 1,000 in an hour. After
+`app_timings_cap_2026_11_01.sql` is applied by hand, a signed-in caller is
+counted on `auth.uid()` (`user_id`), so rotating the client device id does
+not open a new budget, one call cannot insert past the room left under
+1,000, and `ms` / `status` / `request_count` / `since_launch_ms` are clamped
+instead of failing the batch. Until that file is applied, production still
+caps on the client device id only.
+
+An anonymous caller (no user JWT) is still capped only on `p_device_id`,
+which the client chooses. There is no server-side identity on the anon key,
+so that rotation hole stays. Retention is what bounds the table. The Live
+tab polls three reads every 30 s, so a member who keeps it open through a
+game could approach 1,000. The cap was not lowered: that member is the
+population this table exists to measure. Check nothing sits at the cap:
 
 ```sql
 SELECT device_id, date_trunc('hour', received_at) h, count(*)
 FROM app_timings GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20;
 ```
+
+After `app_timings_cap_2026_11_01.sql` is applied, group by `user_id` as
+well. That column does not exist before then. It stays null on rows written
+by an anonymous caller.
