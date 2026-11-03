@@ -31,6 +31,7 @@ import {
   fetchTeamStats,
 } from '@/lib/queries';
 import type { NbaQ1Game, NbaQ1SeasonRow } from '@/lib/nbaQ1';
+import { teamBoardSeason } from '@/lib/teamStatCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
@@ -127,8 +128,10 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   // it used; the page labels its numbers from that, never from the request.
   const board = useSection<{ season: number | null; rows: TeamStatsRow[] }>(
     { season: null, rows: [] },
-    // The ET year, never a bare new Date(): CLAUDE.md §7's "today is ET".
-    () => fetchTeamStats(sport, season ?? Number(today.slice(0, 4))),
+    // The ET clock, never a bare new Date(): CLAUDE.md §7's "today is ET".
+    // No season handed in (opened from a pick, not the board): the sport's
+    // own label, so NBA/NHL ask for 2026-27 as 2027, not the calendar year.
+    () => fetchTeamStats(sport, season ?? teamBoardSeason(sport)),
     [sport, season, nonce],
   );
   const row = useMemo(() => board.data.rows.find((r) => r.team === team) ?? null, [board.data.rows, team]);
