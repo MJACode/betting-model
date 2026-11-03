@@ -269,7 +269,10 @@ _ALLOWED = {
     "listed_twin": {"models/nba_total_luck.py", "scripts/nba_total_luck_card.py"},
     # the split read: `slate`'s old body and the postseason read, nothing else
     "_read_games": {"scripts/nba_total_luck_card.py"},
-    "postseason_games": {"scripts/nba_total_luck_card.py", "scripts/nba_prop_market_card.py"},
+    # scripts/nba_s_postseason.py: the graded search lab defines its own offline function of this name
+    # over the research cache; it imports nothing from the live read
+    "postseason_games": {"scripts/nba_total_luck_card.py", "scripts/nba_prop_market_card.py",
+                         "scripts/nba_s_postseason.py"},
     "rule_slate": {"scripts/nba_prop_market_card.py", "scripts/nba_prop_window.py"},
     # read-only: the alert's look back at what tipped
     "tipped_rule_games": {"scripts/nba_prop_market_card.py", "scripts/nba_pregame_window.py"},
