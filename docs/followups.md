@@ -21,6 +21,48 @@
 
 ---
 
+## [ ] Player props: a book's last-listed line overwrites its main number (2026-11-02)
+
+`data/ingestors/prop_odds_ingestor.py:417-425` keys a standard prop market on (market, player), so when a book lists
+several lines under that key the last one wins, and the two prices can come from different lines. Measured:
+
+- **One paid call (1 credit), 2026-11-03 02:13Z, PHX at GSW, `player_points`, eight books.** Seven books list one line
+  a player. Bovada lists several for all 13 players (seven for Brandin Podziemski, 12.5 to 18.5), and the line we
+  keep is not the one closest to even for any of them. The raw response is in `%TEMP%/q1trend/probe_prop_ladder_raw.json`.
+- Bovada's own site, read once without credits: the stored line is the last it lists for 90 of 90 players.
+- Raw NFL in-play responses (`nfl_live_prop_snapshots`): 4 of 75,024 player-market groups list several lines, and the
+  parser mixed two lines into one row on 2 of them, both DraftKings.
+- **No bet is reached now.** Bovada cannot be bet. Of 362 live prop bets read row by row, at most one may sit on a
+  line other than the book's main number. The app's all-books table does read Bovada's rows, so it can show a
+  Bovada line several points above every other book's (by the code and the view; not seen on a screen).
+- Removing BetRivers 2023-24, the book-season that looks like this in history: `nba_prop_market` +2.92% against
+  +2.96%; `nba_prop_projection` +4.04% against +4.12%, every season still positive.
+
+The fix: key standard markets on (market, player, line), keep each book's two-sided line closest to even under the
+standard name, and file the rest as alternates. It needs a carve-out for books that post one side only (BetRivers'
+NFL rows are about half one-sided), a test on the NHL models, which shop every line, and a margin check on the NFL,
+WNBA and DraftKings row reads that have none. It changes what "a book's line" means everywhere, so it ships on its
+own branch with a review.
+
+## [ ] NBA prop projection: pin the training thread count before any retrain (2026-11-02)
+
+`models/nba_props.py:703-704` fits with every core and a 0.8 row sample, so the seed does not pin the model: on 3
+threads the minutes model differs from the shipped one by 0.32 minutes on average. Pin it at 8, which rebuilds the
+shipped artifact exactly. The record is one draw of five (`docs/nba_models_2026.md` section 5).
+
+## [ ] NBA prop projection: grade the first ten games before next season (2026-11-02)
+
+A team's first ten games earned +0.15% against +4.68% after (section 5). Before October 2027, sweep 5, 10, 15 and 20
+games by cell, by season and across training draws, and decide whether to hold that window. Not this season: every
+team reaches ten games by about 2026-11-09.
+
+## [ ] NBA prop projection: players the name match cannot place (2026-11-02)
+
+The live card matches a priced name only against players logged for either team this season or last. So a player in
+his first game for a new team, or back from a missed season, gets no projection: on 2026-10-21 Tyrese Haliburton and
+Fred VanVleet played 34 and 30 minutes with none. On teams' first games of 2026-27, 47 players a book priced had no
+projection.
+
 ## [ ] NBA game total models: read what could not be measured before they ran live (2026-10-31)
 
 Three reads, none possible from the branch that made the changes (no production
@@ -42,6 +84,19 @@ connection, no deploy; session log, 2026-10-31):
    8.4), inferred because no raw response was stored. `SELECT bookmaker, COUNT(*) FROM
    odds WHERE market = 'totals_h1_alternate' AND source = 'odds_api_nba_first_half_live'
    GROUP BY 1`, once the model has fetched a few games.
+
+**Read 2026-11-02, after the first evening on the new code (four games, 2026-11-01):**
+
+1. **The killed cards lost no bets.** 35 of the 60 NBA games from 2026-10-24 to 10-31 have no team-total decision.
+   Every team-total decision through 2026-11-01 (56 games) reads `early_season: a team has under 10 games`, so
+   those games were inside the ten-game wait and could not have bet. The wait came off on 2026-11-02.
+2. **The stored price table ended the kills on the first evening.** All 12 card runs on 11-01 exited 0, each in
+   about 3 to 5 seconds, against the 180-second kill on most runs before it. The team-total and first-half cards ran
+   side by side on all four games; the full-game card ran ten minutes earlier, so three at once has not been seen.
+   Leave this item open for a week of evenings, and for the first real bets, when the cards read more than the hold.
+3. **No first-half ladder so far.** On the first four games, `rows_stored` equals `main_rows` on every call (8 and
+   8), and `totals_h1_alternate` has no row. Eight books each hold one row per game, BetRivers, betPARX and Hard Rock
+   among them. A call cost 1 credit. Leave this open until a full slate has been read.
 
 ## [x] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29) — DONE 2026-10-30
 
@@ -403,20 +458,27 @@ needs a daily run over an hour late; 2026-10-01's ran 10:10Z to 12:39Z. Next,
 if it matters: have the refresh pass skip its goalie poll while the daily
 run holds its lock.
 
-## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+## [x] The injury reader counts every snapshot of the day (found 2026-10-13, fixed 2026-10-30)
+
+`query_injuries_for_game` keeps the newest ingest that already existed at
+tip-off (`games.commence_time`), and only the players on that pull. A name
+an earlier copy the same day listed, and that pull left off, does not count
+(mike, 2026-10-30). The training reader uses the same rule. Ottawa at 22:23Z
+on 2026-10-13 was 53.900 summed and is 2.800 on the 22:10Z pull (Harrison
+Scott is off it). STL the same minute was 79.800 summed and is 4.200. No
+threshold, stake, or pause change.
 
 `injuries` gets a full copy of each team's list on every ingest run
 (report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
-player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
-reads every row for the latest report_date and `_compute_injury_adjustment`
-sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
-11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
-(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
-on picks. `nhl_moneyline_regulation` never splits on an injury input (0
-splits across all folds), so it changed nothing there. Before a fix (read
-only the latest snapshot), list which live artifacts DO split on injury
-inputs and what their inputs looked like in training, since the fix moves
-those models' inputs: mike's call.
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). Until 2026-10-30
+`query_injuries_for_game` read every row for the latest report_date and
+`_compute_injury_adjustment` summed them, so `home_injury_adj` /
+`away_injury_adj` grew all day: Ottawa read 11.2 at 07:22Z and 53.9 at
+22:23Z, against 2.8 and 3.5 counting each player once (the docstring says
+0-3). It was also the "Opponent injury burden: 79.80" note on picks.
+`nhl_moneyline_regulation` never splits on an injury input (0 splits across
+all folds), so it changed nothing there. Which live artifacts' inputs move,
+and which of those trees split, is in the 2026-10-30 session entry.
 
 **For the NHL game models the six injury inputs are dead whatever the reader
 does.** NHL rows in `injuries` start 2026-04-05, so every training game
