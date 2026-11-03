@@ -52,7 +52,7 @@ def card_world(monkeypatch, gap=3.0, **kw):
     monkeypatch.setattr(card.tlcard, "slate", fake_slate)
     monkeypatch.setattr(card.tlcard, "load_season",
                         lambda conn, season, before: (EMPTY_FINAL, EMPTY_BOX, EMPTY_FINAL))
-    monkeypatch.setattr(fh, "f4_projections", lambda targets, tb: targets.assign(gap_total=gap))
+    monkeypatch.setattr(fh, "f4_projections", lambda targets, tb, **_: targets.assign(gap_total=gap))
     monkeypatch.setattr(fh, "missing_inputs", lambda targets, *a: {
         g: {"score_missing": [], "box_missing": [], "box_mismatch": [], "presumed_unplayed": []}
         for g in targets["game_id"]})

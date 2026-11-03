@@ -27,6 +27,28 @@ paths:
 > settled bets on 2026-09-12, and that session opened none of these paths.
 > Measured story: `docs/rules_evidence.md`.
 
+## No restated records, and every pick graded first (mike, 2026-10-30)
+
+*"No restated records of any kind unless I give the approval. Repo wide rule."*
+A daily, weekly, monthly, capper or full record that has gone out is never
+re-posted, corrected or relabelled, on Discord or X.
+
+- **Neither daily notifier can post a second copy.** They have no such option. A
+  pick graded after its recap reaches ops (`flag_recaps_gone_short`) and the next
+  all-time line. It reaches no channel.
+- **Every other route refuses without an entry in
+  `config.RECORD_RESTATEMENT_APPROVALS`:** the two jobs that clear a ledger row
+  (`publish_results`, `publish_x_results`), the written-correction jobs, the slate
+  re-post, and the capper's Corrected recap. A first post of a day that never went
+  out is not a restatement and still posts.
+- **An entry quotes mike's approval in chat, with the date.** Nothing else adds one.
+  `tests/test_record_never_restated.py` pins the register empty, so an entry changes
+  that test in the same commit.
+- **Before a record posts, `record_held_for_grading` runs.** It finds the picks the
+  record counts that have no result, grades them, and holds both surfaces if any are
+  left. Ops is told once a morning, with the picks named. Morning passes ask again
+  for 7 days. A new publisher of a record calls it too.
+
 ## THE PICK RULE — the mechanics (the rule itself is CLAUDE.md §1c)
 
 Matt, 2026-08-29: *"a pick is a pick and if line movement makes it no longer a

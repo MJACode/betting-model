@@ -2349,6 +2349,10 @@ _RULE_MODEL_MARKETS = {
     # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
     # total; the stored final includes overtime, as books settle it.
     "ncaab_total_blend": "totals",
+    # NCAAB full-game spreads (models/ncaab_spread_market.py). scored_line is
+    # the bet book's HOME number (section 4); the stored final includes
+    # overtime, as books settle it.
+    "ncaab_spread_market": "spreads",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

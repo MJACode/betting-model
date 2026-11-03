@@ -390,7 +390,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-10-30 (mike): the NBA first-half overs; market-fair P(over) + the uplift.
          "nba_first_half_total_luck",
          # 2026-10-30 (mike): NCAAB totals; its blend's P(win, push left out).
-         "ncaab_total_blend"}
+         "ncaab_total_blend",
+         # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
+         "ncaab_spread_market"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

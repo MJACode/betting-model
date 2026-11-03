@@ -62,7 +62,7 @@ import {
   type PickRecord,
   type TeamMarket,
 } from '@/lib/teamDetail';
-import { formatTeamStat, TEAM_STAT_CATALOG, type TeamStatDef } from '@/lib/teamStatCatalog';
+import { formatTeamStat, spreadWord, teamSeasonLabel, teamStatFor, type TeamStatDef } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
@@ -101,7 +101,7 @@ export function TeamStatsScreen() {
   }, [d.nextGame, d.books, team]);
 
   const row = d.row;
-  const seasonLabel = d.board.data.season;
+  const seasonLabel = d.board.data.season != null ? teamSeasonLabel(sport, d.board.data.season) : null;
   const form = d.form.slice(0, FORM_GAMES);
   const formSummary = useMemo(() => summarizeForm(form), [form]);
   const last5 = useMemo(() => summarizeForm(form, 5), [form]);
@@ -759,40 +759,59 @@ function MeetingRow({ game, team }: { game: FormGame; team: string }) {
 // ── Splits ──────────────────────────────────────────────────────────────────
 
 function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
-  const def = (key: keyof TeamStatsRow): TeamStatDef | null =>
-    TEAM_STAT_CATALOG.find((s) => s.key === key && s.sports.includes(sport)) ?? null;
+  const def = (key: keyof TeamStatsRow): TeamStatDef | null => teamStatFor(sport, key);
+  // "ATS", or the run line / puck line in MLB and NHL.
+  const ats = spreadWord(sport);
+  // Under MIN_SPLIT_SAMPLE a split is never a percentage, the board's rule
+  // (Matt, 2026-11-03): the game count instead, so the board and this page
+  // never print two answers for one number.
+  const games = (n: number) => `${n} game${n === 1 ? '' : 's'}`;
+  const isThin = (key: keyof TeamStatsRow): boolean => {
+    const d = def(key);
+    return d != null && isThinSample(row, d);
+  };
+  const count = (key: keyof TeamStatsRow): number => {
+    const d = def(key);
+    return d ? sampleFor(row, d) : 0;
+  };
   const pct = (key: keyof TeamStatsRow): string => {
+    if (isThin(key)) return games(count(key));
     const v = row[key];
     const n = typeof v === 'string' ? Number(v) : v;
     return n == null || !Number.isFinite(n as number) ? '—' : formatPct(n as number, 0);
   };
-  const thin = (key: keyof TeamStatsRow): string | null => {
+  const sampleCaption = (key: keyof TeamStatsRow): string | undefined => {
     const d = def(key);
-    if (!d || !d.sample) return null;
-    const n = sampleFor(row, d);
-    return isThinSample(row, d) ? `${n} game${n === 1 ? '' : 's'} · thin` : `${n} games`;
+    if (!d || !d.sample) return undefined;
+    return isThin(key) ? 'too few to rate' : games(count(key));
   };
+  const ou = `${row.ou_o}-${row.ou_u}${row.ou_p ? `-${row.ou_p}` : ''}`;
+  const atsRec = `${row.ats_w}-${row.ats_l}${row.ats_p ? `-${row.ats_p}` : ''}`;
   const restful = def('rest_adv_ats_pct') != null;
   return (
     <>
       <View style={styles.tileRow}>
-        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={`ATS ${pct('ats_home_pct')}`} />
-        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={`ATS ${pct('ats_away_pct')}`} />
-        <StatTile label="Over" value={pct('over_pct')} caption={`${row.ou_o}-${row.ou_u}${row.ou_p ? `-${row.ou_p}` : ''}`} />
+        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={isThin('ats_home_pct') ? `${ats}: only ${games(count('ats_home_pct'))}` : `${ats} ${pct('ats_home_pct')}`} />
+        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={isThin('ats_away_pct') ? `${ats}: only ${games(count('ats_away_pct'))}` : `${ats} ${pct('ats_away_pct')}`} />
+        <StatTile
+          label="Over"
+          value={isThin('over_pct') ? `${row.ou_o}o-${row.ou_u}u` : pct('over_pct')}
+          caption={isThin('over_pct') ? games(count('over_pct')) : ou}
+        />
       </View>
       <View style={styles.tileRow}>
-        <StatTile label="ATS as fav" value={pct('fav_ats_pct')} />
-        <StatTile label="ATS as dog" value={pct('dog_ats_pct')} />
+        <StatTile label={`${ats} as fav`} value={pct('fav_ats_pct')} />
+        <StatTile label={`${ats} as dog`} value={pct('dog_ats_pct')} />
         <StatTile
-          label="ATS overall"
-          value={pct('ats_pct')}
-          caption={`${row.ats_w}-${row.ats_l}${row.ats_p ? `-${row.ats_p}` : ''}`}
+          label={`${ats} overall`}
+          value={isThin('ats_pct') ? atsRec : pct('ats_pct')}
+          caption={isThin('ats_pct') ? games(count('ats_pct')) : atsRec}
         />
       </View>
       {restful ? (
         <View style={styles.tileRow}>
-          <StatTile label="ATS rest edge" value={pct('rest_adv_ats_pct')} caption={thin('rest_adv_ats_pct') ?? undefined} />
-          <StatTile label="ATS short rest" value={pct('short_rest_ats_pct')} caption={thin('short_rest_ats_pct') ?? undefined} />
+          <StatTile label={`${ats} rest edge`} value={pct('rest_adv_ats_pct')} caption={sampleCaption('rest_adv_ats_pct')} />
+          <StatTile label={`${ats} short rest`} value={pct('short_rest_ats_pct')} caption={sampleCaption('short_rest_ats_pct')} />
         </View>
       ) : null}
     </>

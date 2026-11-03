@@ -111,6 +111,10 @@ MAX_SILENCE: dict = {
     # Hourly at five past, 24x7 UTC, and it beats on the idle hours too (one
     # read of today's slate), so two missed hours and some: a stopped card.
     "ncaab_total_card": 150,
+    # The same cadence: hourly at five past, 24x7 UTC, beating on the idle
+    # hours too. It decides only in the 15:00 UTC hour, so a stopped card is
+    # also caught by the next run's `missed` failure.
+    "ncaab_spread_card": 150,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

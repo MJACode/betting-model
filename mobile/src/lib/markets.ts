@@ -1681,6 +1681,10 @@ export function computeMovement(
  * whenever DraftKings hung the same number. Read as DraftKings' line, a move
  * at the deciding book showed as a price move in the bettor's favour
  * (designer review, 2026-10-20).
+ *
+ * The NCAAB spread card (scripts/ncaab_spread_card.py) writes the same row:
+ * the deciding book's own spread, line_book empty when DraftKings hung the
+ * same number (designer review, 2026-11-02).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
@@ -1688,6 +1692,7 @@ const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_prop_projection',
   'nba_team_total_luck',
   'nba_total_luck',
+  'ncaab_spread_market',
   'nfl_prop_market',
   'wnba_prop_market',
 ];
@@ -1956,7 +1961,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // same hour.
   // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
   // once, the evening before, and never re-prices: not "the first scoring run
-  // of the day".
+  // of the day". The NCAAB spread card (scripts/ncaab_spread_card.py) decides
+  // each game once, on game-day morning, the same way.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -1965,6 +1971,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_team_total_luck' ||
     pick.model_id === 'nba_first_half_total_luck' ||
     pick.model_id === 'ncaab_total_blend' ||
+    pick.model_id === 'ncaab_spread_market' ||
     nbaPosted
   ) {
     return {

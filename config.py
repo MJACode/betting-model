@@ -146,6 +146,31 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
 )
 
 
+# NO RESTATED RECORDS (mike, 2026-10-30: "No restated records of any kind unless
+# I give the approval."). A record that has gone out is not re-posted, corrected
+# or relabelled on any surface. This is the only way to open one: a key here, its
+# value quoting mike's approval in chat with the date. Keyed by game date, or by
+# the lock of a written correction. Empty is the normal state, and
+# tests/test_record_never_restated.py pins it, so an entry changes that test in
+# the same commit. Nothing else opens this, a job argument and a CLI flag included.
+RECORD_RESTATEMENT_APPROVALS: dict[str, str] = {}
+
+
+class RecordRestatementRefused(RuntimeError):
+    """A path tried to post a record again without mike's approval."""
+
+
+def record_restatement_approved(key: str) -> bool:
+    return str(key) in RECORD_RESTATEMENT_APPROVALS
+
+
+def require_record_restatement_approval(key: str) -> None:
+    if not record_restatement_approved(key):
+        raise RecordRestatementRefused(
+            f"{key} has already been published. A restated record needs mike's "
+            f"approval in config.RECORD_RESTATEMENT_APPROVALS.")
+
+
 def record_exclusion_sql(alias: str = "p") -> str:
     """RECORD_EXCLUSIONS as a SQL predicate, ANDed into a record query.
 
@@ -706,6 +731,24 @@ ACTION_THRESHOLDS: dict = {
     # floor could only hide a pick the card wrote (the smallest written
     # probability on 2021-2025 is 0.5403).
     "ncaab_total_blend":        {"min_prob": 0.0, "min_edge": 0.04},
+    # NCAAB full-game spreads (2026-11-02, mike: "we need to build 1H and game
+    # lines ML and Spread no matter what"; no games-played wait):
+    # models/ncaab_spread_market.py, written by scripts/ncaab_spread_card.py.
+    # At 15:00 UTC on game day, every bettable book's spread priced against the
+    # books' median line with an empirical final-margin distribution; bet the
+    # single best quote when its P(win | no push) beats its own price's implied
+    # probability by more than 0.03 and 3+ other books quote the game.
+    # Walk-forward replay of the card's own code (the research's 613 bets
+    # matched game by game): 2021-2025 409 bets, +44.60 units, +9.97%,
+    # date-resampled 95% interval [0.8, 18.4], 5 of 5 seasons positive;
+    # 2025-26 133 bets +20.96% (a second look, not a clean hold-out).
+    # Neighbours, research, every game: 0.02 +4.72%, 0.04 +23.32%. Prices
+    # -120 to +114. min_edge 0.03 IS the card's cut: model_probability is
+    # P(win | no push) at the bet book's line and decision_edge that minus the
+    # bet price's implied, so every publisher agrees with the card. min_prob
+    # 0.0: the edge is the cut (the smallest written probability in the
+    # replay is 0.5134).
+    "ncaab_spread_market":      {"min_prob": 0.0, "min_edge": 0.03},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1967,6 +2010,10 @@ MODEL_MIN_ODDS: dict = {
     # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
     # override cannot move it.
     "ncaab_total_blend":         -200,
+    # NCAAB spreads (2026-11-02, mike): it laid -120 to +114 on its 613
+    # replayed bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
+    # override cannot move it.
+    "ncaab_spread_market":       -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2236,6 +2283,13 @@ MODEL_OWN_EV_FLOOR: dict = {
     # (1,094 bets; median +0.0996). An edge above 0.04 at -120 or longer is EV
     # above 0.073, so 0.07 never removes a bet the evidence took.
     "ncaab_total_blend":        0.07,
+    # NCAAB spreads (2026-11-02, mike). The cut is the edge (0.03, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted in the replay of 2021-2026 with 3+ other books:
+    # P(win | no push) x decimal - 1 = +0.0563 (542 bets; median +0.0697).
+    # EV is edge x decimal, so an edge above 0.03 clears 0.05 at any price
+    # shorter than -150; it laid -120 at the shortest.
+    "ncaab_spread_market":      0.05,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2380,6 +2434,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # was measured on. It has no record, so its map would be the offset
     # borrowed from other models.
     "ncaab_total_blend",
+    # 2026-11-02 (mike). NCAAB spreads: its number is P(win | no push) at the
+    # bet book's line from the final-margin distribution, which its 0.03 cut
+    # was measured on. No record either.
+    "ncaab_spread_market",
 })
 
 
@@ -2507,6 +2565,10 @@ SCORING_METHODS: dict = {
     # its pinned path. Not in SPORTS or MODELS, which the trainer and the
     # loaders iterate.
     "ncaab_total_blend":   "rule",
+    # The same shape: the NCAAB spread rule's artifact holds the mean offset
+    # and the final-margin table (models/ncaab_spread_market.py), loaded by
+    # scripts/ncaab_spread_card.py by its pinned path, never registered.
+    "ncaab_spread_market": "rule",
 }
 
 
@@ -2538,6 +2600,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.04,   # 2026-10-30 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
+    "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2630,6 +2693,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_spread_market":      0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS

@@ -869,7 +869,11 @@ def test_failed_free_post_ledgers_nothing_so_it_retries(monkeypatch):
 # ── Restatement ──────────────────────────────────────────────────────────────
 
 def _restate_env(monkeypatch, ledger: set, signals: list, ok=True):
-    """Wire the notifier to a fake webhook + ledger. Returns the posts list."""
+    """Wire the notifier to a fake webhook + ledger. Returns the posts list.
+
+    A slate re-post needs mike's approval now (config.RECORD_RESTATEMENT_APPROVALS).
+    These tests are about what it does once it has one."""
+    monkeypatch.setitem(dn.config.RECORD_RESTATEMENT_APPROVALS, "2026-08-28", "test")
     posts = []
     monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append((url, payload)), ok)[1])
     monkeypatch.setattr(dn.time, "sleep", lambda *_: None)
@@ -1353,34 +1357,6 @@ def test_a_six_column_row_still_tallies():
 # ── Restating a recap (2026-08-30; automatic since 2026-09-10) ───────────────
 # The full contract is tests/test_recap_restatement.py. What stays here is
 # the boundary with the SLATE restatement above.
-
-def test_a_restate_with_nothing_settled_late_is_a_no_op():
-    """No webhook configured in the test env, so this returns before the
-    database; the point pinned is the signature -- restate=True is accepted
-    and resolves to 'nothing to correct' rather than raising."""
-    assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
-
-
-def test_the_record_restatement_and_the_slate_restatement_are_separate():
-    """One restates a RECORD (its own ledger kind, keyed per correction), the
-    other a SLATE (a hard-coded date set). Sharing a trigger would re-post a
-    day's picks every time its numbers were corrected, and vice versa."""
-    assert "discord_results_restate" in dn.restate_lock_key(
-        "discord_results_restate", "2026-09-09", "2026-09-10T10:02:22+00:00")
-    assert dn.DISCORD_RESTATE_DATES, "the slate set still exists on its own"
-    assert not hasattr(dn, "DISCORD_RESULTS_RESTATE_DATES"), (
-        "the record restatement no longer runs off a hard-coded date list")
-
-
-def test_a_restated_recap_is_labelled_and_says_why():
-    """A correction that looks identical to the original is worse than none —
-    a reader has no way to tell which number is current."""
-    n = dn.results_restate_note(3, 7, 10).lower()
-    assert n.startswith("restated")
-    assert "settled after" in n, "must say WHAT changed"
-    assert "same picks" in n, "must say what did NOT change"
-    assert "7 settled then, 10 now" in n, "must carry both counts"
-
 
 # ── Live (in-play) bets count toward the recap (2026-08-30) ──────────────────
 # Matt: live bets fold into their sport's totals. The is_live COLUMN cannot

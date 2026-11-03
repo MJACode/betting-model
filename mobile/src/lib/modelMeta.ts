@@ -606,6 +606,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Men's college basketball, full-game spreads, named like NCAAF's
+  // ("NCAAF Spreads", badge Spread). The id is the one the model writes its
+  // picks under (models/ncaab_spread_market.py MODEL_ID); it has 'spread' in
+  // it, so markets.ts reads the spreads rows without a named line.
+  ncaab_spread_market: {
+    shortLabel: 'Spread',
+    longLabel: 'NCAAB Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -873,6 +884,17 @@ const EVENING_BEFORE_MODELS: readonly string[] = [
   'ncaab_total_blend',
 ];
 
+// The models that decide each game once, on the morning of the game: the
+// NCAAB spread card (scripts/ncaab_spread_card.py) reads the spread at each
+// book it prices at 15:00 UTC on game day and posts its bets then, in one
+// batch. Nothing posts later in the day, so the hourly-refresh copy sent
+// people back for picks that would never come. The one clock time printed is
+// "by noon ET": the run is 10:05am ET in winter and 11:05am ET from
+// mid-March, and a late run still reads 15:00 UTC quotes only until 15:59 UTC.
+const GAME_MORNING_MODELS: readonly string[] = [
+  'ncaab_spread_market',
+];
+
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
   title: string;
@@ -906,6 +928,19 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       empty:
         'This model posts the evening before each game day. Nothing has posted for the next slate yet.',
       note: 'Posted the evening before and never re-priced.',
+    };
+  }
+  if (GAME_MORNING_MODELS.includes(modelId)) {
+    return {
+      title: 'Decided the morning of the game',
+      body:
+        'This model decides each game once, on the morning of game day, from the spread at each book we ' +
+        'price. It bets only some games, each at the book with the best line and price, which may not be ' +
+        'DraftKings. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model posts once, on the morning of each game day, and bets only some games. If nothing is ' +
+        'here by noon ET, it found no bet today.',
+      note: 'Posted the morning of the game and never re-priced.',
     };
   }
   return {
