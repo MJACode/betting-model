@@ -27,10 +27,17 @@ few games with no possessions too), unless a team is missing more than one.
 
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS. A due game skipped because the
 artifact is for another season, held as box_missing (a team missing two or
-more old boxes, which can hold it all season), or missing its blend makes the
-run raise CardIncomplete AFTER every other game is decided and written, so
-the script exits 1, the job's heartbeat records "error" and the failure
-alerter reports it. It never stops quietly with the heartbeat green.
+more old boxes, which can hold it all season), missing its blend, or held as
+edge_cap (an edge above the data-error cap, models/ncaab_quote_bounds.py)
+makes the run raise CardIncomplete AFTER every other game is decided and
+written, so the script exits 1, the job's heartbeat records "error" and the
+failure alerter reports it. It never stops quietly with the heartbeat green.
+
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). DraftKings'
+standing total outside 90-220, or a price beyond +/-100000, is not priced:
+the game is out_of_range, logged with its game, book and value, counted on
+the diagnostic line, and it waits for its next decision hour like a hold.
+DraftKings' older row is not used instead.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_total_decisions in the same transaction as the game's bet, under the
@@ -493,6 +500,13 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 elif d.status == "no_blend":
                     logger.error(f"NCAAB totals card: {d.game_id}: {d.detail}; the artifact is incomplete.")
                     problems.append(f"no_blend {d.game_id} ({d.detail})")
+                elif d.status == "out_of_range":
+                    logger.warning(f"NCAAB totals card: dropped a data-error quote, {d.game_id} "
+                                   f"{d.detail}")
+                elif d.status == "edge_cap":
+                    logger.error(f"NCAAB totals card: {d.game_id} not bet, its edge is a data "
+                                 f"error: {d.detail}")
+                    problems.append(f"edge_cap {d.game_id} ({d.detail})")
             decisions += got
         published = n_decided = 0
         if do_publish and decisions:

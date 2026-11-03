@@ -46,6 +46,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import models.ncaab_quote_bounds as qb  # noqa: E402
 import models.ncaab_total_blend as nb  # noqa: E402
 
 FIRST_SEASON = 2011          # burn-in season (no prior)
@@ -79,6 +80,11 @@ def load(cache: Path, last: int):
     dk = dk.dropna(subset=["o_ts", "o_total_line", "o_over_price", "o_under_price"])
     dk = dk.rename(columns={"o_total_line": "line", "o_over_price": "over_price",
                             "o_under_price": "under_price"})
+    # The card never prices a feed typo (models/ncaab_quote_bounds.py), so
+    # neither does the replay nor the blend fit: such a game has no quote.
+    dk, bad = qb.split(dk, nb.MARKET, "line", ("over_price", "under_price"))
+    print(f"DraftKings first totals dropped as data errors: {len(bad)}"
+          + "".join(f"\n  {x}" for x in qb.describe(bad, "line", ("over_price", "under_price"))))
     dk["quote_ns"] = pd.to_datetime(dk["o_ts"], utc=True).dt.as_unit("ns").astype("int64")
     return g, box, dk[["game_id", "line", "over_price", "under_price", "quote_ns"]]
 

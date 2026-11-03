@@ -30,7 +30,16 @@ are written as `missed` without failing.
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS, after writing every game it could:
 an artifact for another season (the game is then `missed` next hour); every
 due game with no moneyline at all (the odds steps have stopped); a best side
-at a book config.BEST_LINE_BOOKMAKERS no longer lists.
+at a book config.BEST_LINE_BOOKMAKERS no longer lists; a best edge above the
+data-error cap (models/ncaab_quote_bounds.EDGE_CAP: the game is written as
+edge_cap with no bet).
+
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A moneyline
+priced beyond +/-100000, and a spread beyond +/-60 or priced beyond +/-100000,
+is dropped before any flag, count or price reads it, and that book has no such
+quote at 15:00 UTC. Each is logged with its game, book and value, counted as
+quotes_dropped on the diagnostic line, and kept in the decision row's quotes
+as out_of_range.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_moneyline_decisions in the same transaction as the game's bet, under the
@@ -60,6 +69,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -252,7 +262,8 @@ def decision_row(d: om.Decision, check_hour: datetime, instant: datetime | None,
     b = d.best or {}
     detail = d.status + ": " + d.detail + (f"; refused {refused}" if refused else "")
     side = b.get("side")
-    n_books = sum(1 for q in d.quotes if q.get("book") in bq.BOOKS and q.get("p1") is not None)
+    n_books = sum(1 for q in d.quotes if q.get("book") in bq.BOOKS and q.get("p1") is not None
+                  and "out_of_range" not in (q.get("flags") or ()))
     return {"game_id": d.game_id, "check_hour": check_hour.isoformat(),
             "instant": instant.isoformat() if instant else None, "status": d.status,
             "book": b.get("bookmaker"), "side": side,
@@ -265,8 +276,8 @@ def decision_row(d: om.Decision, check_hour: datetime, instant: datetime | None,
             "quotes": json.dumps(d.quotes) if d.quotes else None, "detail": detail[:2000]}
 
 
-FINAL = ("bets", "below_cut", "book_not_bettable", "no_quotes", "no_clean_quote", "missed",
-         "tipped")
+FINAL = ("bets", "below_cut", "book_not_bettable", "edge_cap", "no_quotes", "no_clean_quote",
+         "missed", "tipped")
 
 
 def publish(conn, rows: list[dict], decisions: list[om.Decision], check_hour: datetime,
@@ -303,6 +314,13 @@ def publish(conn, rows: list[dict], decisions: list[om.Decision], check_hour: da
 class CardIncomplete(RuntimeError):
     """A game the card could not decide at 15:00 UTC, or a run that found the
     odds missing: raised after the rest of the run is written."""
+
+
+def log_dropped(drops) -> None:
+    """One warning per quote dropped as a data error: game, book and value."""
+    from models.ncaab_quote_bounds import describe
+    for line in describe(drops):
+        logger.warning(f"NCAAB moneyline card: dropped a data-error quote, {line}")
 
 
 _ART: dict = {}
@@ -382,10 +400,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 part = {g: due[g] for g in gids}
                 ml_rows = bq.load_rows(conn, part, hour, market="h2h", books=om.REF_BOOKS)
                 sp_rows = bq.load_rows(conn, part, hour, market="spreads")
+                drops = pd.concat([bq.dropped_quotes(ml_rows, books=om.REF_BOOKS, need_line=False),
+                                   bq.dropped_quotes(sp_rows)], ignore_index=True)
+                log_dropped(drops)
+                diag["quotes_dropped"] += len(drops)
                 ml, sp = om.read(ml_rows, sp_rows, art["table"])
                 got = om.decide(gids, ml, sp, config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
                                 bettable=tuple(config.BEST_LINE_BOOKMAKERS),
-                                min_price=float(art["min_price"]))
+                                min_price=float(art["min_price"]), dropped=drops)
                 if got and all(d.status == "no_quotes" for d in got):
                     problems.append(f"no bettable book has a moneyline stamped 14:00-15:00 UTC for any "
                                     f"of the {len(got)} due game(s): the odds refresh and the capture "
@@ -393,6 +415,10 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 for d in got:
                     if d.status == "book_not_bettable":
                         problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
+                    elif d.status == "edge_cap":
+                        logger.error(f"NCAAB moneyline card: {d.game_id} not bet, its edge is a "
+                                     f"data error: {d.detail}")
+                        problems.append(f"edge_cap {d.game_id} ({d.detail})")
                 decisions += got
         for d in decisions:
             diag[d.status] = diag.get(d.status, 0) + 1

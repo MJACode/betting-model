@@ -34,6 +34,13 @@ The edge is raw: the price's own implied probability, vig included, against
 the model's P(win | no push). model_probability on the pick is that P(win | no
 push), so decision_edge is exactly the edge the card cut on.
 
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A first-half
+quote beyond +/-35, or priced beyond +/-100000, is not priced; a full-game line
+outside its plausible range (a spread beyond +/-60, a total outside 90-220)
+never enters a consensus. The dropped first-half quotes are listed on the
+decision. A best edge above the data-error cap is not a bet: the game is
+decided as edge_cap with none, and the card's run fails.
+
 THE TEAM TERM. For every finished game with both halves stored and a closing
 full-game consensus spread AND total (the research's sample requires both), the
 home team's first-vs-second-half margin tilt is
@@ -77,6 +84,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from models import ncaab_quote_bounds as qb
 
 MODEL_ID = "ncaab_first_half_spread"
 SPORT = "NCAAB"
@@ -196,9 +205,16 @@ def price_quote(mu, line, p_home, p_away, T: dict):
 
 # ── the full-game consensus ──────────────────────────────────────────────────
 
-def asof_consensus(rows: pd.DataFrame, cutoff: pd.DataFrame, books=BOOKS) -> pd.DataFrame:
+def asof_consensus(rows: pd.DataFrame, cutoff: pd.DataFrame, books=BOOKS,
+                   market: str | None = None) -> pd.DataFrame:
     """Median over `books` of each book's newest full-game line at or before
     each game's cutoff.
+
+    market ('spreads' or 'totals') drops a book whose newest line is outside
+    that market's plausible range (models/ncaab_quote_bounds.py) before the
+    median: that book is not in the consensus, and its older line is not used
+    instead. With no market nothing is dropped (a caller that has not said
+    which market its lines are).
 
     rows:   game_id, bookmaker, ts (the row's snapshot_at, the book's own time,
             tz-aware), line (spread_home or total_line), optional order (a
@@ -221,6 +237,10 @@ def asof_consensus(rows: pd.DataFrame, cutoff: pd.DataFrame, books=BOOKS) -> pd.
         return pd.DataFrame(columns=["game_id", "cons", "nb"])
     order = ["ts", "order"] if "order" in x.columns else ["ts"]
     x = x.sort_values(order, kind="mergesort").drop_duplicates(["game_id", "bookmaker"], keep="last")
+    if market is not None:
+        x = qb.split(x, market, "line", ())[0]
+    if not len(x):
+        return pd.DataFrame(columns=["game_id", "cons", "nb"])
     out = x.groupby("game_id")["line"].agg(cons="median", nb="size").reset_index()
     return out
 
@@ -397,6 +417,7 @@ class Decision:
     n_away: int = 0
     best: Offer | None = None
     offers: list = field(default_factory=list)
+    dropped: list = field(default_factory=list)   # quotes dropped as data errors
 
     @property
     def price(self) -> float | None:
@@ -405,12 +426,26 @@ class Decision:
         return self.best.home_price if self.best.side == "home" else self.best.away_price
 
 
+QUOTE_PRICES = ("home_price", "away_price")
+
+
+def out_of_range(quotes: pd.DataFrame, books) -> pd.DataFrame:
+    """The quotes of `books` that are data errors (models/ncaab_quote_bounds.py),
+    with `market` and `why`: never priced, listed on the decision."""
+    if not len(quotes):
+        return quotes.assign(market=MARKET, why=None).iloc[0:0]
+    q = quotes[quotes["bookmaker"].isin(list(books))]
+    return qb.split(q, MARKET, "spread_home", QUOTE_PRICES)[1]
+
+
 def quote_offers(quotes: pd.DataFrame, mu: float, T: dict, books) -> list[Offer]:
     """Price every quote of one game: one row per book (bookmaker, spread_home,
     home_price, away_price, optional home_link / away_link). A quote with no
-    number or a missing price is not priced (the research's dropna)."""
+    number or a missing price is not priced (the research's dropna), nor is a
+    data error (out_of_range)."""
     q = quotes[quotes["bookmaker"].isin(list(books))].dropna(
         subset=["spread_home", "home_price", "away_price"])
+    q = qb.split(q, MARKET, "spread_home", QUOTE_PRICES)[0]
     if not len(q):
         return []
     side, edge, p = price_quote(np.full(len(q), mu), q["spread_home"].astype(float).values,
@@ -444,23 +479,31 @@ def decide(game_id: str, quotes: pd.DataFrame, fg: dict | None, tau: dict | None
     fg:  {"cons": consensus home spread, "nb": books} or None.
     tau: {"tau_home", "tau_away", "n_home", "n_away"} or None (zero tendencies).
     """
+    bad = out_of_range(quotes, books)
+    dropped = [{"book": str(r["bookmaker"]), "line": r["spread_home"], "home": r["home_price"],
+                "away": r["away_price"], "why": r["why"]} for r in bad.to_dict("records")]
+    note = ("; dropped as data errors: " + ", ".join(
+        f"{x['book']} {x['line']} ({x['why']})" for x in dropped)) if dropped else ""
     if fg is None or fg.get("cons") is None or not np.isfinite(float(fg["cons"])):
         return Decision(game_id, "no_fg_line", "no bettable book's full-game spread stored "
-                        "at or before the decision")
+                        "at or before the decision" + note, dropped=dropped)
     tau = tau or {}
     th, ta = float(tau.get("tau_home") or 0.0), float(tau.get("tau_away") or 0.0)
     M = -float(fg["cons"])
     mu = float(art["map"]["b"]) * M + float(art["map"]["a"]) + (th - ta) / 2
     d = Decision(game_id, "no_quote", "", mu=mu, fg_spread=float(fg["cons"]),
                  fg_books=int(fg.get("nb") or 0), tau_home=th, tau_away=ta,
-                 n_home=int(tau.get("n_home") or 0), n_away=int(tau.get("n_away") or 0))
+                 n_home=int(tau.get("n_home") or 0), n_away=int(tau.get("n_away") or 0),
+                 dropped=dropped)
     d.offers = quote_offers(quotes, mu, art["_T"], books)
     d.best = best_offer(d.offers)
     if d.best is None:
-        d.detail = "no bettable book quoted a first-half spread in the decision fetch"
+        d.detail = "no bettable book quoted a first-half spread in the decision fetch" + note
         return d
     b = d.best
-    d.status = "bets" if b.edge > cut else "below_cut"
+    capped = qb.edge_problem(b.edge, MODEL_ID)
+    d.status = "edge_cap" if capped else "bets" if b.edge > cut else "below_cut"
     d.detail = (f"{b.side} {b.line:+g} @{b.book} {d.price:+.0f} edge {b.edge:+.4f} "
-                f"p {b.prob:.4f} mu {mu:+.3f} M {M:+.2f} ({d.fg_books} books)")
+                f"p {b.prob:.4f} mu {mu:+.3f} M {M:+.2f} ({d.fg_books} books)"
+                + (f"; {capped}: a data error, not a bet" if capped else "") + note)
     return d
