@@ -170,10 +170,12 @@ def ledger_exists(conn) -> bool:
         "AND table_name = %s", (DECISIONS_TABLE,)).fetchone())
 
 
-def decided_games(conn, game_ids: list[str]) -> set[str]:
+def decided_games(conn, game_ids: list[str], bets: bool = True) -> set[str]:
     """Games with a decision row, or with any ncaab_total_blend BET whatever
     became of it (settled, VOIDed): none is decided again. A row left by the
-    old 10-game wait does not count (the module docstring)."""
+    old 10-game wait does not count (the module docstring). bets=False reads
+    the ledger only (by its primary key), for the whole slate every run; the
+    picks read is then made for the few games with a first post."""
     if not game_ids:
         return set()
     done: set[str] = set()
@@ -182,6 +184,8 @@ def decided_games(conn, game_ids: list[str]) -> set[str]:
             "SELECT game_id FROM ncaab_total_decisions WHERE game_id = ANY(%s) "
             "AND split_part(detail, ':', 1) <> 'below_10_games'",
             (list(game_ids),)).fetchall()}
+    if not bets:
+        return done
     bet = {r[0] for r in conn.execute("""
         SELECT DISTINCT game_id FROM picks
         WHERE model_id = %s AND signal_type = 'BET' AND game_id = ANY(%s)
@@ -540,14 +544,17 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
     try:
         games = slate(conn, now)
         diag["games"] = len(games)
-        done = decided_games(conn, sorted(games))
-        diag["already_decided"] = len(done)
+        # The ledger by primary key for the whole slate; the first-post read
+        # for the games it has not decided; the picks read for the few of
+        # those with a first post. Nothing heavier is read on a run where no
+        # undecided game has a first post.
+        done = decided_games(conn, sorted(games), bets=False)
         undecided = {g: v for g, v in games.items() if g not in done}
-        # A game is due once DraftKings has posted its first total. Nothing
-        # heavier is read on a run where no undecided game has one.
         firsts = load_first_posts(conn, undecided, now)
-        due = {g: v for g, v in undecided.items() if g in firsts}
-        diag["no_dk_total"] = len(undecided) - len(due)
+        bet_done = decided_games(conn, sorted(firsts)) if firsts else set()
+        diag["already_decided"] = len(done) + len(bet_done)
+        due = {g: v for g, v in undecided.items() if g in firsts and g not in bet_done}
+        diag["no_dk_total"] = len(undecided) - len(firsts)
         if not due:
             logger.info(render([], diag))
             return {"games": len(games), "bets": 0, "published": 0, "decided": 0, "diag": diag}

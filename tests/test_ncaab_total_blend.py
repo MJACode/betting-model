@@ -617,6 +617,11 @@ def test_a_row_from_the_old_10_game_wait_does_not_stop_a_game_being_decided():
     (read,) = [s for s, _ in conn.sql if "FROM ncaab_total_decisions" in s]
     assert "split_part(detail, ':', 1) <> 'below_10_games'" in read
     assert "below_10_games" not in card.FINAL
+    # the whole slate is read from the ledger alone; picks only when asked
+    ledger_only = _Conn()
+    card.decided_games(ledger_only, ["g"], bets=False)
+    assert not [s for s, _ in ledger_only.sql if "FROM picks" in s]
+    assert [s for s, _ in conn.sql if "FROM picks" in s]
 
 
 def test_the_quote_read_is_pregame_draftkings_and_fresh():
@@ -674,7 +679,7 @@ def _card_run(monkeypatch, art, extra_season=None, drop_boxes=(), standing="same
     box = box[~box["espn_game_id"].isin(games[games["game_id"].isin(drop_boxes)]["espn_event_id"])]
     monkeypatch.setattr(card, "get_connection", lambda: _ClosingConn())
     monkeypatch.setattr(card, "slate", lambda conn, now: slate)
-    monkeypatch.setattr(card, "decided_games", lambda conn, ids: set())
+    monkeypatch.setattr(card, "decided_games", lambda conn, ids, bets=True: set())
     monkeypatch.setattr(card, "ensure_decisions_table", lambda conn: None)
     monkeypatch.setattr(card, "artifact", lambda: art)
     monkeypatch.setattr(card, "load_season", lambda conn, season: (games, box))
