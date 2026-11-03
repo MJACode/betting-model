@@ -255,6 +255,29 @@ def test_a_game_with_no_league_tip_keeps_its_closing_columns_empty(conn, writer)
     assert w.row() == {"close": None, "method": None, "clv": None, "book": None}
 
 
+@pytest.mark.parametrize("espn_far_early", [False, True])
+def test_the_recompute_leaves_it_empty_when_other_work_makes_it_run(conn, espn_far_early):
+    """In production the recompute nearly always has another bet to measure, so it runs, and its own row
+    filter is what keeps this bet out. Alone in the table, the bet never reaches that filter: the check that
+    decides whether to run at all stops first, so the single-bet tests pass with the row filter removed.
+    Both halves of the filter: no league tip, and ESPN's postseason start far before the feed's."""
+    w = World(conn)
+    if espn_far_early:
+        w.listed(tip=w.at(-300))
+        for book in ("fanduel", "pinnacle"):
+            conn.execute("""INSERT INTO player_prop_odds (game_id, player_name, market, bookmaker, line, over_price,
+                                under_price, snapshot_at, snapshot_type)
+                            VALUES (%s, 'Stephen Curry', 'player_points', %s, 24.5, -110, -200, %s, 'open')""",
+                         (w.gid, book, w.at(-310)))
+    w.bet()
+    other = World(conn, teams=("BOS", "MIA"))
+    other.listed(kind="regular")
+    other.bet(game_time=other.at(0))
+    w.recompute()
+    assert _close(other) == BEFORE_TIP and other.row()["method"] == CLV_METHOD_STANDARD, "the recompute did not run"
+    assert w.row() == {"close": None, "method": None, "clv": None, "book": None}
+
+
 @pytest.mark.parametrize("writer", ["capture", "recompute"])
 def test_a_postseason_start_far_before_the_feeds_bounds_nothing(conn, writer):
     """Read as ESPN's error, so the window ran on the feed's start, and that is no bound either. The
