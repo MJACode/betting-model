@@ -235,8 +235,9 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "pnlColor(summary.roi, 1, 100)" in card
     assert "summary.units != null" in card
     assert "overall.units == null" in screen
-    assert "Models use a flat $100 bet" in hero
-    assert "Yesterday and Models use a flat $100 bet" not in hero
+    assert "Models risk a flat 1u on every pick" in hero
+    assert "Yesterday and Models use a flat" not in hero
+    assert "$100" not in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
     assert "colors.positive" not in curve

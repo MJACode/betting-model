@@ -189,7 +189,9 @@ export function retryAccessibilityLabel(retryLabel: string, what: string): strin
 
 /** "1.2u → 1.0u" is read as "1.2 u arrow"; this says "stake 1.2 units to win 1.0 units". */
 export function unitsSpeech(text: string): string {
-  return text.replace(/(\d)u\b/g, '$1 units').replace(/\s*→\s*/g, ' to win ');
+  return text
+    .replace(/(\d+(?:\.\d+)?)u\b/g, (_m, n: string) => `${n} ${n === '1' ? 'unit' : 'units'}`)
+    .replace(/\s*→\s*/g, ' to win ');
 }
 
 /** "Sharp score 35 of 100, strong" (audit M5). Tier word is optional. */

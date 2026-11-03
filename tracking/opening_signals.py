@@ -403,7 +403,8 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
         logger.info(
             f"Opening-signal shadow settle {game_date}: "
             f"{wins}W / {losses}L / {pushes}P / {no_actions}N "
-            f"(flat ${total_flat:+,.2f})"
+            # profit_flat is stored per $100 staked: /100 is units (§4).
+            f"(flat {total_flat / 100:+.2f}u)"
         )
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 

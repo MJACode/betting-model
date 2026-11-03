@@ -122,8 +122,9 @@ export function useSettledPicksSincePaperStart() {
 }
 
 /** Adapt a full-outcome view row to the CustomModelStats shape the screens render.
- *  Units in the view are 1-unit (flat); screens display at a $100 notional stake,
- *  so scale by 100 to match computeBuiltInModelStats. roi_pct is NULL when
+ *  Units in the view are 1-unit (flat); stats hold the stored per-100 scale,
+ *  so scale by 100 to match computeBuiltInModelStats. Screens print units
+ *  (lib/format formatFlatUnits). roi_pct is NULL when
  *  nothing was priced — surface 0 ROI rather than NaN. */
 export function viewRecordToStats(rec: FullOutcomeRecord): CustomModelStats {
   const decided = rec.wins + rec.losses;

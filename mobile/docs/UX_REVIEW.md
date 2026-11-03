@@ -150,9 +150,14 @@ which is exactly when users open it.
 
 ## 7. Copy
 
-- Odds through `formatAmerican`, percentages through `formatPct`, money
-  through `formatCurrency`, dates through the `*ET` helpers. A hand-rolled
-  format is a finding.
+- Odds through `formatAmerican`, percentages through `formatPct`, dates
+  through the `*ET` helpers. Results and stakes are UNITS, never dollars
+  (mike, 2026-11-03: "everything must be units"): a stored per-100 amount
+  (`profit_flat`) through `formatFlatUnits` / `formatFlatStake`, a units
+  figure through `formatSignedUnits` / `formatUnits`, spoken via
+  `unitsSpeech`. A "$" on a result, a stake or a payout is a finding; the
+  only dollars left are subscription prices and the optional Settings
+  bankroll. A hand-rolled format is a finding.
 - Model ids never appear raw; `modelShort` / `modelMeta` label them.
 - Sentence case, no exclamation marks, no "Oops". Tooltips use `InfoTooltip`
   and explain the *number*, not the feature.
