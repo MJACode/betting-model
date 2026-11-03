@@ -401,6 +401,15 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/nba_first_half_odds.py).
     "nba_first_half_total_luck_decisions",
     "nba_first_half_total_fetches",
+    # The NCAAB first-half spread model's three
+    # (scripts/ncaab_first_half_spread_card.py, data/ingestors/ncaab_first_half_odds.py):
+    # its decisions ledger, its fetch ledger (one row per Odds API call with
+    # the credits it billed), and each finished game's halves and closing
+    # consensus lines, the team term's input. Each created on demand by its
+    # writer; read by the card and the window job, never by the app.
+    "ncaab_first_half_spread_decisions",
+    "ncaab_first_half_fetches",
+    "ncaab_first_half_team_games",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.
