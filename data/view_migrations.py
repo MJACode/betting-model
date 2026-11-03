@@ -511,6 +511,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # comment exist. Does not touch picks, odds or the record. Sits before
     # the posted-stake pair.
     "add_ncaab_player_game_log_2026_11_03.sql",
+    # 2026-11-03 (mike): one unit basis everywhere. A read-only function
+    # that sums the custom-model backtest's matched picks on the published
+    # stake (published_pick_unit_profit / _risked), so a custom model shows
+    # the same units as the Record tab. Creates one function and grants it;
+    # touches no view, pick or existing function. Returns on a catalog read
+    # once it exists. plpgsql, so it may sit before the posted-stake pair.
+    "custom_model_backtest_posted_2026_11_03.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

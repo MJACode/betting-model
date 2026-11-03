@@ -54,6 +54,8 @@ from config import (
     MODEL_MIN_ODDS,
     PAPER_TRADING_START,
     PROB_ONLY_MODELS,
+    duplicate_copy_exclusion_sql,
+    record_exclusion_sql,
 )
 
 # Per-model action filter SQL fragment — inlined float constants, safe (no user input).
@@ -87,18 +89,31 @@ _ACTION_CLAUSES.append(
     f" AND edge >= {ACTION_MIN_EDGE})"
 )
 _ACTION_FILTER = "(" + " OR ".join(_ACTION_CLAUSES) + ")"
+# What a record query excludes: RECORD_EXCLUSIONS and the second copy of one
+# bet stored under two game ids. Never a threshold (CLAUDE.md §1c).
+_RECORD_EXCLUSIONS = record_exclusion_sql("picks") + duplicate_copy_exclusion_sql("picks")
+_LOG_EXCLUSIONS = record_exclusion_sql("p") + duplicate_copy_exclusion_sql("p")
 from data.db import get_connection
 from tracking.discord_notifier import (
     MAX_RISK_UNITS, fmt_stake, fmt_units, stake_for, units_for,
 )
+from tracking.published_units import unit_profit
 
 # ── Units (CLAUDE.md §4) ──────────────────────────────────────────────────────
-# Results and stakes are shown in units, never dollars. A result is
-# profit_flat / 100 (it is stored per $100 staked), shown only on a priced
-# pick, because profit_flat fabricates -110 when there is no price. A stake is
-# the published one, stake_for: 1u to win at COALESCE(decision_odds, dk_odds),
-# risk capped at 3u. The paper Kelly bankroll (recommended_bet, profit_kelly,
-# bankroll_at_pick) is dollars on a roll no published stake uses; not shown.
+# Results and stakes are shown in units, never dollars, on ONE basis: the
+# published stake (CLAUDE.md §2), stake_for: 1u to win at
+# COALESCE(decision_odds, dk_odds), risk capped at 3u, a pick with no price at
+# the bare 1u. It is what Discord #results and the app's Record tab book
+# (published_pick_unit_profit / _risked), so the totals below read the same
+# v_public_track_record views and a model shows the same units everywhere.
+# profit_flat (per $100 staked, 1u RISKED) is not shown: it is another basis,
+# and it invents -110 on a pick with no price. The paper Kelly bankroll
+# (recommended_bet, profit_kelly, bankroll_at_pick) is dollars on a roll no
+# published stake uses; not shown.
+#
+# Record queries filter on what the pick WAS (signal_type = 'BET', a result,
+# the window) and never re-cut with today's action filter (CLAUDE.md §1c).
+# Only Today's Picks and Avoid Signals, the live board, apply _ACTION_FILTER.
 
 def _price_or_none(decision_odds, dk_odds):
     """COALESCE(decision_odds, dk_odds). pandas hands a missing one over as NaN."""
@@ -108,11 +123,13 @@ def _price_or_none(decision_odds, dk_odds):
     return None
 
 
-def _units_cell(profit_flat, price) -> str:
-    """'+1.50u' from profit_flat; '–' when unsettled or unpriced."""
-    if price is None or pd.isna(price) or profit_flat is None or pd.isna(profit_flat):
+def _units_cell(result, price) -> str:
+    """The published stake's result: '+1.00u', '-2.00u' (a -200 loss), '0.00u'
+    on a push; '–' until the pick grades. No price is the bare 1u."""
+    if not isinstance(result, str) or result not in ("WIN", "LOSS", "PUSH"):
         return "–"
-    return f"{float(profit_flat) / 100:+.2f}u"
+    u = unit_profit(None if price is None or pd.isna(price) else float(price), result)
+    return "0.00u" if round(u, 2) == 0 else f"{u:+.2f}u"
 
 
 def _stake_cell(kelly_fraction, decision_odds, dk_odds) -> str:
@@ -204,18 +221,14 @@ with st.sidebar:
 
     st.divider()
 
-    # 7-day summary — floored at the record start date. Units: profit_flat / 100
-    # on priced picks only (profit_flat fabricates -110 without a price).
+    # 7-day summary from the published daily record: the same units the
+    # app's Record tab and Discord show for these days.
     week_ago = max((date.today() - timedelta(days=7)).isoformat(), PAPER_TRADING_START)
-    week_stats = query(f"""
-        SELECT
-            SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
-            SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) as losses,
-            SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
-                     THEN profit_flat END) / 100.0 as units
-        FROM picks
-        WHERE game_date >= %s AND result IS NOT NULL AND signal_type='BET'
-          AND {_ACTION_FILTER}
+    week_stats = query("""
+        SELECT SUM(wins) AS wins, SUM(losses) AS losses,
+               SUM(units) AS units, SUM(risked) AS risked
+        FROM v_public_track_record_daily
+        WHERE game_date >= %s
     """, (week_ago,))
 
     if not week_stats.empty and week_stats["wins"].iloc[0] is not None:
@@ -223,7 +236,7 @@ with st.sidebar:
         l = int(week_stats["losses"].iloc[0] or 0)
         u = week_stats["units"].iloc[0]
         units = float(u) if u is not None and pd.notna(u) else 0.0
-        st.caption(f"Last 7 days: {w}W/{l}L | {units:+.2f}u")
+        st.caption(f"Last 7 days: {w}W/{l}L | {units:+.2f}u (as published)")
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -390,22 +403,19 @@ with tab_perf:
     cutoff = max((date.today() - timedelta(days=lookback)).isoformat(), PAPER_TRADING_START)
 
     # ── Running units chart ────────────────────────────────────────────────────
-    # profit_flat / 100, priced picks only (an unpriced pick's -110 is made up).
-    units_hist = query(f"""
-        SELECT game_date,
-               SUM(profit_flat / 100.0) OVER (ORDER BY settled_at ROWS UNBOUNDED PRECEDING) as units
-        FROM picks
+    # The published daily record, summed day by day: the app's equity curve.
+    units_hist = query("""
+        SELECT game_date, SUM(units) AS units, SUM(risked) AS risked
+        FROM v_public_track_record_daily
         WHERE game_date >= %s
-          AND result IS NOT NULL
-          AND signal_type = 'BET'
-          AND COALESCE(decision_odds, dk_odds) IS NOT NULL
-          AND {_ACTION_FILTER}
-        ORDER BY settled_at
+        GROUP BY game_date
+        ORDER BY game_date
     """, (cutoff,))
 
     if not units_hist.empty:
+        units_hist["units"] = units_hist["units"].astype(float).cumsum()
         fig = px.line(units_hist, x="game_date", y="units",
-                      title="Running Units (flat 1u stake)",
+                      title="Running Units (as published: 1u to win per pick)",
                       labels={"game_date": "Date", "units": "Units"},
                       line_shape="spline")
         fig.add_hline(y=0, line_dash="dash", line_color="gray",
@@ -414,26 +424,19 @@ with tab_perf:
                            font_color="white", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
-    # ── Win rate and ROI by model ─────────────────────────────────────────────
-    model_perf = query(f"""
-        SELECT model_id, sport,
-               COUNT(*) as picks,
-               ROUND(AVG(CASE WHEN result='WIN' THEN 1.0 ELSE 0.0 END), 3) as win_rate,
-               ROUND(SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
-                              THEN profit_flat END) / 100.0, 2) as units,
-               ROUND(SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
-                              THEN profit_flat END)
-                     / NULLIF(COUNT(COALESCE(decision_odds, dk_odds)) * 100.0, 0), 3) as flat_roi,
-               ROUND(AVG(edge), 3) as avg_edge
-        FROM picks
-        WHERE game_date >= %s
-          AND result IS NOT NULL
-          AND signal_type = 'BET'
-          AND {_ACTION_FILTER}
-          AND result IN ('WIN','LOSS')
-        GROUP BY model_id, sport
-        ORDER BY flat_roi DESC
-    """, (cutoff,))
+    # ── Win rate and return by model ──────────────────────────────────────────
+    # The published per-model record since the record start, the same rows
+    # and units as the app's Models list and Record tab. Not windowed: the
+    # lookback above is for the charts.
+    model_perf = query("""
+        SELECT model_id, sport, picks, wins, losses, pushes,
+               ROUND(wins::numeric / NULLIF(wins + losses, 0), 3) AS win_rate,
+               ROUND(units, 2) AS units,
+               ROUND(risked, 2) AS risked,
+               ROUND(units / NULLIF(risked, 0), 3) AS roi
+        FROM v_public_track_record
+        ORDER BY roi DESC NULLS LAST
+    """)
 
     if not model_perf.empty:
         col_l, col_r = st.columns(2)
@@ -448,9 +451,9 @@ with tab_perf:
             st.plotly_chart(fig2, use_container_width=True)
 
         with col_r:
-            fig3 = px.bar(model_perf, x="model_id", y="flat_roi",
-                          color="sport", title="Flat-Bet ROI by Model",
-                          labels={"model_id": "", "flat_roi": "ROI (%)"},
+            fig3 = px.bar(model_perf, x="model_id", y="roi",
+                          color="sport", title="Return on Bets by Model (as published)",
+                          labels={"model_id": "", "roi": "Units won / units risked"},
                           barmode="group")
             fig3.add_hline(y=0, line_dash="dash", line_color="gray")
             fig3.update_layout(plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
@@ -465,8 +468,7 @@ with tab_perf:
         FROM picks
         WHERE game_date >= %s
           AND result IN ('WIN','LOSS')
-          AND signal_type = 'BET'
-          AND {_ACTION_FILTER}
+          AND signal_type = 'BET'{_RECORD_EXCLUSIONS}
     """, (cutoff,))
 
     if len(cal_df) >= 20:
@@ -499,8 +501,7 @@ with tab_perf:
     edge_df = query(f"""
         SELECT edge, result, sport
         FROM picks
-        WHERE game_date >= %s AND signal_type = 'BET' AND result IS NOT NULL
-          AND {_ACTION_FILTER}
+        WHERE game_date >= %s AND signal_type = 'BET' AND result IS NOT NULL{_RECORD_EXCLUSIONS}
     """, (cutoff,))
 
     if not edge_df.empty:
@@ -533,8 +534,7 @@ with tab_log:
                p.injury_flag
         FROM picks p
         WHERE p.game_date >= %s
-          AND p.signal_type = 'BET'
-          AND {_ACTION_FILTER}
+          AND p.signal_type = 'BET'{_LOG_EXCLUSIONS}
         ORDER BY p.game_date DESC, p.edge DESC
     """, (log_cutoff,))
 
@@ -560,8 +560,8 @@ with tab_log:
         # Stake and result in units (§4), beside the result.
         stake = [_stake_cell(k, d, o) for k, d, o in zip(
             log_df["kelly_fraction"], log_df["decision_odds"], log_df["dk_odds"])]
-        units = [_units_cell(pf, _price_or_none(d, o)) for pf, d, o in zip(
-            log_df["profit_flat"], log_df["decision_odds"], log_df["dk_odds"])]
+        units = [_units_cell(r, _price_or_none(d, o)) for r, d, o in zip(
+            log_df["result"], log_df["decision_odds"], log_df["dk_odds"])]
         log_df = log_df.drop(columns=["kelly_fraction", "profit_flat"])
         at = log_df.columns.get_loc("result")
         log_df.insert(at, "stake", stake)

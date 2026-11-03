@@ -1568,6 +1568,27 @@ def _validate_discord_test_post(args: dict) -> dict:
     return {"sport": sport, "message": message}
 
 
+def _discord_channel_name_ok(v: str) -> bool:
+    """A Discord channel name: optional one-emoji prefix, then a slug.
+
+    The slug is the old shape (lowercase, digits, hyphens, 2-32 characters)
+    and must contain a letter. One leading pictograph plus a hyphen is
+    allowed ('🔴-ncaab-live'). A mention, a path, a shell token, an emoji
+    in the middle, a name that is only an emoji, or a name that is only
+    digits is not.
+    """
+    import re
+    if not v or not re.fullmatch(
+        r"(?:[\U0001F300-\U0001FAFF]\uFE0F?|[\u2600-\u27BF]\uFE0F?)-"
+        r"[a-z0-9][a-z0-9-]{1,31}"
+        r"|[a-z0-9][a-z0-9-]{1,31}",
+        v,
+    ):
+        return False
+    slug = v.split("-", 1)[1] if ord(v[0]) > 127 else v
+    return any(c.isalpha() for c in slug)
+
+
 def _validate_discord_create_channel(args: dict) -> dict:
     import re
     extra = sorted(set(args) - {"name", "like", "guild", "apply"})
@@ -1576,13 +1597,15 @@ def _validate_discord_create_channel(args: dict) -> dict:
     out = {}
     # A name has a letter in it; `like` may instead be the source channel's
     # id (17-20 digits), because the server's college football channel is
-    # not called "ncaaf" (dry run, 2026-10-31).
+    # not called "ncaaf" (dry run, 2026-10-31). An emoji prefix is one
+    # pictograph plus a hyphen ('🔴-ncaab-live').
     for k in ("name", "like"):
         v = str(args.get(k) or "").strip()
-        is_name = bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", v)) and not v.isdigit()
+        is_name = _discord_channel_name_ok(v)
         is_id = k == "like" and bool(re.fullmatch(r"[0-9]{17,20}", v))
         if not (is_name or is_id):
-            raise ValueError(f"{k} must be a channel name like 'ncaab'"
+            raise ValueError(f"{k} must be a channel name like 'ncaab' or "
+                             f"'🔴-ncaab-live'"
                              f"{' or a channel id' if k == 'like' else ''}, got {v!r}")
         out[k] = v
     guild = str(args.get("guild") or "").strip()

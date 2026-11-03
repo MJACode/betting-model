@@ -15,11 +15,10 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { describeFilters } from '@/lib/customModelFilters';
 import {
   formatAmerican,
-  formatFlatUnits,
-  FLAT_UNIT_TONE_SCALE,
   formatGameTimeET,
   formatPct,
   formatPctSigned,
+  formatSigned,
   gameDayLabelET,
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
@@ -93,8 +92,10 @@ export function ModelDetailScreen() {
 
   const decided = stats.wins + stats.losses;
   // Each tile's tone comes from the number it prints, rounded as printed.
-  const roiColor = pnlColor(stats.roiFlat, 1, 100);
-  const pnlTint = pnlColor(stats.profitFlat, 2, FLAT_UNIT_TONE_SCALE);
+  // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
+  // Every scored pick the rules match is still graded; only the unit changed.
+  const roiColor = pnlColor(stats.roi, 1, 100);
+  const pnlTint = pnlColor(stats.units, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -153,14 +154,16 @@ export function ModelDetailScreen() {
             </View>
             <View style={styles.statRow}>
               <StatTile
-                label="Flat ROI"
-                value={stats.picks > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+                label="Return on bets"
+                value={stats.risked > 0 ? formatPctSigned(stats.roi) : '—'}
                 tint={roiColor}
-                caption="1u risked per bet"
+                // Until custom_model_backtest_posted answers, the figure is
+                // still the 1u-risked one, and the caption says so.
+                caption={stats.postedKnown ? 'each pick to win 1u' : '1u risked, updating'}
               />
               <StatTile
-                label="Flat units"
-                value={stats.picks > 0 ? formatFlatUnits(stats.profitFlat) : '—'}
+                label="Units"
+                value={stats.picks > 0 ? formatSigned(stats.units, 2, 'u') : '—'}
                 tint={pnlTint}
                 caption="all graded picks"
               />
@@ -221,7 +224,7 @@ export function ModelDetailScreen() {
         renderItem={({ item }) => (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={[item.pick_label, signalDisplayName(item.signal_type), modelShort(item.model_id), item.result, unitsSpeech(formatFlatUnits(item.profit_flat))].filter(Boolean).join(', ')}
+            accessibilityLabel={[item.pick_label, signalDisplayName(item.signal_type), modelShort(item.model_id), item.result, unitsSpeech(formatSigned(item.units, 2, 'u'))].filter(Boolean).join(', ')}
             style={styles.pickRow}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick_id })}
           >
@@ -241,11 +244,11 @@ export function ModelDetailScreen() {
               style={[
                 styles.pickProfit,
                 {
-                  color: pnlColor(item.profit_flat, 2, FLAT_UNIT_TONE_SCALE),
+                  color: pnlColor(item.units, 2),
                 },
               ]}
             >
-              {formatFlatUnits(item.profit_flat)}
+              {formatSigned(item.units, 2, 'u')}
             </Text>
           </Pressable>
         )}

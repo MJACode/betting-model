@@ -132,10 +132,11 @@ def test_the_day_screen_reads_the_posted_stake_and_not_the_flat_book():
     assert "Settled picks that Discord posted." in copy
     assert "Each pick risks the amount needed to win 1 unit." in copy
     assert "1.1 units to win 1." in copy
-    assert "The Models tab risks a flat 1u on every pick" in copy
+    assert "the same stake the Models tab uses" in copy
+    assert "won’t match" not in copy
     assert "$100" not in copy
     assert "one\n              unit is one flat bet" not in modal
-    assert "Models risk a flat 1u on every pick" in hero
+    assert "on the Models tab" in hero
     assert "Yesterday and Models use a flat" not in hero
 
 

@@ -80,7 +80,7 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { reachFrame } from '@/lib/a11y';
+import { reachFrame, unitsSpeech } from '@/lib/a11y';
 import { ErrorBanner } from '@/components/ErrorState';
 import { MatchupStrengthBar } from '@/components/MatchupStrengthBar';
 import { friendlyCause } from '@/lib/errors';
@@ -1791,8 +1791,8 @@ function PickRecordCard({
         tooltip={{
           title: 'Posted bets only',
           body:
-            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units: one unit is one ` +
-            'flat bet. A pick that carried no price counts in the record and not the units.',
+            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units at the stake ` +
+            'Discord posts: each pick to win 1 unit, never more than 3 units laid. A pick that carried no price counts at 1 unit.',
         }}
       />
       {loading && record.settled === 0 ? (
@@ -1813,9 +1813,15 @@ function PickRecordCard({
         <View style={styles.card}>
           <View style={styles.recordTop}>
             <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
-            <Text style={styles.recordCount}>
+            <Text
+              style={styles.recordCount}
+              accessibilityLabel={unitsSpeech(
+                `${record.settled} posted ${record.settled === 1 ? 'bet' : 'bets'}` +
+                  (record.unpriced > 0 ? `, ${record.unpriced} unpriced, staked at 1u` : ''),
+              )}
+            >
               {record.settled} posted {record.settled === 1 ? 'bet' : 'bets'}
-              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
+              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced, staked at 1u` : ''}
             </Text>
             {record.ledgerUnread ? (
               <Text style={styles.muted}>
