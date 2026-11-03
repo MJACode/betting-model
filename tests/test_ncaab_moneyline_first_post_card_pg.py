@@ -301,5 +301,5 @@ def test_the_capture_writes_the_fill_check_on_its_next_poll(db):
     assert led[(IONA, "betrivers")][-1] == "book_not_listed"
     assert fill.record_fill(db, poll, later + timedelta(minutes=5)) == 0      # once per bet
     (p1, p2) = db.execute("SELECT fill_p1, fill_p2 FROM ncaab_moneyline_first_post_decisions "
-                          "WHERE game_id = %s", (ZAGS,)).fetchone()
+                          "WHERE game_id = %s AND bookmaker = 'betrivers'", (ZAGS,)).fetchone()
     assert (p1, p2) == (float(db.cheap[0]) + 15, float(db.cheap[1]) - 15)

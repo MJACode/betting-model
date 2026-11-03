@@ -2107,7 +2107,7 @@ MODEL_MIN_ODDS: dict = {
     # The card removes every side shorter than -200 BEFORE it picks
     # (models/ncaab_moneyline_first_post.py), so this is the second guard,
     # pinned so a Railway DEFAULT_MIN_ODDS override cannot move it. It laid
-    # -200 to +400 on its 353 replayed bets (median -164).
+    # -200 to +400 on its 353 replayed bets (median -161).
     "ncaab_moneyline_first_post": -200,
     # NCAAB first-half spread (2026-11-02, mike): it laid -140 to +125 on its
     # 1,253 graded bets, so -200 admits prices it was never graded at. Pinned
@@ -2406,11 +2406,11 @@ MODEL_OWN_EV_FLOOR: dict = {
     # NCAAB moneylines at a book's first post (2026-11-03, mike). The cut is
     # the edge (0.015, in MODEL_EDGE_THRESHOLDS), so this floor sits just
     # under the smallest EV that cut admitted in the replay of 2021-2026:
-    # P(side wins) x decimal - 1 = +__MIN_EV__ (353 bets; median +__MED_EV__). EV is
+    # P(side wins) x decimal - 1 = +0.0226 (353 bets; median +0.0359). EV is
     # edge x decimal and the shortest price it may lay is -200 (decimal 1.5),
     # so an edge above 0.015 is EV above 0.0225 at every price it can bet:
     # this floor never removes a bet the cut takes.
-    "ncaab_moneyline_first_post": 0.0225,
+    "ncaab_moneyline_first_post": 0.022,
     # NCAAB first-half spread (2026-11-02, mike). The cut is the edge (0.02, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted in the replay of 2023-24..2025-26: P(cover | no push) x
