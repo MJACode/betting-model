@@ -118,6 +118,51 @@ nothing is struck): `nba_moneyline`, `nba_over_under`, `nba_spread`,
 Their feature engines (`features/nba_feature_engine.py`,
 `features/nba_prop_feature_engine.py`), artifacts and scorer loop are gone.
 
+## No 10-game wait on the shooting-luck totals (mike, 2026-11-02)
+
+mike: *"Yes, remove it"*, after the same wait came off the NCAAB totals model
+(*"we do not need to wait 10 games, I never approved that"*). `nba_total_luck`,
+`nba_team_total_luck` and `nba_first_half_total_luck` now price a game once each
+team has played one game this season (`models/nba_total_luck.LIVE_MIN_GAMES`). A
+team with no game has no number to compute, so about 16 games a season are still
+declined `early_season`, on opening night and just after.
+
+The labs and the replays keep the 10-game population (`MIN_GAMES`, passed to
+`decide` by each `scripts/nba_*_total_luck_replay.py`), so they still prove the
+live code against what the lab graded.
+
+**The replay** (2026-11-02): each model's live `decide` on the research cache of
+2026-10-29, at the lab's own decision times, graded by the harness that graded
+the evidence, bootstrap by day. "Kept out" is the games the wait used to skip.
+
+| Model | Seasons | Games | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|---|---|
+| `nba_total_luck` | 2021-22..2025-26 | **no wait (live)** | **719** | **+55.25** | **+7.07%** | **+0.4..+13.7** |
+| | | 10-game wait | 508 | +55.56 | +10.05% | +1.9..+18.3 |
+| | | kept out | 211 | -0.31 | -0.14% | -12.3..+11.1 |
+| `nba_team_total_luck` | 2023-24..2025-26 | **no wait (live)** | **429** | **+68.73** | **+14.33%** | **+4.8..+23.3** |
+| | | 10-game wait | 349 | +64.72 | +16.58% | +6.4..+26.4 |
+| | | kept out | 80 | +4.01 | +4.50% | -18.4..+25.1 |
+| `nba_first_half_total_luck` | 2023-24..2025-26 | **no wait (live)** | **745** | **+51.44** | **+6.38%** | **-0.5..+13.4** |
+| | | 10-game wait | 595 | +51.49 | +8.01% | +0.4..+15.4 |
+| | | kept out | 150 | -0.06 | -0.03% | -14.6..+14.0 |
+
+**What it means.** The kept-out games add volume at about break-even: units are
+flat to slightly up, and ROI falls. They are not evidence of an edge. No band of
+games played is consistently better; each is under 60 bets per model and the
+intervals are wide. The team-total model's kept-out count is thin because the
+cache has almost no October 2023 team-total prices (3 bets that season).
+
+**Sizing runs ahead of the evidence on these bets.** `model_probability` adds each
+model's uplift, measured on games with both teams on 10+. The full-game kept-out
+bets won 109 of 211 (0.517) where that uplift assumes about 0.57, so tenth-Kelly
+stakes them as if they had the later games' edge.
+
+**The earlier research said wait.** The fifth search (`docs/nba_models_2026.md`
+section 9.4, F8) tested an early start with last season blended in, and closed it
+on too few bets to tell. This replay is the plain season-to-date number the live
+models use, not that blend.
+
 ## What the research found (one line each; numbers in `docs/nba_models_2026.md` §4)
 
 - **Schedule is already in the line.** Back-to-backs, road trips, travel, time
@@ -303,6 +348,7 @@ a season.
 | `games` | scores, tip-off (`commence_time`), OT, neutral site | `nba_results_ingestor` (ESPN finals) / `nba_schedule_ingestor` | worker, every refresh pass before settle / this machine |
 | `nba_player_game_log` | every player's box line | `nba_results_ingestor` (ESPN) for 2026-27; nba_api for 2018-19 → 2025-26 | worker |
 | `nba_player_dnp` | ESPN did-not-play reasons | `nba_results_ingestor` | worker |
+| `nba_team_stats` | season-to-date team ratings (Off/Def/Net Rtg, pace, eFG%, TOV%) for the app's Teams board and team page; no live model reads it | `nba_team_stats_from_box` (summed `nba_player_game_log` + `games` finals) for 2026-27, from 2026-11-03; `nba_stats_ingestor` (stats.nba.com) before that, and its row wins a shared key | worker, the 6am run (`nba-team-stats-box`, before `refresh-team-board`) / this machine. Box-built ratings run ~0.8 high (no team turnovers in player boxes); Net Rtg correlates 0.9999 with stats.nba.com over 2025-26 |
 | `nba_schedule` | NBA.com schedule: arenas, neutral sites, NBA Cup, national TV, OT; every game type | `nba_schedule_ingestor` (the season's load) / `nba_schedule_refresh` (ESPN, daily) | this machine (stats.nba.com blocks datacenter IPs) / worker, the 6am run |
 | `nba_player_game_adv` | starters, exact minutes, +/-, fouls, usage, possessions, DNP reasons | `nba_box_enrich` (sportsdataverse bulk files + stats.nba.com) | this machine, 2018-19 → 2025-26 |
 | `nba_game_inactives`, `nba_game_officials` | inactive lists, referee crews | `nba_box_enrich` | this machine |

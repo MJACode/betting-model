@@ -15,7 +15,7 @@ first of them where DraftKings has a total standing (its newest pre-game row
 stored within the last DK_MAX_AGE_MIN minutes), the game is decided, bet or
 not, and never looked at again.
 
-AS OF THE QUOTE. The ratings, the 10-game count and the shooting and style
+AS OF THE QUOTE. The ratings, the games-played count and the shooting and style
 inputs use only finals that had ENDED (tip + 2.5 h) at or before DraftKings'
 own time on that row, rounded down to the hour, as the evidence did.
 
@@ -36,7 +36,11 @@ EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_total_decisions in the same transaction as the game's bet, under the
 model's transaction-scoped advisory lock. A game with a decision row, or with
 any ncaab_total_blend BET, is never decided again: a later hour, a moved line
-or a better price writes nothing.
+or a better price writes nothing. The one exception is a row left by the
+10-game wait this model used to have (mike removed it 2026-11-02). That row
+never looked at the price, so it is not a decision: a game with one that has
+not tipped is decided now, at DraftKings' standing total, and the row is
+replaced.
 
 BET ROWS ONLY in picks, at DraftKings' own price on DraftKings' own number:
 the evidence priced DraftKings and nothing else, so the line is not shopped.
@@ -45,8 +49,7 @@ platform's ("Duke vs Kansas Over 145.5"), checked against the side and line
 before it is written (tracking/pick_integrity.pick_problems).
 
 The per-run diagnostic line counts every slate game by why it did or did not
-bet. Under the 10-game rule the model has never bet in November, so a card of
-below_10_games and no bets until about December is the normal case.
+bet.
 
     python -m scripts.ncaab_total_card              # print the card, write nothing
     python -m scripts.ncaab_total_card --publish    # write new decisions and bets
@@ -117,10 +120,15 @@ _INSERT_DECISION = (
     "INSERT INTO ncaab_total_decisions (game_id, check_hour, quote_at, cutoff, total_line, "
     "model_total, edge, side, n_bets, detail) VALUES (%(game_id)s, %(check_hour)s, "
     "%(quote_at)s, %(cutoff)s, %(total_line)s, %(model_total)s, %(edge)s, %(side)s, "
-    "%(n_bets)s, %(detail)s) ON CONFLICT (game_id) DO NOTHING RETURNING game_id")
+    "%(n_bets)s, %(detail)s) ON CONFLICT (game_id) DO UPDATE SET decided_at = NOW(), "
+    "check_hour = EXCLUDED.check_hour, quote_at = EXCLUDED.quote_at, cutoff = EXCLUDED.cutoff, "
+    "total_line = EXCLUDED.total_line, model_total = EXCLUDED.model_total, edge = EXCLUDED.edge, "
+    "side = EXCLUDED.side, n_bets = EXCLUDED.n_bets, detail = EXCLUDED.detail "
+    "WHERE split_part(ncaab_total_decisions.detail, ':', 1) = 'below_10_games' "
+    "RETURNING game_id")
 
 # The decisions that end a game's wait; the rest wait for its next hour.
-FINAL = ("bets", "below_cut", "below_10_games")
+FINAL = ("bets", "below_cut")
 
 
 def ensure_decisions_table(conn) -> None:
@@ -141,13 +149,15 @@ def ledger_exists(conn) -> bool:
 
 def decided_games(conn, game_ids: list[str]) -> set[str]:
     """Games with a decision row, or with any ncaab_total_blend BET whatever
-    became of it (settled, VOIDed): none is decided again."""
+    became of it (settled, VOIDed): none is decided again. A row left by the
+    old 10-game wait does not count (the module docstring)."""
     if not game_ids:
         return set()
     done: set[str] = set()
     if ledger_exists(conn):
         done = {r[0] for r in conn.execute(
-            "SELECT game_id FROM ncaab_total_decisions WHERE game_id = ANY(%s)",
+            "SELECT game_id FROM ncaab_total_decisions WHERE game_id = ANY(%s) "
+            "AND split_part(detail, ':', 1) <> 'below_10_games'",
             (list(game_ids),)).fetchall()}
     bet = {r[0] for r in conn.execute("""
         SELECT DISTINCT game_id FROM picks

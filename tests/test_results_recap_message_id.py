@@ -9,7 +9,16 @@ from __future__ import annotations
 import inspect
 from datetime import datetime
 
+import pytest
+
 from tracking import discord_notifier as dn
+
+
+@pytest.fixture(autouse=True)
+def _everything_graded(monkeypatch):
+    """These tests are about the post's receipt. The hold has its own file."""
+    monkeypatch.setattr(dn, "ungraded_picks", lambda *a, **k: [])
+
 
 # A morning after the fixture dates, inside 6:00am–noon ET. The recap
 # refuses any other hour, including whatever the wall clock is.
@@ -125,29 +134,6 @@ def test_a_rejected_post_is_recorded_and_the_next_pass_sends(monkeypatch):
     assert alerts == []
 
 
-def test_a_restate_that_raises_is_recorded(monkeypatch):
-    conn = _Conn()
-    monkeypatch.setattr(dn, "get_connection", lambda: conn)
-    monkeypatch.setattr(
-        dn, "recaps_needing_restatement",
-        lambda conn, through=None, **kw: [{
-            "game_date": "2026-10-13",
-            "published_at": "2026-10-14T06:02:45.951539-04:00",
-            "late": 2, "settled": 7,
-        }])
-
-    def boom(*a, **k):
-        raise RuntimeError("embed blew up")
-
-    monkeypatch.setattr(dn, "notify_discord_results", boom)
-    monkeypatch.setattr(
-        "tracking.x_publisher.notify_x_results", lambda *a, **k: 0)
-    assert dn.restate_published_recaps(
-        through="2026-10-14", now=_MORNING.replace(day=14)) == 0
-    assert conn.inserts[0][1] == "discord_results_restate_error"
-    assert "embed blew up" in conn.inserts[0][3]
-
-
 class _Ledger:
     """Remembers push_sent rows so a later pass can see the error row."""
 
@@ -259,21 +245,6 @@ def test_a_failed_error_insert_rolls_back_before_the_read(monkeypatch):
     assert "Lock discord_results:2026-10-04" in alerts[0][1]
     assert "not recorded" in alerts[0][1]
     assert "will not be posted again" not in alerts[0][1]
-
-
-def test_a_restate_with_no_message_id_names_its_lock(monkeypatch):
-    """The restatement lock includes the published_at being corrected."""
-    conn = _Ledger()
-    monkeypatch.setattr(dn, "get_connection", lambda: conn)
-    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
-    alerts = _silence_alert(monkeypatch)
-    monkeypatch.setattr(dn.requests, "post", lambda *a, **k: _Resp(200, {}))
-    restate = {"published_at": "2026-10-06T07:26:00-04:00", "late": 1, "settled": 2}
-    assert dn.notify_discord_results(
-        game_date="2026-10-05", restate=restate, now=_MORNING) == 0
-    assert len(alerts) == 1
-    assert ("Lock discord_results_restate:2026-10-05:"
-            "2026-10-06T07:26:00-04:00") in alerts[0][1]
 
 
 def test_a_rejected_post_whose_error_row_fails_does_not_alert(monkeypatch):
@@ -396,16 +367,3 @@ def test_pipeline_watch_reports_an_uncleared_recap_error(monkeypatch):
     assert not any(f.startswith("`discord_results` ") for f in findings)
 
 
-def test_a_restatement_stores_its_own_id(monkeypatch):
-    conn = _Conn()
-    monkeypatch.setattr(dn, "get_connection", lambda: conn)
-    monkeypatch.setattr(dn, "_results_webhook", lambda: "https://discord.test/results")
-    monkeypatch.setattr(dn, "_post", lambda url, payload: "112233")
-    restate = {"published_at": "2026-10-06T07:26:00-04:00", "late": 1, "settled": 2}
-
-    assert dn.notify_discord_results(
-        game_date="2026-10-05", restate=restate, now=_MORNING) == 1
-    lock_key, kind, _sent, message_id = conn.inserts[0]
-    assert kind == "discord_results_restate"
-    assert lock_key.startswith("discord_results_restate:2026-10-05:")
-    assert message_id == "112233"

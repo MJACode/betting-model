@@ -564,8 +564,7 @@ def test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name():
                                 nhl_derivative_odds_history)
     for src in (feed.SOURCE, nba_odds_history.DERIV_SOURCE, nba_odds_history.ALT_SOURCE,
                 nhl_derivative_odds_history.SOURCE,
-                ncaab_odds_history.NCAAB_DERIV_CLOSE_SOURCE,
-                ncaab_odds_history.NCAAB_DERIV_OPEN_SOURCE):
+                *ncaab_odds_history.DERIV_SOURCES.values()):    # close, open, 15z, 18z, tip60
         assert src in prune_odds.PROTECTED_SOURCES, src
         params: dict = {}
         prune_odds._unprotected(params, table="odds")

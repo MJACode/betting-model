@@ -129,14 +129,28 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
     # function's comment); the second shipped with
     # nba_total_luck, which may reach production before nba_team_total_luck; the
     # third with nba_team_total_luck, which production holds before
-    # nba_first_half_total_luck ships.
+    # nba_first_half_total_luck ships; the fourth with nba_first_half_total_luck,
+    # which production held on 2026-11-02 (read-only query of the comment, and
+    # clv_game_market('ncaab_spread_market') returned 'h2h') before
+    # ncaab_spread_market ships; the fifth with ncaab_spread_market, which
+    # production holds once that model merges, before ncaab_moneyline_own_spread
+    # ships.
     stamped_before = {
         "clv-standard-v2-power-80-0.05-12",
         "clv-standard-v2-power-80-0.05-12-nba-total-luck",
         "clv-standard-v2-power-80-0.05-12-nba-team-total-luck",
+        "clv-standard-v2-power-80-0.05-12-nba-first-half-total-luck",
+        # ncaab_spread_market's (#1127), which production may hold before this
+        # change: ncaab_first_half_spread changes the function again (its
+        # market and the close-only first-half spread), so a stamp of its own.
+        "clv-standard-v2-power-80-0.05-12-ncaab-spread-market",
+        # ncaab_first_half_spread's (#1128), which production holds once that
+        # model merges, before ncaab_moneyline_own_spread changes the function
+        # again (it names the moneyline model as h2h), so a stamp of its own.
+        "clv-standard-v2-power-80-0.05-12-ncaab-spread-and-first-half",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (nba_first_half_total_luck) after production may have "
+        "clv_game_market changed (ncaab_moneyline_own_spread) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 

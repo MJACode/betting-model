@@ -1438,8 +1438,11 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
     """
     if not commence_time:
         return None
+    # A first-half spread is the same shape (data/ingestors/ncaab_first_half_odds.py):
+    # its last pre-tip row is the decision fetch, and no close is taken, so
+    # it is unmeasured rather than graded 0.0 against itself.
     snapshot_filter = ("snapshot_type = 'close'"
-                       if market.startswith("team_totals") or market == "totals_h1"
+                       if market.startswith("team_totals") or market in ("totals_h1", "spreads_h1")
                        else "snapshot_type != 'in_play'")
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
@@ -2351,7 +2354,10 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "under":
             won = (team_pts < total_line)
 
-    elif market in ("spreads", "spreads_1st_5_innings"):
+    elif market in ("spreads", "spreads_1st_5_innings", "spreads_h1"):
+        # spreads_h1: the caller passes the FIRST HALF's points as the two
+        # scores (_ncaab_first_half_points); a level half on a whole number is a
+        # push, as books settle it. Never reach this with the full-game final.
         if spread_home is None:
             return "NO_ACTION", 0.0, 0.0
         covered_margin = margin + spread_home
@@ -2408,6 +2414,22 @@ _RULE_MODEL_MARKETS = {
     # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
     # total; the stored final includes overtime, as books settle it.
     "ncaab_total_blend": "totals",
+    # NCAAB full-game spreads (models/ncaab_spread_market.py). scored_line is
+    # the bet book's HOME number (section 4); the stored final includes
+    # overtime, as books settle it.
+    "ncaab_spread_market": "spreads",
+    # NCAAB full-game moneylines (models/ncaab_moneyline_own_spread.py). The
+    # id has 'spread' in it but the pick is a MONEYLINE: it settles on
+    # games.home_win (overtime included, as books settle it), scored_line
+    # NULL. Named here so every SQL mapping must name it too
+    # (tests/test_rule_model_markets_everywhere.py), since the ones that read
+    # '%spread%' would otherwise send it to the spreads rows.
+    "ncaab_moneyline_own_spread": "h2h",
+    # NCAAB first-half spread (models/ncaab_first_half_spread.py). scored_line
+    # is the first half's HOME number; it settles on period 1 of
+    # ncaab_period_scores (_ncaab_first_half_points), no overtime. NEVER
+    # "spreads": that grades the full-game margin.
+    "ncaab_first_half_spread": "spreads_h1",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -2513,6 +2535,45 @@ def _first_half_points(conn: DBConnection, game_id: str,
                        f"({away_score}-{home_score}) or a period is missing: "
                        f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
     return points
+
+
+def _ncaab_first_half_points(conn: DBConnection, game_id: str,
+                             home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in an NCAAB first half (period 1 of
+    ncaab_period_scores), or None when the game's periods cannot be trusted:
+    they must be numbered 1..n with n >= 2 (two halves, then any overtimes) and
+    add up to the stored final. Then the pick stays PENDING: no result, never
+    the full-game score, never a made-up one. The model's history was graded on
+    exactly this rule (models/ncaab_first_half_spread.valid_halves)."""
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM ncaab_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    per = {}
+    for p, h, a in rows:
+        per[int(p)] = (h, a)
+    n = max(per)
+    if (n < 2 or set(per) != set(range(1, n + 1)) or len(rows) != n
+            or any(v is None for pts in per.values() for v in pts)
+            or home_score is None or away_score is None
+            or sum(float(v[0]) for v in per.values()) != float(home_score)
+            or sum(float(v[1]) for v in per.values()) != float(away_score)):
+        logger.warning(f"{game_id}: its NCAAB period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
+        return None
+    return int(per[1][0]), int(per[1][1])
+
+
+def first_half_points(conn: DBConnection, game_id: str,
+                      home_score, away_score) -> tuple[int, int] | None:
+    """A first half's (home, away) points for any sport that has one stored:
+    an NCAAB game's period 1 (ncaab_period_scores, two halves), an NBA game's
+    Q1 + Q2 (nba_period_scores). None keeps the pick pending."""
+    if str(game_id).startswith("NCAAB_"):
+        return _ncaab_first_half_points(conn, game_id, home_score, away_score)
+    return _first_half_points(conn, game_id, home_score, away_score)
 
 
 def _game_settle_window_days(conn: DBConnection, game_date: str) -> int:
@@ -2801,8 +2862,8 @@ def _settle_game_picks(
             settle_home = home_score_f5
             settle_away = away_score_f5
             settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
-        elif market == "totals_h1":
-            first_half = _first_half_points(conn, game_id, home_score, away_score)
+        elif market in ("totals_h1", "spreads_h1"):
+            first_half = first_half_points(conn, game_id, home_score, away_score)
             if first_half is None:
                 continue  # stays pending: no period rows, no result
             settle_home, settle_away = first_half

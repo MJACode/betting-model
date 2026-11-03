@@ -349,7 +349,7 @@ def test_the_fallback_rollback_is_only_safe_because_callers_read_first():
     body = src.split("def notify_discord_results", 1)[1].split("\ndef ", 1)[0]
     assert body.index("_settled_rows(") < body.index("INSERT INTO push_sent")
     assert body.index("_settled_rows_since(") < body.index("INSERT INTO push_sent")
-    for name in ("recaps_needing_restatement", "post_missed_recap", "_restate_x_if_behind"):
+    for name in ("recaps_gone_short", "post_missed_recap"):
         other = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
         assert "INSERT" not in other
 

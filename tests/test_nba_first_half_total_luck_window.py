@@ -384,7 +384,10 @@ def test_it_rides_the_nba_totals_window_job_and_adds_no_job(monkeypatch):
     from tests.test_nba_prop_window import _jobs
     from tracking import job_heartbeat
     jobs = _jobs(monkeypatch)
-    assert not [j for j in jobs if "first_half" in j], "a job of its own"
+    # NBA's first half only: the NCAAB first-half spread model has its own
+    # every-minute job (ncaab_first_half_window), another sport's slate and
+    # failure domain, not this model's.
+    assert not [j for j in jobs if "first_half" in j and not j.startswith("ncaab_")],         "a job of its own"
     src = inspect.getsource(scheduler.run_nba_total_luck_window)
     assert "scripts.nba_first_half_total_luck_window" in src
     assert job_heartbeat.MAX_SILENCE["nba_total_luck_window"] == 20

@@ -66,7 +66,7 @@ def _decide(art, quotes, gap, monkeypatch, lead=55.0, rows=None, **kw):
     fetch = TIP - timedelta(minutes=lead)
     games = t.assign(tip=pd.Timestamp(TIP))
     q = fh.quote_frame(_rows(GID, fetch, quotes) if rows is None else rows, games)
-    monkeypatch.setattr(fh, "f4_projections", lambda targets, tb: t.assign(gap_total=gap))
+    monkeypatch.setattr(fh, "f4_projections", lambda targets, tb, **_: t.assign(gap_total=gap))
     _no_missing(monkeypatch)
     times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
     empty = pd.DataFrame(columns=["game_id", "team", *fh.BOX_COLS])
@@ -88,7 +88,7 @@ def test_the_ratings_are_the_full_game_model_s_own():
     for name in ("team_box", "f4_projections", "side_strength", "missing_inputs",
                  "scheduled_games", "regular_season", "lead_minutes"):
         assert getattr(fh, name) is getattr(tl, name), f"nba_first_half_total_luck has its own {name}"
-    assert (fh.MIN_GAMES, fh.BOX_COLS) == (tl.MIN_GAMES, tl.BOX_COLS)
+    assert (fh.LIVE_MIN_GAMES, fh.BOX_COLS) == (tl.LIVE_MIN_GAMES, tl.BOX_COLS)
 
 
 def test_the_decision_window_is_the_team_total_model_s():

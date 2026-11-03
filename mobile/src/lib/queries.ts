@@ -984,6 +984,7 @@ const MAIN_GAME_ODDS_MARKETS = [
   'team_totals_home',
   'team_totals_away',
   'totals_h1',
+  'spreads_h1',
 ] as const;
 
 /**
@@ -2939,9 +2940,12 @@ export async function fetchTeamStats(
   // current label has no rows at all. Measured 2026-09-09 —
   // team_stats_board('NFL', 2026) returned 0 and ('NFL', 2025) returned 32,
   // which is the difference between a graded board and a column of dashes.
+  // Every other league falls back one label too (2026-11-03): NBA and NHL in
+  // the days before their opener, MLB and WNBA over the winter. The season
+  // that answered comes back with the rows, so the header still names it.
   const seasons = sport === 'NFL' || sport === 'NCAAF'
     ? footballSeasonCandidates(season)
-    : [season];
+    : [season, season - 1];
   for (const s of seasons) {
     const { data, error } = await supabase.rpc('team_stats_board', {
       p_sport: sport,

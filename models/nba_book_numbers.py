@@ -108,13 +108,20 @@ def visible_numbers(q: pd.DataFrame, times: pd.DataFrame, books=None) -> pd.Data
 # (data/migrations/latest_line_state_tables.sql: *_alternate).
 ALTERNATE_MARKET = {"team_totals_home": "team_totals_home_alternate",
                     "team_totals_away": "team_totals_away_alternate",
-                    "totals_h1": "totals_h1_alternate"}
+                    "totals_h1": "totals_h1_alternate",
+                    # The NCAAB first-half spread (data/ingestors/ncaab_first_half_odds.py):
+                    # its number is spread_home and its two prices home / away.
+                    "spreads_h1": "spreads_h1_alternate"}
+# The markets whose number is the HOME spread and whose prices are home / away,
+# not total_line and over / under.
+_SPREAD_MARKETS = frozenset({"spreads_h1"})
 
 
 def split_main_rungs(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     """One fetch's per-event total rows, team totals or the first half
     (odds-table dicts: game_id, bookmaker, market, total_line, over_price,
-    under_price, ...) -> (main, alternates).
+    under_price, ...; for spreads_h1 spread_home, home_price, away_price)
+    -> (main, alternates).
 
     For each (game, book, market) the main rung (main_rungs: coherent first,
     closest to even, ties to the lower number) keeps its market name; every
@@ -141,15 +148,21 @@ def split_main_rungs(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             return np.nan
         return f if np.isfinite(f) else np.nan
 
+    def cols(r):
+        if r["market"] in _SPREAD_MARKETS:
+            return r.get("spread_home"), r.get("home_price"), r.get("away_price")
+        return r.get("total_line"), r.get("over_price"), r.get("under_price")
+
+    picked = [cols(r) for r in rows]
     q = pd.DataFrame({
         "_row": range(len(rows)),
         "game_id": [r.get("game_id") for r in rows],
         "market": [r["market"] for r in rows],
         "book": [r.get("bookmaker") for r in rows],
         "fetch_at": 0,
-        "line": [num(r.get("total_line")) for r in rows],
-        "price_a": [num(r.get("over_price")) for r in rows],
-        "price_b": [num(r.get("under_price")) for r in rows],
+        "line": [num(c[0]) for c in picked],
+        "price_a": [num(c[1]) for c in picked],
+        "price_b": [num(c[2]) for c in picked],
     })
     q = q[q["price_a"].notna() & q["price_b"].notna()]
     s = H.imp(q["price_a"]) + H.imp(q["price_b"])

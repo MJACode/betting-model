@@ -63,7 +63,7 @@ import {
 import { stalePriceNote } from '@/lib/heroPriceText';
 import { teamScoreUnit } from '@/lib/teamForm';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { myBooksView, NOT_AT_MY_BOOKS, RECORD_AT_BEST_BOOK_NOTE } from '@/lib/myBooks';
+import { myBooksView, NOT_AT_MY_BOOKS, recordNoteFor } from '@/lib/myBooks';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
@@ -269,7 +269,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
       : myView?.status === 'none'
         ? `${NOT_AT_MY_BOOKS}. Change your books in Settings.`
         : null;
-  const myBooksRecordNote = myView?.status === 'mine' ? RECORD_AT_BEST_BOOK_NOTE : null;
+  const myBooksRecordNote = myView?.status === 'mine' ? recordNoteFor(pick.model_id) : null;
   const inSlip = slip.has(slipKeyForPick(pick));
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
