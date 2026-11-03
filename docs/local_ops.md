@@ -284,8 +284,8 @@ in the same read that returns them).
   row count is compared with Supabase's, which finds rows the odds prune deleted.
   The fingerprints of the newest 40 chunks (where odds get marked in play) and of
   the oldest-checked seventh of the rest are compared too, which finds edited
-  rows. A chunk that differs is copied again. Every chunk's fingerprint is
-  re-checked about once a week.
+  rows. A chunk that differs is copied again. Run daily, every chunk's
+  fingerprint is re-checked about once a week.
 - None of those big tables has an `updated_at` column, so the fingerprint is how
   an edit is found.
 
