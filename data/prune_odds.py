@@ -283,7 +283,12 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # (game, market, book), which the keepers would thin.
                      "odds_api_alt_game_lines_live",
                      "odds_api_ncaab_derivative_close",
-                     "odds_api_ncaab_derivative_open")
+                     "odds_api_ncaab_derivative_open",
+                     # The same purchase at its three game-day times
+                     # (2026-11-02): 15:00Z, 18:00Z and tip minus 60 minutes.
+                     "odds_api_ncaab_derivative_15z",
+                     "odds_api_ncaab_derivative_18z",
+                     "odds_api_ncaab_derivative_tip60")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
