@@ -503,6 +503,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once both exist. Does not touch picks,
     # odds or the record. Sits before the posted-stake pair.
     "nba_wnba_game_log_season_index_2026_10_31.sql",
+    # 2026-11-03 (Matt): men's college basketball on the Stats tab. The
+    # per-player game log written by data/ingestors/ncaab_player_box.py
+    # (RLS on, SELECT policy for the app), its season-totals view and the
+    # four Stats RPCs, the WNBA set with the table swapped. Returns on a
+    # catalog read once the table, the policy and the view's marker
+    # comment exist. Does not touch picks, odds or the record. Sits before
+    # the posted-stake pair.
+    "add_ncaab_player_game_log_2026_11_03.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

@@ -1269,9 +1269,23 @@ stored row names its endpoint.
 - **When a game leaves the board.** Three hours after the tip if ESPN's final
   has not landed by then (`format.GAME_DURATION_HOURS`); it stops reading
   LIVE on the clock alone after four (`BLIND_LIVE_WINDOW_MS`).
-- **Not in the app yet.** NCAAB player and team stats (the Stats tab shows its
-  "No player leaderboard" state, and every Stats read returns nothing for
-  NCAAB before it asks the server). School abbreviations: cards show the
+- **Stats tab, Players board (Matt, 2026-11-03).** Men's college basketball
+  player stats: Points, Rebounds, Assists, 3PM, PRA, Steals, Blocks, Minutes,
+  with Hit Rates (H2H, L3, L5, L10, season) and Averages, the WNBA set.
+  Source `ncaab_player_game_log`, one row per player per game from ESPN's
+  game summary `boxscore.players` (`data/ingestors/ncaab_player_box.py`). The
+  team box feed hands over the summary it already fetched, so a new final
+  costs no second call; the `ncaab-box` step's catch-up and the
+  `ncaab-player-box-2026-2027` job (kind `players`) fetch games with no
+  player rows. A team whose players' points do not sum to the stored final is
+  refused (`ncaab_player_box_misses`). Reads: `v_player_season_totals_ncaab`,
+  `player_window_totals_ncaab`, `player_recent_games_ncaab`,
+  `player_season_stat_values_ncaab`, `player_h2h_stat_values_ncaab`
+  (`add_ncaab_player_game_log_2026_11_03.sql`). No player-prop line column:
+  Matt, 2026-11-03, "Don't include those". Season label is the ending year
+  (`boardSeasonET`). Not built yet: the Teams board, the same-position card
+  on the player page (no college position source), team names abbreviated.
+- **Not in the app yet.** NCAAB team stats. School abbreviations: cards show the
   school name, because the app cannot read `ncaab_teams` (anon has no SELECT
   on it, RLS is on and it has no policy; read only, 2026-10-30). Opening it is
   a worker-side change as well as an app one: the code that creates the table

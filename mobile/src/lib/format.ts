@@ -141,7 +141,9 @@ export function yearET(): number {
  */
 export function boardSeasonET(sport: string): number {
   const year = yearET();
-  if (sport === 'NBA') return monthET() >= 10 ? year + 1 : year;
+  // NCAAB labels by the ending year too (ncaab_player_game_log.season): the
+  // 2026-27 season is 2027 from its November tip-off.
+  if (sport === 'NBA' || sport === 'NCAAB') return monthET() >= 10 ? year + 1 : year;
   return year;
 }
 

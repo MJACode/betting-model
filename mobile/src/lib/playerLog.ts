@@ -25,9 +25,9 @@ import {
 import type { PlayerType } from '@/types';
 
 /** Sports with a per-game player log — the ones that can show player detail. */
-export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF';
+export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB';
 
-const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF']);
+const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB']);
 
 /** The two football leagues share a log shape (and a weekly cadence). */
 const FOOTBALL = new Set<PlayerLogSport>(['NFL', 'NCAAF']);
@@ -99,6 +99,9 @@ export const LOG_TABLE: Record<PlayerLogSport, string> = {
   NBA: 'nba_player_game_log',
   NFL: 'nfl_player_game_log',
   NCAAF: 'ncaaf_player_game_log',
+  // Men's college basketball (add_ncaab_player_game_log_2026_11_03.sql):
+  // WNBA's column names, so the basketball column list reads it unchanged.
+  NCAAB: 'ncaab_player_game_log',
 };
 
 export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
@@ -107,6 +110,7 @@ export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
   NBA: BASKETBALL_COLUMNS,
   NFL: NFL_COLUMNS,
   NCAAF: NCAAF_COLUMNS,
+  NCAAB: BASKETBALL_COLUMNS,
 };
 
 /**
@@ -135,7 +139,7 @@ export function logFetchLimit(sport: PlayerLogSport): number {
  */
 export function normalizeLogRow(sport: PlayerLogSport, raw: Record<string, unknown>): PlayerLogEntry {
   const row = { ...raw } as PlayerLogEntry;
-  if (sport === 'WNBA' || sport === 'NBA') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
     row.threes = num(raw.fg3_made);
     row.pra = sum(raw.points, raw.rebounds, raw.assists);
     row.blocks_steals = sum(raw.blocks, raw.steals);
@@ -776,7 +780,7 @@ export function gameContextLine(sport: PlayerLogSport, row: PlayerLogEntry): str
     const wk = row.week != null ? `Wk ${row.week}` : null;
     return [team, opp, wk].filter(Boolean).join(' · ');
   }
-  if (sport === 'WNBA' || sport === 'NBA') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
     const min = num(row.minutes);
     return [team, opp, `${min == null ? '—' : min.toFixed(0)} min`].filter(Boolean).join(' · ');
   }
