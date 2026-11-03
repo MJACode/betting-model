@@ -20,6 +20,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB first-half and team-total purchase at 15:00 UTC, 18:00 UTC and 60 minutes before the tip, each under its own source, plus a 50-game test buy; the opener grid and every first-half purchase send 6 paid calls at once with the floor still exact; code only, nothing bought |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, switch OFF track made visible (shared `AppSwitch`, systemGray off track); mobile UI only |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, Stats header: Players \| Teams on every sport (as NBA), NFL/NCAAF/MLB positions as a second row; no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |

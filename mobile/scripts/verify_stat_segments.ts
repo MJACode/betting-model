@@ -385,8 +385,15 @@ check('StatsScreen: the fallback note joins the board notes behind the ⓘ, and 
 check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed set',
   /positionFallbackNote\(sport, segment, boardMode, segmentPositions\)/.test(stats));
 {
+  // Matt, 2026-11-02: Players | Teams on top (as NBA), positions a second row.
   const rowSrc = stats.slice(stats.indexOf('function StatSegmentRow'));
-  const tabs = rowSrc.slice(0, rowSrc.indexOf('/>') + 2);
+  const top = rowSrc.slice(0, rowSrc.indexOf('/>') + 2);
+  check('StatSegmentRow: the top row is Players | Teams (boardSegmentsFor)',
+    /items=\{boardSegmentsFor\(sport\)\}/.test(top), top.replace(/\s+/g, ' '));
+  const posStart = rowSrc.indexOf('items={positions}');
+  const tabs = posStart < 0 ? '' : rowSrc.slice(rowSrc.lastIndexOf('<SegmentTabs', posStart), rowSrc.indexOf('/>', posStart) + 2);
+  check('StatSegmentRow: the position row is second-level and hides on Teams',
+    /\bsecond\b/.test(tabs) && /\{!onTeams \?/.test(rowSrc.slice(0, posStart)), tabs.replace(/\s+/g, ' '));
   check('StatSegmentRow: passes accessibilityLabelFor and fit to SegmentTabs',
     /<SegmentTabs/.test(tabs) && /accessibilityLabelFor=\{segmentAccessibilityLabel\}/.test(tabs) && /\bfit\b/.test(tabs), tabs.replace(/\s+/g, ' '));
 }
