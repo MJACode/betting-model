@@ -104,19 +104,21 @@ def _dashboard_helpers() -> dict:
     assert set(found) == wanted, f"missing helpers: {wanted - set(found)}"
     import pandas as pd
     from tracking.discord_notifier import fmt_stake, fmt_units, stake_for, units_for
+    from tracking.published_units import unit_profit
     ns = {"pd": pd, "fmt_stake": fmt_stake, "fmt_units": fmt_units,
-          "stake_for": stake_for, "units_for": units_for}
+          "stake_for": stake_for, "units_for": units_for, "unit_profit": unit_profit}
     for code in found.values():
         exec(code, ns)
     return ns
 
 
-def test_the_dashboard_pick_log_shows_units_from_profit_flat():
+def test_the_dashboard_pick_log_shows_units_from_the_result():
+    # The published stake (tests/test_units_one_basis.py pins the basis):
+    # a +150 win is +1u to win, a -110 loss lays 1.1u.
     h = _dashboard_helpers()
-    assert h["_units_cell"](150.0, 150) == "+1.50u"
-    assert h["_units_cell"](-100.0, -110) == "-1.00u"
-    # profit_flat fabricates -110 on an unpriced pick: no number is shown.
-    assert h["_units_cell"](-100.0, None) == "–"
+    assert h["_units_cell"]("WIN", 150) == "+1.00u"
+    assert h["_units_cell"]("LOSS", -110) == "-1.10u"
+    assert h["_units_cell"](None, -110) == "–"
     assert h["_units_cell"](float("nan"), -110) == "–"
 
 

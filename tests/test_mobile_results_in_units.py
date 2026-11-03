@@ -127,11 +127,11 @@ def test_the_model_page_history_rows_are_units():
     screen = _read(SRC / "screens/BuiltInModelDetailScreen.tsx")
     row = screen[screen.index("function HistoryPickRow"):]
     row = row[: row.index("\n}\n")]
-    assert "formatFlatUnits(pick.profit_flat)" in row
-    # No price, no money: the row still shows a dash, not settlement's -110.
-    assert "decisionOdds(pick) == null ? '—' : formatFlatUnits(pick.profit_flat)" in row
-    assert "1u risked per bet" in screen
-    assert 'label="Flat units"' in screen
+    # The published stake since 2026-11-03 (tests/test_mobile_units_one_basis.py):
+    # never settlement's profit_flat, which invents -110 with no price.
+    assert "formatSigned(postedPickUnits(pick).units, 2, 'u')" in row
+    assert "profit_flat" not in _code_only(row)
+    assert 'label="Units"' in screen
 
 
 @pytest.mark.parametrize("rel", [
@@ -141,10 +141,10 @@ def test_the_model_page_history_rows_are_units():
 ])
 def test_each_record_surface_tones_from_the_units_it_prints(rel):
     """Colour comes from the number as printed (lib/tone.ts). Units print at
-    two decimals of profit_flat / 100, so the tone is pnlColor(x, 2, 0.01):
-    a +$0.40 row prints "0.00u" and must be grey, not green."""
+    two decimals ("+0.91u"), so the tone is pnlColor(units, 2)."""
     text = _read(SRC / rel)
-    assert "formatFlatUnits(" in text
+    assert "formatSigned(" in text and ", 2, 'u')" in text
+    assert re.search(r"pnlColor\((stats|item)\.units, 2\)", text), rel
     assert re.search(r"pnlColor\([^)]*profit[^)]*, 2\)", text, re.I) is None, rel
 
 

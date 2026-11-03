@@ -20,9 +20,9 @@
  * line is the half-point below it. `thresholdFromBookLine` / `bookLineFromThreshold`
  * are the only two places that conversion lives here.
  */
-import { americanImplied, formatSignedUnits } from '@/lib/format';
+import { americanImplied, formatSigned } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { isDuplicateCopy, isPausedRow, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
+import { isDuplicateCopy, isPausedRow, postedPickUnits, publishedRecordKeeps, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type GameWindow, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropMarket, statForPropModel, type StatDef } from '@/lib/statCatalog';
@@ -468,7 +468,7 @@ function multiMarketQualifier(modelId: string): string | null {
 /**
  * Settled BETs on this player, grouped by model. Input is already the record
  * filter (BET, a real result); this only sorts and sums. A pick with no price
- * counts in the record and not in the units (CLAUDE.md §6).
+ * counts in the record and in the units at the bare 1u, as the Record tab books it.
  */
 export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   const by = new Map<string, PlayerPickLine>();
@@ -519,13 +519,14 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     const side = String(p.pick_side ?? '').toLowerCase();
     if (side === 'over') line.overs += 1;
     else if (side === 'under') line.unders += 1;
-    // Through decisionPrice, never the columns (UX_REVIEW §0).
-    const priced = hasPricedLine(p);
-    const pf = num(p.profit_flat);
-    if (priced && pf != null) {
-      line.units = (line.units ?? 0) + pf / 100;
-      total.units = (total.units ?? 0) + pf / 100;
-    } else {
+    // The published stake (one unit basis, CLAUDE.md §2): 1u to win at the
+    // decided price, risk capped at 3u, a pick with no price at the bare 1u,
+    // as the Record tab books it. Never profit_flat, which is 1u risked and
+    // invents -110 on a pick with no price. The unpriced count is named.
+    const u = postedPickUnits(p).units;
+    line.units = (line.units ?? 0) + u;
+    total.units = (total.units ?? 0) + u;
+    if (!hasPricedLine(p)) {
       line.unpriced += 1;
       total.unpriced += 1;
     }
@@ -558,5 +559,6 @@ export function playerLineNote(
 export function formatRecordLine(r: { wins: number; losses: number; pushes: number; units: number | null }): string {
   const rec = r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
   if (r.units == null) return rec;
-  return `${rec} · ${formatSignedUnits(r.units)}`;
+  // Two decimals, as the Record tab and the model pages print units.
+  return `${rec} · ${formatSigned(r.units, 2, 'u')}`;
 }

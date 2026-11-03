@@ -200,8 +200,6 @@ Important rules:
 - If I ask for a stake in money, answer in units: the stake is flat and does not change with a bankroll.
 ```
 
-Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). Update whenever thresholds or schema change. The codebase is the source of truth: after any threshold change run
-`python -m scripts.emit_threshold_sql --prefix p.` and paste the block it prints
-over the one inside step 2. Never hand-edit it — that is how the old copies drifted.
+Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). A threshold change needs no paste: the query joins `model_action_thresholds`, which `data.threshold_sync` writes from `config.py`. Paste the block again only when the prompt text itself changes in this file.
 
 ---

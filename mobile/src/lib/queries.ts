@@ -2243,14 +2243,28 @@ export async function fetchCustomModelBacktest(
   rules: CustomModelRule[],
   filters: CustomModelFilters | undefined,
 ): Promise<CustomBacktestSummary> {
-  const { data, error } = await supabase.rpc('custom_model_backtest', {
-    p_rules: rules,
-    // Sanitized so a legacy saved `signals` filter (removed 2026-08-22) never
-    // reaches the RPC while the client matcher ignores it.
-    p_filters: sanitizeFilters(filters),
-  });
+  // Sanitized so a legacy saved `signals` filter (removed 2026-08-22) never
+  // reaches the RPC while the client matcher ignores it.
+  const args = { p_rules: rules, p_filters: sanitizeFilters(filters) };
+  // The same matched picks on the published stake (one unit basis, mike
+  // 2026-11-03). Asked beside the summary, not after it.
+  const [{ data, error }, posted] = await Promise.all([
+    supabase.rpc('custom_model_backtest', args),
+    supabase.rpc('custom_model_backtest_posted', args),
+  ]);
   if (error) throw error;
+  // Until data/migrations/custom_model_backtest_posted_2026_11_03.sql is
+  // applied the function does not exist, and any other failure of this second
+  // figure must not take down a screen the summary can still draw: either way
+  // the summary stands on its 1u-risked units (postedKnown false), and the
+  // screen's caption says so.
+  if (posted.error && !postedFunctionMissing(posted.error)) {
+    console.warn('[customModelBacktest] posted-stake units unavailable', posted.error);
+  }
   const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
+  const prow = posted.error
+    ? null
+    : (posted.data as unknown as { units: number | null; risked: number | null }[] | null)?.[0] ?? null;
   return {
     bets: Number(row?.bets ?? 0),
     wins: Number(row?.wins ?? 0),
@@ -2259,7 +2273,23 @@ export async function fetchCustomModelBacktest(
     priced: Number(row?.priced ?? 0),
     units: Number(row?.units ?? 0),
     roi_pct: row?.roi_pct == null ? null : Number(row.roi_pct),
+    posted_units: prow == null ? null : Number(prow.units ?? 0),
+    posted_risked: prow == null ? null : Number(prow.risked ?? 0),
   };
+}
+
+/**
+ * custom_model_backtest_posted is not deployed yet. PostgREST answers
+ * `PGRST202` ("Could not find the function ... in the schema cache"); Postgres
+ * itself `42883` (undefined function). Nothing else counts as missing.
+ */
+export function postedFunctionMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === 'PGRST202' || code === '42883';
 }
 
 /** The individual graded picks behind a custom-model backtest, newest first. */
@@ -2305,8 +2335,13 @@ export interface FullOutcomeRecord {
   losses: number;
   pushes: number;
   priced_bets: number;
+  /** 1u RISKED per priced pick (profit_flat / 100). Not shown on a screen. */
   units: number;
   roi_pct: number | null;
+  /** The published stake: v_public_track_record's units / risked, the same
+   *  columns the Record tab sums. Absent on an older view. */
+  posted_units?: number | null;
+  posted_risked?: number | null;
 }
 
 export async function fetchModelFullOutcomeRecord(): Promise<Record<string, FullOutcomeRecord>> {
@@ -2335,10 +2370,19 @@ export async function fetchModelFullOutcomeRecord(): Promise<Record<string, Full
  * is 100 x the PRICED picks, and an unpriced pick contributes neither
  * (CLAUDE.md §6: profit_flat fabricates -110 when dk_odds is NULL).
  */
+const PUBLISHED_MODEL_SELECT = 'model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked';
+
 export async function fetchPublishedModelRecord(): Promise<Record<string, FullOutcomeRecord>> {
-  const { data, error } = await supabase
-    .from('v_public_track_record')
-    .select('model_id, picks, wins, losses, pushes, profit_flat, staked_flat');
+  // units / risked are the published stake, the Record tab's basis (one unit
+  // basis everywhere, mike 2026-11-03). The same fallback as
+  // fetchPublicTrackRecord for a view from before those columns.
+  let res = await supabase.from('v_public_track_record').select(PUBLISHED_MODEL_SELECT);
+  if (postedStakeColumnsMissing(res.error)) {
+    res = await supabase
+      .from('v_public_track_record')
+      .select(PUBLISHED_MODEL_SELECT.replace(', units, risked', ''));
+  }
+  const { data, error } = res;
   if (error) throw error;
   const map: Record<string, FullOutcomeRecord> = {};
   for (const r of (data ?? []) as unknown as TrackRecordRow[]) {
@@ -2360,6 +2404,8 @@ export async function fetchPublishedModelRecord(): Promise<Record<string, FullOu
       units: profit / 100,
       // Null rather than 0 when nothing was priced: 0.0% reads as break-even.
       roi_pct: staked > 0 ? (profit / staked) * 100 : null,
+      posted_units: r.units == null ? null : Number(r.units),
+      posted_risked: r.risked == null ? null : Number(r.risked),
     };
   }
   return map;
