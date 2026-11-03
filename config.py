@@ -150,10 +150,15 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
 # I give the approval."). A record that has gone out is not re-posted, corrected
 # or relabelled on any surface. This is the only way to open one: a key here, its
 # value quoting mike's approval in chat with the date. Keyed by game date, or by
-# the lock of a written correction. Empty is the normal state, and
-# tests/test_record_never_restated.py pins it, so an entry changes that test in
-# the same commit. Nothing else opens this, a job argument and a CLI flag included.
-RECORD_RESTATEMENT_APPROVALS: dict[str, str] = {}
+# the lock of a written correction. tests/test_record_never_restated.py pins
+# the entries, so an entry changes that test in the same commit. Nothing else
+# opens this, a job argument and a CLI flag included.
+RECORD_RESTATEMENT_APPROVALS: dict[str, str] = {
+    "2026-11-02": (
+        "mike, 2026-11-03: Corrected recap for the Eggz 2026-11-02 daily "
+        "recap. The all-time line was off by 1 win and 1u."
+    ),
+}
 
 
 class RecordRestatementRefused(RuntimeError):

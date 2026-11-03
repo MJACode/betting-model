@@ -42,7 +42,7 @@ re-posted, corrected or relabelled, on Discord or X.
   re-post, and the capper's Corrected recap. A first post of a day that never went
   out is not a restatement and still posts.
 - **An entry quotes mike's approval in chat, with the date.** Nothing else adds one.
-  `tests/test_record_never_restated.py` pins the register empty, so an entry changes
+  `tests/test_record_never_restated.py` pins the register, so an entry changes
   that test in the same commit.
 - **Before a record posts, `record_held_for_grading` runs.** It finds the picks the
   record counts that have no result, grades them, and holds both surfaces if any are
