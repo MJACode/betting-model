@@ -444,3 +444,30 @@ def test_the_env_file_is_read_at_run_time(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://from-env")
     assert lm.read_env_value("DATABASE_URL", env) == "postgresql://from-env"
     assert lm.read_env_value("MISSING", env) is None
+
+
+# ------------------------------------------------------------- restore
+
+def test_export_csv_writes_what_postgres_copy_reads_back(tmp_path):
+    """The restore path: one table to a CSV for `COPY ... CSV HEADER`.
+    NULL is an unquoted empty field, an empty string is "", a timestamp keeps
+    its microseconds and its UTC offset, and bytea is Postgres hex."""
+    import csv
+    cols = [lm.Column("a", "bigint", "int64"), lm.Column("b", "text", "string"),
+            lm.Column("ts", "timestamp with time zone", "timestamp_us_utc"),
+            lm.Column("blob", "bytea", "binary")]
+    info = lm.TableInfo("public", "t", cols, ["a"], ["bigint"], est_rows=10)
+    stamp = dt.datetime(2026, 11, 3, 18, 0, 48, 123456, tzinfo=UTC)
+    rows = {(1,): (1, 'say "hi"', stamp, b"\x00\xff"), (2,): (2, "", None, None),
+            (3,): (3, None, stamp, b"")}
+    src = FakeServer(info, rows)
+    mirror(src, tmp_path).sync_table(info)
+    out = tmp_path / "t.csv"
+    assert lm.main(["export-csv", "--dest", str(tmp_path), "--table", "public.t",
+                    "--out", str(out)]) == 0
+    raw = out.read_text(encoding="utf-8").splitlines()
+    assert raw[0] == '"a","b","ts","blob"'
+    assert raw[1] == r'"1","say ""hi""","2026-11-03 18:00:48.123456+00","\x00ff"'
+    assert raw[2] == '"2","",,', "empty string quoted, NULLs bare"
+    assert raw[3] == r'"3",,"2026-11-03 18:00:48.123456+00","\x"'
+    assert len(list(csv.reader(out.open(encoding="utf-8", newline="")))) == 4

@@ -1712,7 +1712,8 @@ def cmd_export_csv(args) -> int:
                     col = pa.array([("\\x" + v.hex()) if v is not None else None
                                     for v in col.to_pylist()], type=pa.string())
                 elif pa.types.is_timestamp(f.type) and f.type.tz:
-                    col = pc.strftime(col, format="%Y-%m-%d %H:%M:%S.%f+00")
+                    # Arrow's %S already carries the microseconds.
+                    col = pc.strftime(col, format="%Y-%m-%d %H:%M:%S+00")
                 cols.append(col)
             t = pa.Table.from_arrays(cols, names=t.schema.names)
             if writer is None:
