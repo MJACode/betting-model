@@ -1,5 +1,14 @@
 # Closing line value (CLV)
 
+**An NBA bet whose only start is the odds feed's has no close, and its columns stay empty (2026-11-02,
+mike).** The feed's start ran 2.3 to 20.2 minutes behind the league's on all 107 games it wrote 2026-10-20..11-02, and
+refresh passes store in-play rows typed `open`, so bounding a close on it can record an in-play price. That covers a game the
+schedule does not list, one with no tip there, and a postseason game whose ESPN start sits over 30 minutes before the
+feed's. A game the schedule holds the other way round reads that row. Two places hold the test, and they must agree:
+`tracking/paper_tracker._nba_league_tip` and `data/migrations/clv_standard_v2_2026_10_14.sql`, whose recompute reaches any
+bet not yet stamped on every pass. The bet is stamped empty after two days, in case the schedule row arrives. Other
+sports have no schedule table to test against, so they keep bounding on the earliest start on record.
+
 The formula, the book, and the worked examples. Capture lives in
 `tracking/paper_tracker.py` (`_capture_clv` / `_backfill_clv`); the arithmetic
 is `tracking/clv_math.py`. The bulk rewrite is
