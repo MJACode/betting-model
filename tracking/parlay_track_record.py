@@ -232,7 +232,8 @@ def settle_parlay_track_record(conn: DBConnection, game_date: str,
     if wins + losses + pushes:
         logger.info(
             f"Parlay track record settle {game_date}: "
-            f"{wins}W / {losses}L / {pushes}P (flat ${total_flat:+,.2f})"
+            # Already units: PARLAY_FLAT_STAKE is one unit, so no /100.
+            f"{wins}W / {losses}L / {pushes}P (flat {total_flat:+.2f}u)"
         )
     return wins, losses, pushes, total_flat
 

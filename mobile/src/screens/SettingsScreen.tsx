@@ -489,7 +489,7 @@ export function SettingsScreen() {
           <Text style={styles.bookHint}>
             The books you can bet at. Picks and Stats show the best price among them. You get
             the most value by using every book you can. Model records and stats still use the
-            best price across all books.
+            price the model found.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}

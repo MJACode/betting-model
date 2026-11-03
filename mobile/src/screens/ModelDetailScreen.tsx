@@ -15,7 +15,8 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { describeFilters } from '@/lib/customModelFilters';
 import {
   formatAmerican,
-  formatCurrencySigned,
+  formatFlatUnits,
+  FLAT_UNIT_TONE_SCALE,
   formatGameTimeET,
   formatPct,
   formatPctSigned,
@@ -28,6 +29,7 @@ import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
 import { decisionOdds } from '@/lib/decisionPrice';
+import { unitsSpeech } from '@/lib/a11y';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { signalDisplayName } from '@/lib/tone';
@@ -92,7 +94,7 @@ export function ModelDetailScreen() {
   const decided = stats.wins + stats.losses;
   // Each tile's tone comes from the number it prints, rounded as printed.
   const roiColor = pnlColor(stats.roiFlat, 1, 100);
-  const pnlTint = pnlColor(stats.profitFlat, 2);
+  const pnlTint = pnlColor(stats.profitFlat, 2, FLAT_UNIT_TONE_SCALE);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -154,11 +156,11 @@ export function ModelDetailScreen() {
                 label="Flat ROI"
                 value={stats.picks > 0 ? formatPctSigned(stats.roiFlat) : '—'}
                 tint={roiColor}
-                caption="vs $100 flat per bet"
+                caption="1u risked per bet"
               />
               <StatTile
-                label="P&L"
-                value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+                label="Flat units"
+                value={stats.picks > 0 ? formatFlatUnits(stats.profitFlat) : '—'}
                 tint={pnlTint}
                 caption="all graded picks"
               />
@@ -219,7 +221,7 @@ export function ModelDetailScreen() {
         renderItem={({ item }) => (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={[item.pick_label, signalDisplayName(item.signal_type), modelShort(item.model_id)].filter(Boolean).join(', ')}
+            accessibilityLabel={[item.pick_label, signalDisplayName(item.signal_type), modelShort(item.model_id), item.result, unitsSpeech(formatFlatUnits(item.profit_flat))].filter(Boolean).join(', ')}
             style={styles.pickRow}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick_id })}
           >
@@ -239,11 +241,11 @@ export function ModelDetailScreen() {
               style={[
                 styles.pickProfit,
                 {
-                  color: pnlColor(item.profit_flat, 2),
+                  color: pnlColor(item.profit_flat, 2, FLAT_UNIT_TONE_SCALE),
                 },
               ]}
             >
-              {formatCurrencySigned(item.profit_flat)}
+              {formatFlatUnits(item.profit_flat)}
             </Text>
           </Pressable>
         )}

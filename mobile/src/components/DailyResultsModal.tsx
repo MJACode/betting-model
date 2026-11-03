@@ -419,7 +419,7 @@ export function DailyResultsModal({
               needed to win 1 unit. At −110 that’s 1.1 units to win 1. Risk is
               capped at 3 units, and a pick with no price counts as 1 unit. The
               percentage is units won or lost divided by units risked. The Models
-              tab uses a flat $100 bet, so its percentages won’t match. Open
+              tab risks a flat 1u on every pick, so its percentages won’t match. Open
               picks settle after their games go final.
             </Text>
           </ScrollView>
