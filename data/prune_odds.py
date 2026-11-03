@@ -265,7 +265,8 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # reason: its decision fetches and closes are nba_first_half_total_luck's record.
 # The live NCAAB first-half feed (data/ingestors/ncaab_first_half_odds.SOURCE,
 # 2026-11-02) joins too: nine fetches a game of first-half ladders, and its
-# tip-minus-10 fetch is ncaab_first_half_spread's record.
+# tip-minus-10 fetch is ncaab_first_half_spread's record, its tip-minus-60
+# fetch ncaab_first_half_total's.
 # Literals here, pinned to
 # the writers' constants by tests/test_nba_team_total_odds.py
 # (test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name), so

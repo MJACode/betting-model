@@ -10,14 +10,13 @@ import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { TagChip } from '@/components/TagChip';
-import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
+import { publishedOrSettledStats, useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   dayLabelET,
   dayLabelSpokenET,
   formatAmerican,
-  formatCurrencySigned,
   formatGameTimeET,
   formatPct,
   formatPctSigned,
@@ -31,13 +30,14 @@ import { signalsContextTime } from '@/lib/signalsCard';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero, signalDisplayName } from '@/lib/tone';
-import { isModelPaused, isUnlockedPreview, passesRecordFilter, publishedRecordKeeps } from '@/lib/thresholds';
+import { isModelPaused, isUnlockedPreview, passesRecordFilter, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
+import { unitsSpeech } from '@/lib/a11y';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -80,10 +80,7 @@ export function BuiltInModelDetailScreen() {
   );
 
   const stats = useMemo(
-    () =>
-      fullOutcomeRecords[modelId]
-        ? viewRecordToStats(fullOutcomeRecords[modelId])
-        : computeBuiltInModelStats(modelId, settledRows),
+    () => publishedOrSettledStats(modelId, fullOutcomeRecords, settledRows),
     [modelId, settledRows, fullOutcomeRecords],
   );
   const { registry } = useModelRegistry(modelId);
@@ -151,7 +148,7 @@ export function BuiltInModelDetailScreen() {
   const isProp = meta != null && meta.type !== 'game';
 
   const decided = stats.wins + stats.losses;
-  // Settled with no book price: in the W-L, not in the money (flatPnl).
+  // Settled with no book price: staked at the bare 1u, as the Record tab does.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   // The row that opened this screen greys a thin ROI and captions it; the
   // drill-down is where a member lingers and screenshots, so it cannot be the
@@ -159,12 +156,13 @@ export function BuiltInModelDetailScreen() {
   // qualifier. Same constant, same caption, same rule.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
   // Each tile's tone comes from the number it prints, rounded as printed.
+  // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat, 1, 100);
+    : pnlColor(stats.roi, 1, 100);
   const pnlTint = thin
     ? colors.textSecondary
-    : pnlColor(stats.profitFlat, 2);
+    : pnlColor(stats.units, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -242,7 +240,7 @@ export function BuiltInModelDetailScreen() {
               <StatTile
                 label="Picks"
                 value={String(stats.picks)}
-                caption={`settled, as posted${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
+                caption={`settled, as posted${unpriced > 0 ? ` · ${unpriced} unpriced, staked at 1u` : ''}`}
               />
               <StatTile
                 label="Win %"
@@ -256,14 +254,14 @@ export function BuiltInModelDetailScreen() {
             </View>
             <View style={styles.statRow}>
               <StatTile
-                label="Flat ROI"
-                value={stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+                label="Return on bets"
+                value={stats.risked > 0 ? formatPctSigned(stats.roi) : '—'}
                 tint={roiColor}
-                caption={thin && stats.stakedFlat > 0 ? thinSampleCaption() : 'vs $100 flat per bet'}
+                caption={thin && stats.risked > 0 ? thinSampleCaption() : 'each pick to win 1u'}
               />
               <StatTile
-                label="P&L"
-                value={stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+                label="Units"
+                value={stats.picks > 0 ? formatSigned(stats.units, 2, 'u') : '—'}
                 tint={pnlTint}
                 caption="settled only"
               />
@@ -470,7 +468,8 @@ function TodayPickRow({
 }
 
 // One settled pick in the model's history — shows the outcome (WIN/LOSS/PUSH)
-// and its flat P&L, colored by result. Tap to open the pick detail.
+// and its units at the published stake (the Record tab's), colored by result.
+// Tap to open the pick detail.
 function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => void }) {
   const resultColor =
     pick.result === 'WIN'
@@ -478,7 +477,10 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       : pick.result === 'LOSS'
         ? colors.avoidInk
         : colors.textSecondary;
-  const profitLabel = decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat);
+  // postedPickUnits: 1u to win at the decided price, risk capped at 3u, a
+  // pick with no price at the bare 1u. Never the stored profit_flat.
+  const unitsText = formatSigned(postedPickUnits(pick).units, 2, 'u');
+  const profitLabel = unitsSpeech(unitsText);
   return (
     <Pressable
       style={styles.pickRow}
@@ -504,9 +506,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       <View style={styles.historyRight}>
         <Text style={[styles.historyResult, { color: resultColor }]}>{pick.result}</Text>
         <Text style={[styles.historyProfit, { color: resultColor }]}>
-          {/* No price, no money — the row's total excludes this pick, so the
-              list must not show the -110 that settlement invented for it. */}
-          {decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat)}
+          {unitsText}
         </Text>
       </View>
     </Pressable>

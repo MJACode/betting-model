@@ -67,6 +67,9 @@ export function gameMarketForModel(modelId: string): string | null {
   // The NBA first half's total (overs): stored under its own market, never the
   // game's 'totals' rows, whose number is about twice as big.
   if (modelId === 'nba_first_half_total_luck') return 'totals_h1';
+  // The NCAAB first half's total (models/ncaab_first_half_total.py): the same
+  // market, the same trap.
+  if (modelId === 'ncaab_first_half_total') return 'totals_h1';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
@@ -273,6 +276,7 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_team_total_luck') return 'game_total';
   // The first half's points move with the game total too.
   if (modelId === 'nba_first_half_total_luck') return 'game_total';
+  if (modelId === 'ncaab_first_half_total') return 'game_total';
   // A moneyline, though its id has 'spread' in it (see gameMarketForModel).
   if (modelId === 'ncaab_moneyline_own_spread') return 'game_ml';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
@@ -1699,11 +1703,13 @@ export function computeMovement(
  * same number (designer review, 2026-11-02).
  *
  * The NCAAB first-half spread card (scripts/ncaab_first_half_spread_card.py)
- * writes the same row shape.
+ * writes the same row shape, and so does the NCAAB first-half total card
+ * (scripts/ncaab_first_half_total_card.py).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
   'ncaab_first_half_spread',
+  'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',
@@ -1981,7 +1987,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each game
   // once, on game-day morning, the same way.
   // The NCAAB first-half spread card decides each game once, about ten
-  // minutes before tip, the same way.
+  // minutes before tip, the same way, and the NCAAB first-half total card
+  // about an hour before tip.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -1993,6 +2000,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaab_spread_market' ||
     pick.model_id === 'ncaab_moneyline_own_spread' ||
     pick.model_id === 'ncaab_first_half_spread' ||
+    pick.model_id === 'ncaab_first_half_total' ||
     nbaPosted
   ) {
     return {

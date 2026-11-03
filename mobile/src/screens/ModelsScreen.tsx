@@ -13,17 +13,19 @@ import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { ByomModelList } from '@/components/byom/ByomModelList';
 import {
-  computeBuiltInModelStats,
+  publishedOrSettledStats,
   useSettledPicksSincePaperStart,
-  viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
-import { formatCurrencySigned, formatPctSigned } from '@/lib/format';
+import { formatPctSigned, formatSigned } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
+import { returnOnBetsSpeech } from '@/lib/recordHero';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { RootStackParamList } from '@/types';
+import type { CustomModelStats } from '@/lib/customModelBacktest';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -81,9 +83,7 @@ export function ModelsScreen() {
         // reads) when the model has one; otherwise fall back to the on-device
         // settled picks, which now means "no settled bet in the published
         // window yet" rather than "a sport the view doesn't cover".
-        stats: records[modelId]
-          ? viewRecordToStats(records[modelId])
-          : computeBuiltInModelStats(modelId, rows),
+        stats: publishedOrSettledStats(modelId, records, rows),
       })),
     [rows, records, sport],
   );
@@ -243,15 +243,14 @@ function SegmentPill({
 
 interface BuiltInRowProps {
   modelId: string;
-  stats: ReturnType<typeof computeBuiltInModelStats>;
+  stats: CustomModelStats;
   onPress: () => void;
 }
 
 function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   const decided = stats.wins + stats.losses;
-  // Picks settled with no book price: in the W-L, not in the money (flatPnl).
-  // Named on the row so an 8-5 next to a negative ROI reads as "six of those
-  // had no price" rather than as a bug.
+  // Picks settled with no book price: staked at the bare 1u, as the Record
+  // tab books them. Named on the row so the reader knows which they are.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   // A percentage on a handful of bets is not a result — see
   // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
@@ -263,12 +262,14 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const recordBelow = modelRecordBelow(fontScale, windowWidth);
   // Each figure's tone comes from the number it prints, rounded as printed.
+  // One unit basis (CLAUDE.md §2): the published stake, the Record tab's.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat, 1, 100);
+    : pnlColor(stats.roi, 1, 100);
+  const unitsText = formatSigned(stats.units, 2, 'u');
   const profitColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.profitFlat, 2);
+    : pnlColor(stats.units, 2);
   return (
     <Pressable
       onPress={onPress}
@@ -276,10 +277,10 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
       accessibilityLabel={
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
-        (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (stats.risked > 0 ? `, ${returnOnBetsSpeech(formatPctSigned(stats.roi))}, ${unitsSpeech(unitsText)}` : '') +
         (stats.picks === 0 ? ', no settled bets yet' : '') +
         (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
-        (unpriced > 0 ? `, ${unpriced} unpriced` : '')
+        (unpriced > 0 ? `, ${unpriced} unpriced, staked at 1 unit` : '')
       }
       style={({ pressed }) => [
         styles.builtInCard,
@@ -316,16 +317,16 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a
             // mid-phrase wrap would orphan the one segment that explains the
             // ROI beside it.
-            <Text style={styles.subtle}>{unpriced} unpriced · not in the money</Text>
+            <Text style={styles.subtle}>{unpriced} unpriced, staked at 1u</Text>
           ) : null}
         </ModelBadgeRow>
       </View>
       <View style={[styles.builtInRight, recordBelow && styles.builtInRightStacked]}>
         <Text style={[styles.roi, { color: roiColor }]}>
-          {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+          {stats.risked > 0 ? formatPctSigned(stats.roi) : '—'}
         </Text>
         <Text style={[styles.profit, { color: profitColor }]}>
-          {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+          {stats.picks > 0 ? unitsText : '—'}
         </Text>
       </View>
     </Pressable>

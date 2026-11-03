@@ -415,6 +415,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_first_half_spread_decisions",
     "ncaab_first_half_fetches",
     "ncaab_first_half_team_games",
+    # The NCAAB first-half total model's decisions ledger
+    # (scripts/ncaab_first_half_total_card.py, created on demand); it reads the
+    # same fetch ledger and team games as the spread model.
+    "ncaab_first_half_total_decisions",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.
@@ -613,6 +617,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # byom_game_facts and byom_prop_facts, not picks.
     "custom_model_backtest",
     "custom_model_picks",
+    # The same backtest's units on the published stake (2026-11-03,
+    # data/migrations/custom_model_backtest_posted_2026_11_03.sql, which
+    # carries its own GRANT). SECURITY INVOKER over custom_model_picks.
+    "custom_model_backtest_posted",
     "byom_backtest",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",

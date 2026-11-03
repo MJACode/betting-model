@@ -228,11 +228,14 @@ def _expected_profit(result: str, odds) -> float | None:
 
 
 class Rec:
-    """Win/loss/push tally plus flat-stake P&L at the recorded DK price."""
+    """Win/loss/push tally plus flat-stake units at the recorded DK price.
+
+    Units, never dollars (CLAUDE.md §4): profit_flat is stored per $100
+    staked, so one priced bet adds profit_flat / 100 and one unit staked."""
 
     def __init__(self):
         self.w = self.l = self.p = self.pending = 0
-        self.pnl = 0.0
+        self.units = 0.0
         self.staked = 0
 
     def add(self, r: dict) -> "Rec":
@@ -246,8 +249,8 @@ class Rec:
         else:
             self.pending += 1
         if res in SETTLED and r["dk_odds"] is not None:
-            self.pnl += float(r["profit_flat"] or 0)
-            self.staked += 100
+            self.units += float(r["profit_flat"] or 0) / 100
+            self.staked += 1
         return self
 
     @property
@@ -260,16 +263,16 @@ class Rec:
 
     @property
     def roi(self):
-        return 100.0 * self.pnl / self.staked if self.staked else 0.0
+        return 100.0 * self.units / self.staked if self.staked else 0.0
 
     def line(self, label: str, width: int = 26) -> str:
         rec = f"{self.w}-{self.l}" + (f"-{self.p}" if self.p else "")
         return (f"{label:<{width}} {self.n:>6} {rec:>12} {self.win_pct:>7.1f}% "
-                f"{self.pnl:>11,.2f} {self.roi:>8.2f}% {self.pending:>6}")
+                f"{self.units:>+10.2f}u {self.roi:>8.2f}% {self.pending:>6}")
 
 
 HEAD = (f"{'':<26} {'rows':>6} {'W-L-P':>12} {'win%':>8} "
-        f"{'flat P&L':>11} {'ROI':>9} {'open':>6}")
+        f"{'units':>11} {'ROI':>9} {'open':>6}")
 
 
 def main() -> int:
@@ -340,7 +343,7 @@ def main() -> int:
         wp = 100.0 * w / (w + l) if (w + l) else 0.0
         rec = f"{w}-{l}" + (f"-{p}" if p else "")
         print(f"{'3 published board':<26} {n:>6} {rec:>12} {wp:>7.1f}% "
-              f"{float(pnl):>11,.2f} {roi:>8.2f}% {'':>6}")
+              f"{float(pnl) / 100:>+10.2f}u {roi:>8.2f}% {'':>6}")
         print("   (3 counts re-graded NONE rows that were never issued as bets — "
               "see --reconcile)")
 
@@ -369,14 +372,14 @@ def main() -> int:
         if args.reconcile:
             print("\nRECONCILE — published picks that were never BET signals")
             print(f"{'model':<26} {'published':>10} {'were BET':>9} {'never':>7} "
-                  f"{'pub P&L':>11} {'real-bet P&L':>13}")
+                  f"{'pub units':>11} {'real-bet units':>14}")
             for row in conn.execute("""
                 SELECT f.model_id,
                        COUNT(*),
                        COUNT(*) FILTER (WHERE p.signal_type = 'BET'),
                        COUNT(*) FILTER (WHERE p.signal_type <> 'BET'),
-                       ROUND(SUM(f.profit_units) * 100, 2),
-                       ROUND(SUM(f.profit_units) FILTER (WHERE p.signal_type = 'BET') * 100, 2)
+                       ROUND(SUM(f.profit_units), 2),
+                       ROUND(SUM(f.profit_units) FILTER (WHERE p.signal_type = 'BET'), 2)
                   FROM v_model_full_outcome_picks f
                   JOIN picks p ON p.pick_id = f.pick_id
                  WHERE f.model_id LIKE 'mlb%'
@@ -384,7 +387,7 @@ def main() -> int:
             """).fetchall():
                 mid, tot, was, never, pub_pnl, real_pnl = row
                 print(f"{mid:<26} {tot:>10} {was:>9} {never:>7} "
-                      f"{float(pub_pnl or 0):>11,.2f} {float(real_pnl or 0):>13,.2f}")
+                      f"{float(pub_pnl or 0):>+10.2f}u {float(real_pnl or 0):>+13.2f}u")
 
     if args.csv:
         out = Path(args.csv)

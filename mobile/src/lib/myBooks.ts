@@ -107,28 +107,26 @@ export function foundAtText(bookShort: string, americanText: string): string {
   return `Found at ${bookShort} ${americanText}`;
 }
 
-/** The one line that says the record is not at the member's price. */
-export const RECORD_AT_BEST_BOOK_NOTE =
-  'Model records and stats use the best price across all books.';
-
-// Models whose bet is NOT always the best price across books. The NCAAB
-// moneyline model (models/ncaab_moneyline_own_spread.py) prices each book's
-// moneyline off that same book's spread and bets the book with the largest
-// edge: on its 914 replayed bets, 269 sat at a book another book beat on price
-// at the same moment. "Best price" would be false on those, so these say only
-// that the record is kept at the price the model found (UX review, 2026-11-02).
-const RECORD_AT_EDGE_BOOK_MODELS: readonly string[] = ['ncaab_moneyline_own_spread'];
+/**
+ * The record is kept at the price the pick was decided at, for EVERY model.
+ *
+ * It used to say "the best price across all books", with one model carved
+ * out. That was false: the NCAAB moneyline model
+ * (models/ncaab_moneyline_own_spread.py) bets the book with the largest edge,
+ * and 269 of its 914 replayed bets sat at a book another book beat on price.
+ * The true statement holds for every model, so there is one (2026-11-03).
+ * `modelId` stays in the signature so the callers need not change.
+ */
+const RECORD_NOTE = 'Model records and stats use the price the model found, not your book’s.';
 
 /** Pick Detail's record caption for a member whose own book has the bet. */
-export function recordNoteFor(modelId: string): string {
-  return RECORD_AT_EDGE_BOOK_MODELS.includes(modelId)
-    ? 'Model records and stats use the price the model found, not your book’s.'
-    : RECORD_AT_BEST_BOOK_NOTE;
+export function recordNoteFor(_modelId: string): string {
+  return RECORD_NOTE;
 }
 
 /** The card's short form of recordNoteFor, after "Found at …". */
-export function recordNoteShortFor(modelId: string): string {
-  return RECORD_AT_EDGE_BOOK_MODELS.includes(modelId) ? 'record kept at that price' : 'record uses best price';
+export function recordNoteShortFor(_modelId: string): string {
+  return 'record kept at that price';
 }
 
 export const NOT_AT_MY_BOOKS = 'Not offered at your books';

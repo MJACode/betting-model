@@ -29,7 +29,7 @@ export function roundedAt(
   return Number((n * scale).toFixed(digits));
 }
 
-/** True when the shown number is 0 at this precision ("0.0%", "$0.00"). */
+/** True when the shown number is 0 at this precision ("0.0%", "0.00u"). */
 export function roundsToZero(value: number | null | undefined, digits: number, scale = 1): boolean {
   return roundedAt(value, digits, scale) === 0;
 }
@@ -40,9 +40,9 @@ export function roundsToZero(value: number | null | undefined, digits: number, s
  * The tone comes from the ROUNDED value the screen prints, never the raw one,
  * so the colour always agrees with the sign: pass the display's `digits` and
  * `scale` (a ratio shown by `formatPctSigned` is `digits = 1, scale = 100`;
- * dollars by `formatCurrencySigned` are `2`; CLV in pp is `1`). −0.0004 as a
- * percent prints "0.0%" and is grey, not red; 1e-13 dollars print "$0.00" and
- * are grey, not green; 0.0008 prints "+0.1%" and is green, not grey.
+ * a stored per-100 result shown as units by `formatFlatUnits` is `digits = 2,
+ * scale = 0.01`; CLV in pp is `1`). −0.0004 as a percent prints "0.0%" and is
+ * grey, not red; a +0.4 per-100 result prints "0.00u" and is grey, not green; 0.0008 prints "+0.1%" and is green, not grey.
  */
 export function pnlTone(value: number | null | undefined, digits: number, scale = 1): InkToken {
   const r = roundedAt(value, digits, scale);

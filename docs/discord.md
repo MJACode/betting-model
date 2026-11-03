@@ -33,18 +33,31 @@ the recap is cross-sport), each falling back sensibly.
 **Live picks go to their SPORT'S live channel** (mike, 2026-09-09: *"Push
 picks to discord in live games to their live channels"*): `#nfl-live`,
 `#mlb-live`, `#ncaaf-live`, one `DISCORD_WEBHOOK_LIVE_{SPORT}` each, collected
-into `config.DISCORD_WEBHOOKS_LIVE`. `_live_webhook_for_sport` resolves an
-in-play signal as the sport's live channel, else the shared
-`DISCORD_WEBHOOK_LIVE`, else the sport's pre-game channel. The three URLs are
-Railway variables on BOTH services: the NFL in-play worker runs on `worker`
-(it owns the volume its decision log writes to), the MLB and NCAAF loops on
-`pollers`. The channel probe (`worker_jobs` kind `discord_probe`) reports
-each as `live:{SPORT}`, so a live webhook pasted from the pre-game channel
-shows up as a collision.
+into `config.DISCORD_WEBHOOKS_LIVE`. A sport with no live webhook may instead
+set `DISCORD_CHANNEL_LIVE_<SPORT>` (`config.DISCORD_CHANNELS_LIVE`; an id is
+not a secret). `_live_webhook_for_sport` resolves an in-play signal as the
+sport's live webhook, else that channel id through the bot token (the webhook
+it creates is named `<sport>-live`, lowercase, so it is not the pre-game
+webhook), else the shared `DISCORD_WEBHOOK_LIVE`, else the sport's pre-game
+channel. A live channel id that this process cannot open does not use the
+last two: the pick stays unsent, so it is not ledgered against another room.
+The webhook URLs are Railway variables on BOTH services. Measured 2026-11-03
+from the production logs and variable names: `worker` is `SERVICE_ROLE=pipeline`
+and skips `live_loop`, `ncaaf_live_loop` and `nfl_live_leader`; `pollers` is
+`SERVICE_ROLE=poller` and runs those loops. `pollers` has
+`DISCORD_WEBHOOK_LIVE_{MLB,NCAAF,NFL}` and no `DISCORD_BOT_TOKEN`. The channel
+ids `DISCORD_CHANNEL_LIVE_NCAAB` and `DISCORD_CHANNEL_LIVE_NCAABW` are set on
+`worker` only. A live post that originates on `pollers` cannot open a channel
+id until that service has the bot token (Manage Webhooks) and the channel id,
+or a `DISCORD_WEBHOOK_LIVE_{SPORT}` URL. The notifier logs that once per sport
+and skips the pick. The channel probe (`worker_jobs` kind `discord_probe`)
+reports each live webhook as `live:{SPORT}`, so a live webhook pasted from the
+pre-game channel shows up as a collision.
 
 **A channel id can stand in for a webhook (2026-10-30, NCAAB).** NCAAB went
 live with no channel and no `DISCORD_WEBHOOK_NCAAB`. `NCAAB` is now in
-`config.DISCORD_SPORTS`, and a sport with no webhook variable may instead set
+`config.DISCORD_SPORTS` (NCAABW added 2026-11-03, women's college basketball,
+`DISCORD_CHANNEL_NCAABW`), and a sport with no webhook variable may instead set
 `DISCORD_CHANNEL_<SPORT>` to its channel id (`config.DISCORD_CHANNELS`; an id is
 not a secret). `_webhook_for_sport` then asks `_channel_webhook`, which uses
 `DISCORD_BOT_TOKEN` to list the channel's webhooks, reuses the one the bot
@@ -88,7 +101,7 @@ the stop message lists the guild's text channels by name and id.
 | Function | Source of truth | Called from |
 |---|---|---|
 | `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
-| `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
+| `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer` and each `ncaaf_live.gameday` pass (both `pollers` jobs), end of `nfl_live_leader.gameday` (also `pollers`), and `nfl/live_model/pick_writer.announce_live_picks` on `worker` after every NFL live BET the retired in-play worker commits when `RUN_NFL_LIVE=1` (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
 | `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` and on mike's approval (`config.RECORD_RESTATEMENT_APPROVALS`) |
@@ -675,7 +688,7 @@ date, so a Sunday-night bet is Monday's) rather than a clock date.
 
 Two changes that only make sense together.
 
-**Selectivity.** Swept every settled live BET at real DK prices, flat $100:
+**Selectivity.** Swept every settled live BET at real DK prices, one flat unit per bet:
 
 | model | at 0.65/0.10 | verdict |
 |---|---|---|

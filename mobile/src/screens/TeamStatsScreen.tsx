@@ -46,7 +46,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { TeamLineCell } from '@/components/TeamsBoard';
 import { FORM_GAMES, RECORD_GAMES, useTeamDetail, type NextGame } from '@/hooks/useTeamDetail';
-import { formatPct, formatSignedUnits, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
+import { formatPct, formatSigned, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookName } from '@/lib/markets';
 import { buildTeamLineIndex, type TeamLineQuote } from '@/lib/statsOdds';
@@ -326,8 +326,8 @@ export function TeamStatsScreen() {
             title: 'Posted bets only',
             body:
               `Posted settled bets in ${team}’s last ${RECORD_GAMES} games, split by side. A pick Discord did not post is left out. ` +
-              'Results are in units: one unit is one flat bet. A pick that carried no price counts in the ' +
-              'record but not the units, so nothing here is priced at an invented −110.',
+              'Results are in units at the stake Discord posts: each pick to win 1 unit, never more than 3 ' +
+              'units laid. A pick that carried no price counts at 1 unit.',
           }}
         />
         {d.picksLoading && d.pickRecords.settled === 0 ? (
@@ -683,15 +683,16 @@ function asOf(stamps: Array<string | null>): string {
   return t ? ` · as of ${t}` : '';
 }
 
-/** One number per tile: the units, or the record when nothing was priced; the
- *  record and the unpriced count in the caption (UX review). */
+/** One number per tile: the units at the published stake, two decimals as
+ *  the Record tab prints them (the record alone before any pick); the record
+ *  and the unpriced count in the caption (UX review). */
 function RecordTile({ label, record }: { label: string; record: PickRecord }) {
   const units = record.units;
-  const value = units == null ? formatWinLoss(record) : formatSignedUnits(units);
+  const value = units == null ? formatWinLoss(record) : formatSigned(units, 2, 'u');
   const caption =
     units == null
-      ? record.unpriced > 0 ? `${record.unpriced} unpriced` : undefined
-      : `${formatWinLoss(record)}${record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}`;
+      ? undefined
+      : `${formatWinLoss(record)}${record.unpriced > 0 ? ` · ${record.unpriced} unpriced, staked at 1u` : ''}`;
   return <StatTile label={label} value={value} caption={caption} tint={unitsTint(units)} />;
 }
 
@@ -869,7 +870,8 @@ function signed(n: number, digits: number): string {
 // 3.6:1 on a card, under AA for a 20pt number (UX review).
 function unitsTint(units: number | null): string | undefined {
   if (units == null) return undefined;
-  const r = Math.round(units * 10) / 10;
+  // Rounded as printed: two decimals.
+  const r = Math.round(units * 100) / 100;
   if (r > 0) return colors.gradeGood;
   if (r < 0) return colors.gradeBad;
   return undefined;

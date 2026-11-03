@@ -97,8 +97,9 @@ class _PlanConn:
     ingestor's bet games and its closes-taken read."""
 
     def __init__(self, slate_rows, decided=(), taken=(), bet_rows=(), closes=(), proj_decided=(),
-                 projected=None):
+                 projected=None, sched=()):
         self.slate_rows, self.decided, self.taken = slate_rows, set(decided), set(taken)
+        self.sched = list(sched)
         self.bet_rows, self.closes = list(bet_rows), set(closes)
         self.proj_decided, self.projected = set(proj_decided), dict(projected or {})
 
@@ -106,6 +107,10 @@ class _PlanConn:
         s = " ".join(sql.split())
         if "FROM games g LEFT JOIN nba_schedule" in s:
             self._rows = list(self.slate_rows)
+        elif s.startswith("SELECT DISTINCT season, game_date, game_type FROM nba_schedule"):
+            self._rows = sorted({(r[1], r[2], r[3]) for r in self.sched})
+        elif "FROM nba_schedule s LEFT JOIN games g" in s:
+            self._rows = list(self.sched)
         elif "FROM nba_prop_market_decisions" in s:
             self._rows = [(g,) for g in params[0] if g in self.decided]
         elif "FROM nba_prop_projection_decisions" in s:
@@ -126,8 +131,8 @@ class _PlanConn:
         return self._rows
 
 
-def _game(gid, minutes, game_type="regular"):
-    return (gid, "LAL", "GSW", "2026-10-21", 2027, _t(minutes), _t(minutes), game_type)
+def _game(gid, minutes, game_type="regular", day="2026-10-21"):
+    return (gid, "LAL", "GSW", day, 2027, _t(minutes), _t(minutes), game_type)
 
 
 def _plan(conn, monkeypatch):
@@ -145,8 +150,52 @@ def test_the_plan_takes_games_40_to_62_minutes_out_not_yet_decided(monkeypatch):
                       _game("BET", 60), _game("CUP", 55, "cup_final"), _game("RULE", 50)],
                      decided={"DONE", "RULE"}, taken={"BET"}, proj_decided={"DONE", "BET"})
     p = _plan(conn, monkeypatch)
-    # RULE: nba_prop_market has decided it, the projection model has not
-    assert p.decide == ["AT40", "AT58", "AT62", "RULE"] and p.close == []
+    # RULE: nba_prop_market has decided it, the projection model has not.
+    # CUP: nba_prop_market bets the Cup final (it did not until the 272-game search).
+    assert p.decide == ["AT40", "AT58", "AT62", "CUP", "RULE"] and p.close == []
+
+
+# The 2026-27 schedule as stored: regular-season days, and the Cup final's placeholder.
+_SCHED_2027 = [("A", 2027, "2026-10-20", "regular", "BOS", "NYK", True, True),
+               ("B", 2027, "2027-04-11", "regular", "BOS", "NYK", True, True),
+               ("C", 2027, "2026-12-11", "cup_final", "NaN", "NaN", False, False)]
+
+
+def test_a_postseason_game_is_done_when_the_rule_alone_has_decided_it(monkeypatch):
+    """The projection model will never decide these. With the regular-season test (both models)
+    the job would refetch a decided game on every tick until tip-40, at 17 credits a call, and the
+    fetch would buy nothing a decision can use."""
+    conn = _PlanConn([_game("PO_OPEN", 55, "playoff"), _game("PO_DONE", 55, "playoff"),
+                      _game("PO_BET", 55, "playoff"), _game("PI_DONE", 55, "playin"),
+                      _game("CUP_DONE", 55, "cup_final"),
+                      # a minute past the far end: plan() has no upper bound of its own, so a
+                      # wider postseason read would fetch this game on every tick
+                      _game("PO_FAR", 63, "playoff")],
+                     decided={"PO_DONE", "PI_DONE", "CUP_DONE"}, taken={"PO_BET"}, sched=_SCHED_2027)
+    assert _plan(conn, monkeypatch).decide == ["PO_OPEN"]
+
+
+def test_the_rule_alone_test_is_for_postseason_games_only_never_for_a_game_with_no_type(monkeypatch):
+    """An unlisted Cup quarterfinal has no type either, and it is a regular-season game: the
+    rule deciding it must not stop the projection model's refetch. An unlisted game after the last
+    regular-season day is the rule's alone."""
+    conn = _PlanConn([_game("QF_UNLISTED", 55, None, day="2026-12-04"),
+                      _game("REG_LISTED", 55),
+                      _game("PLAYIN_UNLISTED", 55, None, day="2027-04-13")],
+                     decided={"QF_UNLISTED", "REG_LISTED", "PLAYIN_UNLISTED"}, sched=_SCHED_2027)
+    assert _plan(conn, monkeypatch).decide == ["QF_UNLISTED", "REG_LISTED"]
+
+
+def test_the_projection_model_is_never_asked_to_project_a_postseason_game(monkeypatch):
+    conn = _PlanConn([_game("REG", 55), _game("PO", 55, "playoff"), _game("CUP", 65, "cup_final"),
+                      _game("UNLISTED", 65, None, day="2027-04-13")], sched=_SCHED_2027)
+    assert _plan(conn, monkeypatch).project == ["REG"]
+
+
+def test_a_postseason_game_near_its_tip_keeps_the_tick_publishing(monkeypatch):
+    """A bet a failed Discord run held back still posts before its game starts."""
+    conn = _PlanConn([_game("PO", 30, "playoff")], decided={"PO"}, sched=_SCHED_2027)
+    assert _plan(conn, monkeypatch).publish
 
 
 def test_the_plan_projects_games_about_an_hour_out_and_any_in_the_window_never_projected(monkeypatch):

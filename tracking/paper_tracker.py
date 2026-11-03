@@ -1915,6 +1915,52 @@ def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
     return {"over_price": row[0], "under_price": row[1], "line": row[2]}
 
 
+# How long an NBA bet with no league tip stays open for one to arrive (a schedule row the morning
+# refresh has not written yet) before it is stamped empty and leaves the backfill's queue.
+_NBA_NO_TIP_WAIT_DAYS = 2
+
+
+def _reversed_nba_id(game_id: str) -> str:
+    """NBA_<date>_<away>_<home> with home and away the other way round."""
+    parts = str(game_id).split("_")
+    return "_".join((parts[0], parts[1], parts[3], parts[2])) if len(parts) == 4 else str(game_id)
+
+
+def _nba_schedule_rows(conn: DBConnection, game_ids: list[str]) -> dict[str, tuple]:
+    """{game_id: (start, type)} for these NBA games, under their own id and the other way round."""
+    ids = sorted(set(game_ids) | {_reversed_nba_id(g) for g in game_ids})
+    if not ids:
+        return {}
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT game_id, commence_time, game_type FROM nba_schedule WHERE game_id = ANY(%s)",
+        (ids,)).fetchall()}
+
+
+def _nba_league_tip(game_id: str, feed_start, schedule: dict[str, tuple]) -> "datetime | None":
+    """The start an NBA bet's close can be bounded on, or None when there is none.
+
+    The odds feed's start runs 2 to 20 minutes behind the real tip on every game it has written
+    (2026-10-20..11-02), and refresh passes store in-play rows typed 'open', so a close bounded on it
+    can be an in-play price. That is every bet whose only start is the feed's: a game the schedule
+    does not list and one with no tip there. A game the schedule holds the other way round reads
+    that row. A postseason start far before the feed's is read as ESPN's error
+    (models.nba_prop_market.postseason_tip), so that game has no start to trust either.
+    data/migrations/clv_standard_v2_2026_10_14.sql holds the same test: it recomputes any bet not
+    yet stamped, so a test here alone would be overwritten on its next pass."""
+    from models.nba_prop_market import START_GAP_MIN, parse_ts
+    from models.nba_total_luck import POSTSEASON_TYPES
+    for gid in (game_id, _reversed_nba_id(game_id)):
+        start, kind = schedule.get(gid, (None, None))
+        tip = parse_ts(start)
+        if tip is None:
+            continue
+        feed = _as_utc(feed_start)
+        if kind in POSTSEASON_TYPES and feed is not None and feed - tip > timedelta(minutes=START_GAP_MIN):
+            return None
+        return tip
+    return None
+
+
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     Record closing line value for each official (BET) pick on game_date.
@@ -1987,6 +2033,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
     now_utc = datetime.now(timezone.utc)
     updated = 0
+    nba_schedule = _nba_schedule_rows(conn, sorted({r[1] for r in rows if str(r[1]).startswith("NBA_")}))
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
          pick_label, scored_line, created_at, row_prop_market,
          _row_clv_method, decision_odds, decision_book, game_time) in rows:
@@ -2091,6 +2138,18 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
                 WHERE pick_id = %s
             """, (CLV_METHOD_STANDARD, book, pick_id))
             return 1
+
+        # AN NBA BET WITH NO LEAGUE TIP HAS NO CLOSE. The closing-line columns stay empty rather
+        # than holding an in-play price, and it is stamped once a schedule row is no longer coming.
+        if str(game_id).startswith("NBA_"):
+            league_tip = _nba_league_tip(game_id, commence_time, nba_schedule)
+            if league_tip is None:
+                waited = (now_utc.astimezone(ZoneInfo("America/New_York")).date()
+                          - datetime.strptime(str(game_date)[:10], "%Y-%m-%d").date()).days
+                updated += _stamp_empty(revisiting=revisiting or waited >= _NBA_NO_TIP_WAIT_DAYS)
+                continue
+            if league_tip < _as_utc(close_bound):
+                close_bound = league_tip.isoformat()
 
         has_line = False
         moved_snap = None
@@ -2371,6 +2430,12 @@ _RULE_MODEL_MARKETS = {
     # ncaab_period_scores (_ncaab_first_half_points), no overtime. NEVER
     # "spreads": that grades the full-game margin.
     "ncaab_first_half_spread": "spreads_h1",
+    # NCAAB first-half total (models/ncaab_first_half_total.py). scored_line
+    # is the first half's total; it settles on period 1 of
+    # ncaab_period_scores (first_half_points routes an NCAAB game there), no
+    # overtime. NEVER "totals": that sums the two finals and grades every
+    # under a loss.
+    "ncaab_first_half_total": "totals_h1",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
@@ -2870,6 +2935,31 @@ def _settle_game_picks_window(
     return tuple(totals)
 
 
+def _posted_units_line(conn: DBConnection, settled_at: str) -> str:
+    """This pass's BET results on the published stake, for the settle log.
+
+    stake_for: 1u to win at COALESCE(decision_odds, dk_odds), risk capped at
+    3u, a pick with no price at the bare 1u (tracking/published_units). Read
+    back from the rows this pass stamped, so it is the record's number and
+    never the -110 a settler grades an unpriced pick's profit_flat at.
+    """
+    from tracking.published_units import unit_profit, unit_risked
+    rows = conn.execute("""
+        SELECT COALESCE(decision_odds, dk_odds), result
+        FROM picks
+        WHERE settled_at = %s
+          AND signal_type = 'BET'
+          AND result IN ('WIN', 'LOSS', 'PUSH')
+    """, (settled_at,)).fetchall()
+    units = risked = 0.0
+    for price, result in rows:
+        price = None if price is None else float(price)
+        units += unit_profit(price, result)
+        risked += unit_risked(price, result)
+    roi = f" (ROI {units / risked:.1%})" if risked > 0 else ""
+    return f"Units: {units:+.2f}u on {risked:.2f}u risked{roi}"
+
+
 def settle_picks(game_date: str = None) -> dict:
     """
     Settle all unsettled picks from game_date (default: yesterday).
@@ -3048,13 +3138,16 @@ def settle_picks(game_date: str = None) -> dict:
         win_rate = wins / max(wins + losses, 1)
         flat_roi = total_profit_flat / max((wins + losses) * 100, 1)
 
+        # Units, never dollars (§4), on the published stake: the same units
+        # Discord #results and the Record tab book for these picks. Not the
+        # settlers' profit_flat total, which grades an unpriced pick at an
+        # invented -110 (the return dict keeps that stored figure).
         logger.success(
             f"\n{'═'*50}\n"
             f"  Settled: {game_date}\n"
             f"  Results: {wins}W / {losses}L / {pushes}P / {no_actions}N\n"
             f"  Win Rate: {win_rate:.1%}\n"
-            f"  Flat P&L: ${total_profit_flat:+,.2f} (ROI: {flat_roi:.1%})\n"
-            f"  Kelly P&L: ${total_profit_kelly:+,.2f}\n"
+            f"  {_posted_units_line(conn, settled_at)}\n"
             f"{'═'*50}"
         )
 
@@ -3089,17 +3182,21 @@ def print_performance_summary(days: int = 30) -> dict:
 
     conn = get_connection()
     try:
-        # Overall stats
+        # Overall stats. Units come from priced picks only: profit_flat
+        # fabricates -110 on a pick with no price (config-topology, §6).
         overall = conn.execute(f"""
             SELECT
                 COUNT(*) as total_picks,
                 SUM(CASE WHEN result = 'WIN'  THEN 1 ELSE 0 END) as wins,
                 SUM(CASE WHEN result = 'LOSS' THEN 1 ELSE 0 END) as losses,
                 SUM(CASE WHEN result = 'PUSH' THEN 1 ELSE 0 END) as pushes,
-                SUM(profit_flat)  as total_flat_pnl,
+                SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                         THEN profit_flat END) as total_flat_pnl,
                 SUM(profit_kelly) as total_kelly_pnl,
                 AVG(edge)         as avg_edge,
-                MAX(bankroll_at_pick) as bankroll_at_pick
+                SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                          AND result IN ('WIN', 'LOSS') THEN 1 ELSE 0 END)
+                                  as priced_decided
             FROM picks
             WHERE game_date >= ?
               AND result IS NOT NULL
@@ -3112,7 +3209,8 @@ def print_performance_summary(days: int = 30) -> dict:
             SELECT model_id,
                    COUNT(*) as picks,
                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
-                   SUM(profit_flat) as flat_pnl,
+                   SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                            THEN profit_flat END) as flat_pnl,
                    SUM(profit_kelly) as kelly_pnl,
                    AVG(edge) as avg_edge
             FROM picks
@@ -3123,15 +3221,6 @@ def print_performance_summary(days: int = 30) -> dict:
             GROUP BY model_id
             ORDER BY flat_pnl DESC
         """, (cutoff,)).fetchall()
-
-        # Current bankroll
-        current_bankroll = conn.execute("""
-            SELECT bankroll_at_pick + COALESCE(profit_kelly, 0)
-            FROM picks
-            WHERE result IS NOT NULL
-            ORDER BY settled_at DESC
-            LIMIT 1
-        """).fetchone()
 
         # Running bankroll history (for chart)
         bankroll_history = conn.execute(f"""
@@ -3154,26 +3243,25 @@ def print_performance_summary(days: int = 30) -> dict:
     logger.info(f"{'═'*60}")
 
     if overall and overall[0]:
-        total, wins, losses, pushes, flat_pnl, kelly_pnl, avg_edge, _ = overall
+        total, wins, losses, pushes, flat_pnl, _kelly, avg_edge, priced = overall
         decided = max(wins + losses, 1)
+        units = (flat_pnl or 0) / 100            # units, never dollars (§4)
+        roi = units / priced if priced else 0.0
         logger.info(f"  Total Picks:  {total}")
         logger.info(f"  Record:       {wins}W / {losses}L / {pushes}P")
         logger.info(f"  Win Rate:     {wins/decided:.1%}")
-        logger.info(f"  Flat P&L:     ${flat_pnl:+,.2f} (ROI: {flat_pnl/(decided*100):.1%})")
-        logger.info(f"  Kelly P&L:    ${kelly_pnl:+,.2f}")
+        logger.info(f"  Flat units:   {units:+.2f}u (ROI: {roi:.1%} on {priced} priced)")
         logger.info(f"  Avg Edge:     {avg_edge:.2%}" if avg_edge else "")
-        if current_bankroll and current_bankroll[0]:
-            logger.info(f"  Bankroll:     ${current_bankroll[0]:,.2f}")
 
     if by_model:
-        logger.info(f"\n  {'Model':<30} {'Picks':>5} {'W/L':>7} {'Flat P&L':>10} {'Avg Edge':>9}")
+        logger.info(f"\n  {'Model':<30} {'Picks':>5} {'W/L':>7} {'Units':>10} {'Avg Edge':>9}")
         logger.info(f"  {'-'*63}")
         for row in by_model:
             mid, picks, wins, flat_pnl, kelly_pnl, avg_edge = row
             losses = picks - wins if wins else picks
             wl = f"{wins}/{losses}" if wins is not None else "–"
             logger.info(f"  {mid:<30} {picks:>5} {wl:>7} "
-                         f"${flat_pnl or 0:>9,.2f} {avg_edge or 0:>8.2%}")
+                         f"{(flat_pnl or 0) / 100:>+9.2f}u {avg_edge or 0:>8.2%}")
 
     logger.info(f"{'═'*60}\n")
 
