@@ -272,6 +272,26 @@ The feed has returned DraftKings, FanDuel, Fanatics, BetParx and BetRivers for 2
 (BetMGM, Caesars and Hard Rock not yet), so the five-book row is the expectation, and
 less than that: the best cell of a 546-cell search runs high.
 
+**How to read this record, dated 2026-11-02.** A separate check reproduced the card to the bet (92,877 of 92,877
+rows) and then measured three things the figures above do not say. No bet and no live price changes.
+
+- **It is one draw of five.** The trainer's fits are not pinned to a thread count, so the same seed on another
+  machine is a different model (`models/nba_props.py:703-704`). Refitted on 2, 3, 4 and 6 threads, the card made
+  +3.95%, +3.65%, +3.82% and +3.81% at eight books, against this record's +4.12%; at five books +3.31%, +3.28%,
+  +3.33% and +3.16% against +3.60%. Read the record as about +3.8% at eight books and +3.3% at five. The capped
+  grade, +9.69% on 1,867 bets, falls to +8.96% if a voided bet keeps its slot, as it does live.
+- **One input read tonight's box.** The returning-teammates input in the graded history counted anyone in the
+  game's own box (`models/nba_props.py:550-561`). The live card counts the pre-game roster and players a book
+  prices, so no live bet read it. Fed what live knows, the card makes +4.09% at eight books and +3.59% at five,
+  against +4.12% and +3.60%. Refitted on it, +3.76% and +3.31%, inside the spread between draws.
+- **A team's first ten games earned nothing.** Eight books: 10,244 bets, +15.1 units, +0.15% (-1.86% to +2.07%),
+  against 73,116 bets, +3,395.0 units, +4.68% after. The gap at 5, 7, 10, 12, 15 and 20 games is +3.22, +3.73,
+  +4.53, +2.92, +3.40 and +2.37 points, so ten is the peak of a range and not a boundary. It is not card-wide:
+  threes lose 92.9 units there, while blocks under and rebounds + assists under make money. This was found after
+  the record, so it is not a rule. Every live bet so far is in this window.
+- **The feed now returns all eight books.** Live decisions have been taken at Hard Rock, BetMGM and Caesars, so the
+  five-book row above is no longer the expectation.
+
 **Prices it lays:** min −200, 5th percentile −166, median +108, 95th +170, max +3000;
 64% plus money, 9% at −150 or shorter. 558 bets are longer than +200 (they lose 4.9
 units); the +1,600..+3,000 tail is threes overs at 0.5 quoted by one book, at stakes of

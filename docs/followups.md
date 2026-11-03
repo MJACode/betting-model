@@ -21,6 +21,48 @@
 
 ---
 
+## [ ] Player props: a book's last-listed line overwrites its main number (2026-11-02)
+
+`data/ingestors/prop_odds_ingestor.py:417-425` keys a standard prop market on (market, player), so when a book lists
+several lines under that key the last one wins, and the two prices can come from different lines. Measured:
+
+- **One paid call (1 credit), 2026-11-03 02:13Z, PHX at GSW, `player_points`, eight books.** Seven books list one line
+  a player. Bovada lists several for all 13 players (seven for Brandin Podziemski, 12.5 to 18.5), and the line we
+  keep is not the one closest to even for any of them. The raw response is in `%TEMP%/q1trend/probe_prop_ladder_raw.json`.
+- Bovada's own site, read once without credits: the stored line is the last it lists for 90 of 90 players.
+- Raw NFL in-play responses (`nfl_live_prop_snapshots`): 4 of 75,024 player-market groups list several lines, and the
+  parser mixed two lines into one row on 2 of them, both DraftKings.
+- **No bet is reached now.** Bovada cannot be bet. Of 362 live prop bets read row by row, at most one may sit on a
+  line other than the book's main number. The app's all-books table does read Bovada's rows, so it can show a
+  Bovada line several points above every other book's (by the code and the view; not seen on a screen).
+- Removing BetRivers 2023-24, the book-season that looks like this in history: `nba_prop_market` +2.92% against
+  +2.96%; `nba_prop_projection` +4.04% against +4.12%, every season still positive.
+
+The fix: key standard markets on (market, player, line), keep each book's two-sided line closest to even under the
+standard name, and file the rest as alternates. It needs a carve-out for books that post one side only (BetRivers'
+NFL rows are about half one-sided), a test on the NHL models, which shop every line, and a margin check on the NFL,
+WNBA and DraftKings row reads that have none. It changes what "a book's line" means everywhere, so it ships on its
+own branch with a review.
+
+## [ ] NBA prop projection: pin the training thread count before any retrain (2026-11-02)
+
+`models/nba_props.py:703-704` fits with every core and a 0.8 row sample, so the seed does not pin the model: on 3
+threads the minutes model differs from the shipped one by 0.32 minutes on average. Pin it at 8, which rebuilds the
+shipped artifact exactly. The record is one draw of five (`docs/nba_models_2026.md` section 5).
+
+## [ ] NBA prop projection: grade the first ten games before next season (2026-11-02)
+
+A team's first ten games earned +0.15% against +4.68% after (section 5). Before October 2027, sweep 5, 10, 15 and 20
+games by cell, by season and across training draws, and decide whether to hold that window. Not this season: every
+team reaches ten games by about 2026-11-09.
+
+## [ ] NBA prop projection: players the name match cannot place (2026-11-02)
+
+The live card matches a priced name only against players logged for either team this season or last. So a player in
+his first game for a new team, or back from a missed season, gets no projection: on 2026-10-21 Tyrese Haliburton and
+Fred VanVleet played 34 and 30 minutes with none. On teams' first games of 2026-27, 47 players a book priced had no
+projection.
+
 ## [ ] NBA game total models: read what could not be measured before they ran live (2026-10-31)
 
 Three reads, none possible from the branch that made the changes (no production

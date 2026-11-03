@@ -700,9 +700,11 @@ on what is already live by more than its own noise.
 blind under returns +5.71%, against -2.60% elsewhere. The live rule is +14.60% there and +1.13% elsewhere (-0.50% to
 +2.77%). This is a hindsight split and not a rule, but it says where the unders' money comes from.
 
-**Faults the check found, each measured separately:** the returning-teammates input reads tonight's box, which the
-live card cannot know, and a book's last-listed line can overwrite its main number. Both reach beyond this search, and
-the session log has what was measured. Two smaller ones stand here: 15 files of invented bets from the lab's own
+**Faults the check found, each measured separately on 2026-11-02:** the returning-teammates input reads tonight's box,
+and a book's last-listed line can overwrite its main number. The first does not reach a live bet; what it does to the
+shipped projection model's record is in `docs/nba_models_2026.md` section 5. The second reaches no bet now: of the
+books that can be bet, none lists more than one line a player, and Bovada, which lists seven, cannot be bet
+(`docs/followups.md`). Two smaller ones stand here: 15 files of invented bets from the lab's own
 synthetic check sit in the bets folder (`scripts/nba_s_propoffline.py:1245`), though the verdict never reads them, and
 the verdict's `credited` column reads as credit for the anchored consensus cell at EV 0.04 while it loses to its
 control. `credit_AN.parquet` is the column to read.
