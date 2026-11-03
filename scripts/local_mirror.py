@@ -619,7 +619,10 @@ class PgSource:
         page.limit = limit
         return page
 
-    def range_summaries(self, info: TableInfo, lo, his, with_hash: bool) -> list[tuple[int, int | None]]:
+    def range_summaries(self, info: TableInfo, lo, his, with_hash: bool) -> list[tuple[int, int | None] | None]:
+        """(count, hash) per sub-range; None for a range whose check hit the
+        statement timeout on its own. The caller copies that range again,
+        which always fits (fetch_page halves its batch until it does)."""
         import psycopg2.extensions as ext
         sql, params = summaries_sql(info, lo, his, with_hash)
 
@@ -631,7 +634,8 @@ class PgSource:
         except ext.QueryCanceledError:
             self._reset()
             if len(his) == 1:
-                raise
+                self.log(f"{info.fq}: a range check hit the statement timeout; it will be copied again")
+                return [None]
             # Split the group and try again.
             mid = len(his) // 2
             return (self.range_summaries(info, lo, his[:mid], with_hash)
@@ -781,6 +785,7 @@ class TableResult:
     tail_new: int = 0
     repulled: int = 0
     mismatched: int = 0
+    unchecked: int = 0  # ranges whose count hit the statement timeout
     pulled_rows: int = 0
     error: str | None = None
     seconds: float = 0.0
@@ -958,9 +963,9 @@ class Mirror:
                 continue
             if c["id"] in hashed:
                 lo, hi = self._bounds(chunks, i)
-                (cnt, hsh), = self.source.range_summaries(info, lo, [hi], True)
+                summary = self.source.range_summaries(info, lo, [hi], True)[0]
                 n_checked_hash += 1
-                if cnt != c["rows"] or str(hsh) != c["xor"]:
+                if summary is None or summary[0] != c["rows"] or str(summary[1]) != c["xor"]:
                     bad.append(c["id"])
                 else:
                     c["hash_checked_at"] = now
@@ -974,8 +979,8 @@ class Mirror:
                 j += 1
             lo = chunks[i - 1]["hi"] if i > 0 else None
             sums = self.source.range_summaries(info, lo, [g["hi"] for g in group], False)
-            for g, (cnt, _) in zip(group, sums):
-                if cnt != g["rows"]:
+            for g, s in zip(group, sums):
+                if s is None or s[0] != g["rows"]:  # None: the check timed out
                     bad.append(g["id"])
             i = j
         return bad, n_checked_hash
@@ -1071,9 +1076,13 @@ class Mirror:
                 group = chunks[i:i + self.count_group]
                 lo = chunks[i - 1]["hi"] if i > 0 else None
                 sums = self.source.range_summaries(info, lo, [g["hi"] for g in group], False)
-                for g, (cnt, _) in zip(group, sums):
-                    server += cnt
-                    mism += int(cnt != g["rows"])
+                for g, s in zip(group, sums):
+                    if s is None:  # timed out: not counted, and taken as equal below
+                        res.unchecked += 1
+                        server += g["rows"]
+                        continue
+                    server += s[0]
+                    mism += int(s[0] != g["rows"])
                 i += len(group)
             res.server_rows = server
             res.mismatched = mism
@@ -1081,7 +1090,8 @@ class Mirror:
         m["last_verify"] = {"at": _iso(self.clock()), "local_rows": res.local_rows,
                             "server_rows_in_copied_ranges": res.server_rows,
                             "server_rows_past_last_key": res.tail_new,
-                            "mismatched_chunks": res.mismatched}
+                            "mismatched_chunks": res.mismatched,
+                            "ranges_not_counted_timeout": res.unchecked}
         store.save(m)
         return res
 
@@ -1518,8 +1528,11 @@ def _fmt_table(results: list[TableResult]) -> str:
             status = f"ERROR {r.error[:60]}"
         elif r.server_rows is None:
             status = "not verified"
-        elif r.server_rows == r.local_rows:
+        elif r.server_rows == r.local_rows and not r.unchecked:
             status = "OK"
+        elif r.server_rows == r.local_rows:
+            status = (f"{r.unchecked} range(s) not counted (60 s limit); the rest match; "
+                      f"the next run copies them again")
         else:
             status = (f"MISMATCH in {r.mismatched} range(s): changed since it was copied; "
                       f"the next run re-pulls them")

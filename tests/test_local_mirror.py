@@ -50,6 +50,7 @@ class FakeServer:
         self.fetches = 0
         self.fail_after: int | None = None
         self.halve_once = False
+        self.slow_his: set[tuple] = set()  # ranges whose check hits the statement timeout
 
     # helpers -------------------------------------------------------------------
     def _key(self, texts):
@@ -92,7 +93,8 @@ class FakeServer:
         for h in his:
             keys = self._between(prev, h)
             hsh = lm.xor_all(self._hash(self.rows[k]) for k in keys) if with_hash else None
-            out.append((len(keys), hsh))
+            # PgSource returns None for a range whose check timed out on its own.
+            out.append(None if tuple(h) in self.slow_his else (len(keys), hsh))
             prev = h
         return out
 
@@ -471,3 +473,49 @@ def test_export_csv_writes_what_postgres_copy_reads_back(tmp_path):
     assert raw[2] == '"2","",,', "empty string quoted, NULLs bare"
     assert raw[3] == r'"3",,"2026-11-03 18:00:48.123456+00","\x"'
     assert len(list(csv.reader(out.open(encoding="utf-8", newline="")))) == 4
+
+
+# ------------------------------------------------------------- statement timeouts
+
+def test_a_range_check_that_times_out_is_copied_again_not_failed(tmp_path):
+    """A cold range can take longer than the 60 s limit to count or hash. That
+    must mean 'copy it again' (the copy halves its batch until it fits), not
+    'fail the table', or the same range would fail it on every run."""
+    clock = Clock()
+    src = seeded(47)
+    mm = mirror(src, tmp_path, clock=clock, rotate_days=1)
+    mm.sync_table(src.info)
+    src.put((25, "k025"), "graded")       # an edit inside the slow range
+    src.delete((14, "k014"))              # a delete inside another slow range
+    src.slow_his = {("30", "k030"), ("20", "k020")}
+    clock.advance(days=2)                 # (20,30] is hashed, (10,20] only counted
+    res = mm.sync_table(src.info)
+    assert res.repulled >= 2
+    assert local(tmp_path) == server(src)
+    v = mm.verify_table(src.info)
+    assert v.unchecked == 2 and v.error is None
+
+
+def test_pg_source_narrows_a_timed_out_check_to_the_slow_range(monkeypatch):
+    """PgSource splits a group whose check timed out, and reports only the
+    range that times out on its own, as None."""
+    ext = pytest.importorskip("psycopg2.extensions")
+    monkeypatch.setattr(lm, "summaries_sql", lambda info, lo, his, wh: ((lo, [h[0] for h in his]), []))
+    src = lm.PgSource.__new__(lm.PgSource)
+    src.log = lambda m: None
+    src._conn_obj = None
+
+    class Cur:
+        def execute(self, sql, params):
+            self.sql = sql
+
+        def fetchone(self):
+            lo, his = self.sql
+            if "30" in his:
+                raise ext.QueryCanceledError("canceling statement due to statement timeout")
+            return tuple(7 for _ in his)
+
+    src._run = lambda fn, **kw: fn(Cur())
+    info = lm.TableInfo("public", "t", [], ["a"], ["bigint"])
+    out = src.range_summaries(info, None, [["10"], ["20"], ["30"], ["40"], ["50"]], False)
+    assert out == [(7, None), (7, None), None, (7, None), (7, None)]
