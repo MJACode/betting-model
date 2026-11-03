@@ -1,0 +1,164 @@
+"""
+NCAAB game lines at the 15:00 UTC check: every bettable book's standing quote,
+the sign-crossing artefacts removed, and the books' consensus.
+
+Shared by the NCAAB spread model (models/ncaab_spread_market.py) and the
+moneyline and first-half models planned on the same pieces. One pure function
+per step, so the card (scripts/ncaab_spread_card.py) and the build's replay
+(scripts/ncaab_spread_market_build.py) run the SAME code: the card feeds it
+rows read from `odds`, the replay the stored history.
+
+THE CHECK INSTANT. 15:00 UTC on the game's date (games.game_date, the Eastern
+date): 10:00 ET in winter, 11:00 EDT from mid-March. The research bought its
+history at that instant; nothing else it tested held up (22:00 UTC the evening
+before failed, the hour before tip made +0.43%). A game that tips at or before
+the instant is never quoted.
+
+A BOOK'S QUOTE at the instant is its newest pre-game row whose own stamp
+(`snapshot_at`, the feed's last_update for that market) is at or before the
+instant and no more than WINDOW_MIN minutes older, and at or before the tip.
+Rows with no line or no price on either side are dropped first, so they can
+never hide an older complete row. Two rows of one book with the same stamp:
+the one stored last wins (`order`).
+
+THE ARTEFACT RULE. A quote on the other side of zero from the median of the
+OTHER bettable books' quotes at the same instant (flagged or not) is a pick'em
+sign error in the feed, not a price: with two or more other books it is
+'artefact', with exactly one 'ambiguous'. Both are dropped. A 0 line never
+flags (strict product < 0).
+
+CONSENSUS. The median of the remaining quotes, the book being priced
+INCLUDED, and their count (`n_ok`).
+
+Measured 2026-11-02 on the 2026-27 slate (119 games with odds): the hourly
+refresh pass at :17 past 9 a.m. ET stores every listed book's spread, so at
+15:00 UTC the median stamp is 42 minutes old, and 83-96% of book-game pairs
+hold a stamp inside the 60-minute window across the hours of that day.
+Caesars (williamhill_us) was missing from the 14:00-16:00 UTC passes that day.
+The five-minute capture (scripts/ncaab_odds_capture.py) adds a row only when a
+number moves, so an unchanged quote keeps the pass's stamp.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import numpy as np
+import pandas as pd
+
+# The bettable books the research priced and took the consensus over. Pinned
+# here, not read from config.BEST_LINE_BOOKMAKERS: an environment override of
+# that list must not silently change who is in the consensus.
+BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us", "fanatics",
+         "betrivers", "hardrockbet", "betparx")
+CHECK_HOUR_UTC = 15
+WINDOW_MIN = 60
+
+QUOTE_COLS = ["game_id", "bookmaker", "ts", "line", "p1", "p2", "order"]
+
+
+def check_instant(game_date) -> datetime:
+    """15:00 UTC on the game's date."""
+    d = pd.Timestamp(str(game_date)[:10])
+    return datetime(d.year, d.month, d.day, CHECK_HOUR_UTC, tzinfo=timezone.utc)
+
+
+def _utc(x) -> pd.Series:
+    return pd.to_datetime(x, utc=True, format="mixed")
+
+
+def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN) -> pd.DataFrame:
+    """Each (game, book)'s quote at its game's instant.
+
+    rows: one per stored odds row, with game_id, bookmaker, ts (the row's own
+    stamp, UTC), line (home number for a spread), p1 / p2 (home / away
+    American prices), order (higher = stored later), instant and tip (UTC) for
+    its game, and any extra columns, which are carried through. Books outside
+    BOOKS are ignored. -> one row per (game_id, bookmaker)."""
+    if not len(rows):
+        cols = list(dict.fromkeys(QUOTE_COLS + ["instant", "tip"] + list(rows.columns)))
+        return pd.DataFrame(columns=cols)
+    r = rows[rows["bookmaker"].isin(BOOKS)]
+    r = r[r["line"].notna() & r["p1"].notna() & r["p2"].notna()]
+    win = pd.Timedelta(minutes=window_min)
+    r = r[(r["ts"] <= r["tip"]) & (r["ts"] <= r["instant"]) & (r["ts"] >= r["instant"] - win)
+          & (r["instant"] < r["tip"])]
+    r = r.sort_values(["game_id", "bookmaker", "ts", "order"], kind="mergesort")
+    return r.drop_duplicates(["game_id", "bookmaker"], keep="last").reset_index(drop=True)
+
+
+def flag_and_consensus(q: pd.DataFrame) -> pd.DataFrame:
+    """Add raw_loo / raw_nb (median and count of the OTHER books' lines,
+    flagged or not), flag ('ok' | 'artefact' | 'ambiguous'), cons (median of
+    the game's 'ok' lines, this book included) and n_ok (their count)."""
+    q = q.copy()
+    q["raw_loo"] = np.nan
+    q["raw_nb"] = 0
+    if not len(q):
+        q["flag"] = pd.Series(dtype=object)
+        q["cons"] = np.nan
+        q["n_ok"] = 0
+        return q
+    loo = np.full(len(q), np.nan)
+    nb = np.zeros(len(q), int)
+    lines = q["line"].to_numpy(float)
+    for _, idx in q.groupby("game_id", sort=False).indices.items():
+        v = lines[idx]
+        for j, k in enumerate(idx):
+            others = np.delete(v, j)
+            nb[k] = len(others)
+            if len(others):
+                loo[k] = np.median(others)
+    q["raw_loo"] = loo
+    q["raw_nb"] = nb
+    cross = np.isfinite(loo) & (lines * np.where(np.isfinite(loo), loo, 0.0) < 0)
+    q["flag"] = np.select([cross & (nb >= 2), cross & (nb == 1)], ["artefact", "ambiguous"], "ok")
+    ok = q["flag"] == "ok"
+    med = q[ok].groupby("game_id")["line"].median()
+    cnt = q[ok].groupby("game_id")["line"].size()
+    q["cons"] = q["game_id"].map(med)
+    q["n_ok"] = q["game_id"].map(cnt).fillna(0).astype(int)
+    return q
+
+
+def snapshot(rows: pd.DataFrame, window_min: int = WINDOW_MIN) -> pd.DataFrame:
+    """standing_quotes, then flag_and_consensus: the whole 15:00 UTC read."""
+    return flag_and_consensus(standing_quotes(rows, window_min))
+
+
+# ── the database read ────────────────────────────────────────────────────────
+
+# The columns each market keeps its line and two prices in, home side first.
+MARKET_COLS = {
+    "spreads": ("spread_home", "home_price", "away_price", "home_link", "away_link"),
+}
+
+
+def load_rows(conn, games: dict[str, dict], instant: datetime, market: str = "spreads",
+              window_min: int = WINDOW_MIN) -> pd.DataFrame:
+    """The stored odds rows standing_quotes needs for these games at one
+    instant: every pre-game row of the BOOKS whose own stamp is inside the
+    window. games: game_id -> {"tip": aware datetime, ...}. One read, keyed on
+    the game ids, bounded to the hour before the instant."""
+    if not games:
+        return pd.DataFrame(columns=QUOTE_COLS + ["instant", "tip", "link1", "link2", "stored_at"])
+    line_c, p1_c, p2_c, l1_c, l2_c = MARKET_COLS[market]
+    oldest = instant - timedelta(minutes=window_min)
+    got = conn.execute(f"""
+        SELECT o.game_id, o.bookmaker, o.snapshot_at, o.created_at::timestamptz,
+               o.{line_c}, o.{p1_c}, o.{p2_c}, o.{l1_c}, o.{l2_c}
+        FROM odds o
+        WHERE o.game_id = ANY(%s) AND o.market = %s AND o.bookmaker = ANY(%s)
+          AND o.snapshot_type IS DISTINCT FROM 'in_play'
+          AND o.snapshot_at::timestamptz <= %s
+          AND o.snapshot_at::timestamptz >= %s
+    """, (sorted(games), market, list(BOOKS), instant.isoformat(), oldest.isoformat())).fetchall()
+    d = pd.DataFrame(got, columns=["game_id", "bookmaker", "snapshot_at", "stored_at", "line",
+                                   "p1", "p2", "link1", "link2"])
+    for c in ("line", "p1", "p2"):
+        d[c] = pd.to_numeric(d[c], errors="coerce").astype(float)
+    d["ts"] = _utc(d["snapshot_at"]) if len(d) else pd.Series(dtype="datetime64[ns, UTC]")
+    stored = _utc(d["stored_at"]) if len(d) else pd.Series(dtype="datetime64[ns, UTC]")
+    d["order"] = stored.dt.as_unit("ns").astype("int64") if len(d) else pd.Series(dtype="int64")
+    d["instant"] = pd.Timestamp(instant)
+    d["tip"] = d["game_id"].map({g: pd.Timestamp(v["tip"]) for g, v in games.items()})
+    return d

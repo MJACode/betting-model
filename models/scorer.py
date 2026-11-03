@@ -3486,6 +3486,7 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
+                OR p.model_id = 'ncaab_spread_market'
                 THEN 'spreads'
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC

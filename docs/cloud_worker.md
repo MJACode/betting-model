@@ -33,6 +33,7 @@ crons had).
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
 | NCAAB totals card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_total_card()` → `python -m scripts.ncaab_total_card --publish`, then publish. Decides each game once, at 22:00 UTC the evening before its date, else at 15:00 UTC on the day and each hour to tip, on DraftKings' standing total. Kill switch: `RUN_NCAAB_TOTAL_CARD=0` (the job still beats). A run that cannot decide a due game for a reason that will not clear by itself (an artifact for another season, a team missing two or more old box scores, a missing blend) exits 1 after writing the rest: the heartbeat records `error` and the failure alerter reports it. Added 2026-10-30; `docs/sports/ncaab.md` |
+| NCAAB spread card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_spread_card()` → `python -m scripts.ncaab_spread_card --publish`, then publish. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's spread stamped 14:00-15:00 UTC; every other hour reads the slate and the ledger only. A later run that finds one of the day's games undecided writes it as `missed` (no bet) and exits 1, as does a run where no due game has any quote, or the best quote is at a book no longer in `BEST_LINE_BOOKMAKERS`. Kill switch: `RUN_NCAAB_SPREAD_CARD=0` (the job still beats; switched back on, that day's undecided games are written as `missed` and the run fails once). Added 2026-11-02; `docs/sports/ncaab.md` |
 
 Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
@@ -358,6 +359,10 @@ Notes:
    - `RUN_NCAAB_TOTAL_CARD` — OPTIONAL, default on. `0` stops the NCAAB
      totals card before it reads anything; its job still beats, so the
      silence still means stopped. Worker only (the card is a worker job).
+   - `RUN_NCAAB_SPREAD_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     spread card before it reads anything; its job still beats. Worker only.
+     Games whose 15:00 UTC passes while it is off are recorded as `missed`
+     when it is back on, and that run fails once.
    - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` /
      `MLB_TOTAL_PUBLIC_FADE_PUBLISH` — OPTIONAL, default `0`. MLB game-line
      cards log every pass; they INSERT picks only when the matching flag is

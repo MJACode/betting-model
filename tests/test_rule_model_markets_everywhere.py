@@ -129,14 +129,18 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
     # function's comment); the second shipped with
     # nba_total_luck, which may reach production before nba_team_total_luck; the
     # third with nba_team_total_luck, which production holds before
-    # nba_first_half_total_luck ships.
+    # nba_first_half_total_luck ships; the fourth with nba_first_half_total_luck,
+    # which production held on 2026-11-02 (read-only query of the comment, and
+    # clv_game_market('ncaab_spread_market') returned 'h2h') before
+    # ncaab_spread_market ships.
     stamped_before = {
         "clv-standard-v2-power-80-0.05-12",
         "clv-standard-v2-power-80-0.05-12-nba-total-luck",
         "clv-standard-v2-power-80-0.05-12-nba-team-total-luck",
+        "clv-standard-v2-power-80-0.05-12-nba-first-half-total-luck",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (nba_first_half_total_luck) after production may have "
+        "clv_game_market changed (ncaab_spread_market) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 

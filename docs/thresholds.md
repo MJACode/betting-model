@@ -1031,6 +1031,49 @@ never used to choose.
 ROI, calibration within 5%). Read the close EV and the over share beside the
 ROI: the edge rests on information the close only partly confirms.
 
+## NCAAB — `ncaab_spread_market`, full-game spreads (2026-11-02, mike)
+
+mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
+what"*, no games-played wait. At 15:00 UTC on game day, every bettable book's
+spread is priced against the books' middle line with a final-margin
+distribution; the single best quote is bet when its chance of winning (a push
+left out) beats its own price's implied chance by more than 0.03 and at least
+three other books quote the game (`models/ncaab_spread_market.py`,
+`scripts/ncaab_spread_card.py`; the rule, the evidence and the risks are
+`docs/sports/ncaab.md` "The models").
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.03, at the bet book's own line and price | `MODEL_EDGE_THRESHOLDS` |
+| other books | 3 or more other books in the consensus (tested after the research saw its results) | `models/ncaab_spread_market.MIN_OTHER_BOOKS`, the artifact |
+| prob / edge filter | 0.0 / 0.03. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.05, on its own probability. The smallest EV the cut admitted in the replay was +0.0563 (median +0.0697, 542 bets). EV is edge x decimal, so an edge above 0.03 clears 0.05 at any price shorter than -150; it laid -120 at the shortest | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; it laid -120 to +114 (median -110) | `MODEL_MIN_ODDS` |
+| decided once | 15:00 UTC on the game's date, on quotes stamped 14:00-15:00 UTC; a row in `ncaab_spread_decisions`, bet or not; a missed 15:00 is recorded as `missed` and fails the run, never bet later | `scripts/ncaab_spread_card.py`, `scheduler.run_ncaab_spread_card` |
+
+**The neighbourhood** (the research of 2026-11-02, the every-game version, cut
+on the best quote's edge; date-resampled 95% interval; close EV against
+Pinnacle's no-vig close):
+
+| Cut | 2021-2025 bets | 2021-2025 ROI | interval | close EV | 2025-26 bets | 2025-26 ROI |
+|---|---|---|---|---|---|---|
+| 0.02 | 1,511 | +4.72% | [-0.4, 9.7] | +0.47% | 450 | +4.32% |
+| **0.03** | **478** | **+10.97%** | **[3.1, 18.7]** | **+2.28%** | **135** | **+22.01%** (close EV -0.05%) |
+| 0.04 | 163 | +23.32% | [9.6, 36.1] | +4.04% | 50 | +14.82% |
+
+With the three-other-books minimum (the live version, replayed by the card's
+own code): 0.02 1,342 bets +4.21% [-1.1, 9.4]; **0.03 409 bets +9.97% [0.8,
+18.4], close EV +1.83%; 2025-26 133 bets +20.96%, close EV -0.15%**; 0.04 129
+bets +19.39% [3.4, 34.6]. The returns rise with the cut rather than forming a
+plateau, and the close says the expected value is nearer +2% than +10%.
+Chosen on the seasons it is graded on; 2025-26 had been opened in an earlier
+round, so it is a second look, not a hold-out.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
+ROI, calibration within 5%). Read beside the ROI: how often the bet book's
+number was still up when the pick posted (the ledger keeps every book's 15:00
+quote), and the close EV.
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the
