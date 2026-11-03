@@ -629,10 +629,10 @@ stored in those five minutes takes the game. That is the one place live
 differs from the research's combined rule: there, a post made after 15:00 UTC
 was first seen at the 15:30 snapshot and the 15:00 UTC model kept the game
 (only a post seen at exactly 15:00 UTC went to this model). In the replay, 2
-of this model's 353 bets were first seen after 15:00 UTC on a game the 15:00
-UTC model bet, at 15:30 and at 16:00 UTC, so the 15:00 UTC model kept both;
-live it keeps them too, since only a post stored before 15:05 UTC changes
-hands.
+of this model's 353 bets were posted after 15:00 UTC on a game the 15:00 UTC
+model bet (stamped 15:20 and 15:50 UTC, first seen at 15:30 and 16:00), so the
+15:00 UTC model kept both; live it keeps them too, since only a post stored
+before 15:05 UTC changes hands.
 
 **The ledger** (`ncaab_moneyline_first_post_decisions`, one row per (game,
 book) first post, bet or not, worker-only): its status (`bets`, `below_cut`,
