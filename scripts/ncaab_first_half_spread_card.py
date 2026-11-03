@@ -23,10 +23,11 @@ raises the same way (the first-half total card's rule, PR #1137).
 A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A first-half
 quote beyond +/-35, or priced beyond +/-100000, is not priced, and a full-game
 spread beyond +/-60 (or a total outside 90-220, for the team term's closing
-lines) never enters a consensus; that book's older row is not used instead. Each dropped quote is logged with its game, book and
-value, counted as quotes_dropped on the diagnostic line, and named in the
-decision row's detail. A best edge above the data-error cap is decided as
-edge_cap with no bet, and the run raises after writing every other game.
+lines) never enters a consensus; that book's older row is not used instead.
+Each dropped quote is logged with its game, book and value, counted as
+quotes_dropped on the diagnostic line, and named in the decision row's detail.
+A best edge above the data-error cap is decided as edge_cap with no bet, and
+the run raises after writing every other game.
 
 WHAT IS READ, as of the decision fetch's instant (its fetch_at, the stored
 rows' created_at):
