@@ -617,6 +617,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # byom_game_facts and byom_prop_facts, not picks.
     "custom_model_backtest",
     "custom_model_picks",
+    # The same backtest's units on the published stake (2026-11-03,
+    # data/migrations/custom_model_backtest_posted_2026_11_03.sql, which
+    # carries its own GRANT). SECURITY INVOKER over custom_model_picks.
+    "custom_model_backtest_posted",
     "byom_backtest",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",

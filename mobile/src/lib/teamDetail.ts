@@ -20,10 +20,10 @@
  * sign and is normalised in `nflCoverMarks` exactly as the board does it; a
  * pick's `pick_side` is 'home' / 'away' / 'over' / 'under', never a team name.
  */
-import { americanImplied, formatSignedUnits } from '@/lib/format';
+import { americanImplied, formatSigned } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
 import { gameMarketForModel } from '@/lib/markets';
-import { isDuplicateCopy, isPausedRow, publishedRecordKeeps } from '@/lib/thresholds';
+import { isDuplicateCopy, isPausedRow, postedPickUnits, publishedRecordKeeps } from '@/lib/thresholds';
 import {
   teamStatsForSport,
   teamStatValue,
@@ -428,9 +428,9 @@ export interface PickRecord {
   wins: number;
   losses: number;
   pushes: number;
-  /** Flat units over the priced picks; null when none carried a price. */
+  /** Units at the published stake (a pick with no price at 1u); null before any pick. */
   units: number | null;
-  /** How many of the settled picks had no price (their P&L is excluded, §6). */
+  /** How many of the settled picks had no price (staked at the bare 1u). */
   unpriced: number;
 }
 
@@ -460,13 +460,12 @@ function addPick(rec: PickRecord, p: SettledPick): void {
   if (p.result === 'WIN') rec.wins += 1;
   else if (p.result === 'LOSS') rec.losses += 1;
   else if (p.result === 'PUSH') rec.pushes += 1;
-  // profit_flat fabricates −110 for a priceless pick (CLAUDE.md §6), so a
-  // pick with no price counts in the record and stays out of the units. Read
-  // through decisionPrice, never the columns (UX_REVIEW §0).
-  const priced = hasPricedLine(p);
-  const pf = numOrNull(p.profit_flat);
-  if (priced && pf != null) rec.units = (rec.units ?? 0) + pf / 100;
-  else rec.unpriced += 1;
+  // The published stake (one unit basis, CLAUDE.md §2): 1u to win at the
+  // decided price, risk capped at 3u, a pick with no price at the bare 1u,
+  // as the Record tab books it. Never profit_flat (1u risked, and an invented
+  // -110 on a pick with no price). The unpriced count is still named.
+  rec.units = (rec.units ?? 0) + postedPickUnits(p).units;
+  if (!hasPricedLine(p)) rec.unpriced += 1;
 }
 
 /**
@@ -541,7 +540,8 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
 export function formatPickRecord(r: PickRecord): string {
   const rec = r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
   if (r.units == null) return rec;
-  return `${rec} · ${formatSignedUnits(r.units)}`;
+  // Two decimals, as the Record tab and the model pages print units.
+  return `${rec} · ${formatSigned(r.units, 2, 'u')}`;
 }
 
 /** "3-1" or "3-1-1" — the record without the units. */
