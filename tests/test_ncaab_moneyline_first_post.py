@@ -503,8 +503,9 @@ def test_every_python_reader_treats_the_id_as_a_moneyline():
 
 def test_the_app_names_it_and_reads_it_as_a_moneyline():
     meta = (fp.ROOT / "mobile" / "src" / "lib" / "modelMeta.ts").read_text(encoding="utf-8")
-    assert ("ncaab_moneyline_first_post: {\n    shortLabel: 'ML',\n    longLabel: 'NCAAB Opening Moneyline'"
-            in meta)
+    i = meta.index("  ncaab_moneyline_first_post: {")
+    entry = meta[i:meta.index("},", i)]
+    assert "shortLabel: 'Open ML'," in entry and "longLabel: 'NCAAB Opening Moneyline'," in entry
     src = (fp.ROOT / "mobile" / "src" / "lib" / "markets.ts").read_text(encoding="utf-8")
     assert "pick.model_id === 'ncaab_moneyline_first_post' ||" in src
     assert "spread" not in fp.MODEL_ID     # the substring mappers read it as a moneyline unaided

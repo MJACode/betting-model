@@ -584,7 +584,8 @@ moneyline for a game, that new moneyline is priced off the same book's
 full-game spread at that moment. When at least three OTHER bettable books
 already have a moneyline up and the edge is above **0.015**, it bets that
 book's side, never at a price shorter than -200. In the app it is "NCAAB
-Opening Moneyline".
+Opening Moneyline", badge "Open ML"; its page and Pick Detail tell the member
+that an opening price often changes within half an hour.
 
 **How a post is decided, step by step:**
 

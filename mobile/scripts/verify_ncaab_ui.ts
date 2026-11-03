@@ -116,14 +116,15 @@ check('its Pick Detail note says posted once',
 // bets a book's moneyline the moment the book first posts it.
 const FP = 'ncaab_moneyline_first_post';
 check(`${FP} is filed under NCAAB`, sportOfModel(FP) === 'NCAAB');
-check('its badge is ML and its name NCAAB Opening Moneyline',
-  modelShort(FP) === 'ML' && modelLong(FP) === 'NCAAB Opening Moneyline', `${modelShort(FP)} / ${modelLong(FP)}`);
+check('its badge is Open ML (not the morning model\'s ML) and its name NCAAB Opening Moneyline',
+  modelShort(FP) === 'Open ML' && modelLong(FP) === 'NCAAB Opening Moneyline', `${modelShort(FP)} / ${modelLong(FP)}`);
 check('it is priced off the moneyline rows', gameMarketForModel(FP) === 'h2h', String(gameMarketForModel(FP)));
 check('a parlay treats it as a moneyline', marketClassForModel(FP) === 'game_ml', marketClassForModel(FP));
 const fpTiming = modelPageTiming(FP);
 check('its page says it decides when the line opens, names the moving price, and prints no clock time',
   fpTiming.title === 'Decided when the line opens' && fpTiming.body.includes('first posts its moneyline')
-    && fpTiming.body.includes('move within minutes')
+    && fpTiming.body.includes('within half an hour')
+    && fpTiming.body.includes('never a game the NCAAB Moneyline model has already bet')
     && ![fpTiming.title, fpTiming.body, fpTiming.empty, fpTiming.note].some((s) => /\d\s?(am|pm)\b|\d:\d\d/i.test(s)),
   fpTiming.body);
 check('its probability note says the chance comes from the bet book\'s own spread when it opened',
@@ -133,16 +134,23 @@ const fpPosted = pickTimingInfo({
   pick_id: 3, model_id: FP, sport: 'NCAAB', signal_type: 'BET', created_at: '2026-12-04T23:41:00Z',
   player_id: null, is_live: false,
 } as unknown as Pick);
-check('its Pick Detail note says posted once',
-  !!fpPosted && fpPosted.kind === 'posted' && fpPosted.note.startsWith('Posted once'), fpPosted?.note ?? 'null');
+check('its Pick Detail note says posted once, names no line, and says the opening price moves',
+  !!fpPosted && fpPosted.kind === 'posted' && fpPosted.note.startsWith('Posted once')
+    && !fpPosted.note.includes('line and price') && fpPosted.note.includes('within half an hour'),
+  fpPosted?.note ?? 'null');
+check('the morning moneyline model\'s page says it skips a game the opening model bet',
+  mlTiming.body.includes('skips a game the NCAAB Opening Moneyline model has already bet'), mlTiming.body);
+check('the morning moneyline model\'s Pick Detail note names no line',
+  !!mlPosted && !mlPosted.note.includes('line and price'), mlPosted?.note ?? 'null');
 // The custom-model picker offers moneyline, spread and props slots only, so the
 // totals model adds no NCAAB row there. The spread model
 // (models/ncaab_spread_market.py) adds the Spread choice, as NCAAF's and the
 // NFL's spread models do (2026-11-02), and the moneyline model
 // (models/ncaab_moneyline_own_spread.py) the ML choice: its id has 'spread'
 // in it, and it must land under ML, never under Spread. The opening-moneyline
-// model (models/ncaab_moneyline_first_post.py) joins the same ML choice: one
-// NCAAB moneyline rule, both moneyline models, one bet a game between them.
+// model (models/ncaab_moneyline_first_post.py) joins the same ML choice:
+// tapping it adds both moneyline models as two rules, and the two never bet
+// one game twice.
 const ncaabRows = betTypePickerGroups().filter((g) => g.sport === 'NCAAB');
 const ncaabChoice = (label: string) =>
   ncaabRows.length === 1 ? ncaabRows[0].choices.find((c) => c.label === label) : undefined;

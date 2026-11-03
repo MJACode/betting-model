@@ -632,10 +632,12 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // Men's college basketball, full-game moneylines bet the moment a book
   // first posts its moneyline for a game (models/ncaab_moneyline_first_post.py
   // MODEL_ID). "Opening" is the reader's word for a book's first posted
-  // price. Badge ML, like the game-morning moneyline model; the two never bet
-  // one game twice.
+  // price. The two moneyline models never bet one game twice.
   ncaab_moneyline_first_post: {
-    shortLabel: 'ML',
+    // Its own badge: the Daily Results list and parlay legs show only the
+    // badge, so two live 'ML' models in one sport could not be told apart
+    // (UX review, 2026-11-03; the NBA Props / Projected Props pattern).
+    shortLabel: 'Open ML',
     longLabel: 'NCAAB Opening Moneyline',
     type: 'game',
     statKey: null,
@@ -982,8 +984,9 @@ const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
   ncaab_moneyline_own_spread:
     'This model decides each game once, on the morning of game day. At each book we price, it compares ' +
     'the book’s moneyline with the chance of winning that the same book’s spread implies. It bets only ' +
-    'some games, each at the one book where that gap is largest, which may not be DraftKings. A posted ' +
-    'bet is never re-priced: it stays at the price it posted at.',
+    'some games, each at the one book where that gap is largest, which may not be DraftKings. It skips ' +
+    'a game the NCAAB Opening Moneyline model has already bet. A posted bet is never re-priced: it stays ' +
+    'at the price it posted at.',
 };
 // The model that bets a book's moneyline the moment the book first posts it
 // (scripts/ncaab_moneyline_first_post_card.py, every minute): most books open
@@ -1043,14 +1046,15 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Decided when the line opens',
       body:
-        'This model checks a game when a book first posts its moneyline, usually the evening before or ' +
-        'the morning of the game. It compares that new moneyline with the chance of winning the same ' +
-        'book’s spread implies, and bets at most once per game, at that book, which may not be DraftKings. ' +
-        'Opening prices often move within minutes. A posted bet is never re-priced: it stays at the price ' +
-        'it posted at.',
+        'This model checks a game as each book first posts its moneyline, usually overnight or on the ' +
+        'morning of the game, sometimes the evening before. It compares that moneyline with the chance of ' +
+        'winning that the same book’s spread implies. It bets at most once per game, at the book that ' +
+        'posted, which may not be DraftKings, and never a game the NCAAB Moneyline model has already bet. ' +
+        'An opening price often changes within half an hour: check the book’s price before you bet. A ' +
+        'posted bet is never re-priced: it stays at the price it posted at.',
       empty:
-        'This model posts when books first open their moneylines, mostly the evening before and the ' +
-        'morning of each game, and bets only some games. Nothing has posted yet.',
+        'This model posts when a book first opens its moneyline, usually overnight or on the morning of ' +
+        'the game, sometimes the evening before, and bets only some games. Nothing has posted yet.',
       note: 'Posted when the book opened its moneyline and never re-priced.',
     };
   }

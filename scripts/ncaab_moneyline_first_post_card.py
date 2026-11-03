@@ -364,7 +364,7 @@ def decide(conn, now: datetime, games: dict[str, dict], new: list[tuple[str, str
         gid, book = key
         f = firsts.get(key)
         g = games[gid]
-        if f is None:
+        if f is None or f["p1"] is None or f["p2"] is None:
             out.append(_plain(gid, book, "no_clean_quote", "no complete pre-game moneyline row"))
             continue
         if f["stored"] < pd.Timestamp(now) - MAX_LAG:
@@ -409,10 +409,15 @@ def decide(conn, now: datetime, games: dict[str, dict], new: list[tuple[str, str
                             f"{games[gid]['season']} (scripts/ncaab_moneyline_first_post_build.py)")
             continue                                   # undecided: seen again next run, then missed
         q = ml[(ml["game_id"] == gid) & (ml["bookmaker"] == book)]
-        if not len(q) or not (_same(q["p1"].iloc[0], f["p1"]) and _same(q["p2"].iloc[0], f["p2"])):
-            now_p = (f"{q['p1'].iloc[0]:+.0f}/{q['p2'].iloc[0]:+.0f}" if len(q) else "none")
+        if not len(q):
+            # Its standing moneyline is not a quote (a price inside -100..+100).
+            out.append(_plain(gid, book, "no_clean_quote",
+                              "its moneyline is not price-valid (a price inside -100..+100)"))
+            continue
+        if not (_same(q["p1"].iloc[0], f["p1"]) and _same(q["p2"].iloc[0], f["p2"])):
             out.append(_plain(gid, book, "moved_before_seen",
-                              f"first {f['p1']:+.0f}/{f['p2']:+.0f}, standing now {now_p}"))
+                              f"first {f['p1']:+.0f}/{f['p2']:+.0f}, standing now "
+                              f"{q['p1'].iloc[0]:+.0f}/{q['p2'].iloc[0]:+.0f}"))
             continue
         posting.append((gid, book))
     if posting:

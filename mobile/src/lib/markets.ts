@@ -1932,6 +1932,13 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
  *   - unlocked look-ahead previews (future UFC/golf), which re-price until
  *     game day.
  */
+// The two NCAAB full-game moneyline models: a moneyline has no line, so their
+// Pick Detail note names only the price.
+const NCAAB_MONEYLINE_MODELS: readonly string[] = [
+  'ncaab_moneyline_own_spread',
+  'ncaab_moneyline_first_post',
+];
+
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
   if (pick.signal_type !== 'BET') return null;
@@ -2011,8 +2018,16 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
       verb: 'Posted',
       label: `Posted ${stamp}`,
       note:
-        'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
-        'shown.' +
+        // A moneyline has no line (UX review, 2026-11-03), and an opening
+        // price moves fast: the opening-moneyline model says so where the
+        // member places the bet.
+        (NCAAB_MONEYLINE_MODELS.includes(pick.model_id)
+          ? 'Posted once and never re-priced. This is when the bet posted, at the price shown.'
+          : 'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
+            'shown.') +
+        (pick.model_id === 'ncaab_moneyline_first_post'
+          ? ' An opening price often changes within half an hour: check the book’s price before you bet.'
+          : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : ''),
     };
