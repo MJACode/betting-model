@@ -2379,7 +2379,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
     # (1,094 bets; median +0.0996). An edge above 0.04 at -120 or longer is EV
-    # above 0.073, so 0.07 never removes a bet the evidence took.
+    # above 0.073, so 0.07 never removes a bet the evidence took. Re-measured
+    # 2026-11-03 at DraftKings' first posted total (mike): +0.0734 over the
+    # replay's 2,436 bets of 2022-2026, so 0.07 stands.
     "ncaab_total_blend":        0.07,
     # NCAAB spreads (2026-11-02, mike). The cut is the edge (0.03, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
