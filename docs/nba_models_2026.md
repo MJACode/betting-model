@@ -1987,7 +1987,8 @@ bets.
 - **F8, the early season: too few games to tell.** The six cells place 112, 65, 43, 37, 18 and
   17 bets over all priced seasons. Full-game overs with last season weighted as 5, 10 or 20
   games: -0.9%, +0.1%, +11.4%; home team-total unders: -2.4%, -15.1%, -21.5%. The 10-game wait
-  stays.
+  stays. (mike removed the wait on 2026-11-02; `docs/sports/nba.md` has the replay on the
+  plain season-to-date number, which is not this blend.)
 
 **Closed for 2026-27: team first-quarter and first-half shares, and an early-season start for
 the two live models.** Nothing here is built.

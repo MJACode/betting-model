@@ -1104,9 +1104,9 @@
     "semantic_hash": ""
   },
   "data/prune_odds.py": {
-    "mtime": 1793657726.062001,
-    "seen": 1793658760.37978,
-    "ast_hash": "b6560b947395ddc2f37cf9fb725bf887",
+    "mtime": 1793667330.6433735,
+    "seen": 1793668008.004267,
+    "ast_hash": "712779d9e070ec90114a26f56525de86",
     "semantic_hash": ""
   },
   "data/season_labels.py": {
@@ -1122,9 +1122,9 @@
     "semantic_hash": ""
   },
   "data/team_board_cache.py": {
-    "mtime": 1793375920.9115584,
-    "seen": 1793658760.3798006,
-    "ast_hash": "ed94fc37ba0f46f088ac1df4f3ad4af2",
+    "mtime": 1793667330.6454003,
+    "seen": 1793668008.0042875,
+    "ast_hash": "6fe3c82540d39cc88b57eb7d0f2ab2d9",
     "semantic_hash": ""
   },
   "data/team_stats_rebuild.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1793657726.0684056,
-    "seen": 1793658760.3798153,
-    "ast_hash": "458c2dd7579397473a4b4494ff996148",
+    "mtime": 1793667330.6660666,
+    "seen": 1793668008.0043025,
+    "ast_hash": "f3b54ded0ad7f9e518458b131dfe412b",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -1284,9 +1284,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_a11y.ts": {
-    "mtime": 1793375921.6325762,
-    "seen": 1793658760.3799422,
-    "ast_hash": "8884f89f9e02c921a64f0d4e4f629827",
+    "mtime": 1793667330.6939673,
+    "seen": 1793668008.0044467,
+    "ast_hash": "c235e5bc9940e5ff004cb4af566119c3",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_auth.ts": {
@@ -1578,9 +1578,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_stat_segments.ts": {
-    "mtime": 1793657726.805881,
-    "seen": 1793658760.3802462,
-    "ast_hash": "2489f42b3703576d4ac094db085f1000",
+    "mtime": 1793667330.6959772,
+    "seen": 1793668008.0047793,
+    "ast_hash": "a3acc00ecafd4ddd0e26de7934d09679",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_stats_board.ts": {
@@ -1608,9 +1608,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_team_board.ts": {
-    "mtime": 1793375921.7496486,
-    "seen": 1793658760.3802772,
-    "ast_hash": "5189489b15d24d8e60bfe4108f7b97bd",
+    "mtime": 1793667330.6959772,
+    "seen": 1793668008.0048091,
+    "ast_hash": "84d655aab92555a4e2b8e522452b2dc7",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_toughness.ts": {
@@ -1746,9 +1746,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/GroupTabs.tsx": {
-    "mtime": 1793375921.8125496,
-    "seen": 1793658760.3804643,
-    "ast_hash": "c21a590420d12357b0f2cde352157c89",
+    "mtime": 1793667330.7013872,
+    "seen": 1793668008.004974,
+    "ast_hash": "529c68f620f907f1fc3cebf9864212c7",
     "semantic_hash": ""
   },
   "mobile/src/components/HitModeSheet.tsx": {
@@ -1764,9 +1764,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/InfoTooltip.tsx": {
-    "mtime": 1793657715.6586711,
-    "seen": 1793658760.3804784,
-    "ast_hash": "d518431b2e3a7314728f61d8d2a0575a",
+    "mtime": 1793667330.7029743,
+    "seen": 1793668008.004989,
+    "ast_hash": "3bf92e5cc18c21d7da8f02e1d2738136",
     "semantic_hash": ""
   },
   "mobile/src/components/LineMovementCard.tsx": {
@@ -1788,9 +1788,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/NotificationsCard.tsx": {
-    "mtime": 1793375921.8288317,
-    "seen": 1793658760.3805175,
-    "ast_hash": "3b518dc79abc5d21ed16acab16f32573",
+    "mtime": 1793667330.710255,
+    "seen": 1793668008.0050442,
+    "ast_hash": "4d89b619513f9f52dba4a7d0848f3859",
     "semantic_hash": ""
   },
   "mobile/src/components/OnboardingModal.tsx": {
@@ -1956,9 +1956,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/TeamsBoard.tsx": {
-    "mtime": 1793375921.8985567,
-    "seen": 1793658760.3806913,
-    "ast_hash": "d4ce050b917b3aad173508ae89908c4b",
+    "mtime": 1793667330.7133389,
+    "seen": 1793668008.005231,
+    "ast_hash": "c51da046e159c80469ccc34fc60f8576",
     "semantic_hash": ""
   },
   "mobile/src/components/Toast.tsx": {
@@ -2310,9 +2310,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useTeamDetail.ts": {
-    "mtime": 1793375922.0548778,
-    "seen": 1793658760.3811011,
-    "ast_hash": "a7baccdda8647f4baf8ca30b608db094",
+    "mtime": 1793667330.717074,
+    "seen": 1793668008.0056634,
+    "ast_hash": "7fe69b74046b5a8a09cbfabe659c47ad",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useTeamTrends.ts": {
@@ -2706,9 +2706,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/queries.ts": {
-    "mtime": 1793657726.8534455,
-    "seen": 1793658760.381593,
-    "ast_hash": "5a1a3d2d8bc9bcc2c98283f118150731",
+    "mtime": 1793667330.7217002,
+    "seen": 1793668008.006149,
+    "ast_hash": "4bc989ec64e6cc213ea862518d8e9efe",
     "semantic_hash": ""
   },
   "mobile/src/lib/rangeSlider.ts": {
@@ -2772,9 +2772,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/statSegments.ts": {
-    "mtime": 1793657726.8574648,
-    "seen": 1793658760.3816605,
-    "ast_hash": "905d7b89af2268ac976bbf7251744948",
+    "mtime": 1793667330.7237103,
+    "seen": 1793668008.0062225,
+    "ast_hash": "ef6e2ffb4a6dd7c99e13b0bc5eb2e8a0",
     "semantic_hash": ""
   },
   "mobile/src/lib/statsBoard.ts": {
@@ -2796,9 +2796,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/teamBoard.ts": {
-    "mtime": 1793375922.310517,
-    "seen": 1793658760.3816838,
-    "ast_hash": "2af477212eba16d5ff5d223dc80689bb",
+    "mtime": 1793667330.7237103,
+    "seen": 1793668008.0062487,
+    "ast_hash": "7eafd865fd67d609f8cd8af667fd003c",
     "semantic_hash": ""
   },
   "mobile/src/lib/teamDetail.ts": {
@@ -2808,15 +2808,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/teamStatCatalog.ts": {
-    "mtime": 1793375922.3145387,
-    "seen": 1793658760.3816965,
-    "ast_hash": "0e2b257ef3161e5aaf3fd2f37c130742",
+    "mtime": 1793667330.7272468,
+    "seen": 1793668008.006264,
+    "ast_hash": "550d5261f28162834c60e4cc72cc85c5",
     "semantic_hash": ""
   },
   "mobile/src/lib/theme.ts": {
-    "mtime": 1793375922.3165505,
-    "seen": 1793658760.3817012,
-    "ast_hash": "3cfb2590637a77f95c1dddb55ad72558",
+    "mtime": 1793667330.7287862,
+    "seen": 1793668008.0062692,
+    "ast_hash": "673f23c24bcb3423f9c1450c25904df6",
     "semantic_hash": ""
   },
   "mobile/src/lib/thresholds.generated.ts": {
@@ -2886,9 +2886,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/ModelEditScreen.tsx": {
-    "mtime": 1793375922.3530822,
-    "seen": 1793658760.3817916,
-    "ast_hash": "2cb93dc2938a84c20b965ddc94728110",
+    "mtime": 1793667330.729947,
+    "seen": 1793668008.0063655,
+    "ast_hash": "dd8ddd517573ceeb2f0dc1911622b82e",
     "semantic_hash": ""
   },
   "mobile/src/screens/ModelsScreen.tsx": {
@@ -2958,15 +2958,15 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/StatsScreen.tsx": {
-    "mtime": 1793657715.7163546,
-    "seen": 1793658760.3818495,
-    "ast_hash": "f7fedea7169c75f66a5fb9f06e52bc35",
+    "mtime": 1793667330.73832,
+    "seen": 1793668008.0064335,
+    "ast_hash": "f5e53073f2dfcc872e86c79b590f3a8d",
     "semantic_hash": ""
   },
   "mobile/src/screens/TeamStatsScreen.tsx": {
-    "mtime": 1793657726.8780994,
-    "seen": 1793658760.3818543,
-    "ast_hash": "ca8f8f94c06e42e6cae29e5ce73cd2a3",
+    "mtime": 1793667330.7417023,
+    "seen": 1793668008.0064378,
+    "ast_hash": "78009c8e6f93335298eea1ca5d4ddb7a",
     "semantic_hash": ""
   },
   "mobile/src/screens/TrackRecordScreen.tsx": {
@@ -3948,9 +3948,9 @@
     "semantic_hash": ""
   },
   "run_pipeline.py": {
-    "mtime": 1793657727.008357,
-    "seen": 1793658760.3827436,
-    "ast_hash": "96529729448ad8d96291136c4aa4186f",
+    "mtime": 1793667330.763763,
+    "seen": 1793668008.007382,
+    "ast_hash": "78b2b718294ff4d84e01b4fd5d38cb8d",
     "semantic_hash": ""
   },
   "scheduler.py": {
@@ -6936,9 +6936,9 @@
     "semantic_hash": ""
   },
   "tests/test_prune_preserves_openers.py": {
-    "mtime": 1793375947.5113506,
-    "seen": 1793658760.3865077,
-    "ast_hash": "15a3259e57471718bb9874171df34a6d",
+    "mtime": 1793667330.807795,
+    "seen": 1793668008.0137334,
+    "ast_hash": "b9869148b7a93b279b19bac6b4af4cae",
     "semantic_hash": ""
   },
   "tests/test_public_betting_ingestor.py": {
@@ -7464,9 +7464,9 @@
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1793657727.2780366,
-    "seen": 1793658760.3870602,
-    "ast_hash": "083cc6594b33f7d4c03551e6e94b116c",
+    "mtime": 1793667330.812049,
+    "seen": 1793668008.015137,
+    "ast_hash": "e9ec58b6546726b219027d6f2d8759cd",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -7716,9 +7716,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1793657725.9947162,
-    "seen": 1793658760.3873143,
-    "ast_hash": "e50fed824e6b5db9d14276a2ccde9cb2",
+    "mtime": 1793667330.6317072,
+    "seen": 1793668008.0154412,
+    "ast_hash": "0c68e3c8a2f7218306108ad9c7c1a01a",
     "semantic_hash": ""
   },
   "docs/AGENTS.md": {
@@ -8142,9 +8142,9 @@
     "semantic_hash": ""
   },
   "docs/sports/nba.md": {
-    "mtime": 1793657726.193391,
-    "seen": 1793658760.3877246,
-    "ast_hash": "0331047ff8acc7a3e2c40cb703600685",
+    "mtime": 1793667330.68099,
+    "seen": 1793668008.016254,
+    "ast_hash": "f2a5edcefa39f58cdae74581a94db1ca",
     "semantic_hash": ""
   },
   "docs/sports/ncaaf.md": {
@@ -8196,9 +8196,9 @@
     "semantic_hash": ""
   },
   "docs/thresholds.md": {
-    "mtime": 1793657726.202252,
-    "seen": 1793658760.3877733,
-    "ast_hash": "e58aa7c49e3771ff90854bac7ea5f24f",
+    "mtime": 1793667330.6918092,
+    "seen": 1793668008.016341,
+    "ast_hash": "a54e84d85b5378127ce120697aad06cb",
     "semantic_hash": ""
   },
   "email/preview.html": {
@@ -8634,9 +8634,9 @@
     "semantic_hash": ""
   },
   "docs/nba_models_2026.md": {
-    "mtime": 1793657726.118987,
-    "seen": 1793658760.3875017,
-    "ast_hash": "01924287d7d6a8619353d2d24f847a1f",
+    "mtime": 1793667330.673274,
+    "seen": 1793668008.0160139,
+    "ast_hash": "00ba4e2586b6098923ab6a38ac9d814b",
     "semantic_hash": ""
   },
   "docs/nhl_moneyline_rebuild.md": {
@@ -9168,9 +9168,9 @@
     "semantic_hash": ""
   },
   "models/nba_total_luck.py": {
-    "mtime": 1793657726.907569,
-    "seen": 1793658760.381959,
-    "ast_hash": "e5ef32fb608f146bf4c1c90d7e73651d",
+    "mtime": 1793667330.7594602,
+    "seen": 1793668008.0065494,
+    "ast_hash": "2a9f5a3ba3d2a38e7ce00e3d708828e4",
     "semantic_hash": ""
   },
   "nfl/data_ingest/kickoff_wind_reads.py": {
@@ -9234,9 +9234,9 @@
     "semantic_hash": ""
   },
   "scripts/nba_total_luck_replay.py": {
-    "mtime": 1793375946.325251,
-    "seen": 1793658760.383258,
-    "ast_hash": "ffc5fb50e60da5b6799ccbad3b96132c",
+    "mtime": 1793667330.7736354,
+    "seen": 1793668008.0083625,
+    "ast_hash": "6fff875e68e08d96dd29858e313e0b26",
     "semantic_hash": ""
   },
   "scripts/nba_total_luck_window.py": {
@@ -9348,9 +9348,9 @@
     "semantic_hash": ""
   },
   "tests/test_nba_total_luck.py": {
-    "mtime": 1793375947.2165377,
-    "seen": 1793658760.3856535,
-    "ast_hash": "73b54e8662075d15e49b1215ce65674b",
+    "mtime": 1793667330.7890987,
+    "seen": 1793668008.0108204,
+    "ast_hash": "4d99467dc9f76580769676897f440589",
     "semantic_hash": ""
   },
   "tests/test_nba_total_luck_replay.py": {
@@ -9444,9 +9444,9 @@
     "semantic_hash": ""
   },
   "models/nba_team_total_luck.py": {
-    "mtime": 1793657726.9055226,
-    "seen": 1793658760.381954,
-    "ast_hash": "363539cd910a81f6e5aca15043b8c08e",
+    "mtime": 1793667330.7459478,
+    "seen": 1793668008.006544,
+    "ast_hash": "907060be30ff75598bc7270c5c1e4237",
     "semantic_hash": ""
   },
   "scripts/nba_game4_p1.py": {
@@ -9486,9 +9486,9 @@
     "semantic_hash": ""
   },
   "scripts/nba_team_total_luck_replay.py": {
-    "mtime": 1793657727.045472,
-    "seen": 1793658760.383239,
-    "ast_hash": "ab89cdaed74d578378d63057c48a06eb",
+    "mtime": 1793667330.7714252,
+    "seen": 1793668008.0083413,
+    "ast_hash": "ff50f6643e81f6ea49d896bb83000ae1",
     "semantic_hash": ""
   },
   "scripts/nba_team_total_luck_window.py": {
@@ -9534,15 +9534,15 @@
     "semantic_hash": ""
   },
   "tests/test_nba_team_total_luck.py": {
-    "mtime": 1793657727.1948786,
-    "seen": 1793658760.385629,
-    "ast_hash": "0d7bf5757646e83cc42d4d3baf5d49a6",
+    "mtime": 1793667330.7801561,
+    "seen": 1793668008.0107958,
+    "ast_hash": "2127377f548bb699ed7dae5158b5fcbe",
     "semantic_hash": ""
   },
   "tests/test_nba_team_total_luck_card.py": {
-    "mtime": 1793375947.204461,
-    "seen": 1793658760.3856344,
-    "ast_hash": "0dbd8be810e426e2a5aa7650d06c1a1a",
+    "mtime": 1793667330.7843854,
+    "seen": 1793668008.010801,
+    "ast_hash": "79f47ee6078571733ede8ac7ca881e63",
     "semantic_hash": ""
   },
   "tests/test_nba_team_total_luck_replay.py": {
@@ -9558,9 +9558,9 @@
     "semantic_hash": ""
   },
   "tests/test_nba_team_total_odds.py": {
-    "mtime": 1793375947.213467,
-    "seen": 1793658760.3856487,
-    "ast_hash": "ba592b5ae7d556591ad9989cf1c8d926",
+    "mtime": 1793667330.7865565,
+    "seen": 1793668008.010816,
+    "ast_hash": "3906f1c216aa66e2cd2074d88b42b3e2",
     "semantic_hash": ""
   },
   "tests/test_push_line_change_alerts.py": {
@@ -10302,9 +10302,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_odds_history.py": {
-    "mtime": 1793657714.7268,
-    "seen": 1793658760.378775,
-    "ast_hash": "52a99562380dba3324d1d26c995cd872",
+    "mtime": 1793667330.638251,
+    "seen": 1793668008.0031407,
+    "ast_hash": "e0001fd8f31ebc68e9eb1e66e7e6f3d1",
     "semantic_hash": ""
   },
   "data/ingestors/ncaab_sdv_import.py": {
@@ -10650,9 +10650,9 @@
     "semantic_hash": ""
   },
   "tests/test_ncaab_odds_history.py": {
-    "mtime": 1793657727.232482,
-    "seen": 1793658760.3857179,
-    "ast_hash": "a61862306c1856e6bba17a70c9177a32",
+    "mtime": 1793667330.793317,
+    "seen": 1793668008.010896,
+    "ast_hash": "222176c79d34956f7f08bf842e7c8d16",
     "semantic_hash": ""
   },
   "tests/test_ncaab_odds_intake.py": {
@@ -10674,9 +10674,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaab.md": {
-    "mtime": 1793657726.195569,
-    "seen": 1793658760.3877294,
-    "ast_hash": "a11704c84e632a7f3134f5166615013d",
+    "mtime": 1793667330.6881993,
+    "seen": 1793668008.0162594,
+    "ast_hash": "1da553970d7e72101c3e83bc72ec6f71",
     "semantic_hash": ""
   },
   "data/ingestors/alt_game_lines.py": {
@@ -11034,9 +11034,9 @@
     "semantic_hash": ""
   },
   "tests/test_ncaab_opener_grid.py": {
-    "mtime": 1793657715.8443482,
-    "seen": 1793658760.3857362,
-    "ast_hash": "30668e0c18a7353c1aa2f1c3626562bf",
+    "mtime": 1793667330.795475,
+    "seen": 1793668008.0111341,
+    "ast_hash": "1597d8fcf2479583f4ca284534719702",
     "semantic_hash": ""
   },
   "tests/test_ncaab_opener_grid_pg.py": {
@@ -11058,9 +11058,9 @@
     "semantic_hash": ""
   },
   "models/nba_first_half_total_luck.py": {
-    "mtime": 1793657726.895709,
-    "seen": 1793658760.3819282,
-    "ast_hash": "fa1fab7fd09276294f9aa8e0bfeea1aa",
+    "mtime": 1793667330.743743,
+    "seen": 1793668008.0065174,
+    "ast_hash": "7cec8ee0b1625ae0c63db41d82368e70",
     "semantic_hash": ""
   },
   "scripts/nba_first_half_total_luck_build.py": {
@@ -11076,9 +11076,9 @@
     "semantic_hash": ""
   },
   "scripts/nba_first_half_total_luck_replay.py": {
-    "mtime": 1793657727.025645,
-    "seen": 1793658760.383017,
-    "ast_hash": "d8bc86183ce4a27ac8e46243e6812207",
+    "mtime": 1793667330.7676816,
+    "seen": 1793668008.008102,
+    "ast_hash": "b565f353fb80359484a5788bc1f8cb8e",
     "semantic_hash": ""
   },
   "scripts/nba_first_half_total_luck_window.py": {
@@ -11112,15 +11112,15 @@
     "semantic_hash": ""
   },
   "tests/test_nba_first_half_total_luck.py": {
-    "mtime": 1793657727.1445556,
-    "seen": 1793658760.3853538,
-    "ast_hash": "b0999c0045891a9cbc9914e559a5aaf8",
+    "mtime": 1793667330.775838,
+    "seen": 1793668008.0105176,
+    "ast_hash": "966a12c52134de1b8d5352125f1ff1cc",
     "semantic_hash": ""
   },
   "tests/test_nba_first_half_total_luck_card.py": {
-    "mtime": 1793657727.1544063,
-    "seen": 1793658760.3853586,
-    "ast_hash": "6792fbeef02e6f96260e3685572f725c",
+    "mtime": 1793667330.7779832,
+    "seen": 1793668008.010523,
+    "ast_hash": "bbb6eae3aaebb1047c7c9ee7c254cb84",
     "semantic_hash": ""
   },
   "tests/test_nba_first_half_total_luck_replay.py": {
@@ -11259,6 +11259,42 @@
     "mtime": 1793377033.3385983,
     "seen": 1793658760.386585,
     "ast_hash": "1b49ec758f60018c288449140e43ef64",
+    "semantic_hash": ""
+  },
+  "data/ingestors/nba_team_stats_from_box.py": {
+    "mtime": 1793667330.6347487,
+    "seen": 1793668008.0031042,
+    "ast_hash": "b14915bf8c727255c03c7f6ab3d71857",
+    "semantic_hash": ""
+  },
+  "data/migrations/team_stats_board_main_run_line_2026_11_03.sql": {
+    "mtime": 1793667330.640133,
+    "seen": 1793668008.0041912,
+    "ast_hash": "a2e980fcdd740bd88283cadc327bf1a4",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/AppSwitch.tsx": {
+    "mtime": 1793667330.699375,
+    "seen": 1793668008.004878,
+    "ast_hash": "9e550d91bd84ee77b63ab5b61880503b",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaab_derivative_gameday.py": {
+    "mtime": 1793667330.790724,
+    "seen": 1793668008.0108514,
+    "ast_hash": "37f527a45c43fd77149a9dc41c323448",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaab_paid_calls.py": {
+    "mtime": 1793667330.805781,
+    "seen": 1793668008.011147,
+    "ast_hash": "e6efbcb1d16209b1907997bce9cb26d6",
+    "semantic_hash": ""
+  },
+  "tests/test_team_stats_explained.py": {
+    "mtime": 1793667330.807795,
+    "seen": 1793668008.0147624,
+    "ast_hash": "cfbe0e3249d0de6a4e75042ecd08f25e",
     "semantic_hash": ""
   }
 }

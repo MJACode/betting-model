@@ -62,6 +62,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import models.nba_first_half_total_luck as fh  # noqa: E402
+from models.nba_total_luck import MIN_GAMES  # noqa: E402
 from models import nba_book_numbers as NB  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 from scripts.nba_first_half_total_luck_build import BETS, cell_bets  # noqa: E402
@@ -189,7 +190,7 @@ def _graded_bets(ld: dict, art: dict, rows: pd.DataFrame, seasons=REPLAY_SEASONS
                                         season, "9999-12-31")
         prior = [s for s in art["bucket"] if int(s) < season]
         bets = fh.decide(targets, fh.quote_frame(rows, games), box, final, times, art,
-                         scheduled=sched, bucket_uplift=None if prior else 0.0)[0]
+                         scheduled=sched, bucket_uplift=None if prior else 0.0, min_games=MIN_GAMES)[0]
         out += [{"game_id": b.game_id, "season": season, "market": fh.MARKET, "side": fh.SIDE,
                  "line": b.line, "price": b.price, "book": b.book} for b in bets]
     bets = pd.DataFrame(out).merge(ld["data"].games[["game_id", "game_date"]], on="game_id")
@@ -317,7 +318,7 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     prior = [s for s in art["bucket"] if int(s) < season]
     bets, decisions, diag = fh.decide(targets, quotes, season_box, final, times, art,
                                       scheduled=sched,
-                                      bucket_uplift=None if prior else 0.0)
+                                      bucket_uplift=None if prior else 0.0, min_games=MIN_GAMES)
 
     lab_gap = ld.get("lab_gaps")
     if lab_gap is None:

@@ -117,6 +117,23 @@ def step_refresh_outcomes(run_date: str) -> bool:
         return False
 
 
+def step_nba_team_stats_box(run_date: str) -> bool:
+    """NBA season-to-date team stats from the stored ESPN box scores (worker).
+
+    The stats.nba.com writer runs only from a residential machine and wrote no
+    2026-27 row, which left the Teams board's NBA efficiency column blank.
+    Runs before refresh_team_board so the board picks the new row up the same
+    morning. Validation and method: data/ingestors/nba_team_stats_from_box.py."""
+    try:
+        from data.ingestors.nba_team_stats_from_box import run_nba_team_stats_from_box
+        result = run_nba_team_stats_from_box(as_of_date=run_date)
+        logger.success(f"✓ NBA team stats (box): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA team stats (box) failed: {exc}")
+        return False
+
+
 def step_refresh_team_board(run_date: str) -> bool:
     """Refresh team_stats_board_cache — the Teams board the app reads.
 
@@ -2332,6 +2349,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # mv_scored_pick_outcomes before anyone opens the custom-model builder.
     logger.info("Step 0d: Refreshing scored-pick outcomes...")
     results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+    results["nba_team_stats_box"] = step_nba_team_stats_box(run_date)
     results["refresh_team_board"] = step_refresh_team_board(run_date)
     results["live_calibration"] = step_live_calibration(run_date)
     results["calibration_fit"] = step_calibration_fit(run_date)
@@ -2727,7 +2745,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds", "apply-column-migrations",
-                                 "apply-view-migrations", "refresh-outcomes", "refresh-team-board",
+                                 "apply-view-migrations", "refresh-outcomes", "refresh-team-board", "nba-team-stats-box",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "probables-refresh",
@@ -2782,6 +2800,7 @@ Examples:
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "refresh-team-board": lambda: step_refresh_team_board(run_date),
+            "nba-team-stats-box": lambda: step_nba_team_stats_box(run_date),
             "live-calibration": lambda: step_live_calibration(run_date),
             "calibration-fit": lambda: step_calibration_fit(run_date),
             "injuries":     lambda: step_injuries(run_date),

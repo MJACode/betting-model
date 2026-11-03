@@ -373,10 +373,11 @@ def test_the_grid_buys_what_the_ledger_lacks_newest_season_first_oldest_first(mo
     _grid_world(monkeypatch, games=(UK_DUKE, KSU_DUKE, _game("old", "2024-12-01T17:00:00Z")),
                 held=held)
     bought, keepers, takens = [], [], []
-    monkeypatch.setattr(h, "_buy_snapshot",
-                        lambda conn, meter, tips, resolver, when, stats, keeper=None, taken=None:
-                        bought.append(when) or keepers.append(keeper) or takens.append(taken)
-                        or True)
+    # each bought snapshot is stored by _store_snapshot, in the order asked
+    monkeypatch.setattr(h, "_store_snapshot",
+                        lambda conn, meter, tips, resolver, when, r, stats, keeper=None,
+                        taken=None: bought.append(when) or keepers.append(keeper)
+                        or takens.append(taken))
     h.buy_opener_grid(FakeConn(), FakeMeter(lambda u, p: Resp()), 2025, 2026, 60)
     want = h.grid_plan([UK_DUKE, KSU_DUKE, _game("old", "2024-12-01T17:00:00Z")], 60, held)
     assert sorted(bought) == sorted(want.todo) and _t("2025-11-17T22:00Z") not in bought
@@ -590,12 +591,12 @@ def test_the_grid_is_a_job_mode_with_its_own_ceiling():
 
 @pytest.mark.parametrize("args,argv", [
     ({"mode": "opener_grid", "step_min": 60, "max_credits": 450_000, "floor": 300_000},
-     ["--opener-grid", "--seasons", "2021", "2026", "--step", "60", "--apply",
-      "--max-credits", "450000", "--floor", "300000"]),
+     ["--opener-grid", "--seasons", "2021", "2026", "--step", "60", "--concurrency", "6",
+      "--apply", "--max-credits", "450000", "--floor", "300000"]),
     ({"mode": "opener_grid", "step_min": 30, "pre_start": True, "seasons": [2024, 2026],
       "max_credits": 1_170_000, "floor": 400_000},
-     ["--opener-grid", "--seasons", "2024", "2026", "--step", "30", "--pre-start", "--apply",
-      "--max-credits", "1170000", "--floor", "400000"]),
+     ["--opener-grid", "--seasons", "2024", "2026", "--step", "30", "--pre-start",
+      "--concurrency", "6", "--apply", "--max-credits", "1170000", "--floor", "400000"]),
     ({"mode": "opener_grid", "step_min": 30, "dry_run": True},
      ["--opener-grid", "--seasons", "2021", "2026", "--step", "30", "--dry-run"]),
 ])

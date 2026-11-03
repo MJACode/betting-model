@@ -40,9 +40,11 @@ already bets.
 
 THE RULE, per regular-season game:
   1. RATINGS AND COMPLETENESS: exactly models/nba_total_luck.py's (team_box,
-     f4_projections, missing_inputs, regular_season), imported. Both teams need
-     10+ games this season (MIN_GAMES); every scheduled game of the season
-     before the date must be scored and boxed, else the game is declined.
+     f4_projections, missing_inputs, regular_season), imported. No 10-game wait
+     (mike, 2026-11-02): a team needs one game this season (LIVE_MIN_GAMES),
+     where the evidence above is both teams on 10+ (docs/sports/nba.md,
+     "No 10-game wait"). Every scheduled game of the season before the date must be
+     scored and boxed, else the game is declined.
   2. THE CUT: gap_total >= 2.0 (GAP_CUT, this model's own; nba_total_luck's 3.0
      is its own and does not change).
   3. THE QUOTES (models/nba_book_numbers.py, the lab's own code): each book's
@@ -147,7 +149,7 @@ from models import nba_book_numbers as NB
 from models.nba_team_total_luck import (  # noqa: F401
     DECISION_LEAD_MIN, FETCH_LEAD_MIN, QUOTE_ROW_COLS, STALE_FETCH_MAX_MIN, book_ages, timing)
 from models.nba_total_luck import (  # noqa: F401
-    BOX_COLS, DIAG_KEYS, MIN_GAMES, UNPLAYED_AFTER_DAYS, f4_projections, lead_minutes,
+    BOX_COLS, DIAG_KEYS, LIVE_MIN_GAMES, UNPLAYED_AFTER_DAYS, f4_projections, lead_minutes,
     missing_inputs, regular_season, scheduled_games, side_strength, team_box)
 
 MODEL_ID = "nba_first_half_total_luck"
@@ -303,7 +305,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
            final_games: pd.DataFrame, times: pd.DataFrame, art: dict, *,
            scheduled: pd.DataFrame,
            books=None, min_odds: float | None = None, gap_cut: float = GAP_CUT,
-           bucket_uplift: float | None = None
+           bucket_uplift: float | None = None, min_games: int = LIVE_MIN_GAMES
            ) -> tuple[list[FirstHalfBet], list[FirstHalfDecision], dict]:
     """The rule on frames. Pure given its inputs, so the card and the replay of
     the lab run the same code. The arguments are
@@ -323,7 +325,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     sig = {(season, MARKET): pricing_dist(art, season)}
 
     tb = team_box(box, final_games)
-    proj = f4_projections(targets, tb)
+    proj = f4_projections(targets, tb, min_games=min_games)
     gaps = dict(zip(proj["game_id"], proj["gap_total"]))
     missing = missing_inputs(targets, scheduled_games(scheduled), final_games, tb)
 
@@ -375,7 +377,7 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             continue
         if gap is None:
             diag["early_season"] += 1
-            record(0, f"early_season: a team has under {MIN_GAMES} games")
+            record(0, f"early_season: a team has under {min_games} games")
             continue
         if gap < gap_cut:
             diag["gap_below_cut"] += 1
