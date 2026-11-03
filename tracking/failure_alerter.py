@@ -132,12 +132,43 @@ def _undecided_conditions(conn, now: datetime) -> dict:
         return {"check:nba_undecided_games": (
             "WARN", "The NBA undecided-game check could not read",
             f"`scripts/nba_pregame_window.undecided_games` raised:\n{exc!r}")}
-    return {f"undecided:{model}": (
+    out = {f"undecided:{model}": (
         "CRIT", f"{model} lost {len(games)} game(s): tipped with no decision",
         f"**{len(games)} regular-season game(s)** tipped in the last "
         f"{UNDECIDED_LOOKBACK_HOURS:.0f} hours with no decision from `{model}`, so "
         f"no bet could be written on them:\n" + "\n".join(f"· `{g}`" for g in games))
         for model, games in lost.items()}
+    out.update(_ncaab_first_half_undecided(conn, now))
+    return out
+
+
+def _ncaab_first_half_undecided(conn, now: datetime) -> dict:
+    """The same check for the NCAAB first-half spread model
+    (scripts/ncaab_first_half_window.undecided_games): a listed game that
+    tipped with no decision. Never raises."""
+    model = "ncaab_first_half_spread"
+    try:
+        import config
+        from scripts.ncaab_first_half_window import UNDECIDED_LOOKBACK_HOURS as hours
+        from scripts.ncaab_first_half_window import undecided_games as ncaab_undecided
+        games = ncaab_undecided(conn, now)
+    except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
+        logger.warning(f"failure alerter: the NCAAB first-half undecided read failed: {exc}")
+        try:
+            conn.rollback()
+            conn.execute("SELECT 1").fetchall()
+        except Exception:  # noqa: BLE001 — the database itself is the problem
+            return {}
+        return {"check:ncaab_first_half_undecided": (
+            "WARN", "The NCAAB first-half undecided-game check could not read",
+            f"`scripts/ncaab_first_half_window.undecided_games` raised:\n{exc!r}")}
+    if not games or model in config.RETIRED_MODELS:
+        return {}
+    return {f"undecided:{model}": (
+        "CRIT", f"{model} lost {len(games)} game(s): tipped with no decision",
+        f"**{len(games)} NCAAB game(s)** tipped in the last {hours:.0f} hours with no "
+        f"decision from `{model}`: no tip-minus-10 first-half fetch landed, so no bet "
+        f"could be written on them:\n" + "\n".join(f"· `{g}`" for g in games))}
 
 
 def _is_health_check_step(name: str) -> bool:

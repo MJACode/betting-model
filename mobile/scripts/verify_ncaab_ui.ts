@@ -16,8 +16,10 @@
 import { SPORTS, type Sport } from '../src/hooks/useSportFilter';
 import { routeForPush, PUSH_ROUTE_VERSION } from '../src/lib/pushRoute';
 import {
-  MODEL_META, betTypePickerGroups, modelCategory, modelLong, modelPageTiming, modelShort, sportOfModel,
+  MODEL_META, betTypePickerGroups, modelCategory, modelLong, modelPageTiming, modelProbabilityNote, modelShort,
+  sportOfModel,
 } from '../src/lib/modelMeta';
+import { RECORD_AT_BEST_BOOK_NOTE, recordNoteFor, recordNoteShortFor } from '../src/lib/myBooks';
 import { gameMarketForModel, marketClassForModel, pickTimingInfo } from '../src/lib/markets';
 import type { Pick } from '../src/types';
 import { GROUP_ORDER, defaultStatFor, supportsHitRate } from '../src/lib/statCatalog';
@@ -74,15 +76,53 @@ const posted = pickTimingInfo({
 } as unknown as Pick);
 check('its Pick Detail note says posted once, not the first scoring run of the day',
   !!posted && posted.kind === 'posted' && !posted.note.includes('first scoring run'), posted?.note ?? 'null');
+// The moneyline model (models/ncaab_moneyline_own_spread.py) has 'spread' in
+// its id, because each book's moneyline is priced off that book's own spread,
+// but every pick it writes is a MONEYLINE (2026-11-02).
+const ML = 'ncaab_moneyline_own_spread';
+check(`${ML} is filed under NCAAB`, sportOfModel(ML) === 'NCAAB');
+check('its badge is ML and its name NCAAB Moneyline',
+  modelShort(ML) === 'ML' && modelLong(ML) === 'NCAAB Moneyline', `${modelShort(ML)} / ${modelLong(ML)}`);
+check('it is priced off the moneyline rows, not the spreads rows its id names',
+  gameMarketForModel(ML) === 'h2h', String(gameMarketForModel(ML)));
+check('a parlay treats it as a moneyline', marketClassForModel(ML) === 'game_ml', marketClassForModel(ML));
+check('the spread model is still priced off the spreads rows',
+  gameMarketForModel('ncaab_spread_market') === 'spreads', String(gameMarketForModel('ncaab_spread_market')));
+const mlTiming = modelPageTiming(ML);
+check('its page says it decides the morning of the game, against each book\'s own spread, at a price',
+  mlTiming.title === 'Decided the morning of the game' && mlTiming.body.includes('moneyline')
+    && mlTiming.body.includes('same book’s spread') && !mlTiming.body.includes('line and price'),
+  mlTiming.body);
+check('the spread model\'s page is unchanged',
+  modelPageTiming('ncaab_spread_market').body.startsWith(
+    'This model decides each game once, on the morning of game day, from the spread at each book we price.'));
+check('its probability note says the chance comes from the bet book\'s own spread',
+  modelProbabilityNote(ML).includes('spread at the book we bet'), modelProbabilityNote(ML));
+check('its record note never claims the best price (the edge book is not always the best price)',
+  !recordNoteFor(ML).includes('best price') && !recordNoteShortFor(ML).includes('best price'),
+  `${recordNoteFor(ML)} | ${recordNoteShortFor(ML)}`);
+check('every other model keeps the best-price record note',
+  recordNoteFor('ncaab_spread_market') === RECORD_AT_BEST_BOOK_NOTE
+    && recordNoteShortFor('nba_total_luck') === 'record uses best price');
+const mlPosted = pickTimingInfo({
+  pick_id: 2, model_id: ML, sport: 'NCAAB', signal_type: 'BET', created_at: '2026-12-05T15:05:00Z',
+  player_id: null, is_live: false,
+} as unknown as Pick);
+check('its Pick Detail note says posted once',
+  !!mlPosted && mlPosted.kind === 'posted' && mlPosted.note.startsWith('Posted once'), mlPosted?.note ?? 'null');
 // The custom-model picker offers moneyline, spread and props slots only, so the
 // totals model adds no NCAAB row there. The spread model
-// (models/ncaab_spread_market.py) adds the Spread row, as NCAAF's and the
-// NFL's spread models do (2026-11-02).
+// (models/ncaab_spread_market.py) adds the Spread choice, as NCAAF's and the
+// NFL's spread models do (2026-11-02), and the moneyline model
+// (models/ncaab_moneyline_own_spread.py) the ML choice: its id has 'spread'
+// in it, and it must land under ML, never under Spread.
 const ncaabRows = betTypePickerGroups().filter((g) => g.sport === 'NCAAB');
-check('the custom-model picker has one NCAAB row, Spread, holding only the spread model',
-  ncaabRows.length === 1 && ncaabRows[0].choices.length === 1
-    && ncaabRows[0].choices[0].label === 'Spread'
-    && JSON.stringify(ncaabRows[0].choices[0].modelIds) === JSON.stringify(['ncaab_spread_market']),
+const ncaabChoice = (label: string) =>
+  ncaabRows.length === 1 ? ncaabRows[0].choices.find((c) => c.label === label) : undefined;
+check('the custom-model picker has one NCAAB row: ML (the moneyline model) and Spread (the spread model)',
+  ncaabRows.length === 1 && ncaabRows[0].choices.length === 2
+    && JSON.stringify(ncaabChoice('ML')?.modelIds) === JSON.stringify(['ncaab_moneyline_own_spread'])
+    && JSON.stringify(ncaabChoice('Spread')?.modelIds) === JSON.stringify(['ncaab_spread_market']),
   JSON.stringify(ncaabRows));
 
 // ── Stats: nothing to show yet, and nothing broken ───────────────────────────

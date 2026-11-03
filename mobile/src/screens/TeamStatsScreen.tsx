@@ -364,8 +364,8 @@ export function TeamStatsScreen() {
             {d.pickRecords.firstHalves > 0 ? (
               <Text style={styles.footnote}>
                 {d.pickRecords.firstHalves === 1
-                  ? '1 of them is a first-half total bet, which the tiles above leave out.'
-                  : `${d.pickRecords.firstHalves} of them are first-half total bets, which the tiles above leave out.`}
+                  ? '1 of them is a first-half bet, which the tiles above leave out.'
+                  : `${d.pickRecords.firstHalves} of them are first-half bets, which the tiles above leave out.`}
               </Text>
             ) : null}
             {d.pickRecords.ledgerUnread ? (

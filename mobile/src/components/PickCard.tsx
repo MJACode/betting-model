@@ -47,6 +47,7 @@ import {
   foundAtText,
   myBooksView,
   NOT_AT_MY_BOOKS,
+  recordNoteShortFor,
 } from '@/lib/myBooks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
@@ -240,7 +241,7 @@ export function PickCard({
   // and that the record is kept there. The longer sentence is on Pick Detail.
   const myBooksNote = myQuote && modelPrice != null
     ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}${
-        noEdgeAtMine ? ' · No edge at your books' : ' · record uses best price'
+        noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
       }`
     : notAtMyBooks
       ? NOT_AT_MY_BOOKS

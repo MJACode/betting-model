@@ -410,6 +410,313 @@ its tables exactly.
 2027`). The card refuses a season the artifact was not built for, and those
 games are then recorded as missed.
 
+### The NCAAB moneyline model (`ncaab_moneyline_own_spread`), live from 2026-11-02
+
+mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
+what"*, *"we do not need to wait 10 games"*, *"I want it all done and go live
+now"*, and the cap: *"-200 max"*. Real money, like every model (CLAUDE.md §2),
+with no games-played wait. Code: `models/ncaab_moneyline_own_spread.py` (the
+rule), `scripts/ncaab_moneyline_card.py` (the card that writes its picks),
+`scripts/ncaab_moneyline_build.py` (the frozen numbers and the replay),
+`models/saved/ncaab_moneyline_own_spread_2027.json` (those numbers for
+2026-27). It reuses the spread model's quote reader
+(`models/ncaab_book_quotes.py`) and final-margin distribution
+(`models/ncaab_margin_dist.py`), and prices with the spread model's own
+2026-27 table.
+
+**It did not clear the research bar, and it was chosen after the fact.** Say
+both plainly whenever its record is quoted. The research's pre-registered
+primary test (the hour before tip, the other books' spreads, the 10-game rule)
+failed. This version was picked after mike's -200 limit, from the 162
+versions the research regraded at that limit (18 rule variants, each at 9
+cuts). Its 2021-2025
+95% interval runs from -1.22% to +9.25%, so it includes losing. Every season
+was positive, and 2025-26 was too, but against Pinnacle's closing line its
+bets were worth slightly less than nothing (about -0.2% a bet on 2021-2025,
+-1.4% on 2025-26).
+
+**What it bets.** Each book's moneyline against that same book's own spread.
+A book's spread and its moneyline are two prices for the same game; when the
+moneyline is cheaper than the spread implies, the moneyline is the bet. At
+15:00 UTC on game day (10 a.m. ET in winter, 11 a.m. ET from mid-March), the
+same instant and the same one-hour freshness window as the spread model, it
+reads each of the eight bettable books' full-game moneyline and full-game
+spread. It bets the single best side of the game when its edge is above
+**0.01**, at that book's price, and never at a price shorter than -200.
+
+**How a side is priced, step by step:**
+
+1. **Each book's quotes** are its newest pre-game moneyline and spread stamped
+   in the hour up to 15:00 UTC. Pinnacle's and Bovada's moneylines are read
+   too, only for the favourite check in step 3; they are never bet. A game
+   that tips less than five minutes after 15:00 UTC is not priced.
+2. **The book's fair chance of a home win, from its own spread.** The spread's
+   two prices are de-vigged (power method) to the chance the home side covers.
+   The final-margin distribution (fitted on 2012-2026, 70,268 games, the
+   spread model's table) is turned around to find the expected home margin
+   that gives that cover chance at that line. The chance of a home win is the
+   chance of a positive final margin at that expected margin (overtime
+   included, so a tie cannot happen). No consensus and no offset: each book is
+   priced against itself. A spread is used only when both prices are -100 or
+   longer, the two implied chances add up to between 1.00 and 1.15, and its
+   line is not on the other side of zero from the other books' middle line.
+3. **Suspect moneylines out.** A moneyline is not priced when its two implied
+   chances add up outside 1.00-1.15; when its favourite differs from every
+   other book's favourite (two or more other books, Pinnacle and Bovada
+   counted); or when the same book's spread is 1.5 points or more and names
+   the other team as favourite.
+4. **The -200 cap comes before the pick.** Every side priced shorter than
+   -200 is removed first. A game whose best side is -250 is then bet at its
+   next-best side, if that side clears the cut.
+5. **The edge** of a side is its fair chance minus the implied chance of its
+   own price, vig included. The bet is the largest edge in the game, over
+   every book and both sides; a tie goes to the longer price, then the book's
+   name in alphabetical order (the same bet at two books, so the last step
+   only names which).
+
+**When a game is decided: at 15:00 UTC on its date, once.** Exactly as the
+spread model (above): the card runs hourly at five past (UTC), only the run in
+the 15:00 hour decides, the decision goes into `ncaab_moneyline_decisions`
+with every book's moneyline, its own spread and its flags, and the game is
+never decided again (CLAUDE.md §1c). A missed 15:00 is recorded as `missed`
+with no bet and fails the run; every due game with no moneyline at all, an
+artifact for another season, and a best side at a book
+`config.BEST_LINE_BOOKMAKERS` no longer lists fail it too. It is its own job,
+not the spread card's, so a moneyline failure never fails the spread model's
+heartbeat, and the reverse.
+
+**The bet row.** A moneyline: `scored_line` and `line_book` are empty. The
+label is the platform's ("Duke ML"), checked against the side before it is
+written. `decision_*` and `best_*` are the bet book's price. When DraftKings
+had a clean moneyline at 15:00 UTC, `dk_odds` / `dk_implied_prob` / `edge` are
+DraftKings' own price on that side, the reference; otherwise `dk_odds` is
+empty and the other two 0.0. `model_probability` is the bet side's fair chance
+from the bet book's own spread, the number the 0.01 cut was measured on, so
+the publishers' edge filter agrees with the card. Settlement: full-game
+moneyline, overtime included (`games.home_win`).
+
+**The id has "spread" in it, and the pick is a moneyline.** Several places
+read a pick's market from its model id by looking for the word "spread". Each
+one now names this id first: the app (`mobile/src/lib/markets.ts`), the
+Claude-mobile prompt (`docs/mobile_picks_prompt.md`), the closing-line
+function, settlement and the line-movement check; `tests/test_ncaab_moneyline_own_spread.py`
+and `tests/test_rule_model_markets_everywhere.py` pin them. One was left
+alone: the production view `v_model_full_record`, which nothing in the repo
+reads, maps any id with "spread" in it to spreads. A moneyline pick has no
+line, so that view leaves this model's bets out rather than grading them
+wrong.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.01 (fair chance from the book's own spread minus the bet price's implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.01: the edge filter IS the card's cut | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| price cap | -200: sides shorter than -200 removed before the pick, and pinned again | `models/ncaab_moneyline_own_spread.MIN_PRICE`, `MODEL_MIN_ODDS` |
+| EV floor | 0.015, just under the smallest EV the cut admitted in the replay (+0.0156; median +0.027). An edge above 0.01 at -200 or longer is always EV above 0.015, so it removes nothing the cut takes | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| decision instant | 15:00 UTC on the game's date; quotes stamped 14:00-15:00 UTC | `models/ncaab_book_quotes.py` |
+| decided once | a row in `ncaab_moneyline_decisions`, bet or not | `scripts/ncaab_moneyline_card.py` |
+| settlement | full-game moneyline, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
+| kill switch | `RUN_NCAAB_MONEYLINE_CARD=0` | the card |
+| frozen numbers | the spread model's 2012-2026 distribution, pinned by its SHA-256 | `models/saved/ncaab_moneyline_own_spread_2027.json` |
+
+**The evidence: the card's own code, replayed** (2026-11-02,
+`scripts/ncaab_moneyline_build.py` on the copy of the Supabase reads taken for
+the research; each season priced with the distribution fitted on the seasons
+before it, which equals the research's to the last digit; stake_for; units;
+95% interval resampled by date). It matched all 914 of the research's bets game by
+game: the same game, side, price and book on all 914, and the same edge to the
+last digit (largest difference 0.0). No research bet was missing and the replay
+added none.
+
+| Seasons | Bets | Record | Units | ROI | 95% interval | Without the 10 best dates |
+|---|---|---|---|---|---|---|
+| **2021-2025** | **838** | **511-327** | **+53.11** | **+4.22%** | **[-1.2, 9.3]** | +7.94 units |
+| **2025-26** | **76** | **45-31** | **+14.04** | **+15.05%** | **[-4.9, 32.3]** | -6.24 units |
+
+By season: 2020-21 +5.53% (21 bets), 2021-22 +4.90% (285), 2022-23 +5.42%
+(233), 2023-24 +2.71% (174), 2024-25 +1.98% (125), 2025-26 +15.05% (76).
+Neighbouring cuts, 2021-2025: 0.005 +12.00 units (1,450 bets, +0.55%); 0.015
++13.57 units (430 bets, +2.12%). It laid -200 to +1,000 (median -159).
+
+**The risks, plainly:**
+
+- **The close says there is no edge.** Against Pinnacle's no-vig closing line
+  its bets were worth -0.21% a bet on 2021-2025 (813 with a Pinnacle close)
+  and -1.38% on 2025-26; against the bettable books' close, -0.08% and -1.18%.
+  A real edge shows up as positive close value. The profit so far is what a
+  break-even bet can return by luck.
+- **It leans on a few dates.** Without its 10 best dates, 2021-2025 is +7.94
+  units on 828 bets and 2025-26 is -6.24 units.
+- **The profit sits in home sides.** On 2021-2025 home bets made +68.31 units
+  (623 bets, +7.08%) and away bets lost 15.20 (215, -5.15%); 2025-26 was
+  positive on both. 86% of the 2021-2025 bets were favourites.
+- **It was chosen after the fact, from 162 versions.** A version picked from
+  162 regrades will look better than its true rate. The neighbouring cuts made
+  much less (+12.00 and +13.57 units against +53.11).
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: at least 50
+settled picks, positive flat-bet ROI, calibration within 5%). Read beside the
+ROI: the close value, and how often the bet book's price was still up when the
+pick posted (the ledger keeps every book's 15:00 quote).
+
+**Before the 2027-28 season** rebuild the spread model's frozen numbers first,
+then this one (`python -m scripts.ncaab_moneyline_build --cache <copy>
+--last-season 2027`): it refuses to write unless its own fit equals the spread
+artifact's table, and the card refuses a table whose digest moved.
+### The NCAAB first-half spread model (`ncaab_first_half_spread`), live from 2026-11-02
+
+mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
+what"*, and the same day *"we do not need to wait 10 games ... I want these
+models live now"*. Real money, like every model (CLAUDE.md §2). **It did not
+clear the research bar** (the 95% interval's lower bound is below zero, below).
+It is live on mike's instruction. Code: `models/ncaab_first_half_spread.py` (the
+model), `scripts/ncaab_first_half_spread_card.py` (the card),
+`data/ingestors/ncaab_first_half_odds.py` (the first-half capture),
+`scripts/ncaab_first_half_window.py` (the schedule), and
+`scripts/ncaab_first_half_spread_build.py` (the frozen numbers in
+`models/saved/ncaab_first_half_spread_2027.json`). The build's `--store` copies that file into
+`model_artifacts` (a production write, run after a rebuild).
+
+**What it bets.** One side of the first half's spread, at most once a game,
+about ten minutes before tip, at whichever bettable book's quote has the
+largest edge. It settles on the first half's score; a first half has no
+overtime, and a level first half on a whole-number line is a push.
+
+**How it prices a game** (the research's round 4, family A, market
+`spreads_h1`, snapshot close, best book, cut 0.02, every game; confirmed line by
+line from its `fh_lib.py`, `fh_prep.py`, `fh_score.py` and `fh_grade.py`):
+
+1. **The full-game consensus.** The median of the bettable books' newest
+   full-game home spread stored by the decision moment (DraftKings, FanDuel,
+   BetMGM, Caesars, Fanatics, BetRivers, Hard Rock, betPARX; never Pinnacle).
+   M is minus that number: the home team's expected full-game margin.
+2. **The first-half mean.** a + b x M, plus half the difference of the two
+   teams' first-half tendencies. a and b are one least-squares fit of the
+   first-half home margin on the closing full-game consensus over every
+   earlier season. They are fitted once per season and frozen, not refitted as
+   the season goes (for 2026-27: a = -0.037, b = 0.557 on 2021-2026).
+3. **The team tendency.** For each finished game with both halves and closing
+   lines stored: the home team's first-half margin minus its second-half margin,
+   less what the closing line predicts for that gap (a fitted line, frozen).
+   Each team's sum this season, plus half of last season's, divided by its games
+   plus half of last season's plus 782.2. The 782.2 is heavy shrinkage: a team
+   with 30 games keeps about 4% of its own average, so the term moves the mean
+   by a quarter of a point at most. Only games that ended (tip + 2.5 hours)
+   before the decision count.
+4. **The price.** Each bettable book's first-half spread is priced through a
+   table of how first-half margins actually fell in past games with a similar
+   mean (a kernel table of whole-point outcomes, so the 4.4% of first halves
+   that end level at a pick'em mean are a push mass, not smoothed away). The
+   chance the side covers, a push left out, minus the price's own implied
+   chance (vig included) is the edge. Each quote takes its better side.
+5. **The bet.** The single quote with the largest edge, ties to the
+   alphabetically first book. Bet when that edge is above **0.02**; otherwise the
+   game is decided with no bet.
+
+**When.** The capture fetches each game's first-half lines nine times
+(below). The decision is the fetch ten minutes before tip. If it fails, the
+job retries every minute, and a fetch that lands 5 to 10 minutes before tip
+still decides. With none by 5 minutes out, the game is not decided: the
+20-minute fetch is not used instead, because the research graded only the
+ten-minute snapshot. The card then fails its run, and the failure alerter names
+the game once it tips (`undecided:ncaab_first_half_spread`). Each decision, bet
+or not, goes into `ncaab_first_half_spread_decisions` with every book's priced
+quote, and the game is never decided again (CLAUDE.md §1c).
+
+**The evidence** (the research's `grid.csv`, every game, quotes bought ten
+minutes before tip, graded at their own prices to win one unit; 95% interval
+resampled by date):
+
+| Cut | Seasons | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|---|
+| 0.01 | 2024-2026 | 2,666 | +81.36 | +2.75% | [-0.64, 6.31] |
+| **0.02** | **2024-2026** | **1,253** | **+68.07** | **+4.91%** | **[-0.30, 10.63]** |
+| 0.03 | 2024-2026 | 575 | +35.65 | +5.61% | [-1.74, 13.05] |
+| 0.04 | 2024-2026 | 277 | -3.98 | -1.30% | [-11.93, 9.69] |
+
+At 0.02 by season: 2023-24 +6.06% (477 bets, +31.44 units), 2024-25 +2.80% (533,
++16.47), 2025-26 +7.19% (243, +20.16). Record 682-556-15. Prices -140 to +125.
+Without its 10 best dates: +16.75 units. With the old 10-game rule on, the same
+cut made only +6.87 units on 698 bets (+0.90%): most of the profit is in the
+early-season games that rule kept out.
+
+**The shipped code reproduces it exactly.** The build replays 2023-24 to 2025-26
+through the card's own functions (the as-of consensus, the team term, the
+pricing, the best-offer choice), refitting the frozen numbers before each season
+on the earlier seasons only. Its 1,253 bets are the research's 1,253, the same
+game, side, book, line and price on every one (largest edge difference 3e-16).
+The research's period scores and `ncaab_period_scores` agree on all 35,307
+graded games.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.02 (P(cover, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.02: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
+| EV floor | 0.03, just under the smallest EV the cut admitted in the replay (+0.0346; median +0.0552), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned (it laid -140 to +125) | `MODEL_MIN_ODDS` |
+| books | the eight above, and only those `BEST_LINE_BOOKMAKERS` still lists | `models/ncaab_first_half_spread.BOOKS` |
+| decision fetch | 5 to 10.5 minutes before tip, the tip-minus-10 call or its retries | `scripts/ncaab_first_half_spread_card.DECISION_LEAD_MIN` |
+| decided once | a row in `ncaab_first_half_spread_decisions`, bet or not | the card |
+| settlement | the first half's margin plus the home number (period 1 of `ncaab_period_scores`); pending while the periods are missing or do not add up to the final | `tracking/paper_tracker._ncaab_first_half_points` |
+| closing value | not measured: no fetch after tip minus 10, and the decision fetch is never read as its own close | `tracking/paper_tracker._closing_odds`, the CLV migration |
+| kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and the card | `scripts/ncaab_first_half_window.enabled` |
+| frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_spread_2027.json` |
+
+**The risks, plainly:**
+
+- **It did not clear the bar.** The pooled interval's lower bound is -0.30%,
+  and 2024-25 made only +2.80%. Without its 10 best dates it keeps +16.75 of
+  its +68.07 units.
+- **The quotes' freshness is unverified.** The purchase stamped every book's
+  quote with the purchase time, not the book's own update time, so how stale a
+  "tip minus 10" quote really was is unknown. Live, each book's own update age
+  is stored on every fetch (`book_ages`).
+- **The book mix changed.** Caesars (500 of the 1,253 bets) and BetRivers
+  (254) quoted first halves in 2023-24 and 2024-25 and dropped out of the feed
+  in 2025-26 (73 and 0 games quoted). 2025-26's 243 bets were FanDuel 139,
+  Hard Rock 43, BetMGM 40, DraftKings 17 and Caesars 4.
+- **It is an away-side card.** 971 of the 1,253 bets are the away team (282
+  home); 178 of 243 in 2025-26.
+- **No closing value can be measured.** The research has no quote after tip
+  minus 10, and live takes none.
+- **Live inputs are fresher than the evidence's.** The evidence's full-game
+  consensus at tip minus 10 came from snapshots bought about an hour before
+  tip; live it is the five-minute capture. The closing lines behind the team
+  term come from the capture too.
+- **Same-day period scores can be missing.** The ESPN box feed stores an
+  evening's halves from the 12:17 am pass. A team's game that ended before the
+  decision but has no stored halves is left out of its term and counted
+  (`missing_halves` on the decision row). The term is a fraction of a point, so
+  the game is decided anyway.
+
+#### The first-half capture
+
+`data/ingestors/ncaab_first_half_odds.py`, run by the window job
+(`scheduler.run_ncaab_first_half_window`, every minute). For every game the
+feed lists (one with a bettable book's full-game spread stored), one per-event
+call at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes
+before tip, the ten-minute call first on a busy tick. Each call asks for four
+markets: first-half moneyline, spread and total, and both team totals. All
+four are stored (source `odds_api_ncaab_first_half_live`, protected from the
+odds prune), each book's main number under the market's own name and any
+other rung under `<market>_alternate`. Only the spread decides a bet today; the
+rest is history for the next first-half models. One row per call goes into
+`ncaab_first_half_fetches` with the credits the feed billed.
+
+**Cost.** The live endpoint bills one credit per market it returns, per region,
+and nothing for an empty answer (measured on the live NBA and NCAAB feeds). So
+a call costs at most 4 credits and a game at most 36. The measured ceiling for
+2026-27, if every scheduled ESPN game were listed and every market returned:
+57,204 credits in November and about 231,000 for the season (6,416 games; the
+2026-11-02 purchase plan's count). The real spend is lower: unlisted games are
+never called, and a book that offers fewer markets bills fewer. The balance was
+4,305,317 at 22:18 UTC on 2026-11-02 (`odds_api_quota`).
+
+**The balance floor.** Before buying, the run reads the newest recorded balance
+and the platform's measured daily burn (the median day of the last two weeks).
+Under one day of that burn (`NCAAB_FIRST_HALF_RESERVE_DAYS`, default 1) it buys
+nothing and fails, so the alert fires. Above it every planned game is bought.
+It exists only to keep the account off zero, where every live feed stops.
+
 ## Identity: ESPN owns the games row
 
 `data/ingestors/ncaab_teams.py` is the contract every other piece reads.
@@ -746,6 +1053,7 @@ built; **nothing is bought until a worker job is queued.**
 | ESPN schedule + results | Teams, venues, every game (neutral flag, conference game), finals for settlement; the daily pipeline refreshes 14 days ahead, every refresh pass fills finals for started games | `data/ingestors/ncaab_espn_ingestor.py`, steps `ncaab-schedule` / `ncaab-results` |
 | Live odds | Full-game moneyline, spread and total from the ten line-shop books on every refresh pass; NCAAB is exempt from the DraftKings-must-list gate so every book's first post is kept | `data/ingestors/odds_ingestor.py` |
 | Totals model card | Hourly at five past, UTC: decides each game once at DraftKings' standing total (22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip), writes the bets, then publishes them | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
+| First-half spread model and capture | Every minute: each listed game's first-half lines (moneyline, spread, total, team totals) at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip, at most 4 credits a call; the first-half spread model decides each game once on the tip-minus-10 fetch, writes the bets, then publishes them | `scripts/ncaab_first_half_window.py`, `data/ingestors/ncaab_first_half_odds.py`, `scripts/ncaab_first_half_spread_card.py`, job `ncaab_first_half_window` |
 | Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
 | Price-path retention | NCAAB keeps every book's whole price path (the clean-up job only removes unchanged middles), and the close it keeps for any sport is the last price before the start | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |
 | Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close; the same at 15:00 UTC and 18:00 UTC on game day and 60 minutes before the tip (built 2026-11-02, bought only by a queued job; First-half lines and team totals at three game-day times, above). Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |

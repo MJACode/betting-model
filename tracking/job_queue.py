@@ -1947,10 +1947,13 @@ def _job_team_stats_asof_verify(**kw):
 
     verify() skips the current max (live) season for impossible-games,
     tolerates a 1-game date-boundary mismatch, and excuses a thin snapshot
-    count on that live season only while its finals span fewer than
-    MIN_SNAPSHOTS_PER_SEASON days — see that function. Historical seasons
-    are not excused. This wrapper only reports what verify returns; it
-    never rebuilds or DELETE.
+    count on that live season in two shapes: while its finals span fewer
+    than MIN_SNAPSHOTS_PER_SEASON days, or while its own snapshot series
+    is a young snapshot series (first as_of_date fewer than that many days
+    before the check, newest row today or yesterday). A series that has
+    collapsed or stopped stays thin, and an empty games read is not an
+    excuse. Historical seasons are not excused. This wrapper only reports
+    what verify returns; it never rebuilds or DELETE.
     """
     from data.db import get_connection
     from data.team_stats_rebuild import SPORTS, verify
