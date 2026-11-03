@@ -19,7 +19,9 @@
 -- Puck-line rows are not rewritten: the close matches the stored HOME sign.
 -- A team total's close is its 'close' snapshot only: its other rows are the
 -- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py). A
--- first half's total is the same (data/ingestors/nba_first_half_odds.py).
+-- first half's total is the same (data/ingestors/nba_first_half_odds.py), and
+-- so is the NCAAB first half's spread (data/ingestors/ncaab_first_half_odds.py),
+-- which takes no close: it is unmeasured, never 0.0 against its own price.
 -- results_snapshots is not touched.
 
 DO $mig$
@@ -211,6 +213,7 @@ BEGIN
         WHEN 'ncaab_total_blend' THEN 'totals'
         WHEN 'ncaab_spread_market' THEN 'spreads'
         WHEN 'ncaab_moneyline_own_spread' THEN 'h2h'
+        WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
         ELSE 'h2h'
       END
     $body$;
@@ -480,9 +483,9 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1')
+          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
                 AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1'
+            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
@@ -503,9 +506,9 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1')
+          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
                 AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1'
+            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
@@ -538,9 +541,9 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = 'pinnacle'
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1')
+          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
                 AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1'
+            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (

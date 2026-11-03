@@ -263,6 +263,9 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # fetches and closes are nba_team_total_luck's record. The live NBA first-half
 # feed (data/ingestors/nba_first_half_odds.SOURCE, 2026-10-30) joins for the same
 # reason: its decision fetches and closes are nba_first_half_total_luck's record.
+# The live NCAAB first-half feed (data/ingestors/ncaab_first_half_odds.SOURCE,
+# 2026-11-02) joins too: nine fetches a game of first-half ladders, and its
+# tip-minus-10 fetch is ncaab_first_half_spread's record.
 # Literals here, pinned to
 # the writers' constants by tests/test_nba_team_total_odds.py
 # (test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name), so
@@ -279,6 +282,7 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live",
                      "odds_api_nba_first_half_live",
+                     "odds_api_ncaab_first_half_live",
                      # Alternate spread/total ladders (2026-10-29): many rungs per
                      # (game, market, book), which the keepers would thin.
                      "odds_api_alt_game_lines_live",

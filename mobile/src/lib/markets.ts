@@ -40,6 +40,11 @@ export function gameMarketForModel(modelId: string): string | null {
   // before the substring test below, or every price, movement and line-shop
   // lookup would read the spreads rows (models/ncaab_moneyline_own_spread.py).
   if (modelId === 'ncaab_moneyline_own_spread') return 'h2h';
+  // The NCAAB first half's spread (models/ncaab_first_half_spread.py): stored
+  // under its own market, never the game's 'spreads' rows, whose number is
+  // about twice as big. Before the 'spread' substring rule below, which would
+  // read the full-game spread for it.
+  if (modelId === 'ncaab_first_half_spread') return 'spreads_h1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -1692,9 +1697,13 @@ export function computeMovement(
  * The NCAAB spread card (scripts/ncaab_spread_card.py) writes the same row:
  * the deciding book's own spread, line_book empty when DraftKings hung the
  * same number (designer review, 2026-11-02).
+ *
+ * The NCAAB first-half spread card (scripts/ncaab_first_half_spread_card.py)
+ * writes the same row shape.
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
+  'ncaab_first_half_spread',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',
@@ -1971,6 +1980,8 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // of the day". The NCAAB spread card (scripts/ncaab_spread_card.py) and the
   // NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each game
   // once, on game-day morning, the same way.
+  // The NCAAB first-half spread card decides each game once, about ten
+  // minutes before tip, the same way.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -1981,6 +1992,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaab_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
     pick.model_id === 'ncaab_moneyline_own_spread' ||
+    pick.model_id === 'ncaab_first_half_spread' ||
     nbaPosted
   ) {
     return {

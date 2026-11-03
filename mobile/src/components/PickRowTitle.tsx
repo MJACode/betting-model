@@ -15,7 +15,11 @@ interface Props {
  * 2026-10-31: the whole label on one line lost the side and number first at
  * larger text). Its matchup goes on a line of its own, because middle-clipping
  * the whole label removes "First Half" and leaves what reads as a plain over.
- * Every other label keeps the end clip: its middle can hold the number.
+ * Every other label keeps the end clip: its middle can hold the number. A first
+ * half's title may take a second line (UX review, 2026-11-02): a first-half
+ * spread's middle is the team bet on ("First Half Southeast Missouri State
+ * +3.5"), which a one-line middle clip removed at larger text. A title that fits
+ * stays one line.
  *
  * The row's accessibility label reads the whole stored label, so these two lines
  * are not read separately.
@@ -24,7 +28,7 @@ export function PickRowTitle({ pick, titleStyle, matchupStyle }: Props) {
   const matchup = pickRowMatchup(pick);
   return (
     <>
-      <Text style={titleStyle} numberOfLines={1} ellipsizeMode={matchup ? 'middle' : 'tail'}>
+      <Text style={titleStyle} numberOfLines={matchup ? 2 : 1} ellipsizeMode={matchup ? 'middle' : 'tail'}>
         {pickRowTitle(pick)}
       </Text>
       {matchup ? <Text style={matchupStyle}>{matchup}</Text> : null}

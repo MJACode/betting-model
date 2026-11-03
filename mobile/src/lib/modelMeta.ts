@@ -629,6 +629,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Men's college basketball, the first half's spread
+  // (models/ncaab_first_half_spread.py MODEL_ID). It decides each game once,
+  // about ten minutes before tip, at the best first-half spread any bettable
+  // book hangs, and settles on the first half's score (no overtime). The label
+  // is "Duke @ Kansas — First Half Duke +3.5". A game line, not a picker slot.
+  ncaab_first_half_spread: {
+    // The first half's spread, spelled out like 'F5 Spread' (UX review,
+    // 2026-11-02: "SPR" is read out as letters). The side is in the pick label.
+    shortLabel: '1H Spread',
+    longLabel: 'NCAAB First Half Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -870,6 +884,11 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaab_moneyline_own_spread:
     'The chance this side wins according to the spread at the book we bet. Edge is how much higher that ' +
     'is than the chance the same book’s moneyline price implies.',
+  // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
+  // on a whole-number first-half line a push is possible and is left out.
+  ncaab_first_half_spread:
+    'What our model says is the chance this side covers the first-half spread. On a whole-number ' +
+    'line it leaves out a push, which returns the stake.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -926,6 +945,14 @@ const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
     'some games, each at the one book where that gap is largest, which may not be DraftKings. A posted ' +
     'bet is never re-priced: it stays at the price it posted at.',
 };
+// The models that check each game once, five to ten minutes before tip, and
+// post only the bets they find: the NCAAB first-half spread card
+// (scripts/ncaab_first_half_spread_card.py), on the first-half lines fetched
+// ten minutes before each tip, or a retry up to five minutes before it. Its
+// page fills game by game through the evening, minutes before each tip.
+const MINUTES_BEFORE_TIP_MODELS: readonly string[] = [
+  'ncaab_first_half_spread',
+];
 
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
@@ -949,6 +976,18 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'This model checks each game about an hour before tip-off and bets only some of them. ' +
         'Nothing has posted today so far.',
       note: 'Posted about an hour before tip-off and never re-priced.',
+    };
+  }
+  if (MINUTES_BEFORE_TIP_MODELS.includes(modelId)) {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, five to ten minutes before tip-off, and posts a bet only ' +
+        'when it finds one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model checks each game five to ten minutes before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted five to ten minutes before tip-off and never re-priced.',
     };
   }
   if (EVENING_BEFORE_MODELS.includes(modelId)) {
@@ -1140,6 +1179,10 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   // market at a higher cut; adding it made a second rule with the same
   // title. Chief of Staff, 2026-09-24.
   if (id === 'ncaaf_spread_premium') return null;
+  // The NCAAB first half's spread is not the game's spread line: offered as
+  // the "Spread" slot it would read as the full-game spread. Not a picker
+  // slot, like the NBA first half's total.
+  if (id === 'ncaab_first_half_spread') return null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

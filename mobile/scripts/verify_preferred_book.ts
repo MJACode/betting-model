@@ -448,6 +448,9 @@ check('nba_total_luck is a game_total for parlay correlation', marketClassForMod
 // ncaab_total_blend (NCAAB full-game totals) has neither 'over_under' nor 'spread' either.
 check('ncaab_total_blend resolves to totals (id has no over_under)', gameMarketForModel('ncaab_total_blend') === 'totals');
 check('ncaab_total_blend is a game_total for parlay correlation', marketClassForModel('ncaab_total_blend') === 'game_total');
+// ncaab_first_half_spread HAS 'spread' in it, and must still read the first half's rows, not the game's.
+check('ncaab_first_half_spread resolves to spreads_h1, not spreads', gameMarketForModel('ncaab_first_half_spread') === 'spreads_h1');
+check('ncaab_first_half_spread is a game_spread for parlay correlation', marketClassForModel('ncaab_first_half_spread') === 'game_spread');
 // nba_team_total_luck bets the HOME team's own points: its prices, line shop
 // and movement read the team_totals_home rows, never the game's totals rows
 // (a number twice as big) and never its moneyline rows.

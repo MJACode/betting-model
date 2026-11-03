@@ -140,7 +140,14 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         "clv-standard-v2-power-80-0.05-12-nba-total-luck",
         "clv-standard-v2-power-80-0.05-12-nba-team-total-luck",
         "clv-standard-v2-power-80-0.05-12-nba-first-half-total-luck",
+        # ncaab_spread_market's (#1127), which production may hold before this
+        # change: ncaab_first_half_spread changes the function again (its
+        # market and the close-only first-half spread), so a stamp of its own.
         "clv-standard-v2-power-80-0.05-12-ncaab-spread-market",
+        # ncaab_first_half_spread's (#1128), which production holds once that
+        # model merges, before ncaab_moneyline_own_spread changes the function
+        # again (it names the moneyline model as h2h), so a stamp of its own.
+        "clv-standard-v2-power-80-0.05-12-ncaab-spread-and-first-half",
     }
     assert declared not in stamped_before, (
         "clv_game_market changed (ncaab_moneyline_own_spread) after production may have "

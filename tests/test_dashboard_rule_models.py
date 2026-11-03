@@ -58,6 +58,10 @@ KNOWN_RULES = {
     # (models/ncaab_moneyline_own_spread.py); its artifact names the margin
     # table it prices with.
     "ncaab_moneyline_own_spread",
+    # 2026-11-02 (mike): NCAAB first-half spread, the full-game consensus plus a
+    # shrunk team tendency priced through a first-half table
+    # (models/ncaab_first_half_spread.py); its artifact holds parameters.
+    "ncaab_first_half_spread",
 }
 
 

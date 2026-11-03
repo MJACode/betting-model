@@ -124,6 +124,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market' OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'ncaab_total_blend' THEN 'totals'
             WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
             WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
+            WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id = 'ncaab_moneyline_own_spread' THEN 'h2h'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'

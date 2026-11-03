@@ -39,6 +39,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_team_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_first_half_spread: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   ncaab_moneyline_own_spread: { min_prob: 0, min_edge: 0.01, min_odds: -200 },
   ncaab_spread_market: { min_prob: 0, min_edge: 0.03, min_odds: -200 },
   ncaab_total_blend: { min_prob: 0, min_edge: 0.04, min_odds: -200 },

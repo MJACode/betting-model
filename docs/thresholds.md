@@ -1112,6 +1112,46 @@ on 2025-26. Read the record as unproven.
 **Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
 ROI, calibration within 5%). Read beside the ROI: the close value, and how often
 the bet book's price was still up when the pick posted.
+## NCAAB — `ncaab_first_half_spread`, first-half spreads (2026-11-02, mike)
+
+mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
+what"*. About ten minutes before tip: the bettable books' full-game consensus
+spread, mapped to a first-half mean, plus a heavily shrunk team first-half
+tendency; every bettable book's first-half spread priced through a table of
+past first-half margins; bet the single best quote when its edge is above 0.02.
+No games-played wait (`models/ncaab_first_half_spread.py`,
+`scripts/ncaab_first_half_spread_card.py`; the model, its evidence and its risks
+are `docs/sports/ncaab.md` "The models"). **It did not clear the research bar:**
+the pooled interval's lower bound is below zero.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.02 | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.02. model_probability is the same P(cover, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.03, on its own probability. The smallest EV the 0.02 cut admitted in the replay was +0.0346 (median +0.0552, 1,253 bets); an edge above 0.02 at -140 or longer is EV above 0.034, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; it laid -140 to +125 | `MODEL_MIN_ODDS` |
+| early season | no wait (mike, 2026-11-02). With the old 10-game rule the same cut made +6.87 units on 698 bets (+0.90%) | the card |
+| decided once | on the tip-minus-10 first-half fetch (or its retries, 5 to 10.5 minutes before tip); a row in `ncaab_first_half_spread_decisions`, bet or not | `scripts/ncaab_first_half_spread_card.py`, `scheduler.run_ncaab_first_half_window` |
+
+**The neighbourhood** (the research's grid, every game, 2023-24..2025-26;
+date-resampled 95% interval):
+
+| Cut | Bets | Units | ROI | interval | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|---|---|---|---|
+| 0.01 | 2,666 | +81.36 | +2.75% | [-0.64, 6.31] | +1.61% | +1.29% | +7.21% |
+| **0.02** | **1,253** | **+68.07** | **+4.91%** | **[-0.30, 10.63]** | **+6.06%** | **+2.80%** | **+7.19%** |
+| 0.03 | 575 | +35.65 | +5.61% | [-1.74, 13.05] | +7.65% | -0.48% | +15.76% |
+| 0.04 | 277 | -3.98 | -1.30% | [-11.93, 9.69] | +2.76% | -1.77% | -10.98% |
+
+Positive at 0.01, 0.02 and 0.03, negative from 0.04. Without its 10 best dates
+0.02 keeps +16.75 units. Chosen by the research's grid on the seasons it is
+graded on. Closing value cannot be measured: there is no quote after tip minus
+10, in the evidence or live.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
+ROI, calibration within 5%). Read the book mix and the away share beside the
+ROI: 77% of the graded bets were away sides, and two of the books that carried
+2023-24 and 2024-25 no longer quote first halves.
 
 ## Dated review criteria (2026-09-08, mike)
 
