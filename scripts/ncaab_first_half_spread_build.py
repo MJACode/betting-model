@@ -22,6 +22,7 @@ bets game by game with the research's own scored quotes.
 
     python -m scripts.ncaab_first_half_spread_build --cache DIR [--last-season 2026]
         [--out PATH] [--research SCORED_PARQUET] [--bets-out PATH]
+    python -m scripts.ncaab_first_half_spread_build --store ABSOLUTE_PATH   # copy it into model_artifacts
 
 DIR holds read-only copies of four Supabase reads, as parquet:
   games.parquet                SELECT game_id, season, game_date, commence_time, home_team,
@@ -247,15 +248,34 @@ def compare(bets: pd.DataFrame, research: Path, cut: float = CUT) -> dict:
             "max_edge_gap": float(edge_gap.max()) if len(both) else None}
 
 
+def store(path: Path) -> None:
+    """Copy the artifact into Supabase's model_artifacts (the trainer's restore
+    source, as the NBA first-half build does). A production write: run it
+    deliberately, after the merge, never from a test."""
+    from data.db import get_connection
+    from models.trainer import _store_artifact
+    conn = get_connection()
+    try:
+        _store_artifact(conn, fh.MODEL_ID, path.stem.split(fh.MODEL_ID + "_")[-1], path)
+    finally:
+        conn.close()
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cache", required=True, type=Path)
+    ap.add_argument("--store", type=Path, help="copy this artifact into model_artifacts")
+    ap.add_argument("--cache", type=Path)
     ap.add_argument("--last-season", type=int, default=2026)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--research", type=Path, default=None,
                     help="the research's cache/scored.parquet, to compare the bets game by game")
     ap.add_argument("--bets-out", type=Path, default=None)
     a = ap.parse_args(argv)
+    if a.store:
+        store(a.store.resolve())
+        return
+    if a.cache is None:
+        ap.error("--cache is required to build")
     t0 = time.time()
     last = a.last_season
     games, per, fg, q = load(a.cache)

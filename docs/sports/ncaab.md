@@ -421,7 +421,8 @@ model), `scripts/ncaab_first_half_spread_card.py` (the card),
 `data/ingestors/ncaab_first_half_odds.py` (the first-half capture),
 `scripts/ncaab_first_half_window.py` (the schedule), and
 `scripts/ncaab_first_half_spread_build.py` (the frozen numbers in
-`models/saved/ncaab_first_half_spread_2027.json`).
+`models/saved/ncaab_first_half_spread_2027.json`). The build's `--store` copies that file into
+`model_artifacts` (a production write, run after a rebuild).
 
 **What it bets.** One side of the first half's spread, at most once a game,
 about ten minutes before tip, at whichever bettable book's quote has the
