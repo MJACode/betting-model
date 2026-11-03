@@ -6,7 +6,7 @@
  * curve's end pill. The grid's return is that stake's units / risked, the
  * percentage beside Discord's units. The visible name is "Return on bets".
  * VoiceOver still hears Discord's "All-time". Yesterday uses this same
- * posted stake. Models still use a flat $100 bet. Do not put the Models
+ * posted stake. Models risk a flat 1u on every pick. Do not put the Models
  * tab's book on this card.
  */
 
@@ -135,7 +135,7 @@ export function roiSheetBody(): string {
     'Risk is capped at 3 units, and a pick with no price counts as 1 unit. ' +
     'This number is units won or lost divided by units risked. ' +
     'It matches the percentage in Discord\u2019s all-time line and on Yesterday. ' +
-    'Models use a flat $100 bet, so their percentages won\u2019t match.'
+    'Models risk a flat 1u on every pick, so their percentages won\u2019t match.'
   );
 }
 

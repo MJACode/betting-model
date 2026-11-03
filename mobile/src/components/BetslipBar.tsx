@@ -8,7 +8,8 @@ import { useLineLegs } from '@/hooks/useLineLegs';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { betslipSummary, shouldShowBetslipBar, BETSLIP_BAR_STAKE } from '@/lib/parlay';
-import { formatAmerican, formatCurrency } from '@/lib/format';
+import { formatAmerican } from '@/lib/format';
+import { formatUnits } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -74,7 +75,7 @@ function BetslipBarContent({
   // Over the tab bar the home-indicator inset is already spent by the tabs;
   // over a pushed stack screen the bar owns the bottom and must clear it itself.
   const overTabBar = bottomOffset > 0;
-  const priced = summary.americanOdds != null && summary.payoutPerTen != null;
+  const priced = summary.americanOdds != null && summary.payoutPerUnit != null;
 
   // Nothing in the slip resolves to a live, priceable bet — there is no bet to
   // show, so show no bar. Any selection behind this has already been pruned by
@@ -153,8 +154,8 @@ function BetslipBarContent({
             <Text style={styles.priceValue}>{formatAmerican(summary.americanOdds)}</Text>
           </View>
           <View style={styles.priceRow}>
-            <Text style={styles.payLabel}>${BETSLIP_BAR_STAKE} pays</Text>
-            <Text style={styles.payValue}>{formatCurrency(summary.payoutPerTen)}</Text>
+            <Text style={styles.payLabel}>{formatUnits(BETSLIP_BAR_STAKE)} pays</Text>
+            <Text style={styles.payValue}>{summary.payoutPerUnit == null ? '—' : formatUnits(summary.payoutPerUnit)}</Text>
           </View>
         </View>
       ) : (

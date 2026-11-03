@@ -675,7 +675,7 @@ date, so a Sunday-night bet is Monday's) rather than a clock date.
 
 Two changes that only make sense together.
 
-**Selectivity.** Swept every settled live BET at real DK prices, flat $100:
+**Selectivity.** Swept every settled live BET at real DK prices, one flat unit per bet:
 
 | model | at 0.65/0.10 | verdict |
 |---|---|---|

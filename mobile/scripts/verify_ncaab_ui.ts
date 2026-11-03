@@ -19,7 +19,7 @@ import {
   MODEL_META, betTypePickerGroups, modelCategory, modelLong, modelPageTiming, modelProbabilityNote, modelShort,
   sportOfModel,
 } from '../src/lib/modelMeta';
-import { RECORD_AT_BEST_BOOK_NOTE, recordNoteFor, recordNoteShortFor } from '../src/lib/myBooks';
+import { recordNoteFor, recordNoteShortFor } from '../src/lib/myBooks';
 import { gameMarketForModel, marketClassForModel, pickTimingInfo } from '../src/lib/markets';
 import type { Pick } from '../src/types';
 import { GROUP_ORDER, defaultStatFor, supportsHitRate } from '../src/lib/statCatalog';
@@ -101,9 +101,11 @@ check('its probability note says the chance comes from the bet book\'s own sprea
 check('its record note never claims the best price (the edge book is not always the best price)',
   !recordNoteFor(ML).includes('best price') && !recordNoteShortFor(ML).includes('best price'),
   `${recordNoteFor(ML)} | ${recordNoteShortFor(ML)}`);
-check('every other model keeps the best-price record note',
-  recordNoteFor('ncaab_spread_market') === RECORD_AT_BEST_BOOK_NOTE
-    && recordNoteShortFor('nba_total_luck') === 'record uses best price');
+check('no model claims the best price: every one says the price the model found',
+  [ML, 'ncaab_spread_market', 'nba_total_luck'].every((m) =>
+    recordNoteFor(m) === 'Model records and stats use the price the model found, not your book’s.'
+      && recordNoteShortFor(m) === 'record kept at that price'),
+  `${recordNoteFor('ncaab_spread_market')} | ${recordNoteShortFor('nba_total_luck')}`);
 const mlPosted = pickTimingInfo({
   pick_id: 2, model_id: ML, sport: 'NCAAB', signal_type: 'BET', created_at: '2026-12-05T15:05:00Z',
   player_id: null, is_live: false,

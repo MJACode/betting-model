@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, everything in units: every result, stake and payout on every surface (app model pages and history rows, Models list, Performance tab, betslip and parlay payouts, Streamlit dashboard, picks email, settle logs, the volume check, the Claude-mobile picks prompt) shows units, never dollars; the false "best price across all books" record line replaced by "the price the model found" for every model; display and copy only, no stored data changed |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, `team_stats_asof_integrity` false CRIT: a live season whose snapshot series started fewer than five days ago and is still current is not thin; historical, collapsed and stopped series stay thin; NBA 2027's missing October snapshots described, not backfilled |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, `ncaab_first_half_spread` LIVE: NCAAB first-half spreads, best bettable quote ten minutes before tip when the edge is above 0.02 (the research's round 4 cell: 1,253 bets, +4.91%, interval [-0.30, 10.63], did not clear the bar; live on mike's instruction); the live first-half capture (four markets, nine calls a game, at most 36 credits); the replay matches all 1,253 research bets; no production write |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Scoreboard column labels pinned above the cards (they scrolled away inside the list); odds column labelled Spread / Total / ML by market; display only |

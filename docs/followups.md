@@ -1859,8 +1859,8 @@ starts 2026-08-27, so there is no code history for July, and identifying it
 needs the feature engine run for one date either side of 07-23 (a worker job:
 no DATABASE_URL in a dev sandbox).
 
-**Do NOT chase the volume back.** Realised record, 521 settled BETs, flat $100
-(`profit_flat` is exactly -100 on every loss, so flat ROI = sum/(n*100) —
+**Do NOT chase the volume back.** Realised record, 521 settled BETs, one flat unit each
+(`profit_flat` is stored per 100 staked and is exactly -100 on every loss, so flat ROI = sum/(n*100) —
 dividing by `recommended_bet` mixes flat profit with a Kelly stake and gives a
 nonsense -127%):
 
@@ -1885,7 +1885,7 @@ so it is fitting the pre-07-23 period that no longer exists.
 
 **Decision needed (a model update — needs `Updated-By: <person>` per §1b):**
 1. PAUSE or RETIRE it. config's own comment has called it a retrain candidate
-   since 2026-06-21; it has now lost $4,098 at flat $100 over 521 bets.
+   since 2026-06-21; it has now lost 40.98 units over 521 flat bets.
 2. Or retrain first, then decide — the features (rolling form, prior-season
    Savant, batting order, opp team ERA) are the same ones that stopped
    discriminating on 07-23, so a retrain without finding that cause may

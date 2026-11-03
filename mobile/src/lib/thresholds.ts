@@ -14,7 +14,7 @@
 
 import { decisionEdge, decisionOdds } from './decisionPrice';
 import { discordLedVisible, type DiscordPublish } from './discordPublish';
-import { todayET } from './format';
+import { formatUnits, todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
 import {
@@ -598,26 +598,6 @@ export function formatStake(stake: UnitStake): string {
   return `${formatUnits(stake.risk)} to win ${formatUnits(stake.win)}`;
 }
 
-/**
- * 2 -> "2u", 3.5 -> "3.5u", 1.15 -> "1.15u".
- *
- * TWO decimals, trailing zeros trimmed. One decimal used to round the -115
- * stake (1.15 laid to win 1) to "1.2u", which is a different bet from the one
- * the model asked for; every negative price divides out exactly at two
- * decimals, so this is the precision the number actually has.
- *
- * Rounds HALF-UP, explicitly. Neither language's default is safe: Python's %.2f
- * is half-to-EVEN while JS toFixed is half-up (0.125 renders "0.12" there and
- * "0.13" here), and a float like 2.0250000000000004 is not an integer, so a
- * naive isInteger check gives "2.00" on one side and "2" on the other. Trimming
- * splits on the decimal point rather than stripping trailing zeros off the whole
- * string, which would turn "20.00" into "2". The Python mirror uses the
- * identical expression; the parity fixture pins that they agree — it caught
- * exactly these divergences.
- */
-export function formatUnits(u: number): string {
-  const n = Math.floor(u * 100 + 0.5) / 100;
-  const [whole, frac] = n.toFixed(2).split('.');
-  const trimmed = frac.replace(/0+$/, '');
-  return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
-}
+// formatUnits lives in lib/format (one copy of its half-up rounding, shared
+// with formatFlatStake) and is re-exported here for its existing callers.
+export { formatUnits };

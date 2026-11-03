@@ -4,8 +4,13 @@ import { useCallback, useEffect, useState } from 'react';
 /**
  * How tracked bets are scored on the Performance tab.
  *
- *   'flat'   — $100 per bet (default; matches the rest of the app's records)
- *   'custom' — per-bet dollar amounts the user enters (default $100 each)
+ *   'flat'   — 1u per bet (default; matches the rest of the app's records)
+ *   'custom' — per-bet stakes the user enters, in units (default 1u each)
+ *
+ * Stakes are STORED at the same scale as `profit_flat`: 100 is 1u
+ * (lib/format FLAT_UNIT). Screens show units and never dollars (mike,
+ * 2026-11-03: "everything must be units"). A custom amount saved before that
+ * change was typed as dollars; it now reads as that number / 100 in units.
  *
  * A 'kelly' mode used to size each bet off an on-device bankroll and a Kelly
  * aggressiveness multiplier. Both were removed on 2026-09-20 — every stake the

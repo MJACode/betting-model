@@ -3048,13 +3048,15 @@ def settle_picks(game_date: str = None) -> dict:
         win_rate = wins / max(wins + losses, 1)
         flat_roi = total_profit_flat / max((wins + losses) * 100, 1)
 
+        # Units, never dollars (§4): profit_flat is stored per $100 staked.
+        # The settlers' totals still carry the -110 they grade an unpriced
+        # pick at; this log line does not gate them out.
         logger.success(
             f"\n{'═'*50}\n"
             f"  Settled: {game_date}\n"
             f"  Results: {wins}W / {losses}L / {pushes}P / {no_actions}N\n"
             f"  Win Rate: {win_rate:.1%}\n"
-            f"  Flat P&L: ${total_profit_flat:+,.2f} (ROI: {flat_roi:.1%})\n"
-            f"  Kelly P&L: ${total_profit_kelly:+,.2f}\n"
+            f"  Flat units: {total_profit_flat / 100:+.2f}u (ROI: {flat_roi:.1%})\n"
             f"{'═'*50}"
         )
 
@@ -3089,17 +3091,21 @@ def print_performance_summary(days: int = 30) -> dict:
 
     conn = get_connection()
     try:
-        # Overall stats
+        # Overall stats. Units come from priced picks only: profit_flat
+        # fabricates -110 on a pick with no price (config-topology, §6).
         overall = conn.execute(f"""
             SELECT
                 COUNT(*) as total_picks,
                 SUM(CASE WHEN result = 'WIN'  THEN 1 ELSE 0 END) as wins,
                 SUM(CASE WHEN result = 'LOSS' THEN 1 ELSE 0 END) as losses,
                 SUM(CASE WHEN result = 'PUSH' THEN 1 ELSE 0 END) as pushes,
-                SUM(profit_flat)  as total_flat_pnl,
+                SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                         THEN profit_flat END) as total_flat_pnl,
                 SUM(profit_kelly) as total_kelly_pnl,
                 AVG(edge)         as avg_edge,
-                MAX(bankroll_at_pick) as bankroll_at_pick
+                SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                          AND result IN ('WIN', 'LOSS') THEN 1 ELSE 0 END)
+                                  as priced_decided
             FROM picks
             WHERE game_date >= ?
               AND result IS NOT NULL
@@ -3112,7 +3118,8 @@ def print_performance_summary(days: int = 30) -> dict:
             SELECT model_id,
                    COUNT(*) as picks,
                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
-                   SUM(profit_flat) as flat_pnl,
+                   SUM(CASE WHEN COALESCE(decision_odds, dk_odds) IS NOT NULL
+                            THEN profit_flat END) as flat_pnl,
                    SUM(profit_kelly) as kelly_pnl,
                    AVG(edge) as avg_edge
             FROM picks
@@ -3123,15 +3130,6 @@ def print_performance_summary(days: int = 30) -> dict:
             GROUP BY model_id
             ORDER BY flat_pnl DESC
         """, (cutoff,)).fetchall()
-
-        # Current bankroll
-        current_bankroll = conn.execute("""
-            SELECT bankroll_at_pick + COALESCE(profit_kelly, 0)
-            FROM picks
-            WHERE result IS NOT NULL
-            ORDER BY settled_at DESC
-            LIMIT 1
-        """).fetchone()
 
         # Running bankroll history (for chart)
         bankroll_history = conn.execute(f"""
@@ -3154,26 +3152,25 @@ def print_performance_summary(days: int = 30) -> dict:
     logger.info(f"{'═'*60}")
 
     if overall and overall[0]:
-        total, wins, losses, pushes, flat_pnl, kelly_pnl, avg_edge, _ = overall
+        total, wins, losses, pushes, flat_pnl, _kelly, avg_edge, priced = overall
         decided = max(wins + losses, 1)
+        units = (flat_pnl or 0) / 100            # units, never dollars (§4)
+        roi = units / priced if priced else 0.0
         logger.info(f"  Total Picks:  {total}")
         logger.info(f"  Record:       {wins}W / {losses}L / {pushes}P")
         logger.info(f"  Win Rate:     {wins/decided:.1%}")
-        logger.info(f"  Flat P&L:     ${flat_pnl:+,.2f} (ROI: {flat_pnl/(decided*100):.1%})")
-        logger.info(f"  Kelly P&L:    ${kelly_pnl:+,.2f}")
+        logger.info(f"  Flat units:   {units:+.2f}u (ROI: {roi:.1%} on {priced} priced)")
         logger.info(f"  Avg Edge:     {avg_edge:.2%}" if avg_edge else "")
-        if current_bankroll and current_bankroll[0]:
-            logger.info(f"  Bankroll:     ${current_bankroll[0]:,.2f}")
 
     if by_model:
-        logger.info(f"\n  {'Model':<30} {'Picks':>5} {'W/L':>7} {'Flat P&L':>10} {'Avg Edge':>9}")
+        logger.info(f"\n  {'Model':<30} {'Picks':>5} {'W/L':>7} {'Units':>10} {'Avg Edge':>9}")
         logger.info(f"  {'-'*63}")
         for row in by_model:
             mid, picks, wins, flat_pnl, kelly_pnl, avg_edge = row
             losses = picks - wins if wins else picks
             wl = f"{wins}/{losses}" if wins is not None else "–"
             logger.info(f"  {mid:<30} {picks:>5} {wl:>7} "
-                         f"${flat_pnl or 0:>9,.2f} {avg_edge or 0:>8.2%}")
+                         f"{(flat_pnl or 0) / 100:>+9.2f}u {avg_edge or 0:>8.2%}")
 
     logger.info(f"{'═'*60}\n")
 
