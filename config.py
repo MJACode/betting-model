@@ -297,12 +297,17 @@ LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0
 # connection, no hosting) — one channel per sport. Set only the sports you want:
 #   DISCORD_WEBHOOK_MLB, DISCORD_WEBHOOK_NFL, DISCORD_WEBHOOK_NBA,
 #   DISCORD_WEBHOOK_NHL, DISCORD_WEBHOOK_WNBA, DISCORD_WEBHOOK_UFC,
-#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF, DISCORD_WEBHOOK_NCAAB
+#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF, DISCORD_WEBHOOK_NCAAB,
+#   DISCORD_WEBHOOK_NCAABW
 # A sport with no webhook is SKIPPED and its signals are NOT marked as sent, so
 # adding that channel later still delivers the rest of the day's picks.
 # (Listed literally rather than derived from SPORTS — that registry is defined
 # further down this file, and a webhook name is a stable, user-facing env var.)
-DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB")
+# NCAABW is women's college basketball (2026-11-03): its channel is
+# DISCORD_CHANNEL_NCAABW, same shape as NCAAB, not a separate model registry.
+DISCORD_SPORTS: tuple = (
+    "MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL", "NCAAB", "NCAABW",
+)
 DISCORD_WEBHOOKS: dict = {
     sport: url for sport in DISCORD_SPORTS
     if (url := os.environ.get(f"DISCORD_WEBHOOK_{sport}", "").strip())
@@ -317,6 +322,18 @@ DISCORD_WEBHOOKS: dict = {
 DISCORD_CHANNELS: dict = {
     sport: cid for sport in DISCORD_SPORTS
     if (cid := os.environ.get(f"DISCORD_CHANNEL_{sport}", "").strip())
+}
+# In-play channel ids. A sport with no DISCORD_WEBHOOK_LIVE_<SPORT> may set
+# DISCORD_CHANNEL_LIVE_<SPORT> (a channel id, not a secret). The notifier
+# opens that channel's webhook through DISCORD_BOT_TOKEN and names it
+# "<sport>-live" (lowercase) so it is never the pre-game sport webhook.
+# Added for #ncaab-live and #ncaabw-live (2026-11-03). A webhook variable,
+# when set, still wins. The id only resolves on a service that holds the
+# bot token. The MLB, NCAAF and NFL-leader live loops run on pollers, which
+# has no token (measured 2026-11-03); a channel id set there cannot post.
+DISCORD_CHANNELS_LIVE: dict = {
+    sport: cid for sport in DISCORD_SPORTS
+    if (cid := os.environ.get(f"DISCORD_CHANNEL_LIVE_{sport}", "").strip())
 }
 
 
@@ -340,7 +357,10 @@ DISCORD_WEBHOOK_DEFAULT: str = os.environ.get("DISCORD_WEBHOOK_DEFAULT", "").str
 # pollers -- the NFL in-play worker runs on one, the MLB and NCAAF loops on the
 # other), never in this file. Resolution order for an in-play signal, in
 # tracking/discord_notifier._live_webhook_for_sport:
-#   the sport's LIVE channel -> the shared LIVE channel -> the sport's channel.
+#   the sport's LIVE webhook -> the sport's LIVE channel id (bot token,
+#   webhook named "<sport>-live") -> the shared LIVE channel -> the sport's
+#   channel. A LIVE channel id this process cannot open does not fall
+#   through: the pick stays unsent, so it is not ledgered against another room.
 DISCORD_WEBHOOKS_LIVE: dict = {
     sport: url for sport in DISCORD_SPORTS
     if (url := os.environ.get(f"DISCORD_WEBHOOK_LIVE_{sport}", "").strip())
@@ -2359,7 +2379,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
     # (1,094 bets; median +0.0996). An edge above 0.04 at -120 or longer is EV
-    # above 0.073, so 0.07 never removes a bet the evidence took.
+    # above 0.073, so 0.07 never removes a bet the evidence took. Re-measured
+    # 2026-11-03 at DraftKings' first posted total (mike): +0.0734 over the
+    # replay's 2,436 bets of 2022-2026, so 0.07 stands.
     "ncaab_total_blend":        0.07,
     # NCAAB spreads (2026-11-02, mike). The cut is the edge (0.03, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV

@@ -46,6 +46,8 @@ def test_each_market_has_its_measured_range():
     from models import ncaab_quote_bounds as qb
     assert qb.LINE_RANGE == {"totals": (90.0, 220.0), "spreads": (-60.0, 60.0),
                              "totals_h1": (40.0, 120.0), "spreads_h1": (-35.0, 35.0)}
+    import models.ncaab_total_blend as nb
+    assert nb.TOTAL_RANGE == qb.LINE_RANGE["totals"]          # one number, two readers
     assert qb.MAX_ABS_PRICE == 100_000
     assert qb.EDGE_CAP == {"ncaab_total_blend": 0.25, "ncaab_spread_market": 0.25,
                            "ncaab_moneyline_own_spread": 0.25, "ncaab_first_half_spread": 0.60,
@@ -86,14 +88,20 @@ def test_split_keeps_order_and_says_why():
 # ── the totals card ──────────────────────────────────────────────────────────
 
 def _totals_run(monkeypatch, line=125.5, op=-110, up=-110):
+    """The totals card with this quote as both DraftKings' first post and its
+    standing number (models/ncaab_total_card: a first post is bet only while
+    it stands)."""
     from tests.test_ncaab_total_blend import _art, _card_run, _prepared, _quote, _season
     games, box = _season()
     sg, _ = _prepared(games, box)
     art = _art(sorted(set(sg["home_espn_id"])))
     card, calls, now, (_, t, at) = _card_run(monkeypatch, art)
     gid = t["game_id"].iloc[0]
+    q = {gid: _quote(gid, line=line, at=at, op=op, up=up)}
+    monkeypatch.setattr(card, "load_first_posts", lambda conn, g, now: {
+        x: v for x, v in q.items() if x in g})
     monkeypatch.setattr(card, "load_quotes", lambda conn, g, now: {
-        x: _quote(x, line=line, at=at, op=op, up=up) for x in g if x == gid})
+        x: v for x, v in q.items() if x in g})
     return card, calls, now, gid
 
 
@@ -103,7 +111,29 @@ def test_a_1465_total_is_never_priced_and_the_game_waits(monkeypatch, logs):
     assert out["bets"] == 0 and out["diag"]["out_of_range"] == 1
     assert calls == [] or calls == [["out_of_range"]]      # nothing FINAL: it waits
     assert "out_of_range" not in card.FINAL
-    assert any(gid in x and "draftkings total 1465" in x and "outside 90 to 220" in x for x in logs)
+    assert any(gid in x and "1465" in x for x in logs)
+
+
+def test_a_1465_first_post_that_reached_the_decision_is_not_priced():
+    """The first-post read skips a typo in SQL; the decision refuses one that
+    reached it anyway (a loader slip), so no route prices it."""
+    import models.ncaab_total_blend as nb
+    from tests.test_ncaab_total_blend import _art, _late_target, _prepared, _quote, _season
+    games, box = _season()
+    sg, b = _prepared(games, box)
+    t, at = _late_target(sg)
+    gid = t["game_id"].iloc[0]
+    (d,) = nb.decide(t, {gid: _quote(gid, line=1465.0, at=at)}, sg, b,
+                     _art(sorted(set(sg["home_espn_id"]))), 0.04)
+    assert d.status == "out_of_range" and d.priced is None
+    assert "line 1465 outside 90 to 220" in d.detail
+
+
+def test_a_first_post_priced_beyond_100000_is_not_priced_and_waits(monkeypatch, logs):
+    card, calls, now, gid = _totals_run(monkeypatch, line=125.5, op=250000, up=-110)
+    out = card.run_card(do_publish=True, now=now)
+    assert out["bets"] == 0 and out["diag"]["out_of_range"] == 1
+    assert any(gid in x and "price +250000 beyond +/-100000" in x for x in logs)
 
 
 def test_a_normal_total_still_bets(monkeypatch, logs):

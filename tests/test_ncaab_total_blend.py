@@ -136,21 +136,81 @@ def test_the_committed_artifact_is_complete_and_built_on_the_live_inputs():
     assert set(art["league_rates"]) == {"p3", "ft", "ftr", "par3", "orbr", "tovr"}
 
 
-# ── decision hours ───────────────────────────────────────────────────────────
+# ── the decision moment: DraftKings' first posted total ──────────────────────
 
-def test_decision_hours_are_22z_the_evening_before_then_15z_on_until_tip():
+def test_the_hourly_decision_rule_is_gone():
+    """mike, 2026-11-03: the model decides at DraftKings' first posted total,
+    not at 22:00Z the evening before / 15:00Z on the day."""
     import models.ncaab_total_blend as nb
-    tip = datetime(2026, 12, 6, 0, 30, tzinfo=timezone.utc)     # ET date 2026-12-05
-    at = lambda d, h: datetime(2026, 12, d, h, tzinfo=timezone.utc)  # noqa: E731
-    assert nb.decision_hour("2026-12-05", tip, at(4, 22))
-    assert not nb.decision_hour("2026-12-05", tip, at(4, 21))
-    assert not nb.decision_hour("2026-12-05", tip, at(4, 23))      # no overnight hours
-    assert not nb.decision_hour("2026-12-05", tip, at(5, 3))
-    assert not nb.decision_hour("2026-12-05", tip, at(5, 14))
-    assert nb.decision_hour("2026-12-05", tip, at(5, 15))
-    assert nb.decision_hour("2026-12-05", tip, at(5, 23))
-    assert nb.decision_hour("2026-12-05", tip, at(6, 0))          # 00:00Z, tip 00:30Z
-    assert not nb.decision_hour("2026-12-05", tip, at(6, 1))
+    import scripts.ncaab_total_card as card
+    for name in ("decision_hour", "EVE_HOUR_UTC", "DAY_HOUR_UTC"):
+        assert not hasattr(nb, name), name
+    assert "not_decision_hour" not in nb.DIAG_KEYS
+    assert "first_post_gone" in nb.DIAG_KEYS and "first_post_gone" in card.FINAL
+
+
+def test_a_total_outside_90_220_is_a_feed_error():
+    """The history's one DraftKings typo, 1465.0 for 146.5, moved the December
+    blend's beta from 0.48 to about 1.0 (research round 5)."""
+    import models.ncaab_total_blend as nb
+    assert nb.TOTAL_RANGE == (90.0, 220.0)
+    assert nb.valid_total(146.5) and nb.valid_total("90") and nb.valid_total(220.0)
+    for bad in (1465.0, 14.5, 89.5, 220.5, None, "x", float("nan")):
+        assert not nb.valid_total(bad), bad
+
+
+def test_the_first_post_read_is_draftkings_earliest_usable_pregame_row():
+    import scripts.ncaab_total_card as card
+
+    class C:
+        def execute(self, sql, params):
+            self.sql, self.params = " ".join(sql.split()), params
+
+            class R:
+                def fetchall(self_inner):
+                    return []
+            return R()
+    c = C()
+    now = datetime(2027, 1, 10, 22, 3, tzinfo=timezone.utc)
+    assert card.load_first_posts(c, {}, now) == {}
+    card.load_first_posts(c, {"g": {}}, now)
+    s = c.sql
+    assert "o.bookmaker = %s" in s and c.params[1] == "draftkings"
+    assert "snapshot_type = 'open'" in s and "o.snapshot_at::timestamptz <= g.ct" in s
+    assert "o.created_at::timestamptz <= %s" in s and c.params[2] == now.isoformat()
+    # the bound and both prices are in the WHERE, so a typo row is never the
+    # first post: the next row is
+    where = s.split("WHERE o.market")[1].split("ORDER BY")[0]
+    assert "o.total_line::numeric BETWEEN 90 AND 220" in where
+    assert "o.over_price IS NOT NULL" in where and "o.under_price IS NOT NULL" in where
+    # earliest by DraftKings' own time; one stamp twice keeps the row stored last
+    assert s.endswith("ORDER BY o.game_id, o.snapshot_at::timestamptz ASC, "
+                      "o.created_at::timestamptz DESC")
+    assert "created_at::timestamptz >= %s" not in s      # no freshness bound on the first post
+
+
+def test_a_quote_row_with_a_typo_total_or_no_price_is_not_a_quote():
+    import scripts.ncaab_total_card as card
+    at = datetime(2027, 1, 10, 21, 40, tzinfo=timezone.utc)
+    rows = [("a", 1465.0, -110, -110, at.isoformat(), at, None, None),
+            ("b", 146.5, None, -110, at.isoformat(), at, None, None),
+            ("c", 146.5, "-112", "-108", "2027-01-10T21:40:00Z", at, "lo", "lu")]
+    got = card._quote_rows(rows, at + timedelta(minutes=3))
+    assert set(got) == {"c"}
+    q = got["c"]
+    assert (q.line, q.over_price, q.under_price) == (146.5, -112.0, -108.0)
+    assert q.quote_at == at
+
+
+def test_the_first_post_stands_only_at_the_same_total_and_both_prices():
+    import scripts.ncaab_total_card as card
+    q = _quote("g", line=146.5, op=-110, up=-110)
+    assert card.same_quote(q, _quote("g", line=146.5, op=-110, up=-110,
+                                     at=datetime(2027, 1, 10, 22, 50, tzinfo=timezone.utc)))
+    assert not card.same_quote(q, _quote("g", line=147.5))
+    assert not card.same_quote(q, _quote("g", line=146.5, op=-112))
+    assert not card.same_quote(q, _quote("g", line=146.5, up=-108))
+    assert not card.same_quote(q, None)
 
 
 # ── box scores ───────────────────────────────────────────────────────────────
@@ -414,6 +474,38 @@ def test_a_missing_box_for_a_game_that_just_ended_holds_the_game():
     assert d4.status == "box_missing"
 
 
+def test_a_held_first_post_is_decided_as_of_its_own_hour_and_the_wait_ages_to_now():
+    """The quote stays the first post while a box is awaited, so the cutoff
+    never moves; the 36-hour wait for a box that never lands is counted to the
+    run's instant, not to that fixed cutoff."""
+    import models.ncaab_total_blend as nb
+    games, box = _season()
+    sg, b = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    t, at = _late_target(sg)
+    gid = t["game_id"].iloc[0]
+    home = int(t["home_espn_id"].iloc[0])
+    cut_ns = nb.floor_hour_ns(nb.to_ns(at))
+    mine = sg[((sg["home_espn_id"] == home) | (sg["away_espn_id"] == home)) & (sg["end_ns"] <= cut_ns)]
+    last = mine.sort_values("end_ns").iloc[-1]["game_id"]
+    recent = sg.copy()
+    recent.loc[recent["game_id"] == last, "end_ns"] = cut_ns - 5 * 3600 * 10 ** 9
+    nobox = b[b["game_id"] != last]
+    q = {gid: _quote(gid, line=125.5, at=at)}
+    # an hour later the box is still missing: held, at the same first post
+    (d,) = nb.decide(t, q, recent, nobox, art, 0.04, now=at + timedelta(hours=1))
+    assert d.status == "box_pending" and d.quote.quote_at == at
+    # the box lands: decided at the first post, as of the first post's hour
+    (ok,) = nb.decide(t, q, recent, b, art, 0.04, now=at + timedelta(hours=3))
+    (same,) = nb.decide(t, q, recent, b, art, 0.04)
+    assert ok.status == "bets" and ok.cutoff == at.replace(minute=0)
+    assert ok.priced == same.priced and ok.model_total == same.model_total
+    # 36 hours after that game ended the missing box stops holding (one old
+    # missing box never holds)
+    (late,) = nb.decide(t, q, recent, nobox, art, 0.04, now=at + timedelta(hours=32))
+    assert late.status == "bets" and late.cutoff == at.replace(minute=0)
+
+
 # ── the card ─────────────────────────────────────────────────────────────────
 
 def _bet_decision():
@@ -525,6 +617,11 @@ def test_a_row_from_the_old_10_game_wait_does_not_stop_a_game_being_decided():
     (read,) = [s for s, _ in conn.sql if "FROM ncaab_total_decisions" in s]
     assert "split_part(detail, ':', 1) <> 'below_10_games'" in read
     assert "below_10_games" not in card.FINAL
+    # the whole slate is read from the ledger alone; picks only when asked
+    ledger_only = _Conn()
+    card.decided_games(ledger_only, ["g"], bets=False)
+    assert not [s for s, _ in ledger_only.sql if "FROM picks" in s]
+    assert [s for s, _ in conn.sql if "FROM picks" in s]
 
 
 def test_the_quote_read_is_pregame_draftkings_and_fresh():
@@ -562,10 +659,12 @@ class _ClosingConn:
         pass
 
 
-def _card_run(monkeypatch, art, extra_season=None, drop_boxes=()):
+def _card_run(monkeypatch, art, extra_season=None, drop_boxes=(), standing="same"):
     """run_card over the synthetic season's last game, read through stubs:
     no database. `extra_season` adds a game of that season to the slate;
-    `drop_boxes` removes those games' box rows. -> (card, published calls)."""
+    `drop_boxes` removes those games' box rows; `standing` is DraftKings'
+    standing number against the first post ("same", "moved" or None).
+    -> (card, published calls, now, (sg, target, first-post time))."""
     import scripts.ncaab_total_card as card
     monkeypatch.delenv("RUN_NCAAB_TOTAL_CARD", raising=False)
     games, box = _season()
@@ -580,19 +679,26 @@ def _card_run(monkeypatch, art, extra_season=None, drop_boxes=()):
     box = box[~box["espn_game_id"].isin(games[games["game_id"].isin(drop_boxes)]["espn_event_id"])]
     monkeypatch.setattr(card, "get_connection", lambda: _ClosingConn())
     monkeypatch.setattr(card, "slate", lambda conn, now: slate)
-    monkeypatch.setattr(card, "decided_games", lambda conn, ids: set())
+    monkeypatch.setattr(card, "decided_games", lambda conn, ids, bets=True: set())
     monkeypatch.setattr(card, "ensure_decisions_table", lambda conn: None)
     monkeypatch.setattr(card, "artifact", lambda: art)
     monkeypatch.setattr(card, "load_season", lambda conn, season: (games, box))
+    firsts = {x: _quote(x, line=125.5, at=at) for x in slate}
+    monkeypatch.setattr(card, "load_first_posts", lambda conn, g, now: {
+        x: q for x, q in firsts.items() if x in g})
+    later = at + timedelta(minutes=20)
+    now_q = {"same": lambda x: _quote(x, line=125.5, at=later),
+             "moved": lambda x: _quote(x, line=126.5, at=later),
+             "typo": lambda x: _quote(x, line=1005.0, at=later),
+             None: lambda x: None}[standing]
     monkeypatch.setattr(card, "load_quotes", lambda conn, g, now: {
-        x: _quote(x, line=125.5, at=at) for x in g if x == gid})
+        x: now_q(x) for x in g if now_q(x) is not None})
     import models.scorer as scorer
     monkeypatch.setattr(scorer, "_get_current_bankroll", lambda conn: 1000.0)
     calls = []
     monkeypatch.setattr(card, "publish", lambda conn, rows, decisions, hour, refused:
                         calls.append([d.status for d in decisions]) or (len(rows), len(decisions)))
-    now = at.replace(minute=0) + timedelta(hours=1, minutes=5)   # 22:05Z, the evening before
-    assert now.hour == 22
+    now = at + timedelta(minutes=23)       # the run after the capture stored the first post
     return card, calls, now, (sg, t, at)
 
 
@@ -645,6 +751,64 @@ def test_a_complete_run_does_not_raise(monkeypatch):
     assert out["bets"] == 1 and calls == [["bets"]]
 
 
+def test_the_bet_is_at_the_first_post_as_of_its_hour(monkeypatch):
+    """The card decides at DraftKings' first posted total, as of that row's
+    own hour, at any minute of any hour: there is no decision hour."""
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, calls, _, (_, t, at) = _card_run(monkeypatch, art)
+    got = []
+    monkeypatch.setattr(card, "publish", lambda conn, rows, decisions, hour, refused:
+                        got.append((rows, decisions, hour)) or (len(rows), len(decisions)))
+    now = at + timedelta(hours=1, minutes=48)
+    assert now.minute not in (0, 5) and now.hour not in (15, 22)
+    out = card.run_card(do_publish=True, now=now)
+    assert out["bets"] == 1
+    ((rows, (d,), hour),) = got
+    assert d.status == "bets" and d.cutoff == at.replace(minute=0)
+    assert d.quote.quote_at == at and d.quote.line == 125.5
+    assert rows[0]["scored_line"] == 125.5 and hour == now
+
+
+def test_a_first_post_no_longer_standing_is_decided_with_no_bet(monkeypatch):
+    """The first post moved before the card saw it (or DraftKings took the
+    total down): decided first_post_gone, final, and never bet at the later
+    number."""
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    for standing in ("moved", None):
+        card, calls, now, _ = _card_run(monkeypatch, art, standing=standing)
+        out = card.run_card(do_publish=True, now=now)
+        assert out["bets"] == 0 and out["diag"]["first_post_gone"] == 1
+        assert calls == [["first_post_gone"]]
+
+
+def test_a_standing_total_that_is_a_feed_error_makes_the_game_wait(monkeypatch):
+    """Whether the first post still stands is unknown while DraftKings'
+    standing row is a typo: not a bet, not gone, looked at again next run."""
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, calls, now, _ = _card_run(monkeypatch, art, standing="typo")
+    out = card.run_card(do_publish=True, now=now)
+    assert out["bets"] == 0 and out["diag"]["out_of_range"] == 1
+    assert calls == [["out_of_range"]] and "out_of_range" not in card.FINAL
+
+
+def test_a_game_with_no_first_post_reads_nothing_more(monkeypatch):
+    games, box = _season()
+    sg, _ = _prepared(games, box)
+    art = _art(sorted(set(sg["home_espn_id"])))
+    card, calls, now, _ = _card_run(monkeypatch, art)
+    monkeypatch.setattr(card, "load_first_posts", lambda conn, g, now: {})
+    monkeypatch.setattr(card, "load_season", lambda conn, season: (_ for _ in ()).throw(
+        AssertionError("the season read is for a first post only")))
+    out = card.run_card(do_publish=True, now=now)
+    assert out["bets"] == 0 and out["diag"]["no_dk_total"] == 1 and calls == []
+
+
 def test_an_incomplete_run_exits_non_zero(monkeypatch):
     import scripts.ncaab_total_card as card
     monkeypatch.setattr(card, "run_card", lambda do_publish=False: (_ for _ in ()).throw(
@@ -661,21 +825,27 @@ def _jobs(monkeypatch):
     return jobs(monkeypatch)
 
 
-def test_the_job_runs_hourly_at_five_past_utc_all_year(monkeypatch):
+def test_the_job_runs_every_five_minutes_three_after_each_capture_tick(monkeypatch):
+    """DraftKings' first total is stored by the capture (minute */5, 120 s
+    timeout) and decided three minutes later; about half of first totals
+    change within half an hour (research round 5)."""
     import scheduler
     from tests.test_nba_prop_window import _fires
     from tracking.job_heartbeat import MAX_SILENCE
-    job = _jobs(monkeypatch)["ncaab_total_card"]
+    jobs = _jobs(monkeypatch)
+    job = jobs["ncaab_total_card"]
     assert job.max_instances == 1 and job.coalesce is True
+    assert job.misfire_grace_time < 300                   # a late fire never stacks behind the next
     for start in (datetime(2026, 11, 20, 0, 0, tzinfo=timezone.utc),     # standard time
                   datetime(2027, 3, 20, 0, 0, tzinfo=timezone.utc)):     # after DST returns
         fires = _fires(job, start, start + timedelta(hours=23, minutes=59))
-        assert len(fires) == 24
+        assert len(fires) == 288
         utc = [f.astimezone(timezone.utc) for f in fires]
-        assert all(f.minute == 5 for f in utc)
-        assert {f.hour for f in utc} >= {22, 15}
+        assert all(f.minute % 5 == 3 for f in utc)
+        cap = _fires(jobs["ncaab_odds_capture"], start, start + timedelta(hours=23, minutes=59))
+        assert {f.astimezone(timezone.utc).minute % 5 for f in cap} == {0}
     assert "ncaab_total_card" in scheduler._PIPELINE_JOBS
-    assert MAX_SILENCE["ncaab_total_card"] >= 120
+    assert MAX_SILENCE["ncaab_total_card"] == 20
 
 
 def test_the_job_runs_the_card_and_publishes(monkeypatch):
@@ -943,3 +1113,22 @@ def test_the_channel_job_takes_the_source_channel_by_id():
     for bad in ({"name": "1541173382190596311", "like": "ncaaf"}, {"name": "ncaab", "like": "12"}):
         with pytest.raises(ValueError):
             validate(bad)
+
+
+def test_the_channel_job_accepts_an_emoji_prefix(monkeypatch):
+    """Channel names on this server lead with an emoji ('🔴-ncaab-live').
+    The slug stays lowercase with a letter in it; the emoji cannot sit in
+    the middle, and the job still passes the name through unchanged."""
+    import tracking.job_queue as jq
+    fn, validate = jq.JOBS["discord_create_channel"]
+    args = validate({"name": "🔴-ncaab-live", "like": "ncaaf"})
+    assert args["name"] == "🔴-ncaab-live" and args["apply"] is False
+    ran = []
+    monkeypatch.setattr(jq, "_run_script_main", lambda mod, argv: ran.append(argv) or "ok")
+    assert fn(**args) == "ok"
+    assert ran == [["--name", "🔴-ncaab-live", "--like", "ncaaf", "--dry-run"]]
+    assert validate({"name": "ncaabw", "like": "🔴-ncaab"})["like"] == "🔴-ncaab"
+    for bad in ("🔴ncaab-live", "ncaab-🔴-live", "🔴-12345", "🔴-", "🔴-NCAAB",
+                "🔴-ncaab live", "🔴🔴-ncaab", "ncaab!", "a" * 40):
+        with pytest.raises(ValueError):
+            validate({"name": bad, "like": "ncaaf"})

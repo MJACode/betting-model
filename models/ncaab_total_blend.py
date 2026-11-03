@@ -26,8 +26,9 @@ THE MODEL, per game, as of the moment DraftKings' total is read (the QUOTE):
   3. BLEND with DraftKings' total L:
        mean = L + c + beta x (model - L),   normal with sd sigma,
      c / beta / sigma fitted per phase (November; December on) on the paid
-     seasons 2021-2026, on the model's as-of predictions at DraftKings' first
-     stored total.
+     seasons 2021-2026, on the model's as-of predictions at DraftKings' FIRST
+     POSTED total (the opener grid's half-hourly history included; refit
+     2026-11-03, mike).
   4. PRICE at DraftKings' own two prices on that total: P(win | no push) on
      whole points, minus the price's implied probability. Bet the better side
      when that edge is above 0.04 (config.MODEL_EDGE_THRESHOLDS).
@@ -36,19 +37,27 @@ THE MODEL, per game, as of the moment DraftKings' total is read (the QUOTE):
      priced from the first game of the season, on last season's ratings until
      this season's games come in. The early games are priced with the November
      blend, fitted on every quoted November game, so nothing frozen changed.
-  6. A FEED TYPO IS NOT A QUOTE (models/ncaab_quote_bounds.py). DraftKings'
-     total outside 90-220, or a price beyond +/-100000, is never priced: the
-     game is out_of_range and waits for its next decision hour. An edge above
-     the data-error cap is never bet: the game is edge_cap, waits the same
-     way, and the card's run fails.
+  6. A FEED TYPO IS NOT A QUOTE (models/ncaab_quote_bounds.py). A quote whose
+     total is outside 90-220 or whose price is beyond +/-100000 is never
+     priced: decide() returns out_of_range, not final, and the game is looked
+     at again on the next run. An edge above the data-error cap is never bet:
+     the game is edge_cap, waits the same way, and the card's run fails.
 
-THE EVIDENCE (scratch chain of 2026-10-30, docs/sports/ncaab.md, which also has
-the replay with no wait): cut 0.04, both teams 10+ games, DraftKings' first
-stored total, stake_for. 2021-2025: 1,094 bets, 606-475-13, +87.48 units,
-+7.32%, date-resampled 95% interval [2.0, 12.7], 5 of 5 seasons positive,
-close EV +0.27% against Pinnacle's no-vig close. 2025-26 (never used to
-choose): 349 bets, +26.76 units, +7.03%. 92% of the 2021-2025 bets are overs;
-prices -120 to +102.
+THE QUOTE (from 2026-11-03, mike): DraftKings' first posted full-game total for
+the game, the earliest pre-game row stored, by DraftKings' own time on it, with
+a total inside TOTAL_RANGE and both prices. A total outside it is a feed error
+(the history holds 1465.0 for 146.5) and is skipped, so the next row is the
+first post. The card bets that quote only while it is still DraftKings'
+standing number (scripts/ncaab_total_card.py).
+
+THE EVIDENCE (research round 5, 2026-11-03, docs/sports/ncaab.md): every game,
+cut 0.04, DraftKings' first posted total, blend walk-forward, stake_for.
+2021-2025 (seasons 2022-2025 bet): 1,787 bets, +122.66 units, +6.26%,
+date-resampled 95% interval [1.72, 10.66], 4 of 4 seasons positive. 2025-26:
+649 bets, +58.05 units, +8.17% [0.42, 15.19]. Close EV against Pinnacle's
+no-vig close +1.72% / +3.87%. 91% overs; prices -120 to +110. The rule it
+replaced (22:00Z the evening before, else 15:00Z) made 1,563 bets, +3.90%
+[-0.50, 8.00] on 2022-2026 at its own decision instant.
 
 THE PROBABILITY (what model_probability holds): P(win | no push) on the bet
 side, the number the 0.04 cut was measured on. decision_edge = that minus
@@ -61,7 +70,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -91,11 +100,23 @@ BOX_STATS = ("pts", "d_pts", "fga", "fgm", "tpa", "tpm", "fta", "ftm", "orb", "d
 _HOUR_NS = 3600 * 10 ** 9
 _EPOCH = pd.Timestamp("2000-01-01")
 
-# The decision hours, UTC (the bought snapshots the evidence used): 22:00 the
-# day before the game's Eastern date, then 15:00 on the game's date and every
-# hour after it until tip.
-EVE_HOUR_UTC = 22
-DAY_HOUR_UTC = 15
+# A DraftKings full-game total outside this range is a feed error, never a
+# quote: the stored history holds 1465.0 for 146.5 (2023-03-17, Providence vs
+# Kentucky), and that one row moved the walk-forward blend's December beta from
+# 0.48 to about 1.0. It is the only DraftKings total outside 90-220 in 2021-2026
+# (research round 5). The first post is the first row INSIDE it. The range is
+# the shared NCAAB bounds' (models/ncaab_quote_bounds.LINE_RANGE), so every
+# card reads one number.
+TOTAL_RANGE = qb.LINE_RANGE["totals"]
+
+
+def valid_total(line) -> bool:
+    """A full-game total that can be a real NCAAB number (TOTAL_RANGE)."""
+    try:
+        x = float(line)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(x) and TOTAL_RANGE[0] <= x <= TOTAL_RANGE[1]
 
 
 # ── small helpers ──────────────────────────────────────────────────────────────
@@ -122,21 +143,6 @@ def to_ns(ts) -> int | None:
 
 def floor_hour_ns(ns: int) -> int:
     return (int(ns) // _HOUR_NS) * _HOUR_NS
-
-
-def decision_hour(game_date, tip: datetime, hour: datetime) -> bool:
-    """Is `hour` (a whole UTC hour) one of this game's decision hours?
-
-    22:00Z on the day before its Eastern date; else 15:00Z on its date and
-    every hour after it, before tip. A game not decided at one (no DraftKings
-    total, a box score still to land) waits for the next."""
-    d = pd.Timestamp(str(game_date)[:10]).date()
-    h = hour.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    eve = datetime.combine(d - timedelta(days=1), time(EVE_HOUR_UTC), tzinfo=timezone.utc)
-    if h == eve:
-        return True
-    day = datetime.combine(d, time(DAY_HOUR_UTC), tzinfo=timezone.utc)
-    return day <= h < tip.astimezone(timezone.utc)
 
 
 # ── box scores ─────────────────────────────────────────────────────────────────
@@ -620,13 +626,15 @@ def load_artifact(path: str | Path | None = None) -> dict:
 
 # ── the live decision ──────────────────────────────────────────────────────────
 
-DIAG_KEYS = ("games", "not_decision_hour", "already_decided", "wrong_season", "no_dk_total",
+DIAG_KEYS = ("games", "already_decided", "wrong_season", "no_dk_total", "first_post_gone",
              "out_of_range", "box_pending", "box_missing", "no_blend", "edge_cap", "below_cut",
              "bets")
 # Hold a game while a team's earlier game that ended before the quote has no
-# final score or no box yet, for this long after it ended. A box that never
-# lands is then treated as absent (the evidence also had a few games with no
-# possessions), unless a team is missing more than MAX_OLD_MISSING of them.
+# final score or no box yet, for this long after it ended (counted to now, so a
+# box that never lands stops holding while the quote stays the first post). A
+# box that never lands is then treated as absent (the evidence also had a few
+# games with no possessions), unless a team is missing more than
+# MAX_OLD_MISSING of them.
 BOX_WAIT_H = 36
 MAX_OLD_MISSING = 1
 # A game ESPN lists with one of these never counts and never holds.
@@ -658,12 +666,14 @@ class Decision:
     extra: dict = field(default_factory=dict)
 
 
-def missing_inputs(sg: pd.DataFrame, box_rows: dict, team: int, cut_ns: int) -> tuple[int, int]:
+def missing_inputs(sg: pd.DataFrame, box_rows: dict, team: int, cut_ns: int,
+                   now_ns: int | None = None) -> tuple[int, int]:
     """(recent, old): this team's season games that had ended at or before
     cut_ns and lack a final score or either side's box row; `recent` ended
-    within BOX_WAIT_H of the cutoff. box_rows: game_id -> stored rows. Both
-    sides are counted by row, not by team id: NCAA's row for a non-Division I
-    opponent often has no ESPN id."""
+    within BOX_WAIT_H of now_ns (the cutoff when it is not given). box_rows:
+    game_id -> stored rows. Both sides are counted by row, not by team id:
+    NCAA's row for a non-Division I opponent often has no ESPN id."""
+    ref_ns = cut_ns if now_ns is None else max(int(now_ns), int(cut_ns))
     x = sg[((sg["home_espn_id"] == team) | (sg["away_espn_id"] == team)) & (sg["end_ns"] <= cut_ns)]
     x = x[~x["status"].isin(NOT_PLAYED)] if "status" in x else x
     recent = old = 0
@@ -671,7 +681,7 @@ def missing_inputs(sg: pd.DataFrame, box_rows: dict, team: int, cut_ns: int) -> 
     for gid, hs, e in zip(x["game_id"], x["home_score"], x["end_ns"]):
         if pd.notna(hs) and box_rows.get(gid, 0) >= 2:
             continue
-        if e > cut_ns - wait:
+        if e > ref_ns - wait:
             recent += 1
         else:
             old += 1
@@ -679,13 +689,16 @@ def missing_inputs(sg: pd.DataFrame, box_rows: dict, team: int, cut_ns: int) -> 
 
 
 def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFrame,
-           art: dict, cut: float) -> list[Decision]:
-    """Decide each target game at its DraftKings quote.
+           art: dict, cut: float, now: datetime | None = None) -> list[Decision]:
+    """Decide each target game at its DraftKings quote (live: the first post).
 
     targets: rows of sg (the season's games, season_games() applied, with
     poss and status) to decide now. quotes: game_id -> Quote. box: the
-    season's deduped box rows with game_id, _key and end_ns. Pure given its
-    inputs."""
+    season's deduped box rows with game_id, _key and end_ns. now: the run's
+    instant, which ages a missing box (BOX_WAIT_H); the quote's own time when
+    not given. The ratings and inputs are as of the quote's hour whatever
+    `now` is. Pure given its inputs."""
+    now_ns = to_ns(now) if now is not None else None
     params = Params.from_dict(art["params"])
     prior = EndState.from_json(art["end_state"])
     ref = {int(art["season"]): art["league_rates"]}
@@ -701,7 +714,7 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
     for r in targets.itertuples(index=False):
         q = quotes.get(r.game_id)
         if q is None:
-            out.append(Decision(r.game_id, "no_dk_total", "no DraftKings total standing"))
+            out.append(Decision(r.game_id, "no_dk_total", "no DraftKings total posted"))
             continue
         bad = qb.problem(MARKET, q.line, (q.over_price, q.under_price))
         if bad:
@@ -718,7 +731,7 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
         for team in (r.home_espn_id, r.away_espn_id):
             if pd.isna(team):
                 continue
-            rec, old = missing_inputs(sg, box_rows, int(team), cut_ns)
+            rec, old = missing_inputs(sg, box_rows, int(team), cut_ns, now_ns)
             if rec:
                 held.append(f"{int(team)}: {rec} recent game(s) without a score or box")
             if old > MAX_OLD_MISSING:

@@ -5,12 +5,17 @@ last finished season's end-of-season ratings (the next season's prior), that
 season's league shooting and style rates (the next season's reference), the
 stage-2 residual coefficients (fit on 2012 through the last finished season)
 and the blend's c / beta / sigma per phase (fit on the paid seasons 2021
-through the last finished season, at DraftKings' first stored total). It also
+through the last finished season, at DraftKings' first posted total). It also
 replays the model, walk-forward, on 2022 through the last finished season and
-prints the bets at the 0.04 cut, so the port can be checked against the
-evidence.
+prints the bets at the 0.04 cut by season, so the port can be checked against
+the evidence; then replays THE CARD'S OWN DECISION (models.ncaab_total_blend.
+decide: the hold, the refit at one cutoff, the inputs, the price, and the
+card's price and EV floors) on every quoted game of each season, with that
+season's numbers built walk-forward exactly as the artifact is, and matches
+its bets to the replay's game by game.
 
     python -m scripts.ncaab_total_blend_build --cache DIR [--out PATH] [--last-season 2026]
+                                              [--card-path-seasons 2022-2026]
 
 DIR is a read-only copy of four Supabase reads, as parquet:
   games.parquet                  SELECT game_id, season, game_date, commence_time, home_score,
@@ -20,17 +25,28 @@ DIR is a read-only copy of four Supabase reads, as parquet:
                                  is_home, season, home_espn_id, away_espn_id, pts, d_pts, fga,
                                  fgm, tpa, tpm, fta, ftm, orb, drb, tov, source
                                  FROM ncaab_team_game_stats            (season by season)
-  odds_reduced.parquet           per game, market and book, the first pre-game quote by the
-                                 book's own time (o_ts, o_total_line, o_over_price,
-                                 o_under_price) from SELECT game_id, market, bookmaker,
-                                 snapshot_at, total_line, over_price, under_price FROM odds
-                                 WHERE market = 'totals' AND snapshot_type <> 'in_play', rows
-                                 after ESPN's tip dropped.
-Every row is in Supabase; the copy only saves re-reading 1.2M odds rows. The
-2026-10-30 build read the copy taken that morning for the research.
+  odds_reduced.parquet           per game, DraftKings' FIRST POSTED total: its earliest
+                                 pre-game totals row by its own time (o_ts = snapshot_at,
+                                 o_total_line, o_over_price, o_under_price), from every
+                                 stored row (the opener grid's half-hourly purchase
+                                 included) of SELECT game_id, market, bookmaker,
+                                 snapshot_at, total_line, over_price, under_price, created_at
+                                 FROM odds WHERE market = 'totals' AND snapshot_type IS
+                                 DISTINCT FROM 'in_play'; rows stamped after ESPN's tip, rows
+                                 missing a price, and totals outside
+                                 models.ncaab_total_blend.TOTAL_RANGE dropped FIRST; two rows
+                                 with one stamp keep the one stored last. The live card reads
+                                 the same first post (scripts/ncaab_total_card.
+                                 load_first_posts).
+Every row is in Supabase; the copy only saves re-reading 7.3M odds rows. The
+2026-11-03 build read research round 5's copy of that day ("truefix": the
+2026-10-30 games, events and box reads, and the odds re-read after the opener
+grid was stored, with the one feed typo, 1465.0 on
+NCAAB_2023-03-17_providence_kentucky, dropped).
 
-Reads nothing else and writes only the JSON. It takes about ten minutes: the
-ratings are refit as of every quote, sixteen seasons over.
+Reads nothing else and writes only the JSON. The artifact takes about ten
+minutes (the ratings are refit as of every quote, sixteen seasons over); the
+card-path replay adds a refit per first-post hour per season.
 """
 from __future__ import annotations
 
@@ -81,7 +97,10 @@ def load(cache: Path, last: int):
     dk = dk.rename(columns={"o_total_line": "line", "o_over_price": "over_price",
                             "o_under_price": "under_price"})
     # The card never prices a feed typo (models/ncaab_quote_bounds.py), so
-    # neither does the replay nor the blend fit: such a game has no quote.
+    # neither does the replay nor the blend fit. The reduction should already
+    # have dropped a typo BEFORE taking the first row (so the next row is the
+    # first post, as the card reads it); one that slipped through is dropped
+    # here and counted, and that game has no quote.
     dk, bad = qb.split(dk, nb.MARKET, "line", ("over_price", "under_price"))
     print(f"DraftKings first totals dropped as data errors: {len(bad)}"
           + "".join(f"\n  {x}" for x in qb.describe(bad, "line", ("over_price", "under_price"))))
@@ -193,6 +212,13 @@ def stage2_walk(d: pd.DataFrame, last: int):
     return rh, final
 
 
+def stage2_coefs(d: pd.DataFrame, last: int) -> dict:
+    """Season S -> the stage-2 coefficients fit on STAGE2_FIRST..S-1, the ones
+    stage2_walk scores S with (and, for S = last + 1, the artifact's)."""
+    return {S: nb.fit_stage2(d[(d["season"] >= STAGE2_FIRST) & (d["season"] < S)])
+            for S in range(STAGE2_SCORED, last + 2)}
+
+
 def grade(x: pd.DataFrame) -> dict:
     if not len(x):
         return {"bets": 0}
@@ -232,6 +258,82 @@ def replay(d: pd.DataFrame, dk: pd.DataFrame, last: int):
     return sc, bets
 
 
+def by_season(bets: pd.DataFrame) -> dict:
+    return {str(int(S)): grade(x) for S, x in bets.groupby("season")}
+
+
+def season_artifact(S: int, ends: dict, lg: dict, coefs: dict, x: pd.DataFrame) -> dict:
+    """The numbers the card would read for season S, built walk-forward as the
+    artifact is: last season's end state and league rates, stage 2 fit
+    through S-1, the blend fit on the paid seasons 2021..S-1."""
+    tr = x[(x["season"] >= PAID_FIRST) & (x["season"] < S)]
+    return {"kind": nb.ARTIFACT_KIND, "season": S, "params": SETTINGS,
+            "end_state": ends[S - 1].to_json(), "league_rates": lg[S - 1],
+            "stage2": {"coef": coefs[S]},
+            "blend": {ph: nb.fit_blend(tr[tr["phase"] == ph]) for ph in nb.PHASES}}
+
+
+def card_path(g: pd.DataFrame, b: pd.DataFrame, dk: pd.DataFrame, ends: dict, lg: dict,
+              coefs: dict, x: pd.DataFrame, seasons, log=print) -> pd.DataFrame:
+    """The card's decision on every quoted game of each season in `seasons`:
+    nb.decide at the game's first post (the hold, the refit at one cutoff,
+    the inputs, the price), with season_artifact()'s numbers, then the card's
+    price floor and EV floor (scripts/ncaab_total_card.pick_rows). One row per
+    quoted game: status, side, price, edge, prob, and why a bet was refused."""
+    import config
+    from models.honest_ev import gate
+    floor = config.min_odds_for(nb.MODEL_ID)
+    cut = config.MODEL_EDGE_THRESHOLDS[nb.MODEL_ID]
+    q = dk.set_index("game_id")
+    out = []
+    for S in seasons:
+        t = time.time()
+        art = season_artifact(S, ends, lg, coefs, x)
+        sg = g[g["season"] == S]
+        box = b[b["season"] == S]
+        gids = [gid for gid in sg["game_id"] if gid in q.index]
+        quotes = {}
+        for gid in gids:
+            r = q.loc[gid]
+            at = pd.Timestamp(int(r["quote_ns"]), tz="UTC").to_pydatetime()
+            quotes[gid] = nb.Quote(game_id=gid, line=float(r["line"]), over_price=float(r["over_price"]),
+                                   under_price=float(r["under_price"]), quote_at=at, fetched_at=at)
+        got = nb.decide(sg[sg["game_id"].isin(gids)], quotes, sg, box, art, cut)
+        for dcn in got:
+            pz = dcn.priced
+            row = {"game_id": dcn.game_id, "season": S, "status": dcn.status,
+                   "side": pz.side if pz else None, "price": pz.price if pz else None,
+                   "edge": pz.edge if pz else None, "prob": pz.prob if pz else None,
+                   "line": dcn.quote.line if dcn.quote else None, "refused": None}
+            if dcn.status == "bets":
+                if floor is not None and pz.price < floor:
+                    row["refused"] = "below_price_floor"
+                elif not gate(nb.MODEL_ID, pz.prob, pz.price).clears:
+                    row["refused"] = "below_ev_floor"
+            out.append(row)
+        st = pd.Series([r["status"] for r in out if r["season"] == S]).value_counts().to_dict()
+        log(f"  card path {S}: {len(gids)} quoted games, {st} ({time.time() - t:.0f}s)")
+    return pd.DataFrame(out)
+
+
+def match_card_path(cp: pd.DataFrame, sc: pd.DataFrame, bets: pd.DataFrame) -> dict:
+    """The card path's written bets against the replay's, game by game."""
+    cb = cp[(cp["status"] == "bets") & cp["refused"].isna()]
+    seasons = sorted(set(cp["season"]))
+    rb = bets[bets["season"].isin(seasons)]
+    both = rb.merge(cb, on="game_id", suffixes=("", "_card"))
+    allg = sc[sc["season"].isin(seasons)].merge(cp[cp["edge"].notna()], on="game_id", suffixes=("", "_card"))
+    return {"replay_bets": int(len(rb)), "card_bets": int(len(cb)), "same_game": int(len(both)),
+            "same_side": int((both["side"] == both["side_card"]).sum()),
+            "replay_only": sorted(set(rb["game_id"]) - set(cb["game_id"]))[:20],
+            "card_only": sorted(set(cb["game_id"]) - set(rb["game_id"]))[:20],
+            "refused": cp["refused"].value_counts().to_dict(),
+            "held": cp[cp["status"].isin(["box_pending", "box_missing"])].groupby("season").size()
+            .rename(index=str).to_dict(),
+            "max_abs_edge_diff_all_scored": (round(float((allg["edge"] - allg["edge_card"]).abs().max()), 10)
+                                             if len(allg) else None)}
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cache", required=True, type=Path)
@@ -239,6 +341,9 @@ def main(argv=None) -> None:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--bets-out", type=Path, default=None,
                     help="optional parquet of the replayed bets, for checking against the evidence")
+    ap.add_argument("--card-path-seasons", default=None,
+                    help="seasons for the card-path replay, e.g. 2022-2026 (default: 2022 to "
+                         "--last-season); 'none' skips it")
     a = ap.parse_args(argv)
     t0 = time.time()
     last = a.last_season
@@ -255,6 +360,7 @@ def main(argv=None) -> None:
     d = d.merge(feats, on="game_id", how="left")
     d = d[d["pt_s1"].notna() & d["total"].notna()].copy()
     rh, coef = stage2_walk(d, last)
+    coefs = stage2_coefs(d, last)
     d["rhat"] = rh
     d["pt"] = d["pt_s1"] + d["rhat"].fillna(0.0)
     x = d.merge(dk, on="game_id")
@@ -265,7 +371,10 @@ def main(argv=None) -> None:
     dev = bets[bets["season"] <= last - 1]
     newest = bets[bets["season"] == last]
     summary = {"cut": CUT, "rule": "every quoted game, no games-played wait",
+               "quote": "DraftKings' first posted total (earliest pre-game row by its own time, "
+                        f"totals outside {list(nb.TOTAL_RANGE)} dropped first)",
                f"{PAID_FIRST + 1}-{last - 1}": grade(dev), str(last): grade(newest),
+               "by_season": by_season(bets),
                # the population the 2026-10-30 evidence graded, to check against it
                "both_teams_10_games": {f"{PAID_FIRST + 1}-{last - 1}": grade(dev[dev["min_gp"] >= 10]),
                                        str(last): grade(newest[newest["min_gp"] >= 10])},
@@ -275,12 +384,29 @@ def main(argv=None) -> None:
     print("replay (walk-forward blend on paid seasons):", json.dumps(summary, indent=1))
     if a.bets_out:
         bets.to_parquet(a.bets_out, index=False)
+    spec = a.card_path_seasons or f"{PAID_FIRST + 1}-{last}"
+    if spec.lower() != "none":
+        lo, _, hi = spec.partition("-")
+        seasons = list(range(int(lo), int(hi or lo) + 1))
+        cp = card_path(g, b, dk, ends, lg, coefs, x, seasons)
+        cbets = cp[(cp["status"] == "bets") & cp["refused"].isna()].merge(
+            d[["game_id", "total"]], on="game_id")
+        summary["card_path"] = {"seasons": [seasons[0], seasons[-1]],
+                                "match": match_card_path(cp, sc, bets),
+                                "by_season": by_season(cbets)}
+        print("card path (models.ncaab_total_blend.decide, walk-forward numbers):",
+              json.dumps(summary["card_path"], indent=1, default=str))
+        if a.bets_out:
+            cp.to_parquet(a.bets_out.with_name(a.bets_out.stem + "_card_path.parquet"), index=False)
     out = a.out or (nb.ROOT / f"models/saved/ncaab_total_blend_{last + 1}.json")
     art = {
         "kind": nb.ARTIFACT_KIND, "model_id": nb.MODEL_ID,
         "season": last + 1, "prior_season": last,
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "command": f"python -m scripts.ncaab_total_blend_build --cache <copy of the four reads> --last-season {last}",
+        "quote_rule": ("DraftKings' first posted full-game total: the earliest pre-game row by its own "
+                       f"time, totals outside {list(nb.TOTAL_RANGE)} dropped first (research round 5, "
+                       "2026-11-03; mike)"),
         "params": SETTINGS,
         "possessions": "fga - orb + tov + 0.475 fta, the two teams averaged, every season",
         "end_state": ends[last].to_json(),

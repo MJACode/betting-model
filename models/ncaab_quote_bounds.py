@@ -16,11 +16,14 @@ dropped BEFORE any consensus, flag or price reads it, so it cannot move a
 median either, and each card logs it by game, book and value and counts it on
 its run's diagnostic line. A book's dropped quote is NOT replaced by that
 book's older row: its real number at that moment is unknown, so the book has
-no quote at that moment. What then happens to the game is each card's own
+no quote at that moment (the totals card's first post, below, is the one
+exception). What then happens to the game is each card's own
 rule:
-  * the totals card (scripts/ncaab_total_card.py): DraftKings is its only
-    book, so the game is not decided on it and waits for its next decision
-    hour (status out_of_range);
+  * the totals card (scripts/ncaab_total_card.py) prices DraftKings' first
+    posted total, which is the first row INSIDE the range (a typo row is
+    skipped, the research's rule, so here the next row does stand in); a
+    standing total or a first post's price that is a data error makes the
+    game wait (status out_of_range, looked at again on the next run);
   * the 15:00 UTC spread and moneyline cards and the two first-half cards
     decide on the books that are left, the dropped quote listed in the
     decision row; a game left with no quote is decided with none.
@@ -82,7 +85,8 @@ MAX_ABS_PRICE = 100_000.0       # beyond +/-100000 is a typo; -100000 itself is 
 
 # Each model's cap sits well above the largest edge its own replay produced
 # (scripts/ncaab_*_build.py on the research copy, measured 2026-11-03):
-#   ncaab_total_blend          0.1257  (2022-2026, 1,513 bets at the 0.04 cut)
+#   ncaab_total_blend          0.1606  (2022-2026, 2,436 bets at the 0.04 cut, at
+#                              DraftKings' first posted total)
 #   ncaab_spread_market        0.1500  (2021-2026, 613 bets at the 0.03 cut)
 #   ncaab_moneyline_own_spread 0.0594  (2021-2026, 914 bets at the 0.01 cut)
 #   ncaab_first_half_total     0.3381  (2023-24 to 2025-26, 17,142 decided games),
