@@ -74,6 +74,9 @@ class _Conn:
             cols = [c.strip().split(".")[-1] for c in s[7:s.index(" FROM picks")].split(",")]
             return _Res([tuple(p[c] for c in cols) for p in self.picks
                          if p["game_date"] == params[0]])
+        if "FROM nba_schedule" in s:    # an NBA game here is on its league row, tipping when written
+            return _Res([(p["game_id"], p["game_time"], "regular") for p in self.picks
+                         if p["game_id"] in params[0]])
         if "FROM odds" in s:
             if "spread_home = %s" in s or "total_line = %s" in s:
                 game_id, market, book, bound, line = params

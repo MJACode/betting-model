@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, nba_prop_market bets the play-in, playoffs and Cup final with its rule, cut, floor and caps unchanged; no other NBA model reaches them; alerts for a lost game and for an open bet with no final (mike) |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NBA: seven searches land with results written up, starters 0 of 32, line-size shapes 0 of 256, the two passes checked by a separate rebuild; first evening of the first-half model read; no model change |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, injury snapshot dedupe brought onto current master for #1096. Session-log conflicts only. Newest pre-tip pull, one player once. NCAAB feed from #1098 left as merged. Not merged to master. |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, `team_stats_asof_integrity` false CRIT: a live season whose snapshot series started fewer than five days ago and is still current is not thin; historical, collapsed and stopped series stay thin; NBA 2027's missing October snapshots described, not backfilled |

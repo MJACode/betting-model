@@ -388,6 +388,8 @@ def test_the_slate_prices_an_unlisted_quarterfinal_and_skips_the_cup_final():
             elif q.startswith("SELECT DISTINCT season, game_date, game_type"):
                 out = [(2027, "2026-10-20", "regular"), (2027, "2027-04-11", "regular"),
                        (2027, "2026-12-04", "regular"), (2027, "2026-12-11", "cup_final")]
+            elif "FROM nba_schedule" in q:      # the rows behind an unlisted game: none lists these teams
+                out = []
             else:
                 raise AssertionError(q[:60])
             return type("R", (), {"fetchall": lambda self_: list(out)})()
