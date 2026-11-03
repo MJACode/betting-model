@@ -201,33 +201,42 @@ def _prop_watch_conditions(conn, now: datetime) -> dict:
     return out
 
 
+# The NCAAB first-half models and the fetch each decides on.
+_NCAAB_FIRST_HALF_MODELS = (("ncaab_first_half_spread", "tip-minus-10"),
+                            ("ncaab_first_half_total", "tip-minus-60"))
+
+
 def _ncaab_first_half_undecided(conn, now: datetime) -> dict:
-    """The same check for the NCAAB first-half spread model
+    """The same check for the NCAAB first-half spread and total models
     (scripts/ncaab_first_half_window.undecided_games): a listed game that
     tipped with no decision. Never raises."""
-    model = "ncaab_first_half_spread"
-    try:
-        import config
-        from scripts.ncaab_first_half_window import UNDECIDED_LOOKBACK_HOURS as hours
-        from scripts.ncaab_first_half_window import undecided_games as ncaab_undecided
-        games = ncaab_undecided(conn, now)
-    except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
-        logger.warning(f"failure alerter: the NCAAB first-half undecided read failed: {exc}")
+    out: dict = {}
+    for model, mark in _NCAAB_FIRST_HALF_MODELS:
         try:
-            conn.rollback()
-            conn.execute("SELECT 1").fetchall()
-        except Exception:  # noqa: BLE001 — the database itself is the problem
-            return {}
-        return {"check:ncaab_first_half_undecided": (
-            "WARN", "The NCAAB first-half undecided-game check could not read",
-            f"`scripts/ncaab_first_half_window.undecided_games` raised:\n{exc!r}")}
-    if not games or model in config.RETIRED_MODELS:
-        return {}
-    return {f"undecided:{model}": (
-        "CRIT", f"{model} lost {len(games)} game(s): tipped with no decision",
-        f"**{len(games)} NCAAB game(s)** tipped in the last {hours:.0f} hours with no "
-        f"decision from `{model}`: no tip-minus-10 first-half fetch landed, so no bet "
-        f"could be written on them:\n" + "\n".join(f"· `{g}`" for g in games))}
+            import config
+            from scripts.ncaab_first_half_window import UNDECIDED_LOOKBACK_HOURS as hours
+            from scripts.ncaab_first_half_window import undecided_games as ncaab_undecided
+            games = ncaab_undecided(conn, now, model=model)
+        except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
+            logger.warning(f"failure alerter: the NCAAB first-half undecided read failed "
+                           f"({model}): {exc}")
+            try:
+                conn.rollback()
+                conn.execute("SELECT 1").fetchall()
+            except Exception:  # noqa: BLE001 — the database itself is the problem
+                return out
+            out["check:ncaab_first_half_undecided"] = (
+                "WARN", "The NCAAB first-half undecided-game check could not read",
+                f"`scripts/ncaab_first_half_window.undecided_games` raised ({model}):\n{exc!r}")
+            continue
+        if not games or model in config.RETIRED_MODELS:
+            continue
+        out[f"undecided:{model}"] = (
+            "CRIT", f"{model} lost {len(games)} game(s): tipped with no decision",
+            f"**{len(games)} NCAAB game(s)** tipped in the last {hours:.0f} hours with no "
+            f"decision from `{model}`: no {mark} first-half fetch landed, so no bet "
+            f"could be written on them:\n" + "\n".join(f"· `{g}`" for g in games))
+    return out
 
 
 def _is_health_check_step(name: str) -> bool:

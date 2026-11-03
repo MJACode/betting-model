@@ -248,9 +248,6 @@ def main() -> int:
                     help="must include eu — that's where Pinnacle lives")
     ap.add_argument("--watch-days", type=float, default=10.0,
                     help="observe games this far out (firing stays in T-7..T-2)")
-    ap.add_argument("--bankroll", type=float, default=1000.0,
-                    help="only for the stake_amt column of the saved CSV; the "
-                         "printed card is in units, never dollars")
     a = ap.parse_args()
 
     # Two windows, and since 2026-09-06 they share an early bound.
@@ -337,7 +334,6 @@ def main() -> int:
 
     print(f"\n=== OPENER SPREAD CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
     bets = bets.copy()
-    bets["stake_amt"] = (bets.stake_pct / 100 * a.bankroll).round(2)
     bets["line_age"] = [opener_spread.age_tag(h) for h in bets.held_min]
     cols = ["matchup", "kick_utc", "bet_team", "side_line", "book", "price",
             "dev", "line_age", "model_prob", "edge_pp", "edge_tier", "units"]

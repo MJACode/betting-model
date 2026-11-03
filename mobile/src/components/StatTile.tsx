@@ -17,7 +17,7 @@ export function StatTile({ label, value, caption, tint }: Props) {
     <View
       style={styles.tile}
       accessible
-      accessibilityLabel={[label, unitsSpeech(value), caption].filter(Boolean).join(', ')}
+      accessibilityLabel={[label, unitsSpeech(value), caption ? unitsSpeech(caption) : null].filter(Boolean).join(', ')}
     >
       <Text style={styles.label}>{label}</Text>
       <Text style={[styles.value, tint ? { color: tint } : null]}>{value}</Text>

@@ -613,7 +613,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="Track record"
-          sub="Every settled pick on record — win rate, flat ROI and CLV by sport and model. Nothing cherry-picked."
+          sub="Every settled pick on record — win rate, return on bets and CLV by sport and model. Nothing cherry-picked."
           // Track Record is a bottom tab, and Settings is a stack screen above
           // the tab navigator — navigate() only bubbles UP, so a bare
           // navigate('TrackRecord') here is never handled. Target the tab

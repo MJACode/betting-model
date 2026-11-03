@@ -618,5 +618,5 @@ console.log(JSON.stringify({ picks: s.picks, wins: s.wins }));
 def test_the_custom_model_pick_list_skips_the_labelled_copy():
     hook = _read(ROOT / "mobile" / "src" / "hooks" / "useCustomModelStats.ts")
     assert "&& !isDuplicateCopy(p))" in hook
-    assert "import { isDuplicateCopy } from '@/lib/thresholds';" in hook
+    assert re.search(r"import \{[^}]*\bisDuplicateCopy\b[^}]*\} from '@/lib/thresholds';", hook)
 

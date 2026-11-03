@@ -235,7 +235,10 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "pnlColor(summary.roi, 1, 100)" in card
     assert "summary.units != null" in card
     assert "overall.units == null" in screen
-    assert "Models risk a flat 1u on every pick" in hero
+    # One unit basis (2026-11-03): the Models tab books this same stake, so
+    # the sheet no longer says its percentages differ.
+    assert "on the Models tab" in hero
+    assert "won\\u2019t match" not in hero
     assert "Yesterday and Models use a flat" not in hero
     assert "$100" not in hero
     assert "unpriced, staked at 1u" in screen

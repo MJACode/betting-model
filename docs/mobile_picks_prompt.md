@@ -132,6 +132,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
             WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
             WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
+            WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id = 'ncaab_moneyline_own_spread' THEN 'h2h'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
@@ -199,8 +200,6 @@ Important rules:
 - If I ask for a stake in money, answer in units: the stake is flat and does not change with a bankroll.
 ```
 
-Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). Update whenever thresholds or schema change. The codebase is the source of truth: after any threshold change run
-`python -m scripts.emit_threshold_sql --prefix p.` and paste the block it prints
-over the one inside step 2. Never hand-edit it — that is how the old copies drifted.
+Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). A threshold change needs no paste: the query joins `model_action_thresholds`, which `data.threshold_sync` writes from `config.py`. Paste the block again only when the prompt text itself changes in this file.
 
 ---
