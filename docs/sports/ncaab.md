@@ -271,7 +271,9 @@ hourly at five past (UTC), but only the run in the 15:00 hour decides
 anything, and it reads the quotes as of 15:00 UTC even if it runs late in that
 hour. The decision, bet or not, goes into `ncaab_spread_decisions` with every
 book's quote, the consensus and the reason, and the game is never decided
-again (CLAUDE.md §1c). Only BET rows go into `picks`.
+again (CLAUDE.md §1c). Only BET rows go into `picks`. A game that tips after
+15:00 UTC but before the run gets to it is recorded as `tipped`, not bet: a
+pick is never announced for a game under way.
 
 **A missed 15:00 is a failure, never a late bet.** The research tested no
 other hour that held up: 22:00 UTC the evening before failed, and the hour
@@ -307,8 +309,27 @@ DraftKings had the same line at 15:00 UTC, `line_book` is empty and `dk_odds`
 reference. Otherwise `line_book` names the bet book and `dk_odds` is empty, the
 same convention as a pick scored off another book's line. `model_probability`
 is the chance of winning with a push left out, the number the 0.03 cut was
-measured on, so the publishers' edge filter agrees with the card. Settlement:
-full-game spread, overtime included.
+measured on, so the publishers' edge filter agrees with the card. **Read this
+model's edge from `decision_edge`, never `edge`**: on a bet off DraftKings'
+line `edge` is 0.0 by that convention. Settlement: full-game spread, overtime
+included.
+
+**The first live read (2026-11-02, read-only).** The card's own code, run
+against production as of 15:05 UTC on the season's first full slate (no row it
+read was stored after 15:05): 179 games due, 116 with at least one quote, 63
+with none (mostly small schools the odds feed does not list). It would have
+bet 9, labels as the card writes them: Vanderbilt -32.5 (Hard Rock -110),
+Oklahoma -30.5 (Hard Rock -105), Oklahoma State -29.5 (betPARX +112), Wake
+Forest -30.5 (Fanatics -110), Marquette -30.5 (betPARX -109), South Alabama
+-1.5 (DraftKings +110), Radford +11.5 (FanDuel -102), Bryant +5.5 (DraftKings
+-108) and South Carolina Upstate +14.5 (Fanatics -110). None was refused by
+the price or EV floor. Five of the nine are favourites of 29.5 points or more.
+In four of those the books split between two numbers and the bet takes the
+smaller (Vanderbilt: 3 books at -32.5, 4 at -35.5; Oklahoma 3 and 3; Wake
+Forest 2 and 3; Marquette 3 and 4); Oklahoma State is the price, +112 on a
+line a point longer than the consensus. Nine bets from 116 quoted games is a
+far higher rate than the research's 542 from about 32,000, as early-November
+slates run, and it is the first thing to watch.
 
 | Setting | Value | Where |
 |---|---|---|
