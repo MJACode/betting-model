@@ -25,9 +25,9 @@ import {
 import type { PlayerType } from '@/types';
 
 /** Sports with a per-game player log — the ones that can show player detail. */
-export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF';
+export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB';
 
-const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF']);
+const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB']);
 
 /** The two football leagues share a log shape (and a weekly cadence). */
 const FOOTBALL = new Set<PlayerLogSport>(['NFL', 'NCAAF']);
@@ -99,6 +99,9 @@ export const LOG_TABLE: Record<PlayerLogSport, string> = {
   NBA: 'nba_player_game_log',
   NFL: 'nfl_player_game_log',
   NCAAF: 'ncaaf_player_game_log',
+  // Men's college basketball (add_ncaab_player_game_log_2026_11_03.sql):
+  // WNBA's column names, so the basketball column list reads it unchanged.
+  NCAAB: 'ncaab_player_game_log',
 };
 
 export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
@@ -107,6 +110,7 @@ export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
   NBA: BASKETBALL_COLUMNS,
   NFL: NFL_COLUMNS,
   NCAAF: NCAAF_COLUMNS,
+  NCAAB: BASKETBALL_COLUMNS,
 };
 
 /**
@@ -135,7 +139,7 @@ export function logFetchLimit(sport: PlayerLogSport): number {
  */
 export function normalizeLogRow(sport: PlayerLogSport, raw: Record<string, unknown>): PlayerLogEntry {
   const row = { ...raw } as PlayerLogEntry;
-  if (sport === 'WNBA' || sport === 'NBA') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
     row.threes = num(raw.fg3_made);
     row.pra = sum(raw.points, raw.rebounds, raw.assists);
     row.blocks_steals = sum(raw.blocks, raw.steals);
@@ -688,18 +692,31 @@ const OPP_LABEL_MAX = 4;
  * letters when the map has no entry — a bare cut prints "Michigan" and
  * "Michigan State" both as MICH (UX review, 2026-10-28). Null when the
  * opponent is unknown.
+ *
+ * `noSlice`: for a sport with no abbreviation map the app can read (NCAAB),
+ * a long name is never cut — "MICH" would be Michigan and Michigan State, and
+ * every "North …" school would read "NORT" (UX review, 2026-11-03). The short
+ * label is then the venue marker alone, and the full name stays on the
+ * selected bar's caption (`oppFull`).
  */
 export function opponentLabel(
   row: Pick<PlayerLogEntry, 'opponent' | 'venue'>,
   short = false,
   abbrevs?: ReadonlyMap<string, string>,
+  noSlice = false,
 ): string | null {
   const opp = row.opponent ? String(row.opponent) : '';
   if (!opp) return null;
   let name = opp;
   if (short && opp.length > OPP_LABEL_MAX) {
     const code = abbrevs?.get(opp);
-    name = code && code.length <= 5 ? code : opp.slice(0, OPP_LABEL_MAX).toUpperCase();
+    if (code && code.length <= 5) {
+      name = code;
+    } else if (noSlice) {
+      return row.venue === 'away' ? '@' : row.venue === 'home' ? 'vs' : null;
+    } else {
+      name = opp.slice(0, OPP_LABEL_MAX).toUpperCase();
+    }
   }
   if (row.venue === 'away') return `@${name}`;
   if (row.venue === 'home') return `vs ${name}`;
@@ -734,6 +751,7 @@ export function chartGames(
   games: PlayerLogEntry[],
   valueOf: (r: PlayerLogEntry) => number | null,
   abbrevs?: ReadonlyMap<string, string>,
+  noSlice = false,
 ): ChartGame[] {
   const out: ChartGame[] = [];
   for (const r of games) {
@@ -742,7 +760,7 @@ export function chartGames(
     out.push({
       value: v,
       date: shortGameDate(r.game_date),
-      opp: opponentLabel(r, true, abbrevs),
+      opp: opponentLabel(r, true, abbrevs, noSlice),
       oppFull: opponentLabel(r, false),
     });
   }
@@ -768,13 +786,25 @@ export function playerSubtitle(
  * The context line under a recent-game date — the volume behind the stat, which
  * is what tells you whether a quiet game was a bad game or a short one.
  */
-export function gameContextLine(sport: PlayerLogSport, row: PlayerLogEntry): string {
+export function gameContextLine(
+  sport: PlayerLogSport,
+  row: PlayerLogEntry,
+  currentTeam?: string | null,
+): string {
   const team = row.team ?? '—';
   // "@CHI" on an away game, "vs CHI" at home — every sport now, from `games`.
   const opp = opponentLabel(row);
   if (FOOTBALL.has(sport)) {
     const wk = row.week != null ? `Wk ${row.week}` : null;
     return [team, opp, wk].filter(Boolean).join(' · ');
+  }
+  if (sport === 'NCAAB') {
+    // Two full school names on one truncating line: the minutes go first so
+    // they are never the part cut (UX review, 2026-11-03). The player's own
+    // school only when it is not the header's (a transfer's earlier rows).
+    const min = num(row.minutes);
+    const own = row.team && row.team !== currentTeam ? row.team : null;
+    return [`${min == null ? '—' : min.toFixed(0)} min`, opp, own].filter(Boolean).join(' · ');
   }
   if (sport === 'WNBA' || sport === 'NBA') {
     const min = num(row.minutes);

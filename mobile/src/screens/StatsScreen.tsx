@@ -109,7 +109,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, boardSeasonET, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, boardSeasonET, etDate, formatAmerican, MINUS, monthET, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -720,9 +720,9 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = etDay;
-    // A sport with no player leaderboard and no Teams board (NCAAB today)
-    // draws only its empty state. Its week of games would be read and thrown
-    // away: 472 NCAAB games for 2026-11-02 to 11-08.
+    // A sport with no player leaderboard and no Teams board draws only its
+    // empty state, so its week of games would be read and thrown away (472
+    // NCAAB games for 2026-11-02 to 11-08, before NCAAB had a board).
     if (!defaultStatFor(sport) && !supportsTeamBoard(sport)) {
       setSlate(EMPTY_SLATE);
       setSlateGames([]);
@@ -2190,10 +2190,11 @@ export function StatsScreen() {
     (timeWindow === 'h2h' && slateChecking) ||
     (touchView === 'loading' && !error);
   const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
+  // A Players board that can never carry a line (NCAAB: no college props,
+  // Matt 2026-11-03) does not name a book whose lines it will not show.
   const showHeaderBookLine =
     (boardMode === 'teams' && supportsTeamBoard(sport)) ||
-    !stat ||
-    (!oddsHeaderSlot && !playersBoardSettling);
+    (sport !== 'NCAAB' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
   // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
   // stack grow by the overhang and pull the same amount back with a negative
   // margin. The typing field reports overhang 0 and the pad matches it.
@@ -2539,6 +2540,13 @@ export function StatsScreen() {
         propLines.rows.some((r) => r.market === propMarket);
       const missing = nhlEmptyBoardText(hasLines, betLabel || (stat?.label ?? 'lines'));
       if (missing && rows.length === 0) return missing;
+    }
+    // Men's college basketball's first weeks: the board is empty because the
+    // season is new, not because a feed broke, and the reader is told when it
+    // fills (UX review, 2026-11-03). November only, on the ET clock.
+    if (sport === 'NCAAB' && rows.length === 0 && monthET() === 11) {
+      const s = boardSeasonET(sport);
+      return `The ${s - 1}\u2013${String(s).slice(2)} season has just tipped off. Player stats appear as each game goes final.`;
     }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
@@ -3200,7 +3208,7 @@ export function StatsScreen() {
                 hitMode={hitMode}
                 sport={sport}
                 colorful={colorful}
-                thinSample={timeWindow === 'h2h'}
+                thinSample
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail && canOpenPlayerDetail(item.player_id)}
@@ -5323,9 +5331,10 @@ function HitRateRow({
   onPress: () => void;
 }) {
   // `games < 3` is the player page's rule (SplitsCard / HeadToHeadCard), and
-  // under H2H the board has to share it or the SAME 1-of-1 is grey on the
-  // detail screen and full green on the board. Scoped to H2H because every
-  // other window has a uniform denominator, where the rule would say nothing.
+  // the board shares it or the SAME 1-of-1 is grey on the detail screen and
+  // full green on the board. Every window, not only H2H: in a season's first
+  // week L3/L5/L10 are 1-of-1 rows too (NCAAB tipped off 2026-11-03; UX
+  // review), so the denominator is not uniform there either.
   const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
   const nameBlock = (
       <View

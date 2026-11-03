@@ -125,6 +125,12 @@ ANON_READABLE: tuple[str, ...] = (
     "v_player_season_totals_ncaaf",
     "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
+    # Men's college basketball Stats tab (Matt, 2026-11-03). security_invoker
+    # over ncaab_player_game_log, whose SELECT policy and grant are in
+    # add_ncaab_player_game_log_2026_11_03.sql. The player page reads the log
+    # through playerLog.LOG_TABLE, like the WNBA and NBA logs, so the log is
+    # not a literal .from() and is not listed here.
+    "v_player_season_totals_ncaab",
     # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
     # .from() these yet; tests/test_anon_readable.py keeps them on an
     # explicit ahead-of-the-app list so the stale-entry check stays strict
@@ -581,11 +587,13 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_recent_games_mlb",
     "player_recent_games_nba",
     "player_recent_games_ncaaf",
+    "player_recent_games_ncaab",
     "player_recent_games_nfl",
     "player_recent_games_wnba",
     "player_season_stat_values_mlb",
     "player_season_stat_values_nba",
     "player_season_stat_values_ncaaf",
+    "player_season_stat_values_ncaab",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
     # NHL hit-rate arrays (per game, last 5, last 10, season). The app does
@@ -597,6 +605,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_h2h_stat_values_mlb",
     "player_h2h_stat_values_nba",
     "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_ncaab",
     "player_h2h_stat_values_nfl",
     "player_h2h_stat_values_wnba",
     # Same-position-vs-opponent card on the player page
@@ -612,6 +621,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
+    "player_window_totals_ncaab",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
     # NHL Players board. Reads nhl_skater_game_log (shots, ending-year

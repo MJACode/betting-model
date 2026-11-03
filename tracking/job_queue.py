@@ -821,7 +821,10 @@ def _validate_ncaab_schedule_backfill(args: dict) -> dict:
 # what is stored, so a re-run stores nothing twice. The box backfill is held
 # to the current season, the only one sportsdataverse does not cover; an
 # older season would put a second source on games NCAA's rows already hold.
-NCAAB_BOX_BACKFILL_SPANS = {"periods": (2011, 2027), "box": (2027, 2027)}
+# "players": per-player box scores (data/ingestors/ncaab_player_box.py) for
+# the Stats tab, 2025-26 on (Matt, 2026-11-03: "This season + 2025-26").
+NCAAB_BOX_BACKFILL_SPANS = {"periods": (2011, 2027), "box": (2027, 2027),
+                            "players": (2026, 2027)}
 
 
 def _validate_ncaab_box_backfill(args: dict) -> dict:
@@ -842,6 +845,9 @@ def _validate_ncaab_box_backfill(args: dict) -> dict:
 
 
 def _job_ncaab_box_backfill(**kw) -> str:
+    if kw["kind"] == "players":
+        return _run_script_main("data.ingestors.ncaab_player_box",
+                                ["--seasons", str(kw["first"]), str(kw["last"])])[-4000:]
     flag = "--periods" if kw["kind"] == "periods" else "--box"
     return _run_script_main("data.ingestors.ncaab_espn_box",
                             [flag, "--seasons", str(kw["first"]), str(kw["last"])])[-4000:]
