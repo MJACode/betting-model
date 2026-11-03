@@ -1981,7 +1981,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each game
   // once, on game-day morning, the same way.
   // The NCAAB first-half spread card decides each game once, about ten
-  // minutes before tip, the same way.
+  // minutes before tip, the same way. The NCAAB opening-moneyline card
+  // (scripts/ncaab_moneyline_first_post_card.py) bets a game at most once,
+  // the moment a book first posts its moneyline, and never re-prices.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -1992,6 +1994,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'ncaab_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
     pick.model_id === 'ncaab_moneyline_own_spread' ||
+    pick.model_id === 'ncaab_moneyline_first_post' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     nbaPosted
   ) {

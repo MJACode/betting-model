@@ -68,7 +68,7 @@ def _utc(x) -> pd.Series:
     return pd.to_datetime(x, utc=True, format="mixed")
 
 
-def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOKS,
+def standing_quotes(rows: pd.DataFrame, window_min: int | None = WINDOW_MIN, books=BOOKS,
                     need_line: bool = True) -> pd.DataFrame:
     """Each (game, book)'s quote at its game's instant.
 
@@ -78,15 +78,19 @@ def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOK
     its game, and any extra columns, which are carried through. Books outside
     `books` (default BOOKS) are ignored. need_line=False reads a market with
     no line (the moneyline, models/ncaab_moneyline_own_spread.py): a row then
-    needs only its two prices. -> one row per (game_id, bookmaker)."""
+    needs only its two prices. window_min=None reads each book's newest row
+    however old (the first-post moneyline model,
+    models/ncaab_moneyline_first_post.py: change-only rows keep an unchanged
+    quote's old stamp). -> one row per (game_id, bookmaker)."""
     if not len(rows):
         cols = list(dict.fromkeys(QUOTE_COLS + ["instant", "tip"] + list(rows.columns)))
         return pd.DataFrame(columns=cols)
     r = rows[rows["bookmaker"].isin(books)]
     r = r[(r["line"].notna() | (not need_line)) & r["p1"].notna() & r["p2"].notna()]
-    win = pd.Timedelta(minutes=window_min)
-    r = r[(r["ts"] <= r["tip"]) & (r["ts"] <= r["instant"]) & (r["ts"] >= r["instant"] - win)
-          & (r["instant"] < r["tip"])]
+    keep = (r["ts"] <= r["tip"]) & (r["ts"] <= r["instant"]) & (r["instant"] < r["tip"])
+    if window_min is not None:
+        keep &= r["ts"] >= r["instant"] - pd.Timedelta(minutes=window_min)
+    r = r[keep]
     r = r.sort_values(["game_id", "bookmaker", "ts", "order"], kind="mergesort")
     return r.drop_duplicates(["game_id", "bookmaker"], keep="last").reset_index(drop=True)
 
@@ -125,7 +129,7 @@ def flag_and_consensus(q: pd.DataFrame) -> pd.DataFrame:
     return q
 
 
-def snapshot(rows: pd.DataFrame, window_min: int = WINDOW_MIN) -> pd.DataFrame:
+def snapshot(rows: pd.DataFrame, window_min: int | None = WINDOW_MIN) -> pd.DataFrame:
     """standing_quotes, then flag_and_consensus: the whole 15:00 UTC read."""
     return flag_and_consensus(standing_quotes(rows, window_min))
 

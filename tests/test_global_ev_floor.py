@@ -395,6 +395,8 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).
          "ncaab_moneyline_own_spread",
+         # 2026-11-03 (mike): NCAAB moneylines at a book's first post; the same table's P(side wins).
+         "ncaab_moneyline_first_post",
          # 2026-11-02 (mike): NCAAB first-half spread; its table's P(cover, push left out).
          "ncaab_first_half_spread"}
     )

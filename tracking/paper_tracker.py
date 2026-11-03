@@ -2425,6 +2425,10 @@ _RULE_MODEL_MARKETS = {
     # (tests/test_rule_model_markets_everywhere.py), since the ones that read
     # '%spread%' would otherwise send it to the spreads rows.
     "ncaab_moneyline_own_spread": "h2h",
+    # NCAAB full-game moneylines at a book's first post
+    # (models/ncaab_moneyline_first_post.py): a MONEYLINE, settled on
+    # games.home_win (overtime included), scored_line NULL.
+    "ncaab_moneyline_first_post": "h2h",
     # NCAAB first-half spread (models/ncaab_first_half_spread.py). scored_line
     # is the first half's HOME number; it settles on period 1 of
     # ncaab_period_scores (_ncaab_first_half_points), no overtime. NEVER
