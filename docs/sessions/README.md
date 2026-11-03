@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, `ncaab_total_blend` decides at DraftKings' first posted total, every five minutes, bet only while that number stands (research round 5: 1,787 bets +6.26% on 2021-2025, 649 +8.17% on 2025-26, against +3.90% for the old 22:00 / 15:00 UTC rule at its own instant); blend refit on the corrected first-post quotes; the replay matches the research's 2,436 bets (mike) |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, everything in units: every result, stake and payout on every surface (app model pages and history rows, Models list, Performance tab, betslip and parlay payouts, Streamlit dashboard, picks email, settle logs, the volume check, the Claude-mobile picks prompt) shows units, never dollars; the false "best price across all books" record line replaced by "the price the model found" for every model; display and copy only, no stored data changed |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, nba_prop_market bets the play-in, playoffs and Cup final with its rule, cut, floor and caps unchanged; no other NBA model reaches them; alerts for a lost game and for an open bet with no final (mike) |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NBA: seven searches land with results written up, starters 0 of 32, line-size shapes 0 of 256, the two passes checked by a separate rebuild; first evening of the first-half model read; no model change |

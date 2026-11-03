@@ -3,7 +3,7 @@
  "model_id": "ncaab_total_blend",
  "season": 2027,
  "prior_season": 2026,
- "built_at": "2026-10-31T05:14:56Z",
+ "built_at": "2026-11-03T20:16:55Z",
  "command": "python -m scripts.ncaab_total_blend_build --cache <copy of the four reads> --last-season 2026",
  "params": {
   "K": 9.0,
@@ -1879,15 +1879,15 @@
    "tov_sum"
   ],
   "coef": [
-   -0.6771077,
-   -20.08968003,
-   -8.40211207,
-   -8.61705786,
-   5.7945013,
-   -6.53393115,
-   3.06958614,
-   3.19887708,
-   -7.40661326
+   -0.67719094,
+   -20.0914305,
+   -8.43044964,
+   -8.62224721,
+   5.78069842,
+   -6.53738306,
+   3.07541504,
+   3.19963299,
+   -7.41970643
   ],
   "train_seasons": [
    2012,
@@ -1896,16 +1896,16 @@
  },
  "blend": {
   "Nov": {
-   "c": 0.25938117,
-   "beta": 0.19502661,
-   "sigma": 17.19299124,
-   "n": 5734
+   "c": 0.21032386,
+   "beta": 0.2367989,
+   "sigma": 17.22242669,
+   "n": 5735
   },
   "Dec+": {
-   "c": 0.66006194,
-   "beta": 0.39974541,
-   "sigma": 16.49910043,
-   "n": 24525
+   "c": 0.61430738,
+   "beta": 0.45846091,
+   "sigma": 16.51237512,
+   "n": 24540
   }
  },
  "blend_train_seasons": [
@@ -1914,30 +1914,54 @@
  ],
  "replay": {
   "cut": 0.04,
-  "rule": "both teams >= 10 games ended before the quote",
+  "rule": "every quoted game, no games-played wait",
   "2022-2025": {
-   "bets": 809,
-   "wins": 448,
-   "losses": 353,
-   "pushes": 8,
-   "units": 63.28,
-   "roi_pct": 7.17,
-   "overs": 775,
+   "bets": 1787,
+   "wins": 983,
+   "losses": 785,
+   "pushes": 19,
+   "units": 122.66,
+   "roi_pct": 6.26,
+   "overs": 1618,
    "price_min": -120.0,
-   "price_max": 102.0
+   "price_max": 110.0
   },
   "2026": {
-   "bets": 348,
-   "wins": 194,
-   "losses": 154,
+   "bets": 649,
+   "wins": 367,
+   "losses": 282,
    "pushes": 0,
-   "units": 25.76,
-   "roi_pct": 6.78,
-   "overs": 343,
+   "units": 58.05,
+   "roi_pct": 8.17,
+   "overs": 613,
    "price_min": -115.0,
    "price_max": -105.0
   },
-  "min_prob": 0.5403,
-  "min_ev": 0.0753
+  "both_teams_10_games": {
+   "2022-2025": {
+    "bets": 1360,
+    "wins": 759,
+    "losses": 587,
+    "pushes": 14,
+    "units": 116.12,
+    "roi_pct": 7.79,
+    "overs": 1223,
+    "price_min": -120.0,
+    "price_max": 110.0
+   },
+   "2026": {
+    "bets": 518,
+    "wins": 292,
+    "losses": 226,
+    "pushes": 0,
+    "units": 44.29,
+    "roi_pct": 7.81,
+    "overs": 499,
+    "price_min": -115.0,
+    "price_max": -105.0
+   }
+  },
+  "min_prob": 0.5204,
+  "min_ev": 0.0734
  }
 }

@@ -36,7 +36,10 @@ mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model
    2012-2026 seasons.
 3. **Blended with DraftKings' total:** mean = line + c + beta x (model −
    line), normal spread sigma, with c, beta and sigma fitted separately for
-   November and for December on, on the paid seasons 2021-2026.
+   November and for December on, on the paid seasons 2021-2026, at
+   DraftKings' first posted total (refit 2026-11-03: November c 0.2103, beta
+   0.2368, sigma 17.22 on 5,735 games; December on c 0.6143, beta 0.4585,
+   sigma 16.51 on 24,540).
 4. **Priced at DraftKings' own two prices** on that total: the chance the bet
    wins, a push left out, minus the price's implied chance. The better side
    is bet when that edge is above **0.04**. DraftKings only: the evidence
@@ -48,26 +51,58 @@ mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model
    season's games come in. Nothing frozen changed: the November blend was
    always fitted on every quoted November game.
 
-**When a game is decided.** The evidence bet DraftKings' FIRST stored total,
-and the history it bought was snapshots at 22:00 UTC the evening before, at
-15:00 UTC on the day and the hour before tip. So the card (hourly at five
-past, UTC) decides a game at 22:00 UTC the evening before its date if
-DraftKings has a total up then, else at 15:00 UTC on the day, else at each
-hour after until tip. "Up" means DraftKings' newest pre-game row was stored in
-the last 90 minutes. The decision, bet or not, goes into
-`ncaab_total_decisions` with the quote, the cutoff and the reason, and the game
-is never decided again (CLAUDE.md §1c). Only BET rows go into `picks`.
+**When a game is decided (from 2026-11-03, mike).** At DraftKings' **first
+posted** full-game total: the earliest pre-game DraftKings totals row stored
+for the game, by DraftKings' own time on the row, with a total between 90 and
+220 and both prices. A total outside 90-220 is a feed error and is skipped, so
+the next row is the first post (the history holds one, 1465.0 for 146.5). The
+odds capture stores DraftKings' first total within one five-minute poll, and
+the card runs every five minutes, three minutes after each poll, so a game is
+decided minutes after DraftKings posts it. Ratings and inputs are as of the
+first post's hour, as the evidence's were. "First posted" here means first
+stored: live, the capture polls every 5 minutes, which is closer to
+DraftKings' true first post than the research's half-hourly history was.
 
-**A hold is not a decision.** A game waits for its next decision hour while
-either team has, among its games that ended before the quote, one from the
-last 36 hours without a final score or both box rows (`box_pending`), or two
-or more older ones without them (`box_missing`). One older game without a box
-does not hold (the evidence also had a few games with no possessions). The
-boxes come from the ESPN box feed (`data/ingestors/ncaab_espn_box.py`, source
-`espn_summary`, PR #1103). **Before that feed runs no box is stored**: a
-team's first game, and its second if the first ended more than 36 hours
-before the quote, is priced on the prior alone; from the third game on its
-games hold.
+**Only while the first post still stands.** The bet goes in at the first
+post's total and prices only while that is still DraftKings' standing number
+(its newest pre-game row stored in the last 90 minutes, the same total and the
+same two prices). If it is not, the game is decided `first_post_gone`, with no
+bet. The research graded the first post; a number no longer on the board
+cannot be bet; and the game is never bet at a later number instead, because
+the later instants are what the old rule bet, and they were weaker (the table
+below). About half of DraftKings' first totals change by the next half-hourly
+snapshot (median 31 minutes), 71% within 2 hours.
+
+The decision, bet or not, goes into `ncaab_total_decisions` with the quote,
+the cutoff and the reason, and the game is never decided again (CLAUDE.md
+§1c). `check_hour` holds the run's instant, so `decided_at` minus `quote_at` is
+the lag from the first post. Only BET rows go into `picks`. Games decided under
+the 22:00 / 15:00 UTC rule before 2026-11-03 stay decided.
+
+**The rule it replaced** (2026-10-30 to 2026-11-03): 22:00 UTC the evening
+before if DraftKings had a total up then, else 15:00 UTC on the day, else each
+hour after, at DraftKings' standing total. The evidence it shipped on was
+DraftKings' first STORED total among the bought hours, which included the
+previous evening's pre-tip hours (00:00-03:00 UTC) that the card never used,
+so the card decided later than its own evidence.
+
+**A hold is not a decision.** A game waits, and is looked at again on every
+run, while either team has, among its games that ended before the first post,
+one from the last 36 hours without a final score or both box rows
+(`box_pending`), or two or more older ones without them (`box_missing`). The
+36 hours are counted to the run's instant, so a box that never lands stops
+holding. When the box lands the game is decided at the same first post, as of
+the same hour, if that is still DraftKings' standing number, and is
+`first_post_gone` if not. This is the one place the live rule bets less than
+the research did: in 910 of 30,275 games of 2021-2026 (3.0%) DraftKings' first
+total came within 4 hours of one team's previous game ending (tip + 2.5 hours),
+and the ESPN feed stored a box a median 1.9 hours (90th percentile 3.9) after
+that end time on 2026-11-02. One older game without a box does not hold (the
+evidence also had a few games with no possessions). The boxes come from the
+ESPN box feed (`data/ingestors/ncaab_espn_box.py`, source `espn_summary`, PR
+#1103). **Before that feed runs no box is stored**: a team's first game, and
+its second if the first ended more than 36 hours before the quote, is priced
+on the prior alone; from the third game on its games hold.
 
 **A run that cannot decide a due game fails.** `box_missing` can hold a
 team's games all season, so it fails the run, as do an artifact built for
@@ -88,9 +123,64 @@ counted it unboxed. Fixed 2026-10-31; the frozen numbers were rebuilt with it.
 **The 10-game wait ran from 2026-10-30 to 2026-11-02.** It left a
 `below_10_games` row on 106 games, 98 of them not yet tipped on 2026-11-02. That
 row never looked at a price, so it is not a decision: a game with one that has
-not tipped is decided at DraftKings' standing total at its next hour, and the
-row is replaced (`scripts/ncaab_total_card.py`). Those 98 games are priced at
-that later number, not DraftKings' first stored total as the evidence was.
+not tipped is decided again, and the row is replaced
+(`scripts/ncaab_total_card.py`). Until 2026-11-03 that was at DraftKings'
+standing total at its next hour; from 2026-11-03 it is at its first post, if
+that still stands.
+
+**The evidence for the first-post rule** (research round 5, 2026-11-03: the
+model's own walk-forward replay, every game, on DraftKings' first posted total
+from the stored history with the opener grid's half-hourly purchase in it,
+the one feed typo removed, the blend refit on those quotes; stake_for, pushes
+0, 95% interval resampled by date; 2021-2025 means seasons 2022-2025 bet, the
+blend walk-forward from 2021):
+
+| Cut | Seasons | Bets | Units | ROI | 95% interval | By season |
+|---|---|---|---|---|---|---|
+| 0.03 | 2021-2025 | 2,997 | +178.20 | +5.42% | [2.05, 8.69] | +7.9 / +12.5 / +4.0 / +2.2 |
+| **0.04** | **2021-2025** | **1,787** | **+122.66** | **+6.26%** | **[1.72, 10.66]** | **+9.6 (307) / +13.0 (274) / +3.6 (496) / +4.1 (710)** |
+| 0.05 | 2021-2025 | 1,045 | +90.12 | +7.87% | [2.49, 13.53] | +12.8 / +12.1 / +5.4 / +6.3 |
+| 0.03 | 2025-26 | 998 | +55.54 | +5.09% | [-1.02, 10.86] | |
+| **0.04** | **2025-26** | **649** | **+58.05** | **+8.17%** | **[0.42, 15.19]** | |
+| 0.05 | 2025-26 | 387 | +45.94 | +10.86% | [0.78, 19.99] | |
+
+At 0.04: record 983-785-19 on 2021-2025 and 367-282-0 on 2025-26. Close EV
+against Pinnacle's no-vig close +1.72% and +3.87%; the bet line 1.28 and 1.77
+points better than Pinnacle's close. Prices -120 to +110 (2025-26: -115 to
+-105). 1,618 of 1,787 bets are overs (91%; 2025-26 613 of 649). Without the 10
+best dates: +62.43 units on 2021-2025, -3.78 on 2025-26. Claimed chance of the
+bets 0.580 against a hit rate of 0.542-0.592 by season: calibrated in
+2022-2023, 1.4-3.9 points optimistic in 2024-2026. Betting every DraftKings
+over blind lost 2.6% (2021-2025) and 5.5% (2025-26). Edge is larger at the
+first post: 9.4% of games clear 0.04 there against 3.2% at the old rule's
+instant (25,946 games scored both ways).
+
+**The rule it replaced, at its own decision instant** (the same research, the
+card's actual quote: DraftKings' total at 22:00 UTC the evening before if it
+was in that snapshot, else 15:00 UTC, else the first later hour; every game,
+cut 0.04):
+
+| Blend | Seasons | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|---|
+| the shipped artifact's (fit on the evidence's quotes, so in-sample) | 2022-2025 | 1,089 | +48.63 | +4.11% | [-0.87, 9.27] |
+| the shipped artifact's | 2022-2026 | 1,563 | +66.46 | +3.90% | [-0.50, 8.00] |
+| walk-forward, refit at that instant | 2022-2025 | 591 | +17.78 | +2.77% | [-3.93, 9.50] |
+| walk-forward, refit at that instant | 2025-26 | 228 | +21.38 | +8.61% | [-4.92, 20.76] |
+| **first post (live from 2026-11-03)** | **2022-2025** | **1,787** | **+122.66** | **+6.26%** | **[1.72, 10.66]** |
+| **first post** | **2025-26** | **649** | **+58.05** | **+8.17%** | **[0.42, 15.19]** |
+
+Of the old rule's 591 walk-forward bets on 2021-2025, the first-post rule also
+bets 525 games (+1.94% at its quote against +2.58% at the old one); the 1,262
+games only it bets made
++8.06% (interval lower bound 2.76) on 2021-2025 and +8.95% (lower bound 0.56)
+on 458 in 2025-26. Multiple
+testing: about 330 cells were graded in that research; this one was
+pre-registered and passes, but some passes are expected by chance. Files:
+research round 5, `RESULTS.txt` (Q5 and the 2026-11-03 addendum).
+
+**The tables below are the evidence the model shipped on (2026-10-30 and
+2026-11-02), graded at DraftKings' first STORED total before the opener grid
+was stored.** They are kept as history.
 
 **The replay with no wait** (2026-11-02; the build's own walk-forward replay and
 grade on the copy of 2026-10-30, every quoted game kept, cut 0.04; 95% interval
@@ -119,13 +209,13 @@ with a team on 0 games cleared the cut.
 |---|---|---|
 | the cut | edge > 0.04 (P(win, push left out) minus DraftKings' implied) | `config.MODEL_EDGE_THRESHOLDS` |
 | prob / edge filter | 0.0 / 0.04: the edge filter IS the card's cut, because model_probability is that same P(win, push left out) | `ACTION_THRESHOLDS` |
-| EV floor | 0.07, just under the smallest EV the cut admitted on 2021-2025 (+0.0743; median +0.0996), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
-| price floor | -200, pinned (it laid -120 to +102) | `MODEL_MIN_ODDS` |
-| decision hours | 22:00 UTC the evening before; else 15:00 UTC on the day and each hour to tip | `models/ncaab_total_blend.decision_hour` |
+| EV floor | 0.07, just under the smallest EV the cut admitted in the first-post replay of 2022-2026 (+0.0734, 2,436 bets; it was +0.0743 on the old quotes), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned (it laid -120 to +110) | `MODEL_MIN_ODDS` |
+| decision moment | DraftKings' first posted total (earliest pre-game row, total 90-220, both prices), bet only while it still stands; the card every 5 minutes, 3 after each capture poll | `scripts/ncaab_total_card.load_first_posts`, `scheduler.run_ncaab_total_card` |
 | decided once | a row in `ncaab_total_decisions`, bet or not | `scripts/ncaab_total_card.py` |
 | settlement | full-game total, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
 | kill switch | `RUN_NCAAB_TOTAL_CARD=0` | the card |
-| frozen numbers | built from 2011-2026 | `models/saved/ncaab_total_blend_2027.json` |
+| frozen numbers | built from 2011-2026; blend and residual refit at the first post 2026-11-03 | `models/saved/ncaab_total_blend_2027.json` |
 
 **The evidence, graded exactly as it runs live** (scratch chain of
 2026-10-30: box-score possessions in every season, no returning-minutes input,
@@ -188,18 +278,25 @@ no team id on either NCAA row kept one row, which on 2024-25 would have held
 Fairleigh Dickinson and Saint Francis as `box_missing` all season (five such
 games each).
 
-**The risks, plainly:**
+**The risks, plainly** (the first five bullets are the first-post research
+above; the rest are from the evidence it shipped on):
 
-- **92% of its bets are overs** (1,007 of 1,094 on 2021-2025; 344 of 349 in
-  2025-26). Betting every over blind at the same prices lost 1.75% on
-  2021-2025, so it is not just an over lean, but expect an over-heavy card.
-- **Closing-line value is thin.** Close EV against Pinnacle's no-vig close is
-  +0.27% at 0.04, and its interval in the research version ([-0.28, 0.90])
-  includes zero. At 0.03 it is negative. The realised return runs well above
-  what the close implies, which holds only if the model's information against
-  the close is real.
-- **2025-26 rests on its best days.** Without its 5 best dates the research
-  version's 2025-26 was -0.78% (282 bets); without its 10 best, -6.88%.
+- **Speed.** About half of DraftKings' first totals change within about half
+  an hour. Bets whose first total stood over 2 hours made +9.9% on 2021-2025;
+  those that changed within 30 minutes +6.3% (2025-26: +2.3%). The card bets
+  within about eight minutes of the capture's poll, and never at a number that
+  has moved.
+- **2025-26 rests on its best days.** Without its 10 best dates the first-post
+  rule's 2025-26 is -3.78 units; 2021-2025 keeps +62.43.
+- **It claims more than it hits in recent seasons.** The bets' claimed chance
+  of winning is 0.580; they hit 1.4-3.9 points less in 2024-2026.
+- **91% of its bets are overs** (1,618 of 1,787 on 2021-2025; 613 of 649 in
+  2025-26). Betting every DraftKings over blind lost 2.6% and 5.5%, so it is
+  not just an over lean, but expect an over-heavy card.
+- **Closing-line value is positive but modest.** Close EV against Pinnacle's
+  no-vig close is +1.72% (2021-2025) and +3.87% (2025-26) at the first post.
+  On the quotes it shipped on it was +0.27%, with an interval that included
+  zero.
 - **The games the wait kept out are about break-even** (the table above):
   they add 356 bets and +4.40 units over five seasons, and the seasons split
   (2022 +25.20%, 2023 -6.02%, 2024 -0.51%, 2025 -10.14%, 2026 +8.46%).
