@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Scoreboard splits source probe: stored splits are Action Network consensus, not DraftKings; worker probe of DK Network and AN book ids; writes nothing |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB spread model LIVE (`ncaab_spread_market`): best of eight books' 15:00 UTC spreads vs the books' median line, edge > 0.03, 3+ other books, no games-played wait; replay matched the research's 613 bets |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, no-restated-records merged over 89 master commits (session-log conflicts only). 10-30 and 11-01 restated while it waited; both were goalie saves props. |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Teams board: every stat explained (hint + Details), tabs rearranged, splits under 10 games show the record; NBA/NHL ending-year season; NBA 2026-27 ratings built on the worker from ESPN boxes; MLB/NHL ATS on the main ±1.5 line only; no model change |
