@@ -558,7 +558,43 @@ NCAAB_ODDS_HISTORY_MODES = {
     # billed above 30 (job 805227's 7,403 snapshots averaged 30.56 in
     # api_call_log). The job's own max_credits is set when it is approved.
     "opener_grid": {"cap": 1_170_000, "seasons": (2021, 2026), "argv": ["--opener-grid"]},
+    # The game-day first-half and team-total times (mike, 2026-11-02): 15:00Z
+    # and 18:00Z on the game's date and tip minus 60 minutes, 2023-24..2025-26,
+    # each under its own source. Approved that day: the 50-game test at 15:00Z
+    # (at most 50 x 40 + 50 lists = 2,050), then the full 15:00Z buy if books
+    # post first-half lines by then; 18:00Z and tip-60 follow on 2026-12-01.
+    # Each cap sits above the measured ceiling (40 a game FG-listed by the
+    # time + 1 a date, api_call_log + odds, 2026-11-02): 15:00Z 687,686,
+    # 18:00Z 628,965, tip-60 689,286. {"mode": ..., "dry_run": true} prints
+    # the plan against production and makes no call.
+    "deriv_15z": {"cap": 700_000, "seasons": (2024, 2026), "argv": ["--derivatives", "15z"]},
+    "deriv_18z": {"cap": 650_000, "seasons": (2024, 2026), "argv": ["--derivatives", "18z"]},
+    "deriv_tip60": {"cap": 700_000, "seasons": (2024, 2026),
+                    "argv": ["--derivatives", "tip60"]},
+    "deriv_15z_test": {"cap": 2_500, "seasons": (2024, 2026),
+                       "argv": ["--derivatives", "15z", "--sample", "50"]},
 }
+NCAAB_GAMEDAY_DERIV_MODES = frozenset({"deriv_15z", "deriv_18z", "deriv_tip60", "deriv_15z_test"})
+# Paid calls in flight at once for the grid and the first-half purchases
+# (mike, 2026-11-02: "I want it all done"). A job whose stored args name none
+# runs at the default, so a job reclaimed after a redeploy (the opener grid,
+# job 936020) picks it up. The buyer's meter clears every call with the calls
+# in flight counted at their most, so the floor holds at any setting.
+NCAAB_ODDS_HISTORY_CONCURRENT_MODES = frozenset(
+    {"opener_grid", "deriv_close", "deriv_open"} | NCAAB_GAMEDAY_DERIV_MODES)
+NCAAB_ODDS_HISTORY_DEFAULT_CONCURRENCY = 6
+NCAAB_ODDS_HISTORY_MAX_CONCURRENCY = 10
+
+
+def _ncaab_concurrency(args: dict) -> dict:
+    """{"concurrency": n} when the args name one (1..10, an integer), else {}."""
+    if "concurrency" not in args:
+        return {}
+    n = args["concurrency"]
+    if isinstance(n, bool) or not isinstance(n, int)             or not 1 <= n <= NCAAB_ODDS_HISTORY_MAX_CONCURRENCY:
+        raise ValueError(f"concurrency must be an integer 1..{NCAAB_ODDS_HISTORY_MAX_CONCURRENCY}, "
+                         f"got {n!r}")
+    return {"concurrency": n}
 # 300,000 = 3.5 of October's worst organic days (84,534 credits on 2026-10-04,
 # odds_api_quota) ahead of a refill that lands about 00:00Z on the 1st (the
 # Sept and Oct resets both show a full day's burn by the 1st's 23:40Z reading).
@@ -595,6 +631,11 @@ def _job_ncaab_odds_history(**kw):
         if kw.get("dry_run"):
             return _run_script_main("data.ingestors.ncaab_odds_history",
                                     argv + ["--dry-run"])[-4000:]
+    if kw["mode"] in NCAAB_GAMEDAY_DERIV_MODES and kw.get("dry_run"):
+        return _run_script_main("data.ingestors.ncaab_odds_history", argv + ["--dry-run"])[-4000:]
+    if kw["mode"] in NCAAB_ODDS_HISTORY_CONCURRENT_MODES:
+        argv += ["--concurrency",
+                 str(kw.get("concurrency") or NCAAB_ODDS_HISTORY_DEFAULT_CONCURRENCY)]
     argv += ["--apply", "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
     return _run_script_main("data.ingestors.ncaab_odds_history", argv)[-4000:]
 
@@ -605,10 +646,10 @@ def _validate_ncaab_opener_grid(args: dict) -> dict:
     buys nothing and takes no credit limit; a purchase takes both, under the
     mode's ceiling and over the floor."""
     extra = sorted(set(args) - {"mode", "step_min", "pre_start", "seasons", "dry_run",
-                                "max_credits", "floor"})
+                                "max_credits", "floor", "concurrency"})
     if extra:
         raise ValueError(f"unknown args {extra}; opener_grid takes step_min, pre_start, seasons, "
-                         f"dry_run, max_credits and floor")
+                         f"dry_run, max_credits, floor and concurrency")
     step = args.get("step_min")
     if isinstance(step, bool) or step not in (60, 30):
         raise ValueError(f"step_min must be 60 or 30, got {step!r}")
@@ -626,8 +667,9 @@ def _validate_ncaab_opener_grid(args: dict) -> dict:
         raise ValueError(f"seasons must be [first, last] within {lo}..{hi}, got {seasons!r}")
     out["seasons"] = (seasons[0], seasons[1])
     if out["dry_run"]:
-        if "max_credits" in args or "floor" in args:
-            raise ValueError("a dry run buys nothing; it takes no max_credits or floor")
+        if "max_credits" in args or "floor" in args or "concurrency" in args:
+            raise ValueError("a dry run buys nothing; it takes no max_credits, floor or "
+                             "concurrency")
         return out
     cap = int(args.get("max_credits") or 0)
     top = NCAAB_ODDS_HISTORY_MODES["opener_grid"]["cap"]
@@ -636,7 +678,7 @@ def _validate_ncaab_opener_grid(args: dict) -> dict:
     floor = int(args.get("floor") or 0)
     if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
         raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
-    return {**out, "max_credits": cap, "floor": floor}
+    return {**out, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
 
 
 def _validate_ncaab_odds_history(args: dict) -> dict:
@@ -651,9 +693,24 @@ def _validate_ncaab_odds_history(args: dict) -> dict:
         return {"mode": args["mode"], "dry_run": dry}
     if args.get("mode") == "opener_grid":
         return _validate_ncaab_opener_grid(args)
-    extra = sorted(set(args) - {"mode", "max_credits", "floor"})
+    if args.get("mode") in NCAAB_GAMEDAY_DERIV_MODES and "dry_run" in args:
+        # A game-day time's dry run buys nothing and takes no credit limit;
+        # dry_run false is a purchase, held to the checks below.
+        dry, args = args["dry_run"], {k: v for k, v in args.items() if k != "dry_run"}
+        if not isinstance(dry, bool):
+            raise ValueError(f"dry_run must be true or false, got {dry!r}")
+        if dry:
+            extra = sorted(set(args) - {"mode"})
+            if extra:
+                raise ValueError(f"a dry run buys nothing; it takes mode and dry_run only, "
+                                 f"not {extra}")
+            return {"mode": args["mode"], "dry_run": True}
+    allowed = {"mode", "max_credits", "floor"}
+    if args.get("mode") in NCAAB_ODDS_HISTORY_CONCURRENT_MODES:
+        allowed.add("concurrency")
+    extra = sorted(set(args) - allowed)
     if extra:
-        raise ValueError(f"unknown args {extra}; this job takes mode, max_credits and floor")
+        raise ValueError(f"unknown args {extra}; this job takes {', '.join(sorted(allowed))}")
     mode = args.get("mode")
     if mode not in NCAAB_ODDS_HISTORY_MODES:
         raise ValueError(f"mode must be one of "
@@ -666,7 +723,7 @@ def _validate_ncaab_odds_history(args: dict) -> dict:
     floor = int(args.get("floor") or 0)
     if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
         raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
-    return {"mode": mode, "max_credits": cap, "floor": floor}
+    return {"mode": mode, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
 
 
 # The free NCAAB feed check (scripts/ncaab_feed_probe.py). Its only paid calls
