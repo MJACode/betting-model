@@ -89,6 +89,11 @@ MAX_ABS_PRICE = 100_000.0       # beyond +/-100000 is a typo; -100000 itself is 
 #                              DraftKings' first posted total)
 #   ncaab_spread_market        0.1500  (2021-2026, 613 bets at the 0.03 cut)
 #   ncaab_moneyline_own_spread 0.0594  (2021-2026, 914 bets at the 0.01 cut)
+#   ncaab_moneyline_first_post 0.2416  (2021-2026, 353 bets at the 0.015 cut: BetMGM's
+#                              +340 first post on central-connecticut_umass-lowell,
+#                              2021-11-17), also the largest of all 97,429 first
+#                              posts priced with 3+ other books up, so its cap
+#                              sits above it at 0.40 rather than at 0.25
 #   ncaab_first_half_total     0.3381  (2023-24 to 2025-26, 17,142 decided games),
 #                              then 0.1508: the 0.3381 is FanDuel under 79.5 when
 #                              every other book had 68-69, so its cap sits above it
@@ -103,6 +108,7 @@ EDGE_CAP: dict[str, float] = {
     "ncaab_total_blend": 0.25,
     "ncaab_spread_market": 0.25,
     "ncaab_moneyline_own_spread": 0.25,
+    "ncaab_moneyline_first_post": 0.40,
     "ncaab_first_half_spread": 0.60,
     "ncaab_first_half_total": 0.50,
 }

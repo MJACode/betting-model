@@ -133,7 +133,7 @@ def too_close(tip, instant) -> bool:
 
 # ── the two reads ─────────────────────────────────────────────────────────────
 
-def moneyline_quotes(rows: pd.DataFrame) -> pd.DataFrame:
+def moneyline_quotes(rows: pd.DataFrame, window_min: int | None = bq.WINDOW_MIN) -> pd.DataFrame:
     """Every REF_BOOKS moneyline standing at its game's instant, with its flags.
 
     rows: stored h2h odds rows (models/ncaab_book_quotes.load_rows with
@@ -141,8 +141,10 @@ def moneyline_quotes(rows: pd.DataFrame) -> pd.DataFrame:
     home / away prices. A quote with a price inside -100..+100 is dropped.
     Adds isum, pq (power de-vigged P(home)), fav (+1 home, -1 away, 0 even),
     overround_bad and fav_alone. spread_disagree and flag_any are added by
-    flag_moneylines, which needs the spreads."""
-    q = bq.standing_quotes(rows, books=REF_BOOKS, need_line=False)
+    flag_moneylines, which needs the spreads. window_min: the freshness window
+    (models/ncaab_book_quotes.standing_quotes; None = the newest row however
+    old, the first-post model's read)."""
+    q = bq.standing_quotes(rows, window_min=window_min, books=REF_BOOKS, need_line=False)
     ok, s = pair_ok(q["p1"], q["p2"]) if len(q) else (np.zeros(0, bool), np.zeros(0))
     q = q[ok].copy()
     q["isum"] = s[ok]
@@ -163,14 +165,16 @@ def moneyline_quotes(rows: pd.DataFrame) -> pd.DataFrame:
     return q.reset_index(drop=True)
 
 
-def spread_quotes(rows: pd.DataFrame, table: dict) -> pd.DataFrame:
+def spread_quotes(rows: pd.DataFrame, table: dict,
+                  window_min: int | None = bq.WINDOW_MIN) -> pd.DataFrame:
     """Every bettable book's spread standing at its game's instant
     (models/ncaab_book_quotes.snapshot: the sign-error flag over the eight
     books), with sp_valid (prices -100/+100 or longer, implied sum 1.00-1.15),
     own_ok (sp_valid and not flagged), and, where own_ok, pcov (P home covers
     | no push, power de-vigged), mu (the expected home margin that gives it at
-    the book's line) and ph_own (P home wins at that mean)."""
-    q = bq.snapshot(rows)
+    the book's line) and ph_own (P home wins at that mean). window_min as in
+    moneyline_quotes."""
+    q = bq.snapshot(rows, window_min)
     if not len(q):
         for c in ("sp_valid", "own_ok"):
             q[c] = pd.Series(dtype=bool)
@@ -285,7 +289,8 @@ def load_artifact(path: str | Path | None = None) -> dict:
 # ── the decision ──────────────────────────────────────────────────────────────
 
 DIAG_KEYS = ("games", "already_decided", "no_quotes", "no_clean_quote", "below_cut",
-             "book_not_bettable", "edge_cap", "bets", "missed", "tipped", "quotes_dropped")
+             "book_not_bettable", "edge_cap", "bets", "missed", "tipped", "quotes_dropped",
+             "other_model_bet")
 
 
 @dataclass
@@ -400,9 +405,12 @@ def decide(game_ids, ml: pd.DataFrame, sp: pd.DataFrame, cut: float,
     return out
 
 
-def read(ml_rows: pd.DataFrame, sp_rows: pd.DataFrame, table: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+def read(ml_rows: pd.DataFrame, sp_rows: pd.DataFrame, table: dict,
+         window_min: int | None = bq.WINDOW_MIN) -> tuple[pd.DataFrame, pd.DataFrame]:
     """The whole 15:00 UTC read from raw rows carrying instant and tip:
-    (flag_moneylines output, spread_quotes output)."""
-    sp = spread_quotes(sp_rows, table)
-    ml = flag_moneylines(moneyline_quotes(ml_rows), sp)
+    (flag_moneylines output, spread_quotes output). window_min=None is the
+    first-post model's read (models/ncaab_moneyline_first_post.py): each
+    book's newest row however old."""
+    sp = spread_quotes(sp_rows, table, window_min)
+    ml = flag_moneylines(moneyline_quotes(ml_rows, window_min), sp)
     return ml, sp
