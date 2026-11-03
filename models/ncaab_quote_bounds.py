@@ -21,7 +21,7 @@ rule:
   * the totals card (scripts/ncaab_total_card.py): DraftKings is its only
     book, so the game is not decided on it and waits for its next decision
     hour (status out_of_range);
-  * the 15:00 UTC spread and moneyline cards and the first-half spread card
+  * the 15:00 UTC spread and moneyline cards and the two first-half cards
     decide on the books that are left, the dropped quote listed in the
     decision row; a game left with no quote is decided with none.
 A missing line or price is not a data error here, nor a price inside
@@ -46,7 +46,8 @@ season so far (`odds`, rows stamped at or before the tip):
   full-game spread  2021-26: 890,454 rows, -47.5 to +34.5. 2026-27: -44.5 to
                     +11.5 (a -78.5 is stored after a tip, never before).
                                                         -> -60 to +60
-  first-half total  2023-26 purchase: 43.5-94.5. 2026-27: 64.5-82.5.
+  first-half total   2023-26 purchases: 43.5-94.5 over every bought time
+                    (52.5-94.5 an hour before tip). 2026-27: 64.5-82.5.
                                                         -> 40 to 120
   first-half spread 2023-26 purchase: -27.5 to +20.5. 2026-27: -18.5 to +5.5.
                                                         -> -35 to +35
@@ -84,6 +85,9 @@ MAX_ABS_PRICE = 100_000.0       # beyond +/-100000 is a typo; -100000 itself is 
 #   ncaab_total_blend          0.1257  (2022-2026, 1,513 bets at the 0.04 cut)
 #   ncaab_spread_market        0.1500  (2021-2026, 613 bets at the 0.03 cut)
 #   ncaab_moneyline_own_spread 0.0594  (2021-2026, 914 bets at the 0.01 cut)
+#   ncaab_first_half_total     0.3381  (2023-24 to 2025-26, 17,142 decided games),
+#                              then 0.1508: the 0.3381 is FanDuel under 79.5 when
+#                              every other book had 68-69, so its cap sits above it
 #   ncaab_first_half_spread    0.4633  (2023-24 to 2025-26, 17,206 decided games),
 #                              then 0.4108 and 0.2583: all three at a book whose
 #                              first-half line no other book had (BetMGM +12.5
@@ -96,6 +100,7 @@ EDGE_CAP: dict[str, float] = {
     "ncaab_spread_market": 0.25,
     "ncaab_moneyline_own_spread": 0.25,
     "ncaab_first_half_spread": 0.60,
+    "ncaab_first_half_total": 0.50,
 }
 
 

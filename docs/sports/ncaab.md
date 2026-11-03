@@ -9,6 +9,21 @@
 
 ## The models
 
+**A feed typo never becomes a bet (2026-11-03).** Every live NCAAB card reads
+one guard, `models/ncaab_quote_bounds.py`. A quote whose line is outside its
+market's range (full-game total 90-220, spread +/-60, first-half total 40-120,
+first-half spread +/-35) or whose price is beyond +/-100000 is dropped before
+any consensus or price reads it, and that book's older row is not used
+instead. The totals card then holds the game for its next decision hour; the
+other cards decide on the books that are left. Each drop is logged with its
+game, book and value and counted on the run's line. A best edge above the
+model's cap (0.25; 0.60 and 0.50 for the first-half spread and total
+models, whose own replays reached 0.46 and 0.34) is never bet and fails the
+run. The ranges are the stored
+2021-2026 and 2026-27 lines with a margin, and every card's replay gave the
+same bets with the guard as without it. It was found because the feed held a
+DraftKings total of 1465.0 (Providence at Kentucky, 2023-03-17).
+
 ### The NCAAB totals model (`ncaab_total_blend`), live from 2026-10-30
 
 mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model

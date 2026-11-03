@@ -48,7 +48,8 @@ def test_each_market_has_its_measured_range():
                              "totals_h1": (40.0, 120.0), "spreads_h1": (-35.0, 35.0)}
     assert qb.MAX_ABS_PRICE == 100_000
     assert qb.EDGE_CAP == {"ncaab_total_blend": 0.25, "ncaab_spread_market": 0.25,
-                           "ncaab_moneyline_own_spread": 0.25, "ncaab_first_half_spread": 0.60}
+                           "ncaab_moneyline_own_spread": 0.25, "ncaab_first_half_spread": 0.60,
+                           "ncaab_first_half_total": 0.50}
 
 
 def test_a_typo_is_a_data_error_and_the_extremes_history_holds_are_not():
@@ -231,17 +232,40 @@ def _fh_quotes(*rows):
                           "snapshot_at": "x"} for b, ln, hp, ap in rows])
 
 
+def _fht_quotes(*rows):
+    return pd.DataFrame([{"game_id": GID, "bookmaker": b, "total_line": ln, "over_price": op,
+                          "under_price": up, "over_link": f"{b}/o", "under_link": f"{b}/u",
+                          "snapshot_at": "x"} for b, ln, op, up in rows])
+
+
 class _Null:
     def close(self):
         pass
 
 
-def _fh_wire(monkeypatch, quotes, fetch_at, fg=None):
-    """run_card read through stubs: one game, one decision fetch at fetch_at."""
-    from scripts import ncaab_first_half_spread_card as card
+def _fh_wire(monkeypatch, quotes, fetch_at, fg=None, total=False):
+    """run_card read through stubs: one game, one decision fetch at fetch_at.
+    total=True runs the first-half total card instead of the spread card."""
+    from scripts import ncaab_first_half_spread_card as spread_card
+    from scripts import ncaab_first_half_total_card as total_card
     from scripts import ncaab_first_half_window as win
     import models.scorer as scorer
-    from tests.test_ncaab_first_half_spread import T
+    import models.ncaab_first_half_spread as fh
+    import models.ncaab_first_half_total as ft
+    if total:
+        from tests.test_ncaab_first_half_total import T
+        card, mod = total_card, ft
+        art = {"map": {"a": -2.0, "b": 0.485}, "_T": T,
+               "tilt": {"alpha": 0.0, "beta": 0.0, "k": 236.0, "w_prev": 0.5},
+               "prior_team_sums": {}}
+        fg = fg or {"cons": 140.0, "nb": 5}
+    else:
+        from tests.test_ncaab_first_half_spread import T
+        card, mod = spread_card, fh
+        art = {"map": {"a": 0.0, "b": 0.56}, "_T": T,
+               "tilt": {"alpha": 0.0, "beta": 0.0, "k": 782.2, "w_prev": 0.5},
+               "prior_team_sums": {}}
+        fg = fg or {"cons": -8.0, "nb": 5}
     got = {}
     monkeypatch.setenv("RUN_NCAAB_FIRST_HALF", "1")
     monkeypatch.setattr(card, "enabled", lambda: True)
@@ -252,19 +276,17 @@ def _fh_wire(monkeypatch, quotes, fetch_at, fg=None):
     monkeypatch.setattr(win, "listed", lambda conn, ids: set(ids))
     monkeypatch.setattr(card, "ensure_decisions_table", lambda conn: None)
     monkeypatch.setattr(card, "decided_games", lambda conn, ids: set())
-    monkeypatch.setattr(card.feed, "decision_fetches", lambda conn, ids, now: {GID: (fetch_at, {})})
+    monkeypatch.setattr(card.feed, "decision_fetches",
+                        lambda conn, ids, now, **kw: {GID: (fetch_at, {})})
     monkeypatch.setattr(card, "decision_quotes", lambda conn, cuts: quotes)
-    monkeypatch.setattr(card, "fg_consensus", lambda conn, cuts: {GID: fg or {"cons": -8.0, "nb": 5}})
-    art = {"map": {"a": 0.0, "b": 0.56}, "_T": T,
-           "tilt": {"alpha": 0.0, "beta": 0.0, "k": 782.2, "w_prev": 0.5}, "prior_team_sums": {}}
+    monkeypatch.setattr(card, "fg_consensus", lambda conn, cuts: {GID: fg})
     monkeypatch.setattr(card, "artifact", lambda season: art)
-    import models.ncaab_first_half_spread as fh
-    tg = pd.DataFrame(columns=list(card.TEAM_COLS))
+    tg = pd.DataFrame(columns=list(spread_card.TEAM_COLS))
     sg = pd.DataFrame({"game_id": pd.Series(dtype=object), "home_team": pd.Series(dtype=object),
                        "away_team": pd.Series(dtype=object), "home_score": pd.Series(dtype=float),
                        "tip": pd.Series(dtype="datetime64[ns, UTC]")})
     monkeypatch.setattr(card, "team_games", lambda conn, season, now, write: (tg, sg))
-    monkeypatch.setattr(fh, "team_effects", lambda res, season, prior, targets, k, w: pd.DataFrame(
+    monkeypatch.setattr(mod, "team_effects", lambda res, season, prior, targets, k, w: pd.DataFrame(
         {"game_id": [GID], "tau_home": [0.0], "tau_away": [0.0], "n_home": [0], "n_away": [0]}))
     monkeypatch.setattr(scorer, "_get_current_bankroll", lambda conn: 1000.0)
     monkeypatch.setattr(card, "publish", lambda conn, rows, decided: got.update(
@@ -347,3 +369,54 @@ def test_a_decision_fetch_five_minutes_old_still_decides(monkeypatch):
     card, got = _fh_wire(monkeypatch, _fh_quotes(GENEROUS), TIP - timedelta(minutes=10))
     out = card.run_card(do_publish=True, now=TIP - timedelta(minutes=5))
     assert out["bets"] == 1
+
+
+# ── the first-half total card (live from 2026-11-03, PR #1137) ───────────────
+
+FHT_AT = TIP - timedelta(minutes=60)
+FHT_NOW = TIP - timedelta(minutes=59, seconds=30)
+UNDER = ("fanduel", 69.5, -120, +100)      # T 140 makes mu 65.9: the under at even money bets
+
+
+def test_a_normal_first_half_total_still_bets(monkeypatch):
+    card, got = _fh_wire(monkeypatch, _fht_quotes(UNDER), FHT_AT, total=True)
+    out = card.run_card(do_publish=True, now=FHT_NOW)
+    assert out["bets"] == 1 and got["rows"][0]["decision_book"] == "fanduel"
+    assert out["diag"]["quotes_dropped"] == 0
+
+
+def test_a_first_half_total_of_7_5_is_dropped_and_never_bet(monkeypatch, logs):
+    q = _fht_quotes(("betmgm", 7.5, -110, -110), ("draftkings", 66.0, -110, -110))
+    card, got = _fh_wire(monkeypatch, q, FHT_AT, total=True)
+    out = card.run_card(do_publish=True, now=FHT_NOW)
+    (rec,) = got["decided"]
+    assert out["bets"] == 0 and got["rows"] == [] and rec["book"] != "betmgm"
+    assert out["diag"]["quotes_dropped"] == 1
+    assert "betmgm 7.5 (line 7.5 outside 40 to 120)" in rec["detail"]
+    assert any(f"{GID} betmgm totals_h1 line 7.5" in x for x in logs)
+
+
+def test_an_absurd_first_half_total_edge_is_recorded_not_bet_and_fails_the_run(monkeypatch, logs):
+    q = _fht_quotes(("fanduel", 69.5, -120, +5000))
+    card, got = _fh_wire(monkeypatch, q, FHT_AT, total=True)
+    with pytest.raises(card.CardIncomplete, match="data-error cap"):
+        card.run_card(do_publish=True, now=FHT_NOW)
+    (rec,) = got["decided"]
+    assert rec["status"] == "edge_cap" and got["rows"] == [] and rec["n_bets"] == 0
+
+
+def test_the_total_card_reads_the_full_game_total_through_the_bounds(logs):
+    from scripts import ncaab_first_half_total_card as card
+    cut = datetime(2026, 11, 10, 23, 0, tzinfo=UTC)
+
+    class C:
+        def execute(self, sql, params):
+            class R:
+                def fetchall(self_inner):
+                    return [("g", "draftkings", "2026-11-10T22:30:00Z", 146.5),
+                            ("g", "fanduel", "2026-11-10T22:30:00Z", 145.5),
+                            ("g", "betmgm", "2026-11-10T22:30:00Z", 1465.0)]
+            return R()
+    got = card.fg_consensus(C(), {"g": cut})
+    assert got == {"g": {"cons": 146.0, "nb": 2}}
+    assert any("g betmgm totals line 1465" in x for x in logs)

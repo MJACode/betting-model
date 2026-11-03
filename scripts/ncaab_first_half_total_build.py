@@ -204,7 +204,8 @@ def replay(art: dict, games: pd.DataFrame, team_games: pd.DataFrame, fg_asof: pd
     rows = fg_asof[fg_asof["game_id"].isin(stamp["game_id"])][["game_id", "bookmaker", "ts",
                                                                 "total_line"]] \
         .rename(columns={"total_line": "line"})
-    cons = ft.asof_consensus(rows, stamp.rename(columns={"stamp": "cutoff"})).set_index("game_id")
+    cons = ft.asof_consensus(rows, stamp.rename(columns={"stamp": "cutoff"}),
+                             market="totals").set_index("game_id")
     res = ft.team_game_residuals(team_games[team_games["season"] == S],
                                  art["tilt"]["alpha"], art["tilt"]["beta"])
     targets = stamp.merge(gS[["home_team", "away_team"]], left_on="game_id", right_index=True)
