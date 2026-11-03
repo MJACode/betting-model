@@ -1470,6 +1470,68 @@ def _job_discord_create_channel(**kw):
     return _run_script_main("scripts.discord_create_sport_channel", argv)[-3000:]
 
 
+def _job_discord_test_post(**kw):
+    """Post ONE plain test message to a sport's pick channel, through the same
+    route a real pick takes (discord_notifier._webhook_for_sport: the sport's
+    webhook variable, else DISCORD_CHANNEL_<SPORT> + the bot token, which finds
+    or creates the bot's webhook in that channel).
+
+    mike, 2026-11-02: "Run a test to ncaab then" -- #ncaab was wired by channel
+    id only, so the first real pick would also be the first time the bot made
+    the channel's webhook. This proves that path before a pick depends on it.
+
+    Writes nothing to picks or any other table, so it is not a pick and touches
+    no record. Exactly one POST, no retry (a timed-out POST may already have
+    landed, and a retry would post twice), and it never raises: a failure is
+    returned as the job's result, so the queue does not re-run it. The webhook
+    URL and token never appear in the result."""
+    import requests
+    from tracking import discord_notifier as dn
+    sport = kw["sport"]
+    try:
+        url = dn._webhook_for_sport(sport)
+    except Exception as exc:  # noqa: BLE001
+        return {"sport": sport, "posted": False, "error": f"resolve: {type(exc).__name__}"}
+    if not url:
+        return {"sport": sport, "posted": False,
+                "error": f"no webhook for {sport}: set DISCORD_WEBHOOK_{sport}, or "
+                         f"DISCORD_CHANNEL_{sport} with DISCORD_BOT_TOKEN (the bot needs "
+                         "Manage Webhooks on the channel); see the worker log"}
+    try:
+        r = requests.post(f"{url}?wait=true", json={"content": kw["message"]}, timeout=20)
+    except Exception as exc:  # noqa: BLE001 -- never retried, see docstring
+        return {"sport": sport, "posted": "unknown", "error": type(exc).__name__}
+    out = {"sport": sport, "status": r.status_code, "posted": r.status_code in (200, 204)}
+    if out["posted"]:
+        try:
+            body = r.json()
+            out.update(message_id=str(body.get("id")), channel_id=str(body.get("channel_id")),
+                       webhook_id=str(body.get("webhook_id")))
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        out["error"] = dn._WEBHOOK_IN_TEXT.sub("[webhook]", r.text[:180])
+    try:
+        out["channel"] = dn.channel_hook_info(sport) if config.DISCORD_CHANNELS.get(sport) else None
+    except Exception as exc:  # noqa: BLE001
+        out["channel"] = {"error": type(exc).__name__}
+    return out
+
+
+def _validate_discord_test_post(args: dict) -> dict:
+    extra = sorted(set(args) - {"sport", "message"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes sport, message")
+    sport = str(args.get("sport") or "").strip().upper()
+    if sport not in config.DISCORD_SPORTS:
+        raise ValueError(f"sport must be one of {list(config.DISCORD_SPORTS)}")
+    message = str(args.get("message") or "").strip() or (
+        f"\U0001f9ea Test: Signalbase {sport} pick feed is connected. Not a pick.")
+    if len(message) > 300 or "@" in message:
+        raise ValueError("message must be under 300 characters with no mentions")
+    return {"sport": sport, "message": message}
+
+
 def _validate_discord_create_channel(args: dict) -> dict:
     import re
     extra = sorted(set(args) - {"name", "like", "guild", "apply"})
@@ -2482,6 +2544,9 @@ JOBS = {
     # 2026-10-30). apply defaults false. See _job_discord_create_channel.
     "discord_create_channel": (_job_discord_create_channel,
                                _validate_discord_create_channel),
+    # One plain test message to a sport's pick channel, via the pick route.
+    # Writes no table; one POST, never retried. See _job_discord_test_post.
+    "discord_test_post": (_job_discord_test_post, _validate_discord_test_post),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
