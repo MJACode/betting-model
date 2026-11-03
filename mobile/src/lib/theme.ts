@@ -222,8 +222,8 @@ export const font = {
  * The tone is taken from the value ROUNDED the way the screen shows it —
  * `digits` decimals of `value × scale` — so a ratio printed as "0.0%" is grey
  * and one printed as "+0.1%" is green. Match the formatter beside it:
- * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatCurrencySigned(v)` →
- * `pnlColor(v, 2)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
+ * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatFlatUnits(v)` →
+ * `pnlColor(v, 2, FLAT_UNIT_TONE_SCALE)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
  *
  * The rule itself lives in `lib/tone.ts` so the verify scripts, which cannot
  * import react-native, can pin it.

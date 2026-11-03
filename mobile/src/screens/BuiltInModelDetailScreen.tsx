@@ -17,7 +17,8 @@ import {
   dayLabelET,
   dayLabelSpokenET,
   formatAmerican,
-  formatCurrencySigned,
+  formatFlatUnits,
+  FLAT_UNIT_TONE_SCALE,
   formatGameTimeET,
   formatPct,
   formatPctSigned,
@@ -38,6 +39,7 @@ import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { PickRowTitle } from '@/components/PickRowTitle';
+import { unitsSpeech } from '@/lib/a11y';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -164,7 +166,7 @@ export function BuiltInModelDetailScreen() {
     : pnlColor(stats.roiFlat, 1, 100);
   const pnlTint = thin
     ? colors.textSecondary
-    : pnlColor(stats.profitFlat, 2);
+    : pnlColor(stats.profitFlat, 2, FLAT_UNIT_TONE_SCALE);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -259,11 +261,11 @@ export function BuiltInModelDetailScreen() {
                 label="Flat ROI"
                 value={stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
                 tint={roiColor}
-                caption={thin && stats.stakedFlat > 0 ? thinSampleCaption() : 'vs $100 flat per bet'}
+                caption={thin && stats.stakedFlat > 0 ? thinSampleCaption() : '1u risked per bet'}
               />
               <StatTile
-                label="P&L"
-                value={stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+                label="Flat units"
+                value={stats.stakedFlat > 0 ? formatFlatUnits(stats.profitFlat) : '—'}
                 tint={pnlTint}
                 caption="settled only"
               />
@@ -470,7 +472,7 @@ function TodayPickRow({
 }
 
 // One settled pick in the model's history — shows the outcome (WIN/LOSS/PUSH)
-// and its flat P&L, colored by result. Tap to open the pick detail.
+// and its flat result in units, colored by result. Tap to open the pick detail.
 function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => void }) {
   const resultColor =
     pick.result === 'WIN'
@@ -478,7 +480,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       : pick.result === 'LOSS'
         ? colors.avoidInk
         : colors.textSecondary;
-  const profitLabel = decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat);
+  const profitLabel = decisionOdds(pick) == null ? '—' : unitsSpeech(formatFlatUnits(pick.profit_flat));
   return (
     <Pressable
       style={styles.pickRow}
@@ -506,7 +508,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
         <Text style={[styles.historyProfit, { color: resultColor }]}>
           {/* No price, no money — the row's total excludes this pick, so the
               list must not show the -110 that settlement invented for it. */}
-          {decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat)}
+          {decisionOdds(pick) == null ? '—' : formatFlatUnits(pick.profit_flat)}
         </Text>
       </View>
     </Pressable>

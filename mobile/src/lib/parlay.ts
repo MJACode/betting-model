@@ -282,13 +282,15 @@ export interface BetslipSummary {
   resolved: number;
   /** Combined American odds across the resolved legs; null when none resolve. */
   americanOdds: number | null;
-  /** Total return on a $10 stake (stake included); null when none resolve. */
-  payoutPerTen: number | null;
+  /** Total return, in units, on a 1u stake (stake included); null when none
+   *  resolve. Units, never dollars (mike, 2026-11-03). */
+  payoutPerUnit: number | null;
   /** 2+ resolved legs — the price is a parlay rather than a single bet. */
   isParlay: boolean;
 }
 
-export const BETSLIP_BAR_STAKE = 10;
+/** The betslip bar's example stake, in units. */
+export const BETSLIP_BAR_STAKE = 1;
 
 export function betslipSummary(legs: ParlayLeg[], selectionCount: number): BetslipSummary {
   if (legs.length === 0) {
@@ -296,7 +298,7 @@ export function betslipSummary(legs: ParlayLeg[], selectionCount: number): Betsl
       count: selectionCount,
       resolved: 0,
       americanOdds: null,
-      payoutPerTen: null,
+      payoutPerUnit: null,
       isParlay: false,
     };
   }
@@ -305,7 +307,7 @@ export function betslipSummary(legs: ParlayLeg[], selectionCount: number): Betsl
     count: selectionCount,
     resolved: legs.length,
     americanOdds: m.americanOdds,
-    payoutPerTen: BETSLIP_BAR_STAKE * m.decimalPayout,
+    payoutPerUnit: BETSLIP_BAR_STAKE * m.decimalPayout,
     isParlay: legs.length >= 2,
   };
 }

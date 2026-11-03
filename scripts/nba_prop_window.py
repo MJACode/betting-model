@@ -8,8 +8,9 @@ in 2026-27 could never be decided. mike, 2026-10-16: "run the fucking thing
 more often ... we're not leaving our games."
 
 WHAT A TICK DOES (scheduler.run_nba_prop_window, every five minutes, 24x7):
-  1. plan(): the unstarted regular-season NBA games tipping 40-62 minutes from
-     now (LOOK_AHEAD_MIN) that are not decided yet, and the bet games whose
+  1. plan(): the unstarted NBA games nba_prop_market may bet (regular season, and
+     the play-in, playoffs and Cup final, which only it may bet) tipping 40-62
+     minutes from now (LOOK_AHEAD_MIN) that are not decided yet, and the bet games whose
      closing snapshot is due (12-25 minutes before tip, not yet taken). One
      database read; no API call.
   2. Nothing in either list: the tick returns. It spends nothing.
@@ -72,15 +73,20 @@ class Plan:
 def plan(conn, now: datetime) -> Plan:
     """What this tick has to do, from what is stored. No API call."""
     card.ensure_decisions_table(conn)
-    games = card.slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
-    publish = bool(games)                     # slate() keeps only games not yet tipped
+    games = card.rule_slate(conn, now, horizon_min=LOOK_AHEAD_MIN[1])
+    publish = bool(games)                     # rule_slate() keeps only games not yet tipped
     near = sorted(g for g, v in games.items()
                   if mk.minutes_to_tip(v["tip"], now) >= LOOK_AHEAD_MIN[0])
     if near:
-        # a game is done only when BOTH NBA prop models have decided it
+        # A game is done only when BOTH NBA prop models have decided it, except one only
+        # the rule may bet: the projection model will never decide it, and every tick
+        # would refetch it (17 credits a call) for nothing until tip-40. `postseason` is
+        # set only by the read that adds these games. An unlisted Cup quarterfinal also has
+        # no type, and it is a regular-season game that both models decide.
         rule_done = card.decided_games(conn, near) | card.games_with_a_bet(conn, near)
         proj_done = projection_card.decided_games(conn, near)
-        near = [g for g in near if not (g in rule_done and g in proj_done)]
+        near = [g for g in near
+                if not (g in rule_done and (g in proj_done or games[g].get("postseason")))]
     bet = close_ing.bet_games(conn, now)
     taken = close_ing.closes_taken(conn, sorted(bet)) if bet else set()
     owed = sorted(g for g, v in bet.items()

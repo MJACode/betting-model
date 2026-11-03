@@ -1,0 +1,2153 @@
+{
+ "cup_final": {
+  "date": "2025-12-16",
+  "scoreboard": {
+   "events": [
+    {
+     "id": "401809839",
+     "date": "2025-12-17T01:30Z",
+     "season": {
+      "type": 2,
+      "year": 2026
+     },
+     "status": {
+      "period": 4,
+      "type": {
+       "name": "STATUS_FINAL",
+       "completed": true,
+       "description": "Final"
+      }
+     },
+     "competitions": [
+      {
+       "date": "2025-12-17T01:30Z",
+       "neutralSite": true,
+       "notes": [
+        {
+         "headline": "NBA Cup Championship"
+        }
+       ],
+       "competitors": [
+        {
+         "homeAway": "home",
+         "score": "124",
+         "team": {
+          "abbreviation": "NY",
+          "displayName": "New York Knicks"
+         }
+        },
+        {
+         "homeAway": "away",
+         "score": "113",
+         "team": {
+          "abbreviation": "SA",
+          "displayName": "San Antonio Spurs"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "summary": {
+   "header": {
+    "id": "401809839",
+    "season": {
+     "year": 2026,
+     "current": false,
+     "type": 2
+    },
+    "competitions": [
+     {
+      "date": "2025-12-17T01:30Z"
+     }
+    ]
+   },
+   "boxscore": {
+    "players": [
+     {
+      "team": {
+       "abbreviation": "SA",
+       "displayName": "San Antonio Spurs"
+      },
+      "statistics": [
+       {
+        "labels": [
+         "MIN",
+         "PTS",
+         "FG",
+         "3PT",
+         "FT",
+         "REB",
+         "AST",
+         "TO",
+         "STL",
+         "BLK",
+         "OREB",
+         "DREB",
+         "PF",
+         "+/-"
+        ],
+        "athletes": [
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "23",
+           "11",
+           "4-9",
+           "0-4",
+           "3-3",
+           "3",
+           "2",
+           "0",
+           "1",
+           "1",
+           "2",
+           "1",
+           "0",
+           "+4"
+          ],
+          "athlete": {
+           "id": "6578",
+           "displayName": "Harrison Barnes"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "23",
+           "14",
+           "7-9",
+           "0-0",
+           "0-0",
+           "6",
+           "1",
+           "0",
+           "0",
+           "0",
+           "5",
+           "1",
+           "0",
+           "+7"
+          ],
+          "athlete": {
+           "id": "3064560",
+           "displayName": "Luke Kornet"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "32",
+           "16",
+           "5-13",
+           "2-6",
+           "4-6",
+           "2",
+           "9",
+           "5",
+           "1",
+           "0",
+           "0",
+           "2",
+           "3",
+           "-4"
+          ],
+          "athlete": {
+           "id": "4066259",
+           "displayName": "De'Aaron Fox"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "33",
+           "12",
+           "4-14",
+           "2-7",
+           "2-2",
+           "5",
+           "3",
+           "0",
+           "0",
+           "0",
+           "0",
+           "5",
+           "2",
+           "-9"
+          ],
+          "athlete": {
+           "id": "4395630",
+           "displayName": "Devin Vassell"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "35",
+           "15",
+           "5-15",
+           "1-3",
+           "4-5",
+           "7",
+           "12",
+           "2",
+           "0",
+           "1",
+           "4",
+           "3",
+           "4",
+           "-5"
+          ],
+          "athlete": {
+           "id": "4845367",
+           "displayName": "Stephon Castle"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "16",
+           "3",
+           "1-3",
+           "1-2",
+           "0-0",
+           "4",
+           "0",
+           "0",
+           "0",
+           "0",
+           "3",
+           "1",
+           "0",
+           "-4"
+          ],
+          "athlete": {
+           "id": "4395723",
+           "displayName": "Keldon Johnson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "25",
+           "3",
+           "1-5",
+           "1-4",
+           "0-0",
+           "2",
+           "1",
+           "0",
+           "1",
+           "1",
+           "1",
+           "1",
+           "1",
+           "-11"
+          ],
+          "athlete": {
+           "id": "4592479",
+           "displayName": "Julian Champagnie"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "25",
+           "18",
+           "7-17",
+           "2-6",
+           "2-4",
+           "6",
+           "1",
+           "1",
+           "1",
+           "2",
+           "0",
+           "6",
+           "0",
+           "-18"
+          ],
+          "athlete": {
+           "id": "5104157",
+           "displayName": "Victor Wembanyama"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "28",
+           "21",
+           "7-14",
+           "5-7",
+           "2-2",
+           "7",
+           "0",
+           "0",
+           "0",
+           "0",
+           "3",
+           "4",
+           "3",
+           "-15"
+          ],
+          "athlete": {
+           "id": "5037871",
+           "displayName": "Dylan Harper"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "2489663",
+           "displayName": "Kelly Olynyk"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4066317",
+           "displayName": "Lindy Waters III"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4610139",
+           "displayName": "Jeremy Sochan"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5061568",
+           "displayName": "Carter Bryant"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "6427",
+           "displayName": "Bismack Biyombo"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "3134916",
+           "displayName": "Jordan McLaughlin"
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "team": {
+       "abbreviation": "NY",
+       "displayName": "New York Knicks"
+      },
+      "statistics": [
+       {
+        "labels": [
+         "MIN",
+         "PTS",
+         "FG",
+         "3PT",
+         "FT",
+         "REB",
+         "AST",
+         "TO",
+         "STL",
+         "BLK",
+         "OREB",
+         "DREB",
+         "PF",
+         "+/-"
+        ],
+        "athletes": [
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "40",
+           "28",
+           "10-17",
+           "5-10",
+           "3-5",
+           "9",
+           "3",
+           "0",
+           "0",
+           "1",
+           "4",
+           "5",
+           "4",
+           "+7"
+          ],
+          "athlete": {
+           "id": "3934719",
+           "displayName": "OG Anunoby"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "30",
+           "16",
+           "6-12",
+           "2-5",
+           "2-2",
+           "11",
+           "1",
+           "2",
+           "2",
+           "0",
+           "4",
+           "7",
+           "3",
+           "-2"
+          ],
+          "athlete": {
+           "id": "3136195",
+           "displayName": "Karl-Anthony Towns"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "29",
+           "11",
+           "5-7",
+           "1-3",
+           "0-0",
+           "8",
+           "3",
+           "1",
+           "2",
+           "1",
+           "1",
+           "7",
+           "4",
+           "+3"
+          ],
+          "athlete": {
+           "id": "3062679",
+           "displayName": "Josh Hart"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "33",
+           "11",
+           "4-12",
+           "1-5",
+           "2-2",
+           "5",
+           "5",
+           "1",
+           "0",
+           "0",
+           "1",
+           "4",
+           "0",
+           "-10"
+          ],
+          "athlete": {
+           "id": "3147657",
+           "displayName": "Mikal Bridges"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "41",
+           "25",
+           "11-27",
+           "1-5",
+           "2-4",
+           "4",
+           "8",
+           "4",
+           "0",
+           "1",
+           "1",
+           "3",
+           "3",
+           "+15"
+          ],
+          "athlete": {
+           "id": "3934672",
+           "displayName": "Jalen Brunson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "18",
+           "4",
+           "2-6",
+           "0-0",
+           "0-0",
+           "15",
+           "2",
+           "1",
+           "1",
+           "2",
+           "10",
+           "5",
+           "3",
+           "+9"
+          ],
+          "athlete": {
+           "id": "4351852",
+           "displayName": "Mitchell Robinson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "2",
+           "0",
+           "0-0",
+           "0-0",
+           "0-0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "0",
+           "+4"
+          ],
+          "athlete": {
+           "id": "4871141",
+           "displayName": "Ariel Hukporti"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "27",
+           "15",
+           "6-15",
+           "3-7",
+           "0-0",
+           "2",
+           "0",
+           "0",
+           "1",
+           "1",
+           "2",
+           "0",
+           "1",
+           "+15"
+          ],
+          "athlete": {
+           "id": "2528426",
+           "displayName": "Jordan Clarkson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "20",
+           "14",
+           "5-9",
+           "2-5",
+           "2-2",
+           "5",
+           "5",
+           "1",
+           "0",
+           "0",
+           "0",
+           "5",
+           "2",
+           "+14"
+          ],
+          "athlete": {
+           "id": "4433225",
+           "displayName": "Tyler Kolek"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4017844",
+           "displayName": "Guerschon Yabusele"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4597865",
+           "displayName": "Tosan Evbuomwan"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5211983",
+           "displayName": "Pacome Dadiet"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5289900",
+           "displayName": "Mohamed Diawara"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4395623",
+           "displayName": "Trey Jemison III"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4411057",
+           "displayName": "Kevin McCullar Jr."
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "playin": {
+  "date": "2026-04-14",
+  "scoreboard": {
+   "events": [
+    {
+     "id": "401866755",
+     "date": "2026-04-14T23:30Z",
+     "season": {
+      "type": 5,
+      "year": 2026
+     },
+     "status": {
+      "period": 5,
+      "type": {
+       "name": "STATUS_FINAL",
+       "completed": true,
+       "description": "Final"
+      }
+     },
+     "competitions": [
+      {
+       "date": "2026-04-14T23:30Z",
+       "neutralSite": false,
+       "notes": [
+        {
+         "headline": "NBA Play-In - East - 9th Place vs 10th Place"
+        }
+       ],
+       "competitors": [
+        {
+         "homeAway": "home",
+         "score": "127",
+         "team": {
+          "abbreviation": "CHA",
+          "displayName": "Charlotte Hornets"
+         }
+        },
+        {
+         "homeAway": "away",
+         "score": "126",
+         "team": {
+          "abbreviation": "MIA",
+          "displayName": "Miami Heat"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "summary": {
+   "header": {
+    "id": "401866755",
+    "season": {
+     "year": 2026,
+     "current": false,
+     "type": 5
+    },
+    "competitions": [
+     {
+      "date": "2026-04-14T23:30Z"
+     }
+    ]
+   },
+   "boxscore": {
+    "players": [
+     {
+      "team": {
+       "abbreviation": "MIA",
+       "displayName": "Miami Heat"
+      },
+      "statistics": [
+       {
+        "labels": [
+         "MIN",
+         "PTS",
+         "FG",
+         "3PT",
+         "FT",
+         "REB",
+         "AST",
+         "TO",
+         "STL",
+         "BLK",
+         "OREB",
+         "DREB",
+         "PF",
+         "+/-"
+        ],
+        "athletes": [
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "42",
+           "27",
+           "10-18",
+           "4-8",
+           "3-3",
+           "7",
+           "3",
+           "0",
+           "0",
+           "0",
+           "2",
+           "5",
+           "2",
+           "-6"
+          ],
+          "athlete": {
+           "id": "3059319",
+           "displayName": "Andrew Wiggins"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "11",
+           "6",
+           "3-3",
+           "0-0",
+           "0-0",
+           "3",
+           "1",
+           "0",
+           "1",
+           "0",
+           "0",
+           "3",
+           "0",
+           "+1"
+          ],
+          "athlete": {
+           "id": "4066261",
+           "displayName": "Bam Adebayo"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "42",
+           "12",
+           "5-12",
+           "2-8",
+           "0-0",
+           "19",
+           "4",
+           "0",
+           "0",
+           "5",
+           "6",
+           "13",
+           "1",
+           "-5"
+          ],
+          "athlete": {
+           "id": "5105623",
+           "displayName": "Kel'el Ware"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "48",
+           "28",
+           "12-24",
+           "4-9",
+           "0-0",
+           "4",
+           "6",
+           "0",
+           "2",
+           "1",
+           "1",
+           "3",
+           "2",
+           "-6"
+          ],
+          "athlete": {
+           "id": "4278053",
+           "displayName": "Davion Mitchell"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "34",
+           "23",
+           "7-18",
+           "3-6",
+           "6-6",
+           "3",
+           "6",
+           "2",
+           "0",
+           "0",
+           "0",
+           "3",
+           "1",
+           "-2"
+          ],
+          "athlete": {
+           "id": "4395725",
+           "displayName": "Tyler Herro"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "6",
+           "0",
+           "0-1",
+           "0-1",
+           "0-0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "1",
+           "0",
+           "1",
+           "0",
+           "+3"
+          ],
+          "athlete": {
+           "id": "3899664",
+           "displayName": "Simone Fontecchio"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "41",
+           "13",
+           "5-14",
+           "2-6",
+           "1-2",
+           "6",
+           "8",
+           "1",
+           "0",
+           "1",
+           "1",
+           "5",
+           "2",
+           "+4"
+          ],
+          "athlete": {
+           "id": "4432848",
+           "displayName": "Jaime Jaquez Jr."
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "19",
+           "11",
+           "5-9",
+           "1-2",
+           "0-0",
+           "2",
+           "1",
+           "2",
+           "0",
+           "0",
+           "1",
+           "1",
+           "1",
+           "+11"
+          ],
+          "athlete": {
+           "id": "2595516",
+           "displayName": "Norman Powell"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "22",
+           "6",
+           "2-4",
+           "0-1",
+           "2-3",
+           "3",
+           "3",
+           "2",
+           "1",
+           "0",
+           "1",
+           "2",
+           "0",
+           "-5"
+          ],
+          "athlete": {
+           "id": "4601025",
+           "displayName": "Pelle Larsson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4431772",
+           "displayName": "Myron Gardner"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4431786",
+           "displayName": "Keshad Johnson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "LEFT ANKLE SPRAIN",
+          "stats": [],
+          "athlete": {
+           "id": "4997528",
+           "displayName": "Nikola Jovic"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "RIGHT FOOT",
+          "stats": [],
+          "athlete": {
+           "id": "4066993",
+           "displayName": "Dru Smith"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4433133",
+           "displayName": "Jahmir Young"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5214640",
+           "displayName": "Kasparas Jakucionis"
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "team": {
+       "abbreviation": "CHA",
+       "displayName": "Charlotte Hornets"
+      },
+      "statistics": [
+       {
+        "labels": [
+         "MIN",
+         "PTS",
+         "FG",
+         "3PT",
+         "FT",
+         "REB",
+         "AST",
+         "TO",
+         "STL",
+         "BLK",
+         "OREB",
+         "DREB",
+         "PF",
+         "+/-"
+        ],
+        "athletes": [
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "43",
+           "28",
+           "10-18",
+           "5-10",
+           "3-3",
+           "9",
+           "2",
+           "0",
+           "1",
+           "3",
+           "0",
+           "9",
+           "2",
+           "-7"
+          ],
+          "athlete": {
+           "id": "4066383",
+           "displayName": "Miles Bridges"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "36",
+           "8",
+           "4-5",
+           "0-0",
+           "0-0",
+           "14",
+           "1",
+           "1",
+           "0",
+           "1",
+           "8",
+           "6",
+           "1",
+           "-17"
+          ],
+          "athlete": {
+           "id": "4433249",
+           "displayName": "Moussa Diabate"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "37",
+           "23",
+           "9-17",
+           "5-10",
+           "0-0",
+           "5",
+           "5",
+           "1",
+           "0",
+           "2",
+           "2",
+           "3",
+           "4",
+           "+5"
+          ],
+          "athlete": {
+           "id": "4433287",
+           "displayName": "Brandon Miller"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "40",
+           "30",
+           "12-31",
+           "2-16",
+           "4-4",
+           "5",
+           "10",
+           "3",
+           "1",
+           "1",
+           "0",
+           "5",
+           "5",
+           "+15"
+          ],
+          "athlete": {
+           "id": "4432816",
+           "displayName": "LaMelo Ball"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "34",
+           "6",
+           "2-12",
+           "0-6",
+           "2-2",
+           "5",
+           "1",
+           "0",
+           "0",
+           "0",
+           "1",
+           "4",
+           "4",
+           "-20"
+          ],
+          "athlete": {
+           "id": "5061575",
+           "displayName": "Kon Knueppel"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "18",
+           "5",
+           "2-8",
+           "1-5",
+           "0-0",
+           "2",
+           "0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "1",
+           "2",
+           "-2"
+          ],
+          "athlete": {
+           "id": "4066218",
+           "displayName": "Grant Williams"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "13",
+           "6",
+           "3-4",
+           "0-0",
+           "0-0",
+           "5",
+           "1",
+           "0",
+           "0",
+           "0",
+           "4",
+           "1",
+           "0",
+           "+12"
+          ],
+          "athlete": {
+           "id": "4576060",
+           "displayName": "Ryan Kalkbrenner"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "26",
+           "19",
+           "7-15",
+           "5-8",
+           "0-0",
+           "5",
+           "3",
+           "1",
+           "2",
+           "0",
+           "0",
+           "5",
+           "1",
+           "+21"
+          ],
+          "athlete": {
+           "id": "4395651",
+           "displayName": "Coby White"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "5",
+           "0",
+           "0-1",
+           "0-0",
+           "0-0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "0",
+           "2",
+           "0"
+          ],
+          "athlete": {
+           "id": "4432811",
+           "displayName": "Josh Green"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "13",
+           "2",
+           "1-2",
+           "0-1",
+           "0-0",
+           "3",
+           "3",
+           "0",
+           "0",
+           "0",
+           "0",
+           "3",
+           "0",
+           "-2"
+          ],
+          "athlete": {
+           "id": "4602025",
+           "displayName": "Sion James"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4277964",
+           "displayName": "Xavier Tillman"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5211176",
+           "displayName": "Tidjane Salaun"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "2578239",
+           "displayName": "Pat Connaughton"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4432819",
+           "displayName": "Tre Mann"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5239590",
+           "displayName": "Liam McNeeley"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "playoff": {
+  "date": "2026-06-13",
+  "scoreboard": {
+   "events": [
+    {
+     "id": "401859967",
+     "date": "2026-06-14T00:30Z",
+     "season": {
+      "type": 3,
+      "year": 2026
+     },
+     "status": {
+      "period": 4,
+      "type": {
+       "name": "STATUS_FINAL",
+       "completed": true,
+       "description": "Final"
+      }
+     },
+     "competitions": [
+      {
+       "date": "2026-06-14T00:30Z",
+       "neutralSite": false,
+       "notes": [
+        {
+         "headline": "NBA Finals - Game 5"
+        }
+       ],
+       "competitors": [
+        {
+         "homeAway": "home",
+         "score": "90",
+         "team": {
+          "abbreviation": "SA",
+          "displayName": "San Antonio Spurs"
+         }
+        },
+        {
+         "homeAway": "away",
+         "score": "94",
+         "team": {
+          "abbreviation": "NY",
+          "displayName": "New York Knicks"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "summary": {
+   "header": {
+    "id": "401859967",
+    "season": {
+     "year": 2026,
+     "current": false,
+     "type": 3
+    },
+    "competitions": [
+     {
+      "date": "2026-06-14T00:30Z"
+     }
+    ]
+   },
+   "boxscore": {
+    "players": [
+     {
+      "team": {
+       "abbreviation": "NY",
+       "displayName": "New York Knicks"
+      },
+      "statistics": [
+       {
+        "labels": [
+         "MIN",
+         "PTS",
+         "FG",
+         "3PT",
+         "FT",
+         "REB",
+         "AST",
+         "TO",
+         "STL",
+         "BLK",
+         "OREB",
+         "DREB",
+         "PF",
+         "+/-"
+        ],
+        "athletes": [
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "33",
+           "11",
+           "3-11",
+           "1-5",
+           "4-6",
+           "8",
+           "0",
+           "1",
+           "3",
+           "1",
+           "0",
+           "8",
+           "5",
+           "+2"
+          ],
+          "athlete": {
+           "id": "3934719",
+           "displayName": "OG Anunoby"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "23",
+           "2",
+           "1-7",
+           "0-2",
+           "0-0",
+           "10",
+           "1",
+           "5",
+           "3",
+           "1",
+           "1",
+           "9",
+           "6",
+           "-4"
+          ],
+          "athlete": {
+           "id": "3136195",
+           "displayName": "Karl-Anthony Towns"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "39",
+           "13",
+           "4-11",
+           "3-6",
+           "2-3",
+           "11",
+           "2",
+           "1",
+           "0",
+           "0",
+           "3",
+           "8",
+           "3",
+           "+15"
+          ],
+          "athlete": {
+           "id": "3062679",
+           "displayName": "Josh Hart"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "39",
+           "14",
+           "5-10",
+           "3-7",
+           "1-2",
+           "2",
+           "4",
+           "0",
+           "0",
+           "1",
+           "0",
+           "2",
+           "1",
+           "+6"
+          ],
+          "athlete": {
+           "id": "3147657",
+           "displayName": "Mikal Bridges"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "41",
+           "45",
+           "14-27",
+           "4-7",
+           "13-15",
+           "3",
+           "3",
+           "3",
+           "2",
+           "0",
+           "1",
+           "2",
+           "1",
+           "+10"
+          ],
+          "athlete": {
+           "id": "3934672",
+           "displayName": "Jalen Brunson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "0",
+           "0",
+           "0-0",
+           "0-0",
+           "0-0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "+1"
+          ],
+          "athlete": {
+           "id": "4610139",
+           "displayName": "Jeremy Sochan"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "20",
+           "2",
+           "1-2",
+           "0-0",
+           "0-2",
+           "10",
+           "2",
+           "0",
+           "0",
+           "0",
+           "6",
+           "4",
+           "1",
+           "+5"
+          ],
+          "athlete": {
+           "id": "4351852",
+           "displayName": "Mitchell Robinson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "2",
+           "0",
+           "0-0",
+           "0-0",
+           "0-0",
+           "1",
+           "1",
+           "0",
+           "0",
+           "1",
+           "1",
+           "0",
+           "0",
+           "+4"
+          ],
+          "athlete": {
+           "id": "4871141",
+           "displayName": "Ariel Hukporti"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "6",
+           "2",
+           "1-5",
+           "0-2",
+           "0-0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "0",
+           "0",
+           "+3"
+          ],
+          "athlete": {
+           "id": "2528426",
+           "displayName": "Jordan Clarkson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "13",
+           "5",
+           "2-7",
+           "1-4",
+           "0-0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "2",
+           "-14"
+          ],
+          "athlete": {
+           "id": "3914044",
+           "displayName": "Landry Shamet"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "11",
+           "0",
+           "0-5",
+           "0-2",
+           "0-0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "1",
+           "-11"
+          ],
+          "athlete": {
+           "id": "4277869",
+           "displayName": "Jose Alvarado"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "13",
+           "0",
+           "0-2",
+           "0-2",
+           "0-0",
+           "0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "0",
+           "0",
+           "1",
+           "+3"
+          ],
+          "athlete": {
+           "id": "4431823",
+           "displayName": "Miles McBride"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5211983",
+           "displayName": "Pacome Dadiet"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "5289900",
+           "displayName": "Mohamed Diawara"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4433225",
+           "displayName": "Tyler Kolek"
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "team": {
+       "abbreviation": "SA",
+       "displayName": "San Antonio Spurs"
+      },
+      "statistics": [
+       {
+        "labels": [
+         "MIN",
+         "PTS",
+         "FG",
+         "3PT",
+         "FT",
+         "REB",
+         "AST",
+         "TO",
+         "STL",
+         "BLK",
+         "OREB",
+         "DREB",
+         "PF",
+         "+/-"
+        ],
+        "athletes": [
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "31",
+           "14",
+           "5-9",
+           "4-8",
+           "0-0",
+           "7",
+           "1",
+           "4",
+           "1",
+           "0",
+           "2",
+           "5",
+           "3",
+           "-10"
+          ],
+          "athlete": {
+           "id": "4592479",
+           "displayName": "Julian Champagnie"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "38",
+           "19",
+           "7-19",
+           "1-6",
+           "4-5",
+           "14",
+           "2",
+           "2",
+           "0",
+           "5",
+           "6",
+           "8",
+           "3",
+           "-3"
+          ],
+          "athlete": {
+           "id": "5104157",
+           "displayName": "Victor Wembanyama"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "37",
+           "7",
+           "3-15",
+           "1-8",
+           "0-0",
+           "0",
+           "5",
+           "1",
+           "2",
+           "0",
+           "0",
+           "0",
+           "2",
+           "+1"
+          ],
+          "athlete": {
+           "id": "4066259",
+           "displayName": "De'Aaron Fox"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "39",
+           "12",
+           "5-8",
+           "2-5",
+           "0-0",
+           "7",
+           "2",
+           "0",
+           "2",
+           "1",
+           "0",
+           "7",
+           "1",
+           "-11"
+          ],
+          "athlete": {
+           "id": "4395630",
+           "displayName": "Devin Vassell"
+          }
+         },
+         {
+          "starter": true,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "32",
+           "6",
+           "1-10",
+           "0-3",
+           "4-6",
+           "5",
+           "4",
+           "3",
+           "1",
+           "0",
+           "1",
+           "4",
+           "4",
+           "-1"
+          ],
+          "athlete": {
+           "id": "4845367",
+           "displayName": "Stephon Castle"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "16",
+           "7",
+           "2-5",
+           "2-3",
+           "1-2",
+           "5",
+           "0",
+           "0",
+           "0",
+           "0",
+           "2",
+           "3",
+           "2",
+           "+17"
+          ],
+          "athlete": {
+           "id": "4395723",
+           "displayName": "Keldon Johnson"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "6",
+           "0",
+           "0-0",
+           "0-0",
+           "0-0",
+           "2",
+           "0",
+           "1",
+           "0",
+           "0",
+           "0",
+           "2",
+           "0",
+           "+2"
+          ],
+          "athlete": {
+           "id": "5061568",
+           "displayName": "Carter Bryant"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "10",
+           "0",
+           "0-1",
+           "0-0",
+           "0-0",
+           "2",
+           "0",
+           "1",
+           "0",
+           "0",
+           "1",
+           "1",
+           "2",
+           "-3"
+          ],
+          "athlete": {
+           "id": "3064560",
+           "displayName": "Luke Kornet"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": false,
+          "reason": "COACH'S DECISION",
+          "stats": [
+           "31",
+           "25",
+           "10-19",
+           "2-4",
+           "3-6",
+           "5",
+           "4",
+           "0",
+           "0",
+           "1",
+           "2",
+           "3",
+           "5",
+           "-12"
+          ],
+          "athlete": {
+           "id": "5037871",
+           "displayName": "Dylan Harper"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "6578",
+           "displayName": "Harrison Barnes"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "2489663",
+           "displayName": "Kelly Olynyk"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "4066317",
+           "displayName": "Lindy Waters III"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "6427",
+           "displayName": "Bismack Biyombo"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "2488653",
+           "displayName": "Mason Plumlee"
+          }
+         },
+         {
+          "starter": false,
+          "didNotPlay": true,
+          "reason": "COACH'S DECISION",
+          "stats": [],
+          "athlete": {
+           "id": "3134916",
+           "displayName": "Jordan McLaughlin"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

@@ -125,7 +125,7 @@ import {
   unitsFor,
   formatUnits,
 } from '@/lib/thresholds';
-import { formatCurrency, formatPct, gameStatus, liveSlateDatesET, todayET } from '@/lib/format';
+import { formatPct, gameStatus, liveSlateDatesET, todayET } from '@/lib/format';
 import { reachFrame, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
 
 /**

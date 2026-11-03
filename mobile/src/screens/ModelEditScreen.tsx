@@ -244,9 +244,9 @@ export function ModelEditScreen() {
             on its own.
           </Text>
           <Text style={styles.helper}>
-            Model % is our projected win probability. Edge is model % minus DraftKings' implied
-            probability. EV is expected profit per $1 at the DK price (picks with no DK price can
-            never clear an EV floor).
+            Model % is our projected win probability. Edge is model % minus the implied
+            probability at the price the model found. EV is expected profit per unit staked at that
+            same price (a pick with no price can never clear an EV floor).
           </Text>
 
           {rules.length === 0 ? (
@@ -441,7 +441,7 @@ function PreviewFooter({
           <PreviewStat
             label="Flat ROI"
             value={backtest && backtest.picks > 0 ? formatPctSigned(roi) : '—'}
-            caption="$100/bet"
+            caption="1u/bet"
             color={roiColor}
           />
         </View>

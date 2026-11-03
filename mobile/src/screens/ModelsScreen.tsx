@@ -17,7 +17,8 @@ import {
   useSettledPicksSincePaperStart,
   viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
-import { formatCurrencySigned, formatPctSigned } from '@/lib/format';
+import { FLAT_UNIT_TONE_SCALE, formatFlatUnits, formatPctSigned } from '@/lib/format';
+import { unitsSpeech } from '@/lib/a11y';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
@@ -249,7 +250,7 @@ interface BuiltInRowProps {
 
 function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   const decided = stats.wins + stats.losses;
-  // Picks settled with no book price: in the W-L, not in the money (flatPnl).
+  // Picks settled with no book price: in the W-L, not in the units (flatPnl).
   // Named on the row so an 8-5 next to a negative ROI reads as "six of those
   // had no price" rather than as a bug.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
@@ -268,7 +269,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
     : pnlColor(stats.roiFlat, 1, 100);
   const profitColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.profitFlat, 2);
+    : pnlColor(stats.profitFlat, 2, FLAT_UNIT_TONE_SCALE);
   return (
     <Pressable
       onPress={onPress}
@@ -276,7 +277,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
       accessibilityLabel={
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
-        (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}, ${unitsSpeech(formatFlatUnits(stats.profitFlat))} flat` : '') +
         (stats.picks === 0 ? ', no settled bets yet' : '') +
         (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
@@ -316,7 +317,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a
             // mid-phrase wrap would orphan the one segment that explains the
             // ROI beside it.
-            <Text style={styles.subtle}>{unpriced} unpriced · not in the money</Text>
+            <Text style={styles.subtle}>{unpriced} unpriced · not in the units</Text>
           ) : null}
         </ModelBadgeRow>
       </View>
@@ -325,7 +326,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
           {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
         <Text style={[styles.profit, { color: profitColor }]}>
-          {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+          {stats.stakedFlat > 0 ? formatFlatUnits(stats.profitFlat) : '—'}
         </Text>
       </View>
     </Pressable>
