@@ -357,7 +357,7 @@ class _NullConn:
         pass
 
 
-def _wire(monkeypatch, table, slate, ledger=True, decided=(), ml=None, sp=None):
+def _wire(monkeypatch, table, slate, ledger=True, decided=(), ml=None, sp=None, first_post_bet=()):
     import scripts.ncaab_moneyline_card as card
     import models.scorer as scorer
     got = {}
@@ -368,6 +368,8 @@ def _wire(monkeypatch, table, slate, ledger=True, decided=(), ml=None, sp=None):
     monkeypatch.setattr(card, "slate", lambda conn, now: slate)
     monkeypatch.setattr(card, "ledger_exists", lambda conn: ledger)
     monkeypatch.setattr(card, "decided_games", lambda conn, ids: set(decided))
+    # The first-post moneyline model's BETs (one bet a game across the two).
+    monkeypatch.setattr(card, "first_post_bets", lambda conn, ids: set(first_post_bet))
     monkeypatch.setattr(card, "ensure_decisions_table", lambda conn: None)
 
     def load_rows(conn, games, instant, market="spreads", books=bq.BOOKS):

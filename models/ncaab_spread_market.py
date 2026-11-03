@@ -12,8 +12,11 @@ THE RULE, per game, at 15:00 UTC on its date (models/ncaab_book_quotes.py):
   1. QUOTES. Each of the eight bettable books' standing full-game spread (its
      newest pre-game row stamped in the hour up to 15:00 UTC): home line and
      both prices.
-  2. ARTEFACTS OUT. A quote on the other side of zero from the median of the
-     other books is a pick'em sign error and is dropped.
+  2. ARTEFACTS OUT. A quote whose line or price is a feed typo (a spread
+     beyond +/-60, a price beyond +/-100000: models/ncaab_quote_bounds.py) is
+     dropped before anything reads it, and that book has no quote. A quote on
+     the other side of zero from the median of the other books is a pick'em
+     sign error and is dropped.
   3. CONSENSUS. The median of the remaining lines, the book being priced
      included.
   4. MEAN. Expected home margin = -consensus + c, with c = +0.2494 points in
@@ -32,6 +35,9 @@ THE RULE, per game, at 15:00 UTC on its date (models/ncaab_book_quotes.py):
      edge; a tie goes to the better line for the side, then the better price,
      then the book's name in alphabetical order. A tie on line AND price is the
      same bet at two books, so the alphabetical step only names which.
+  7. A best edge above the data-error cap (models/ncaab_quote_bounds.EDGE_CAP)
+     is not a bet: the game is decided as edge_cap with none, and the card's
+     run fails so the failure alerter says so.
 
 Each game is decided once (CLAUDE.md section 1c): bet or not, never looked at
 again, and a moved line writes nothing.
@@ -54,6 +60,7 @@ import pandas as pd
 
 from models import ncaab_book_quotes as bq
 from models import ncaab_margin_dist as md
+from models import ncaab_quote_bounds as qb
 
 MODEL_ID = "ncaab_spread_market"
 SPORT = "NCAAB"
@@ -133,7 +140,8 @@ def load_artifact(path: str | Path | None = None) -> dict:
 # ── the decision ──────────────────────────────────────────────────────────────
 
 DIAG_KEYS = ("games", "already_decided", "no_quotes", "no_clean_quote", "below_cut",
-             "too_few_books", "book_not_bettable", "bets", "missed", "tipped")
+             "too_few_books", "book_not_bettable", "edge_cap", "bets", "missed", "tipped",
+             "quotes_dropped")
 
 
 @dataclass
@@ -146,34 +154,53 @@ class Decision:
     dk: dict | None = None           # DraftKings' own quote, when it had one
 
 
-def _quote_list(q: pd.DataFrame) -> list[dict]:
+def _quote_list(q: pd.DataFrame, dropped: pd.DataFrame | None = None) -> list[dict]:
     out = []
     for r in q.sort_values("bookmaker").itertuples(index=False):
         out.append({"book": r.bookmaker, "line": float(r.line), "p1": float(r.p1),
                     "p2": float(r.p2), "ts": pd.Timestamp(r.ts).isoformat(), "flag": r.flag})
+    for r in ([] if dropped is None else dropped.sort_values("bookmaker").to_dict("records")):
+        out.append({"book": r["bookmaker"], "line": float(r["line"]), "p1": float(r["p1"]),
+                    "p2": float(r["p2"]), "ts": pd.Timestamp(r["ts"]).isoformat(),
+                    "flag": "out_of_range", "why": r["why"]})
     return out
 
 
+def _dropped_note(dropped: pd.DataFrame | None) -> str:
+    if dropped is None or not len(dropped):
+        return ""
+    return "; dropped as data errors: " + ", ".join(
+        f"{r['bookmaker']} {float(r['line']):+g} ({r['why']})" for r in dropped.to_dict("records"))
+
+
 def decide(game_ids, snap: pd.DataFrame, c_by_phase: dict, table: dict, cut: float,
-           min_other_books: int = MIN_OTHER_BOOKS, bettable=bq.BOOKS) -> list[Decision]:
+           min_other_books: int = MIN_OTHER_BOOKS, bettable=bq.BOOKS,
+           dropped: pd.DataFrame | None = None) -> list[Decision]:
     """Decide each game at its 15:00 UTC snapshot. Pure given its inputs.
 
     game_ids: the games to decide. snap: models/ncaab_book_quotes.snapshot
     output for them, with a `phase` column. bettable: the books a bet may be
     placed at now (config.BEST_LINE_BOOKMAKERS); the best quote is chosen over
     every book first, as the evidence chose it, and a best quote at a book not
-    bettable now is not replaced by the next one."""
+    bettable now is not replaced by the next one. dropped: the quotes the
+    snapshot dropped as data errors (models/ncaab_book_quotes.dropped_quotes),
+    listed in each game's decision; nothing is priced from them."""
     out: list[Decision] = []
     by_game = {g: x for g, x in snap.groupby("game_id")} if len(snap) else {}
+    drops = ({g: x for g, x in dropped.groupby("game_id")}
+             if dropped is not None and len(dropped) else {})
     priced = price_quotes(snap, c_by_phase, table) if len(snap) else snap
     best = best_per_game(priced).set_index("game_id") if len(priced) else None
     for gid in game_ids:
         q = by_game.get(gid)
+        dg = drops.get(gid)
+        note = _dropped_note(dg)
         if q is None or not len(q):
             out.append(Decision(gid, "no_quotes", "no bettable book quoted a spread in the hour "
-                                                  "before 15:00 UTC"))
+                                                  "before 15:00 UTC" + note,
+                                quotes=_quote_list(pd.DataFrame(columns=["bookmaker"]), dg)))
             continue
-        quotes = _quote_list(q)
+        quotes = _quote_list(q, dg)
         dkq = q[q["bookmaker"] == "draftkings"]
         dk = None
         if len(dkq):
@@ -182,7 +209,7 @@ def decide(game_ids, snap: pd.DataFrame, c_by_phase: dict, table: dict, cut: flo
                   "link1": r.get("link1"), "link2": r.get("link2")}
         if best is None or gid not in best.index:
             out.append(Decision(gid, "no_clean_quote", "every quote crossed zero against the "
-                                                       "other books", quotes=quotes, dk=dk))
+                                                       "other books" + note, quotes=quotes, dk=dk))
             continue
         b = best.loc[gid].to_dict()
         b["game_id"] = gid
@@ -190,7 +217,11 @@ def decide(game_ids, snap: pd.DataFrame, c_by_phase: dict, table: dict, cut: flo
         others = int(b["n_ok"]) - 1
         desc = (f"{b['bookmaker']} {side} {b['line']:+g} {b['price']:+.0f} edge {b['edge']:+.4f} "
                 f"p {b['prob']:.4f} consensus {b['cons']:+g} mean {b['mu']:+.2f} books {int(b['n_ok'])}")
-        if not b["edge"] > cut:
+        capped = qb.edge_problem(b["edge"], MODEL_ID)
+        if capped:
+            status = "edge_cap"
+            desc += f"; {capped}: a data error, not a bet"
+        elif not b["edge"] > cut:
             status = "below_cut"
         elif others < min_other_books:
             status = "too_few_books"
@@ -200,7 +231,7 @@ def decide(game_ids, snap: pd.DataFrame, c_by_phase: dict, table: dict, cut: flo
             desc += "; that book is not in config.BEST_LINE_BOOKMAKERS"
         else:
             status = "bets"
-        out.append(Decision(gid, status, desc, best=b, quotes=quotes, dk=dk))
+        out.append(Decision(gid, status, desc + note, best=b, quotes=quotes, dk=dk))
     return out
 
 

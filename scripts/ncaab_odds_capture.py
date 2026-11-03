@@ -34,6 +34,11 @@ WHAT A TICK DOES (scheduler.run_ncaab_odds_capture, every 5 minutes, 24x7):
      would hide a real name or schedule mismatch.
   5. Parse onto ESPN's games (odds_ingestor._process_events), diff against
      latest_odds, insert only the new and changed rows, print the counts.
+  6. The first-post moneyline model's fill measurement
+     (scripts/ncaab_first_post_fill.py): for each of its bets decided before
+     this poll and not yet checked, whether this poll still listed that
+     book's moneyline at the bet's two prices. Its own commit; a failure there
+     is logged and never fails the capture.
 
 A tick that inserts nothing is the normal case and exits 0. It exits non-zero
 when an exception is raised (the call failed, the write failed), and when the
@@ -285,6 +290,17 @@ def capture(conn, now: datetime | None = None) -> dict:
         counts["inserted"] = len(to_write)
     else:
         release_read(conn)
+
+    try:
+        from scripts.ncaab_first_post_fill import record_fill
+        counts["fill_checked"] = record_fill(conn, odds_rows, now)
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning(f"NCAAB odds capture: first-post fill check failed ({exc!r}); "
+                       f"the odds this tick stored are kept")
+        try:
+            conn.rollback()
+        except Exception:                                       # noqa: BLE001
+            pass
 
     if upcoming and not counts["resolved"]:
         # Every event the feed listed inside the window failed to join ESPN's
