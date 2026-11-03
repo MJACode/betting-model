@@ -354,4 +354,10 @@ lifts `assert_retrain_allowed` for MLB. Ongoing integrity:
   where `games` stores WSH/CWS/ARI/OAK; `impossible_games_played` resolves
   those twins so a missing key is not a 2967-row false CRIT.
 * `system_health` check `team_stats_asof_integrity` (CRIT) — same two
-  invariants (impossible `games_played`, thin snapshots)
+  invariants (impossible `games_played`, thin snapshots). The live season
+  is excused while its finals span fewer than five days, and while its
+  own snapshot series started fewer than five days before the check and
+  its newest row is today or yesterday (NBA 2027 on 2026-11-03: finals
+  already spanned 13 days, first `nba_team_stats` row that morning). A
+  historical thin season, a collapsed series, and a stopped series stay
+  thin. An empty games read is not an excuse.
