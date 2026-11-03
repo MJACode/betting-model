@@ -51,6 +51,8 @@ import { usePushDeepLink } from '@/hooks/usePushDeepLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
 import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
+import { startPerfLogging } from '@/lib/perfLogSetup';
+import { setPerfScreen } from '@/lib/perfLog';
 import { AppErrorBoundary } from '@/components/AppErrorBoundary';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
@@ -247,6 +249,8 @@ installNotificationHandler();
 // Same reason: catch an error from the first render, and record how the
 // previous launch ended before this one can overwrite the marker.
 startCrashLogging();
+// Load times: the first screen is timed from here (lib/perfLog.ts).
+startPerfLogging();
 
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
@@ -272,6 +276,7 @@ export default function App() {
   const syncRoute = useCallback(() => {
     const name = navRef.getCurrentRoute()?.name;
     setCrashScreen(name);
+    setPerfScreen(name);
     setRouteName(name);
   }, [navRef]);
   // Retry after a crash remounts the navigator; onReady sets this back, and

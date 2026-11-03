@@ -293,48 +293,51 @@ export function ScoreboardBoard({
           retrying={retrying}
         />
       ) : (
+        <>
+        {/* Column labels sit above the list, not in it, so they stay on screen
+            while the cards scroll (Matt, 2026-11-03: couldn't tell what the two
+            % columns meant once the in-list header scrolled away). VoiceOver
+            already reads each card's splits in full, so these are hidden from it. */}
+        {error ? (
+          <ErrorBanner
+            what="the scoreboard"
+            error={error}
+            onRetry={() => void onRefresh()}
+            retrying={retrying}
+          />
+        ) : null}
+        {cards.length > 0 ? (
+          <View style={styles.cols} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <Text style={[styles.colHead, styles.colMatch]} numberOfLines={1}>Matchup</Text>
+            <Text
+              style={[styles.colHead, styles.colScore]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
+              Score
+            </Text>
+            <Text style={[styles.colHead, styles.colLine]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+              {scoreboardMarketLabel(market, sport)}
+            </Text>
+            {showSplits ? (
+              <>
+                <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  % Bets
+                </Text>
+                <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  % Money
+                </Text>
+              </>
+            ) : null}
+          </View>
+        ) : null}
         <FlatList
           data={cards}
           keyExtractor={(c) => c.gameId}
           contentContainerStyle={styles.list}
           ListFooterComponent={<BetslipBarSpacer />}
           refreshControl={<RefreshControl refreshing={pulling} onRefresh={refresh} />}
-          ListHeaderComponent={
-            <View>
-              {error ? (
-                <ErrorBanner
-                  what="the scoreboard"
-                  error={error}
-                  onRetry={() => void onRefresh()}
-                  retrying={retrying}
-                />
-              ) : null}
-              {cards.length > 0 ? (
-                <View style={styles.cols}>
-                  <Text style={[styles.colHead, styles.colMatch]}>Matchup</Text>
-                  <Text
-                    style={[styles.colHead, styles.colScore]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.7}
-                  >
-                    Score
-                  </Text>
-                  <Text style={[styles.colHead, styles.colLine]}>Odds</Text>
-                  {showSplits ? (
-                    <>
-                      <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        % Bets
-                      </Text>
-                      <Text style={[styles.colHead, styles.colPct]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        % Money
-                      </Text>
-                    </>
-                  ) : null}
-                </View>
-              ) : null}
-            </View>
-          }
           ListEmptyComponent={
             <View style={styles.empty}>
               {sportIcon(sport) ? (
@@ -377,6 +380,7 @@ export function ScoreboardBoard({
             </View>
           )}
         />
+        </>
       )}
     </View>
   );
@@ -676,17 +680,21 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     minHeight: 44,
   },
+  // Pinned above the list: the list's own lg inset plus the card's md
+  // padding, so each label sits over its column.
   cols: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    marginHorizontal: spacing.lg,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.xs,
+    paddingTop: spacing.sm,
   },
   colHead: {
     fontFamily: font.family,
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
   },
   // 56 keeps the row inside a 320pt-wide phone with four fixed columns.
   colMatch: { flex: 1, minWidth: 56 },

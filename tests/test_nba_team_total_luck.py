@@ -83,7 +83,7 @@ def _decide(art, quotes, part, monkeypatch, lead=55.0, rows=None, **kw):
     fetch = TIP - timedelta(minutes=lead)
     games = t.assign(tip=pd.Timestamp(TIP))
     q = tt.quote_frame(_rows(GID, fetch, quotes) if rows is None else rows, games)
-    monkeypatch.setattr(tt, "f4_projections", lambda targets, tb: _proj(t, part))
+    monkeypatch.setattr(tt, "f4_projections", lambda targets, tb, **_: _proj(t, part))
     _no_missing(monkeypatch)
     times = pd.DataFrame({"game_id": t.game_id, "T": [pd.Timestamp(fetch)]})
     empty = pd.DataFrame(columns=["game_id", "team", *tt.BOX_COLS])
@@ -126,7 +126,7 @@ def test_the_ratings_are_the_full_game_model_s_own():
     for name in ("team_box", "f4_projections", "side_strength", "missing_inputs",
                  "scheduled_games", "regular_season", "lead_minutes"):
         assert getattr(tt, name) is getattr(tl, name), f"nba_team_total_luck has its own {name}"
-    assert (tt.MIN_GAMES, tt.BOX_COLS) == (tl.MIN_GAMES, tl.BOX_COLS)
+    assert (tt.LIVE_MIN_GAMES, tt.BOX_COLS) == (tl.LIVE_MIN_GAMES, tl.BOX_COLS)
 
 
 def test_the_lab_reads_the_one_copy_of_the_main_number_rule(monkeypatch):
@@ -470,9 +470,9 @@ def test_a_one_sided_rung_is_never_the_main_one():
     assert main == [] and len(alt) == 1
 
 
-def test_the_split_reads_team_totals_only():
+def test_the_split_reads_per_event_totals_only():
     assert NB.split_main_rungs([]) == ([], [])
-    with pytest.raises(ValueError, match="not a team-total market"):
+    with pytest.raises(ValueError, match="not a per-event total market"):
         NB.split_main_rungs([_tt_row("fanduel", 221.5, -110, -110, market="totals")])
 
 

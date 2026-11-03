@@ -42,6 +42,26 @@ KNOWN_RULES = {
     # NBA home team-total unders on the home team's part of the same gap; its
     # artifact holds parameters too.
     "nba_team_total_luck",
+    # 2026-10-30 (mike): NBA first-half overs on the same gap; its artifact holds
+    # parameters too.
+    "nba_first_half_total_luck",
+    # 2026-10-30 (mike): NCAAB totals, ratings plus a residual blended with
+    # DraftKings' total (models/ncaab_total_blend.py); its artifact holds
+    # parameters, not an estimator.
+    "ncaab_total_blend",
+    # 2026-11-02 (mike): NCAAB spreads, every bettable book priced at 15:00 UTC
+    # against the books' median line (models/ncaab_spread_market.py); its
+    # artifact holds the mean offset and the final-margin table.
+    "ncaab_spread_market",
+    # 2026-11-02 (mike): NCAAB moneylines, every bettable book's moneyline
+    # priced at 15:00 UTC off the same book's spread
+    # (models/ncaab_moneyline_own_spread.py); its artifact names the margin
+    # table it prices with.
+    "ncaab_moneyline_own_spread",
+    # 2026-11-02 (mike): NCAAB first-half spread, the full-game consensus plus a
+    # shrunk team tendency priced through a first-half table
+    # (models/ncaab_first_half_spread.py); its artifact holds parameters.
+    "ncaab_first_half_spread",
 }
 
 

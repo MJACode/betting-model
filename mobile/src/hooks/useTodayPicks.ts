@@ -4,6 +4,7 @@ import {
   fetchUpcomingUfcPicks,
   fetchUpcomingNflPicks,
   fetchUpcomingNcaafPicks,
+  fetchUpcomingNcaabPicks,
   fetchUpcomingNhlPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
@@ -54,6 +55,16 @@ const NCAAF_AHEAD_DAYS = 150;
  * 2026-09-22.
  */
 const NHL_AHEAD_DAYS = 7;
+/**
+ * How far ahead the NCAAB board looks. The NCAAB totals model is planned to
+ * decide the evening before the game, so a same-day read would hide its picks
+ * until game day. 7 is config.GAME_SCORE_AHEAD_DAYS, the outer bound the
+ * scorer uses for the other basketball sports. NCAAB is not in
+ * GAME_SCORE_AHEAD_SPORTS, so this is a bound, not a mirror: raise it if an
+ * NCAAB model ever writes further out. Only the picks' own games are read
+ * (fetchUpcomingNcaabPicks), so a longer window costs little.
+ */
+const NCAAB_AHEAD_DAYS = 7;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
@@ -104,13 +115,15 @@ export function useTodayPicks(date?: string) {
       // NCAAF have had one; NHL joined the scorer's 7-day game window
       // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
       // slate dated inside that window never reached the chip or the board.
+      // NCAAB joined with its totals model, which decides the evening before.
       // The look-ahead fetches are enrichment — don't fail the whole feed on
       // them, but record each failure in `partial`.
-      const [rows, ufcRows, nflRows, ncaafRows, nhlRows] = await Promise.all([
+      const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, nhlRows] = await Promise.all([
         fetchPicksForDate(target, (what, e) => note(what)(e)),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
         fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
+        fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS)).catch(swallow('the upcoming NCAAB card')),
         fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
@@ -130,7 +143,7 @@ export function useTodayPicks(date?: string) {
       // pill and the betslip hand-off. A VOID Discord already posted stays:
       // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
       // that split. passesActionFilter is the Signals / green-bet half.
-      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...nhlRows];
+      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...nhlRows];
       const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
       const byId = new Map(stamped.map((p) => [p.pick_id, p]));
       const all = merged.map((d) => ({

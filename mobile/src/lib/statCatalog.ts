@@ -172,6 +172,9 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   NBA: ['NBA'],
   NFL: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   NCAAF: ['Passing', 'Rushing', 'Receiving', 'Defense'],
+  // No NCAAB player stats are in the app yet: the Stats tab shows its
+  // "No player leaderboard" state for NCAAB.
+  NCAAB: [],
   UFC: ['UFC'],
   NHL: ['NHL'],
   // Golf has no per-player leaderboard (v1).

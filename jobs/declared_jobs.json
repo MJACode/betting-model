@@ -1373,6 +1373,30 @@
     }
   },
   {
+    "key": "ncaab-period-scores-2021-2026",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "mike",
+    "enabled": true,
+    "note": "ON (mike, 2026-10-30: do all outstanding tasks). Free, no key: ESPN's NCAAB scoreboard, one call per date, stores the first-half, second-half and overtime scores of every 2020-21 to 2025-26 final that has none in ncaab_period_scores (855 dates, 35,323 finals counted 2026-10-30; about 15-20 minutes at one call a second). Skips what is stored, so a re-run stores nothing twice. Replaces the research round's halves file that lived only on one laptop.",
+    "args": {
+      "kind": "periods",
+      "first": 2021,
+      "last": 2026
+    }
+  },
+  {
+    "key": "ncaab-box-scores-2027",
+    "job_type": "ncaab_box_backfill",
+    "requested_by": "owner",
+    "enabled": false,
+    "note": "OFF until someone turns it on after the merge (set enabled to true). Free, no key: one ESPN game summary per 2026-27 final with no 'espn_summary' row in ncaab_team_game_stats, box and period scores together. The refresh pass already covers the last 3 ET dates, so this is only needed if the merge lands after 2026-11-04, a pass missed games, or ESPN refused every game for a while (step ncaab-box red with espn-box-refused): it tries refused games again, ignoring their attempt count. Skips what is stored.",
+    "args": {
+      "kind": "box",
+      "first": 2027,
+      "last": 2027
+    }
+  },
+  {
     "key": "ncaab-history-probe-2026-10-26",
     "job_type": "ncaab_odds_history",
     "requested_by": "mike",
@@ -1548,5 +1572,19 @@
     "key": "ncaab-history-deriv-open-2024-2026-r2",
     "note": "mike 2026-10-26: '1) yes' (build the NCAAB operation), '3 approved' (the price history); 2026-10-28: 'dont stop the spend'. Backstop for the opener purchase if the 2026-11-01 run fired before the refill and stopped at the floor at once.",
     "run_after": "2026-11-02T01:00:00+00:00"
+  },
+  {
+    "key": "ncaab-injury-reachability-2026-10-30",
+    "job_type": "ncaab_injury_probe",
+    "requested_by": "mike",
+    "note": "Reachability of the two public NCAAB injury pages (RotoWire JSON and Covers HTML) from the worker. Writes nothing. A non-200 or a body that does not parse fails the job; zero player rows is still a successful check.",
+    "args": {}
+  },
+  {
+    "key": "splits-source-probe-2026-11-03",
+    "job_type": "splits_source_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-03: 'Pull the numbers where we can reliably.' Fetches DK Network's betting-splits page and Action Network's v2 scoreboard (no bookIds filter) plus /web/v1/books, to measure whether DraftKings' own handle/bets % can be pulled and which AN book ids carry splits. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]

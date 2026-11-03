@@ -6,7 +6,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -16,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { AppSwitch } from '@/components/AppSwitch';
 import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
 import {
   useCustomModelBacktest,
@@ -339,7 +339,7 @@ export function ModelEditScreen() {
                 Drops picks where a relevant player is carrying an injury flag.
               </Text>
             </View>
-            <Switch
+            <AppSwitch
               accessibilityLabel="Skip injury-flagged picks"
               value={filters.excludeInjuries === true}
               onValueChange={(on) =>

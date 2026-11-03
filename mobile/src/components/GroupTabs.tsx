@@ -16,8 +16,8 @@ import { colors, font, spacing } from '@/lib/theme';
  * stacks QB | WR/TE | RB under Players | Teams).
  *
  * Full width and evenly divided rather than scrolling: the widest set anywhere
- * is the Stats tab's NFL position row, five tabs (QB / RB / WR/TE / DEF /
- * Teams) at 20% each — 78.6pt on a 393pt screen.
+ * is the Stats tab's football position row, four tabs (QB / RB / WR/TE / DEF)
+ * at 25% each under Players | Teams (Matt, 2026-11-02).
  */
 export function SegmentTabs<T extends string>({
   items,
@@ -37,11 +37,11 @@ export function SegmentTabs<T extends string>({
   accessibilityLabelFor,
   /** Shrink a label to fit its tab at large Dynamic Type sizes instead of
    *  truncating it, and cap it at 2x (UX_REVIEW §5 segmented-control
-   *  exception). Added 2026-09-25 for the Stats position row, whose NFL
-   *  segments (QB / RB / WR/TE / DEF / Teams) share one screen width
+   *  exception). Added 2026-09-25 for the Stats position row, whose football
+   *  segments (QB / RB / WR/TE / DEF) share one screen width
    *  (Designer: "don't truncate"). */
   fit = false,
-  /** Stats Compact B: a shorter position row. Slop grows so the target
+  /** Stats Compact B: a shorter Stats top row (Players | Teams). Slop grows so the target
    *  stays 44pt while the bar itself loses a few points. */
   tight = false,
 }: {

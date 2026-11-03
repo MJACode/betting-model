@@ -260,7 +260,13 @@ PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 # NHL totals purchases (data/ingestors/nba_odds_history.DERIV_SOURCE,
 # nhl_derivative_odds_history.SOURCE), and the live NBA team-total feed
 # (data/ingestors/nba_team_total_odds.SOURCE), whose alternates, decision
-# fetches and closes are nba_team_total_luck's record. Literals here, pinned to
+# fetches and closes are nba_team_total_luck's record. The live NBA first-half
+# feed (data/ingestors/nba_first_half_odds.SOURCE, 2026-10-30) joins for the same
+# reason: its decision fetches and closes are nba_first_half_total_luck's record.
+# The live NCAAB first-half feed (data/ingestors/ncaab_first_half_odds.SOURCE,
+# 2026-11-02) joins too: nine fetches a game of first-half ladders, and its
+# tip-minus-10 fetch is ncaab_first_half_spread's record.
+# Literals here, pinned to
 # the writers' constants by tests/test_nba_team_total_odds.py
 # (test_the_prune_protects_every_ladder_source_by_its_writer_s_own_name), so
 # the pruner does not import the purchase modules.
@@ -275,11 +281,18 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nba_alt_history",
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live",
+                     "odds_api_nba_first_half_live",
+                     "odds_api_ncaab_first_half_live",
                      # Alternate spread/total ladders (2026-10-29): many rungs per
                      # (game, market, book), which the keepers would thin.
                      "odds_api_alt_game_lines_live",
                      "odds_api_ncaab_derivative_close",
-                     "odds_api_ncaab_derivative_open")
+                     "odds_api_ncaab_derivative_open",
+                     # The same purchase at its three game-day times
+                     # (2026-11-02): 15:00Z, 18:00Z and tip minus 60 minutes.
+                     "odds_api_ncaab_derivative_15z",
+                     "odds_api_ncaab_derivative_18z",
+                     "odds_api_ncaab_derivative_tip60")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
@@ -320,8 +333,8 @@ def _unprotected(params: dict, table: str | None = None) -> str:
         clauses.append(f"bookmaker NOT LIKE %({key})s")
     # Only `odds` has a `source` column (player_prop_odds does not, checked
     # against the live schema 2026-09-07); referencing it there would abort
-    # the prop prune. Live rows carry NULL and stay prunable; the one live
-    # feed with a marker, the NBA team totals, is a ladder (PROTECTED_SOURCES).
+    # the prop prune. Live rows carry NULL and stay prunable; the live feeds
+    # with a marker, the NBA team and first-half totals, are PROTECTED_SOURCES.
     if table == "odds":
         params["protected_sources"] = PROTECTED_SOURCES
         clauses.append("(source IS NULL OR source NOT IN %(protected_sources)s)")

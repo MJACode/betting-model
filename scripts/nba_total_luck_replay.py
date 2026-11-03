@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import models.nba_total_luck as tl  # noqa: E402
+from models.nba_total_luck import MIN_GAMES  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 
 BETS = Path("C:/Users/micha/AppData/Local/Temp/nba_game_edge/results/house/bets/"
@@ -59,6 +60,14 @@ def load(cache: Path = H.CACHE, seasons=LAB_SEASONS) -> dict:
     o = o[o["game_id"].isin(set(data.games["game_id"]))]
     o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
     led = pd.read_parquet(cache / "nba_fetch_ledger.parquet")
+    # the injury-report windows (docs/nba_models_2026.md section 11) stay out, as H.load
+    # leaves them out: the lab this replays was graded before they were bought
+    if "why" in led:
+        news = led["why"].astype(str) == H.NEWS_WINDOW_WHY
+        if news.any():
+            pulled = set(pd.to_datetime(led.loc[news, "pulled_at"], utc=True))
+            o = o[~pd.to_datetime(o["created_at"], utc=True, format="mixed").isin(pulled)]
+            led = led[~news]
     o, _ = H.attach_fetch(o, led)
     o["created_at"] = o["fetch_at"]                          # the live table's meaning
     box = pd.read_parquet(cache / "nba_player_game_log.parquet",
@@ -146,7 +155,7 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     prior = [s for s in art["bucket"] if int(s) < season]
     bets, decisions, diag = tl.decide(targets, quotes, season_box, final, times, art,
                                       scheduled=sched,
-                                      bucket_uplift=None if prior else 0.0)
+                                      bucket_uplift=None if prior else 0.0, min_games=MIN_GAMES)
 
     lab_gap = lab_gaps(data, box)
     live_gap = {d.game_id: d.gap for d in decisions if d.gap is not None}
@@ -198,7 +207,7 @@ def grade_window(ld: dict, season: int, lo: float, hi: float, art: dict | None =
                                            season, "9999-12-31")
     prior = [s for s in art["bucket"] if int(s) < season]
     bets, _, _ = tl.decide(targets, quotes, season_box, final, times, art, scheduled=sched,
-                           bucket_uplift=None if prior else 0.0)
+                           bucket_uplift=None if prior else 0.0, min_games=MIN_GAMES)
     tips = games.set_index("game_id")["tip"]
     b = pd.DataFrame([{"game_id": x.game_id, "season": season, "game_date": None,
                        "market": tl.MARKET, "side": tl.SIDE, "line": x.line, "price": x.price,

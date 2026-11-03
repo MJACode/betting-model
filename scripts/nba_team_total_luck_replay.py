@@ -56,6 +56,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import models.nba_team_total_luck as tt  # noqa: E402
+from models.nba_total_luck import MIN_GAMES  # noqa: E402
 from models import nba_book_numbers as NB  # noqa: E402
 from scripts import nba_game_harness as H  # noqa: E402
 from scripts.nba_team_total_luck_build import BETS, cell_bets  # noqa: E402
@@ -63,7 +64,7 @@ from scripts.nba_total_luck_replay import FrameConn  # noqa: E402
 
 LAB_SEASONS = (H.REGIME, *H.CHOOSE, H.CONFIRM)        # the lab's full-game load (P3 --full)
 REPLAY_SEASONS = (2024, 2025, 2026)
-TT_MARKETS = tuple(NB.ALTERNATE_MARKET)
+TT_MARKETS = ("team_totals_home", "team_totals_away")
 
 
 def lab_bets(path: Path = BETS) -> pd.DataFrame:
@@ -170,7 +171,7 @@ def replay(ld: dict, season: int, art: dict | None = None) -> dict:
     prior = [s for s in art["bucket"] if int(s) < season]
     bets, decisions, diag = tt.decide(targets, quotes, season_box, final, times, art,
                                       scheduled=sched,
-                                      bucket_uplift=None if prior else 0.0)
+                                      bucket_uplift=None if prior else 0.0, min_games=MIN_GAMES)
 
     lab_part = ld.get("lab_parts")
     if lab_part is None:

@@ -625,7 +625,7 @@ def _book_for_dk_number(pick: dict) -> str | None:
     return "DraftKings"
 
 
-def render_results(recap: dict, game_date: str, restate: bool = False,
+def render_results(recap: dict, game_date: str,
                    heading: str | None = None) -> str:
     """The settled day, in one tweet. Numbers only — the record is the pitch.
 
@@ -656,12 +656,7 @@ def render_results(recap: dict, game_date: str, restate: bool = False,
         tally = f"{rec}, {units:+.2f}u, {units / risked * 100:+.1f}% ROI"
     else:
         tally = f"{rec}, {units:+.2f}u"
-    # "(restated)" when a late settlement invalidated the tweet before it --
-    # the embed says "restated" in its title; the two must agree.
-    if heading:
-        head = heading
-    else:
-        head = f"{pretty} results (restated)" if restate else f"{pretty} results"
+    head = heading or f"{pretty} results"
     lines = [f"\U0001F4CA {head}: {tally}"]
     # The day's closing-line figure, exactly as the embed states it -- share
     # of graded bets that beat the close, WITH its denominator (discord_notifier
@@ -1206,7 +1201,9 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
     Discord's sport channels release, including a game dated ahead of today,
     excluding live and started games. Discord's free-pick choice is not
     consulted. Order is that query's order. This posts the first one that
-    is not already ledgered and whose game has not started.
+    is not already ledgered and whose game has not started. A pick whose label
+    disagrees with its side and line is refused here, as on every other surface
+    (tracking/pick_integrity).
 
     One confirmed tweet per call. The previous x_pick sent_at must be at
     least PICK_MIN_GAP old. From 1:00am through 8:00am ET the call posts
@@ -1233,7 +1230,11 @@ def _post_released_picks(conn, target_date: str, dry_run: bool = False,
             return 0
         try:
             from tracking.discord_notifier import _new_signals
-            picks = _new_signals(conn, target_date, include_already_posted=True)
+            from tracking.pick_integrity import refuse_mismatched
+            # A refused pick stays unledgered, so it retries and keeps logging,
+            # as on Discord.
+            picks = refuse_mismatched(
+                _new_signals(conn, target_date, include_already_posted=True), "X")
         except Exception as exc:                              # noqa: BLE001
             logger.error(f"X slate failed: {exc}")
             return 0
@@ -1309,7 +1310,6 @@ def notify_x_picks(target_date: str | None = None,
 
 
 def notify_x_results(game_date: str, dry_run: bool = False,
-                     restate: dict | None = None,
                      now: datetime | None = None) -> int:
     """Tweet the settled day. Ledgered per date, and ONLY for a day that is over.
 
@@ -1341,8 +1341,8 @@ def notify_x_results(game_date: str, dry_run: bool = False,
         return 0
     from tracking.discord_notifier import (_as_et, _settled_rows, _tally,
                                            clv_line, in_daily_recap_window,
-                                           restate_lock_key, sport_in_progress,
-                                           window_still_live)
+                                           record_held_for_grading,
+                                           sport_in_progress, window_still_live)
     clock = _as_et(now)
     # Same clock as notify_discord_results: a day that is not over, and any
     # hour from noon through 6:00am, returns before the database is opened.
@@ -1352,15 +1352,14 @@ def notify_x_results(game_date: str, dry_run: bool = False,
         return 0
     from data.db import get_connection
 
-    # A restatement (recaps_needing_restatement's dict) rides its own ledger
-    # kind, keyed on the published_at of the recap it corrects -- the same
-    # key shape Discord uses, so the two surfaces fire on the same batch.
-    kind = "x_results_restate" if restate else "x_results"
-    lock = (restate_lock_key(kind, game_date, restate["published_at"])
-            if restate else f"x_results:{game_date}")
+    kind = "x_results"
+    lock = f"x_results:{game_date}"
     conn = get_connection()
     try:
         if _already_sent(conn, lock, kind):
+            return 0
+        if record_held_for_grading(conn, game_date, label=game_date,
+                                   dry_run=dry_run, now=clock):
             return 0
         rows = _settled_rows(conn, game_date)
         if not rows:
@@ -1398,9 +1397,7 @@ def notify_x_results(game_date: str, dry_run: bool = False,
                 for g in (_tally(group),)
             ],
         }
-        tweet_id = post_tweet(render_results(recap, game_date,
-                                             restate=bool(restate)),
-                              dry_run=dry_run)
+        tweet_id = post_tweet(render_results(recap, game_date), dry_run=dry_run)
         if not tweet_id:
             return 0
         if not dry_run:
@@ -1427,6 +1424,7 @@ def notify_x_period(span: str, start, end, heading: str,
         return 0
     from tracking.discord_notifier import (_settled_rows_since, _tally, clv_line,
                                            in_period_recap_window,
+                                           record_held_for_grading,
                                            sport_in_progress, window_still_live)
     if not in_period_recap_window(now):
         return 0
@@ -1437,6 +1435,10 @@ def notify_x_period(span: str, start, end, heading: str,
     conn = get_connection()
     try:
         if _already_sent(conn, lock, kind):
+            return 0
+        if record_held_for_grading(conn, start.isoformat(), end.isoformat(),
+                                   label=f"{span} of {start.isoformat()}",
+                                   dry_run=dry_run, now=now):
             return 0
         rows = _settled_rows_since(conn, start.isoformat(), end.isoformat())
         if not rows:

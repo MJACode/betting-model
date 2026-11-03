@@ -1,0 +1,264 @@
+{
+ "events": [
+  {
+   "id": "401804920",
+   "date": "2026-02-07T18:00Z",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401804920",
+     "date": "2026-02-07T18:00Z",
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 3,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final/OT",
+       "shortDetail": "Final/OT",
+       "altDetail": "OT"
+      }
+     },
+     "competitors": [
+      {
+       "id": "48",
+       "homeAway": "home",
+       "score": "89",
+       "linescores": [
+        {
+         "value": 41.0,
+         "displayValue": "41",
+         "period": 1
+        },
+        {
+         "value": 38.0,
+         "displayValue": "38",
+         "period": 2
+        },
+        {
+         "value": 10.0,
+         "displayValue": "10",
+         "period": 3
+        }
+       ],
+       "team": {
+        "id": "48",
+        "uid": "s:40~l:41~t:48",
+        "location": "Delaware",
+        "name": "Blue Hens",
+        "abbreviation": "DEL",
+        "displayName": "Delaware Blue Hens",
+        "shortDisplayName": "Delaware"
+       }
+      },
+      {
+       "id": "2393",
+       "homeAway": "away",
+       "score": "88",
+       "linescores": [
+        {
+         "value": 43.0,
+         "displayValue": "43",
+         "period": 1
+        },
+        {
+         "value": 36.0,
+         "displayValue": "36",
+         "period": 2
+        },
+        {
+         "value": 9.0,
+         "displayValue": "9",
+         "period": 3
+        }
+       ],
+       "team": {
+        "id": "2393",
+        "uid": "s:40~l:41~t:2393",
+        "location": "Middle Tennessee",
+        "name": "Blue Raiders",
+        "abbreviation": "MTSU",
+        "displayName": "Middle Tennessee Blue Raiders",
+        "shortDisplayName": "MTSU"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401827665",
+   "date": "2026-02-07T21:00Z",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401827665",
+     "date": "2026-02-07T21:00Z",
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 2,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     },
+     "competitors": [
+      {
+       "id": "12",
+       "homeAway": "home",
+       "score": "84",
+       "linescores": [
+        {
+         "value": 40.0,
+         "displayValue": "40",
+         "period": 1
+        },
+        {
+         "value": 44.0,
+         "displayValue": "44",
+         "period": 2
+        }
+       ],
+       "team": {
+        "id": "12",
+        "uid": "s:40~l:41~t:12",
+        "location": "Arizona",
+        "name": "Wildcats",
+        "abbreviation": "ARIZ",
+        "displayName": "Arizona Wildcats",
+        "shortDisplayName": "Arizona"
+       }
+      },
+      {
+       "id": "197",
+       "homeAway": "away",
+       "score": "47",
+       "linescores": [
+        {
+         "value": 22.0,
+         "displayValue": "22",
+         "period": 1
+        },
+        {
+         "value": 25.0,
+         "displayValue": "25",
+         "period": 2
+        }
+       ],
+       "team": {
+        "id": "197",
+        "uid": "s:40~l:41~t:197",
+        "location": "Oklahoma State",
+        "name": "Cowboys",
+        "abbreviation": "OKST",
+        "displayName": "Oklahoma State Cowboys",
+        "shortDisplayName": "Oklahoma St"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401820724",
+   "date": "2026-02-07T23:30Z",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "competitions": [
+    {
+     "id": "401820724",
+     "date": "2026-02-07T23:30Z",
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 2,
+      "type": {
+       "id": "3",
+       "name": "STATUS_FINAL",
+       "state": "post",
+       "completed": true,
+       "description": "Final",
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     },
+     "competitors": [
+      {
+       "id": "153",
+       "homeAway": "home",
+       "score": "71",
+       "linescores": [
+        {
+         "value": 29.0,
+         "displayValue": "29",
+         "period": 1
+        },
+        {
+         "value": 42.0,
+         "displayValue": "42",
+         "period": 2
+        }
+       ],
+       "team": {
+        "id": "153",
+        "uid": "s:40~l:41~t:153",
+        "location": "North Carolina",
+        "name": "Tar Heels",
+        "abbreviation": "UNC",
+        "displayName": "North Carolina Tar Heels",
+        "shortDisplayName": "North Carolina"
+       }
+      },
+      {
+       "id": "150",
+       "homeAway": "away",
+       "score": "68",
+       "linescores": [
+        {
+         "value": 41.0,
+         "displayValue": "41",
+         "period": 1
+        },
+        {
+         "value": 27.0,
+         "displayValue": "27",
+         "period": 2
+        }
+       ],
+       "team": {
+        "id": "150",
+        "uid": "s:40~l:41~t:150",
+        "location": "Duke",
+        "name": "Blue Devils",
+        "abbreviation": "DUKE",
+        "displayName": "Duke Blue Devils",
+        "shortDisplayName": "Duke"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

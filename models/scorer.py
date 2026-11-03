@@ -235,6 +235,26 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         direction = "Over" if pick_side == "over" else "Under"
         line_str = f" {line}" if line is not None else ""
         return f"{away_team} @ {home_team} — {team} Team Total {direction}{line_str}"
+    elif market == "totals_h1":
+        # The first half's points: "BOS @ MIL — First Half Over 112.5". The
+        # matchup leads, as a team total's does, so the label cannot be read as
+        # the full-game total. tracking/pick_integrity refuses a first-half
+        # label that does not say so.
+        direction = "Over" if pick_side == "over" else "Under"
+        line_str = f" {line}" if line is not None else ""
+        return f"{away_team} @ {home_team} — First Half {direction}{line_str}"
+    elif market == "spreads_h1":
+        # The first half's spread: "Duke @ Kansas — First Half Duke +3.5". The
+        # matchup leads, as the first-half total's does, so the label cannot be
+        # read as the full-game spread; the signed number is the side's own
+        # (the home number, negated for an away pick).
+        # tracking/pick_integrity refuses a first-half label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        if line is None:
+            return f"{away_team} @ {home_team} — First Half {team} Spread"
+        spread = line if pick_side == "home" else -line
+        sign = "+" if spread > 0 else ""
+        return f"{away_team} @ {home_team} — First Half {team} {sign}{spread:.1f}"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -3470,12 +3490,21 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               -- tests/test_rule_model_markets_everywhere.py).
               WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
                 OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
+                OR p.model_id = 'ncaab_total_blend'
                 THEN 'totals'
               -- The home team's own points, not the game total.
               WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
+              -- The first half's points, not the game total.
+              WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
+              -- The first half's spread, not the game's.
+              WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
+                OR p.model_id = 'ncaab_spread_market'
                 THEN 'spreads'
+              -- ncaab_moneyline_own_spread has 'spread' in its id but bets
+              -- moneylines: it falls to h2h here, and no pattern above may
+              -- match it (tests/test_rule_model_markets_everywhere.py).
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC
     """, (game_date,)).fetchall()
@@ -3497,7 +3526,7 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
 
         # Named markets, not a substring: "totals" in market would also start
         # line-checking the MLB first-five totals, which this never covered.
-        if market in ("totals", "team_totals_home", "team_totals_away"):
+        if market in ("totals", "team_totals_home", "team_totals_away", "totals_h1"):
             cur_line = current.get("total_line")
             if cur_line is not None and scored_line is not None:
                 delta = cur_line - scored_line

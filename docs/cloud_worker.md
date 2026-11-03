@@ -32,6 +32,10 @@ crons had).
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+| NCAAB totals card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_total_card()` → `python -m scripts.ncaab_total_card --publish`, then publish. Decides each game once, at 22:00 UTC the evening before its date, else at 15:00 UTC on the day and each hour to tip, on DraftKings' standing total. Kill switch: `RUN_NCAAB_TOTAL_CARD=0` (the job still beats). A run that cannot decide a due game for a reason that will not clear by itself (an artifact for another season, a team missing two or more old box scores, a missing blend) exits 1 after writing the rest: the heartbeat records `error` and the failure alerter reports it. Added 2026-10-30; `docs/sports/ncaab.md` |
+| NCAAB spread card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_spread_card()` → `python -m scripts.ncaab_spread_card --publish`, then publish. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's spread stamped 14:00-15:00 UTC; every other hour reads the slate and the ledger only. A later run that finds one of the day's games undecided writes it as `missed` (no bet) and exits 1, as does a run where no due game has any quote, or the best quote is at a book no longer in `BEST_LINE_BOOKMAKERS`. Kill switch: `RUN_NCAAB_SPREAD_CARD=0` (the job still beats; switched back on, that day's undecided games are written as `missed` and the run fails once). Added 2026-11-02; `docs/sports/ncaab.md` |
+| NCAAB moneyline card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_moneyline_card()` → `python -m scripts.ncaab_moneyline_card --publish`, then publish. Its own job beside the spread card's, so each model keeps its own kill switch and failure. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's moneyline and the same book's spread stamped 14:00-15:00 UTC (Pinnacle's and Bovada's moneylines read for the favourite check only); every other hour reads the slate and the ledger only. Fails the run in the same three cases as the spread card. Kill switch: `RUN_NCAAB_MONEYLINE_CARD=0`. Added 2026-11-02; `docs/sports/ncaab.md` |
+| NCAAB first half (live, real money) | every minute, 24x7 | `run_ncaab_first_half_window()` → one planning read; for the due games `python -m scripts.ncaab_first_half_window --fetch G...` (one Odds API event call per game for its first-half moneyline, spread, total and team totals, at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip; at most 4 credits a call, 36 a game), then `python -m scripts.ncaab_first_half_spread_card --publish` once a game is ten minutes or less from tip, then publish. The card decides each game once on its tip-minus-10 fetch. Only games with a bettable book's full-game spread stored are fetched. The fetch buys nothing when the balance is under one day of the measured burn (`NCAAB_FIRST_HALF_RESERVE_DAYS`). Kill switch: `RUN_NCAAB_FIRST_HALF=0` (the job still beats). A failed call or a game with no decision fetch by five minutes before tip fails the tick after publishing; the failure alerter also names any listed game that tipped undecided. Added 2026-11-02; `docs/sports/ncaab.md` |
 
 Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
@@ -49,7 +53,12 @@ every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
 pruner) and the current ladder in `alt_game_lines`, which the betslip's
 game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
 game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
-one row per call:
+one row per call. Kill switch: `ALT_GAME_LINES_ENABLED=0` (default `1`) buys
+nothing, including the event lists. `ALT_GAME_LINES_MAX_GAMES`, unset by
+default, caps event-odds calls for that process when set to a whole number;
+anything else buys nothing and fails the step. Neither flag is a credit
+budget. The app hides that ladder once `games.commence_time` has passed.
+The measurement query:
 
     SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
            sum(credits_last) AS credits, count(*) FILTER (WHERE NOT ok) AS failed
@@ -151,7 +160,9 @@ never scheduled.
 `live_scoreboard` job, `pollers` service, every minute 24x7
 (`data/ingestors/live_scoreboard.py`). While a sport has a game that has
 started, has no final on `games` and no final row yet, it reads ESPN's site
-scoreboard once per sport and upserts one row per game into
+scoreboard once per sport for each ET date on the slate (today, and
+yesterday until 6 am ET; ESPN refuses a date range with HTTP 400) and
+upserts one row per game into
 `public.live_scoreboard` (`state` `in` / `post`, score, clock label, NFL down
 and possession). The app's Scoreboard reads it. No Odds API credits. An idle
 tick is one database read and no HTTP call. `RUN_LIVE_SCOREBOARD=0` stops it.
@@ -164,6 +175,34 @@ refresh-pass step (`data/ingestors/scoreboard_splits.py`) into
 `public.scoreboard_splits`: Action Network's free v2 scoreboard, every sport
 with an unstarted game today or tomorrow, display only (never
 `public_betting`, which the scorer reads).
+
+### NCAAB box scores and period scores (added 2026-10-30)
+
+Refresh-pass step `ncaab-box` (`data/ingestors/ncaab_espn_box.py`), on the
+HOURLY passes only (midnight-5am and 7am-5pm ET; the evening passes have no
+room in their 10-minute tick), after the results group, settle and
+refresh-outcomes: one ESPN game summary per NCAAB final of the last 3 ET
+dates with no box row yet, into `ncaab_team_game_stats` (source
+`espn_summary`) and `ncaab_period_scores`. Free, no key, no new variable, no
+Odds API credits. At most 80 games and about 150 seconds of fetching a pass,
+one request at a time; an idle pass makes no ESPN call. Red when ESPN answers
+403 or 429, when a fetch fails outright (the run stops there; about 46 s at
+worst), or when the newest 5 finals ESPN answered for were all refused, which
+means its summary changed for every game. Detail: `docs/sports/ncaab.md`
+(Box scores and period scores).
+
+Backfill job `ncaab_box_backfill`: `{"kind": "periods", "first": 2021,
+"last": 2026}` stores the period scores of every 2020-21 to 2025-26 final
+from one scoreboard call per date; `{"kind": "box"}` fetches the 2026-27
+box scores the passes have not stored. Both are declared in
+`jobs/declared_jobs.json`: `ncaab-period-scores-2021-2026` is ON (mike,
+2026-10-30), so the worker queues it once after the merge;
+`ncaab-box-scores-2027` is OFF. To queue it, set its `enabled` to true and
+merge: that one line is the whole change, no test needs editing. A run
+that ESPN stops part-way is still recorded as done, as the schedule backfill
+is; its result names the stop, so the read-back query is the check. Its two tables
+are also created by `add_ncaab_period_scores_2026_10_30.sql`, which the
+`apply-view-migrations` step applies on the first pass after a merge.
 
 ### NHL player props
 
@@ -310,12 +349,25 @@ Notes:
    - `ODDS_API_KEY`
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
+   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips the daily
+     alternate spreads/totals fetch. `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL,
+     unset means no cap. A whole number caps that step's event-odds calls.
    - `TZ` = `America/New_York`
    - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
      `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put
      the NFL card on a dedicated key/quota.
    - `DISCORD_WEBHOOK_*` — OPTIONAL, see [Discord](#discord-picks-to-your-server)
      below. Omit them all and nothing Discord-related runs.
+   - `RUN_NCAAB_TOTAL_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     totals card before it reads anything; its job still beats, so the
+     silence still means stopped. Worker only (the card is a worker job).
+   - `RUN_NCAAB_SPREAD_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     spread card before it reads anything; its job still beats. Worker only.
+     Games whose 15:00 UTC passes while it is off are recorded as `missed`
+     when it is back on, and that run fails once.
+   - `RUN_NCAAB_MONEYLINE_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     moneyline card before it reads anything; its job still beats. Worker
+     only. Same `missed` behaviour as the spread card.
    - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` /
      `MLB_TOTAL_PUBLIC_FADE_PUBLISH` — OPTIONAL, default `0`. MLB game-line
      cards log every pass; they INSERT picks only when the matching flag is
@@ -405,6 +457,8 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_UFC` | `#ufc-picks` |
 | `DISCORD_WEBHOOK_GOLF` | `#golf-picks` |
 | `DISCORD_WEBHOOK_NCAAF` | `#ncaaf-picks` |
+| `DISCORD_WEBHOOK_NCAAB` | `#ncaab`. Optional: NCAAB can post through `DISCORD_CHANNEL_NCAAB` instead (next row). When both are set, the webhook wins. |
+| `DISCORD_CHANNEL_<SPORT>` | A sport's channel ID, in place of its webhook (added 2026-10-30 for NCAAB: `DISCORD_CHANNEL_NCAAB`). Not a secret. It only works on a service that also has `DISCORD_BOT_TOKEN`, which is the `worker`, where the NCAAB totals card runs; `pollers` has no bot token, so the ID set there resolves nothing and pollers' publish passes skip NCAAB without marking it sent. The notifier uses the token to reuse the bot's own webhook in that channel, or creates one named after the sport (`ncaab`), and keeps its URL in memory only. The ID comes from the one-off `discord_create_channel` worker job (`scripts/discord_create_sport_channel.py`). Redeploy after setting. The `discord_probe` job reports such a sport by the channel and the bot's webhook ID and name. |
 | `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
 | `DISCORD_WEBHOOK_LIVE_NFL` / `_LIVE_MLB` / `_LIVE_NCAAF` | **The sport's live channel** (`#nfl-live`, `#mlb-live`, `#ncaaf-live`; mike, 2026-09-09). Set on BOTH `worker` (runs the NFL in-play worker) and `pollers` (runs the MLB and NCAAF loops). Any `DISCORD_WEBHOOK_LIVE_{SPORT}` over the sport list works. |
 | `DISCORD_WEBHOOK_LIVE` | Shared in-play channel, the fallback for a sport with no live channel of its own. Falls back to the sport's channel if unset too. |
@@ -419,7 +473,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_PARLAYMATT` | ParlayMatt recaps in his channel only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
 | `DISCORD_PARLAYMATT_CHANNEL_ID` | The `#parlaymatt-picks` channel id the bot reads. Unset, his poll does not call Discord. |
 | `DISCORD_PARLAYMATT_AUTHOR_ID` | Discord user id of the only ParlayMatt author stored. The username is not the filter. |
-| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. |
+| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. A sport that posts through `DISCORD_CHANNEL_<SPORT>` also needs **Manage Webhooks** on that channel, and the `discord_create_channel` job needs **Manage Channels** in the guild (plus whatever permissions the copied overwrites grant). It is on `worker` only (variable names read 2026-10-30: `pollers` has none). |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |

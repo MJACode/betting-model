@@ -24,6 +24,30 @@ WHAT IS BOUGHT
            resumable through `odds_history_pulls` (sport 'NCAAB', snapshot_date,
            hour_utc).
 
+  --opener-grid --step 60|30 [--pre-start]  The same bulk snapshot at every
+           grid time on the clock (every hour, or every half hour) from 72
+           hours before any game's tip up to that tip, so each book's first
+           posted full-game line is dated to the step. The lines plan above
+           dates a first post only to the gap between its fixed hours, which
+           is over two hours for 42-68% of first spreads and totals, by book
+           (41.6% BetMGM totals to 67.6% betPARX totals; opener-route design,
+           2026-10-30). --pre-start adds every grid time from 240 to
+           72 hours before each season's first tip, for the season-opening
+           boards. A time on the hour is ledgered in `odds_history_pulls`,
+           exactly as the lines purchase ledgers it, so an hour either one
+           bought is never bought again; a half hour in
+           `odds_history_fetches` (sport 'NCAAB', requested_at, why
+           'opener_grid'), the table the NBA purchase files its off-the-hour
+           fetches in. The shared ledger's key is never changed. What is
+           stored of each snapshot is each book's first quote on each game
+           and market and every quote that differs from the one before it
+           (ChangeKeeper), less any quote already in `odds` (the same game,
+           market, book, feed time, prices and line, stored by the lines
+           purchase or an earlier grid run), and never an in-play price. Its
+           own ceiling (tracking/job_queue.py) and the same floor; it reads
+           the balance on record before its first call, so that call is
+           checked too. NOT QUEUED: the spend needs mike's approval.
+
   --derivatives close|open  The per-event endpoint: first-half moneyline,
            spread and total plus team totals (4 markets; the feed bills 10 a
            market returned, so up to 40 a game, and an empty answer is free per
@@ -35,13 +59,27 @@ WHAT IS BOUGHT
            team totals split into `team_totals_home` / `team_totals_away` (the
            NBA shape). A game already holding rows under the source is skipped.
 
+  --derivatives 15z|18z|tip60 [--sample N]  The same purchase at three
+           game-day times (mike, 2026-11-02): 15:00Z on the game's ESPN date
+           (only games that tip after 15:00Z), 18:00Z on that date (only games
+           that tip after 18:00Z), and tip minus 60 minutes. Each has its own
+           source (NCAAB_DERIV_15Z_SOURCE, _18Z_, _TIP60_), so each resumes on
+           its own and a later read can tell them apart. --sample N buys only
+           N games, a deterministic spread over the seasons and the tip times
+           (sample_games), and prints, per book and market, how many of the N
+           returned a quote next to how many the stored close has: the test
+           of whether books post first-half lines by then. Without --apply it
+           is a read-only dry run that prints the plan and makes no call.
+
   --probe  One real paid call of each kind, writing nothing, printing the
            MEASURED x-requests-last of each, so the per-call cost is a
            measurement before the big run.
 
   --replay-unmatched  No paid call. Re-reads the raw events kept in
            `ncaab_odds_unmatched` and stores the ones that resolve now (after a
-           fix to the team names), as the purchase would have stored them,
+           fix to the team names), as the game-line purchase would have
+           stored them (its QuoteKeeper filter, also for raw events the
+           opener grid kept, which the grid itself thins with ChangeKeeper),
            with two differences: a listing whose start is 12 hours or more
            from the ESPN game it lands on is not stored, and an hour the feed
            answered with an earlier hour's snapshot is replayed only at the
@@ -77,26 +115,37 @@ DATE FIRST, so a stop leaves the most recent seasons stored.
     python -m data.ingestors.ncaab_odds_history --probe --seasons 2026 2026 --max-credits 200 --floor 300000 --apply
     python -m data.ingestors.ncaab_odds_history --lines --seasons 2021 2026 --max-credits 420000 --floor 300000 --apply
     python -m data.ingestors.ncaab_odds_history --derivatives close --seasons 2024 2026 --max-credits 800000 --floor 300000 --apply
+    python -m data.ingestors.ncaab_odds_history --derivatives 15z --sample 50 --seasons 2024 2026 --dry-run
+    python -m data.ingestors.ncaab_odds_history --derivatives 15z --sample 50 --seasons 2024 2026 --max-credits 2500 --floor 300000 --apply
+    python -m data.ingestors.ncaab_odds_history --derivatives 15z --seasons 2024 2026 --max-credits 700000 --floor 300000 --apply
+    python -m data.ingestors.ncaab_odds_history --opener-grid --step 30 --seasons 2021 2026 --dry-run
     python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2026 2026 --dry-run
     python -m data.ingestors.ncaab_odds_history --replay-unmatched --seasons 2021 2026 --apply
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 import json
+import threading
+import time
 from bisect import bisect_left
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import requests
 from loguru import logger
 
 import config
 from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 from data.db import get_connection
-from data.ingestors.nba_odds_history import _ODDS_KEYS, Meter, _write_with_retry
+from data.ingestors.nba_odds_history import (_ODDS_KEYS, FETCH_LEDGER_DDL, Meter,
+                                             _write_with_retry)
 from data.ingestors.ncaab_teams import (eastern_game_date, load_games_window, ncaab_season_label,
                                         load_registry, match_event, reset_registry_cache,
                                         resolve_team_name)
@@ -104,7 +153,7 @@ from data.ingestors.odds_ingestor import (HISTORICAL_ODDS_SOURCE, PULL_LEDGER_DD
                                           _insert_odds, _mark_in_play, _parse_outcomes,
                                           _parse_spread_outcomes, _parse_total_outcomes,
                                           _process_events)
-from data.ingestors.odds_quota import persist_quota
+from data.ingestors.odds_quota import latest_remaining, persist_quota, record_quota_headers
 
 SPORT = "NCAAB"
 BASE = "https://api.the-odds-api.com/v4/historical/sports/basketball_ncaab"
@@ -116,7 +165,16 @@ DERIV_MARKETS = ["h2h_h1", "spreads_h1", "totals_h1", "team_totals"]
 # exactly as data/prune_odds.PROTECTED_SOURCES lists them.
 NCAAB_DERIV_CLOSE_SOURCE = "odds_api_ncaab_derivative_close"
 NCAAB_DERIV_OPEN_SOURCE = "odds_api_ncaab_derivative_open"
-DERIV_SOURCES = {"close": NCAAB_DERIV_CLOSE_SOURCE, "open": NCAAB_DERIV_OPEN_SOURCE}
+# The three game-day times (mike, 2026-11-02), each its own source for the
+# same reason, also named in data/prune_odds.PROTECTED_SOURCES.
+NCAAB_DERIV_15Z_SOURCE = "odds_api_ncaab_derivative_15z"
+NCAAB_DERIV_18Z_SOURCE = "odds_api_ncaab_derivative_18z"
+NCAAB_DERIV_TIP60_SOURCE = "odds_api_ncaab_derivative_tip60"
+DERIV_SOURCES = {"close": NCAAB_DERIV_CLOSE_SOURCE, "open": NCAAB_DERIV_OPEN_SOURCE,
+                 "15z": NCAAB_DERIV_15Z_SOURCE, "18z": NCAAB_DERIV_18Z_SOURCE,
+                 "tip60": NCAAB_DERIV_TIP60_SOURCE}
+GAMEDAY_MODES = ("15z", "18z", "tip60")
+GAMEDAY_HOURS = {"15z": 15, "18z": 18}      # UTC hour on the game's ESPN (Eastern) date
 FIRST_DERIV_DATE = "2023-05-03"     # the feed's first period / prop snapshot
 LINE_SNAPSHOT_COST = 30             # 10 x 3 markets x 1 region (measured on the NBA)
 LIST_COST = 1                       # the historical event list, a date
@@ -142,6 +200,14 @@ CREATE TABLE IF NOT EXISTS ncaab_odds_unmatched (
 )
 """
 PULL_LEDGER_COLS = ("sport", "snapshot_date", "hour_utc", "pulled_at", "rows")
+# The opener grid's half hours. odds_history_pulls is shared by every sport's
+# history purchase and keyed on an integer hour, and its key is not changed:
+# any copy of a purchase whose ON CONFLICT names those three columns would pay
+# for a snapshot and then fail to ledger it. A time off the hour is ledgered
+# here instead, keyed on the instant: the NBA purchase's table
+# (nba_odds_history.FETCH_LEDGER_DDL), whose every NBA reader filters on sport.
+FETCH_LEDGER_COLS = ("sport", "requested_at", "snapshot_ts", "why", "pulled_at", "rows")
+GRID_WHY = "opener_grid"
 
 
 class PreconditionError(RuntimeError):
@@ -176,6 +242,193 @@ def _season_window(first: int, last: int) -> tuple[str, str]:
     """The game dates seasons first..last cover under the ending-year label
     (ncaab_teams.ncaab_season_label: October onwards is the next year's)."""
     return f"{first - 1}-10-01", f"{last}-09-30"
+
+
+# ── paid calls side by side, the credit meter exact ─────────────────────────
+#
+# WHY. One call at a time, the opener grid bought about 48 snapshots a minute
+# (job 936020, 2026-11-02), most of it waiting on the feed (a bulk snapshot
+# answers in 0.4-1.0 s, api_call_log). mike, 2026-11-02: "I want it all done".
+# So the grid and the first-half purchases send up to `concurrency` calls at
+# once (default 6, at most 10). Only the HTTP calls run in the pool. Every
+# database write, the parse, the keepers and the meter's accounting stay on
+# the main thread, and each answer is handled in the order it was asked for,
+# so what is stored is what the one-at-a-time run would store.
+#
+# THE FLOOR STAYS EXACT. Before EVERY paid call the meter is asked whether it
+# fits with every call already in flight counted at its most (30 a bulk
+# snapshot, 40 a game's first-half call): PoolMeter.reserved. So no call in
+# flight can take the balance under the floor or the spend over the ceiling.
+# While the balance is still unknown, one call at a time.
+#
+# RATE LIMITS. The feed's docs: "Requests are rate limited in order to protect
+# our systems from sudden bursts in traffic", and a 429 asks for the requests
+# to be spaced out over several seconds. A 429 pauses EVERY thread (one shared
+# pause, doubling from 2 s to at most 30 s), is retried, and takes one call
+# off the number in flight; 100 answers in a row without one put it back, up
+# to the setting. The run's report counts the 429s.
+
+DEFAULT_CONCURRENCY = 6
+MAX_CONCURRENCY = 10
+
+
+@dataclass
+class Fetched:
+    """One paid call's answer and every attempt it took (each is billed)."""
+    response: object
+    attempts: list = field(default_factory=list)
+
+
+def _billed(r) -> int:
+    return int(float(r.headers.get("x-requests-last") or 0))
+
+
+class PoolMeter(Meter):
+    """The shared Meter's ceiling and floor, with calls in flight.
+
+    `fetch` runs on a pool thread and touches no accounting; `settle` (main
+    thread only) bills what a fetch's attempts cost. `stop_reason` counts
+    every call in flight at its most (`reserved`, which _paid_calls keeps).
+    `get` is fetch then settle, for the calls made one at a time."""
+
+    RETRY_429 = 8
+    RETRY_5XX = 4
+    RETRY_NETWORK = 5
+
+    def __init__(self, ceiling: int, floor: int, workers: int = 1):
+        super().__init__(ceiling, floor)
+        if not 1 <= int(workers) <= MAX_CONCURRENCY:
+            raise ValueError(f"concurrency must be 1..{MAX_CONCURRENCY}, got {workers}")
+        self.workers = self.window = int(workers)
+        self.reserved = 0
+        self.rate_limited = 0
+        self._lock = threading.Lock()
+        self._pause_until = 0.0
+        self._backoff = 0.0
+        self._calm = 0
+
+    def stop_reason(self, next_cost: int) -> str | None:
+        return super().stop_reason(next_cost + self.reserved)
+
+    def _send(self, url: str, params: dict):
+        """One HTTP request. The only line that reaches the feed (tests replace it)."""
+        return requests.get(url, params={**params, "apiKey": config.ODDS_API_KEY}, timeout=90)
+
+    def _wait_turn(self) -> None:
+        with self._lock:
+            wait = self._pause_until - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+
+    def _throttled(self) -> None:
+        with self._lock:
+            self.rate_limited += 1
+            self._backoff = min(30.0, max(2.0, self._backoff * 2))
+            self._pause_until = max(self._pause_until, time.monotonic() + self._backoff)
+            self.window = max(1, self.window - 1)
+            self._calm = 0
+        logger.warning(f"HTTP 429: every call paused {self._backoff:.0f}s, "
+                       f"{self.window} in flight at most")
+
+    def _answered(self) -> None:
+        with self._lock:
+            self._backoff /= 2
+            self._calm += 1
+            if self._calm >= 100 and self.window < self.workers:
+                self.window += 1
+                self._calm = 0
+
+    def fetch(self, url: str, params: dict) -> Fetched:
+        """One paid call, retried on a 429 (shared pause), a server error or a
+        network error, and only while no attempt has billed anything: the
+        meter cleared one call's cost, not two."""
+        out = Fetched(None)
+        n429 = n5xx = nnet = 0
+        while True:
+            self._wait_turn()
+            try:
+                r = self._send(url, params)
+            except requests.RequestException as exc:
+                nnet += 1
+                logger.warning(f"network: {type(exc).__name__}; retry {nnet}")
+                if nnet >= self.RETRY_NETWORK:
+                    return out
+                time.sleep(3 * nnet)
+                continue
+            out.attempts.append(r)
+            out.response = r
+            free = _billed(r) == 0
+            if r.status_code == 429 and free and n429 < self.RETRY_429:
+                n429 += 1
+                self._throttled()
+                continue
+            if r.status_code in (500, 502, 503, 504) and free and n5xx < self.RETRY_5XX:
+                n5xx += 1
+                time.sleep(5 * n5xx)
+                continue
+            if r.status_code != 429:
+                self._answered()
+            return out
+
+    def settle(self, f: Fetched):
+        """Bill a fetch (main thread only) and return its answer. The balance
+        is the lowest any answer reported: answers can arrive out of order."""
+        for r in f.attempts:
+            record_quota_headers(r)
+            self.spent += _billed(r)
+            rem = r.headers.get("x-requests-remaining")
+            if rem is not None:
+                rem = int(float(rem))
+                self.remaining = rem if self.remaining is None else min(self.remaining, rem)
+        return f.response
+
+    def get(self, url: str, params: dict):
+        return self.settle(self.fetch(url, params))
+
+
+def _paid_calls(meter, jobs, cost: int, consume) -> str | None:
+    """Make each job's paid call and hand its answer to consume(key, response)
+    in the jobs' order. `jobs` yields (key, url, params) and is read on the
+    main thread, one job at a time, just before its call is cleared.
+
+    Before every call the meter clears it with every call in flight counted at
+    `cost`, its most. A stop ends the asking; the calls already in flight are
+    still handled. Returns the stop reason, or None. A meter that is not a
+    PoolMeter with more than one worker makes the calls one at a time."""
+    if not isinstance(meter, PoolMeter) or meter.workers <= 1:
+        for key, url, params in jobs:
+            why = meter.stop_reason(cost)
+            if why:
+                return why
+            consume(key, meter.get(url, params))
+        return None
+    inflight: deque = deque()
+    why = None
+    with ThreadPoolExecutor(max_workers=meter.workers, thread_name_prefix="ncaab-paid") as pool:
+        def handle_oldest():
+            key, fut = inflight.popleft()
+            f = fut.result()
+            meter.reserved -= cost
+            consume(key, meter.settle(f))
+        try:
+            for key, url, params in jobs:
+                # a full window, or a balance not yet known, waits for an answer
+                while inflight and (len(inflight) >= meter.window or meter.remaining is None):
+                    handle_oldest()
+                why = meter.stop_reason(cost)
+                if why:
+                    break
+                meter.reserved += cost
+                inflight.append((key, pool.submit(meter.fetch, url, params)))
+            while inflight:
+                handle_oldest()
+        finally:
+            for _, fut in inflight:             # only after an error: bill what was spent
+                f = fut.result()
+                meter.reserved -= cost
+                meter.settle(f)
+            inflight.clear()
+    return why
 
 
 # ── the two checks that run before any credit is spent ──────────────────────
@@ -257,16 +510,22 @@ def check_process_events_contract() -> None:
 # ── tables ───────────────────────────────────────────────────────────────────
 
 def _ensure_tables(conn) -> None:
-    """The pull ledger and the unmatched store, created once and locked down.
+    """The two ledgers and the unmatched store, created once and locked down.
 
-    Both are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The catalog
-    gate means a run that finds them current fires no DDL (data/ddl_guard.py).
+    All three are worker-only (data/anon_readable.WORKER_ONLY_TABLES). The
+    catalog gate means a run that finds them current fires no DDL
+    (data/ddl_guard.py); production holds all three (2026-10-30).
     """
     changed = False
     if not schema_is_current(conn, "odds_history_pulls", columns=PULL_LEDGER_COLS,
                              rls=True, revoked_from=API_ROLES):
         conn.execute(PULL_LEDGER_DDL)
         lock_down(conn, "odds_history_pulls")
+        changed = True
+    if not schema_is_current(conn, "odds_history_fetches", columns=FETCH_LEDGER_COLS,
+                             rls=True, revoked_from=API_ROLES):
+        conn.execute(FETCH_LEDGER_DDL)
+        lock_down(conn, "odds_history_fetches")
         changed = True
     if not schema_is_current(conn, "ncaab_odds_unmatched", columns=UNMATCHED_COLS,
                              rls=True, revoked_from=API_ROLES):
@@ -467,10 +726,36 @@ def season_order(todo: list[datetime]) -> list[datetime]:
     return sorted(todo, key=lambda w: (-season(w), w))
 
 
-def _held_hours(conn) -> set[tuple[str, int]]:
-    return {(str(r[0]), int(r[1])) for r in conn.execute(
-        "SELECT snapshot_date, hour_utc FROM odds_history_pulls WHERE sport = %s",
-        (SPORT,)).fetchall()}
+def _held_instants(conn) -> set[datetime]:
+    """Every NCAAB instant bought, as aware UTC, from both ledgers: the pull
+    ledger's hours (date, hour) and the fetch ledger's off-the-hour instants
+    (sport 'NCAAB' only; the NBA files its own there). A half hour is its own
+    instant and never reads as its hour.
+
+    A database the fetch ledger has never reached (no NBA or grid purchase
+    has run there) holds no half hour: its hours are the answer. Any other
+    failure of that read is raised."""
+    out = set()
+    for d, hour in conn.execute("SELECT snapshot_date, hour_utc FROM odds_history_pulls "
+                                "WHERE sport = %s", (SPORT,)).fetchall():
+        try:
+            day = date.fromisoformat(str(d)[:10])
+        except ValueError:
+            continue
+        out.add(datetime(day.year, day.month, day.day, int(hour), tzinfo=timezone.utc))
+    try:
+        fetched = conn.execute("SELECT requested_at FROM odds_history_fetches "
+                               "WHERE sport = %s", (SPORT,)).fetchall()
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()
+        if conn.execute("SELECT to_regclass('public.odds_history_fetches')").fetchone()[0]:
+            raise
+        fetched = []
+    for (at,) in fetched:
+        when = _utc(at)
+        if when is not None:
+            out.add(when)
+    return out
 
 
 def _parse_snapshot(events: list[dict], when: datetime, resolver: EventResolver,
@@ -516,29 +801,67 @@ def _parse_snapshot(events: list[dict], when: datetime, resolver: EventResolver,
 
 
 def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
-                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None) -> bool:
+                  when: datetime, stats: dict, keeper: "QuoteKeeper | None" = None,
+                  taken: set | None = None) -> bool:
     """Buy the whole slate at `when`, write it, its unmatched events and its
-    ledger row in one transaction. False = stop (ceiling or floor)."""
-    snap_date, hour = when.date().isoformat(), when.hour
-    held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
-                        "AND snapshot_date = %s AND hour_utc = %s",
-                        (SPORT, snap_date, hour)).fetchone()
-    if held:
-        conn.commit()
+    ledger row in one transaction. False = stop (ceiling or floor).
+
+    On the hour the ledger is odds_history_pulls (sport, date, hour), as every
+    purchase has it; off the hour (the grid's half hours) odds_history_fetches,
+    keyed on the instant. One routing rule for the check and the write, so
+    22:30 and 22:00 are two snapshots and neither reads as the other bought.
+
+    With `taken` (the opener grid) a kept row whose identical quote is already
+    in `odds`, or was stored by this run (`taken`), is not stored again: the
+    keeper knows only what this run has seen, and the lines purchase stored
+    its hours' quotes before. `odds` is read back INSIDE the write unit, as
+    the replay does, so a retry after a lost commit stores nothing twice."""
+    if _snapshot_held(conn, when):
         stats["skipped_held"] += 1
         return True
     stop = meter.stop_reason(LINE_SNAPSHOT_COST)
     if stop:
         stats["stopped"] = stop
-        logger.warning(f"lines stopping at {when:%Y-%m-%d %H}Z: {stop}")
+        logger.warning(f"lines stopping at {when:%Y-%m-%d %H:%M}Z: {stop}")
         return False
+    r = meter.get(f"{BASE}/odds", _snapshot_params(when))
+    _store_snapshot(conn, meter, tips, resolver, when, r, stats, keeper, taken)
+    return True
+
+
+def _snapshot_held(conn, when: datetime) -> bool:
+    """Is this instant in the ledger? On the hour odds_history_pulls (sport,
+    date, hour); off the hour odds_history_fetches (sport, instant)."""
+    if when.minute == 0 and when.second == 0:
+        held = conn.execute("SELECT 1 FROM odds_history_pulls WHERE sport = %s "
+                            "AND snapshot_date = %s AND hour_utc = %s",
+                            (SPORT, when.date().isoformat(), when.hour)).fetchone()
+    else:
+        held = conn.execute("SELECT 1 FROM odds_history_fetches WHERE sport = %s "
+                            "AND requested_at = %s", (SPORT, when)).fetchone()
+    if held:
+        conn.commit()
+    return bool(held)
+
+
+def _snapshot_params(when: datetime) -> dict:
+    return {"date": _stamp(when), "markets": ",".join(LINE_MARKETS), "bookmakers": BOOKS,
+            "oddsFormat": "american"}
+
+
+def _store_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResolver,
+                    when: datetime, r, stats: dict, keeper: "QuoteKeeper | None" = None,
+                    taken: set | None = None) -> None:
+    """Parse and write one bought snapshot (_buy_snapshot's second half, and
+    the opener grid's, whose calls run side by side): odds, its unmatched
+    events and its ledger row in one transaction."""
+    snap_date, hour = when.date().isoformat(), when.hour
+    on_hour = when.minute == 0 and when.second == 0
     snapshot_at = _stamp(when)
-    r = meter.get(f"{BASE}/odds", {"date": snapshot_at, "markets": ",".join(LINE_MARKETS),
-                                   "bookmakers": BOOKS, "oddsFormat": "american"})
     if r is None or r.status_code != 200:
         stats["errors"] += 1
         logger.warning(f"lines {snapshot_at}: HTTP {getattr(r, 'status_code', 'network')}")
-        return True
+        return
     body = r.json()
     events = body.get("data") or []
     stamp = body.get("timestamp") or snapshot_at
@@ -554,31 +877,54 @@ def _buy_snapshot(conn, meter: Meter, tips: dict[str, str], resolver: EventResol
     lost = [(stamp, str(ev.get("id")), ev.get("home_team"), ev.get("away_team"),
              ev.get("commence_time"), json.dumps(ev), HISTORICAL_ODDS_SOURCE)
             for ev in unmatched + dropped]
+    # The rows this snapshot stored, by one attempt or another: a retry after a
+    # commit the server did make finds them in `odds` and stores none.
+    stored = {"n": 0}
 
     def _write():
-        if odds_rows:
-            _insert_odds(conn, odds_rows)
+        rows = odds_rows
+        if taken is not None:
+            rows = [r for _, r in _not_yet_stored(conn, odds_rows, taken)]
+        if rows:
+            _insert_odds(conn, rows)
+        stored["n"] = max(stored["n"], len(rows))
         if lost:
             conn.executemany(_UNMATCHED_INSERT, lost)
-        conn.execute("""
-            INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
-            VALUES (%s, %s, %s, NOW(), %s)
-            ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
-               SET pulled_at = NOW(), rows = EXCLUDED.rows
-        """, (SPORT, snap_date, hour, len(odds_rows)))
+        if on_hour:
+            conn.execute("""
+                INSERT INTO odds_history_pulls (sport, snapshot_date, hour_utc, pulled_at, rows)
+                VALUES (%s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                   SET pulled_at = NOW(), rows = EXCLUDED.rows
+            """, (SPORT, snap_date, hour, stored["n"]))
+        else:
+            conn.execute("""
+                INSERT INTO odds_history_fetches
+                       (sport, requested_at, snapshot_ts, why, pulled_at, rows)
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (sport, requested_at) DO UPDATE
+                   SET snapshot_ts = EXCLUDED.snapshot_ts, pulled_at = NOW(),
+                       rows = EXCLUDED.rows
+            """, (SPORT, when, body.get("timestamp"), GRID_WHY, stored["n"]))
         conn.commit()
 
     if not _write_with_retry(conn, _write, f"lines {snapshot_at}"):
         stats["errors"] += 1
-        return True
+        return
+    if taken is not None:
+        # every kept row is in `odds` now; the next snapshot need not store it
+        taken.update(_row_key(r["game_id"], r.get("market"), r.get("bookmaker"),
+                              r.get("snapshot_at"), *(r.get(c) for c in _ROW_VALUES))
+                     for r in odds_rows)
+        stats["rows_already_stored"] += len(odds_rows) - stored["n"]
     stats["calls"] += 1
-    stats["odds_rows"] += len(odds_rows)
+    stats["odds_rows"] += stored["n"]
     stats["unmatched_events"] += len(unmatched)
     stats["dropped_by_parser"] += len(dropped)
     if stats["calls"] % 50 == 0:
         logger.info(f"lines {snapshot_at}: {stats['calls']} calls, {stats['odds_rows']:,} rows, "
                     f"spent {meter.spent:,}, balance {meter.remaining}")
-    return True
+    return
 
 
 def plan_lines(conn, first: int, last: int) -> tuple[list[dict], list[datetime], list[datetime]]:
@@ -586,11 +932,11 @@ def plan_lines(conn, first: int, last: int) -> tuple[list[dict], list[datetime],
     games = _season_games(conn, first, last)
     pairs = line_snapshots(games)
     try:
-        done = _held_hours(conn)
+        done = _held_instants(conn)
     except Exception:                                           # noqa: BLE001
         conn.rollback()                    # a database the ledger has never reached
         done = set()
-    todo = [w for w in pairs if (w.date().isoformat(), w.hour) not in done]
+    todo = [w for w in pairs if w not in done]
     return games, pairs, todo
 
 
@@ -620,18 +966,32 @@ def deriv_instant(tip: datetime | None, game_date: str, mode: str) -> datetime |
 
     close: tip minus 10 minutes. open: D-1 22Z or tip minus 20 hours, whichever
     is LATER (a 7pm ET tip opens at 04Z the same night, a noon tip at D-1 22Z).
-    Rounded down to five minutes, the feed's snapshot spacing.
+    tip60: tip minus 60 minutes. Rounded down to five minutes, the feed's
+    snapshot spacing.
+
+    15z / 18z: 15:00Z / 18:00Z on the game's date (ESPN's date, which is the
+    Eastern date of the tip: 18,836 of 18,836 games 2023-24..2025-26, read
+    2026-11-02), and None for a game that tips at or before that time, or
+    whose tip is unknown: its price then could be in play.
     """
-    d = date.fromisoformat(str(game_date)[:10]) - timedelta(days=1)
+    day = date.fromisoformat(str(game_date)[:10])
+    if mode in GAMEDAY_HOURS:
+        at = datetime(day.year, day.month, day.day, GAMEDAY_HOURS[mode], tzinfo=timezone.utc)
+        return at if tip is not None and tip > at else None
+    d = day - timedelta(days=1)
     evening_before = datetime(d.year, d.month, d.day, 22, tzinfo=timezone.utc)
     if mode == "close":
         if tip is None:
             return None
         at = tip - timedelta(minutes=10)
+    elif mode == "tip60":
+        if tip is None:
+            return None
+        at = tip - timedelta(minutes=60)
     elif mode == "open":
         at = evening_before if tip is None else max(evening_before, tip - timedelta(hours=20))
     else:
-        raise ValueError(f"mode must be close or open, got {mode!r}")
+        raise ValueError(f"mode must be one of {sorted(DERIV_SOURCES)}, got {mode!r}")
     return at.replace(minute=at.minute - at.minute % 5, second=0, microsecond=0)
 
 
@@ -700,23 +1060,169 @@ def _list_instant(game_date: str, tips: list[datetime]) -> datetime:
     return min([noon] + early)
 
 
+def _has_instant(g: dict, mode: str) -> bool:
+    """Could this game be bought at the mode's time? A game-day time (15z,
+    18z) is skipped for a game whose stored tip is at or before it; a game with
+    no stored tip stays in (the feed's own start is read when it is bought)."""
+    tip = _utc(g.get("commence_time"))
+    return tip is None or deriv_instant(tip, g["game_date"], mode) is not None
+
+
 def plan_derivatives(conn, first: int, last: int, mode: str):
     """(every season game, those since FIRST_DERIV_DATE, the ids already stored
-    under the mode's source)."""
+    under the mode's source). A game-day mode leaves out the games that tip
+    at or before its time."""
     every = _season_games(conn, first, last)
     games = [g for g in every if g["game_date"] >= FIRST_DERIV_DATE]
+    if mode in GAMEDAY_MODES:
+        games = [g for g in games if _has_instant(g, mode)]
     return every, games, _deriv_done(conn, [g["game_id"] for g in games], DERIV_SOURCES[mode])
 
 
-def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dict:
+# ── the test buy: a few games, spread over the seasons and the tip times ────
+#
+# WHY. Whether the books post first-half lines by 15:00Z on game day is not
+# measured: the stored derivatives are at the open (most books absent, Hard
+# Rock alone on ~3,100 2025-26 games) and the close (each of six books on
+# ~5,000-5,600). A ~50-game buy answers it for about 2,000 credits before the
+# full one (at most 687,686) is spent. Its rows are stored under the full
+# purchase's own source, so the full run skips them.
+#
+# HOW IT CHOOSES. Strata are season x the tip's Eastern hour (TIP_BUCKETS;
+# every one of the 15 holds at least 264 games 2023-24..2025-26, read
+# 2026-11-02). Within a stratum games are ranked by sha256(SAMPLE_SEED +
+# game id), and the strata are taken in turn, so 50 games are 3 or 4 a stratum.
+# Ranking by a hash of the id, not a draw, means a game's place never moves,
+# so a re-run picks the same games and buys none of them twice. Only games
+# with a stored close (any book's first-half or team-total line at tip minus
+# 10) are drawn, so a game no book ever priced does not spend a slot.
+
+SAMPLE_SEED = "ncaab-derivative-sample-2026-11-02"
+SAMPLE_POOL = 6            # candidates checked for a stored close, per game sampled
+# (the Eastern hour a stratum ends before, label); an hour after midnight is late
+TIP_BUCKETS = ((13, "before 1pm ET"), (16, "1-4pm ET"), (19, "4-7pm ET"),
+               (21, "7-9pm ET"), (30, "9pm ET or later"))
+REPORT_MARKETS = ("h2h_h1", "spreads_h1", "totals_h1", "team_totals_home", "team_totals_away")
+
+
+def tip_bucket(tip: datetime) -> str:
+    """The Eastern tip-time stratum of a tip (TIP_BUCKETS)."""
+    local = tip.astimezone(ET)
+    hour = local.hour + (24 if local.hour < 6 else 0)
+    return next(label for end, label in TIP_BUCKETS if hour < end)
+
+
+def _rank(game_id: str, seed: str) -> str:
+    return hashlib.sha256(f"{seed}:{game_id}".encode("utf-8")).hexdigest()
+
+
+def sample_games(games: list[dict], n: int, seed: str = SAMPLE_SEED) -> list[dict]:
+    """Up to n of `games`, spread over season x tip-time strata. Pure and
+    deterministic: each stratum in hash-rank order, the strata in turn
+    (earliest tip time first, and within a tip time the newest season first,
+    so a remainder spreads over the seasons). A game with no tip is not drawn."""
+    strata: dict[tuple, list[dict]] = defaultdict(list)
+    order = {label: i for i, (_, label) in enumerate(TIP_BUCKETS)}
+    for g in games:
+        tip = _utc(g.get("commence_time"))
+        if tip is not None:
+            strata[(ncaab_season_label(str(g["game_date"])[:10]), tip_bucket(tip))].append(g)
+    keys = sorted(strata, key=lambda k: (order[k[1]], -k[0]))
+    for k in keys:
+        strata[k].sort(key=lambda g: _rank(g["game_id"], seed))
+    out: list[dict] = []
+    for i in itertools.count():
+        took = False
+        for k in keys:
+            if i < len(strata[k]):
+                took = True
+                out.append(strata[k][i])
+                if len(out) >= n:
+                    return out
+        if not took:
+            return out
+    return out
+
+
+def plan_sample(conn, first: int, last: int, mode: str, n: int):
+    """plan_derivatives for a test buy of n games: (every season game, the n
+    sampled, the ids already stored under the mode's source, whether they were
+    drawn from games with a stored close). Reads the close for SAMPLE_POOL x n
+    candidates and the mode's own source for the n, never the whole season."""
+    every = _season_games(conn, first, last)
+    eligible = [g for g in every if g["game_date"] >= FIRST_DERIV_DATE
+                and deriv_instant(_utc(g.get("commence_time")), g["game_date"], mode) is not None]
+    pool = sample_games(eligible, SAMPLE_POOL * n)
+    priced = _deriv_done(conn, [g["game_id"] for g in pool], NCAAB_DERIV_CLOSE_SOURCE)
+    with_close = [g for g in pool if g["game_id"] in priced]
+    chosen = sample_games(with_close or pool, n)
+    done = _deriv_done(conn, [g["game_id"] for g in chosen], DERIV_SOURCES[mode])
+    return every, chosen, done, bool(with_close)
+
+
+_COVERAGE_SQL = ("SELECT DISTINCT source, bookmaker, market, game_id FROM odds "
+                 "WHERE game_id = ANY(%s) AND source = ANY(%s) "
+                 "AND snapshot_type IS DISTINCT FROM 'in_play'")
+
+
+def sample_coverage(conn, games: list[dict], mode: str, drawn_from_close: bool = True) -> str:
+    """The test buy's answer, read back from `odds`: per book and market, how
+    many of the sampled games hold a quote at the mode's time, beside how many
+    hold one at the stored close; then the same, any book, by tip time."""
+    ids = [g["game_id"] for g in games]
+    source = DERIV_SOURCES[mode]
+    have: dict[str, dict[tuple, set]] = {source: defaultdict(set),
+                                         NCAAB_DERIV_CLOSE_SOURCE: defaultdict(set)}
+    for src, book, market, gid in conn.execute(
+            _COVERAGE_SQL, (ids, [source, NCAAB_DERIV_CLOSE_SOURCE])).fetchall():
+        if src in have and market in REPORT_MARKETS:
+            have[src][(book, market)].add(gid)
+            have[src][("any book", market)].add(gid)
+            have[src][("any book", "any")].add(gid)
+    n = len(ids)
+    at, close = have[source], have[NCAAB_DERIV_CLOSE_SOURCE]
+    books = ["any book"] + sorted({b for b, _ in list(at) + list(close)} - {"any book"})
+    lines = [f"sample coverage, {mode} ({source}): {n} games"
+             + (", drawn from games with a stored close" if drawn_from_close else
+                ", NO stored close among the candidates, drawn from all")
+             + f"; {len(at[('any book', 'any')])} hold a quote at {mode}, "
+             f"{len(close[('any book', 'any')])} at the close",
+             "  each cell: games with a quote at " + mode + " / at the close, of " + str(n),
+             "  " + "book".ljust(14) + "".join(m.ljust(18) for m in REPORT_MARKETS)]
+    for b in books:
+        lines.append("  " + b[:13].ljust(14) + "".join(
+            f"{len(at[(b, m)])}/{len(close[(b, m)])}".ljust(18) for m in REPORT_MARKETS))
+    by_bucket: dict[str, list[int]] = {label: [0, 0, 0] for _, label in TIP_BUCKETS}
+    for g in games:
+        tip = _utc(g.get("commence_time"))
+        if tip is None:
+            continue
+        cell = by_bucket[tip_bucket(tip)]
+        cell[0] += 1
+        cell[1] += g["game_id"] in at[("any book", "any")]
+        cell[2] += g["game_id"] in close[("any book", "any")]
+    lines.append("  any quote by tip time (at " + mode + " / at the close / games): " + "; ".join(
+        f"{label} {a}/{c}/{k}" for label, (k, a, c) in by_bucket.items() if k))
+    return "\n".join(lines)
+
+
+def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str,
+                    sample: int | None = None) -> dict:
     """One purchase per game at its mode's instant, newest date first; a game
     already holding rows under the source is skipped, so a re-run (the r2 job
     after the monthly refill) buys only what is missing. An answer with no
     markets writes nothing and is asked again on a re-run; the feed documents
-    an empty answer as free."""
+    an empty answer as free. With `sample` (a game-day mode only) only that
+    many games are bought (plan_sample), and the run ends by printing what
+    they returned, per book and market (sample_coverage)."""
     source = DERIV_SOURCES[mode]
+    if sample is not None and mode not in GAMEDAY_MODES:
+        raise ValueError(f"a sample is for the game-day times {GAMEDAY_MODES}, not {mode!r}")
     check_precondition(conn, list(range(first, last + 1)))
-    every, games, done = plan_derivatives(conn, first, last, mode)
+    if sample is not None:
+        every, games, done, from_close = plan_sample(conn, first, last, mode, sample)
+    else:
+        every, games, done = plan_derivatives(conn, first, last, mode)
     resolver = _resolver(conn, every)
     pending = {g["game_id"]: g for g in games if g["game_id"] not in done}
     by_date: dict[str, list[dict]] = defaultdict(list)
@@ -749,16 +1255,21 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
                 out.append((ev, pending.pop(hit[0]), hit[1]))
         return out
 
-    def buy_one(ev: dict, g: dict, flipped: bool) -> bool:
-        """Buy and store one game; False = no usable answer (kept for the second pass)."""
+    def plan_one(ev: dict, g: dict):
+        """(tip, instant, params) for one game's call, or None when it is not
+        bought (no tip, or a game-day time it tips at or before)."""
         tip = _utc(g.get("commence_time")) or _utc(ev.get("commence_time"))
         at = deriv_instant(tip, g["game_date"], mode)
         if at is None:
-            totals["no_tip"] += 1
-            return True
-        resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
-            "date": _stamp(at), "markets": ",".join(DERIV_MARKETS), "bookmakers": BOOKS,
-            "oddsFormat": "american"})
+            # a game-day time a game tips at or before (its tip read off the
+            # feed) is not bought: that price could be in play
+            totals["no_tip" if tip is None else "tips_before_instant"] += 1
+            return None
+        return tip, at, {"date": _stamp(at), "markets": ",".join(DERIV_MARKETS),
+                         "bookmakers": BOOKS, "oddsFormat": "american"}
+
+    def finish(ev: dict, g: dict, flipped: bool, tip, at, resp) -> bool:
+        """Store one game's answer; False = no usable answer (kept for the second pass)."""
         if resp is None or resp.status_code != 200:
             totals["errors"] += 1
             return False
@@ -795,6 +1306,30 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
         answered.add(g["game_id"])
         return True
 
+    def buy_many(items: list[tuple], on_fail) -> tuple[str | None, set[int]]:
+        """Buy each (event, game, flipped) through _paid_calls (side by side,
+        each call cleared by the meter with the calls in flight counted at
+        40), storing each answer in order. Returns (the stop reason or None,
+        the indexes handled: bought, failed or not to be bought)."""
+        handled: set[int] = set()
+
+        def jobs():
+            for i, (ev, g, _) in enumerate(items):
+                plan = plan_one(ev, g)
+                if plan is None:
+                    handled.add(i)
+                    continue
+                yield (i, plan), f"{BASE}/events/{ev['id']}/odds", plan[2]
+
+        def consume(key, resp):
+            i, (tip, at, _) = key
+            handled.add(i)
+            ev, g, flipped = items[i]
+            if not finish(ev, g, flipped, tip, at, resp):
+                on_fail(ev, g, flipped)
+
+        return _paid_calls(meter, jobs(), DERIV_EVENT_COST, consume), handled
+
     def run_date(d: str) -> bool:
         # The check sits HERE, not only in the first loop, so the second pass
         # over unanswered dates cannot list one (1 credit) under the floor.
@@ -807,16 +1342,14 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
         if evs is None:
             unlisted.append(d)
             return True
-        for i, (ev, g, flipped) in enumerate(evs):
-            why = meter.stop_reason(DERIV_EVENT_COST)
-            if why:
-                totals["stopped"] = why
-                logger.warning(f"derivatives {mode} stopping at {d}: {why}")
-                for _, left, _ in evs[i:]:      # listed but not bought: still owed
+        why, handled = buy_many(evs, lambda ev, g, flipped: failed.append((ev, g, flipped)))
+        if why:
+            totals["stopped"] = why
+            logger.warning(f"derivatives {mode} stopping at {d}: {why}")
+            for i, (_, left, _) in enumerate(evs):   # listed but not bought: still owed
+                if i not in handled:
                     pending[left["game_id"]] = left
-                return False
-            if not buy_one(ev, g, flipped):
-                failed.append((ev, g, flipped))
+            return False
         return True
 
     stopped = False
@@ -840,19 +1373,255 @@ def buy_derivatives(conn, meter: Meter, first: int, last: int, mode: str) -> dic
                 break
         if not stopped:
             totals["retried"] = len(failed)
-            for ev, g, flipped in list(failed):
-                why = meter.stop_reason(DERIV_EVENT_COST)
-                if why:
-                    totals["stopped"] = why
-                    break
-                if not buy_one(ev, g, flipped):
-                    totals["still_failed"] += 1
+
+            def still_failed(*_):
+                totals["still_failed"] += 1
+            why, _ = buy_many(list(failed), still_failed)
+            if why:
+                totals["stopped"] = why
     # Still owed, for the report: never listed or past a stop, plus listed games
     # whose purchase never got an answer (a stop skips the retry pass).
     totals["left_unbought"] = len(pending) + len(
         {g["game_id"] for _, g, _ in failed} - answered)
+    if isinstance(meter, PoolMeter):
+        totals["concurrency"] = meter.workers
+        totals["rate_limited_429"] = meter.rate_limited
     print(f"derivatives {mode}", resolver.report())
+    if sample is not None:
+        totals["sampled"] = len(games)
+        totals["sampled_already_stored"] = len(done & {g["game_id"] for g in games})
+        # last, so the worker's tail of the printout keeps it
+        print(sample_coverage(conn, games, mode, from_close))
+        _end_read(conn)
     return dict(totals)
+
+
+# ── the opener grid: a snapshot every step before every tip ─────────────────
+#
+# WHY. The lines plan buys three kinds of hour per game date, so a book's first
+# post is dated only to the gap between two of them: over two hours for 42-68%
+# of first spreads and totals, by book (41.6% BetMGM totals to 67.6% betPARX
+# totals; opener-route design, 2026-10-30, against this ledger). The grid buys a snapshot at every grid time on the clock, every 60
+# or 30 minutes, from 72 hours before each tip up to the tip. One bulk snapshot
+# covers the whole listed slate, so the plan is a set of times, not of games.
+#
+# THE SIZE, 2020-21 to 2025-26 (the --dry-run against ESPN's stored schedule and
+# this ledger, both fingerprinted against production on 2026-10-30): every
+# hour, 21,710 grid times, 7,403 already bought, 14,307 to buy; every half
+# hour, 43,415, 7,403 and 36,012. At 30 credits a snapshot that is 429,210 and
+# 1,080,360 credits. The pre-start window adds 168 a season every hour and 336
+# every half hour, none held.
+
+GRID_LEAD = timedelta(hours=72)          # how long before a tip its grid starts
+GRID_STEPS = (60, 30)                    # minutes; the feed keeps 5-minute snapshots
+PRE_START = timedelta(days=10)           # --pre-start: from 240 hours before a season's first tip
+# The lines purchase's measured pace, for the dry run's time estimate: 7,403
+# snapshots from 04:25:12Z to 07:04:47Z on 2026-10-29 (job 805227, api_call_log).
+LINES_PACE_PER_MIN = 7_403 / 159.6
+
+
+@dataclass
+class GridPlan:
+    """The grid times a run would buy, ascending.
+
+    window: every grid time inside some game's 72-hour lead.
+    pre: the pre-start grid times (240 to 72 hours before each season's first
+         tip) not already in `window`; empty unless asked for.
+    todo: window and pre, less the times the ledger holds.
+    """
+    window: list
+    pre: list
+    todo: list
+    window_held: int
+    pre_held: int
+
+
+def _grid_times(spans: list[tuple[int, int]], step: int) -> list[int]:
+    """Every multiple of `step` seconds inside the union of the [lo, hi) spans."""
+    out: list[int] = []
+    end = None
+    for lo, hi in sorted(spans):
+        if end is not None and lo < end:
+            lo = end                     # the overlap was already walked
+        if hi <= lo:
+            continue
+        t = -(-lo // step) * step        # the first grid time at or after lo
+        out.extend(range(t, hi, step))
+        end = hi if end is None else max(end, hi)
+    return out
+
+
+def grid_plan(games: list[dict], step_min: int, held: set, pre_start: bool = False) -> GridPlan:
+    """The opener grid for `games`. Pure, so the plan is testable.
+
+    A grid time is on the clock (every hour, or :00 and :30), never on a tip:
+    a game tipping at 01:20Z wants 01:00 and not 01:30, and its first time is
+    the first one at or after 01:20Z three days earlier. A game with no stored
+    tip adds nothing. Games that share a time share the snapshot.
+    """
+    if step_min not in GRID_STEPS:
+        raise ValueError(f"the grid steps every {GRID_STEPS} minutes, not {step_min}")
+    step, lead = step_min * 60, int(GRID_LEAD.total_seconds())
+    spans: list[tuple[int, int]] = []
+    first_tip: dict[int, int] = {}
+    for g in games:
+        tip = _utc(g.get("commence_time"))
+        if tip is None:
+            continue
+        t = int(tip.timestamp())
+        spans.append((t - lead, t))
+        season = ncaab_season_label(str(g["game_date"])[:10])
+        first_tip[season] = min(first_tip.get(season, t), t)
+
+    def as_dt(ts: list[int]) -> list[datetime]:
+        return [datetime.fromtimestamp(x, tz=timezone.utc) for x in ts]
+
+    window = as_dt(_grid_times(spans, step))
+    pre: list[datetime] = []
+    if pre_start:
+        early = int(PRE_START.total_seconds())
+        inside = set(window)
+        pre = [w for w in as_dt(_grid_times([(t - early, t - lead) for t in first_tip.values()],
+                                            step)) if w not in inside]
+    todo = sorted(w for w in window + pre if w not in held)
+    return GridPlan(window=window, pre=pre, todo=todo,
+                    window_held=sum(1 for w in window if w in held),
+                    pre_held=sum(1 for w in pre if w in held))
+
+
+def plan_opener_grid(conn, first: int, last: int, step_min: int,
+                     pre_start: bool = False) -> tuple[list[dict], GridPlan]:
+    """(every season game, the grid plan against the ledger). Reads only."""
+    games = _season_games(conn, first, last)
+    try:
+        held = _held_instants(conn)
+    except Exception:                                           # noqa: BLE001
+        conn.rollback()                    # a database the ledger has never reached
+        held = set()
+    return games, grid_plan(games, step_min, held, pre_start)
+
+
+class ChangeKeeper:
+    """What the grid stores of each bought snapshot: each book's first quote on
+    each game and market, and every quote that differs from the one before it
+    in price or line. A repeat is not kept (a half-hourly grid over 72 hours
+    would otherwise store the same quote up to 144 times), and an in-play
+    price never is. What it keeps is then read back against `odds`
+    (_buy_snapshot with `taken`), so a quote already stored is not stored
+    again.
+
+    The first quote is the point of the purchase: its feed time (the market's
+    own last_update, which the parser stores as snapshot_at) dates the book's
+    first post to within the step. Storing each change as well keeps every
+    distinct quote the grid paid for, the way the live opener capture
+    (scripts/ncaab_odds_capture.py) stores changes only. One keeper a season,
+    so its memory is bounded. It knows only what this run has seen: the
+    quotes the lines purchase stored at its hours (which the grid skips as
+    bought), and those an earlier run stored before a stop, are caught by the
+    read-back of `odds`, not here.
+    """
+
+    def __init__(self):
+        self.last: dict[tuple[str, str, str], tuple] = {}
+
+    def wanted(self, row: dict, when: datetime) -> bool:
+        if row.get("snapshot_type") == "in_play":
+            return False
+        key = (row["game_id"], row.get("market") or "", row.get("bookmaker") or "")
+        quote = tuple(None if row.get(c) is None else round(float(row[c]), 4)
+                      for c in _ROW_VALUES)
+        if self.last.get(key) == quote:
+            return False
+        self.last[key] = quote
+        return True
+
+
+def buy_opener_grid(conn, meter: Meter, first: int, last: int, step_min: int,
+                    pre_start: bool = False) -> dict:
+    """Buy every grid time the ledgers lack, newest season first and each
+    season oldest first, through _buy_snapshot (odds, unmatched events and the
+    ledger row in one transaction; the hour in odds_history_pulls, the half
+    hour in odds_history_fetches).
+
+    Two things the lines purchase does not do. Each snapshot's kept rows are
+    read back against `odds` (one `taken` set a season, beside the keeper),
+    so a quote the lines purchase or an earlier run stored is not stored
+    twice. And the balance must be known before the first call: the meter
+    reads it off each response, so without the stored reading the first call
+    would go unchecked against the floor."""
+    if step_min not in GRID_STEPS:
+        raise ValueError(f"the grid steps every {GRID_STEPS} minutes, not {step_min}")
+    check_precondition(conn, list(range(first, last + 1)))
+    check_process_events_contract()
+    _ensure_tables(conn)
+    if meter.remaining is None:
+        meter.remaining = latest_remaining(conn)
+        if meter.remaining is None:
+            raise PreconditionError(
+                "no Odds API balance on record in odds_api_quota, so the floor cannot be "
+                "checked before the first call")
+    games, plan = plan_opener_grid(conn, first, last, step_min, pre_start)
+    resolver = _resolver(conn, games)
+    tips = {g["game_id"]: g.get("commence_time") for g in games}
+    logger.info(f"opener grid every {step_min} min: {len(games):,} games -> "
+                f"{len(plan.window) + len(plan.pre):,} grid times, {len(plan.todo):,} to buy "
+                f"(~{LINE_SNAPSHOT_COST * len(plan.todo):,} credits); balance on record "
+                f"{meter.remaining:,}, floor {meter.floor:,}, ceiling {meter.ceiling:,}")
+    # End the planning reads' transaction before the first paid call.
+    conn.commit()
+    stats: dict = defaultdict(int)
+    state: dict = {"season": None, "keeper": None, "taken": None}
+
+    def jobs():
+        # read on the main thread just before each call is cleared: a time the
+        # ledger holds by then (a restarted run, a second worker) is not bought
+        for when in season_order(plan.todo):
+            if _snapshot_held(conn, when):
+                stats["skipped_held"] += 1
+                continue
+            yield when, f"{BASE}/odds", _snapshot_params(when)
+
+    def consume(when, r):
+        # in the order asked, so the keepers see what the one-at-a-time run saw
+        label = ncaab_season_label(when.date().isoformat())
+        if label != state["season"]:   # no game spans two seasons: bound the memory
+            state.update(season=label, keeper=ChangeKeeper(), taken=set())
+        _store_snapshot(conn, meter, tips, resolver, when, r, stats, state["keeper"],
+                        state["taken"])
+
+    stop = _paid_calls(meter, jobs(), LINE_SNAPSHOT_COST, consume)
+    if stop:
+        stats["stopped"] = stop
+        logger.warning(f"opener grid stopping: {stop}")
+    if isinstance(meter, PoolMeter):
+        stats["concurrency"] = meter.workers
+        stats["rate_limited_429"] = meter.rate_limited
+    print("opener grid", resolver.report())
+    return dict(stats)
+
+
+def _dry_run_grid(conn, first: int, last: int, step_min: int, pre_start: bool) -> None:
+    """The grid's plan and its credits, printed. Reads only; buys nothing."""
+    print("precondition:", check_precondition(conn, list(range(first, last + 1))))
+    games, full = plan_opener_grid(conn, first, last, step_min, pre_start=True)
+    pre = set(full.pre)
+    todo = full.todo if pre_start else [w for w in full.todo if w not in pre]
+    n_win = len(full.window) - full.window_held
+    n_pre = len(full.pre) - full.pre_held
+    by_season = Counter(ncaab_season_label(w.date().isoformat()) for w in todo)
+    print(f"dry run: opener grid every {step_min} minutes, seasons {first}-{last}, "
+          f"{len(games):,} games")
+    print(f"  72 hours before each tip, up to the tip: {len(full.window):,} grid times, "
+          f"{full.window_held:,} already bought, {n_win:,} to buy "
+          f"(~{LINE_SNAPSHOT_COST * n_win:,} credits)")
+    print(f"  pre-start, 240 to 72 hours before each season's first tip: {len(full.pre):,} grid "
+          f"times, {full.pre_held:,} already bought, {n_pre:,} to buy "
+          f"(~{LINE_SNAPSHOT_COST * n_pre:,} credits); "
+          + ("included" if pre_start else "not included (add --pre-start)"))
+    print(f"  to buy: {len(todo):,} snapshots, ~{LINE_SNAPSHOT_COST * len(todo):,} credits at "
+          f"{LINE_SNAPSHOT_COST} a snapshot; about {len(todo) / LINES_PACE_PER_MIN / 60:.1f} hours "
+          f"at the lines purchase's pace; by season {dict(sorted(by_season.items()))}")
+    print("re-run with --apply --max-credits N --floor N")
 
 
 # ── the probe: one measured call of each kind ────────────────────────────────
@@ -1007,17 +1776,11 @@ def _far_from_tip(ev: dict, hit, tips: dict[str, str]) -> bool:
 
 
 def _ledger_instants(conn) -> list[datetime]:
-    """Every NCAAB instant odds_history_pulls records as bought, ascending."""
-    out = set()
-    for d, hour in conn.execute("SELECT snapshot_date, hour_utc FROM odds_history_pulls "
-                                "WHERE sport = %s", (SPORT,)).fetchall():
-        try:
-            day = date.fromisoformat(str(d)[:10])
-        except ValueError:
-            continue
-        out.add(datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
-                + timedelta(hours=int(hour)))
-    return sorted(out)
+    """Every NCAAB instant bought, ascending, from both ledgers (the hours in
+    odds_history_pulls, the grid's half hours in odds_history_fetches): a
+    feed time maps back to the half hour the grid bought, not to the hour
+    after it."""
+    return sorted(_held_instants(conn))
 
 
 def _stream(conn, sql: str, params: tuple):
@@ -1260,11 +2023,13 @@ def _run_replay(first: int, last: int, apply: bool) -> dict:
 
 # ── command line ─────────────────────────────────────────────────────────────
 
-def main() -> None:
+def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     what = ap.add_mutually_exclusive_group(required=True)
     what.add_argument("--lines", action="store_true", help="bulk game lines, every planned snapshot")
-    what.add_argument("--derivatives", choices=("close", "open"),
+    what.add_argument("--opener-grid", action="store_true",
+                      help="bulk game lines at every grid time from 72 hours before each tip")
+    what.add_argument("--derivatives", choices=tuple(DERIV_SOURCES),
                       help="first-half lines and team totals, one snapshot a game")
     what.add_argument("--probe", action="store_true",
                       help="one measured paid call of each kind, writes nothing")
@@ -1281,6 +2046,22 @@ def main() -> None:
                     help="spend (the purchases) or write (the replay); without it, a dry run")
     ap.add_argument("--dry-run", action="store_true",
                     help="write nothing: the default without --apply")
+    ap.add_argument("--step", type=int, choices=GRID_STEPS,
+                    help="--opener-grid only: minutes between grid times")
+    ap.add_argument("--pre-start", action="store_true",
+                    help="--opener-grid only: add 240 to 72 hours before each season's first tip")
+    ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, metavar="N",
+                    help=f"--opener-grid and --derivatives: paid calls in flight at once, "
+                         f"1..{MAX_CONCURRENCY} (default {DEFAULT_CONCURRENCY}); the meter "
+                         f"clears each call with the ones in flight counted at their most")
+    ap.add_argument("--sample", type=int, metavar="N",
+                    help=f"--derivatives {'|'.join(GAMEDAY_MODES)} only: buy N games spread "
+                         f"over the seasons and tip times, and print what they returned")
+    return ap
+
+
+def main() -> None:
+    ap = _parser()
     a = ap.parse_args()
     first, last = a.seasons
     if first > last:
@@ -1298,20 +2079,49 @@ def main() -> None:
         ap.error("--apply needs --max-credits")
     if a.apply and a.floor is None:
         ap.error("--apply needs --floor")
+    if a.opener_grid and a.step is None:
+        ap.error("--opener-grid needs --step 60 or --step 30")
+    if not a.opener_grid and (a.step is not None or a.pre_start):
+        ap.error("--step and --pre-start belong to --opener-grid")
+    if not 1 <= a.concurrency <= MAX_CONCURRENCY:
+        ap.error(f"--concurrency must be 1..{MAX_CONCURRENCY}")
+    if a.sample is not None and (a.derivatives not in GAMEDAY_MODES or a.sample < 1):
+        ap.error(f"--sample N (N >= 1) belongs to --derivatives {'|'.join(GAMEDAY_MODES)}")
+    if a.opener_grid and not a.apply:
+        conn = _read_only_connection()     # the dry run cannot write, by the server's word
+        try:
+            _dry_run_grid(conn, first, last, a.step, a.pre_start)
+        finally:
+            conn.close()
+        return
+    if a.derivatives in GAMEDAY_MODES and not a.apply:
+        conn = _read_only_connection()     # no meter, no call, and the server refuses a write
+        try:
+            _dry_run_gameday(conn, first, last, a.derivatives, a.sample)
+        finally:
+            conn.close()
+        return
     conn = get_connection()
     try:
         if not a.apply:
             _dry_run(conn, a, first, last)
             return
-        meter = Meter(ceiling=a.max_credits, floor=a.floor)
+        # side by side only where _paid_calls is used (the grid, the first-half
+        # purchases); the lines purchase and the probe call one at a time
+        meter = PoolMeter(ceiling=a.max_credits, floor=a.floor,
+                          workers=a.concurrency if (a.opener_grid or a.derivatives) else 1)
         if a.probe:
             print("probe:", probe(conn, meter, last))
+        elif a.opener_grid:
+            print(f"opener grid every {a.step} min:",
+                  buy_opener_grid(conn, meter, first, last, a.step, pre_start=a.pre_start))
         elif a.lines:
             print("lines:", buy_lines(conn, meter, first, last))
         else:
             print(f"derivatives {a.derivatives}:",
-                  buy_derivatives(conn, meter, first, last, a.derivatives))
-        print(f"spent {meter.spent:,} credits; balance {meter.remaining}")
+                  buy_derivatives(conn, meter, first, last, a.derivatives, sample=a.sample))
+        print(f"spent {meter.spent:,} credits; balance {meter.remaining}; "
+              f"{meter.workers} in flight at most; HTTP 429 answers {meter.rate_limited}")
     finally:
         try:
             persist_quota(conn)
@@ -1339,6 +2149,49 @@ def _dry_run(conn, a, first: int, last: int) -> None:
         dates = len({g["game_date"] for g in games if g["game_id"] not in done})
         print(f"dry run: derivatives {a.derivatives} {n:,} games on {dates:,} dates to buy "
               f"(<= ~{DERIV_EVENT_COST * n + LIST_COST * dates:,} credits), {len(done):,} stored")
+    print("re-run with --apply --max-credits N --floor N")
+
+
+def _dry_run_gameday(conn, first: int, last: int, mode: str, sample: int | None) -> None:
+    """A game-day time's plan and the most it can cost, printed. Reads only:
+    no meter is built, so no call can be made. With `sample`, the games the
+    test buy would take, and what the stored close holds for them."""
+    print("precondition:", check_precondition(conn, list(range(first, last + 1))))
+    source = DERIV_SOURCES[mode]
+    if sample is None:
+        every, games, done = plan_derivatives(conn, first, last, mode)
+        skipped = sum(1 for g in every
+                      if g["game_date"] >= FIRST_DERIV_DATE and not _has_instant(g, mode))
+        head = (f"dry run: derivatives {mode} ({source}), seasons {first}-{last}: "
+                f"{len(games):,} games, {skipped:,} more tip at or before the time and are "
+                f"skipped, {len(done):,} already stored")
+    else:
+        every, games, done, from_close = plan_sample(conn, first, last, mode, sample)
+        head = (f"dry run: derivatives {mode} ({source}), test buy of {sample} games, seasons "
+                f"{first}-{last}: {len(games)} sampled, {len(done)} already stored")
+        print(head)
+        for g in games:
+            tip = _utc(g.get("commence_time"))
+            at = deriv_instant(tip, g["game_date"], mode)
+            print(f"  {g['game_date']} tip {tip.astimezone(ET):%H:%M} ET ({tip_bucket(tip)}), "
+                  f"would buy at {at:%Y-%m-%d %H:%M}Z  {g['game_id']}"
+                  + ("  [stored]" if g["game_id"] in done else ""))
+        strata = Counter((ncaab_season_label(str(g["game_date"])[:10]),
+                          tip_bucket(_utc(g["commence_time"]))) for g in games)
+        order = {label: i for i, (_, label) in enumerate(TIP_BUCKETS)}
+        print("  by season and tip time: " + "; ".join(
+            f"{s} {b} {k}" for (s, b), k in sorted(strata.items(),
+                                                    key=lambda x: (-x[0][0], order[x[0][1]]))))
+        print(sample_coverage(conn, games, mode, from_close))
+    todo = [g for g in games if g["game_id"] not in done]
+    dates = {g["game_date"] for g in todo}
+    by_season = Counter(ncaab_season_label(str(g["game_date"])[:10]) for g in todo)
+    if sample is None:
+        print(head)
+    print(f"  to buy: {len(todo):,} games on {len(dates):,} dates, at most "
+          f"{DERIV_EVENT_COST * len(todo) + LIST_COST * len(dates):,} credits "
+          f"({DERIV_EVENT_COST} a game, {LIST_COST} a date's event list; an empty answer and a "
+          f"404 are free); by season {dict(sorted(by_season.items()))}")
     print("re-run with --apply --max-credits N --floor N")
 
 

@@ -1452,3 +1452,35 @@ reply used that gap: the PR and the memory copy were each described in the
 prose, then under Quick summary, then again under Errors and under Decisions.
 Any text above the headings becomes a second Quick summary, so the rule now
 allows none, and the "why" of a question goes under Errors or Bugs found.
+
+## §1b (evidence). No restated records (2026-10-30)
+
+mike: *"You keep sending our restated records. Hard rule. No restated records of
+any kind unless I give the approval. Repo wide rule."* and *"checks prior to the
+daily record going out to ensure all picks are graded, if not grade them."*
+
+Measured on production 2026-10-30:
+
+- **19 restated days on Discord and 19 on X in the 45 days to 10-30** (`push_sent`,
+  kinds `discord_results_restate` and `x_results_restate`). The latest went out at
+  07:24:17 ET that morning, 81 minutes after the 06:03:03 recap for the same day.
+- **All 13 model-and-day groups that graded late in the 21 days to 10-30 were NHL
+  props.** Over 60 days: 97 NHL prop picks on 17 days, then 6 NCAAF in-play, 4 NFL
+  in-play, 2 NFL prop and 3 UFC, all before 09-18.
+- **The cause, on the 10-29 record.** Jake Oettinger Under 22.5 Saves: the box score
+  wrote that game's goalie rows at 22:46 on 10-29, and the pick stayed ungraded. A
+  goalie prop grades only on a goalie flagged as the starter, the box row is never
+  overwritten, and a game with a row is never fetched again. The morning stats pull
+  flagged him at 06:09, six minutes after the recap, because it ran at Step 4 and
+  settle runs at Step 0. The 07:17 pass graded him at 07:24, and the restatement
+  fired in the same pass.
+- **Not measured:** what the NHL box said at 22:46. The morning pull overwrites every
+  starter row, so none of the 12 dates checked keeps a box-sourced start. The
+  official box now shows `starter: true` for both goalies in that game, so the flag
+  does arrive, later. The fix moves the pull ahead of settle rather than relying on
+  when the box fills in.
+- **No BET on any past date has a NULL result today**, across all history, so the
+  hold had nothing to wedge on when it shipped.
+
+Why the rule is in CLAUDE.md and not only in `tracking/`: a declared job or a
+one-off script reaches a re-post without opening that folder.

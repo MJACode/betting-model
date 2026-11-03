@@ -281,3 +281,55 @@ def test_migration_is_declared_before_the_posted_stake_pair_and_grants_select_on
     assert "GRANT SELECT ON public.live_scoreboard TO anon, authenticated" in sql
     # The guard returns before any DDL once the table, policy and grant exist.
     assert sql.index("RETURN;") < sql.index("CREATE TABLE")
+
+
+class _Resp:
+    def __init__(self, status, payload=None):
+        self.status_code, self._payload = status, payload
+
+    def json(self):
+        return self._payload
+
+
+def _espn_like(calls, broken=()):
+    """requests.get as ESPN's site scoreboard answered it on 2026-10-30: HTTP
+    400 to a YYYYMMDD-YYYYMMDD range for NBA, NHL and NFL, 200 to one date."""
+    def get(url, params=None, headers=None, timeout=None):
+        day = (params or {}).get("dates", "")
+        calls.append(day)
+        if "-" in day:
+            return _Resp(400)
+        if day in broken:
+            return _Resp(503)
+        ev = _event("in", date=f"{day[:4]}-{day[4:6]}-{day[6:]}T02:10Z")
+        ev["id"] = day
+        return _Resp(200, {"events": [ev]})
+    return get
+
+
+def test_the_early_morning_slate_asks_espn_one_date_at_a_time(monkeypatch):
+    # From midnight to 6 am ET the slate is today and yesterday. Asked for
+    # both as one range, ESPN refused every call from 00:00 ET on 2026-10-30,
+    # and four NBA and NHL games were left showing in progress.
+    import requests
+    calls: list[str] = []
+    monkeypatch.setattr(requests, "get", _espn_like(calls))
+    data = ls._default_fetch("NBA", ["2026-10-30", "2026-10-29"])
+    assert sorted(calls) == ["20261029", "20261030"]
+    assert sorted(e["id"] for e in data["events"]) == ["20261029", "20261030"]
+
+    calls.clear()
+    data = ls._default_fetch("NFL", ["2026-10-30"])
+    assert calls == ["20261030"]
+    assert [e["id"] for e in data["events"]] == ["20261030"]
+
+
+def test_a_date_that_fails_does_not_lose_the_other(monkeypatch):
+    import requests
+    calls: list[str] = []
+    monkeypatch.setattr(requests, "get", _espn_like(calls, broken={"20261030"}))
+    data = ls._default_fetch("NHL", ["2026-10-30", "2026-10-29"])
+    assert [e["id"] for e in data["events"]] == ["20261029"]
+
+    monkeypatch.setattr(requests, "get", _espn_like(calls, broken={"20261029", "20261030"}))
+    assert ls._default_fetch("NHL", ["2026-10-30", "2026-10-29"]) is None

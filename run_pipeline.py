@@ -117,6 +117,23 @@ def step_refresh_outcomes(run_date: str) -> bool:
         return False
 
 
+def step_nba_team_stats_box(run_date: str) -> bool:
+    """NBA season-to-date team stats from the stored ESPN box scores (worker).
+
+    The stats.nba.com writer runs only from a residential machine and wrote no
+    2026-27 row, which left the Teams board's NBA efficiency column blank.
+    Runs before refresh_team_board so the board picks the new row up the same
+    morning. Validation and method: data/ingestors/nba_team_stats_from_box.py."""
+    try:
+        from data.ingestors.nba_team_stats_from_box import run_nba_team_stats_from_box
+        result = run_nba_team_stats_from_box(as_of_date=run_date)
+        logger.success(f"✓ NBA team stats (box): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA team stats (box) failed: {exc}")
+        return False
+
+
 def step_refresh_team_board(run_date: str) -> bool:
     """Refresh team_stats_board_cache — the Teams board the app reads.
 
@@ -288,6 +305,35 @@ def step_prune_odds(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.warning(f"⚠ Odds prune failed (non-fatal, step marked failed): {exc}")
+        return False
+
+
+def step_prune_app_timings(run_date: str) -> bool:
+    """Delete app_timings rows older than 45 days.
+
+    Non-fatal: a failed prune costs disk, never picks, so the run goes on,
+    and the step is marked failed. A database that has not had the hand
+    migration yet has no table; that is a skip, not a red daily.
+    """
+    try:
+        from data.app_timings_retention import (
+            APP_TIMINGS_RETENTION_DAYS, prune_app_timings,
+        )
+        n = prune_app_timings()
+        logger.success(
+            f"✓ app_timings prune: {n:,} rows older than "
+            f"{APP_TIMINGS_RETENTION_DAYS} days removed")
+        return True
+    except Exception as exc:
+        missing = getattr(exc, "pgcode", None) == "42P01" or (
+            "app_timings" in str(exc) and "does not exist" in str(exc))
+        if missing:
+            logger.warning(
+                "⚠ app_timings prune skipped: table is not there "
+                "(hand migration add_app_timings.sql)")
+            return True
+        logger.warning(
+            f"⚠ app_timings prune failed (non-fatal, step marked failed): {exc}")
         return False
 
 
@@ -637,6 +683,21 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
+def step_nhl_game_logs(run_date: str) -> bool:
+    """Per-game NHL logs from the stats API. Must run BEFORE settlement: a goalie
+    prop grades only on a goalie flagged as the starter, and this is the pull that
+    reliably flags him. Non-fatal; the record holds on anything left ungraded."""
+    try:
+        from data.ingestors.nhl_game_logs import top_up
+        from data.ingestors.nhl_stats_ingestor import LOG_TOPUP_DAYS
+        result = top_up(LOG_TOPUP_DAYS, apply=True, today=run_date)
+        logger.success(f"✓ NHL game logs: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL game logs failed: {exc}")
+        return False
+
+
 def step_weather(run_date: str, max_age_min: int | None = None,
                  ahead_days: int | None = None) -> bool:
     """Fetch and store weather for run_date AND the look-ahead window, from
@@ -792,18 +853,27 @@ def step_alt_game_lines(run_date: str) -> bool:
     call's credits are recorded in alt_game_line_fetches. Stores every rung in
     `odds` and the current ladder in alt_game_lines, which the betslip's
     game-line edit reads (data/ingestors/alt_game_lines.py). Runs after the
-    opening odds so today's games exist. A failed game is logged and the rest
-    stand; the step reports failure so the pass shows it."""
+    opening odds so today's games exist.
+
+    ALT_GAME_LINES_ENABLED=0 skips the buy (default 1). ALT_GAME_LINES_MAX_GAMES,
+    when set to a whole number, caps event-odds calls for this process. One
+    game's failure is logged and the rest stand; the step fails when every
+    game call failed, or when the cap is not a whole number."""
     try:
         from data.ingestors.alt_game_lines import run as alt_run
+        from data.ingestors.alt_game_lines import step_succeeded
         summary = alt_run()
     except Exception as exc:
         logger.error(f"✗ Alternate game lines failed: {exc}")
         return False
     logger.info(f"Alternate game lines: {summary.get('games')} games, {summary.get('rows')} rungs, "
                 f"{summary.get('failed')} failed, {summary.get('credits')} credits reported "
-                f"({summary.get('credits_unreported')} calls unreported)")
-    return not summary.get("failed")
+                f"({summary.get('credits_unreported')} calls unreported)"
+                + (f", skipped: {summary['skipped']}" if summary.get("skipped") else "")
+                + (f", cap left {summary.get('capped')} game(s) and "
+                   f"{summary.get('capped_sports')} sport(s) unbought"
+                   if summary.get("capped") or summary.get("capped_sports") else ""))
+    return step_succeeded(summary)
 
 
 def step_nba_quarters(run_date: str) -> bool:
@@ -813,7 +883,8 @@ def step_nba_quarters(run_date: str) -> bool:
       1. quarter scores for every finished game this season that lacks them
          (data/ingestors/nba_period_scores.py; only missing games are fetched)
       2. play-by-play and possessions for the same games
-         (data/ingestors/nba_pbp.fill_gaps; it refuses past MAX_GAPS)
+         (data/ingestors/nba_pbp.fill_gaps; at most MAX_GAPS a run, oldest
+         first, and one game's failure does not drop the games already built)
       3. nba_team_q1_games rebuilt for this season and the last, since the
          last-10 window reaches back into last season early on
          (data/ingestors/nba_team_q1.py)
@@ -845,10 +916,19 @@ def step_nba_quarters(run_date: str) -> bool:
     try:
         try:
             from data.ingestors.nba_pbp import fill_gaps
-            logger.success(f"✓ NBA play-by-play: {fill_gaps(conn, season)}")
+            pbp = fill_gaps(conn, season)
+            if pbp.get("errors"):
+                # Last ERROR line is what _timed_step stores in pipeline_log.
+                # One game's failure is already committed around; the run stays
+                # red until a later pass has none, so a real error is not hidden.
+                detail = f"; first: {pbp['first_error']}" if pbp.get("first_error") else ""
+                logger.error(f"✗ NBA play-by-play failed: {pbp['errors']} game(s){detail}")
+                ok = False
+            else:
+                logger.success(f"✓ NBA play-by-play: {pbp}")
         except Exception as exc:
             conn.rollback()
-            logger.error(f"✗ NBA play-by-play failed: {exc}")
+            logger.error(f"✗ NBA play-by-play failed: {type(exc).__name__}: {exc}")
             ok = False
         try:
             from data.ingestors.nba_team_q1 import rebuild
@@ -953,6 +1033,33 @@ def step_ncaab_results(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ NCAAB results failed: {exc}")
+        return False
+
+
+def step_ncaab_box(run_date: str) -> bool:
+    """
+    NCAAB team box scores and period scores from ESPN's game summary
+    (data/ingestors/ncaab_espn_box.py) into ncaab_team_game_stats (source
+    'espn_summary') and ncaab_period_scores. Runs AFTER ncaab-results, which
+    writes the finals it reads, on the HOURLY refresh passes only
+    (scripts/refresh_pass.sh). Self-limiting: no ESPN call unless a final of
+    the last 3 ET dates has no ESPN box row; at most 80 games and about 150
+    seconds of fetching a pass. A game ESPN cannot answer usefully is logged
+    and skipped, not raised. False when ESPN refused the worker, a fetch
+    failed, a write failed, or the newest 5 finals ESPN answered for were all
+    refused (the summary changed for every game), so pipeline_runs names it.
+    """
+    try:
+        from data.ingestors.ncaab_espn_box import run_recent
+        t = run_recent(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAAB box scores (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAAB box scores (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAB box scores failed: {exc}")
         return False
 
 
@@ -1650,6 +1757,29 @@ def step_nba_team_total_luck(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_first_half_total_luck(dry_run: bool = False) -> bool:
+    """NBA first-half totals, overs (`nba_first_half_total_luck`): the full-game
+    shooting-luck gap on the first half's line.
+
+    Decides each regular-season game once, on this model's own first-half fetch
+    45-66 minutes before tip, and writes the first-half over at the best bettable
+    price when the gap is 2 points or more
+    (scripts/nba_first_half_total_luck_card.py). LIVE, no write switch. Runs only
+    in the NBA totals window job, right after the first-half fetch, under a time
+    limit there (scheduler.run_nba_total_luck_window). A run with no game to
+    decide writes nothing and logs why.
+    """
+    try:
+        from scripts.nba_first_half_total_luck_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA first-half card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA first-half card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -1991,7 +2121,6 @@ def step_settle(settle_date: str) -> bool:
     #
     # Only on a pass settling today. The 6am run settles yesterday and has
     # just made the ordinary attempt above, so it runs nothing new here.
-    # Before the restatement scan, so a recap posted here is never "late".
     import config
     if settle_date == config.today_et():
         try:
@@ -2003,17 +2132,13 @@ def step_settle(settle_date: str) -> bool:
             logger.error(f"✗ Late results recap failed (settlement "
                          f"unaffected): {exc}")
 
-    # A recap published before one of its picks settled is corrected here, on
-    # every pass, both surfaces (2026-09-10: the 09-09 recap went out MLB-only
-    # and the NFL settled an hour later against a ledgered date). Ledgered per
-    # correction, so a pass that finds nothing new posts nothing.
+    # A published record is never re-posted (CLAUDE.md §1b). A pick graded after
+    # its recap went out reaches ops and the next all-time line, and no channel.
     try:
-        from tracking.discord_notifier import restate_published_recaps
-        n = restate_published_recaps()
-        if n:
-            logger.info(f"Results restated: {n} post(s)")
+        from tracking.discord_notifier import flag_recaps_gone_short
+        flag_recaps_gone_short()
     except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+        logger.error(f"✗ Short-recap check failed (settlement unaffected): {exc}")
 
     # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
     # first Monday, the previous calendar month. Later morning passes, through
@@ -2179,6 +2304,15 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nfl_props_data"] = step_nfl_props_data(run_date)
     time.sleep(1)
 
+    # ── Step 0h1: NHL per-game logs (MUST precede settlement) ────────────────
+    # The same pull ran only at Step 4, after settle. The recap posted at 06:03,
+    # the pull flagged the goalie's start at 06:09, and the 07:17 pass graded his
+    # saves prop at 07:24, on 17 mornings between 10-01 and 10-29. Step 4 still
+    # pulls again, which costs nothing and keeps its rates current.
+    logger.info("Step 0h1: NHL per-game logs from the stats API (pre-settle)...")
+    results["nhl_game_logs"] = step_nhl_game_logs(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -2198,7 +2332,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # Quarter scores, play-by-play possessions, then nba_team_q1_games, which
     # the NBA team page reads. Free ESPN endpoints; only missing games fetched.
     logger.info("Step 0c1: NBA quarter scores, possessions and 1Q team stats...")
-    results["nba_quarters"] = step_nba_quarters(run_date)
+    # _timed_step is what writes pipeline_log.error_msg. --step already uses
+    # it; the 6am run did not, so a failed nba_quarters left no reason.
+    results["nba_quarters"] = _timed_step(
+        "nba-quarters", lambda: step_nba_quarters(run_date), run_date)
 
     # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
     # Keeps the table (public track record + mobile action filter + Discord)
@@ -2212,6 +2349,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # mv_scored_pick_outcomes before anyone opens the custom-model builder.
     logger.info("Step 0d: Refreshing scored-pick outcomes...")
     results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+    results["nba_team_stats_box"] = step_nba_team_stats_box(run_date)
     results["refresh_team_board"] = step_refresh_team_board(run_date)
     results["live_calibration"] = step_live_calibration(run_date)
     results["calibration_fit"] = step_calibration_fit(run_date)
@@ -2389,6 +2527,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # games before today — see data/prune_odds.py.
     logger.info("Step 11b: Pruning line-shop (non-DK) odds history...")
     results["prune_odds"] = step_prune_odds(run_date)
+
+    # Load-time rows. A dry run writes nothing, including this delete.
+    # 45 days: data/app_timings_retention.py. Skipped when the table is absent.
+    if not dry_run:
+        logger.info("Step 11c: Pruning app_timings older than 45 days...")
+        results["prune_app_timings"] = step_prune_app_timings(run_date)
 
     # ── Step 12: System health check (feed freshness — after all ingestion) ────
     # Daily: CRIT failure returns False → the run shows red. Results land in
@@ -2601,7 +2745,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds", "apply-column-migrations",
-                                 "apply-view-migrations", "refresh-outcomes", "refresh-team-board",
+                                 "apply-view-migrations", "refresh-outcomes", "refresh-team-board", "nba-team-stats-box",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "probables-refresh",
@@ -2614,17 +2758,18 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
-                                 "nba-total-luck", "nba-team-total-luck",
+                                 "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck",
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
-                                 "ncaab-results", "ncaab-schedule",
+                                 "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
+                                 "prune-app-timings",
                                  "check-lines", "settle", "health-check",
                                  "model-quality"],
                         help="Run a single pipeline step")
@@ -2655,6 +2800,7 @@ Examples:
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "refresh-team-board": lambda: step_refresh_team_board(run_date),
+            "nba-team-stats-box": lambda: step_nba_team_stats_box(run_date),
             "live-calibration": lambda: step_live_calibration(run_date),
             "calibration-fit": lambda: step_calibration_fit(run_date),
             "injuries":     lambda: step_injuries(run_date),
@@ -2709,6 +2855,7 @@ Examples:
             "nba-prop-project": lambda: step_nba_prop_project(),
             "nba-total-luck": lambda: step_nba_total_luck(dry_run=args.dry_run),
             "nba-team-total-luck": lambda: step_nba_team_total_luck(dry_run=args.dry_run),
+            "nba-first-half-total-luck": lambda: step_nba_first_half_total_luck(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
@@ -2723,6 +2870,7 @@ Examples:
             "ncaaf-weather": lambda: step_ncaaf_weather(run_date),
             "ncaab-results": lambda: step_ncaab_results(run_date),
             "ncaab-schedule": lambda: step_ncaab_schedule(run_date),
+            "ncaab-box": lambda: step_ncaab_box(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),
@@ -2736,6 +2884,7 @@ Examples:
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
             "prune-odds":   lambda: step_prune_odds(run_date),
+            "prune-app-timings": lambda: step_prune_app_timings(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             # Observe-only: refresh_pass.sh (hourly/evening/overnight) is the
             # caller. A standing CRIT still WRITES system_health_checks; it

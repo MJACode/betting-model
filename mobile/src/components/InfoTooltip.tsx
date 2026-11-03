@@ -4,9 +4,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
+/** A headed paragraph in the sheet ("What it is" / "How to use it"). */
+export interface InfoSection {
+  heading: string;
+  text: string;
+}
+
 interface Props {
   title: string;
-  body: string;
+  body?: string;
+  /** Headed paragraphs, drawn after `body`. For an explanation with parts
+   *  (the Teams board's stat sheets: what it is, what's good, how to use it). */
+  sections?: InfoSection[];
   /** Accessibility label for the info icon. Defaults to "More info". */
   accessibilityLabel?: string;
   /**
@@ -40,6 +49,7 @@ export function InfoSheet({
   visible,
   title,
   body,
+  sections,
   onClose,
   warn = false,
   action,
@@ -47,13 +57,16 @@ export function InfoSheet({
 }: {
   visible: boolean;
   title: string;
-  body: string;
+  body?: string;
+  sections?: InfoSection[];
   onClose: () => void;
   warn?: boolean;
   /** One optional follow-up, drawn as a text link above "Got it" — for a note
    *  whose fix is a tap away ("Change your sportsbooks"). The caller closes. */
   action?: { label: string; onPress: () => void } | null;
-  /** iOS: fires after the fade-out, when another Modal may be presented. */
+  /** iOS: fires after the fade-out. A caller that presents another Modal
+   *  from here still has to defer that present — UIKit has not released
+   *  the presenter in this turn. */
   onDismiss?: () => void;
 }) {
   const accent = warn ? colors.gradeBad : colors.tint;
@@ -79,10 +92,16 @@ export function InfoSheet({
               size={22}
               color={accent}
             />
-            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardTitle} accessibilityRole="header">{title}</Text>
           </View>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} bounces={false}>
-            <Text style={styles.cardBody}>{body}</Text>
+            {body ? <Text style={styles.cardBody}>{body}</Text> : null}
+            {(sections ?? []).map((s, i) => (
+              <View key={s.heading} style={i > 0 || body ? styles.section : null}>
+                <Text style={styles.sectionHeading} accessibilityRole="header">{s.heading}</Text>
+                <Text style={styles.cardBody}>{s.text}</Text>
+              </View>
+            ))}
           </ScrollView>
           {action ? (
             <Pressable
@@ -112,6 +131,7 @@ export function InfoSheet({
 export function InfoTooltip({
   title,
   body,
+  sections,
   accessibilityLabel,
   label,
   tone = 'info',
@@ -172,6 +192,7 @@ export function InfoTooltip({
         visible={open}
         title={title}
         body={body}
+        sections={sections}
         warn={warn}
         onClose={() => setOpen(false)}
       />
@@ -260,6 +281,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     lineHeight: 21,
     color: colors.textSecondary,
+  },
+  section: { marginTop: spacing.md },
+  sectionHeading: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    marginBottom: 2,
   },
   actionBtn: {
     marginTop: spacing.md,

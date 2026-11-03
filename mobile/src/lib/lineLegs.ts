@@ -42,7 +42,7 @@
  * way it would two model game legs.
  */
 
-import { americanToDecimal, formatStampET } from '@/lib/format';
+import { americanToDecimal, formatStampET, parseStamp } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
 import { nhlOffLineCount } from '@/lib/nhlBoard';
 import { CUSTOM_MODEL_ID, type LegBookPrice, type ParlayLeg } from '@/lib/parlay';
@@ -538,6 +538,8 @@ export interface EditMenu {
   choices: EditChoice[];
   /** The line under the sheet's title, per market. */
   subtitle: string;
+  /** Set when the morning ladder was hidden because the game has started. */
+  ladderHidden?: 'started';
 }
 
 const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
@@ -548,6 +550,9 @@ const GAME_LINE_SUBTITLE = 'Every number a sportsbook posts, including alternate
 // No ladder reached the sheet (not fetched yet for this game, or the read
 // failed): do not claim alternates the user cannot see.
 const MAIN_ONLY_SUBTITLE = 'Every number a sportsbook is hanging right now.';
+// The ladder was loaded and then hidden: the game has started. Do not reuse
+// the "hanging right now" sentence, which describes a ladder that never arrived.
+const STARTED_SUBTITLE = 'The game has started, so this morning’s alternate lines aren’t listed.';
 /** The whole game is off the board. */
 export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
 
@@ -656,6 +661,8 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]
   // and whether main rows are labelled (a menu of only main rows needs no
   // "Main line" on every row).
   const hasLadder = at.some((r) => r.fromLadder);
+  const ladderHidden = (rows as { ladderHidden?: 'started' }).ladderHidden === 'started' ? 'started' as const : undefined;
+  const quietSubtitle = ladderHidden === 'started' ? STARTED_SUBTITLE : MAIN_ONLY_SUBTITLE;
   const push = (segment: string, next: GameLineLegSpec, list: GameLineRow[], title = lineLegLabel(next)) => {
     const side = gameLegSide(next);
     const priceOf = (r: GameLineRow) => priceForSide(r, side);
@@ -689,7 +696,7 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]
         push(t, next, at.filter((r) => gameRowAtNumber(r, next)));
       }
     }
-    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : MAIN_ONLY_SUBTITLE });
+    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : quietSubtitle, ladderHidden });
   }
   const totals = [...new Set(at.map((r) => num(r.total_line)).filter((n): n is number => n != null))].sort((a, b) => a - b);
   for (const side of ['over', 'under'] as const) {
@@ -698,7 +705,7 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]
       push(side, next, at.filter((r) => gameRowAtNumber(r, next)), `${side === 'over' ? 'Over' : 'Under'} ${fmtLine(line)}`);
     }
   }
-  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : MAIN_ONLY_SUBTITLE });
+  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : quietSubtitle, ladderHidden });
 }
 
 // ── Alternate game lines (Matt, 2026-10-29: "yes", fetched once a day) ──────
@@ -711,6 +718,24 @@ export const ALT_GAME_MARKET: Partial<Record<GameLineMarket, string>> = {
   spreads: 'alternate_spreads',
   totals: 'alternate_totals',
 };
+
+/**
+ * The once-a-day ladder is a pre-game price. Hide it once the game has
+ * started: those numbers drift, and the main row is already the last
+ * pre-game price. A missing or unparseable start stays visible — we have
+ * not seen a kickoff. parseStamp, not Date.parse: Hermes rejects the
+ * space-separated timestamps the pipeline stores, and Date.parse then
+ * returns NaN, which would leave the morning ladder up.
+ */
+export function pregameLadderVisible(
+  commenceTime: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (commenceTime == null || commenceTime === '') return true;
+  const t = parseStamp(commenceTime).getTime();
+  if (!Number.isFinite(t)) return true;
+  return t > nowMs;
+}
 
 /**
  * A game market's main rows plus its alternate ladder (alt_game_lines), as

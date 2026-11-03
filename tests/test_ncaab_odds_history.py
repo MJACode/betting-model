@@ -443,7 +443,8 @@ def test_the_lines_purchase_resumes_from_the_ledger(monkeypatch):
     monkeypatch.setattr(h, "check_process_events_contract", lambda: None)
     monkeypatch.setattr(h, "_ensure_tables", lambda conn: None)
     monkeypatch.setattr(h, "_season_games", lambda conn, a, b: [UK_DUKE])
-    monkeypatch.setattr(h, "_held_hours", lambda conn: {("2025-11-18", 15), ("2025-11-17", 22)})
+    monkeypatch.setattr(h, "_held_instants",
+                        lambda conn: {_t("2025-11-18T15:00Z"), _t("2025-11-17T22:00Z")})
     monkeypatch.setattr(h, "_resolver", lambda conn, games: h.EventResolver(REGISTRY, games))
     bought = []
     monkeypatch.setattr(h, "_buy_snapshot",
@@ -537,9 +538,15 @@ def test_the_derivative_done_check_reads_its_own_source_exactly():
 
 
 def test_the_two_derivative_purchases_resume_separately():
+    """Each time is its own source, so each resumes on its own; the three
+    game-day times (2026-11-02) join the close and the open."""
     assert h.NCAAB_DERIV_CLOSE_SOURCE == "odds_api_ncaab_derivative_close"
     assert h.NCAAB_DERIV_OPEN_SOURCE == "odds_api_ncaab_derivative_open"
-    assert h.DERIV_SOURCES == {"close": h.NCAAB_DERIV_CLOSE_SOURCE, "open": h.NCAAB_DERIV_OPEN_SOURCE}
+    assert h.DERIV_SOURCES == {"close": h.NCAAB_DERIV_CLOSE_SOURCE, "open": h.NCAAB_DERIV_OPEN_SOURCE,
+                               "15z": "odds_api_ncaab_derivative_15z",
+                               "18z": "odds_api_ncaab_derivative_18z",
+                               "tip60": "odds_api_ncaab_derivative_tip60"}
+    assert len(set(h.DERIV_SOURCES.values())) == len(h.DERIV_SOURCES)
 
 
 def _deriv_world(monkeypatch, done=frozenset()):
@@ -719,7 +726,8 @@ def test_the_tables_are_created_only_when_the_catalog_says_so(monkeypatch):
     conn = FakeConn()
     h._ensure_tables(conn)
     assert conn.sql == [] and conn.commits == 0
-    assert {t for t, _ in seen} == {"odds_history_pulls", "ncaab_odds_unmatched"}
+    assert {t for t, _ in seen} == {"odds_history_pulls", "odds_history_fetches",
+                                    "ncaab_odds_unmatched"}
     assert all(kw["rls"] is True and kw["revoked_from"] for _, kw in seen)
 
 
@@ -732,7 +740,9 @@ def _cli(monkeypatch):
     monkeypatch.setattr(h, "buy_lines",
                         lambda conn, m, a, b: called.append(("lines", a, b, m.ceiling, m.floor)) or {})
     monkeypatch.setattr(h, "buy_derivatives",
-                        lambda conn, m, a, b, mode: called.append((mode, a, b, m.ceiling, m.floor)) or {})
+                        lambda conn, m, a, b, mode, sample=None: called.append(
+                            (mode, a, b, m.ceiling, m.floor)
+                            + (() if sample is None else (sample,))) or {})
     monkeypatch.setattr(h, "probe", lambda conn, m, season: called.append(("probe", season, m.ceiling)) or {})
     return called
 
@@ -742,6 +752,10 @@ def _cli(monkeypatch):
     ("deriv_close", ("close", 2024, 2026, 800_000, 500_000)),
     ("deriv_open", ("open", 2024, 2026, 800_000, 500_000)),
     ("probe", ("probe", 2026, 200)),
+    ("deriv_15z", ("15z", 2024, 2026, 700_000, 500_000)),
+    ("deriv_18z", ("18z", 2024, 2026, 650_000, 500_000)),
+    ("deriv_tip60", ("tip60", 2024, 2026, 700_000, 500_000)),
+    ("deriv_15z_test", ("15z", 2024, 2026, 2_500, 500_000, 50)),
 ])
 def test_every_job_mode_runs_the_buyer_through_its_own_argv(monkeypatch, mode, want):
     called = _cli(monkeypatch)
@@ -812,7 +826,11 @@ def test_the_approved_scopes_and_floor():
     modes = jq.NCAAB_ODDS_HISTORY_MODES
     assert {m: (v["cap"], v["seasons"]) for m, v in modes.items()} == {
         "lines": (420_000, (2021, 2026)), "deriv_close": (800_000, (2024, 2026)),
-        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026))}
+        "deriv_open": (800_000, (2024, 2026)), "probe": (200, (2026, 2026)),
+        "opener_grid": (1_170_000, (2021, 2026)),
+        # the game-day times, approved 2026-11-02
+        "deriv_15z": (700_000, (2024, 2026)), "deriv_18z": (650_000, (2024, 2026)),
+        "deriv_tip60": (700_000, (2024, 2026)), "deriv_15z_test": (2_500, (2024, 2026))}
     assert jq.NCAAB_ODDS_HISTORY_MIN_FLOOR == h.MIN_FLOOR == 300_000
     # the probe mode may carry the same floor as the purchases
     assert jq._validate_ncaab_odds_history({"mode": "probe", "max_credits": 200, "floor": 500_000})
@@ -853,7 +871,9 @@ SWEEPS = [f"ncaab-game-line-market-sweep-{m}-2026-10-26" for m in ("spreads", "t
 DERIVS = ["ncaab-history-deriv-close-2024-2026", "ncaab-history-deriv-close-2024-2026-r1",
           "ncaab-history-deriv-close-2024-2026-r2", "ncaab-history-deriv-open-2024-2026",
           "ncaab-history-deriv-open-2024-2026-r2"]
-DECLARED = ["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS + SWEEPS + DERIVS
+INJURY_PROBE = "ncaab-injury-reachability-2026-10-30"
+DECLARED = (["ncaab-feed-probe-2026-10-26"] + SCHEDULES + IMPORTS + BUYS
+            + SWEEPS + DERIVS + [INJURY_PROBE])
 
 
 def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
@@ -861,17 +881,31 @@ def test_the_declared_ncaab_jobs_validate_in_order_and_fit_the_approval():
     season's ESPN schedule (the current one first, so live odds resolve from
     opening night), the free history, the measured probe call, the game-line
     purchase and its post-refill resume, the sweeps on what it bought, then
-    the first-half purchases."""
+    the first-half purchases. The injury reachability probe is last: public
+    pages, no credits, and it writes nothing."""
     entries = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     keys = [e["key"] for e in entries]
     at = [keys.index(k) for k in DECLARED]
     assert at == sorted(at), "declared out of order: the backfill must be claimed before the buys"
-    assert sorted(k for k in keys if k.startswith("ncaab-")) == sorted(DECLARED)
     by = {e["key"]: e for e in entries}
+    # Every NCAAB declaration is in DECLARED, except the free ESPN box and
+    # period backfills (job ncaab_box_backfill, 2026-10-30): they spend no
+    # credits, and whether each is on is a one-line switch that
+    # tests/test_ncaab_espn_box.py checks. The injury probe is in DECLARED
+    # and is not a credit approval.
+    assert sorted(k for k in keys if k.startswith("ncaab-")
+                  and by[k]["job_type"] != "ncaab_box_backfill") == sorted(DECLARED)
     for k in DECLARED:
         e = by[k]
         assert e["requested_by"] == "mike" and e.get("enabled", True) is True
-        assert "approved" in e["note"] or "yes" in e["note"]
+        if k == INJURY_PROBE:
+            # Not a credit purchase. The note must not borrow "approved" or
+            # "yes" from the Odds API jobs above.
+            assert e["args"] == {}
+            assert "Writes nothing" in e["note"]
+            assert "approved" not in e["note"] and "yes" not in e["note"]
+        else:
+            assert "approved" in e["note"] or "yes" in e["note"]
         jq.JOBS[e["job_type"]][1](e["args"])
     assert by["ncaab-feed-probe-2026-10-26"]["args"] == {"market_events": 5}
     assert by[SCHEDULES[0]]["args"] == {"first": "2026-11-01", "last": "2027-04-10"}

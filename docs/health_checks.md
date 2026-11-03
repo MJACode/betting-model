@@ -31,7 +31,8 @@ demand via `python run_pipeline.py --step health-check`. Results are upserted in
   yesterday = dead ingest job), picks scored today.
 - **WARN** = degraded but not pick-blocking: prop odds, pitcher stats, injuries, lineups,
   umpires, public betting, WNBA/NBA box-score logs (the local Task Scheduler job),
-  golf odds, missing model artifacts, settlement lag.
+  golf odds, missing model artifacts, settlement lag (`settlement_lag`, 2 to 14
+  days old; `settlement_stranded`, older than that with no ceiling, naming the picks).
 - **Cadence-aware:** every sport's checks gate on that sport having games in the window —
   NBA in July, UFC midweek, golf off-weeks are SKIPPED, never false alarms.
   Bullpen, the player game log and umpires expect the newest MLB final on or
