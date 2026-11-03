@@ -24,6 +24,7 @@ import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, forma
 import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
+import { postedTrackedStake } from '@/lib/trackedStake';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -373,15 +374,13 @@ const STAKE_MODES: { value: StakeMode; label: string }[] = [
 ];
 
 function stakeCaption(mode: StakeMode): string {
-  if (mode === 'custom') {
-    return 'Your stake on the bets you set, in units. Tap a stake to change it; the rest stay as posted';
-  }
-  return 'Each pick to win 1u at its price, risk capped at 3u, as on the Record tab';
+  if (mode === 'custom') return 'Tap a stake to set your own, in units. Bets you leave alone stay as posted';
+  return 'Each pick to win 1u at its posted price, risk capped at 3u, as on the Record tab';
 }
 
-/** "2u stake" when the member set it, "1.5u as posted" when they have not. */
+/** "2u your stake" when the member set it, "1.5u as posted" when they have not. */
 function stakeChipText(row: TrackedBetRow): string {
-  return `${formatFlatStake(row.stake)} ${row.customStake ? 'stake' : 'as posted'}`;
+  return `${formatFlatStake(row.stake)} ${row.customStake ? 'your stake' : 'as posted'}`;
 }
 
 function TrackedBetsCard({
@@ -469,7 +468,7 @@ function TrackedBetsCard({
                 decisionOdds(row.pick) != null
                   ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                   : null,
-                stakeMode === 'custom' ? unitsSpeech(stakeChipText(row)) : null,
+                unitsSpeech(stakeMode === 'custom' ? stakeChipText(row) : `${formatFlatStake(row.stake)} risk`),
                 unitsSpeech(trackedResultLabel(row)),
               ]
                 .filter(Boolean)
@@ -497,6 +496,9 @@ function TrackedBetsCard({
                     decisionOdds(row.pick) != null
                       ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                       : null,
+                    // As posted, risk runs 0.25u to 3u by price, so the row says
+                    // what it laid, as the logged bets above do (UX review).
+                    stakeMode === 'posted' ? `${formatFlatStake(row.stake)} risk` : null,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
@@ -508,7 +510,7 @@ function TrackedBetsCard({
                     // row doesn't grow (audit M10: was an 11pt pencil, slop 6).
                     hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
                     accessibilityRole="button"
-                    accessibilityLabel={`Edit stake, ${unitsSpeech(formatFlatStake(row.stake))}`}
+                    accessibilityLabel={`Edit stake, ${unitsSpeech(stakeChipText(row))}`}
                     style={styles.stakeChip}
                   >
                     <Ionicons name="pencil-outline" size={11} color={colors.tint} />
@@ -575,7 +577,12 @@ function StakeEditModal({
   const [amount, setAmount] = useState('');
   useEffect(() => {
     // Stored at the 100-is-1u scale (lib/format FLAT_UNIT); edited in units.
-    if (row) setAmount(String(Math.round((row.stake / FLAT_UNIT) * 100) / 100));
+    // A posted row opens empty, so the placeholder shows the posted stake and
+    // Save without typing keeps it posted (it used to save the rounded figure
+    // as the member's own). A stake the member set opens filled in.
+    if (row) {
+      setAmount(row.customStake ? String(Math.round((row.stake / FLAT_UNIT) * 100) / 100) : '');
+    }
   }, [row]);
 
   const save = () => {
@@ -602,8 +609,8 @@ function StakeEditModal({
             {row?.pick.pick_label ?? ''}
           </Text>
           <Text style={styles.stakeModalHint}>
-            What you risk, at the price the pick was posted at. Leave it empty to use the posted
-            stake.
+            What you risk on this bet, settled at its posted price. Leave it empty to keep the
+            posted stake.
           </Text>
           <TextInput
             accessibilityLabel="Stake in units"
@@ -611,8 +618,9 @@ function StakeEditModal({
             value={amount}
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
             keyboardType="decimal-pad"
+            clearButtonMode="while-editing"
             autoFocus
-            placeholder="As posted"
+            placeholder={row ? `${formatFlatStake(postedTrackedStake(row.pick).risk)} as posted` : 'As posted'}
             placeholderTextColor={colors.textTertiary}
           />
           <View style={styles.stakeModalActions}>
