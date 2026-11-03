@@ -451,6 +451,10 @@ check('ncaab_total_blend is a game_total for parlay correlation', marketClassFor
 // ncaab_first_half_spread HAS 'spread' in it, and must still read the first half's rows, not the game's.
 check('ncaab_first_half_spread resolves to spreads_h1, not spreads', gameMarketForModel('ncaab_first_half_spread') === 'spreads_h1');
 check('ncaab_first_half_spread is a game_spread for parlay correlation', marketClassForModel('ncaab_first_half_spread') === 'game_spread');
+// ncaab_first_half_total has neither 'over_under' nor 'spread': without its own case it read the moneyline rows.
+check('ncaab_first_half_total resolves to totals_h1', gameMarketForModel('ncaab_first_half_total') === 'totals_h1',
+  String(gameMarketForModel('ncaab_first_half_total')));
+check('ncaab_first_half_total is a game_total for parlay correlation', marketClassForModel('ncaab_first_half_total') === 'game_total');
 // nba_team_total_luck bets the HOME team's own points: its prices, line shop
 // and movement read the team_totals_home rows, never the game's totals rows
 // (a number twice as big) and never its moneyline rows.

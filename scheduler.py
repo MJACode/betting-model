@@ -76,7 +76,8 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         game at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10
         minutes before tip, at most 4 credits a call; then the
         ncaab_first_half_spread card decides each game once on its tip-minus-10
-        fetch and the job publishes. A tick with nothing due makes no call.
+        fetch, the ncaab_first_half_total card on its tip-minus-60 fetch, and
+        the job publishes. A tick with nothing due makes no call.
         RUN_NCAAB_FIRST_HALF=0 stops it.)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
@@ -793,8 +794,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAB moneyline picks through its own card, reading
                   # the same stored odds.
                   "ncaab_moneyline_card",
-                  # Writes NCAAB first-half spread picks through its own card,
-                  # on its own first-half fetches.
+                  # Writes NCAAB first-half spread and total picks through
+                  # their own cards, on its own first-half fetches.
                   "ncaab_first_half_window"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
@@ -1740,12 +1741,15 @@ def run_ncaab_first_half_window() -> None:
     """One NCAAB first-half tick (scripts/ncaab_first_half_window.py).
 
     ONE planning read: the listed games due a first-half call (15:00 UTC on
-    their date, then 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip)
-    and the undecided games ten minutes or less from tip. Most ticks have
-    neither and return without a call. Otherwise: the fetch for exactly the
-    due games, the tip-minus-10 calls first; then the ncaab_first_half_spread
-    card, which decides each game once on its tip-minus-10 fetch; then publish
-    what it wrote. A step that fails or is killed raises AFTER publishing, so
+    their date, then 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip),
+    the games ten minutes or less from tip the spread model has not decided,
+    and the games sixty minutes or less from tip the total model has not
+    decided. Most ticks have none and return without a call. Otherwise: the
+    fetch for exactly the due games, the decision calls (tip minus 10 and tip
+    minus 60) first; then the ncaab_first_half_spread card, which decides each
+    game once on its tip-minus-10 fetch, and the ncaab_first_half_total card,
+    which decides each game once on its tip-minus-60 fetch; then publish what
+    they wrote. A step that fails or is killed raises AFTER publishing, so
     the heartbeat records "error" and the failure alerter reports it, while a
     bet that was written still goes out; the next tick, a minute later, calls
     a failed game again. RUN_NCAAB_FIRST_HALF=0 makes the plan empty: nothing
@@ -1766,6 +1770,13 @@ def run_ncaab_first_half_window() -> None:
         outcomes["ncaab-first-half-spread"] = _run(
             [sys.executable, "-m", "scripts.ncaab_first_half_spread_card", "--publish"],
             "ncaab-first-half-spread", timeout=t["card"])
+    if plan.total_card:
+        # Its own step: a failed spread card never stops the total's decisions,
+        # and the reverse.
+        outcomes["ncaab-first-half-total"] = _run(
+            [sys.executable, "-m", "scripts.ncaab_first_half_total_card", "--publish"],
+            "ncaab-first-half-total", timeout=t["card"])
+    if plan.card or plan.total_card:
         _publish_new_signals("ncaab-first-half-window")
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
     if bad:
@@ -2772,8 +2783,9 @@ def build_scheduler() -> BlockingScheduler:
     )
 
     # NCAAB first half -- every minute, 24x7 (run_ncaab_first_half_window).
-    # Every minute because the decision fetch is ten minutes before each tip
-    # and its retries have five minutes to land (scripts/ncaab_first_half_window.py);
+    # Every minute because the decision fetches are ten and sixty minutes
+    # before each tip and their retries have five minutes to land
+    # (scripts/ncaab_first_half_window.py);
     # misfire_grace_time 30 because a tick overtaken by the next one has
     # nothing left to add. The kill switch is in the plan (RUN_NCAAB_FIRST_HALF).
     sched.add_job(
@@ -2781,7 +2793,8 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*", timezone=TIMEZONE),
         id="ncaab_first_half_window",
         name="NCAAB first half (every minute, 24x7: first-half calls at 15Z and "
-             "180..10 min before tip; the spread card decides at tip minus 10)",
+             "180..10 min before tip; the spread card decides at tip minus 10, "
+             "the total card at tip minus 60)",
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 

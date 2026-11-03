@@ -115,3 +115,66 @@ def test_its_prices_are_read_with_the_main_game_markets():
 def test_the_mobile_threshold_is_generated_from_config():
     src = (LIB / "thresholds.generated.ts").read_text(encoding="utf-8")
     assert "ncaab_first_half_spread: { min_prob: 0, min_edge: 0.02, min_odds: -200 }," in src
+
+
+# ── the NCAAB first half's total (ncaab_first_half_total) ────────────────────
+# Stored under 'totals_h1' like the NBA first half's total; its id holds
+# neither 'over_under' nor 'spread', so without its own case it read the
+# moneyline rows.
+
+TO = """
+const TO_LABEL = 'Duke @ Kansas — First Half Under 70.5';
+const TO_PICK = { ...PICK, game_id: 'NCAAB_2026-11-10_duke_kansas', sport: 'NCAAB',
+  model_id: 'ncaab_first_half_total', pick_side: 'under', pick_label: TO_LABEL,
+  scored_line: 70.5, dk_odds: -115, decision_odds: -110, decision_book: 'fanduel' };
+"""
+
+
+@node
+def test_the_first_half_total_reads_its_own_market_and_number(tmp_path):
+    _run(tmp_path, MARKETS_FILES, TO + """
+import { gameMarketForModel, marketClassForModel, lineFromSnapshot, splitPickTitle, pickRowTitle, pickRowMatchup, rowIsSameBet, pickTimingInfo } from './markets.ts';
+eq(gameMarketForModel('ncaab_first_half_total'), 'totals_h1', 'market');
+eq(gameMarketForModel('ncaab_total_blend'), 'totals', 'the game total is unchanged');
+eq(marketClassForModel('ncaab_first_half_total'), 'game_total', 'parlay class');
+const fd = { bookmaker: 'fanduel', total_line: 70.5, over_price: -110, under_price: -110 };
+eq(lineFromSnapshot(fd, 'totals_h1'), 70.5, 'the first half total');
+eq(rowIsSameBet(TO_PICK, fd, 'totals_h1'), true, 'the same number is the same bet');
+eq(rowIsSameBet(TO_PICK, { ...fd, total_line: 71.5 }, 'totals_h1'), false, 'another number is not');
+eq(pickRowTitle(TO_PICK), 'First Half Under 70.5', 'the row');
+eq(pickRowMatchup(TO_PICK), 'Duke @ Kansas', 'the row caption');
+const info = pickTimingInfo(TO_PICK);
+eq([info.kind, info.note.startsWith('Posted once and never re-priced'), info.note.includes('Void')],
+   ['posted', true, false], 'timing');
+""")
+
+
+@node
+def test_the_team_page_counts_a_first_half_total_with_the_first_halves(tmp_path):
+    _run(tmp_path, TEAM_FILES, TO + """
+import { teamPickRecords } from './teamDetail.ts';
+const games = [{ game_id: TO_PICK.game_id, game_date: TO_PICK.game_date, home_team: 'Kansas', away_team: 'Duke' }];
+const bet = { ...TO_PICK, result: 'WIN', profit_flat: 90.9 };
+const r = teamPickRecords([bet], games, 'Kansas');
+eq([r.settled, r.firstHalves], [1, 1], 'counted with the first halves, in no tile');
+""")
+
+
+@node
+def test_the_first_half_total_has_its_own_chip_and_says_it_posts_an_hour_out(tmp_path):
+    _run(tmp_path, META_FILES, """
+import { MODEL_META, betSlotForModel, modelLong, modelPageTiming, modelProbabilityNote } from './modelMeta.ts';
+const m = MODEL_META.ncaab_first_half_total;
+eq([m.type, m.shortLabel, m.statKey, m.statLabel], ['game', '1H O/U', null, ''], 'entry');
+eq(modelLong('ncaab_first_half_total'), 'NCAAB First Half Totals', 'long name');
+eq(betSlotForModel('ncaab_first_half_total', 'game'), null, 'not a picker slot');
+const t = modelPageTiming('ncaab_first_half_total');
+eq([t.title, t.empty.includes('about an hour before tip-off'), t.note.includes('about an hour')],
+   ['Checked once per game', true, true], 'page');
+eq(modelProbabilityNote('ncaab_first_half_total').includes('first half'), true, 'its own note');
+""")
+
+
+def test_the_first_half_total_threshold_is_generated_from_config():
+    src = (LIB / "thresholds.generated.ts").read_text(encoding="utf-8")
+    assert "ncaab_first_half_total: { min_prob: 0, min_edge: 0.02, min_odds: -200 }," in src
