@@ -3488,6 +3488,9 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
                 OR p.model_id = 'ncaab_spread_market'
                 THEN 'spreads'
+              -- ncaab_moneyline_own_spread has 'spread' in its id but bets
+              -- moneylines: it falls to h2h here, and no pattern above may
+              -- match it (tests/test_rule_model_markets_everywhere.py).
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC
     """, (game_date,)).fetchall()

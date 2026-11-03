@@ -2353,6 +2353,13 @@ _RULE_MODEL_MARKETS = {
     # the bet book's HOME number (section 4); the stored final includes
     # overtime, as books settle it.
     "ncaab_spread_market": "spreads",
+    # NCAAB full-game moneylines (models/ncaab_moneyline_own_spread.py). The
+    # id has 'spread' in it but the pick is a MONEYLINE: it settles on
+    # games.home_win (overtime included, as books settle it), scored_line
+    # NULL. Named here so every SQL mapping must name it too
+    # (tests/test_rule_model_markets_everywhere.py), since the ones that read
+    # '%spread%' would otherwise send it to the spreads rows.
+    "ncaab_moneyline_own_spread": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

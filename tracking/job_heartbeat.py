@@ -115,6 +115,9 @@ MAX_SILENCE: dict = {
     # hours too. It decides only in the 15:00 UTC hour, so a stopped card is
     # also caught by the next run's `missed` failure.
     "ncaab_spread_card": 150,
+    # The NCAAB moneyline card: the same cadence and the same 15:00 UTC
+    # decision, so the same bound.
+    "ncaab_moneyline_card": 150,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

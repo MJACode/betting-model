@@ -2,8 +2,10 @@
 NCAAB game lines at the 15:00 UTC check: every bettable book's standing quote,
 the sign-crossing artefacts removed, and the books' consensus.
 
-Shared by the NCAAB spread model (models/ncaab_spread_market.py) and the
-moneyline and first-half models planned on the same pieces. One pure function
+Shared by the NCAAB spread model (models/ncaab_spread_market.py), the
+moneyline model (models/ncaab_moneyline_own_spread.py, which also reads the
+moneyline market and Pinnacle's and Bovada's quotes through the `books` and
+`need_line` arguments) and the first-half models planned on the same pieces. One pure function
 per step, so the card (scripts/ncaab_spread_card.py) and the build's replay
 (scripts/ncaab_spread_market_build.py) run the SAME code: the card feeds it
 rows read from `odds`, the replay the stored history.
@@ -66,19 +68,22 @@ def _utc(x) -> pd.Series:
     return pd.to_datetime(x, utc=True, format="mixed")
 
 
-def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN) -> pd.DataFrame:
+def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOKS,
+                    need_line: bool = True) -> pd.DataFrame:
     """Each (game, book)'s quote at its game's instant.
 
     rows: one per stored odds row, with game_id, bookmaker, ts (the row's own
     stamp, UTC), line (home number for a spread), p1 / p2 (home / away
     American prices), order (higher = stored later), instant and tip (UTC) for
     its game, and any extra columns, which are carried through. Books outside
-    BOOKS are ignored. -> one row per (game_id, bookmaker)."""
+    `books` (default BOOKS) are ignored. need_line=False reads a market with
+    no line (the moneyline, models/ncaab_moneyline_own_spread.py): a row then
+    needs only its two prices. -> one row per (game_id, bookmaker)."""
     if not len(rows):
         cols = list(dict.fromkeys(QUOTE_COLS + ["instant", "tip"] + list(rows.columns)))
         return pd.DataFrame(columns=cols)
-    r = rows[rows["bookmaker"].isin(BOOKS)]
-    r = r[r["line"].notna() & r["p1"].notna() & r["p2"].notna()]
+    r = rows[rows["bookmaker"].isin(books)]
+    r = r[(r["line"].notna() | (not need_line)) & r["p1"].notna() & r["p2"].notna()]
     win = pd.Timedelta(minutes=window_min)
     r = r[(r["ts"] <= r["tip"]) & (r["ts"] <= r["instant"]) & (r["ts"] >= r["instant"] - win)
           & (r["instant"] < r["tip"])]
@@ -128,30 +133,33 @@ def snapshot(rows: pd.DataFrame, window_min: int = WINDOW_MIN) -> pd.DataFrame:
 # ── the database read ────────────────────────────────────────────────────────
 
 # The columns each market keeps its line and two prices in, home side first.
+# A moneyline has no line (None: read as NULL).
 MARKET_COLS = {
     "spreads": ("spread_home", "home_price", "away_price", "home_link", "away_link"),
+    "h2h": (None, "home_price", "away_price", "home_link", "away_link"),
 }
 
 
 def load_rows(conn, games: dict[str, dict], instant: datetime, market: str = "spreads",
-              window_min: int = WINDOW_MIN) -> pd.DataFrame:
+              window_min: int = WINDOW_MIN, books=BOOKS) -> pd.DataFrame:
     """The stored odds rows standing_quotes needs for these games at one
-    instant: every pre-game row of the BOOKS whose own stamp is inside the
-    window. games: game_id -> {"tip": aware datetime, ...}. One read, keyed on
-    the game ids, bounded to the hour before the instant."""
+    instant: every pre-game row of `books` (default BOOKS) whose own stamp is
+    inside the window. games: game_id -> {"tip": aware datetime, ...}. One
+    read, keyed on the game ids, bounded to the hour before the instant."""
     if not games:
         return pd.DataFrame(columns=QUOTE_COLS + ["instant", "tip", "link1", "link2", "stored_at"])
     line_c, p1_c, p2_c, l1_c, l2_c = MARKET_COLS[market]
+    line_sql = f"o.{line_c}" if line_c else "NULL"
     oldest = instant - timedelta(minutes=window_min)
     got = conn.execute(f"""
         SELECT o.game_id, o.bookmaker, o.snapshot_at, o.created_at::timestamptz,
-               o.{line_c}, o.{p1_c}, o.{p2_c}, o.{l1_c}, o.{l2_c}
+               {line_sql}, o.{p1_c}, o.{p2_c}, o.{l1_c}, o.{l2_c}
         FROM odds o
         WHERE o.game_id = ANY(%s) AND o.market = %s AND o.bookmaker = ANY(%s)
           AND o.snapshot_type IS DISTINCT FROM 'in_play'
           AND o.snapshot_at::timestamptz <= %s
           AND o.snapshot_at::timestamptz >= %s
-    """, (sorted(games), market, list(BOOKS), instant.isoformat(), oldest.isoformat())).fetchall()
+    """, (sorted(games), market, list(books), instant.isoformat(), oldest.isoformat())).fetchall()
     d = pd.DataFrame(got, columns=["game_id", "bookmaker", "snapshot_at", "stored_at", "line",
                                    "p1", "p2", "link1", "link2"])
     for c in ("line", "p1", "p2"):

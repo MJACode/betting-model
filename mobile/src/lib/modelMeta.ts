@@ -617,6 +617,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Men's college basketball, full-game moneylines, named like NCAAF's
+  // ("NCAAF Moneyline", badge ML). The id is the one the model writes its
+  // picks under (models/ncaab_moneyline_own_spread.py MODEL_ID). It has
+  // 'spread' in it because each book's moneyline is priced off that book's
+  // own spread; markets.ts names it as a moneyline before its substring test.
+  ncaab_moneyline_own_spread: {
+    shortLabel: 'ML',
+    longLabel: 'NCAAB Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -891,9 +903,18 @@ const EVENING_BEFORE_MODELS: readonly string[] = [
 // people back for picks that would never come. The one clock time printed is
 // "by noon ET": the run is 10:05am ET in winter and 11:05am ET from
 // mid-March, and a late run still reads 15:00 UTC quotes only until 15:59 UTC.
+// The NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decides at the
+// same instant, from each book's moneyline, and posts in the same batch.
 const GAME_MORNING_MODELS: readonly string[] = [
+  'ncaab_moneyline_own_spread',
   'ncaab_spread_market',
 ];
+
+// What a game-morning model reads, in the page's words: "the spread at each
+// book we price", or "the moneyline at each book we price".
+function gameMorningMarket(modelId: string): string {
+  return modelId === 'ncaab_moneyline_own_spread' ? 'the moneyline' : 'the spread';
+}
 
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
@@ -934,9 +955,10 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Decided the morning of the game',
       body:
-        'This model decides each game once, on the morning of game day, from the spread at each book we ' +
-        'price. It bets only some games, each at the book with the best line and price, which may not be ' +
-        'DraftKings. A posted bet is never re-priced: it stays at the line and price it posted at.',
+        `This model decides each game once, on the morning of game day, from ${gameMorningMarket(modelId)} ` +
+        'at each book we price. It bets only some games, each at the book with the best line and price, ' +
+        'which may not be DraftKings. A posted bet is never re-priced: it stays at the line and price it ' +
+        'posted at.',
       empty:
         'This model posts once, on the morning of each game day, and bets only some games. If nothing is ' +
         'here by noon ET, it found no bet today.',

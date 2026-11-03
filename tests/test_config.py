@@ -218,7 +218,10 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "ncaab_total_blend",
          # 2026-11-02 (mike): NCAAB spreads; its 0.03 cut was measured on its
          # own P(win | no push) at the bet book's line, and it has no record.
-         "ncaab_spread_market"}
+         "ncaab_spread_market",
+         # 2026-11-02 (mike): NCAAB moneylines; its 0.01 cut was measured on its
+         # own P(the side wins) from the bet book's spread, and it has no record.
+         "ncaab_moneyline_own_spread"}
     )
 
 
@@ -311,5 +314,6 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nba_first_half_total_luck",  # 2026-10-30 (mike): market-fair P(over) + the walk-forward uplift
         "ncaab_total_blend",        # 2026-10-30 (mike): its blend's P(win, push left out)
         "ncaab_spread_market",      # 2026-11-02 (mike): the margin table's P(win, push left out)
+        "ncaab_moneyline_own_spread",  # 2026-11-02 (mike): the margin table's P(side wins) at the book's own spread
     }
     assert not not_named_here

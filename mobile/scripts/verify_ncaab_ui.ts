@@ -76,13 +76,17 @@ check('its Pick Detail note says posted once, not the first scoring run of the d
   !!posted && posted.kind === 'posted' && !posted.note.includes('first scoring run'), posted?.note ?? 'null');
 // The custom-model picker offers moneyline, spread and props slots only, so the
 // totals model adds no NCAAB row there. The spread model
-// (models/ncaab_spread_market.py) adds the Spread row, as NCAAF's and the
-// NFL's spread models do (2026-11-02).
+// (models/ncaab_spread_market.py) adds the Spread choice, as NCAAF's and the
+// NFL's spread models do (2026-11-02), and the moneyline model
+// (models/ncaab_moneyline_own_spread.py) the ML choice: its id has 'spread'
+// in it, and it must land under ML, never under Spread.
 const ncaabRows = betTypePickerGroups().filter((g) => g.sport === 'NCAAB');
-check('the custom-model picker has one NCAAB row, Spread, holding only the spread model',
-  ncaabRows.length === 1 && ncaabRows[0].choices.length === 1
-    && ncaabRows[0].choices[0].label === 'Spread'
-    && JSON.stringify(ncaabRows[0].choices[0].modelIds) === JSON.stringify(['ncaab_spread_market']),
+const ncaabChoice = (label: string) =>
+  ncaabRows.length === 1 ? ncaabRows[0].choices.find((c) => c.label === label) : undefined;
+check('the custom-model picker has one NCAAB row: ML (the moneyline model) and Spread (the spread model)',
+  ncaabRows.length === 1 && ncaabRows[0].choices.length === 2
+    && JSON.stringify(ncaabChoice('ML')?.modelIds) === JSON.stringify(['ncaab_moneyline_own_spread'])
+    && JSON.stringify(ncaabChoice('Spread')?.modelIds) === JSON.stringify(['ncaab_spread_market']),
   JSON.stringify(ncaabRows));
 
 // ── Stats: nothing to show yet, and nothing broken ───────────────────────────
