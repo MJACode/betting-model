@@ -92,7 +92,7 @@ export function InfoSheet({
               size={22}
               color={accent}
             />
-            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardTitle} accessibilityRole="header">{title}</Text>
           </View>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} bounces={false}>
             {body ? <Text style={styles.cardBody}>{body}</Text> : null}
@@ -145,7 +145,9 @@ export function InfoTooltip({
       <Pressable
         onPress={() => setOpen(true)}
         // Bare icon: 20pt glyph + 12 + 12 = 44pt (audit M18; 10 reached 40).
-        hitSlop={12}
+        // A labelled row is full width already; slop only below, so it does
+        // not reach up into a chip row above it (UX review, 2026-11-03).
+        hitSlop={label ? { top: 0, bottom: 8, left: 0, right: 0 } : 12}
         accessibilityRole="button"
         // Voice Control matches the label against what is on screen, and the
         // visible word is "Details" — "More info" made "tap Details" miss.
@@ -284,7 +286,7 @@ const styles = StyleSheet.create({
   },
   section: { marginTop: spacing.md },
   sectionHeading: {
-    fontSize: font.size.footnote,
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     marginBottom: 2,

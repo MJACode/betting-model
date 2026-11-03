@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Teams board: every stat explained (hint + Details), tabs rearranged, splits under 10 games show the record; NBA/NHL ending-year season; NBA 2026-27 ratings built on the worker from ESPN boxes; MLB/NHL ATS on the main ±1.5 line only; no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |

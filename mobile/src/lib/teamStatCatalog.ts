@@ -121,7 +121,7 @@ const ATS_SAMPLE: (keyof TeamStatsRow)[] = ['ats_w', 'ats_l', 'ats_p'];
 const RUN_LINE = 'the run line (±1.5 runs)';
 const PUCK_LINE = 'the puck line (±1.5 goals)';
 const PRICED_LINE_GOOD =
-  'Run and puck lines are usually priced well away from even money, so 50% is not break-even here — the price you get matters as much as the cover rate.';
+  'Higher means the team covers more often. Run and puck lines are usually priced well away from even money, so 50% is not break-even here — the price you get matters as much as the cover rate.';
 
 export const TEAM_STAT_CATALOG: TeamStatDef[] = [
   // ── Efficiency ──────────────────────────────────────────────────────────
@@ -507,11 +507,11 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'ATS%, only in games where the team was the favourite.',
       good: 'Above 50% means the team has beaten the market’s expectations as a favourite.',
       use: 'Shows whether the market overrates or underrates the team when it is expected to win.',
-      watch: 'Some teams are rarely favoured, so this can rest on very few games — check the Games column and the overall ATS record.',
+      watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games. Check the team’s overall ATS record.',
     },
     bySport: {
-      MLB: { label: 'RL% as Fav', hint: 'How often the team covered -1.5 runs as the favourite.', explain: { what: 'How often the team won by 2+ runs when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'Can rest on very few games for a team that is rarely favoured.' } },
-      NHL: { label: 'PL% as Fav', hint: 'How often the team covered -1.5 goals as the favourite.', explain: { what: 'How often the team won by 2+ goals when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'Can rest on very few games for a team that is rarely favoured.' } },
+      MLB: { label: 'RL% as Fav', hint: 'How often the team covered -1.5 runs as the favourite.', explain: { what: 'How often the team won by 2+ runs when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
+      NHL: { label: 'PL% as Fav', hint: 'How often the team covered -1.5 goals as the favourite.', explain: { what: 'How often the team won by 2+ goals when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
     },
   },
   {
@@ -521,11 +521,11 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'ATS%, only in games where the team was the underdog.',
       good: 'Above 50% means the team has beaten the market’s expectations as an underdog.',
       use: 'Shows whether the market has been selling the team short when it is not expected to win.',
-      watch: 'Some teams are rarely underdogs, so this can rest on very few games — check the Games column and the overall ATS record.',
+      watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games. Check the team’s overall ATS record.',
     },
     bySport: {
-      MLB: { label: 'RL% as Dog', hint: 'How often the team covered +1.5 runs as the underdog.', explain: { what: 'How often the team won or lost by 1 run when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'Can rest on very few games for a team that is rarely the underdog.' } },
-      NHL: { label: 'PL% as Dog', hint: 'How often the team covered +1.5 goals as the underdog.', explain: { what: 'How often the team won or lost by 1 goal when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'Can rest on very few games for a team that is rarely the underdog.' } },
+      MLB: { label: 'RL% as Dog', hint: 'How often the team covered +1.5 runs as the underdog.', explain: { what: 'How often the team won or lost by 1 run when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
+      NHL: { label: 'PL% as Dog', hint: 'How often the team covered +1.5 goals as the underdog.', explain: { what: 'How often the team won or lost by 1 goal when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
     },
   },
   {

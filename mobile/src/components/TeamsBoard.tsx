@@ -400,11 +400,14 @@ export function TeamsBoard({
       {/* Group tabs — Efficiency first by design, and the same two-level tab
           bar the Players board uses (Matt, 2026-09-04). */}
       <GroupTabs groups={groups} active={activeGroup} onChange={pickGroup} />
-      <View style={styles.groupIntroRow}>
-        <Text style={styles.groupIntroText} numberOfLines={2}>
-          {TEAM_GROUP_INTRO[activeGroup]}
-        </Text>
-      </View>
+      {/* Only the Betting caveat stays on screen; the other groups' line opens
+          each Details sheet instead, so the header stays short (UX review,
+          2026-11-03). No line cap: the caveat is the clause that matters. */}
+      {activeGroup === 'Betting' ? (
+        <View style={styles.groupIntroRow}>
+          <Text style={styles.groupIntroText}>{TEAM_GROUP_INTRO.Betting}</Text>
+        </View>
+      ) : null}
 
       <ScrollView
         horizontal
@@ -432,6 +435,7 @@ export function TeamsBoard({
         <InfoTooltip
           label={stat.hint}
           title={stat.label}
+          body={activeGroup === 'Betting' ? undefined : TEAM_GROUP_INTRO[activeGroup]}
           sections={explainSections(stat.explain)}
         />
       </View>
@@ -612,11 +616,18 @@ function TeamRow({
   const color = tierColor(tier);
   const record = formatRecord(row, def);
   const sample = def.sample ? sampleFor(row, def) : null;
-  // Under MIN_SPLIT_SAMPLE a split is its record ("3-2"), or "—" when the
-  // board has no record for it, with the game count under it — never a
-  // percentage (Matt, 2026-11-03).
-  const shown = thin ? (record ?? '—') : formatTeamStat(value, def.format);
+  // Under MIN_SPLIT_SAMPLE a split is never a percentage (Matt, 2026-11-03):
+  // its record ("3-2", or "3o-2u" for overs and unders) over the game count,
+  // or, with no stored record, the game count alone. "—" stays "no data".
   const gamesText = `${sample} game${sample === 1 ? '' : 's'}`;
+  const isOU = def.key === 'over_pct';
+  const thinRecord = thin && record && isOU
+    ? `${row.ou_o}o-${row.ou_u}u${row.ou_p ? `-${row.ou_p}p` : ''}`
+    : record;
+  const shown = thin ? (thinRecord ?? gamesText) : formatTeamStat(value, def.format);
+  const spokenRecord = isOU
+    ? `${row.ou_o} overs, ${row.ou_u} unders, `
+    : record ? `${record} record, ` : '';
 
   return (
     <View style={[styles.row, subline ? styles.rowWithGame : null]}>
@@ -676,12 +687,14 @@ function TeamRow({
         accessible
         accessibilityLabel={
           thin
-            ? `${def.label}: ${record ? `${record} record, ` : ''}only ${gamesText}`
+            ? `${def.label}: ${thinRecord ? spokenRecord : ''}only ${gamesText}`
             : `${def.label} ${shown}${record ? `, ${record}` : ''}`
         }
       >
-        <Text style={[styles.value, color ? { color } : null]}>{shown}</Text>
-        {thin ? (
+        <Text style={[styles.value, color ? { color } : null, thin && !thinRecord ? styles.thinValue : null]}>
+          {shown}
+        </Text>
+        {thin && thinRecord ? (
           <Text style={styles.thinLabel}>{gamesText}</Text>
         ) : record ? (
           <Text style={styles.valueLabel}>{record}</Text>
@@ -914,6 +927,7 @@ const styles = StyleSheet.create({
   },
   valueLabel: { fontSize: font.size.nano, color: colors.textTertiary },
   thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
+  thinValue: { fontWeight: font.weight.regular, color: colors.textSecondary },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
 });
