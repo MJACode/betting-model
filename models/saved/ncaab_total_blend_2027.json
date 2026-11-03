@@ -3,8 +3,9 @@
  "model_id": "ncaab_total_blend",
  "season": 2027,
  "prior_season": 2026,
- "built_at": "2026-11-03T20:16:55Z",
+ "built_at": "2026-11-03T21:02:07Z",
  "command": "python -m scripts.ncaab_total_blend_build --cache <copy of the four reads> --last-season 2026",
+ "quote_rule": "DraftKings' first posted full-game total: the earliest pre-game row by its own time, totals outside [90.0, 220.0] dropped first (research round 5, 2026-11-03; mike)",
  "params": {
   "K": 9.0,
   "KT": 3.0,
@@ -1915,6 +1916,7 @@
  "replay": {
   "cut": 0.04,
   "rule": "every quoted game, no games-played wait",
+  "quote": "DraftKings' first posted total (earliest pre-game row by its own time, totals outside [90.0, 220.0] dropped first)",
   "2022-2025": {
    "bets": 1787,
    "wins": 983,
@@ -1936,6 +1938,63 @@
    "overs": 613,
    "price_min": -115.0,
    "price_max": -105.0
+  },
+  "by_season": {
+   "2022": {
+    "bets": 307,
+    "wins": 174,
+    "losses": 130,
+    "pushes": 3,
+    "units": 32.05,
+    "roi_pct": 9.55,
+    "overs": 274,
+    "price_min": -120.0,
+    "price_max": 100.0
+   },
+   "2023": {
+    "bets": 274,
+    "wins": 161,
+    "losses": 111,
+    "pushes": 2,
+    "units": 39.05,
+    "roi_pct": 12.98,
+    "overs": 187,
+    "price_min": -115.0,
+    "price_max": 110.0
+   },
+   "2024": {
+    "bets": 496,
+    "wins": 265,
+    "losses": 224,
+    "pushes": 7,
+    "units": 19.35,
+    "roi_pct": 3.55,
+    "overs": 476,
+    "price_min": -120.0,
+    "price_max": 102.0
+   },
+   "2025": {
+    "bets": 710,
+    "wins": 383,
+    "losses": 320,
+    "pushes": 7,
+    "units": 32.21,
+    "roi_pct": 4.14,
+    "overs": 681,
+    "price_min": -115.0,
+    "price_max": -105.0
+   },
+   "2026": {
+    "bets": 649,
+    "wins": 367,
+    "losses": 282,
+    "pushes": 0,
+    "units": 58.05,
+    "roi_pct": 8.17,
+    "overs": 613,
+    "price_min": -115.0,
+    "price_max": -105.0
+   }
   },
   "both_teams_10_games": {
    "2022-2025": {
@@ -1962,6 +2021,88 @@
    }
   },
   "min_prob": 0.5204,
-  "min_ev": 0.0734
+  "min_ev": 0.0734,
+  "card_path": {
+   "seasons": [
+    2022,
+    2026
+   ],
+   "match": {
+    "replay_bets": 2436,
+    "card_bets": 2431,
+    "same_game": 2431,
+    "same_side": 2431,
+    "replay_only": [
+     "NCAAB_2022-02-03_youngstown-state_iu-indianapolis",
+     "NCAAB_2022-02-14_iu-indianapolis_uic",
+     "NCAAB_2022-02-17_iu-indianapolis_robert-morris",
+     "NCAAB_2022-02-24_milwaukee_iu-indianapolis",
+     "NCAAB_2022-03-01_iu-indianapolis_oakland"
+    ],
+    "card_only": [],
+    "refused": {},
+    "held": {
+     "2022": 14
+    },
+    "max_abs_edge_diff_all_scored": 1.54e-08
+   },
+   "by_season": {
+    "2022": {
+     "bets": 302,
+     "wins": 172,
+     "losses": 127,
+     "pushes": 3,
+     "units": 33.25,
+     "roi_pct": 10.07,
+     "overs": 269,
+     "price_min": -120.0,
+     "price_max": 100.0
+    },
+    "2023": {
+     "bets": 274,
+     "wins": 161,
+     "losses": 111,
+     "pushes": 2,
+     "units": 39.05,
+     "roi_pct": 12.98,
+     "overs": 187,
+     "price_min": -115.0,
+     "price_max": 110.0
+    },
+    "2024": {
+     "bets": 496,
+     "wins": 265,
+     "losses": 224,
+     "pushes": 7,
+     "units": 19.35,
+     "roi_pct": 3.55,
+     "overs": 476,
+     "price_min": -120.0,
+     "price_max": 102.0
+    },
+    "2025": {
+     "bets": 710,
+     "wins": 383,
+     "losses": 320,
+     "pushes": 7,
+     "units": 32.21,
+     "roi_pct": 4.14,
+     "overs": 681,
+     "price_min": -115.0,
+     "price_max": -105.0
+    },
+    "2026": {
+     "bets": 649,
+     "wins": 367,
+     "losses": 282,
+     "pushes": 0,
+     "units": 58.05,
+     "roi_pct": 8.17,
+     "overs": 613,
+     "price_min": -115.0,
+     "price_max": -105.0
+    }
+   }
+  }
  }
 }

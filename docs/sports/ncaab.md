@@ -178,6 +178,8 @@ testing: about 330 cells were graded in that research; this one was
 pre-registered and passes, but some passes are expected by chance. Files:
 research round 5, `RESULTS.txt` (Q5 and the 2026-11-03 addendum).
 
+**The shipped code reproduces it (2026-11-03).** `scripts/ncaab_total_blend_build.py`, run on research round 5's corrected first-post quote set, refits the blend to the research's numbers and its walk-forward replay makes the research's 2,436 bets on 2022-2026, game by game, same side and price. The card's own decision code, walk-forward over 2022-2026 (`card_path` in the build: the hold, the refit at one cutoff, the inputs, the price, the price and EV floors, each season's numbers built only from earlier seasons): 2,431 bets, every one the same game and side as the replay's (largest edge difference over every scored game 1.5e-8), no bet refused by a floor. The replay's other 5 bets are all 2021-22 IU Indianapolis games the card holds as `box_missing` (14 games of that season whose teams have two or more old games with no stored box); live, such a hold fails the run so the alerter reports it. By season: 2022: 302 bets +33.25 units, 2023 274 +39.05, 2024 496 +19.35, 2025 710 +32.21, 2026 649 +58.05. The build stores both in the artifact (`replay`, `replay.card_path`).
+
 **The tables below are the evidence the model shipped on (2026-10-30 and
 2026-11-02), graded at DraftKings' first STORED total before the opener grid
 was stored.** They are kept as history.
