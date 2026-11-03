@@ -191,7 +191,6 @@ def main() -> int:
     ap.add_argument("--days", type=int, default=7, help="look-ahead window")
     ap.add_argument("--threshold", type=float, default=DEPLOY_THRESHOLD)
     ap.add_argument("--regions", default="us")
-    ap.add_argument("--bankroll", type=float, default=10000.0)
     ap.add_argument("--dry-run", action="store_true", help="skip the odds call, spend nothing")
     a = ap.parse_args()
 
@@ -240,8 +239,7 @@ def main() -> int:
         except Exception as exc:                               # noqa: BLE001
             print(f"WARNING: wind pick-eval dump failed: {exc}", file=sys.stderr)
 
-    bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll,
-                       wind_reads=wind_reads)
+    bets = select_bets(g, threshold=a.threshold, wind_reads=wind_reads)
 
     # Games that clear the wind bar but are not yet inside the firing window.
     # Reported on EVERY run, not just dry runs: the card is polled from T-10 and

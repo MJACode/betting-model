@@ -3498,6 +3498,8 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
               -- The first half's spread, not the game's.
               WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
+              -- The NCAAB first half's points, not the game total.
+              WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
                 OR p.model_id = 'mlb_spread_market' OR p.model_id = 'nfl_opener_spread'
                 OR p.model_id = 'ncaab_spread_market'

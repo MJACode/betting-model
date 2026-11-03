@@ -148,9 +148,14 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         # model merges, before ncaab_moneyline_own_spread changes the function
         # again (it names the moneyline model as h2h), so a stamp of its own.
         "clv-standard-v2-power-80-0.05-12-ncaab-spread-and-first-half",
-        # ncaab_moneyline_own_spread's, which production holds once that model
-        # merges, before ncaab_moneyline_first_post names itself as h2h.
+        # ncaab_moneyline_own_spread's (#1125), which production holds once
+        # that model merges, before ncaab_first_half_total changes the function
+        # again (it names the first-half total as totals_h1), so a stamp of
+        # its own.
         "clv-standard-v2-power-80-0.05-12-ncaab-moneyline-own-spread",
+        # ncaab_first_half_total's (#1137), which production holds once that
+        # model merges, before ncaab_moneyline_first_post names itself as h2h.
+        "clv-standard-v2-power-80-0.05-12-ncaab-first-half-total",
     }
     assert declared not in stamped_before, (
         "clv_game_market changed (ncaab_moneyline_first_post) after production may have "

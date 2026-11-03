@@ -21,7 +21,8 @@
 -- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py). A
 -- first half's total is the same (data/ingestors/nba_first_half_odds.py), and
 -- so is the NCAAB first half's spread (data/ingestors/ncaab_first_half_odds.py),
--- which takes no close: it is unmeasured, never 0.0 against its own price.
+-- which takes no close: it is unmeasured, never 0.0 against its own price. The
+-- NCAAB first half's total comes from the same feed and is the same.
 -- results_snapshots is not touched.
 
 DO $mig$
@@ -215,6 +216,7 @@ BEGIN
         WHEN 'ncaab_moneyline_own_spread' THEN 'h2h'
         WHEN 'ncaab_moneyline_first_post' THEN 'h2h'
         WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
+        WHEN 'ncaab_first_half_total' THEN 'totals_h1'
         ELSE 'h2h'
       END
     $body$;

@@ -1,5 +1,5 @@
-"""The NCAAB first-half window: the first-half fetches and the
-ncaab_first_half_spread card's run.
+"""The NCAAB first-half window: the first-half fetches and the runs of the
+ncaab_first_half_spread and ncaab_first_half_total cards.
 
 Planned every minute (scheduler.run_ncaab_first_half_window, 24x7). A tick:
   1. plan(): the NCAAB games dated today or tomorrow (Eastern) that have not
@@ -9,13 +9,16 @@ Planned every minute (scheduler.run_ncaab_first_half_window, 24x7). A tick:
      first-half market and no event to call). For each, the newest fetch time
      that has passed (data/ingestors/ncaab_first_half_odds.MARKS: 15:00 UTC on
      its date, then 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip)
-     with no ok call since is due. And the games the card must look at: not
-     decided, ten minutes or less from tip. Reads only; no API call.
+     with no ok call since is due. And the games each card must look at: not
+     decided by it, ten minutes or less from tip for the spread card, sixty
+     for the total card. Reads only; no API call.
   2. --fetch G...: one event call per due game, the decision fetches first
      (data/ingestors/ncaab_first_half_odds.py). Exit 1 when a call failed, not
      when the books offered nothing.
-  3. The card (scripts/ncaab_first_half_spread_card.py) decides each game on
-     its tip-minus-10 fetch, writes the bets, and the job publishes them.
+  3. The spread card (scripts/ncaab_first_half_spread_card.py) decides each
+     game on its tip-minus-10 fetch, the total card
+     (scripts/ncaab_first_half_total_card.py) on its tip-minus-60 fetch; each
+     writes its bets, and the job publishes them.
 
 THE DECISION FETCH, AND WHAT HAPPENS WHEN IT FAILS. The research graded one
 instant: the purchase ten minutes before tip. The tick at tip minus 10 makes
@@ -26,7 +29,10 @@ for that time that landed 5 to 10 minutes before tip
 landed by 5 minutes before tip the game is not decided and the run reports it:
 the 20-minute fetch is NOT used instead. It is ten minutes further from the
 graded instant than any retry inside the window, and the research only
-supports tip minus 10.
+supports tip minus 10. The total's decision fetch is the call at tip minus 60,
+retried the same way; it decides on one that landed 55 to 60.5 minutes before
+tip (scripts/ncaab_first_half_total_card.DECISION_LEAD_MIN), and the 50-minute
+fetch is not used instead.
 
     python -m scripts.ncaab_first_half_window                 # print what a tick would do
     python -m scripts.ncaab_first_half_window --fetch G1 G2   # fetch these games now
@@ -52,6 +58,8 @@ from data.db import get_connection  # noqa: E402
 _ET = ZoneInfo("America/New_York")
 # The card is run once a game is this close to tip and not decided.
 CARD_LEAD_MIN = 10.5
+# The first-half total card, the same way, at its own decision time.
+TOTAL_CARD_LEAD_MIN = 60.5
 
 
 def enabled() -> bool:
@@ -66,9 +74,10 @@ class Plan:
     fetch: list = field(default_factory=list)       # game ids due a call
     marks: dict = field(default_factory=dict)       # game id -> mark
     card: list = field(default_factory=list)        # undecided games <= CARD_LEAD_MIN out
+    total_card: list = field(default_factory=list)  # undecided by the total card, <= TOTAL_CARD_LEAD_MIN
 
     def __bool__(self) -> bool:
-        return bool(self.fetch or self.card)
+        return bool(self.fetch or self.card or self.total_card)
 
 
 def slate(conn, now: datetime) -> dict[str, dict]:
@@ -107,6 +116,7 @@ def lead_minutes(tip: datetime, t: datetime) -> float:
 def plan(conn, now: datetime) -> Plan:
     """What this tick has to do, from what is stored. Reads only."""
     from scripts.ncaab_first_half_spread_card import decided_games
+    from scripts.ncaab_first_half_total_card import decided_games as total_decided
     games = slate(conn, now)
     if not games:
         return Plan()
@@ -125,29 +135,51 @@ def plan(conn, now: datetime) -> Plan:
     if near:
         done = decided_games(conn, near)
         p.card = [g for g in near if g not in done]
+    near = sorted(g for g, v in games.items()
+                  if lead_minutes(v["tip"], now) <= TOTAL_CARD_LEAD_MIN)
+    if near:
+        done = total_decided(conn, near)
+        p.total_card = [g for g in near if g not in done]
     return p
 
 
 UNDECIDED_LOOKBACK_HOURS = 24.0
 
 
+SPREAD_MODEL = "ncaab_first_half_spread"
+TOTAL_MODEL = "ncaab_first_half_total"
+
+
 def undecided_games(conn, now: datetime,
-                    hours: float = UNDECIDED_LOOKBACK_HOURS) -> list[str]:
+                    hours: float = UNDECIDED_LOOKBACK_HOURS,
+                    model: str = SPREAD_MODEL) -> list[str]:
     """The listed NCAAB games that tipped in the last `hours` with no decision
-    from ncaab_first_half_spread, for the failure alerter. Reads only.
+    from `model` (ncaab_first_half_spread or ncaab_first_half_total), for the
+    failure alerter. Reads only.
 
     Only games that tipped after this feed's first call are counted (the
-    ledger's oldest row): before it, the model did not exist. No ledger yet,
-    nothing named; a job that never ran is the heartbeat check's to report.
-    The window job's own error beat is overwritten by the next idle tick a
-    minute later, so this is what names a game the model lost."""
-    from scripts.ncaab_first_half_spread_card import decided_games
+    ledger's oldest row): before it, the model did not exist. The total model
+    came later, so for it only games that tipped after its own first decision
+    (its ledger's oldest row) count; with none yet, nothing is named. No feed
+    ledger yet, nothing named; a job that never ran is the heartbeat check's to
+    report. The window job's own error beat is overwritten by the next idle
+    tick a minute later, so this is what names a game the model lost."""
+    if model == TOTAL_MODEL:
+        from scripts.ncaab_first_half_total_card import decided_games, first_decision
+    else:
+        from scripts.ncaab_first_half_spread_card import decided_games
+        first_decision = None
     if not feed.ledger_exists(conn):
         return []
     row = conn.execute(f"SELECT MIN(fetch_at) FROM {feed.LEDGER_TABLE}").fetchone()
     first = feed._aware(row[0]) if row else None
     if first is None:
         return []
+    if first_decision is not None:
+        began = first_decision(conn)
+        if began is None:
+            return []
+        first = max(first, began)
     today = now.astimezone(_ET).date()
     dates = [(today - timedelta(days=d)).isoformat() for d in (0, 1, 2)]
     rows = conn.execute("""
