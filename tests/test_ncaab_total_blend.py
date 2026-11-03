@@ -1113,3 +1113,22 @@ def test_the_channel_job_takes_the_source_channel_by_id():
     for bad in ({"name": "1541173382190596311", "like": "ncaaf"}, {"name": "ncaab", "like": "12"}):
         with pytest.raises(ValueError):
             validate(bad)
+
+
+def test_the_channel_job_accepts_an_emoji_prefix(monkeypatch):
+    """Channel names on this server lead with an emoji ('🔴-ncaab-live').
+    The slug stays lowercase with a letter in it; the emoji cannot sit in
+    the middle, and the job still passes the name through unchanged."""
+    import tracking.job_queue as jq
+    fn, validate = jq.JOBS["discord_create_channel"]
+    args = validate({"name": "🔴-ncaab-live", "like": "ncaaf"})
+    assert args["name"] == "🔴-ncaab-live" and args["apply"] is False
+    ran = []
+    monkeypatch.setattr(jq, "_run_script_main", lambda mod, argv: ran.append(argv) or "ok")
+    assert fn(**args) == "ok"
+    assert ran == [["--name", "🔴-ncaab-live", "--like", "ncaaf", "--dry-run"]]
+    assert validate({"name": "ncaabw", "like": "🔴-ncaab"})["like"] == "🔴-ncaab"
+    for bad in ("🔴ncaab-live", "ncaab-🔴-live", "🔴-12345", "🔴-", "🔴-NCAAB",
+                "🔴-ncaab live", "🔴🔴-ncaab", "ncaab!", "a" * 40):
+        with pytest.raises(ValueError):
+            validate({"name": bad, "like": "ncaaf"})

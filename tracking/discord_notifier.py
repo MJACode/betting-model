@@ -8,9 +8,12 @@ Producers, each independently enabled by whether its webhook is configured:
     §16 mobile query use). Reads `picks`, not `opening_signals`, so what posts is
     the same set the app shows.
   • notify_discord_live    — in-play BET signals from the live loops (MLB,
-    NCAAF, and the NFL in-play worker), to the SPORT'S live channel
-    (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
-    channel, else the sport's pre-game channel.
+    NCAAF, and the NFL-leader loop on pollers; the retired NFL in-play
+    worker on the pipeline worker), to the SPORT'S live channel
+    (DISCORD_WEBHOOK_LIVE_{SPORT} if set, else DISCORD_CHANNEL_LIVE_{SPORT}
+    through the bot token, webhook named "<sport>-live"; mike, 2026-09-09),
+    else the shared live channel, else the sport's pre-game channel. A live
+    channel id this process cannot open does not fall through.
   • notify_discord_results — one morning recap after settlement: yesterday's
     record, P&L and ROI, overall and by sport. The same webhook also gets
     the Monday weekly recap and the first-Monday monthly recap.
@@ -623,10 +626,16 @@ _DISCORD_API = "https://discord.com/api/v10"
 _CHANNEL_HOOKS: dict = {}
 
 
-def _channel_hook_name(sport: str) -> str:
-    """The name a created webhook posts under: the sport's, lower case, as the
-    other sports' webhooks are named ('ncaaf', 'nba')."""
-    return sport.lower()
+def _channel_hook_name(sport: str, *, live: bool = False) -> str:
+    """The name a created webhook posts under.
+
+    Pre-game is the sport's, lower case, as the other sports' webhooks are
+    named ('ncaaf', 'nba'). A live channel uses '<sport>-live' so the webhook
+    the bot creates there is never the pre-game one, even if both channels
+    were listed side by side.
+    """
+    name = sport.lower()
+    return f"{name}-live" if live else name
 
 
 def _bot_hook_in_channel(sport: str, channel: str, headers: dict) -> tuple[dict | None, str | None]:
@@ -676,64 +685,118 @@ def channel_hook_info(sport: str) -> dict:
             "webhook_name": hook.get("name"), "via": "channel id + bot token"}
 
 
-def _channel_webhook(sport: str) -> str | None:
-    """The webhook URL for `sport`'s configured channel, or None.
+def _resolve_channel_webhook(label: str, channel: str | None, name: str,
+                             cache_key: str) -> str | None:
+    """The webhook URL for `channel`, or None.
 
     Reuses a webhook in that channel that the bot itself created (its `user`
-    is the bot), else creates one named after the sport. Needs
-    DISCORD_BOT_TOKEN with Manage Webhooks on the channel. A failure is logged
-    by status code and returns None, so the sport is skipped exactly as an
-    unset webhook is (its picks stay unsent and post once the channel
-    resolves)."""
-    channel = config.DISCORD_CHANNELS.get(sport)
+    is the bot), else creates one named `name`. Needs DISCORD_BOT_TOKEN with
+    Manage Webhooks on the channel. A failure is logged by status code and
+    returns None, so the sport is skipped exactly as an unset webhook is
+    (its picks stay unsent and post once the channel resolves). `cache_key`
+    is per destination: the pre-game sport and its live channel must not
+    share a URL."""
     if not channel:
         return None
-    if sport in _CHANNEL_HOOKS:
-        return _CHANNEL_HOOKS[sport]
+    if cache_key in _CHANNEL_HOOKS:
+        return _CHANNEL_HOOKS[cache_key]
     headers = _bot_headers()
     if headers is None:
         return None
     try:
-        hook, why = _bot_hook_in_channel(sport, channel, headers)
+        hook, why = _bot_hook_in_channel(label, channel, headers)
         if why:
             logger.error(f"Discord: {why}")
             return None
         if hook is None:
             made = requests.post(f"{_DISCORD_API}/channels/{channel}/webhooks", headers=headers,
-                                 json={"name": _channel_hook_name(sport)}, timeout=15)
+                                 json={"name": name}, timeout=15)
             if made.status_code not in (200, 201):
-                logger.error(f"Discord: creating the {sport} channel's webhook failed "
+                logger.error(f"Discord: creating the {label} channel's webhook failed "
                              f"({made.status_code})")
                 return None
             hook = made.json()
-            logger.info(f"Discord: created a webhook in the {sport} channel")
+            logger.info(f"Discord: created a webhook in the {label} channel")
     except (requests.RequestException, ValueError) as exc:
-        logger.error(f"Discord: resolving the {sport} channel's webhook failed: "
+        logger.error(f"Discord: resolving the {label} channel's webhook failed: "
                      f"{type(exc).__name__}")
         return None
     url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
-    _CHANNEL_HOOKS[sport] = url
+    _CHANNEL_HOOKS[cache_key] = url
     return url
+
+
+def _channel_webhook(sport: str) -> str | None:
+    """The webhook URL for `sport`'s configured pre-game channel, or None."""
+    return _resolve_channel_webhook(
+        sport, config.DISCORD_CHANNELS.get(sport), _channel_hook_name(sport), sport)
+
+
+# One line per sport per process. A live pass calls this for every pick, and
+# the missing token does not change until the process is redeployed.
+_LIVE_CHANNEL_TOKEN_WARNED: set = set()
+
+
+def _live_channel_webhook(sport: str) -> str | None:
+    """The webhook URL for `sport`'s live channel id, or None.
+
+    Same path as `_channel_webhook`: reuse the bot's own webhook in
+    DISCORD_CHANNEL_LIVE_<SPORT>, else create one. The created webhook is
+    named '<sport>-live' and cached apart from the pre-game URL.
+
+    No bot token is a soft skip. The URL is not invented, nothing is posted,
+    and the caller does not ledger the pick. Logged once per sport: the MLB,
+    NCAAF and NFL-leader loops that call notify_discord_live run on pollers,
+    and that service has no DISCORD_BOT_TOKEN.
+    """
+    channel = (getattr(config, "DISCORD_CHANNELS_LIVE", None) or {}).get(sport)
+    if not channel:
+        return None
+    if _bot_headers() is None:
+        if sport not in _LIVE_CHANNEL_TOKEN_WARNED:
+            _LIVE_CHANNEL_TOKEN_WARNED.add(sport)
+            logger.error(
+                f"Discord(live): DISCORD_CHANNEL_LIVE_{sport} is set but this "
+                f"process has no DISCORD_BOT_TOKEN, so the {sport.lower()}-live "
+                f"webhook cannot be opened. {sport} live picks are skipped and "
+                f"not marked sent. Set DISCORD_BOT_TOKEN on this service (the "
+                f"bot needs Manage Webhooks on that channel), or set "
+                f"DISCORD_WEBHOOK_LIVE_{sport}."
+            )
+        return None
+    return _resolve_channel_webhook(
+        f"{sport} live", channel, _channel_hook_name(sport, live=True), f"{sport}:live")
 
 
 def _live_webhook_for_sport(sport: str) -> str | None:
     """Where an IN-PLAY signal for `sport` posts.
 
-    The sport's own live channel first (mike, 2026-09-09: live picks go to
-    #nfl-live / #mlb-live / #ncaaf-live), then the shared live channel, then
-    the sport's pre-game channel. The last fallback is deliberate: a sport that
-    has a live loop and no live channel yet still posts SOMEWHERE its members
-    read, and the ledger keeps it from re-posting once the channel is added.
+    The sport's own live webhook first (mike, 2026-09-09: live picks go to
+    #nfl-live / #mlb-live / #ncaaf-live). With no webhook variable, the
+    sport's live channel id (DISCORD_CHANNEL_LIVE_<SPORT>) is opened through
+    the bot token. Then the shared live channel, then the sport's pre-game
+    channel. The last two are for a sport that has no live destination yet:
+    it still posts somewhere its members read, and the ledger keeps it from
+    re-posting once a live channel is added.
+
+    A live channel id that is set and cannot be opened does not use those
+    fallbacks. Posting the pick somewhere else would ledger it, and the live
+    channel would never receive it.
     """
-    return (config.DISCORD_WEBHOOKS_LIVE.get(sport)
-            or config.DISCORD_WEBHOOK_LIVE
-            or _webhook_for_sport(sport))
+    explicit = config.DISCORD_WEBHOOKS_LIVE.get(sport)
+    if explicit:
+        return explicit
+    if (getattr(config, "DISCORD_CHANNELS_LIVE", None) or {}).get(sport):
+        return _live_channel_webhook(sport)
+    return config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(sport)
 
 
 def _configured() -> bool:
+    live_by_channel = bool(getattr(config, "DISCORD_CHANNELS_LIVE", None)) and _bot_headers() is not None
     return bool(config.DISCORD_WEBHOOKS
                 or config.discord_sports_wired()
                 or config.DISCORD_WEBHOOKS_LIVE
+                or live_by_channel
                 or config.DISCORD_WEBHOOK_DEFAULT
                 or config.DISCORD_WEBHOOK_LIVE
                 or config.DISCORD_WEBHOOK_RESULTS)
