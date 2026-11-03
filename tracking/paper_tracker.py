@@ -2430,6 +2430,12 @@ _RULE_MODEL_MARKETS = {
     # ncaab_period_scores (_ncaab_first_half_points), no overtime. NEVER
     # "spreads": that grades the full-game margin.
     "ncaab_first_half_spread": "spreads_h1",
+    # NCAAB first-half total (models/ncaab_first_half_total.py). scored_line
+    # is the first half's total; it settles on period 1 of
+    # ncaab_period_scores (first_half_points routes an NCAAB game there), no
+    # overtime. NEVER "totals": that sums the two finals and grades every
+    # under a loss.
+    "ncaab_first_half_total": "totals_h1",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

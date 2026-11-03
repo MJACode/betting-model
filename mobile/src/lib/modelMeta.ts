@@ -643,6 +643,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Men's college basketball, the first half's total points
+  // (models/ncaab_first_half_total.py MODEL_ID). It decides each game once,
+  // about an hour before tip, at the best first-half total any bettable book
+  // hangs, over or under, and settles on the first half's points (no
+  // overtime). The label is "Duke @ Kansas — First Half Under 70.5". A game
+  // line, not a picker slot.
+  ncaab_first_half_total: {
+    // 1H O/U, as the NBA first half's total. The side is in the pick label.
+    shortLabel: '1H O/U',
+    longLabel: 'NCAAB First Half Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -889,6 +903,11 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaab_first_half_spread:
     'What our model says is the chance this side covers the first-half spread. On a whole-number ' +
     'line it leaves out a push, which returns the stake.',
+  // P(win | no push) at the bet's own number (models/ncaab_first_half_total.py):
+  // a first-half total on a whole number can land on it, a push, left out.
+  ncaab_first_half_total:
+    'What our model says is the chance this side wins on the first half’s points. On a ' +
+    'whole-number line it leaves out a push, which returns the stake.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -902,9 +921,13 @@ export function modelProbabilityNote(modelId: string): string {
 // first-half overs (scripts/nba_first_half_total_luck_card.py, 45-66) and
 // the two prop models (scripts/nba_prop_market_card.py,
 // nba_prop_projection_card.py, 45-57). Their page is empty most of the day,
-// and the morning-run copy sent people back at the wrong time.
+// and the morning-run copy sent people back at the wrong time. The NCAAB
+// first-half total card (scripts/ncaab_first_half_total_card.py) checks each
+// game the same way, on the first-half lines fetched an hour before tip (55
+// to 60 minutes out).
 const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
+  'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',
@@ -1183,6 +1206,8 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   // the "Spread" slot it would read as the full-game spread. Not a picker
   // slot, like the NBA first half's total.
   if (id === 'ncaab_first_half_spread') return null;
+  // The NCAAB first half's total, the same: not the game's total line.
+  if (id === 'ncaab_first_half_total') return null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';
