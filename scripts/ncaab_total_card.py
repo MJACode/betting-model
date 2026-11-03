@@ -1,46 +1,70 @@
 """NCAAB totals card: write `ncaab_total_blend` bets (models/ncaab_total_blend.py).
 
 LIVE, real money (mike, 2026-10-30: "Yes to the totals model"). Runs in its
-own job, hourly at five past the hour UTC (scheduler.run_ncaab_total_card),
-and writes picks only; the job then publishes them like every other card.
-RUN_NCAAB_TOTAL_CARD=0 stops it before it reads anything; the job keeps
-beating, so its silence still means stopped.
+own job every five minutes, three minutes after each odds capture tick
+(scheduler.run_ncaab_total_card), and writes picks only; the job then
+publishes them like every other card. RUN_NCAAB_TOTAL_CARD=0 stops it before
+it reads anything; the job keeps beating, so its silence still means stopped.
 
-WHEN A GAME IS DECIDED. The evidence bet DraftKings' FIRST stored total, and
-the totals it bought were the 22:00Z snapshot the evening before, the 15:00Z
-snapshot on the day and the hour before tip. So a game's decision hours are
-22:00Z on the day before its Eastern date, then 15:00Z on its date and every
-hour after it until tip (models.ncaab_total_blend.decision_hour). At the
-first of them where DraftKings has a total standing (its newest pre-game row
-stored within the last DK_MAX_AGE_MIN minutes), the game is decided, bet or
-not, and never looked at again.
+WHEN A GAME IS DECIDED (from 2026-11-03, mike). At DraftKings' FIRST POSTED
+full-game total: its earliest pre-game totals row stored for the game, by
+DraftKings' own time on the row (snapshot_at), with a total inside
+models.ncaab_total_blend.TOTAL_RANGE and both prices (a total outside it is a
+feed error and is skipped, so the next row is the first post). The odds
+capture (scripts/ncaab_odds_capture.py) stores DraftKings' first total within
+one five-minute poll, and this card runs three minutes after each poll, so a
+game is decided minutes after DraftKings posts it. The evidence (research
+round 5) graded every game at that quote: 1,787 bets, +6.26% on 2021-2025 and
+649, +8.17% on 2025-26, against +3.90% for the 22:00Z / 15:00Z rule this
+replaced, at that rule's own decision instant. About half of DraftKings' first
+totals change within about half an hour, which is why it runs this often.
+
+ONLY WHILE THE FIRST POST STANDS. The bet is placed at the first post's total
+and prices only while that is still DraftKings' standing number (its newest
+pre-game row stored within DK_MAX_AGE_MIN, same total, same two prices). When
+it is not, the game is decided `first_post_gone`, with no bet: the research
+graded the first post, and a number no longer on the board cannot be bet. It
+is never decided at a later number instead (the later instants are what the
+old rule bet, and they were weaker).
 
 AS OF THE QUOTE. The ratings, the games-played count and the shooting and style
 inputs use only finals that had ENDED (tip + 2.5 h) at or before DraftKings'
-own time on that row, rounded down to the hour, as the evidence did.
+own time on the first post, rounded down to the hour, as the evidence did.
 
-A HOLD IS NOT A DECISION. When a team's earlier game ended before the quote
-but its final score or either box score is not stored yet (the ESPN feed fills
-them after each final), the game waits for its next decision hour. A box still
-missing BOX_WAIT_H hours after its game ended stops holding (the evidence had a
-few games with no possessions too), unless a team is missing more than one.
+A HOLD IS NOT A DECISION. When a team's earlier game ended before the first
+post but its final score or either box score is not stored yet (the ESPN feed
+fills them after each final, a median 1.9 hours after the model's end time on
+2026-11-02), the game waits and is looked at again on every run. When the box
+lands it is decided at the same first post, as of the same hour, if that is
+still DraftKings' standing number, and is `first_post_gone` if not. A box still
+missing BOX_WAIT_H hours after its game ended (counted to now) stops holding
+(the evidence had a few games with no possessions too), unless a team is
+missing more than one.
 
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS. A due game skipped because the
 artifact is for another season, held as box_missing (a team missing two or
-more old boxes, which can hold it all season), or missing its blend makes the
-run raise CardIncomplete AFTER every other game is decided and written, so
-the script exits 1, the job's heartbeat records "error" and the failure
-alerter reports it. It never stops quietly with the heartbeat green.
+more old boxes, which can hold it all season), missing its blend, or held as
+edge_cap (an edge above the data-error cap, models/ncaab_quote_bounds.py)
+makes the run raise CardIncomplete AFTER every other game is decided and
+written, so the script exits 1, the job's heartbeat records "error" and the
+failure alerter reports it. It never stops quietly with the heartbeat green.
+
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A total
+outside 90-220 is never a first post (load_first_posts skips the row, so the
+next row is the first post, the research's rule). A standing total outside it,
+or a first post priced beyond +/-100000, makes the game wait: out_of_range,
+not final, logged with its game, book and value and counted on the
+diagnostic line; it is looked at again on the next run.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_total_decisions in the same transaction as the game's bet, under the
 model's transaction-scoped advisory lock. A game with a decision row, or with
 any ncaab_total_blend BET, is never decided again: a later hour, a moved line
-or a better price writes nothing. The one exception is a row left by the
-10-game wait this model used to have (mike removed it 2026-11-02). That row
-never looked at the price, so it is not a decision: a game with one that has
-not tipped is decided now, at DraftKings' standing total, and the row is
-replaced.
+or a better price writes nothing. Games decided under the old 22:00Z /
+15:00Z rule stay decided. The one exception is a row left by the 10-game wait
+this model used to have (mike removed it 2026-11-02). That row never looked at
+the price, so it is not a decision: a game with one that has not tipped is
+decided now, at its first post if that still stands, and the row is replaced.
 
 BET ROWS ONLY in picks, at DraftKings' own price on DraftKings' own number:
 the evidence priced DraftKings and nothing else, so the line is not shopped.
@@ -59,6 +83,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -87,6 +112,12 @@ _ET = ZoneInfo("America/New_York")
 # number is never more than about an hour old; an older one has been taken
 # down, or the odds steps have stopped.
 DK_MAX_AGE_MIN = 90
+
+# How many Eastern dates past today the slate reads. DraftKings' first total
+# came 2+ Eastern dates before the game's date in 778 of 30,275 games of
+# 2021-2026 (2.6%), at most 7 (research round 5's first-post set), so a game
+# is on the slate before its first post can land.
+SLATE_DAYS = 7
 
 
 def enabled() -> bool:
@@ -127,8 +158,8 @@ _INSERT_DECISION = (
     "WHERE split_part(ncaab_total_decisions.detail, ':', 1) = 'below_10_games' "
     "RETURNING game_id")
 
-# The decisions that end a game's wait; the rest wait for its next hour.
-FINAL = ("bets", "below_cut")
+# The decisions that end a game's wait; the rest are looked at again next run.
+FINAL = ("bets", "below_cut", "first_post_gone")
 
 
 def ensure_decisions_table(conn) -> None:
@@ -147,10 +178,12 @@ def ledger_exists(conn) -> bool:
         "AND table_name = %s", (DECISIONS_TABLE,)).fetchone())
 
 
-def decided_games(conn, game_ids: list[str]) -> set[str]:
+def decided_games(conn, game_ids: list[str], bets: bool = True) -> set[str]:
     """Games with a decision row, or with any ncaab_total_blend BET whatever
     became of it (settled, VOIDed): none is decided again. A row left by the
-    old 10-game wait does not count (the module docstring)."""
+    old 10-game wait does not count (the module docstring). bets=False reads
+    the ledger only (by its primary key), for the whole slate every run; the
+    picks read is then made for the few games with a first post."""
     if not game_ids:
         return set()
     done: set[str] = set()
@@ -159,6 +192,8 @@ def decided_games(conn, game_ids: list[str]) -> set[str]:
             "SELECT game_id FROM ncaab_total_decisions WHERE game_id = ANY(%s) "
             "AND split_part(detail, ':', 1) <> 'below_10_games'",
             (list(game_ids),)).fetchall()}
+    if not bets:
+        return done
     bet = {r[0] for r in conn.execute("""
         SELECT DISTINCT game_id FROM picks
         WHERE model_id = %s AND signal_type = 'BET' AND game_id = ANY(%s)
@@ -180,9 +215,10 @@ def _tip(text) -> datetime | None:
 
 
 def slate(conn, now: datetime) -> dict[str, dict]:
-    """NCAAB games dated today or tomorrow (Eastern) that have not tipped."""
+    """NCAAB games dated today through SLATE_DAYS ahead (Eastern) that have
+    not tipped."""
     today = now.astimezone(_ET).date()
-    dates = [(today + timedelta(days=d)).isoformat() for d in (0, 1)]
+    dates = [(today + timedelta(days=d)).isoformat() for d in range(SLATE_DAYS + 1)]
     rows = conn.execute("""
         SELECT game_id, season, game_date, commence_time, home_team, away_team
         FROM games WHERE sport = 'NCAAB' AND game_date = ANY(%s)
@@ -262,9 +298,67 @@ def prepare_season(games: pd.DataFrame, box: pd.DataFrame) -> tuple[pd.DataFrame
     return sg, b
 
 
+def _quote_rows(rows, now: datetime, keep_bad_total: bool = False) -> dict[str, nb.Quote]:
+    out = {}
+    for gid, line, op, up, snap, created, lo, lu in rows:
+        if line is None or implied(op) is None or implied(up) is None:
+            continue
+        if not keep_bad_total and not nb.valid_total(line):
+            continue
+        snap_t = _tip(snap) or _tip(created)
+        out[gid] = nb.Quote(game_id=gid, line=float(line), over_price=float(op),
+                            under_price=float(up), quote_at=min(snap_t, now),
+                            fetched_at=_tip(created), link_over=lo, link_under=lu)
+    return out
+
+
+# A row is a usable total only with a number inside TOTAL_RANGE and both
+# prices. The bound is applied BEFORE the first row is chosen, so a feed typo
+# is skipped and the next row is the first post (research round 5, AF-4).
+_USABLE = ("AND o.total_line IS NOT NULL AND o.over_price IS NOT NULL "
+           "AND o.under_price IS NOT NULL "
+           f"AND o.total_line::numeric BETWEEN {nb.TOTAL_RANGE[0]:g} AND {nb.TOTAL_RANGE[1]:g}")
+
+
+def load_first_posts(conn, games: dict[str, dict], now: datetime) -> dict[str, nb.Quote]:
+    """DraftKings' FIRST POSTED total per game: its earliest pre-game totals
+    row stored at or before now, by DraftKings' own time on the row
+    (snapshot_at; two rows with one stamp keep the one stored last, as the
+    research's quote set did), with a total inside TOTAL_RANGE and both
+    prices. One read, by game id (idx_odds_book_snap)."""
+    if not games:
+        return {}
+    rows = conn.execute(f"""
+        WITH g AS (
+            SELECT game_id, commence_time::timestamptz AS ct
+            FROM games WHERE game_id = ANY(%s) AND commence_time IS NOT NULL
+        )
+        SELECT DISTINCT ON (o.game_id)
+               o.game_id, o.total_line, o.over_price, o.under_price, o.snapshot_at,
+               o.created_at::timestamptz, o.over_link, o.under_link
+        FROM odds o JOIN g ON g.game_id = o.game_id
+        WHERE o.market = 'totals' AND o.bookmaker = %s AND o.snapshot_type = 'open'
+          AND o.snapshot_at::timestamptz <= g.ct
+          AND o.created_at::timestamptz <= %s
+          {_USABLE}
+        ORDER BY o.game_id, o.snapshot_at::timestamptz ASC, o.created_at::timestamptz DESC
+    """, (list(games), nb.BOOK, now.isoformat())).fetchall()
+    return _quote_rows(rows, now)
+
+
+def same_quote(a: nb.Quote | None, b: nb.Quote | None) -> bool:
+    """The same total and the same two prices."""
+    return (a is not None and b is not None and float(a.line) == float(b.line)
+            and float(a.over_price) == float(b.over_price)
+            and float(a.under_price) == float(b.under_price))
+
+
 def load_quotes(conn, games: dict[str, dict], now: datetime) -> dict[str, nb.Quote]:
     """DraftKings' standing total per game: its newest pre-game totals row
-    stored at or before now and within DK_MAX_AGE_MIN, with both prices."""
+    stored at or before now and within DK_MAX_AGE_MIN, with both prices. A
+    total outside TOTAL_RANGE is returned as it is, so the card can see that
+    the standing number is a feed error and wait, rather than read an older
+    row or call the first post gone."""
     if not games:
         return {}
     oldest = now - timedelta(minutes=DK_MAX_AGE_MIN)
@@ -283,15 +377,7 @@ def load_quotes(conn, games: dict[str, dict], now: datetime) -> dict[str, nb.Quo
           AND o.created_at::timestamptz >= %s
         ORDER BY o.game_id, o.created_at::timestamptz DESC, o.snapshot_at::timestamptz DESC
     """, (list(games), nb.BOOK, now.isoformat(), oldest.isoformat())).fetchall()
-    out = {}
-    for gid, line, op, up, snap, created, lo, lu in rows:
-        if line is None or implied(op) is None or implied(up) is None:
-            continue
-        snap_t = _tip(snap) or _tip(created)
-        out[gid] = nb.Quote(game_id=gid, line=float(line), over_price=float(op),
-                            under_price=float(up), quote_at=min(snap_t, now),
-                            fetched_at=_tip(created), link_over=lo, link_under=lu)
-    return out
+    return _quote_rows(rows, now, keep_bad_total=True)
 
 
 # ── rows ──────────────────────────────────────────────────────────────────────
@@ -374,7 +460,9 @@ def publish(conn, rows: list[dict], decisions: list[nb.Decision], check_hour: da
             refused: dict[str, str]) -> tuple[int, int]:
     """Write each decided game once: its decision row and its bet in ONE
     transaction, under the model's lock, the ledger and the picks re-read
-    inside it. -> (bets written, decisions written)."""
+    inside it. check_hour is the run's instant (the ledger's column name is
+    from the hourly rule); decided_at minus quote_at is the lag from the first
+    post. -> (bets written, decisions written)."""
     final = [d for d in decisions if d.status in FINAL]
     if not final:
         return 0, 0
@@ -425,6 +513,16 @@ def artifact() -> dict:
     return _ART["a"]
 
 
+def first_post_gone(q: nb.Quote, standing: nb.Quote | None) -> nb.Decision:
+    """The first post is no longer DraftKings' standing number: decided, no
+    bet (the module docstring, ONLY WHILE THE FIRST POST STANDS)."""
+    now_txt = ("no DraftKings total standing" if standing is None else
+               f"standing {standing.line:g} {standing.over_price:+.0f}/{standing.under_price:+.0f}")
+    return nb.Decision(q.game_id, "first_post_gone",
+                       f"first post {q.line:g} {q.over_price:+.0f}/{q.under_price:+.0f} at "
+                       f"{q.quote_at.isoformat()}; {now_txt}", quote=q)
+
+
 def render(decisions: list[nb.Decision], diag: dict, written=None, decided=None) -> str:
     head = f"NCAAB totals card ({MODEL_ID}): " + " ".join(f"{k}={diag.get(k, 0)}" for k in nb.DIAG_KEYS)
     if decided is not None:
@@ -449,27 +547,54 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
     if not enabled():
         logger.info("NCAAB totals card: RUN_NCAAB_TOTAL_CARD is off; nothing read")
         return {"games": 0, "bets": 0, "published": 0, "decided": 0, "off": True}
-    hour = now.replace(minute=0, second=0, microsecond=0)
     diag = dict.fromkeys(nb.DIAG_KEYS, 0)
     conn = get_connection()
     try:
         games = slate(conn, now)
         diag["games"] = len(games)
-        due = {g: v for g, v in games.items() if nb.decision_hour(v["game_date"], v["tip"], hour)}
-        diag["not_decision_hour"] = len(games) - len(due)
-        if do_publish and due:
-            ensure_decisions_table(conn)
-        done = decided_games(conn, sorted(due))
-        diag["already_decided"] = len(done)
-        due = {g: v for g, v in due.items() if g not in done}
+        # The ledger by primary key for the whole slate; the first-post read
+        # for the games it has not decided; the picks read for the few of
+        # those with a first post. Nothing heavier is read on a run where no
+        # undecided game has a first post.
+        done = decided_games(conn, sorted(games), bets=False)
+        undecided = {g: v for g, v in games.items() if g not in done}
+        firsts = load_first_posts(conn, undecided, now)
+        bet_done = decided_games(conn, sorted(firsts)) if firsts else set()
+        diag["already_decided"] = len(done) + len(bet_done)
+        due = {g: v for g, v in undecided.items() if g in firsts and g not in bet_done}
+        diag["no_dk_total"] = len(undecided) - len(firsts)
         if not due:
             logger.info(render([], diag))
             return {"games": len(games), "bets": 0, "published": 0, "decided": 0, "diag": diag}
-        art = artifact()
+        if do_publish:
+            ensure_decisions_table(conn)
+        standing = load_quotes(conn, due, now)
         decisions: list[nb.Decision] = []
+        live: dict[str, nb.Quote] = {}
+        for g in sorted(due):
+            q, now_q = firsts[g], standing.get(g)
+            if now_q is not None and not nb.valid_total(now_q.line):
+                # DraftKings' standing total is a feed error: whether the first
+                # post still stands is unknown, so the game waits for the next
+                # row, as a hold does. Neither bet nor gone.
+                decisions.append(nb.Decision(
+                    g, "out_of_range", f"{nb.BOOK} standing total {now_q.line:g} stamped "
+                    f"{now_q.quote_at.isoformat()} is outside {nb.TOTAL_RANGE}: a feed error, waits",
+                    quote=now_q))
+                diag["out_of_range"] += 1
+                logger.warning(f"NCAAB totals card: {g} waits, {decisions[-1].detail}")
+                continue
+            if same_quote(q, now_q):
+                # the first post's number and stamp; the standing row's links
+                live[g] = replace(q, link_over=now_q.link_over or q.link_over,
+                                  link_under=now_q.link_under or q.link_under)
+            else:
+                decisions.append(first_post_gone(q, now_q))
+                diag["first_post_gone"] += 1
+        art = artifact() if live else None
         problems: list[str] = []          # why a due game was not decided; fails the run
-        for season in sorted({v["season"] for v in due.values()}):
-            gids = sorted(g for g, v in due.items() if v["season"] == season)
+        for season in sorted({due[g]["season"] for g in live}):
+            gids = sorted(g for g in live if due[g]["season"] == season)
             if int(art["season"]) != season:
                 msg = (f"the artifact is for season {art['season']}; season {season} needs one "
                        f"built through {season - 1} (scripts/ncaab_total_blend_build.py). "
@@ -480,9 +605,9 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 continue
             games_df, box_df = load_season(conn, season)
             sg, box = prepare_season(games_df, box_df)
-            quotes = load_quotes(conn, {g: due[g] for g in gids}, now)
             targets = sg[sg["game_id"].isin(gids)]
-            got = nb.decide(targets, quotes, sg, box, art, config.MODEL_EDGE_THRESHOLDS[MODEL_ID])
+            got = nb.decide(targets, {g: live[g] for g in gids}, sg, box, art,
+                            config.MODEL_EDGE_THRESHOLDS[MODEL_ID], now=now)
             for d in got:
                 diag[d.status] = diag.get(d.status, 0) + 1
                 if d.status == "box_missing":
@@ -493,12 +618,19 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 elif d.status == "no_blend":
                     logger.error(f"NCAAB totals card: {d.game_id}: {d.detail}; the artifact is incomplete.")
                     problems.append(f"no_blend {d.game_id} ({d.detail})")
+                elif d.status == "out_of_range":
+                    logger.warning(f"NCAAB totals card: dropped a data-error quote, {d.game_id} "
+                                   f"{d.detail}")
+                elif d.status == "edge_cap":
+                    logger.error(f"NCAAB totals card: {d.game_id} not bet, its edge is a data "
+                                 f"error: {d.detail}")
+                    problems.append(f"edge_cap {d.game_id} ({d.detail})")
             decisions += got
         published = n_decided = 0
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
-            published, n_decided = publish(conn, rows, decisions, hour, refused)
+            published, n_decided = publish(conn, rows, decisions, now, refused)
         logger.info("\n" + render(decisions, diag, published if do_publish else None,
                                   n_decided if do_publish else None))
         if problems:

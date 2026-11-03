@@ -1068,20 +1068,37 @@ mike, 2026-10-30: *"Yes to the totals model."* Team ratings refit as of
 DraftKings' total, a correction for shooting luck and playing style, blended
 with DraftKings' total; bet the side whose chance of winning (a push left out)
 beats DraftKings' implied chance by more than 0.04, with no games-played wait
-(mike, 2026-11-02) (`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
+(mike, 2026-11-02), at DraftKings' first posted total (mike, 2026-11-03)
+(`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
 evidence and its risks are `docs/sports/ncaab.md` "The models").
 
 | Setting | Value | Where |
 |---|---|---|
 | the cut | edge > 0.04 | `MODEL_EDGE_THRESHOLDS` |
 | prob / edge filter | 0.0 / 0.04. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
-| EV floor | 0.07, on its own probability. The smallest EV the 0.04 cut admitted on 2021-2025 was +0.0743 (median +0.0996, 1,094 bets); an edge above 0.04 at -120 or longer is EV above 0.073, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
-| price floor | -200, pinned; it laid -120 to +102 (median -110) | `MODEL_MIN_ODDS` |
+| EV floor | 0.07, on its own probability. The smallest EV the 0.04 cut admitted in the first-post replay of 2022-2026 was +0.0734 (2,436 bets; +0.0743 on the quotes it shipped on); an edge above 0.04 at -120 or longer is EV above 0.073, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; it laid -120 to +110 (median -110) | `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02: *"we do not need to wait 10 games, I never approved that"*). With no wait the replay is 1,513 bets, +5.66% on 2022-2026, against 1,157 bets, +7.06% with it; the 356 bets it adds are +1.13%, interval [-10.1, 12.1]. `docs/sports/ncaab.md` has the table | `models/ncaab_total_blend.decide` |
-| decided once | 22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip, at DraftKings' standing total; a row in `ncaab_total_decisions`, bet or not | `scripts/ncaab_total_card.py`, `scheduler.run_ncaab_total_card` |
+| decision moment | from 2026-11-03 (mike): DraftKings' first posted total (the earliest pre-game row, total 90-220, both prices), bet only while it is still DraftKings' standing number, else `first_post_gone` with no bet; the card every 5 minutes, 3 after each capture poll. It replaced 22:00 UTC the evening before / 15:00 UTC on the day, which at its own instant made 1,563 bets, +3.90%, interval [-0.50, 8.00] on 2022-2026 | `scripts/ncaab_total_card.py`, `scheduler.run_ncaab_total_card` |
+| decided once | a row in `ncaab_total_decisions`, bet or not; games decided under the old rule stay decided | `scripts/ncaab_total_card.py` |
 
-**The neighbourhood** (the evidence of 2026-10-30, graded while the 10-game
-wait was on, so on both teams 10+ games; date-resampled 95% interval):
+**The neighbourhood at the first post** (research round 5, 2026-11-03: every
+game, DraftKings' first posted total, blend walk-forward; 2021-2025 means
+seasons 2022-2025 bet; date-resampled 95% interval):
+
+| Cut | 2021-2025 bets | units | ROI | interval | 2025-26 bets | units | ROI | interval |
+|---|---|---|---|---|---|---|---|---|
+| 0.03 | 2,997 | +178.20 | +5.42% | [2.05, 8.69] | 998 | +55.54 | +5.09% | [-1.02, 10.86] |
+| **0.04** | **1,787** | **+122.66** | **+6.26%** | **[1.72, 10.66]** | **649** | **+58.05** | **+8.17%** | **[0.42, 15.19]** |
+| 0.05 | 1,045 | +90.12 | +7.87% | [2.49, 13.53] | 387 | +45.94 | +10.86% | [0.78, 19.99] |
+
+Every season of 2022-2025 positive at 0.04 (+9.6%, +13.0%, +3.6%, +4.1%). Close
+EV +1.72% / +3.87% against Pinnacle's no-vig close. The cut stays 0.04: both
+neighbours pass.
+
+**The neighbourhood it shipped on** (the evidence of 2026-10-30, at
+DraftKings' first STORED total before the opener grid, graded while the
+10-game wait was on, so on both teams 10+ games; date-resampled 95% interval):
 
 | Cut | 2021-2025 bets | 2021-2025 ROI | interval | close EV | 2025-26 bets | 2025-26 ROI |
 |---|---|---|---|---|---|---|
@@ -1180,6 +1197,47 @@ on 2025-26. Read the record as unproven.
 **Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
 ROI, calibration within 5%). Read beside the ROI: the close value, and how often
 the bet book's price was still up when the pick posted.
+## NCAAB — `ncaab_moneyline_first_post`, moneylines at a book's first post (2026-11-03, mike)
+
+mike, 2026-11-03: a new model when a new search beats what is live; NCAAB
+moneylines *"-200 max"*. The moment a bettable book first posts its
+full-game moneyline for a game, that moneyline is priced off the same book's
+spread at that moment, as the 15:00 UTC moneyline model prices it (flags,
+-200 floor before the pick), with 3+ other bettable moneylines already up;
+bet when the edge is above 0.015. One bet a game across both moneyline
+models (`models/ncaab_moneyline_first_post.py`,
+`scripts/ncaab_moneyline_first_post_card.py`; the rule, the evidence and the
+risks are `docs/sports/ncaab.md` "The models"). **A secondary cell** of the
+round-5 search, not its pre-registered one, and the half-hourly history
+cannot say how long a first post stood.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.015, at the posting book's own price | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.015. model_probability is the fair chance the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.022, on its own probability. The smallest EV the cut admitted in the replay was +0.0226 (median +0.0359, 353 bets). EV is edge x decimal and the shortest price is -200 (decimal 1.5), so an edge above 0.015 is always EV above 0.0225 | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price cap | -200, removed before the pick and pinned again; it laid -200 to +400 (median -161) | `MIN_PRICE`, `MODEL_MIN_ODDS` |
+| other books | 3+ other bettable moneylines up (price-valid; a flagged one counts) | `MIN_OTHER_BOOKS` |
+| data-error cap | an edge above 0.40 is a feed error, not a bet (the replay's largest priced edge was 0.2416, a bet, so not 0.25) | `models/ncaab_quote_bounds.EDGE_CAP` |
+| decided once | each (game, book) first post once, bet or not, within the minute after it is stored; one bet a game across both moneyline models | `scripts/ncaab_moneyline_first_post_card.py`, `scheduler.run_ncaab_moneyline_first_post` |
+
+**The neighbourhood** (replayed by the card's own functions, which matched
+the research's 297 + 56 bets game by game; date-resampled 95% interval):
+
+| Cut | 2021-2025 bets | 2021-2025 units | ROI | interval | seasons positive | 2025-26 bets | 2025-26 ROI |
+|---|---|---|---|---|---|---|---|
+| 0.01 | 587 | +62.77 | +7.27% | [0.89, 13.79] | 3 of 5 | 124 | +6.89% |
+| **0.015** | **297** | **+67.11** | **+15.15%** | **[7.34, 23.37]** | **5 of 5** | **56** | **+13.87%** |
+| 0.02 | 150 | +33.78 | +14.78% | [3.74, 26.46] | 4 of 5 | 22 | +10.43% |
+
+Close value against Pinnacle's no-vig close: +1.54% a bet on 2021-2025, +0.42%
+on 2025-26. With the 15:00 UTC model, one bet a game, the earlier first:
+1,053 bets +6.52% [1.76, 11.01] on 2021-2025, 123 bets +11.82% on 2025-26.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
+ROI, calibration within 5%). Read beside the ROI: the fill check on each bet's
+ledger row (was the price still up at the capture's next poll), the close
+value, and how many games it took from the 15:00 UTC model.
 ## NCAAB — `ncaab_first_half_spread`, first-half spreads (2026-11-02, mike)
 
 mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
