@@ -209,6 +209,9 @@ stored. The old version of this rule carried exceptions "worth fixing when
 touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
 laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
 undeclared store on disk, and the fix is an importer, not an allowlist entry.
+**Everything is also carbon-copied to mike's PC** (mike, 2026-11-03): database,
+storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
+never a second store: `docs/local_ops.md`.
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
 UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
