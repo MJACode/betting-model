@@ -625,8 +625,11 @@ them before writing. The 15:00 UTC card writes a game this model bet as
 `other_model_bet`, never prices it and never counts it missed; this card
 writes `other_model_bet` for a game the 15:00 UTC card bet. The 15:00 UTC
 card decides when it runs (15:05 UTC, on the 15:00 quotes), so a first post
-in those five minutes takes the game; the research broke that tie at exactly
-15:00 UTC the same way (this model first).
+stored in those five minutes takes the game. That is the one place live
+differs from the research's combined rule: there, a post made after 15:00 UTC
+was first seen at the 15:30 snapshot and the 15:00 UTC model kept the game
+(only a post seen at exactly 15:00 UTC went to this model). Of the 353
+replayed bets, 2 went to the 15:00 UTC model that way.
 
 **The ledger** (`ncaab_moneyline_first_post_decisions`, one row per (game,
 book) first post, bet or not, worker-only): its status (`bets`, `below_cut`,
