@@ -38,6 +38,12 @@ same instant and the same 60-minute freshness window as the spread model):
      0.01. A tie on edge goes to the longer price, then the book's name in
      alphabetical order (the same bet at two books; the name only says which).
   A game that tips less than five minutes after 15:00 UTC is not priced.
+  6. FEED TYPOS OUT, FIRST (models/ncaab_quote_bounds.py). A moneyline with a
+     price beyond +/-100000 (-100000 itself is a real quote), and a spread
+     beyond +/-60 or with a price beyond +/-100000, is dropped before any flag
+     or count reads it; that book has no such quote at the instant. A best
+     edge above the data-error cap is not a bet: the game is decided as
+     edge_cap with none, and the card's run fails.
 
 Each game is decided once (CLAUDE.md section 1c): bet or not, never looked at
 again, and a moved price writes nothing.
@@ -66,6 +72,7 @@ import pandas as pd
 
 from models import ncaab_book_quotes as bq
 from models import ncaab_margin_dist as md
+from models import ncaab_quote_bounds as qb
 
 MODEL_ID = "ncaab_moneyline_own_spread"
 SPORT = "NCAAB"
@@ -126,7 +133,7 @@ def too_close(tip, instant) -> bool:
 
 # ── the two reads ─────────────────────────────────────────────────────────────
 
-def moneyline_quotes(rows: pd.DataFrame) -> pd.DataFrame:
+def moneyline_quotes(rows: pd.DataFrame, window_min: int | None = bq.WINDOW_MIN) -> pd.DataFrame:
     """Every REF_BOOKS moneyline standing at its game's instant, with its flags.
 
     rows: stored h2h odds rows (models/ncaab_book_quotes.load_rows with
@@ -134,8 +141,10 @@ def moneyline_quotes(rows: pd.DataFrame) -> pd.DataFrame:
     home / away prices. A quote with a price inside -100..+100 is dropped.
     Adds isum, pq (power de-vigged P(home)), fav (+1 home, -1 away, 0 even),
     overround_bad and fav_alone. spread_disagree and flag_any are added by
-    flag_moneylines, which needs the spreads."""
-    q = bq.standing_quotes(rows, books=REF_BOOKS, need_line=False)
+    flag_moneylines, which needs the spreads. window_min: the freshness window
+    (models/ncaab_book_quotes.standing_quotes; None = the newest row however
+    old, the first-post model's read)."""
+    q = bq.standing_quotes(rows, window_min=window_min, books=REF_BOOKS, need_line=False)
     ok, s = pair_ok(q["p1"], q["p2"]) if len(q) else (np.zeros(0, bool), np.zeros(0))
     q = q[ok].copy()
     q["isum"] = s[ok]
@@ -156,14 +165,16 @@ def moneyline_quotes(rows: pd.DataFrame) -> pd.DataFrame:
     return q.reset_index(drop=True)
 
 
-def spread_quotes(rows: pd.DataFrame, table: dict) -> pd.DataFrame:
+def spread_quotes(rows: pd.DataFrame, table: dict,
+                  window_min: int | None = bq.WINDOW_MIN) -> pd.DataFrame:
     """Every bettable book's spread standing at its game's instant
     (models/ncaab_book_quotes.snapshot: the sign-error flag over the eight
     books), with sp_valid (prices -100/+100 or longer, implied sum 1.00-1.15),
     own_ok (sp_valid and not flagged), and, where own_ok, pcov (P home covers
     | no push, power de-vigged), mu (the expected home margin that gives it at
-    the book's line) and ph_own (P home wins at that mean)."""
-    q = bq.snapshot(rows)
+    the book's line) and ph_own (P home wins at that mean). window_min as in
+    moneyline_quotes."""
+    q = bq.snapshot(rows, window_min)
     if not len(q):
         for c in ("sp_valid", "own_ok"):
             q[c] = pd.Series(dtype=bool)
@@ -278,7 +289,8 @@ def load_artifact(path: str | Path | None = None) -> dict:
 # ── the decision ──────────────────────────────────────────────────────────────
 
 DIAG_KEYS = ("games", "already_decided", "no_quotes", "no_clean_quote", "below_cut",
-             "book_not_bettable", "bets", "missed", "tipped")
+             "book_not_bettable", "edge_cap", "bets", "missed", "tipped", "quotes_dropped",
+             "other_model_bet")
 
 
 @dataclass
@@ -316,16 +328,36 @@ def _quote_list(ml: pd.DataFrame, sp: pd.DataFrame) -> list[dict]:
     return out
 
 
+def _dropped_list(dropped: pd.DataFrame | None) -> dict[str, list[dict]]:
+    """{game_id: [quote dropped as a data error, as the decision row lists it]}."""
+    out: dict[str, list[dict]] = {}
+    if dropped is None or not len(dropped):
+        return out
+    for r in dropped.sort_values(["game_id", "market", "bookmaker"]).to_dict("records"):
+        line = r.get("line")
+        out.setdefault(r["game_id"], []).append({
+            "book": r["bookmaker"], "market": r["market"],
+            "line": None if line is None or pd.isna(line) else float(line),
+            "p1": _f(r.get("p1")), "p2": _f(r.get("p2")), "flags": ["out_of_range"],
+            "why": r["why"]})
+    return out
+
+
 def decide(game_ids, ml: pd.DataFrame, sp: pd.DataFrame, cut: float,
-           bettable=bq.BOOKS, min_price: float = MIN_PRICE) -> list[Decision]:
+           bettable=bq.BOOKS, min_price: float = MIN_PRICE,
+           dropped: pd.DataFrame | None = None) -> list[Decision]:
     """Decide each game at its 15:00 UTC read. Pure given its inputs.
 
     ml: flag_moneylines output; sp: spread_quotes output, for these games.
     bettable: the books a bet may be placed at now
     (config.BEST_LINE_BOOKMAKERS); the best side is chosen over the eight
     books first, as the evidence chose it, and a best side at a book not
-    bettable now is not replaced by the next one."""
+    bettable now is not replaced by the next one. dropped: the moneylines and
+    spreads the read dropped as data errors (models/ncaab_book_quotes
+    .dropped_quotes, with `market`), listed in each game's decision; nothing
+    is priced from them."""
     out: list[Decision] = []
+    drops = _dropped_list(dropped)
     ml_by = {g: x for g, x in ml.groupby("game_id")} if len(ml) else {}
     sp_by = {g: x for g, x in sp.groupby("game_id")} if len(sp) else {}
     sides = price_sides(ml, sp, min_price)
@@ -334,12 +366,15 @@ def decide(game_ids, ml: pd.DataFrame, sp: pd.DataFrame, cut: float,
         m = ml_by.get(gid)
         s = sp_by.get(gid, sp.iloc[0:0] if len(sp) else pd.DataFrame())
         mb = m[m["bookmaker"].isin(bq.BOOKS)] if m is not None else None
+        dg = drops.get(gid, [])
+        note = ("; dropped as data errors: " + ", ".join(
+            f"{x['book']} {x['market']} ({x['why']})" for x in dg)) if dg else ""
         if mb is None or not len(mb):
             out.append(Decision(gid, "no_quotes", "no bettable book quoted a moneyline in the hour "
-                                                  "before 15:00 UTC",
-                                quotes=_quote_list(m, s) if m is not None else []))
+                                                  "before 15:00 UTC" + note,
+                                quotes=(_quote_list(m, s) if m is not None else []) + dg))
             continue
-        quotes = _quote_list(m, s)
+        quotes = _quote_list(m, s) + dg
         dkq = mb[(mb["bookmaker"] == "draftkings") & ~mb["flag_any"]]
         dk = None
         if len(dkq):
@@ -348,27 +383,34 @@ def decide(game_ids, ml: pd.DataFrame, sp: pd.DataFrame, cut: float,
         if best is None or gid not in best.index:
             out.append(Decision(gid, "no_clean_quote", "no unflagged moneyline with a usable spread "
                                                        f"at the same book and a price of {min_price:+.0f} "
-                                                       "or longer", quotes=quotes, dk=dk))
+                                                       "or longer" + note, quotes=quotes, dk=dk))
             continue
         b = best.loc[gid].to_dict()
         b["game_id"] = gid
         desc = (f"{b['bookmaker']} {b['side']} {b['price']:+.0f} edge {b['edge']:+.4f} "
                 f"p {b['prob']:.4f} own spread {b['own_line']:+g} mean {b['mu']:+.2f} "
                 f"books {int(mb['bookmaker'].nunique())}")
-        if not b["edge"] > cut:
+        capped = qb.edge_problem(b["edge"], MODEL_ID)
+        if capped:
+            status = "edge_cap"
+            desc += f"; {capped}: a data error, not a bet"
+        elif not b["edge"] > cut:
             status = "below_cut"
         elif b["bookmaker"] not in bettable:
             status = "book_not_bettable"
             desc += "; that book is not in config.BEST_LINE_BOOKMAKERS"
         else:
             status = "bets"
-        out.append(Decision(gid, status, desc, best=b, quotes=quotes, dk=dk))
+        out.append(Decision(gid, status, desc + note, best=b, quotes=quotes, dk=dk))
     return out
 
 
-def read(ml_rows: pd.DataFrame, sp_rows: pd.DataFrame, table: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+def read(ml_rows: pd.DataFrame, sp_rows: pd.DataFrame, table: dict,
+         window_min: int | None = bq.WINDOW_MIN) -> tuple[pd.DataFrame, pd.DataFrame]:
     """The whole 15:00 UTC read from raw rows carrying instant and tip:
-    (flag_moneylines output, spread_quotes output)."""
-    sp = spread_quotes(sp_rows, table)
-    ml = flag_moneylines(moneyline_quotes(ml_rows), sp)
+    (flag_moneylines output, spread_quotes output). window_min=None is the
+    first-post model's read (models/ncaab_moneyline_first_post.py): each
+    book's newest row however old."""
+    sp = spread_quotes(sp_rows, table, window_min)
+    ml = flag_moneylines(moneyline_quotes(ml_rows, window_min), sp)
     return ml, sp
