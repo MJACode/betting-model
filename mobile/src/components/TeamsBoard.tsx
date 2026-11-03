@@ -28,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { GroupTabs } from '@/components/GroupTabs';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
@@ -71,9 +72,13 @@ import {
 } from '@/lib/teamBoard';
 import {
   defaultTeamStatFor,
+  explainSections,
   formatRecord,
   formatTeamStat,
+  TEAM_GROUP_INTRO,
+  teamBoardSeason,
   teamGroupsForSport,
+  teamSeasonLabel,
   teamStatValue,
   teamStatsForSport,
   type TeamStatDef,
@@ -85,17 +90,6 @@ import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
-
-/**
- * Seasons to try, newest first. Every league except MLB/WNBA is out of season
- * for part of the calendar year, and NFL/NCAAF label a season by its starting
- * year — so the current year is frequently empty and the board should fall
- * back to the most recent season with data rather than render blank.
- */
-function seasonCandidates(): number[] {
-  const y = new Date().getUTCFullYear();
-  return [y, y - 1];
-}
 
 function tierColor(tier: Tier): string | undefined {
   if (tier === 'good') return colors.gradeGood;
@@ -252,8 +246,9 @@ export function TeamsBoard({
       // the candidates itself; fetchTeamStats owns the fallback now, so asking
       // for 2026 can return 2025 rows and only the reply knows which — label
       // the header from that, never from what we asked for (UX review,
-      // 2026-09-09).
-      const { season: used, rows: data } = await fetchTeamStats(sport, seasonCandidates()[0]);
+      // 2026-09-09). The season asked for is the SPORT's label: NBA and NHL
+      // name a season by its ending year (teamBoardSeason).
+      const { season: used, rows: data } = await fetchTeamStats(sport, teamBoardSeason(sport));
       setRows(data);
       setSeason(used);
     } catch (e: unknown) {
@@ -405,6 +400,11 @@ export function TeamsBoard({
       {/* Group tabs — Efficiency first by design, and the same two-level tab
           bar the Players board uses (Matt, 2026-09-04). */}
       <GroupTabs groups={groups} active={activeGroup} onChange={pickGroup} />
+      <View style={styles.groupIntroRow}>
+        <Text style={styles.groupIntroText} numberOfLines={2}>
+          {TEAM_GROUP_INTRO[activeGroup]}
+        </Text>
+      </View>
 
       <ScrollView
         horizontal
@@ -425,20 +425,16 @@ export function TeamsBoard({
           ))}
       </ScrollView>
 
-      {/* What this number is, and — for the betting group — what it isn't. */}
-      {stat.hint ? (
-        <View style={styles.hintRow}>
-          <Text style={styles.hintText}>{stat.hint}</Text>
-        </View>
-      ) : null}
-      {activeGroup === 'Betting' && !stat.hint ? (
-        <View style={styles.hintRow}>
-          <Text style={styles.hintText}>
-            Betting records describe what already happened. They regress toward .500 once
-            the market prices a trend in — read them as context, not as an edge.
-          </Text>
-        </View>
-      ) : null}
+      {/* What this number is in one line; "Details" opens what it is, what's
+          good, how to use it for a bet and what to watch for (Matt,
+          2026-11-03). Every stat in the catalog carries both. */}
+      <View style={styles.hintRow}>
+        <InfoTooltip
+          label={stat.hint}
+          title={stat.label}
+          sections={explainSections(stat.explain)}
+        />
+      </View>
 
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
@@ -505,7 +501,7 @@ export function TeamsBoard({
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
           <Text style={styles.colHeaderName}>
-            TEAM{season ? ` · ${season}` : ''}
+            TEAM{season ? ` · ${teamSeasonLabel(sport, season)}` : ''}
           </Text>
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             {stat.label.toUpperCase()}
@@ -616,6 +612,11 @@ function TeamRow({
   const color = tierColor(tier);
   const record = formatRecord(row, def);
   const sample = def.sample ? sampleFor(row, def) : null;
+  // Under MIN_SPLIT_SAMPLE a split is its record ("3-2"), or "—" when the
+  // board has no record for it, with the game count under it — never a
+  // percentage (Matt, 2026-11-03).
+  const shown = thin ? (record ?? '—') : formatTeamStat(value, def.format);
+  const gamesText = `${sample} game${sample === 1 ? '' : 's'}`;
 
   return (
     <View style={[styles.row, subline ? styles.rowWithGame : null]}>
@@ -668,17 +669,22 @@ function TeamRow({
           {row.point_diff_pg != null
             ? ` · ${row.point_diff_pg > 0 ? '+' : ''}${Number(row.point_diff_pg).toFixed(1)}/g`
             : ''}
-          {thin ? ` · ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
       </Pressable>
-      <View style={styles.valueWrap}>
-        <Text style={[styles.value, color ? { color } : null]}>
-          {formatTeamStat(value, def.format)}
-        </Text>
-        {record ? (
+      <View
+        style={styles.valueWrap}
+        accessible
+        accessibilityLabel={
+          thin
+            ? `${def.label}: ${record ? `${record} record, ` : ''}only ${gamesText}`
+            : `${def.label} ${shown}${record ? `, ${record}` : ''}`
+        }
+      >
+        <Text style={[styles.value, color ? { color } : null]}>{shown}</Text>
+        {thin ? (
+          <Text style={styles.thinLabel}>{gamesText}</Text>
+        ) : record ? (
           <Text style={styles.valueLabel}>{record}</Text>
-        ) : thin ? (
-          <Text style={styles.thinLabel}>thin</Text>
         ) : null}
       </View>
       {showLine ? <TeamLineCell quote={quote} team={row.team} started={started} onPress={onLinePress} /> : null}
@@ -762,8 +768,9 @@ const styles = StyleSheet.create({
   listFlex: { flex: 1 },
   list: { paddingBottom: spacing.xl },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
-  hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
-  hintText: { fontSize: font.size.micro, color: colors.textTertiary, lineHeight: 15 },
+  hintRow: { paddingHorizontal: spacing.lg },
+  groupIntroRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs },
+  groupIntroText: { fontSize: font.size.caption, color: colors.textSecondary, lineHeight: 16 },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',

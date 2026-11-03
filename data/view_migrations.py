@@ -317,6 +317,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # after team_stats_board_line_probe_2026_09_28, which owns the function
     # and would otherwise restore the unbounded scan on the next pass.
     "team_stats_board_commence_bound_2026_09_30.sql",
+    # 2026-11-03: MLB/NHL ATS% graded against the main ±1.5 run/puck line
+    # only; DraftKings' alternates (±2.5, ±3.5) sat in the same `spreads`
+    # rows. Patches the LIVE function text, so it runs after both owners
+    # above. Marker team_board_main_run_line.
+    "team_stats_board_main_run_line_2026_11_03.sql",
     # 2026-10-04 (mike): nfl_live_prop retired and its settled record struck
     # (config.RECORD_EXCLUSIONS). Patches the LIVE view text with one clause,
     # so it must run after every migration that owns the two record views.

@@ -62,7 +62,7 @@ import {
   type PickRecord,
   type TeamMarket,
 } from '@/lib/teamDetail';
-import { formatTeamStat, TEAM_STAT_CATALOG, type TeamStatDef } from '@/lib/teamStatCatalog';
+import { formatTeamStat, spreadWord, teamSeasonLabel, teamStatFor, type TeamStatDef } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
@@ -101,7 +101,7 @@ export function TeamStatsScreen() {
   }, [d.nextGame, d.books, team]);
 
   const row = d.row;
-  const seasonLabel = d.board.data.season;
+  const seasonLabel = d.board.data.season != null ? teamSeasonLabel(sport, d.board.data.season) : null;
   const form = d.form.slice(0, FORM_GAMES);
   const formSummary = useMemo(() => summarizeForm(form), [form]);
   const last5 = useMemo(() => summarizeForm(form, 5), [form]);
@@ -759,8 +759,9 @@ function MeetingRow({ game, team }: { game: FormGame; team: string }) {
 // ── Splits ──────────────────────────────────────────────────────────────────
 
 function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
-  const def = (key: keyof TeamStatsRow): TeamStatDef | null =>
-    TEAM_STAT_CATALOG.find((s) => s.key === key && s.sports.includes(sport)) ?? null;
+  const def = (key: keyof TeamStatsRow): TeamStatDef | null => teamStatFor(sport, key);
+  // "ATS", or the run line / puck line in MLB and NHL.
+  const ats = spreadWord(sport);
   const pct = (key: keyof TeamStatsRow): string => {
     const v = row[key];
     const n = typeof v === 'string' ? Number(v) : v;
@@ -776,23 +777,23 @@ function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
   return (
     <>
       <View style={styles.tileRow}>
-        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={`ATS ${pct('ats_home_pct')}`} />
-        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={`ATS ${pct('ats_away_pct')}`} />
+        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={`${ats} ${pct('ats_home_pct')}`} />
+        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={`${ats} ${pct('ats_away_pct')}`} />
         <StatTile label="Over" value={pct('over_pct')} caption={`${row.ou_o}-${row.ou_u}${row.ou_p ? `-${row.ou_p}` : ''}`} />
       </View>
       <View style={styles.tileRow}>
-        <StatTile label="ATS as fav" value={pct('fav_ats_pct')} />
-        <StatTile label="ATS as dog" value={pct('dog_ats_pct')} />
+        <StatTile label={`${ats} as fav`} value={pct('fav_ats_pct')} />
+        <StatTile label={`${ats} as dog`} value={pct('dog_ats_pct')} />
         <StatTile
-          label="ATS overall"
+          label={`${ats} overall`}
           value={pct('ats_pct')}
           caption={`${row.ats_w}-${row.ats_l}${row.ats_p ? `-${row.ats_p}` : ''}`}
         />
       </View>
       {restful ? (
         <View style={styles.tileRow}>
-          <StatTile label="ATS rest edge" value={pct('rest_adv_ats_pct')} caption={thin('rest_adv_ats_pct') ?? undefined} />
-          <StatTile label="ATS short rest" value={pct('short_rest_ats_pct')} caption={thin('short_rest_ats_pct') ?? undefined} />
+          <StatTile label={`${ats} rest edge`} value={pct('rest_adv_ats_pct')} caption={thin('rest_adv_ats_pct') ?? undefined} />
+          <StatTile label={`${ats} short rest`} value={pct('short_rest_ats_pct')} caption={thin('short_rest_ats_pct') ?? undefined} />
         </View>
       ) : null}
     </>
