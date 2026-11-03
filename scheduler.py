@@ -52,13 +52,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         every 10 minutes, every 5 while a game tips within three hours;
         Covers' public page about every 30. Change rows, including cleared.
         Tags only. Writes no picks. RUN_NCAAB_INJURY=0 stops it.)
-  * NCAAB totals card     hourly at :05, 24x7, UTC -> run_ncaab_total_card
+  * NCAAB totals card     every 5 min at :03/:08/.., 24x7 -> run_ncaab_total_card
         (scripts/ncaab_total_card.py: the NCAAB totals model decides each
-        game once, at 22:00Z the evening before or else at 15:00Z on the day
-        and each hour after, on DraftKings' standing total; then publishes.
-        UTC, not Eastern, because those are the hours its evidence bought;
-        an Eastern cron would drift an hour when DST returns on 2027-03-14.
-        RUN_NCAAB_TOTAL_CARD=0 stops it.)
+        game once, at DraftKings' first posted total, minutes after the odds
+        capture stores it, and only while that number still stands; then
+        publishes. Three minutes after each capture tick, which has 120
+        seconds to finish. RUN_NCAAB_TOTAL_CARD=0 stops it.)
   * NCAAB spread card     hourly at :05, 24x7, UTC -> run_ncaab_spread_card
         (scripts/ncaab_spread_card.py: the NCAAB spread model decides each
         game once, in the 15:00Z hour on its date, on every bettable book's
@@ -1663,18 +1662,21 @@ def run_ncaab_injury_feed() -> None:
     log.info("DONE  ncaab-injury-feed (exit 0)")
 
 
-# The card reads one season of NCAAB games and box scores and refits the
-# ratings once per quote hour; seconds to a minute in practice.
+# The card reads the slate, the ledger and DraftKings' first totals every run,
+# and one season of games and box scores (a ratings refit per first-post hour)
+# only when a first post is new; seconds in practice. A run past five minutes
+# makes the next tick skip (max_instances=1), never stack.
 NCAAB_TOTAL_CARD_TIMEOUT_S = 600
 
 
 def run_ncaab_total_card() -> None:
     """One NCAAB totals card run (scripts/ncaab_total_card.py), then publish.
 
-    Hourly at five past, UTC. A game is decided at 22:00Z the evening before
-    its date or, failing a DraftKings total then, at 15:00Z on the day and
-    each hour after, so a run at any other hour decides nothing and returns
-    after one read. The script returns at once when RUN_NCAAB_TOTAL_CARD=0;
+    Every five minutes, three after each odds capture tick. A game is decided
+    at DraftKings' first posted total, while that number still stands, so a
+    run with no new first post decides nothing and returns after the slate,
+    ledger and first-total reads. The script returns at once when
+    RUN_NCAAB_TOTAL_CARD=0;
     the job still beats. A run that fails or is killed raises AFTER
     publishing, so the heartbeat records "error" and the failure alerter
     reports it, while a bet that was written still goes out. The script exits
@@ -2780,19 +2782,19 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
-    # NCAAB totals card -- hourly at five past, UTC (run_ncaab_total_card).
-    # UTC on purpose: the model decides at 22:00Z the evening before and from
-    # 15:00Z on the day, the hours its evidence bought, and an Eastern cron
-    # would move them an hour when DST returns. Five past, so the hour's
-    # standing DraftKings total is the one stored by the capture job's ticks
-    # up to then. Unconditional; the kill switch is in the script.
+    # NCAAB totals card -- every five minutes (run_ncaab_total_card), three
+    # minutes after each odds capture tick (minute */5, 120 s timeout), so a
+    # DraftKings first total the capture stored is decided within about eight
+    # minutes of the poll that saw it. The model decides at that first post
+    # (mike, 2026-11-03), and about half of DraftKings' first totals change
+    # within half an hour. Unconditional; the kill switch is in the script.
     sched.add_job(
         run_ncaab_total_card,
-        CronTrigger(minute=5, timezone="UTC"),
+        CronTrigger(minute="3-59/5", timezone="UTC"),
         id="ncaab_total_card",
-        name="NCAAB totals card (hourly at :05 UTC: decide at 22Z the evening before, "
-             "else 15Z on the day and each hour to tip)",
-        max_instances=1, coalesce=True, misfire_grace_time=600,
+        name="NCAAB totals card (every 5 min, 3 after each odds capture: decide at "
+             "DraftKings' first posted total)",
+        max_instances=1, coalesce=True, misfire_grace_time=240,
     )
 
     # NCAAB spread card -- hourly at five past, UTC (run_ncaab_spread_card).
