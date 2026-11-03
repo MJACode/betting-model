@@ -308,41 +308,37 @@ def test_the_daily_recap_and_form_strip_name_ncaab():
     assert "case 'NCAAB':" in pts, "an NCAAB form strip would read R, not PTS"
 
 
-def test_the_stats_board_has_nothing_to_show_for_ncaab_and_asks_for_nothing():
-    """No NCAAB player or team stats are in the app yet.
+def test_the_stats_players_board_reads_ncaab_own_views():
+    """Men's college basketball has a Players board (Matt, 2026-11-03).
 
-    The leaderboard catalog is empty for NCAAB (the Stats screen's "No player
-    leaderboard" state), it has no team board, and every Stats read returns
-    [] for it before a request: each of them otherwise falls through to a
-    different sport's view.
+    Every Stats read routes NCAAB to its own server read
+    (add_ncaab_player_game_log_2026_11_03.sql), never another league's that
+    shares its column keys, and no stat carries a prop market (Matt: no college
+    player props). There is still no NCAAB Teams board.
     """
     cat = _read(STAT_CATALOG)
     groups = re.search(r"export const GROUP_ORDER: Record<Sport, StatGroup\[\]> = \{(.*?)\n\};", cat, re.S)
-    assert groups and "\n  NCAAB: []," in groups.group(1)
-    assert not re.search(r"sport: 'NCAAB'", cat), "a stat catalog entry for NCAAB has no data behind it"
+    assert groups and "\n  NCAAB: ['NCAAB']," in groups.group(1)
+    for key in ("points", "rebounds", "assists", "threes", "pra", "steals", "blocks", "minutes"):
+        assert re.search(rf"key: '{key}', label: '[^']+', sport: 'NCAAB'", cat), key
+    assert "if (def.sport === 'NCAAB') return null;" in _fn(cat, "propMarketForStat")
     team = _read(TEAM_STAT_CATALOG)
-    # The Teams board is the BALL list (TEAM_SPORTS = new Set(BALL)).
     assert "const TEAM_SPORTS = new Set<Sport>(BALL);" in team
     ball = re.search(r"const BALL: Sport\[\] = \[(.*?)\];", team)
     assert ball and "'NCAAB'" not in ball.group(1), "an NCAAB Teams board has no rows behind it"
     q = _read(QUERIES)
-    # These three fall through to another sport's read (the MLB views, the
-    # team board RPC) for a sport they do not name, so NCAAB returns first.
+    assert "supabase.from('v_player_season_totals_ncaab')" in _fn(q, "fetchSeasonTotals")
+    for name, rpc in (("fetchWindowTotals", "player_window_totals_ncaab"),
+                      ("fetchRecentGames", "player_recent_games_ncaab"),
+                      ("fetchSeasonStatValues", "player_season_stat_values_ncaab"),
+                      ("fetchH2HStatValues", "player_h2h_stat_values_ncaab")):
+        assert f"sport === 'NCAAB' ? '{rpc}'" in _fn(q, name), name
     for name in ("fetchSeasonTotals", "fetchWindowTotals"):
-        assert re.search(r"if \(sport === 'GOLF' \|\| sport === 'NCAAB'\) return \[\];", _fn(q, name)), (
-            f"{name} has no early return for NCAAB, so it reads the MLB view"
-        )
+        assert "sport === 'NCAAB') return [];" not in _fn(q, name), name
     assert re.search(
         r"if \(sport === 'UFC' \|\| sport === 'GOLF' \|\| sport === 'NCAAB'\) return \{ season: null, rows: \[\] \};",
         _fn(q, "fetchTeamStats"),
     )
-    # The Stats screen does not read a week of games for a sport it can only
-    # show the empty state for.
-    stats = _read(SRC / "screens" / "StatsScreen.tsx")
-    slate = stats[stats.index("const slateKey = slateReadKey(sport, etDay);"):]
-    slate = slate[:slate.index("fetchSlateGames(sport")]
-    assert "if (!defaultStatFor(sport) && !supportsTeamBoard(sport)) {" in slate
-    # These end on `return []` for every sport they do not name.
     for name in ("fetchRecentGames", "fetchSeasonStatValues", "fetchPositionVsOpponent"):
         body = _fn(q, name).rstrip()
         assert re.search(r"return \[\];(?: //[^\n]*)?\n\}$", body), f"{name} no longer ends on return []"

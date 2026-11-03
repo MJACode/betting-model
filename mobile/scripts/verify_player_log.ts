@@ -76,7 +76,7 @@ const statOf = (sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF', label: string, 
   chipsForPlayer(sport, playerType).find((s) => s.label === label)!;
 
 // ── Which sports get a detail screen ────────────────────────────────────────
-for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF'] as const) {
+for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB'] as const) {
   check(`${s} has a player detail screen`, supportsPlayerDetail(s));
 }
 for (const s of ['UFC', 'NHL', 'GOLF'] as const) {
@@ -663,6 +663,26 @@ check('the same-position card excludes the player by the resolved id',
       && opponentLabel(sided[2]!, true) === 'vs ORL');
   check('a stored opponent with no venue reads as the bare name, never as a home game',
     opponentLabel({ opponent: 'Michigan', venue: null }) === 'Michigan');
+  // NCAAB has no abbreviation map the app can read: a long school is never
+  // cut to four letters (Michigan / Michigan State both read MICH).
+  check('an NCAAB chart label is the venue marker, never a sliced school',
+    opponentLabel({ opponent: 'Michigan State', venue: 'away' }, true, undefined, true) === '@'
+      && opponentLabel({ opponent: 'Michigan State', venue: 'home' }, true, undefined, true) === 'vs'
+      && opponentLabel({ opponent: 'Michigan State', venue: null }, true, undefined, true) === null
+      && opponentLabel({ opponent: 'Duke', venue: 'away' }, true, undefined, true) === '@Duke'
+      && opponentLabel({ opponent: 'Michigan State', venue: 'away' }, true) === '@MICH');
+  {
+    const row = normalizeLogRow('NCAAB', {
+      player_id: 'p', player_name: 'A', team: 'Duke', game_id: 'g', game_date: '2026-11-04',
+      season: 2027, minutes: 31, points: 20, rebounds: 8, assists: 5, fg3_made: 3,
+      opponent: 'Mississippi Valley State', venue: 'away',
+    });
+    check('an NCAAB row derives threes and PRA like the other basketball logs',
+      row.threes === 3 && row.pra === 33);
+    check('an NCAAB game line leads with minutes and names its school only when it differs',
+      gameContextLine('NCAAB', row, 'Duke') === '31 min · @Mississippi Valley State'
+        && gameContextLine('NCAAB', row, 'Kentucky') === '31 min · @Mississippi Valley State · Duke');
+  }
   check('the chart values are the labelled games\' values',
     /const windowed = useMemo\(\(\) => windowedGames\.map\(\(g\) => g\.value\)/.test(playerScreen));
   check('a game missing from games keeps no opponent and no venue',
