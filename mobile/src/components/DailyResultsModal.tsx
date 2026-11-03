@@ -418,9 +418,9 @@ export function DailyResultsModal({
               Settled picks that Discord posted. Each pick risks the amount
               needed to win 1 unit. At −110 that’s 1.1 units to win 1. Risk is
               capped at 3 units, and a pick with no price counts as 1 unit. The
-              percentage is units won or lost divided by units risked. The Models
-              tab risks a flat 1u on every pick, so its percentages won’t match. Open
-              picks settle after their games go final.
+              percentage is units won or lost divided by units risked. Each pick is
+              booked at the same stake the Models tab uses. Open picks settle after
+              their games go final.
             </Text>
           </ScrollView>
         )}

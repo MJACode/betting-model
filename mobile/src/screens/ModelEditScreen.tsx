@@ -414,9 +414,10 @@ function PreviewFooter({
   saveLabel: string;
   onSave: () => void;
 }) {
-  const roi = backtest?.roiFlat ?? 0;
+  // The published stake's return (one unit basis, CLAUDE.md §2).
+  const roi = backtest?.roi ?? 0;
   const roiColor =
-    !backtest || backtest.picks === 0 ? colors.textSecondary : pnlColor(roi, 1, 100);
+    !backtest || backtest.risked === 0 ? colors.textSecondary : pnlColor(roi, 1, 100);
   const decided = (backtest?.wins ?? 0) + (backtest?.losses ?? 0);
 
   return (
@@ -439,9 +440,9 @@ function PreviewFooter({
             caption={backtest && backtest.pushes > 0 ? `${backtest.pushes} push` : 'since Apr 14'}
           />
           <PreviewStat
-            label="Flat ROI"
-            value={backtest && backtest.picks > 0 ? formatPctSigned(roi) : '—'}
-            caption="1u/bet"
+            label="Return"
+            value={backtest && backtest.risked > 0 ? formatPctSigned(roi) : '—'}
+            caption={backtest == null || backtest.postedKnown ? '1u to win' : '1u risked'}
             color={roiColor}
           />
         </View>

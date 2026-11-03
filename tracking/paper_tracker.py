@@ -2935,6 +2935,31 @@ def _settle_game_picks_window(
     return tuple(totals)
 
 
+def _posted_units_line(conn: DBConnection, settled_at: str) -> str:
+    """This pass's BET results on the published stake, for the settle log.
+
+    stake_for: 1u to win at COALESCE(decision_odds, dk_odds), risk capped at
+    3u, a pick with no price at the bare 1u (tracking/published_units). Read
+    back from the rows this pass stamped, so it is the record's number and
+    never the -110 a settler grades an unpriced pick's profit_flat at.
+    """
+    from tracking.published_units import unit_profit, unit_risked
+    rows = conn.execute("""
+        SELECT COALESCE(decision_odds, dk_odds), result
+        FROM picks
+        WHERE settled_at = %s
+          AND signal_type = 'BET'
+          AND result IN ('WIN', 'LOSS', 'PUSH')
+    """, (settled_at,)).fetchall()
+    units = risked = 0.0
+    for price, result in rows:
+        price = None if price is None else float(price)
+        units += unit_profit(price, result)
+        risked += unit_risked(price, result)
+    roi = f" (ROI {units / risked:.1%})" if risked > 0 else ""
+    return f"Units: {units:+.2f}u on {risked:.2f}u risked{roi}"
+
+
 def settle_picks(game_date: str = None) -> dict:
     """
     Settle all unsettled picks from game_date (default: yesterday).
@@ -3113,15 +3138,16 @@ def settle_picks(game_date: str = None) -> dict:
         win_rate = wins / max(wins + losses, 1)
         flat_roi = total_profit_flat / max((wins + losses) * 100, 1)
 
-        # Units, never dollars (§4): profit_flat is stored per $100 staked.
-        # The settlers' totals still carry the -110 they grade an unpriced
-        # pick at; this log line does not gate them out.
+        # Units, never dollars (§4), on the published stake: the same units
+        # Discord #results and the Record tab book for these picks. Not the
+        # settlers' profit_flat total, which grades an unpriced pick at an
+        # invented -110 (the return dict keeps that stored figure).
         logger.success(
             f"\n{'═'*50}\n"
             f"  Settled: {game_date}\n"
             f"  Results: {wins}W / {losses}L / {pushes}P / {no_actions}N\n"
             f"  Win Rate: {win_rate:.1%}\n"
-            f"  Flat units: {total_profit_flat / 100:+.2f}u (ROI: {flat_roi:.1%})\n"
+            f"  {_posted_units_line(conn, settled_at)}\n"
             f"{'═'*50}"
         )
 
