@@ -365,14 +365,23 @@ function manualResultColor(result: ManualBetResult, profit: number): string {
 
 const TRACKED_ROW_CAP = 40;
 
+// As posted is the Record tab's stake (lib/trackedStake), so a tracked pick
+// shows the Record's units. My stakes is the member's own override.
 const STAKE_MODES: { value: StakeMode; label: string }[] = [
-  { value: 'flat', label: '1u flat' },
-  { value: 'custom', label: 'Custom' },
+  { value: 'posted', label: 'As posted' },
+  { value: 'custom', label: 'My stakes' },
 ];
 
 function stakeCaption(mode: StakeMode): string {
-  if (mode === 'custom') return 'Custom stakes, in units. Tap a stake to edit (default 1u)';
-  return 'Scored at 1u flat per bet';
+  if (mode === 'custom') {
+    return 'Your stake on the bets you set, in units. Tap a stake to change it; the rest stay as posted';
+  }
+  return 'Each pick to win 1u at its price, risk capped at 3u, as on the Record tab';
+}
+
+/** "2u stake" when the member set it, "1.5u as posted" when they have not. */
+function stakeChipText(row: TrackedBetRow): string {
+  return `${formatFlatStake(row.stake)} ${row.customStake ? 'stake' : 'as posted'}`;
 }
 
 function TrackedBetsCard({
@@ -460,7 +469,7 @@ function TrackedBetsCard({
                 decisionOdds(row.pick) != null
                   ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                   : null,
-                stakeMode === 'custom' ? unitsSpeech(`${formatFlatStake(row.stake)} stake`) : null,
+                stakeMode === 'custom' ? unitsSpeech(stakeChipText(row)) : null,
                 unitsSpeech(trackedResultLabel(row)),
               ]
                 .filter(Boolean)
@@ -503,7 +512,7 @@ function TrackedBetsCard({
                     style={styles.stakeChip}
                   >
                     <Ionicons name="pencil-outline" size={11} color={colors.tint} />
-                    <Text style={styles.stakeChipText}>{formatFlatStake(row.stake)} stake</Text>
+                    <Text style={styles.stakeChipText}>{stakeChipText(row)}</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -571,7 +580,7 @@ function StakeEditModal({
 
   const save = () => {
     const n = parseFloat(amount);
-    // Empty / invalid input resets the bet back to the 1u default.
+    // Empty / invalid input puts the bet back on the posted stake.
     onSave(Number.isFinite(n) && n >= 0 ? n * FLAT_UNIT : null);
   };
 
@@ -588,9 +597,13 @@ function StakeEditModal({
           accessibilityLabel="Close stake editor"
         />
         <View style={styles.stakeModalCard} accessibilityViewIsModal>
-          <Text style={styles.stakeModalTitle}>Stake for this bet, in units</Text>
+          <Text style={styles.stakeModalTitle}>Your stake for this bet, in units</Text>
           <Text style={styles.stakeModalLabel} numberOfLines={2}>
             {row?.pick.pick_label ?? ''}
+          </Text>
+          <Text style={styles.stakeModalHint}>
+            What you risk, at the price the pick was posted at. Leave it empty to use the posted
+            stake.
           </Text>
           <TextInput
             accessibilityLabel="Stake in units"
@@ -599,7 +612,7 @@ function StakeEditModal({
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
             keyboardType="decimal-pad"
             autoFocus
-            placeholder="1"
+            placeholder="As posted"
             placeholderTextColor={colors.textTertiary}
           />
           <View style={styles.stakeModalActions}>
@@ -607,9 +620,9 @@ function StakeEditModal({
               onPress={() => onSave(null)}
               hitSlop={12}
               accessibilityRole="button"
-              accessibilityLabel="Reset to 1 unit"
+              accessibilityLabel="Use the posted stake"
             >
-              <Text style={styles.stakeModalReset}>Reset to 1u</Text>
+              <Text style={styles.stakeModalReset}>Use posted stake</Text>
             </Pressable>
             <View style={styles.stakeModalRight}>
               <Pressable onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Cancel">
@@ -966,6 +979,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+    marginBottom: spacing.sm,
+  },
+  stakeModalHint: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
     marginBottom: spacing.md,
   },
   stakeModalInput: {

@@ -669,7 +669,7 @@ console.log('\nM9 / M10 / M18 / M19 / M25 / M26');
 const perf = read('src/screens/PerformanceScreen.tsx');
 check('M10: stake chip 12pt slop (was 6) + role + label', /hitSlop=\{\{ top: 12, bottom: 12, left: 8, right: 8 \}\}\s*accessibilityRole="button"\s*accessibilityLabel=\{`Edit stake, /.test(perf));
 check('M10: stake pills are radios with checked state + 8pt slop', /accessibilityRole="radiogroup"/.test(perf) && /hitSlop=\{\{ top: 8, bottom: 8, left: 2, right: 2 \}\}\s*accessibilityRole="radio"\s*accessibilityState=\{\{ checked: active, selected: active \}\}/.test(perf));
-check('M10: StakeEditModal buttons labelled, 12pt slop, tap outside closes', /accessibilityLabel="Reset to 1 unit"/.test(perf) && /accessibilityLabel="Save stake"/.test(perf) && /<View style=\{styles\.stakeModalBackdrop\}>\s*\{\/\*[\s\S]*?\*\/\}\s*<Pressable\s*style=\{StyleSheet\.absoluteFill\}\s*onPress=\{onClose\}/.test(perf));
+check('M10: StakeEditModal buttons labelled, 12pt slop, tap outside closes', /accessibilityLabel="Use the posted stake"/.test(perf) && /accessibilityLabel="Save stake"/.test(perf) && /<View style=\{styles\.stakeModalBackdrop\}>\s*\{\/\*[\s\S]*?\*\/\}\s*<Pressable\s*style=\{StyleSheet\.absoluteFill\}\s*onPress=\{onClose\}/.test(perf));
 check('M10: tracked rows offer Untrack / Edit stake as accessibilityActions (Undo toast is PR 5)', /\{ name: 'untrack', label: 'Untrack' \}/.test(perf) && /actionName === 'untrack'\) onRowLongPress\(row\)/.test(perf));
 const tip = read('src/components/InfoTooltip.tsx');
 check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessibilityRole="button"/.test(tip));

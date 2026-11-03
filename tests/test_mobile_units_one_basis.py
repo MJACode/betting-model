@@ -93,6 +93,41 @@ def test_player_and_team_records_are_the_published_stake(rel):
     assert "pf / 100" not in code
 
 
+def test_tracked_picks_default_to_the_posted_stake():
+    """#1138 Decision 1 (mike, 2026-11-03: "everything must be units"). A
+    tracked pick on the Performance tab books the posted stake by default, so
+    it shows the Record tab's units. The member's own stake is an explicit
+    override, and the old 1u-risked mode is gone: a device that stored it
+    lands on the posted stake."""
+    settings = _code(_read(SRC / "hooks/useStakeSettings.ts"))
+    assert "export type StakeMode = 'posted' | 'custom';" in settings
+    assert "const DEFAULT_STATE: StakeState = { mode: 'posted', custom: {} };" in settings
+    assert "return raw === 'custom' ? raw : 'posted';" in settings
+    assert "'flat'" not in settings
+    screen = _code(_read(SRC / "screens/PerformanceScreen.tsx"))
+    modes = screen[screen.index("const STAKE_MODES"):]
+    modes = modes[: modes.index("];")]
+    assert "{ value: 'posted', label: 'As posted' }" in modes
+    assert "{ value: 'custom', label: 'My stakes' }" in modes
+    assert modes.index("'posted'") < modes.index("'custom'")
+    assert "1u flat" not in screen
+
+
+def test_the_tracked_grader_books_the_posted_stake_not_profit_flat():
+    """profit_flat is 1u risked and invents -110 for a pick with no price. The
+    graders apply a result to a stake; the stake is thresholds.stakeFor at the
+    decided price, the same price math as postedPickUnits."""
+    for rel in ("lib/trackedPerformance.ts", "lib/liveTracked.ts"):
+        code = _code(_read(SRC / rel))
+        assert re.search(r"\.profit_flat\b", code) is None, rel
+        assert "() => 100" not in code, f"{rel} keeps a hidden 1u-risked default"
+    stake = _code(_read(SRC / "lib/trackedStake.ts"))
+    assert "stakeFor(p.kelly_fraction, decisionOdds(p))" in stake
+    hook = _code(_read(SRC / "hooks/useTrackedBetResults.ts"))
+    assert "trackedStakeFor(stakes.mode, stakes.customStakes)" in hook
+    assert "FLAT_STAKE" not in hook
+
+
 @pytest.mark.skipif(tsx_cmd(MOBILE) is None, reason="mobile node modules not installed")
 def test_the_behavioural_checks_pass():
     proc = subprocess.run(
