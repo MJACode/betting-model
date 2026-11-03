@@ -88,8 +88,8 @@ connection, no deploy; session log, 2026-10-31):
 **Read 2026-11-02, after the first evening on the new code (four games, 2026-11-01):**
 
 1. **The killed cards lost no bets.** 35 of the 60 NBA games from 2026-10-24 to 10-31 have no team-total decision.
-   Every team-total decision so far (56 games) reads `early_season: a team has under 10 games`, so those games
-   were inside the ten-game hold and could not have bet. The first possible bet is still ahead.
+   Every team-total decision through 2026-11-01 (56 games) reads `early_season: a team has under 10 games`, so
+   those games were inside the ten-game wait and could not have bet. The wait came off on 2026-11-02.
 2. **The stored price table ended the kills on the first evening.** All 12 card runs on 11-01 exited 0, each in
    about 3 to 5 seconds, against the 180-second kill on most runs before it. The team-total and first-half cards ran
    side by side on all four games; the full-game card ran ten minutes earlier, so three at once has not been seen.
