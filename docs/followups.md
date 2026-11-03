@@ -403,20 +403,27 @@ needs a daily run over an hour late; 2026-10-01's ran 10:10Z to 12:39Z. Next,
 if it matters: have the refresh pass skip its goalie poll while the daily
 run holds its lock.
 
-## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+## [x] The injury reader counts every snapshot of the day (found 2026-10-13, fixed 2026-10-30)
+
+`query_injuries_for_game` keeps the newest ingest that already existed at
+tip-off (`games.commence_time`), and only the players on that pull. A name
+an earlier copy the same day listed, and that pull left off, does not count
+(mike, 2026-10-30). The training reader uses the same rule. Ottawa at 22:23Z
+on 2026-10-13 was 53.900 summed and is 2.800 on the 22:10Z pull (Harrison
+Scott is off it). STL the same minute was 79.800 summed and is 4.200. No
+threshold, stake, or pause change.
 
 `injuries` gets a full copy of each team's list on every ingest run
 (report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
-player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
-reads every row for the latest report_date and `_compute_injury_adjustment`
-sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
-11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
-(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
-on picks. `nhl_moneyline_regulation` never splits on an injury input (0
-splits across all folds), so it changed nothing there. Before a fix (read
-only the latest snapshot), list which live artifacts DO split on injury
-inputs and what their inputs looked like in training, since the fix moves
-those models' inputs: mike's call.
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). Until 2026-10-30
+`query_injuries_for_game` read every row for the latest report_date and
+`_compute_injury_adjustment` summed them, so `home_injury_adj` /
+`away_injury_adj` grew all day: Ottawa read 11.2 at 07:22Z and 53.9 at
+22:23Z, against 2.8 and 3.5 counting each player once (the docstring says
+0-3). It was also the "Opponent injury burden: 79.80" note on picks.
+`nhl_moneyline_regulation` never splits on an injury input (0 splits across
+all folds), so it changed nothing there. Which live artifacts' inputs move,
+and which of those trees split, is in the 2026-10-30 session entry.
 
 **For the NHL game models the six injury inputs are dead whatever the reader
 does.** NHL rows in `injuries` start 2026-04-05, so every training game
