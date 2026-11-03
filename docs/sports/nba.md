@@ -262,6 +262,7 @@ a season.
 | `games` | scores, tip-off (`commence_time`), OT, neutral site | `nba_results_ingestor` (ESPN finals) / `nba_schedule_ingestor` | worker, every refresh pass before settle / this machine |
 | `nba_player_game_log` | every player's box line | `nba_results_ingestor` (ESPN) for 2026-27; nba_api for 2018-19 → 2025-26 | worker |
 | `nba_player_dnp` | ESPN did-not-play reasons | `nba_results_ingestor` | worker |
+| `nba_team_stats` | season-to-date team ratings (Off/Def/Net Rtg, pace, eFG%, TOV%) for the app's Teams board and team page; no live model reads it | `nba_team_stats_from_box` (summed `nba_player_game_log` + `games` finals) for 2026-27, from 2026-11-03; `nba_stats_ingestor` (stats.nba.com) before that, and its row wins a shared key | worker, the 6am run (`nba-team-stats-box`, before `refresh-team-board`) / this machine. Box-built ratings run ~0.8 high (no team turnovers in player boxes); Net Rtg correlates 0.9999 with stats.nba.com over 2025-26 |
 | `nba_schedule` | NBA.com schedule: arenas, neutral sites, NBA Cup, national TV, OT; every game type | `nba_schedule_ingestor` (the season's load) / `nba_schedule_refresh` (ESPN, daily) | this machine (stats.nba.com blocks datacenter IPs) / worker, the 6am run |
 | `nba_player_game_adv` | starters, exact minutes, +/-, fouls, usage, possessions, DNP reasons | `nba_box_enrich` (sportsdataverse bulk files + stats.nba.com) | this machine, 2018-19 → 2025-26 |
 | `nba_game_inactives`, `nba_game_officials` | inactive lists, referee crews | `nba_box_enrich` | this machine |
