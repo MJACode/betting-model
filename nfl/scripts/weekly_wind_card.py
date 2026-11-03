@@ -274,10 +274,11 @@ def main() -> int:
 
     print(f"\n=== WIND UNDER CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
     cols = ["matchup", "kick_utc", "exp_true_wind", "total_line", "book", "price",
-            "model_prob", "market_prob", "edge", "ev_pct", "units", "stake_pct", "stake_amt"]
+            "model_prob", "market_prob", "edge", "ev_pct", "units", "stake_pct"]
     print(bets[cols].to_string(index=False))
     print(f"\n{len(bets)} bet(s), {bets.units.sum():.2f} units total. "
-          f"1 unit = {UNIT_PCT*100:.2f}% of bankroll = {UNIT_PCT*a.bankroll:,.0f}. "
+          # Units, never dollars (CLAUDE.md §4).
+          f"1 unit = {UNIT_PCT*100:.2f}% of bankroll. "
           f"Sizing is derived in scripts/stake_sizing.py.")
     if (bets.units <= 0).any():
         print(f"{(bets.units <= 0).sum()} row(s) sized at ZERO: forecast lead beyond "

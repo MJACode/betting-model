@@ -1,19 +1,29 @@
 """Render the daily picks email to a standalone HTML file.
 
-Usage:
-    python -m email.render_picks_email          # uses mock data, writes email/preview.html
-    python -m email.render_picks_email --live   # pulls today's picks from Supabase (not implemented yet)
+Usage (run by path: this folder shares its name with the standard library's
+`email` package, so `python -m email.render_picks_email` cannot find it):
+    python email/render_picks_email.py          # uses mock data, writes email/preview.html
+
+Nothing in the pipeline sends it yet; there is no live mode.
 
 The output is a self-contained HTML file with inline CSS that renders correctly
 in Gmail, Apple Mail, Outlook, and any modern browser. No external assets.
+
+Stakes are in units, never dollars (CLAUDE.md §4): the published stake,
+tracking.discord_notifier.stake_for — 1u to win at the pick's price, risk
+capped at 3u, and the bare 1u when there is no price.
 """
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tracking.discord_notifier import UnitStake, fmt_stake, fmt_units, stake_for  # noqa: E402
 
 
 @dataclass
@@ -26,14 +36,11 @@ class Pick:
     dk_odds: Optional[str]
     edge_pct: Optional[float]
     confidence: str
-    kelly_pct: float
-    bet_dollars: float
     weather: str
     injuries: str
     notes: str
 
 
-MOCK_BANKROLL = 1500.0
 MOCK_DATE = "Wednesday, May 20, 2026"
 
 MOCK_PICKS = [
@@ -46,8 +53,6 @@ MOCK_PICKS = [
         dk_odds="-110",
         edge_pct=15.4,
         confidence="HIGH",
-        kelly_pct=3.2,
-        bet_dollars=48.00,
         weather="72°F, wind 9 mph (out +5.3)",
         injuries="—",
         notes="—",
@@ -61,8 +66,6 @@ MOCK_PICKS = [
         dk_odds="-145",
         edge_pct=12.8,
         confidence="HIGH",
-        kelly_pct=2.9,
-        bet_dollars=43.50,
         weather="68°F, wind 14 mph (out +9.1)",
         injuries="—",
         notes="—",
@@ -76,8 +79,6 @@ MOCK_PICKS = [
         dk_odds="+118",
         edge_pct=14.6,
         confidence="HIGH",
-        kelly_pct=3.7,
-        bet_dollars=55.50,
         weather="64°F, wind 11 mph (out -3.2)",
         injuries="CHC: Hoerner Q",
         notes="—",
@@ -91,8 +92,6 @@ MOCK_PICKS = [
         dk_odds="-118",
         edge_pct=10.6,
         confidence="MED",
-        kelly_pct=2.1,
-        bet_dollars=31.50,
         weather="64°F, wind 11 mph (out -3.2)",
         injuries="—",
         notes="—",
@@ -106,8 +105,6 @@ MOCK_PICKS = [
         dk_odds="N/A",
         edge_pct=7.3,
         confidence="MED",
-        kelly_pct=1.8,
-        bet_dollars=27.00,
         weather="Dome",
         injuries="—",
         notes="⚠ Borderline (F5 only fetched at 11am — may shift if line moves)",
@@ -121,8 +118,6 @@ MOCK_PICKS = [
         dk_odds=None,
         edge_pct=None,
         confidence="MED",
-        kelly_pct=0.0,
-        bet_dollars=0.00,
         weather="61°F, wind 7 mph (out +2.1)",
         injuries="—",
         notes="Prob-only (no DK line)",
@@ -136,8 +131,6 @@ MOCK_PICKS = [
         dk_odds="-115",
         edge_pct=9.8,
         confidence="MED",
-        kelly_pct=2.0,
-        bet_dollars=30.00,
         weather="58°F, wind 12 mph (out -6.4)",
         injuries="—",
         notes="—",
@@ -165,9 +158,14 @@ def _fmt_edge(edge: Optional[float]) -> str:
     return f"{sign}{edge:.1f}%"
 
 
+def _stake(pick: Pick) -> UnitStake:
+    """The published stake at the pick's price ('N/A' or None: no price)."""
+    return stake_for(None, pick.dk_odds)
+
+
 def _pick_card(pick: Pick) -> str:
     conf_color = CONFIDENCE_COLOR.get(pick.confidence, "#6b7280")
-    bet_str = f"${pick.bet_dollars:,.2f}" if pick.bet_dollars > 0 else '<span style="color:#6b7280;">—</span>'
+    stake_str = fmt_stake(_stake(pick))
     notes_row = ""
     if pick.notes and pick.notes != "—":
         notes_row = f"""
@@ -219,7 +217,7 @@ def _pick_card(pick: Pick) -> str:
                 <td width="25%" style="padding:4px 0;"><span style="color:#6b7280;">Model</span><br/><strong style="color:#111827; font-size:15px;">{pick.model_pct:.1f}%</strong></td>
                 <td width="25%" style="padding:4px 0;"><span style="color:#6b7280;">DK Odds</span><br/><strong style="color:#111827; font-size:15px;">{_fmt_odds(pick.dk_odds)}</strong></td>
                 <td width="25%" style="padding:4px 0;"><span style="color:#6b7280;">Edge</span><br/><strong style="color:#16a34a; font-size:15px;">{_fmt_edge(pick.edge_pct)}</strong></td>
-                <td width="25%" style="padding:4px 0;"><span style="color:#6b7280;">Bet</span><br/><strong style="color:#111827; font-size:15px;">{bet_str}</strong> <span style="color:#9ca3af; font-size:12px;">({pick.kelly_pct:.1f}%)</span></td>
+                <td width="25%" style="padding:4px 0;"><span style="color:#6b7280;">Stake</span><br/><strong style="color:#111827; font-size:15px;">{stake_str}</strong></td>
               </tr>
             </table>
           </td>
@@ -232,10 +230,9 @@ def _pick_card(pick: Pick) -> str:
       </table>"""
 
 
-def render_email(picks: list[Pick], bankroll: float, date_str: str) -> str:
-    total_exposure = sum(p.bet_dollars for p in picks)
-    exposure_pct = (total_exposure / bankroll) * 100 if bankroll > 0 else 0
-    bet_count = sum(1 for p in picks if p.bet_dollars > 0)
+def render_email(picks: list[Pick], date_str: str) -> str:
+    units_at_risk = fmt_units(sum(_stake(p).risk for p in picks))
+    bet_count = len(picks)
     borderline_count = sum(1 for p in picks if "Borderline" in p.notes)
 
     cards_html = "\n".join(_pick_card(p) for p in picks)
@@ -263,17 +260,13 @@ def render_email(picks: list[Pick], bankroll: float, date_str: str) -> str:
                     <div style="font-size:22px; color:#ffffff; font-weight:700; padding-top:6px;">{date_str}</div>
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px; padding-top:14px; border-top:1px solid #334155;">
                       <tr>
-                        <td width="33%">
-                          <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px;">Bankroll</div>
-                          <div style="font-size:18px; color:#ffffff; font-weight:600; padding-top:2px;">${bankroll:,.0f}</div>
-                        </td>
-                        <td width="33%">
+                        <td width="50%">
                           <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px;">Picks</div>
                           <div style="font-size:18px; color:#ffffff; font-weight:600; padding-top:2px;">{bet_count}</div>
                         </td>
-                        <td width="33%">
-                          <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px;">Exposure</div>
-                          <div style="font-size:18px; color:#ffffff; font-weight:600; padding-top:2px;">${total_exposure:,.2f} <span style="font-size:12px; color:#94a3b8; font-weight:400;">({exposure_pct:.1f}%)</span></div>
+                        <td width="50%">
+                          <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px;">Units at risk</div>
+                          <div style="font-size:18px; color:#ffffff; font-weight:600; padding-top:2px;">{units_at_risk}</div>
                         </td>
                       </tr>
                     </table>
@@ -320,7 +313,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "preview.html")
     args = parser.parse_args()
 
-    html = render_email(MOCK_PICKS, MOCK_BANKROLL, MOCK_DATE)
+    html = render_email(MOCK_PICKS, MOCK_DATE)
     args.out.write_text(html, encoding="utf-8")
     print(f"Wrote {args.out} ({len(html):,} bytes, {len(MOCK_PICKS)} picks)")
 

@@ -26,8 +26,8 @@ import type { Pick } from '@/types';
  * Fetch is failure-tolerant — a network error keeps the last-known rows so the
  * card degrades instead of vanishing.
  *
- * Stake per bet comes from useStakeSettings: $100 flat (default) or a per-bet
- * custom amount. There is no bankroll-derived mode — the app publishes flat
+ * Stake per bet comes from useStakeSettings: 1u flat (default) or a per-bet
+ * custom amount in units, stored at the 100-is-1u scale. There is no bankroll-derived mode — the app publishes flat
  * units and holds no bankroll to size off.
  */
 export function useTrackedBetResults() {

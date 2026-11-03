@@ -175,7 +175,7 @@ export function OpeningComparisonScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Flat $100 bets at the price we first locked, every settled game-level pick since{' '}
+          Flat 1u bets at the price we first locked, every settled game-level pick since{' '}
           {SHADOW_TRACK_START}. This experiment keeps a longer history than the published
           record on purpose — a comparison needs something to compare against. It is a shadow
           experiment: it doesn’t change the picks you see
