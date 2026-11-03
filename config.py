@@ -790,6 +790,27 @@ ACTION_THRESHOLDS: dict = {
     # +125. min_edge 0.02 IS the card's cut (decision_edge is that edge);
     # min_prob 0.0 because the edge is the cut.
     "ncaab_first_half_spread":  {"min_prob": 0.0, "min_edge": 0.02},
+    # NCAAB FIRST-HALF total (2026-11-03, mike: "we need to build 1H ... no
+    # matter what", "I want it all done and go live now"; no games-played
+    # wait): models/ncaab_first_half_total.py, written by
+    # scripts/ncaab_first_half_total_card.py. At the fetch an hour before tip:
+    # mu = a + b x the bettable books' full-game consensus total + the two
+    # teams' shrunk first-half scoring tendencies; every bettable book's
+    # first-half total priced through an empirical first-half-total table; bet
+    # the single best quote (sides shorter than -200 set aside first) when
+    # P(win | no push) minus its implied probability is above 0.02. Graded on
+    # every game at the bought tip-minus-60 quotes (the research's round 5,
+    # family A_to; the same model is positive pooled at all four fetch times
+    # graded and every cut 0.00-0.04, and this cell in all three seasons):
+    # 2023-24..2025-26 2,529 bets,
+    # +125.78 units, +4.40%, date-resampled 95% interval [0.57, 8.12]; with
+    # the -200 floor 2,527 bets, +123.78 units, [0.45, 8.05]. 2023-24 +67.27,
+    # 2024-25 +41.03, 2025-26 +15.48 units (+1.65%, the floor on). Neighbours:
+    # 0.01 +129.76 units, 0.03 +76.86 units. Without the 10 best dates +48.11
+    # units. 78% unders. 14 of the 1,036 cells cleared the interval test where
+    # about 26 would by chance. min_edge 0.02 IS the card's cut (decision_edge
+    # is that edge); min_prob 0.0 because the edge is the cut.
+    "ncaab_first_half_total":   {"min_prob": 0.0, "min_edge": 0.02},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -2065,6 +2086,12 @@ MODEL_MIN_ODDS: dict = {
     # 1,253 graded bets, so -200 admits prices it was never graded at. Pinned
     # so a Railway DEFAULT_MIN_ODDS override cannot move it.
     "ncaab_first_half_spread":   -200,
+    # NCAAB first-half total (2026-11-03, mike): the research's cell laid -240
+    # to +155; the card sets a side shorter than -200 aside BEFORE it picks
+    # the best book (models/ncaab_first_half_total.best_offer), which made
+    # 2,527 bets of the 2,529 (prices -160 to +155), so this is the second
+    # guard. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "ncaab_first_half_total":    -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2356,6 +2383,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # at -140 or longer is EV above 0.034, so 0.03 never removes a bet the
     # evidence took.
     "ncaab_first_half_spread":  0.03,
+    # NCAAB first-half total (2026-11-03, mike). The cut is the edge (0.02, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
+    # that cut admitted in the replay of 2023-24..2025-26 with the -200 floor:
+    # P(win | no push) x decimal - 1 = +0.0343 (2,527 bets; median +0.059).
+    # EV is edge x decimal and the shortest price it may lay is -200 (decimal
+    # 1.5), so an edge above 0.02 is EV above 0.03 at every price it can bet:
+    # this floor never removes a bet the cut takes.
+    "ncaab_first_half_total":   0.03,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2512,6 +2547,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # push) from its own first-half table, which its 0.02 cut was measured on.
     # It has no record, so its map would be the offset borrowed from others.
     "ncaab_first_half_spread",
+    # 2026-11-03 (mike). NCAAB first-half total: its number is P(win | no
+    # push) from its own first-half total table, which its 0.02 cut was
+    # measured on. No record either.
+    "ncaab_first_half_total",
 })
 
 
@@ -2652,6 +2691,9 @@ SCORING_METHODS: dict = {
     # (models/saved/ncaab_first_half_spread_<season>.json) holds its first-half
     # map, table sample and team term, loaded by the card, never registered.
     "ncaab_first_half_spread": "rule",
+    # The same shape: models/saved/ncaab_first_half_total_<season>.json holds
+    # the first-half total's map, table sample and team term.
+    "ncaab_first_half_total": "rule",
 }
 
 
@@ -2686,6 +2728,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.02,   # 2026-11-02 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
+    "ncaab_first_half_total":   0.02,   # 2026-11-03 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2781,6 +2824,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaab_spread_market":      0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.0,  # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_first_half_total":   0.0,    # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS

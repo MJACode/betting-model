@@ -62,6 +62,10 @@ KNOWN_RULES = {
     # shrunk team tendency priced through a first-half table
     # (models/ncaab_first_half_spread.py); its artifact holds parameters.
     "ncaab_first_half_spread",
+    # 2026-11-03 (mike): NCAAB first-half total, the full-game consensus total
+    # plus the two teams' shrunk tendencies priced through a first-half total
+    # table (models/ncaab_first_half_total.py); its artifact holds parameters.
+    "ncaab_first_half_total",
 }
 
 

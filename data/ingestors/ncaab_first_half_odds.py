@@ -1,6 +1,7 @@
 """Live NCAAB first-half lines: one per-event Odds API call per game per fetch
 time, stored before anything is decided on it (`ncaab_first_half_spread`,
-models/ncaab_first_half_spread.py).
+models/ncaab_first_half_spread.py, and `ncaab_first_half_total`,
+models/ncaab_first_half_total.py).
 
 WHY A FETCH OF ITS OWN. Nothing stored NCAAB first-half lines for 2026-27
 before this model: the bulk odds endpoint never returns them (the capture job,
@@ -9,8 +10,8 @@ purchase (data/ingestors/ncaab_odds_history.py) is history.
 
 WHAT ONE CALL BUYS. One game, markets h2h_h1, spreads_h1, totals_h1 and
 team_totals, the configured region and line-shop books, links and sids on
-(odds_ingestor._get_event_odds). Only the spread decides a bet today; the other
-three are stored because the next first-half models (moneyline, total, team
+(odds_ingestor._get_event_odds). The spread and the total decide bets; the
+other two are stored because the next first-half models (moneyline, team
 total) need their history, and a market the call does not return costs
 nothing. The endpoint bills per market RETURNED per region (measured on the NBA
 and NCAAB live feeds, odds_ingestor._get_event_odds), so a call costs at most 4
@@ -22,10 +23,12 @@ times per game: 15:00 UTC on its Eastern date, then 180, 120, 60, 50, 40, 30,
 20 and 10 minutes before tip (MARKS). A time is due once it has passed and no
 ok call for the game has landed since; a missed time is covered by the next
 tick, and a time the next one overtakes is skipped. A failed call at a history
-time waits for the next time; a failed call at the decision time is retried
-every minute. At most 9 x 4 = 36 credits a game (an empty answer and an HTTP
-404 billed 0 in the measured calls, the purchase's api_call_log). The call at tip minus 10 (DECISION_MARK) is the one the card decides
-on (scripts/ncaab_first_half_spread_card.py).
+time waits for the next time; a failed call at a decision time (DECISION_MARKS)
+is retried every minute. At most 9 x 4 = 36 credits a game (an empty answer and an HTTP
+404 billed 0 in the measured calls, the purchase's api_call_log). The call at tip minus 10 (DECISION_MARK) is the one the spread card decides
+on (scripts/ncaab_first_half_spread_card.py); the call at tip minus 60
+(TOTAL_DECISION_MARK) is the one the total card decides on
+(scripts/ncaab_first_half_total_card.py).
 
 WHAT ONE CALL STORES, per line-shop book, in ESPN's home/away orientation (the
 feed's event is placed on ESPN's game by ncaab_teams' resolver; when the feed
@@ -97,10 +100,15 @@ EVENTS, EVENT_ODDS = "events", "event_odds"
 _ET = ZoneInfo("America/New_York")
 
 # The fetch times: (mark, minutes before tip), None = 15:00 UTC on the game's
-# Eastern date. DECISION_MARK is the research's close (tip minus 10 minutes).
+# Eastern date. DECISION_MARK is the research's close (tip minus 10 minutes),
+# the first-half spread's decision; TOTAL_DECISION_MARK the research's tip60
+# purchase (tip minus 60), the first-half total's. A call at either is retried
+# every minute until one lands (due_mark).
 MARKS = (("15z", None), ("T-180", 180), ("T-120", 120), ("T-60", 60), ("T-50", 50),
          ("T-40", 40), ("T-30", 30), ("T-20", 20), ("T-10", 10))
 DECISION_MARK = "T-10"
+TOTAL_DECISION_MARK = "T-60"
+DECISION_MARKS = (DECISION_MARK, TOTAL_DECISION_MARK)
 MAX_CREDITS_PER_CALL = len(API_MARKETS)      # one per market returned, one region
 # No call this close to tip: the answer could land after the start.
 LAST_CALL_LEAD = timedelta(seconds=30)
@@ -210,13 +218,14 @@ def last_fetches(conn, game_ids: list[str], now: datetime | None = None,
     return {gid: t for gid, ts in rows if (t := _aware(ts)) is not None}
 
 
-def decision_fetches(conn, game_ids: list[str], now: datetime | None = None
-                     ) -> dict[str, tuple[datetime, dict]]:
+def decision_fetches(conn, game_ids: list[str], now: datetime | None = None,
+                     mark: str = DECISION_MARK) -> dict[str, tuple[datetime, dict]]:
     """{game_id: (fetch_at, book ages)} for each game's newest ok call made for
-    DECISION_MARK, at or before `now` when given. Reads only."""
+    `mark` (DECISION_MARK, the spread's; TOTAL_DECISION_MARK, the total's), at
+    or before `now` when given. Reads only."""
     if not game_ids or not ledger_exists(conn):
         return {}
-    bound, params = "", [list(game_ids), EVENT_ODDS, DECISION_MARK]
+    bound, params = "", [list(game_ids), EVENT_ODDS, mark]
     if now is not None:
         bound = "AND fetch_at <= %s"
         params.append(now)
@@ -255,7 +264,9 @@ def _z(t: datetime) -> str:
 
 def slots(game_date: str, tip: datetime) -> list[tuple[str, datetime]]:
     """The game's fetch times before its tip, earliest first. Two marks at the
-    same instant are one fetch time (the earlier-listed mark names it)."""
+    same instant are one fetch time: the earlier-listed mark names it, unless
+    the later is a decision mark (an 11am ET tip's 15:00 UTC call IS its tip
+    minus 60, and is retried and decided on as that)."""
     out: dict[datetime, str] = {}
     for mark, lead in MARKS:
         if lead is None:
@@ -263,7 +274,7 @@ def slots(game_date: str, tip: datetime) -> list[tuple[str, datetime]]:
             t = datetime(d.year, d.month, d.day, 15, tzinfo=timezone.utc)
         else:
             t = tip - timedelta(minutes=lead)
-        if t < tip and t not in out:
+        if t < tip and (t not in out or mark in DECISION_MARKS):
             out[t] = mark
     return sorted(((m, t) for t, m in out.items()), key=lambda x: x[1])
 
@@ -274,9 +285,10 @@ def due_mark(game_date: str, tip: datetime, now: datetime, last_ok: datetime | N
     that has passed, with no ok call landed at or after it. None otherwise, and
     always None within LAST_CALL_LEAD of tip or after it.
 
-    Only the decision time is retried every tick: a history fetch time that
-    has had one failed attempt waits for the next fetch time, so a game the
-    feed keeps refusing is called once per fetch time, not once a minute."""
+    Only the decision times (DECISION_MARKS) are retried every tick: a history
+    fetch time that has had one failed attempt waits for the next fetch time,
+    so a game the feed keeps refusing is called once per fetch time, not once
+    a minute."""
     if now >= tip - LAST_CALL_LEAD:
         return None
     passed = [(m, t) for m, t in slots(game_date, tip) if t <= now]
@@ -285,7 +297,7 @@ def due_mark(game_date: str, tip: datetime, now: datetime, last_ok: datetime | N
     mark, t = passed[-1]
     if last_ok is not None and last_ok >= t:
         return None
-    if mark != DECISION_MARK and last_try is not None and last_try >= t:
+    if mark not in DECISION_MARKS and last_try is not None and last_try >= t:
         return None
     return mark, t
 
@@ -508,9 +520,9 @@ def fetch_first_half(game_ids, conn=None, now: datetime | None = None) -> dict:
             if hit and hit[0] in marks and ev.get("id"):
                 by_game[hit[0]] = (str(ev["id"]), bool(hit[1]), ev)
 
-        # The decision fetches first, then by tip: on a dense slate the call the
+        # The decision fetches first, then by tip: on a dense slate the call a
         # card decides on is never queued behind a history fetch.
-        order = sorted(marks, key=lambda g: (marks[g] != DECISION_MARK, games[g]["tip"], g))
+        order = sorted(marks, key=lambda g: (marks[g] not in DECISION_MARKS, games[g]["tip"], g))
         for gid in order:
             mark = marks[gid]
             hit = by_game.get(gid)
