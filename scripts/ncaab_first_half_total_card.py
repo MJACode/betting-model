@@ -15,7 +15,10 @@ minutes before) and no other time this model was chosen at; a call that failed
 at tip minus 60 is retried every minute, and one that lands up to five minutes
 later still decides. With none by 55 minutes before tip the game is not
 decided, and the run raises after writing every other game, so the job's
-heartbeat records an error. The 50-minute fetch is not used instead.
+heartbeat records an error. The 50-minute fetch is not used instead. A
+decision fetch is decided on only within MAX_DECISION_DELAY_MIN (5) of landing:
+the card normally runs in the same tick, and a bet written later would carry a
+price that may be gone, so a run that comes too late treats the game as missed.
 
 WHAT IS READ, as of the decision fetch's instant (its fetch_at, the stored
 rows' created_at):
@@ -86,6 +89,8 @@ MODEL_ID = ft.MODEL_ID
 SPORT = ft.SPORT
 # A decision fetch landed this many minutes before tip (module docstring).
 DECISION_LEAD_MIN = (55.0, 60.5)
+# ...and is decided on only this many minutes after it landed, at most.
+MAX_DECISION_DELAY_MIN = 5.0
 
 
 def enabled() -> bool:
@@ -443,10 +448,12 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             if gid in done:
                 continue
             f = fetched.get(gid)
-            ok = f is not None and DECISION_LEAD_MIN[0] <= lead_minutes(g["tip"], f[0]) <= DECISION_LEAD_MIN[1]
-            if ok:
+            landed = (f is not None
+                      and DECISION_LEAD_MIN[0] <= lead_minutes(g["tip"], f[0]) <= DECISION_LEAD_MIN[1])
+            fresh = landed and (now - f[0]).total_seconds() / 60.0 <= MAX_DECISION_DELAY_MIN
+            if fresh:
                 due[gid] = f
-            elif lead_minutes(g["tip"], now) < DECISION_LEAD_MIN[0]:
+            elif landed or lead_minutes(g["tip"], now) < DECISION_LEAD_MIN[0]:
                 diag["missed"] += 1
                 problems.append(gid)
             else:
@@ -509,7 +516,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         why = []
         if problems:
             why.append(f"no decision fetch landed {DECISION_LEAD_MIN[0]:g}-{DECISION_LEAD_MIN[1]:g} "
-                       f"minutes before tip, not decided: {problems}")
+                       f"minutes before tip, or the card ran more than "
+                       f"{MAX_DECISION_DELAY_MIN:g} minutes after it, not decided: {problems}")
         if stale:
             why.append(f"no artifact for the season of {stale}")
         if why:

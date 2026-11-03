@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, `ncaab_first_half_total` LIVE: NCAAB first-half totals, best bettable quote an hour before tip when the edge is above 0.02, sides shorter than -200 set aside first (the research's round 5 cell: 2,527 bets with the limit, +123.78 units, interval [0.45, 8.05]); replay matched game by game; the first-half spread's evidence re-measured (1,143 bets, +5.90%, [0.71, 11.69]) (mike) |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, everything in units: every result, stake and payout on every surface (app model pages and history rows, Models list, Performance tab, betslip and parlay payouts, Streamlit dashboard, picks email, settle logs, the volume check, the Claude-mobile picks prompt) shows units, never dollars; the false "best price across all books" record line replaced by "the price the model found" for every model; display and copy only, no stored data changed |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, nba_prop_market bets the play-in, playoffs and Cup final with its rule, cut, floor and caps unchanged; no other NBA model reaches them; alerts for a lost game and for an open bet with no final (mike) |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NBA: seven searches land with results written up, starters 0 of 32, line-size shapes 0 of 256, the two passes checked by a separate rebuild; first evening of the first-half model read; no model change |

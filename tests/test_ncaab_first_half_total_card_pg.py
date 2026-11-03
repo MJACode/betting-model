@@ -211,6 +211,22 @@ def test_a_dry_run_writes_nothing(world):
     assert q(raw, "SELECT to_regclass('ncaab_first_half_total_decisions') IS NULL") == [(True,)]
 
 
+def test_a_decision_fetch_is_not_decided_on_long_after_it_landed(world):
+    """A run that comes ten minutes after the tip-minus-60 call would write its
+    price as the bet's: the game is missed instead, never bet stale."""
+    gid = world["gid"]
+    feed.fetch_first_half([gid])
+    with pytest.raises(card.CardIncomplete):
+        card.run_card(do_publish=True, now=datetime.now(UTC) + timedelta(minutes=10))
+    conn = world["connect"]()
+    try:
+        assert card.decided_games(conn, [gid]) == set()
+    finally:
+        conn.close()
+    # in time, the same fetch decides
+    assert card.run_card(do_publish=True)["decided"] == 1
+
+
 def test_a_game_whose_decision_fetch_never_landed_is_reported_not_decided(world):
     gid = world["gid"]
     late = world["tip"] - timedelta(minutes=54)

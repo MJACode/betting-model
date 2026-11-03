@@ -414,7 +414,7 @@ def test_the_window_plans_the_total_card_an_hour_out(monkeypatch):
 
 def test_the_card_decides_on_a_call_55_to_60_point_5_minutes_out():
     from scripts import ncaab_first_half_total_card as card
-    assert card.DECISION_LEAD_MIN == (55.0, 60.5)
+    assert card.DECISION_LEAD_MIN == (55.0, 60.5) and card.MAX_DECISION_DELAY_MIN == 5.0
     from scripts.ncaab_first_half_window import TOTAL_CARD_LEAD_MIN
     assert TOTAL_CARD_LEAD_MIN == card.DECISION_LEAD_MIN[1]
 

@@ -906,7 +906,7 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   // P(win | no push) at the bet's own number (models/ncaab_first_half_total.py):
   // a first-half total on a whole number can land on it, a push, left out.
   ncaab_first_half_total:
-    'What our model says is the chance this side wins on the first half’s points. On a ' +
+    'What our model says is the chance this side hits, on the first half’s points alone. On a ' +
     'whole-number line it leaves out a push, which returns the stake.',
 };
 

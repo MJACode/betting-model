@@ -793,8 +793,10 @@ confirmed line by line from its `r5_lib.py`, `r5_prep.py`, `r5_score.py`,
 
 **When.** The decision is the capture's call an hour before tip, the one it
 already made for history. If it fails, the job retries every minute, and a
-call that lands 55 to 60.5 minutes before tip still decides. With none by 55
-minutes out, the game is not decided: the 50-minute call is not used instead.
+call that lands 55 to 60.5 minutes before tip still decides, if the card runs
+within five minutes of it landing (it normally runs in the same minute; a bet
+written later would carry a price that may be gone). With none by 55 minutes
+out, the game is not decided: the 50-minute call is not used instead.
 The card then fails its run, and the failure alerter names the game once it
 tips (`undecided:ncaab_first_half_total`). The research's quotes were stamped
 about 64 minutes before tip (median 64.4); live it is about 60. Each decision,
