@@ -65,6 +65,13 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         quote as of 15:00Z; then publishes. A later run that finds a game
         undecided writes it as missed, never bets it, and fails.
         RUN_NCAAB_SPREAD_CARD=0 stops it.)
+  * NCAAB moneyline card  hourly at :05, 24x7, UTC -> run_ncaab_moneyline_card
+        (scripts/ncaab_moneyline_card.py: the NCAAB moneyline model decides
+        each game once, in the same 15:00Z hour, on every bettable book's
+        moneyline and its own spread as of 15:00Z; then publishes. Its own
+        job, so each model keeps its own kill switch and failure. A later run
+        that finds a game undecided writes it as missed, never bets it, and
+        fails. RUN_NCAAB_MONEYLINE_CARD=0 stops it.)
   * NCAAB first half      every minute, 24x7    -> run_ncaab_first_half_window
         (scripts/ncaab_first_half_window.py: one first-half call per listed
         game at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10
@@ -784,6 +791,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAB spread picks through its own card, reading the
                   # same stored odds.
                   "ncaab_spread_card",
+                  # Writes NCAAB moneyline picks through its own card, reading
+                  # the same stored odds.
+                  "ncaab_moneyline_card",
                   # Writes NCAAB first-half spread picks through its own card,
                   # on its own first-half fetches.
                   "ncaab_first_half_window"}
@@ -1692,6 +1702,29 @@ def run_ncaab_spread_card() -> None:
         raise RuntimeError(f"NCAAB spread card did not finish: {outcome}")
 
 
+# The moneyline card reads the slate, the ledger and one hour of stored
+# moneyline and spread odds for the day's games; seconds in practice.
+NCAAB_MONEYLINE_CARD_TIMEOUT_S = 600
+
+
+def run_ncaab_moneyline_card() -> None:
+    """One NCAAB moneyline card run (scripts/ncaab_moneyline_card.py), then
+    publish.
+
+    Hourly at five past, UTC, beside the spread card. Games are decided only
+    in the 15:00Z hour, on every bettable book's moneyline and its own spread
+    as of 15:00Z, so every other run reads the slate and the ledger and
+    returns. A later run that finds one of the day's games undecided writes it
+    as missed (no bet) and the script exits 1. The script returns at once when
+    RUN_NCAAB_MONEYLINE_CARD=0; the job still beats. A run that fails or is
+    killed raises AFTER publishing, so the heartbeat records "error" and the
+    failure alerter reports it, while a bet that was written still goes out.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaab_moneyline_card", "--publish"],
+                   "ncaab-moneyline-card", timeout=NCAAB_MONEYLINE_CARD_TIMEOUT_S)
+    _publish_new_signals("ncaab-moneyline-card")
+    if outcome != "ok":
+        raise RuntimeError(f"NCAAB moneyline card did not finish: {outcome}")
 # The NCAAB first-half window's steps, bounded so a stuck one cannot hold the
 # job past the ticks that follow it (max_instances=1). The fetch is one event
 # list plus one event call per due game (15 s each at most,
@@ -2720,6 +2753,19 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute=5, timezone="UTC"),
         id="ncaab_spread_card",
         name="NCAAB spread card (hourly at :05 UTC: decide in the 15Z hour on the 15Z quotes)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
+    # NCAAB moneyline card -- hourly at five past, UTC
+    # (run_ncaab_moneyline_card), the spread card's minute: both decide in the
+    # 15:00Z hour on the quotes stamped up to 15:00Z. Its own job so a
+    # moneyline failure never fails the spread model's heartbeat, and the
+    # reverse. Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_ncaab_moneyline_card,
+        CronTrigger(minute=5, timezone="UTC"),
+        id="ncaab_moneyline_card",
+        name="NCAAB moneyline card (hourly at :05 UTC: decide in the 15Z hour on the 15Z quotes)",
         max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 

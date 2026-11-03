@@ -1074,6 +1074,44 @@ ROI, calibration within 5%). Read beside the ROI: how often the bet book's
 number was still up when the pick posted (the ledger keeps every book's 15:00
 quote), and the close EV.
 
+## NCAAB — `ncaab_moneyline_own_spread`, full-game moneylines (2026-11-02, mike)
+
+mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
+what"*, *"-200 max"*, no games-played wait. At 15:00 UTC on game day, every
+bettable book's moneyline is priced off the SAME book's spread through the
+final-margin distribution; flagged quotes and every side shorter than -200 are
+removed before the pick; the single largest edge of the game is bet when it is
+above 0.01 (`models/ncaab_moneyline_own_spread.py`,
+`scripts/ncaab_moneyline_card.py`; the rule, the evidence and the risks are
+`docs/sports/ncaab.md` "The models"). **It did not clear the research bar**
+(the 2021-2025 interval reaches below zero) **and was chosen after the fact**,
+from the 162 versions (18 rule variants, 9 cuts each) regraded at mike's
+-200 limit.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.01, at the bet book's own price | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.01. model_probability is the same fair chance the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.015, on its own probability. The smallest EV the cut admitted in the replay was +0.0156 (median +0.027, 914 bets). EV is edge x decimal and the shortest price is -200 (decimal 1.5), so an edge above 0.01 is always EV above 0.015 | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price cap | -200, removed before the pick and pinned again; it laid -200 to +1,000 (median -159) | `MIN_PRICE`, `MODEL_MIN_ODDS` |
+| decided once | 15:00 UTC on the game's date, on quotes stamped 14:00-15:00 UTC; a row in `ncaab_moneyline_decisions`, bet or not; a missed 15:00 is recorded as `missed` and fails the run, never bet later | `scripts/ncaab_moneyline_card.py`, `scheduler.run_ncaab_moneyline_card` |
+
+**The neighbourhood** (replayed by the card's own code, which matched the
+research's 914 bets; every game; date-resampled 95% interval):
+
+| Cut | 2021-2025 bets | 2021-2025 units | ROI | interval | without the 10 best dates | 2025-26 bets | 2025-26 units |
+|---|---|---|---|---|---|---|---|
+| 0.005 | 1,450 | +12.00 | +0.55% | [-3.4, 4.7] | -48.50 | 178 | -9.72 |
+| **0.01** | **838** | **+53.11** | **+4.22%** | **[-1.2, 9.3]** | **+7.94** | **76** | **+14.04 (+15.05%)** |
+| 0.015 | 430 | +13.57 | +2.12% | [-5.3, 9.6] | -20.04 | 35 | +7.19 |
+
+A peak, not a plateau: both neighbours made a quarter of the units or less.
+Close value against Pinnacle's no-vig close: -0.21% a bet on 2021-2025, -1.38%
+on 2025-26. Read the record as unproven.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
+ROI, calibration within 5%). Read beside the ROI: the close value, and how often
+the bet book's price was still up when the pick posted.
 ## NCAAB — `ncaab_first_half_spread`, first-half spreads (2026-11-02, mike)
 
 mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter

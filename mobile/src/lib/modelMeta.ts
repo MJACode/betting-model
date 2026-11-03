@@ -617,6 +617,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Men's college basketball, full-game moneylines, named like NCAAF's
+  // ("NCAAF Moneyline", badge ML). The id is the one the model writes its
+  // picks under (models/ncaab_moneyline_own_spread.py MODEL_ID). It has
+  // 'spread' in it because each book's moneyline is priced off that book's
+  // own spread; markets.ts names it as a moneyline before its substring test.
+  ncaab_moneyline_own_spread: {
+    shortLabel: 'ML',
+    longLabel: 'NCAAB Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Men's college basketball, the first half's spread
   // (models/ncaab_first_half_spread.py MODEL_ID). It decides each game once,
   // about ten minutes before tip, at the best first-half spread any bettable
@@ -866,6 +878,12 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'What our model says is the chance this side hits: the market’s fair chance plus about 6 percentage ' +
     'points, the extra these bets won over the last three NBA seasons (56% won where the market’s fair ' +
     'chance averaged 50%). Read it as an upper bound.',
+  // The win chance the bet book's own spread implies
+  // (models/ncaab_moneyline_own_spread.py); the edge is that minus the same
+  // book's moneyline price's implied chance (UX review, 2026-11-02).
+  ncaab_moneyline_own_spread:
+    'The chance this side wins according to the spread at the book we bet. Edge is how much higher that ' +
+    'is than the chance the same book’s moneyline price implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -910,10 +928,23 @@ const EVENING_BEFORE_MODELS: readonly string[] = [
 // people back for picks that would never come. The one clock time printed is
 // "by noon ET": the run is 10:05am ET in winter and 11:05am ET from
 // mid-March, and a late run still reads 15:00 UTC quotes only until 15:59 UTC.
+// The NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decides at the
+// same instant and posts in the same batch; its body says what it compares.
 const GAME_MORNING_MODELS: readonly string[] = [
+  'ncaab_moneyline_own_spread',
   'ncaab_spread_market',
 ];
 
+// The moneyline model's page body (UX review, 2026-11-02): it bets the book
+// whose moneyline is furthest below what that same book's spread implies,
+// which need not be the best price, and a moneyline has no line.
+const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
+  ncaab_moneyline_own_spread:
+    'This model decides each game once, on the morning of game day. At each book we price, it compares ' +
+    'the book’s moneyline with the chance of winning that the same book’s spread implies. It bets only ' +
+    'some games, each at the one book where that gap is largest, which may not be DraftKings. A posted ' +
+    'bet is never re-priced: it stays at the price it posted at.',
+};
 // The models that check each game once, five to ten minutes before tip, and
 // post only the bets they find: the NCAAB first-half spread card
 // (scripts/ncaab_first_half_spread_card.py), on the first-half lines fetched
@@ -974,6 +1005,7 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Decided the morning of the game',
       body:
+        GAME_MORNING_BODY[modelId] ??
         'This model decides each game once, on the morning of game day, from the spread at each book we ' +
         'price. It bets only some games, each at the book with the best line and price, which may not be ' +
         'DraftKings. A posted bet is never re-priced: it stays at the line and price it posted at.',

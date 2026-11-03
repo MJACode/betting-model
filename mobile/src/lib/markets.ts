@@ -35,6 +35,11 @@ export function gameMarketForModel(modelId: string): string | null {
   // it HAS a market -- without this it would fall into the null below.
   if (modelId === 'nfl_live_leader_ml') return 'h2h';
   if (modelId.startsWith('nfl_')) return null; // any future NFL model without snapshots
+  // The NCAAB moneyline model prices each book's moneyline off that book's own
+  // spread, so its id has 'spread' in it; its picks are MONEYLINES. Named
+  // before the substring test below, or every price, movement and line-shop
+  // lookup would read the spreads rows (models/ncaab_moneyline_own_spread.py).
+  if (modelId === 'ncaab_moneyline_own_spread') return 'h2h';
   // The NCAAB first half's spread (models/ncaab_first_half_spread.py): stored
   // under its own market, never the game's 'spreads' rows, whose number is
   // about twice as big. Before the 'spread' substring rule below, which would
@@ -268,6 +273,8 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_team_total_luck') return 'game_total';
   // The first half's points move with the game total too.
   if (modelId === 'nba_first_half_total_luck') return 'game_total';
+  // A moneyline, though its id has 'spread' in it (see gameMarketForModel).
+  if (modelId === 'ncaab_moneyline_own_spread') return 'game_ml';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1970,8 +1977,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // same hour.
   // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
   // once, the evening before, and never re-prices: not "the first scoring run
-  // of the day". The NCAAB spread card (scripts/ncaab_spread_card.py) decides
-  // each game once, on game-day morning, the same way.
+  // of the day". The NCAAB spread card (scripts/ncaab_spread_card.py) and the
+  // NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each game
+  // once, on game-day morning, the same way.
   // The NCAAB first-half spread card decides each game once, about ten
   // minutes before tip, the same way.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
@@ -1983,6 +1991,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_first_half_total_luck' ||
     pick.model_id === 'ncaab_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
+    pick.model_id === 'ncaab_moneyline_own_spread' ||
     pick.model_id === 'ncaab_first_half_spread' ||
     nbaPosted
   ) {
