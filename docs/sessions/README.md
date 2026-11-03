@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, no-restated-records merged over 89 master commits (session-log conflicts only). 10-30 and 11-01 restated while it waited; both were goalie saves props. |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Teams board: every stat explained (hint + Details), tabs rearranged, splits under 10 games show the record; NBA/NHL ending-year season; NBA 2026-27 ratings built on the worker from ESPN boxes; MLB/NHL ATS on the main ±1.5 line only; no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB first-half and team-total purchase at 15:00 UTC, 18:00 UTC and 60 minutes before the tip, each under its own source, plus a 50-game test buy; the opener grid and every first-half purchase send 6 paid calls at once with the floor still exact; code only, nothing bought |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, switch OFF track made visible (shared `AppSwitch`, systemGray off track); mobile UI only |
@@ -33,6 +34,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-01 | [2026-11](./2026-11.md) | 2026-11-01, merged origin/master into the NCAAB pre-tip injury feed branch for #1098. Injury job, migration, and probe kept beside the totals card, box scores, and app timings. Pull request not merged. |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, app load times measured on the phone: `app_timings` (per read, per screen, cold start) via a wrapped Supabase fetch and `log_app_timings`. Migration applied to production. Step B (instant last picks) waits on the data. |
 | 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, Stats board "slow to respond" on first open: player_recent_games_nba timed out cold (3.6s vs anon 3s; no season index on the NBA log). Season index on NBA and WNBA logs via ACTIVE_MIGRATIONS; fetchAllPages retries one statement timeout per read. Settings back button (iOS 27.2) investigated, not fixed. |
+| 2026-10-31 | [2026-10](./2026-10.md) | 2026-10-31, the 10-30 recap posted short and restated because the no-restatement rule was still unmerged; current master merged into that PR. |
+| 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, no restated records without mike's approval (automatic restatement removed, approval register empty, every re-post route refuses). Every record holds until each pick it counts is graded; the 6am run pulls NHL logs before settle. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, NCAAB box scores and period scores from ESPN's game summary on the hourly refresh passes (step ncaab-box, after the results step; red when the newest 5 finals were all refused), into ncaab_team_game_stats under espn_summary and a new ncaab_period_scores. Period backfill 2020-21 to 2025-26 and 2026-27 box backfill declared off. No production write. PR #1103, not merged. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters worker job: a False step returns {"ok": false} and is recorded once, instead of raising and being retried up to 3 times. pipeline_log error row unchanged. |
 | 2026-10-30 | [2026-10](./2026-10.md) | 2026-10-30, nba_quarters: fill_gaps commits as it goes and one ESPN failure no longer drops the season; the 6am run writes the reason to pipeline_log. No production write. |

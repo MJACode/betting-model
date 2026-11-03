@@ -146,6 +146,31 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
 )
 
 
+# NO RESTATED RECORDS (mike, 2026-10-30: "No restated records of any kind unless
+# I give the approval."). A record that has gone out is not re-posted, corrected
+# or relabelled on any surface. This is the only way to open one: a key here, its
+# value quoting mike's approval in chat with the date. Keyed by game date, or by
+# the lock of a written correction. Empty is the normal state, and
+# tests/test_record_never_restated.py pins it, so an entry changes that test in
+# the same commit. Nothing else opens this, a job argument and a CLI flag included.
+RECORD_RESTATEMENT_APPROVALS: dict[str, str] = {}
+
+
+class RecordRestatementRefused(RuntimeError):
+    """A path tried to post a record again without mike's approval."""
+
+
+def record_restatement_approved(key: str) -> bool:
+    return str(key) in RECORD_RESTATEMENT_APPROVALS
+
+
+def require_record_restatement_approval(key: str) -> None:
+    if not record_restatement_approved(key):
+        raise RecordRestatementRefused(
+            f"{key} has already been published. A restated record needs mike's "
+            f"approval in config.RECORD_RESTATEMENT_APPROVALS.")
+
+
 def record_exclusion_sql(alias: str = "p") -> str:
     """RECORD_EXCLUSIONS as a SQL predicate, ANDed into a record query.
 

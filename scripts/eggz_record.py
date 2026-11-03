@@ -20,7 +20,8 @@ then list the rows still open and settle those. Do not reuse an id from
 before that grade: a needs_review row is deleted and inserted again, so
 its id changes.
 
-`restate` posts one Corrected recap for a day that already has a sent
+`restate` needs mike's approval (config.RECORD_RESTATEMENT_APPROVALS) and then
+posts one Corrected recap for a day that already has a sent
 recap, then stops. It returns 0 when a leg is still unresolved, a game of
 that sport is in progress, or that correction was already sent.
 """
