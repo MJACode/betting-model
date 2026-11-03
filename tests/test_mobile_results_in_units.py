@@ -36,8 +36,10 @@ DOLLARS_ALLOWED = {
     "lib/billingConfig.ts",    # the same prices, configured
     "lib/iapHelpers.ts",       # the store's localized price string
     "lib/bankroll.ts",         # the optional bankroll, display-only (#831)
-    "screens/SettingsScreen.tsx",  # the bankroll field's "$" prefix
 }
+# Settings carries exactly one "$": the bankroll field's prefix. Any other
+# dollar sign there is a finding like anywhere else.
+SETTINGS_BANKROLL_PREFIX = "screens/SettingsScreen.tsx: $"
 
 
 def _read(p: Path) -> str:
@@ -97,16 +99,24 @@ def test_no_screen_prints_a_dollar_amount():
             if tail[:1] in ("/", ")", "'", '"', "`", "|", "]") or src_line.strip().startswith("*"):
                 continue
             offenders.append(f"{rel}: {src_line.strip()}")
+    settings = [o for o in offenders if o.startswith("screens/SettingsScreen.tsx: ")]
+    assert settings == [SETTINGS_BANKROLL_PREFIX], settings
+    offenders = [o for o in offenders if o not in settings]
     assert offenders == [], "\n".join(offenders)
 
 
 def test_no_copy_says_dollars_for_a_result():
     words = re.compile(r"in dollars|\$100|\$10 pays|per \$1\b|Stake \(\$\)", re.I)
     offenders = [
-        f"{rel}: {m.group(0)}"
+        f"{rel}: {line.strip()}"
         for rel, text in _sources()
         if rel not in DOLLARS_ALLOWED
-        for m in words.finditer(_code_only(text))
+        for line in _code_only(text).splitlines()
+        if words.search(line)
+        # The Settings bankroll field (#831) is the one place a member types
+        # dollars: its label and hint say so, and say nothing about a result.
+        and not (rel == "screens/SettingsScreen.tsx" and re.search(
+            r'"Your bankroll in dollars, optional"|"Only used to show your units in dollars', line))
     ]
     assert offenders == [], offenders
 
