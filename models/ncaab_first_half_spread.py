@@ -131,15 +131,19 @@ def grid() -> np.ndarray:
     return np.arange(lo, hi + 0.0001, step)
 
 
-def fit_table(outcome, key, weight=None, h0: float = H0, nmin: float = NMIN) -> dict:
+def fit_table(outcome, key, weight=None, h0: float = H0, nmin: float = NMIN,
+              means=None, support=None) -> dict:
     """The research's kernel table (fh_lib.fit_table), with an optional
     per-row count so a sample stored as (key, outcome, count) rebuilds the same
-    table. `weight` = None is one row each, exactly the research's call."""
+    table. `weight` = None is one row each, exactly the research's call.
+    `means` / `support` default to this model's first-half margin grid and
+    support (MARGIN_SPEC); the first-half total model
+    (models/ncaab_first_half_total.py) passes its own (TOTAL_SPEC)."""
     outcome = np.asarray(outcome).astype(int)
     key = np.asarray(key, float)
     cnt = np.ones(len(outcome)) if weight is None else np.asarray(weight, float)
-    g = grid()
-    klo, khi = SUPPORT
+    g = grid() if means is None else np.asarray(means, float)
+    klo, khi = SUPPORT if support is None else support
     nk = khi - klo + 1
     base_idx = np.clip(outcome, klo, khi) - klo
     pmf = np.zeros((len(g), nk))
