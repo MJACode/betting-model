@@ -23,6 +23,14 @@ Rows with no line or no price on either side are dropped first, so they can
 never hide an older complete row. Two rows of one book with the same stamp:
 the one stored last wins (`order`).
 
+A DATA-ERROR QUOTE IS DROPPED AFTER THAT (models/ncaab_quote_bounds.py): a
+book's quote whose line is outside its market's plausible range (a full-game
+spread beyond +/-60) or whose price is beyond +/-100000.
+It is dropped before the artefact rule and the consensus read it, so it can
+never move a median, and the book's older row does NOT take its place: that
+book has no quote at the instant. dropped_quotes() returns them, for the cards
+to log and count.
+
 THE ARTEFACT RULE. A quote on the other side of zero from the median of the
 OTHER bettable books' quotes at the same instant (flagged or not) is a pick'em
 sign error in the feed, not a price: with two or more other books it is
@@ -47,6 +55,8 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 
+from models import ncaab_quote_bounds as qb
+
 # The bettable books the research priced and took the consensus over. Pinned
 # here, not read from config.BEST_LINE_BOOKMAKERS: an environment override of
 # that list must not silently change who is in the consensus.
@@ -68,17 +78,13 @@ def _utc(x) -> pd.Series:
     return pd.to_datetime(x, utc=True, format="mixed")
 
 
-def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOKS,
-                    need_line: bool = True) -> pd.DataFrame:
-    """Each (game, book)'s quote at its game's instant.
+def _market(market: str | None, need_line: bool) -> str:
+    return market or ("spreads" if need_line else "h2h")
 
-    rows: one per stored odds row, with game_id, bookmaker, ts (the row's own
-    stamp, UTC), line (home number for a spread), p1 / p2 (home / away
-    American prices), order (higher = stored later), instant and tip (UTC) for
-    its game, and any extra columns, which are carried through. Books outside
-    `books` (default BOOKS) are ignored. need_line=False reads a market with
-    no line (the moneyline, models/ncaab_moneyline_own_spread.py): a row then
-    needs only its two prices. -> one row per (game_id, bookmaker)."""
+
+def _newest(rows: pd.DataFrame, window_min: int, books, need_line: bool) -> pd.DataFrame:
+    """Each (game, book)'s newest complete row in the window, data errors
+    included: standing_quotes before the bounds."""
     if not len(rows):
         cols = list(dict.fromkeys(QUOTE_COLS + ["instant", "tip"] + list(rows.columns)))
         return pd.DataFrame(columns=cols)
@@ -89,6 +95,32 @@ def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOK
           & (r["instant"] < r["tip"])]
     r = r.sort_values(["game_id", "bookmaker", "ts", "order"], kind="mergesort")
     return r.drop_duplicates(["game_id", "bookmaker"], keep="last").reset_index(drop=True)
+
+
+def standing_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOKS,
+                    need_line: bool = True, market: str | None = None) -> pd.DataFrame:
+    """Each (game, book)'s quote at its game's instant.
+
+    rows: one per stored odds row, with game_id, bookmaker, ts (the row's own
+    stamp, UTC), line (home number for a spread), p1 / p2 (home / away
+    American prices), order (higher = stored later), instant and tip (UTC) for
+    its game, and any extra columns, which are carried through. Books outside
+    `books` (default BOOKS) are ignored. need_line=False reads a market with
+    no line (the moneyline, models/ncaab_moneyline_own_spread.py): a row then
+    needs only its two prices. market names the bounds that apply
+    (models/ncaab_quote_bounds.LINE_RANGE): 'spreads' by default, 'h2h' when
+    need_line is False. A book whose newest row is a data error has no quote
+    (dropped_quotes). -> one row per (game_id, bookmaker)."""
+    q = _newest(rows, window_min, books, need_line)
+    return qb.split(q, _market(market, need_line))[0].reset_index(drop=True)
+
+
+def dropped_quotes(rows: pd.DataFrame, window_min: int = WINDOW_MIN, books=BOOKS,
+                   need_line: bool = True, market: str | None = None) -> pd.DataFrame:
+    """The quotes standing_quotes drops as data errors, with `market` and
+    `why`: what the cards log and count."""
+    q = _newest(rows, window_min, books, need_line)
+    return qb.split(q, _market(market, need_line))[1].reset_index(drop=True)
 
 
 def flag_and_consensus(q: pd.DataFrame) -> pd.DataFrame:

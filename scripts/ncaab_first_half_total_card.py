@@ -20,6 +20,14 @@ decision fetch is decided on only within MAX_DECISION_DELAY_MIN (5) of landing:
 the card normally runs in the same tick, and a bet written later would carry a
 price that may be gone, so a run that comes too late treats the game as missed.
 
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A first-half
+total outside 40-120, or priced beyond +/-100000, is not priced, and a
+full-game total outside 90-220 never enters the consensus; that book's older
+row is not used instead. Each dropped quote is logged with its game, book and
+value, counted as quotes_dropped on the diagnostic line, and named in the
+decision row's detail. A best edge above the data-error cap is decided as
+edge_cap with no bet, and the run raises after writing every other game.
+
 WHAT IS READ, as of the decision fetch's instant (its fetch_at, the stored
 rows' created_at):
   * the first-half totals that fetch stored (the feed's SOURCE, market
@@ -76,12 +84,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 import data.ingestors.ncaab_first_half_odds as feed  # noqa: E402
 import models.ncaab_first_half_total as ft  # noqa: E402
+import models.ncaab_quote_bounds as qb  # noqa: E402
 from data.anon_readable import API_ROLES, lock_down  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.ddl_guard import schema_is_current  # noqa: E402
 from models.market_relative import implied  # noqa: E402
 from scripts.ncaab_first_half_spread_card import (  # noqa: E402
-    _cuts_sql, _num, _table_exists, missing_halves, team_games,
+    _cuts_sql, _log_dropped, _num, _table_exists, missing_halves, team_games,
 )
 from tracking.pick_integrity import pick_problems  # noqa: E402
 
@@ -213,7 +222,10 @@ def fg_consensus(conn, cuts: dict[str, datetime]) -> dict[str, dict]:
     df["line"] = pd.to_numeric(df["line"], errors="coerce")
     df["ts"] = pd.to_datetime(df["snapshot_at"], utc=True, format="mixed", errors="coerce")
     cut = pd.DataFrame({"game_id": gids, "cutoff": pd.to_datetime(ts, utc=True)})
-    c = ft.asof_consensus(df, cut)
+    # One row per book already (DISTINCT ON): a data error here is that book's
+    # newest total, so the book leaves the consensus (asof_consensus drops it).
+    _log_dropped(qb.split(df, "totals", "line", ())[1], "full-game", "line", ())
+    c = ft.asof_consensus(df, cut, market="totals")
     return {r.game_id: {"cons": float(r.cons), "nb": int(r.nb)} for r in c.itertuples(index=False)}
 
 
@@ -426,7 +438,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         return {"games": 0, "bets": 0, "published": 0, "decided": 0, "off": True}
     diag = {"games": 0, "already_decided": 0, "no_fetch_yet": 0, "missed": 0,
             "wrong_season": 0, "bets": 0, "below_cut": 0, "below_floor": 0, "no_quote": 0,
-            "no_fg_line": 0}
+            "no_fg_line": 0, "edge_cap": 0, "quotes_dropped": 0}
     conn = get_connection()
     try:
         games = slate(conn, now)
@@ -473,6 +485,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         books = bet_books()
         floor = config.min_odds_for(MODEL_ID)
         stale: list[str] = []
+        capped: list[str] = []
         for season in sorted({games[g]["season"] for g in due}):
             gids = sorted(g for g in due if games[g]["season"] == season)
             art = artifact(season)
@@ -497,6 +510,12 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 d = ft.decide(gid, q, fgc.get(gid), t, art, config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
                               books=books, min_price=floor)
                 diag[d.status] = diag.get(d.status, 0) + 1
+                diag["quotes_dropped"] += _log_dropped(
+                    ft.out_of_range(q, books), "first-half", "total_line", ft.QUOTE_PRICES)
+                if d.status == "edge_cap":
+                    logger.error(f"NCAAB first-half total card: {gid} not bet, its edge is a "
+                                 f"data error: {d.detail}")
+                    capped.append(gid)
                 miss = (missing_halves(sgames, tg, games[gid]["home"], due[gid][0])
                         + missing_halves(sgames, tg, games[gid]["away"], due[gid][0]))
                 decisions.append(d)
@@ -520,6 +539,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                        f"{MAX_DECISION_DELAY_MIN:g} minutes after it, not decided: {problems}")
         if stale:
             why.append(f"no artifact for the season of {stale}")
+        if capped:
+            why.append(f"edge above the data-error cap, decided with no bet: {capped}")
         if why:
             raise CardIncomplete("; ".join(why)[:1500])
         return {"games": len(near), "bets": diag["bets"], "published": published,
