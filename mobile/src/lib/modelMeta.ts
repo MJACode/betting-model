@@ -864,6 +864,12 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'What our model says is the chance this side hits: the market’s fair chance plus about 6 percentage ' +
     'points, the extra these bets won over the last three NBA seasons (56% won where the market’s fair ' +
     'chance averaged 50%). Read it as an upper bound.',
+  // The win chance the bet book's own spread implies
+  // (models/ncaab_moneyline_own_spread.py); the edge is that minus the same
+  // book's moneyline price's implied chance (UX review, 2026-11-02).
+  ncaab_moneyline_own_spread:
+    'The chance this side wins according to the spread at the book we bet. Edge is how much higher that ' +
+    'is than the chance the same book’s moneyline price implies.',
 };
 
 export function modelProbabilityNote(modelId: string): string {
@@ -904,17 +910,22 @@ const EVENING_BEFORE_MODELS: readonly string[] = [
 // "by noon ET": the run is 10:05am ET in winter and 11:05am ET from
 // mid-March, and a late run still reads 15:00 UTC quotes only until 15:59 UTC.
 // The NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decides at the
-// same instant, from each book's moneyline, and posts in the same batch.
+// same instant and posts in the same batch; its body says what it compares.
 const GAME_MORNING_MODELS: readonly string[] = [
   'ncaab_moneyline_own_spread',
   'ncaab_spread_market',
 ];
 
-// What a game-morning model reads, in the page's words: "the spread at each
-// book we price", or "the moneyline at each book we price".
-function gameMorningMarket(modelId: string): string {
-  return modelId === 'ncaab_moneyline_own_spread' ? 'the moneyline' : 'the spread';
-}
+// The moneyline model's page body (UX review, 2026-11-02): it bets the book
+// whose moneyline is furthest below what that same book's spread implies,
+// which need not be the best price, and a moneyline has no line.
+const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
+  ncaab_moneyline_own_spread:
+    'This model decides each game once, on the morning of game day. At each book we price, it compares ' +
+    'the book’s moneyline with the chance of winning that the same book’s spread implies. It bets only ' +
+    'some games, each at the one book where that gap is largest, which may not be DraftKings. A posted ' +
+    'bet is never re-priced: it stays at the price it posted at.',
+};
 
 export interface ModelPageTiming {
   /** The tooltip beside "Today's potential picks". */
@@ -955,10 +966,10 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Decided the morning of the game',
       body:
-        `This model decides each game once, on the morning of game day, from ${gameMorningMarket(modelId)} ` +
-        'at each book we price. It bets only some games, each at the book with the best line and price, ' +
-        'which may not be DraftKings. A posted bet is never re-priced: it stays at the line and price it ' +
-        'posted at.',
+        GAME_MORNING_BODY[modelId] ??
+        'This model decides each game once, on the morning of game day, from the spread at each book we ' +
+        'price. It bets only some games, each at the book with the best line and price, which may not be ' +
+        'DraftKings. A posted bet is never re-priced: it stays at the line and price it posted at.',
       empty:
         'This model posts once, on the morning of each game day, and bets only some games. If nothing is ' +
         'here by noon ET, it found no bet today.',
