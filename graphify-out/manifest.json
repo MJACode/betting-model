@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "data/ingestors/injury_ingestor.py": {
-    "mtime": 1793643774.6915605,
-    "seen": 1793677336.487853,
-    "ast_hash": "9c0c7f59ffd38f335008c0c42ea333cb",
+    "mtime": 1793727077.4554565,
+    "seen": 1793727875.918735,
+    "ast_hash": "b48e74ed4b655ab5f1fc752a010e5928",
     "semantic_hash": ""
   },
   "data/ingestors/kalshi_game_ingestor.py": {
@@ -1128,9 +1128,9 @@
     "semantic_hash": ""
   },
   "data/team_stats_rebuild.py": {
-    "mtime": 1793643775.6899042,
-    "seen": 1793677336.4889302,
-    "ast_hash": "973b568ae7d0f92fe634191f45e38fe1",
+    "mtime": 1793727077.457141,
+    "seen": 1793727875.9204636,
+    "ast_hash": "4cd6245034669c5ee2666f6ebc307042",
     "semantic_hash": ""
   },
   "data/threshold_sync.py": {
@@ -1164,9 +1164,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "features/feature_engine.py": {
-    "mtime": 1793643775.9915004,
-    "seen": 1793677336.4889548,
-    "ast_hash": "968f1302531294c57a1120b909f56917",
+    "mtime": 1793727077.4922428,
+    "seen": 1793727875.9204988,
+    "ast_hash": "71a041e17d1a0b4d81f4011289234933",
     "semantic_hash": ""
   },
   "features/golf_feature_engine.py": {
@@ -1224,9 +1224,9 @@
     "semantic_hash": ""
   },
   "features/wnba_feature_engine.py": {
-    "mtime": 1793643776.010362,
-    "seen": 1793677336.4889987,
-    "ast_hash": "c175dd52a8a03a4bde8a1f7d5dca63ab",
+    "mtime": 1793727077.4922428,
+    "seen": 1793727875.9205616,
+    "ast_hash": "a53f69a62e3cd63acd54fdccb0e29d28",
     "semantic_hash": ""
   },
   "features/wnba_prop_feature_engine.py": {
@@ -7224,15 +7224,15 @@
     "semantic_hash": ""
   },
   "tests/test_team_stats_asof_invariants.py": {
-    "mtime": 1793643801.1275651,
-    "seen": 1793677336.4941363,
-    "ast_hash": "409a69c31e6e9d549cba5e46e71d7d1b",
+    "mtime": 1793727077.5221725,
+    "seen": 1793727875.9319158,
+    "ast_hash": "88d7eed9e749afa4ca56fa6654e6ae20",
     "semantic_hash": ""
   },
   "tests/test_team_stats_asof_verify_job.py": {
-    "mtime": 1793643801.1295764,
-    "seen": 1793677336.4941394,
-    "ast_hash": "d20c7679ab8de0acef4ccfdc89a4f48e",
+    "mtime": 1793727077.5233755,
+    "seen": 1793727875.9319234,
+    "ast_hash": "c93861051ab97a8ab0f2beb47e6bf626",
     "semantic_hash": ""
   },
   "tests/test_threshold_review.py": {
@@ -7464,9 +7464,9 @@
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1793673966.2045686,
-    "seen": 1793677336.4942513,
-    "ast_hash": "35912382512056fd93f5ab60f5398393",
+    "mtime": 1793727077.5246687,
+    "seen": 1793727875.932219,
+    "ast_hash": "66408a3bfd14320a908e38601e7710bd",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -7584,9 +7584,9 @@
     "semantic_hash": ""
   },
   "tracking/system_health.py": {
-    "mtime": 1793643801.2410748,
-    "seen": 1793677336.4943066,
-    "ast_hash": "11191dd9b4a62c195607d9ae59ad6fde",
+    "mtime": 1793727077.5287168,
+    "seen": 1793727875.932355,
+    "ast_hash": "8fa46b38765d8ab40f7a7018b3491fdf",
     "semantic_hash": ""
   },
   "tracking/threshold_review.py": {
@@ -7788,9 +7788,9 @@
     "semantic_hash": ""
   },
   "docs/followups.md": {
-    "mtime": 1793673205.195927,
-    "seen": 1793677336.4944181,
-    "ast_hash": "8aac6d6878b907206b010c114ecea226",
+    "mtime": 1793727107.736169,
+    "seen": 1793727875.9326503,
+    "ast_hash": "fdc963899dca8c6868d82004f104ba94",
     "semantic_hash": ""
   },
   "docs/game_injury_gate.md": {
@@ -8178,9 +8178,9 @@
     "semantic_hash": ""
   },
   "docs/team_stats_leak.md": {
-    "mtime": 1793643775.9718971,
-    "seen": 1793677336.4946105,
-    "ast_hash": "b2a3f731df7485a38ab272c2615737d8",
+    "mtime": 1793727077.4901714,
+    "seen": 1793727875.9331083,
+    "ast_hash": "5f0e907009df36524d4655e8ec84bbd5",
     "semantic_hash": ""
   },
   "docs/team_stats_rebuild_scope.md": {
@@ -8634,9 +8634,9 @@
     "semantic_hash": ""
   },
   "docs/nba_models_2026.md": {
-    "mtime": 1793673965.810519,
-    "seen": 1793677336.4944863,
-    "ast_hash": "00ba4e2586b6098923ab6a38ac9d814b",
+    "mtime": 1793727077.4653907,
+    "seen": 1793727875.9327877,
+    "ast_hash": "a65964b6d13f70aeb0794252a27fa2fe",
     "semantic_hash": ""
   },
   "docs/nhl_moneyline_rebuild.md": {
@@ -10362,9 +10362,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/ScoreboardBoard.tsx": {
-    "mtime": 1793643776.6844473,
-    "seen": 1793677336.489589,
-    "ast_hash": "b35e3525d108747d1194e398473cac46",
+    "mtime": 1793727077.498413,
+    "seen": 1793727875.9218094,
+    "ast_hash": "bce2dd4fcadbb734cdb28c57739487d5",
     "semantic_hash": ""
   },
   "mobile/src/components/StatsSportButton.tsx": {
@@ -11454,15 +11454,147 @@
     "semantic_hash": ""
   },
   "tests/test_nba_postseason_gate.py": {
-    "mtime": 1793654915.3549173,
-    "seen": 1793677336.4930997,
-    "ast_hash": "7e41dbbe8e11449f3331e1bee4342ef7",
+    "mtime": 1793727242.1158004,
+    "seen": 1793727875.9300303,
+    "ast_hash": "93a1efd3285c4e6722bae61cf09453f4",
     "semantic_hash": ""
   },
   "tests/test_nba_postseason_pg.py": {
     "mtime": 1793655951.3686042,
     "seen": 1793677336.4931042,
     "ast_hash": "4c0bf5a3886f47d11908174f675a7658",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_fav200.py": {
+    "mtime": 1793727077.4988513,
+    "seen": 1793727875.925071,
+    "ast_hash": "b7dfadf90f835eb74c3e70030fb28028",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_popular.py": {
+    "mtime": 1793727077.5018325,
+    "seen": 1793727875.925077,
+    "ast_hash": "ecbb1a0a80bd2b91680e93abc7d30c3b",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_postseason.py": {
+    "mtime": 1793727077.5029862,
+    "seen": 1793727875.9250822,
+    "ast_hash": "d6a995e435a540e4183230557fd07bed",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_propoffline.py": {
+    "mtime": 1793727077.5047903,
+    "seen": 1793727875.9250867,
+    "ast_hash": "c3233d3b9f096f23e3374a9b622bff52",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_shapes.py": {
+    "mtime": 1793727077.5067995,
+    "seen": 1793727875.9250917,
+    "ast_hash": "ed90d746dc7d839d03448b4ac8950f61",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_shotluck.py": {
+    "mtime": 1793727077.5067995,
+    "seen": 1793727875.9250968,
+    "ast_hash": "a187910c63e974f7d5ec4e6fcff82c87",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_starters.py": {
+    "mtime": 1793727077.5102303,
+    "seen": 1793727875.925184,
+    "ast_hash": "bbc4fa92defad33a03e5cc99e44b3df3",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_fav200.py": {
+    "mtime": 1793727077.5102303,
+    "seen": 1793727875.9301345,
+    "ast_hash": "124fb70d2e79a131c7ae896d5e7813c1",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_popular.py": {
+    "mtime": 1793727077.5120614,
+    "seen": 1793727875.930142,
+    "ast_hash": "6736a0134b20c4537c31ddcbecc805c0",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_postseason.py": {
+    "mtime": 1793727077.5140946,
+    "seen": 1793727875.930149,
+    "ast_hash": "dd35c68cc98f7a21338ea36ccb258a80",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_propoffline.py": {
+    "mtime": 1793727077.5150964,
+    "seen": 1793727875.9301543,
+    "ast_hash": "30c7042b2a88f11ef3254c3089716047",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_shapes.py": {
+    "mtime": 1793727077.5173566,
+    "seen": 1793727875.930159,
+    "ast_hash": "7e9fdd90f79c1b1d4aa65ab0ed997306",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_shotluck.py": {
+    "mtime": 1793727077.5173566,
+    "seen": 1793727875.9301643,
+    "ast_hash": "56b98bbae19e2d1010addcd939a552f0",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_starters.py": {
+    "mtime": 1793727077.5192862,
+    "seen": 1793727875.93017,
+    "ast_hash": "8d1399a83e49041c896982204c79fc52",
+    "semantic_hash": ""
+  },
+  "tests/test_query_injuries_for_game.py": {
+    "mtime": 1793727077.5205011,
+    "seen": 1793727875.931578,
+    "ast_hash": "cf55900286b85fdda8457a113b000617",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_fav200.md": {
+    "mtime": 1793727077.4653907,
+    "seen": 1793727875.9328065,
+    "ast_hash": "5e5cf5f815e90e611d1e1d1d6d34ddf2",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_popular.md": {
+    "mtime": 1793727077.4679084,
+    "seen": 1793727875.9328122,
+    "ast_hash": "1e10e22d31cb126481896e2c96ce44ac",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_postseason.md": {
+    "mtime": 1793727077.4679084,
+    "seen": 1793727875.932819,
+    "ast_hash": "9bb46ac8f5d911b77aa23268b3a8638a",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_propoffline.md": {
+    "mtime": 1793727077.4679084,
+    "seen": 1793727875.932824,
+    "ast_hash": "6e8a1695608aa21319964530e6cc8e4a",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_shapes.md": {
+    "mtime": 1793727077.4723852,
+    "seen": 1793727875.9328287,
+    "ast_hash": "0737b2dba42f3c8c9550bf9022985b7e",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_shotluck.md": {
+    "mtime": 1793727077.4733953,
+    "seen": 1793727875.9328332,
+    "ast_hash": "c279a70231548af43cae44f11205c9a4",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_starters.md": {
+    "mtime": 1793727077.475074,
+    "seen": 1793727875.9328375,
+    "ast_hash": "9caf3b3794336209684d74453cf050e2",
     "semantic_hash": ""
   }
 }
