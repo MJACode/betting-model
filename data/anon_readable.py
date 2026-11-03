@@ -415,6 +415,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_first_half_spread_decisions",
     "ncaab_first_half_fetches",
     "ncaab_first_half_team_games",
+    # The NCAAB first-half total model's decisions ledger
+    # (scripts/ncaab_first_half_total_card.py, created on demand); it reads the
+    # same fetch ledger and team games as the spread model.
+    "ncaab_first_half_total_decisions",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.

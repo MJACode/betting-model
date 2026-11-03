@@ -173,10 +173,15 @@ def test_the_short_recap_scan_counts_the_same_picks_the_record_does():
 
 # ── the approval register ────────────────────────────────────────────────────
 
-def test_nothing_is_approved():
+def test_the_only_restatement_approval_is_the_eggz_nov_2_daily():
     """Only mike's words in chat put an entry here, and this test changes in the
     same commit, so an approval cannot be added by accident."""
-    assert config.RECORD_RESTATEMENT_APPROVALS == {}
+    assert config.RECORD_RESTATEMENT_APPROVALS == {
+        "2026-11-02": (
+            "mike, 2026-11-03: Corrected recap for the Eggz 2026-11-02 daily "
+            "recap. The all-time line was off by 1 win and 1u."
+        ),
+    }
 
 
 @pytest.mark.parametrize("job,key", [
