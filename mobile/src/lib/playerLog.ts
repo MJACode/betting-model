@@ -692,18 +692,31 @@ const OPP_LABEL_MAX = 4;
  * letters when the map has no entry — a bare cut prints "Michigan" and
  * "Michigan State" both as MICH (UX review, 2026-10-28). Null when the
  * opponent is unknown.
+ *
+ * `noSlice`: for a sport with no abbreviation map the app can read (NCAAB),
+ * a long name is never cut — "MICH" would be Michigan and Michigan State, and
+ * every "North …" school would read "NORT" (UX review, 2026-11-03). The short
+ * label is then the venue marker alone, and the full name stays on the
+ * selected bar's caption (`oppFull`).
  */
 export function opponentLabel(
   row: Pick<PlayerLogEntry, 'opponent' | 'venue'>,
   short = false,
   abbrevs?: ReadonlyMap<string, string>,
+  noSlice = false,
 ): string | null {
   const opp = row.opponent ? String(row.opponent) : '';
   if (!opp) return null;
   let name = opp;
   if (short && opp.length > OPP_LABEL_MAX) {
     const code = abbrevs?.get(opp);
-    name = code && code.length <= 5 ? code : opp.slice(0, OPP_LABEL_MAX).toUpperCase();
+    if (code && code.length <= 5) {
+      name = code;
+    } else if (noSlice) {
+      return row.venue === 'away' ? '@' : row.venue === 'home' ? 'vs' : null;
+    } else {
+      name = opp.slice(0, OPP_LABEL_MAX).toUpperCase();
+    }
   }
   if (row.venue === 'away') return `@${name}`;
   if (row.venue === 'home') return `vs ${name}`;
@@ -738,6 +751,7 @@ export function chartGames(
   games: PlayerLogEntry[],
   valueOf: (r: PlayerLogEntry) => number | null,
   abbrevs?: ReadonlyMap<string, string>,
+  noSlice = false,
 ): ChartGame[] {
   const out: ChartGame[] = [];
   for (const r of games) {
@@ -746,7 +760,7 @@ export function chartGames(
     out.push({
       value: v,
       date: shortGameDate(r.game_date),
-      opp: opponentLabel(r, true, abbrevs),
+      opp: opponentLabel(r, true, abbrevs, noSlice),
       oppFull: opponentLabel(r, false),
     });
   }
@@ -772,7 +786,11 @@ export function playerSubtitle(
  * The context line under a recent-game date — the volume behind the stat, which
  * is what tells you whether a quiet game was a bad game or a short one.
  */
-export function gameContextLine(sport: PlayerLogSport, row: PlayerLogEntry): string {
+export function gameContextLine(
+  sport: PlayerLogSport,
+  row: PlayerLogEntry,
+  currentTeam?: string | null,
+): string {
   const team = row.team ?? '—';
   // "@CHI" on an away game, "vs CHI" at home — every sport now, from `games`.
   const opp = opponentLabel(row);
@@ -780,7 +798,15 @@ export function gameContextLine(sport: PlayerLogSport, row: PlayerLogEntry): str
     const wk = row.week != null ? `Wk ${row.week}` : null;
     return [team, opp, wk].filter(Boolean).join(' · ');
   }
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'NCAAB') {
+    // Two full school names on one truncating line: the minutes go first so
+    // they are never the part cut (UX review, 2026-11-03). The player's own
+    // school only when it is not the header's (a transfer's earlier rows).
+    const min = num(row.minutes);
+    const own = row.team && row.team !== currentTeam ? row.team : null;
+    return [`${min == null ? '—' : min.toFixed(0)} min`, opp, own].filter(Boolean).join(' · ');
+  }
+  if (sport === 'WNBA' || sport === 'NBA') {
     const min = num(row.minutes);
     return [team, opp, `${min == null ? '—' : min.toFixed(0)} min`].filter(Boolean).join(' · ');
   }
