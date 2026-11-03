@@ -115,3 +115,54 @@ def test_the_lead_the_card_decides_at_is_stated_beside_the_pooled_figure(rel):
     assert "population the card decides at" in flat
     assert "The second line is the live expectation" not in flat
     assert "Read the second row as the live expectation" not in flat
+
+
+# ── what the docs tell a person to do ────────────────────────────────────────
+
+def _flat(rel: str) -> str:
+    """The doc with its line wrapping removed, so a claim is found wherever the lines happen to break."""
+    return " ".join(_read(rel).split())
+
+
+def test_the_docs_say_a_misdated_postseason_row_can_be_bet_until_the_schedule_lists_the_game():
+    """The gate cannot see a wrong date before the schedule names the real game's teams
+    (test_before_the_schedule_lists_the_final_a_misdated_row_still_reaches_the_other_models pins the
+    behaviour). The entry used to describe this row as stopping three models and pricing props."""
+    follow = _flat("docs/followups.md")
+    assert "A postseason game can be bet this way, by all four other NBA models." in follow
+    assert "That cannot catch a wrong-date row before the schedule lists the real game" in follow
+    assert "Before the schedule lists it, such a row reaches all four other models and can be bet by them" in _flat(
+        "docs/sports/nba.md")
+
+
+def test_the_sports_doc_keeps_a_played_games_bet_from_being_voided():
+    """A played game's bet has a real result, and CLAUDE.md 1c keeps VOID for a row the model should
+    never have produced. The alert says so (tests/test_failure_alerter.py), and a person reads this beside it."""
+    flat = _flat("docs/sports/nba.md")
+    assert "void it with `scripts/void_picks.py`" not in flat
+    at = flat.index("**The game was played and its final landed on another row.**")
+    split = flat.index("**The game was postponed or cancelled.**", at)
+    played, postponed = flat[at:split], flat[split:split + 400]
+    assert "Do not void" in played and "void_picks" not in played
+    assert "NO_ACTION" in postponed and "void_picks.py --game-id" in postponed
+    assert "--allow-posted" in postponed and "RECORD_EXCLUSIONS" in postponed and "naming who asked" in postponed
+
+
+def test_the_docs_say_a_bet_whose_only_start_is_the_feeds_has_no_close():
+    """These bets used to be described as counting like any other, while the close could be an in-play price."""
+    assert "with one exception: a bet whose only start is the odds feed's records no closing-line value" in _flat(
+        "docs/sports/nba.md")
+    assert "An NBA bet whose only start is the odds feed's has no close" in _flat("docs/clv.md")
+
+
+def test_the_doc_says_which_start_a_disputed_postseason_game_reads_and_what_that_risks():
+    para = " ".join(_paragraph(_read("docs/sports/nba.md"), "**The tip.**").split())
+    assert "read as ESPN's error" in para and "measured from the feed's start" in para
+    assert "If the feed is ever the stale one, this writes the bet after the real tip" in para
+    assert "decides on the earlier" not in para
+
+
+def test_the_doc_does_not_call_a_priced_row_refused():
+    flat = _flat("docs/sports/nba.md")
+    assert "a row the regular slate prices (above) is not called refused" in flat
+    assert "That does not hold on a regular-season day" in flat
