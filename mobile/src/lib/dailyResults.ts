@@ -5,8 +5,8 @@
  * posted settled BETs (passesRecordFilter, Discord still has the lock). The
  * money is Discord's posted stake: `postedPickUnits`, the app twin of
  * `published_pick_unit_profit` / `published_pick_unit_risked`. ROI is units
- * won or lost divided by units risked. The Models tab stays on the flat
- * $100 book.
+ * won or lost divided by units risked. The Models tab and the model pages
+ * book the same stake (one unit basis, 2026-11-03).
  */
 import { formatPctSigned, formatSigned } from '@/lib/format';
 import {

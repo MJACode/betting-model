@@ -40,7 +40,7 @@ const SLIDES: Slide[] = [
     icon: 'wallet-outline',
     title: 'Bet to stay in the game',
     body:
-      'Every pick is a flat 1-unit play, so no single call can run away with your roll. Pick a unit you can afford to lose, shop for the best price, skip the parlays the books push, and never chase. Tools here are built to help you last — not to promise you can’t lose.',
+      'Every pick is staked to win 1 unit, with never more than 3 units laid, so no single call can run away with your roll. Pick a unit you can afford to lose, shop for the best price, skip the parlays the books push, and never chase. Tools here are built to help you last — not to promise you can’t lose.',
   },
 ];
 
