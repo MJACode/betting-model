@@ -23,6 +23,9 @@ transaction; a (game, book) with a row is never decided again, and a moved
 price writes nothing. The statuses:
   bets / below_cut / too_few_books / no_clean_quote / not_best /
   book_not_bettable    the rule's verdict (models/ncaab_moneyline_first_post)
+  edge_cap             the moment's largest edge is above the data-error cap
+                       (models/ncaab_quote_bounds.EDGE_CAP): no bet, and the
+                       run fails, as on the 15:00 UTC card
   game_already_bet     this model bet the game on an earlier post
   other_model_bet      the 15:00 UTC moneyline model (ncaab_moneyline_own_spread)
                        bet the game first: one bet a game across the two
@@ -37,6 +40,14 @@ price writes nothing. The statuses:
                        Written with no bet, and the run fails (exit 1), so the
                        heartbeat records "error" and the failure alerter
                        reports it. Never a late bet.
+
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py), exactly as
+on the 15:00 UTC card: a moneyline priced beyond +/-100000, and a spread
+beyond +/-60 or priced beyond +/-100000, is dropped before any flag, count or
+price reads it. Each is logged with its game, book and value, counted as
+quotes_dropped on the run's line, and kept in the ledger row's quotes as
+out_of_range. A posting book whose own first moneyline is a data error is
+written no_clean_quote.
 
 ONE BET A GAME ACROSS BOTH MONEYLINE MODELS, whichever writes its bet first.
 Both cards take BOTH models' publish locks (sorted, so neither can deadlock
@@ -352,7 +363,7 @@ def decide(conn, now: datetime, games: dict[str, dict], new: list[tuple[str, str
            first_run: bool) -> tuple[list[fp.PostDecision], dict, list[str]]:
     """Decide every new first post. -> (decisions, {key: first row}, problems)."""
     problems: list[str] = []
-    out: list[fp.PostDecision] = []
+    out: list[fp.PostDecision] = _Decisions()
     if first_run:
         for gid, book in new:
             out.append(_plain(gid, book, "pre_model", "stored before this card's first run"))
@@ -394,6 +405,12 @@ def decide(conn, now: datetime, games: dict[str, dict], new: list[tuple[str, str
     part = {g: games[g] for g in gids}
     ml_rows, sp_rows = standing_rows(conn, part, now)
     art = artifact()
+    # Feed typos out first, as on the 15:00 UTC card (models/ncaab_quote_bounds).
+    drops = pd.concat([bq.dropped_quotes(ml_rows, window_min=None, books=fp.REF_BOOKS,
+                                         need_line=False),
+                       bq.dropped_quotes(sp_rows, window_min=None)], ignore_index=True)
+    log_dropped(drops)
+    n_dropped = len(drops)
     ml, sp = fp.read(ml_rows, sp_rows, art["table"])
     posting = []
     for gid, book in fresh:
@@ -410,9 +427,11 @@ def decide(conn, now: datetime, games: dict[str, dict], new: list[tuple[str, str
             continue                                   # undecided: seen again next run, then missed
         q = ml[(ml["game_id"] == gid) & (ml["bookmaker"] == book)]
         if not len(q):
-            # Its standing moneyline is not a quote (a price inside -100..+100).
-            out.append(_plain(gid, book, "no_clean_quote",
-                              "its moneyline is not price-valid (a price inside -100..+100)"))
+            own = drops[(drops["game_id"] == gid) & (drops["bookmaker"] == book)
+                        & (drops["market"] == "h2h")] if len(drops) else drops
+            why = (f"its moneyline is a data error ({own['why'].iloc[0]})" if len(own) else
+                   "its moneyline is not price-valid (a price inside -100..+100)")
+            out.append(_plain(gid, book, "no_clean_quote", why))
             continue
         if not (_same(q["p1"].iloc[0], f["p1"]) and _same(q["p2"].iloc[0], f["p2"])):
             out.append(_plain(gid, book, "moved_before_seen",
@@ -425,12 +444,30 @@ def decide(conn, now: datetime, games: dict[str, dict], new: list[tuple[str, str
                               config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
                               bettable=tuple(config.BEST_LINE_BOOKMAKERS),
                               min_price=float(art["min_price"]),
-                              min_other=int(art["min_other_books"]))
+                              min_other=int(art["min_other_books"]), dropped=drops)
         for d in got:
             if d.status == "book_not_bettable":
                 problems.append(f"book_not_bettable {d.game_id} {d.bookmaker} ({d.detail})")
+            elif d.status == "edge_cap":
+                logger.error(f"NCAAB first-post moneyline card: {d.game_id} {d.bookmaker} not bet, "
+                             f"its edge is a data error: {d.detail}")
+                problems.append(f"edge_cap {d.game_id} {d.bookmaker} ({d.detail})")
         out += got
+    out.dropped = n_dropped                          # counted on the run's line
     return out, firsts, problems
+
+
+class _Decisions(list):
+    """The run's decisions, with how many quotes the read dropped as data
+    errors (`dropped`)."""
+    dropped = 0
+
+
+def log_dropped(drops) -> None:
+    """One warning per quote dropped as a data error: game, book and value."""
+    from models.ncaab_quote_bounds import describe
+    for line in describe(drops):
+        logger.warning(f"NCAAB first-post moneyline card: dropped a data-error quote, {line}")
 
 
 def _same(a, b) -> bool:
@@ -532,6 +569,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         decisions, firsts, problems = decide(conn, now, games, new, first_run)
         for d in decisions:
             diag[d.status] = diag.get(d.status, 0) + 1
+        if getattr(decisions, "dropped", 0):
+            diag["quotes_dropped"] = decisions.dropped
         published = n_decided = 0
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll

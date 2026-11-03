@@ -1218,6 +1218,7 @@ cannot say how long a first post stood.
 | EV floor | 0.022, on its own probability. The smallest EV the cut admitted in the replay was +0.0226 (median +0.0359, 353 bets). EV is edge x decimal and the shortest price is -200 (decimal 1.5), so an edge above 0.015 is always EV above 0.0225 | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price cap | -200, removed before the pick and pinned again; it laid -200 to +400 (median -161) | `MIN_PRICE`, `MODEL_MIN_ODDS` |
 | other books | 3+ other bettable moneylines up (price-valid; a flagged one counts) | `MIN_OTHER_BOOKS` |
+| data-error cap | an edge above 0.40 is a feed error, not a bet (the replay's largest priced edge was 0.2416, a bet, so not 0.25) | `models/ncaab_quote_bounds.EDGE_CAP` |
 | decided once | each (game, book) first post once, bet or not, within the minute after it is stored; one bet a game across both moneyline models | `scripts/ncaab_moneyline_first_post_card.py`, `scheduler.run_ncaab_moneyline_first_post` |
 
 **The neighbourhood** (replayed by the card's own functions, which matched

@@ -38,6 +38,13 @@ posts its full-game moneyline for a game:
      post in the same moment, the larger edge wins and a tie goes to the
      book's name in alphabetical order (the research's order, not the 15:00
      UTC model's longer-price tie-break).
+  6. FEED TYPOS OUT, FIRST (models/ncaab_quote_bounds.py), as on the 15:00 UTC
+     card: a moneyline priced beyond +/-100000, and a spread beyond +/-60 or
+     priced beyond +/-100000, is dropped before any flag, count or price reads
+     it, and that book has no such quote at that moment. A moment whose
+     largest edge is above the data-error cap
+     (ncaab_quote_bounds.EDGE_CAP[MODEL_ID]) bets nothing: that post is
+     written edge_cap and the card's run fails.
 A moment less than five minutes before tip is not priced.
 
 ONE BET A GAME, ACROSS BOTH MONEYLINE MODELS. A first post below the cut does
@@ -63,6 +70,7 @@ import pandas as pd
 from models import ncaab_book_quotes as bq
 from models import ncaab_margin_dist as md
 from models import ncaab_moneyline_own_spread as om
+from models import ncaab_quote_bounds as qb
 
 MODEL_ID = "ncaab_moneyline_first_post"
 SPORT = "NCAAB"
@@ -126,7 +134,7 @@ def load_artifact(path: str | Path | None = None) -> dict:
 
 # Every status a first post can be written with (the ledger's `status`).
 STATUSES = ("bets", "below_cut", "too_few_books", "no_clean_quote", "not_best",
-            "book_not_bettable", "game_already_bet", "other_model_bet", "moved_before_seen",
+            "book_not_bettable", "edge_cap", "game_already_bet", "other_model_bet", "moved_before_seen",
             "tipped", "pre_model", "before_window", "missed")
 
 
@@ -161,7 +169,8 @@ def _book_reason(mrow: dict | None, srow: dict | None, min_price: float) -> str:
 
 def decide_posts(posting: pd.DataFrame, ml: pd.DataFrame, sp: pd.DataFrame, cut: float = CUT,
                  bettable=bq.BOOKS, min_price: float = MIN_PRICE,
-                 min_other: int = MIN_OTHER_BOOKS, with_quotes: bool = True) -> list[PostDecision]:
+                 min_other: int = MIN_OTHER_BOOKS, with_quotes: bool = True,
+                 dropped: pd.DataFrame | None = None) -> list[PostDecision]:
     """Decide every first post in `posting` (game_id, bookmaker), all at the
     same moment per game. Pure given its inputs.
 
@@ -170,17 +179,22 @@ def decide_posts(posting: pd.DataFrame, ml: pd.DataFrame, sp: pd.DataFrame, cut:
     (config.BEST_LINE_BOOKMAKERS); the pick is made over the posting books
     first, as the evidence made it, and a pick at a book not bettable now is
     not replaced by the next one. with_quotes=False leaves out every book's
-    quotes (the ledger's `quotes`), which the replay does not need."""
+    quotes (the ledger's `quotes`), which the replay does not need. dropped:
+    the moneylines and spreads the read dropped as data errors
+    (models/ncaab_book_quotes.dropped_quotes, with `market`), listed in each
+    post's quotes and detail; nothing is priced from them."""
     out: list[PostDecision] = []
     if not len(posting):
         return out
+    drops = om._dropped_list(dropped)
     sides = om.price_sides(ml, sp, min_price)
     sides = sides[sides["edge"].notna()]
     # One side per quote: the larger edge (the research's order).
     sides = sides.sort_values(["game_id", "bookmaker", "edge"], ascending=[True, True, False],
                               kind="mergesort").drop_duplicates(["game_id", "bookmaker"], keep="first")
     best_by = {(r["game_id"], r["bookmaker"]): r for r in sides.to_dict("records")}
-    keep = ["game_id", "bookmaker", "p1", "p2", "flag_any"] + list(_FLAGS) +         [c for c in ("link1", "link2") if c in ml.columns]
+    keep = ["game_id", "bookmaker", "p1", "p2", "flag_any"] + list(_FLAGS) + \
+        [c for c in ("link1", "link2") if c in ml.columns]
     ml_rec = {(r["game_id"], r["bookmaker"]): r for r in ml[keep].to_dict("records")} if len(ml) else {}
     sp_rec = {(r["game_id"], r["bookmaker"]): r
               for r in sp[["game_id", "bookmaker", "own_ok"]].to_dict("records")} if len(sp) else {}
@@ -195,6 +209,11 @@ def decide_posts(posting: pd.DataFrame, ml: pd.DataFrame, sp: pd.DataFrame, cut:
         quotes = []
         if with_quotes and gid in ml_by:
             quotes = om._quote_list(ml_by[gid], sp_by.get(gid, sp.iloc[0:0]))
+        dg = drops.get(gid, [])
+        if with_quotes:
+            quotes = quotes + dg
+        note = ("; dropped as data errors: " + ", ".join(
+            f"{x['book']} {x['market']} ({x['why']})" for x in dg)) if dg else ""
         r = ml_rec.get((gid, "draftkings"))
         dk = None
         if r is not None and not r["flag_any"]:
@@ -206,8 +225,10 @@ def decide_posts(posting: pd.DataFrame, ml: pd.DataFrame, sp: pd.DataFrame, cut:
             bb = best_by.get((gid, b))
             base = dict(game_id=gid, bookmaker=b, quotes=quotes, dk=dk, n_books=n_books)
             if bb is None:
-                res[b] = PostDecision(status="no_clean_quote", detail=_book_reason(
-                    ml_rec.get((gid, b)), sp_rec.get((gid, b)), min_price), **base)
+                own = [x for x in dg if x["book"] == b]
+                why = ("its own " + ", ".join(f"{x['market']} is a data error ({x['why']})" for x in own)
+                       if own else _book_reason(ml_rec.get((gid, b)), sp_rec.get((gid, b)), min_price))
+                res[b] = PostDecision(status="no_clean_quote", detail=why + note, **base)
                 continue
             bb = dict(bb)
             desc = (f"{b} {bb['side']} {bb['price']:+.0f} edge {bb['edge']:+.4f} p {bb['prob']:.4f} "
@@ -228,10 +249,20 @@ def decide_posts(posting: pd.DataFrame, ml: pd.DataFrame, sp: pd.DataFrame, cut:
                 d = res[c["bookmaker"]]
                 d.status = "not_best"
                 d.detail += f"; {win} posted in the same moment with the larger edge"
-            if win not in bettable:
+            capped = qb.edge_problem(cands[0]["edge"], MODEL_ID)
+            if capped:
+                # The moment's largest edge is a data error, not a bet
+                # (models/ncaab_quote_bounds.py): nothing is bet at this
+                # moment, and the game stays open for a later first post.
+                d = res[win]
+                d.status = "edge_cap"
+                d.detail += f"; {capped}: a data error, not a bet"
+            elif win not in bettable:
                 d = res[win]
                 d.status = "book_not_bettable"
                 d.detail += "; that book is not in config.BEST_LINE_BOOKMAKERS"
+        for b in books:
+            res[b].detail += note
         out += [res[b] for b in books]
     return out
 

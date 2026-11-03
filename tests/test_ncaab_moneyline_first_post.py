@@ -284,7 +284,7 @@ class _Conn:
         pass
 
 
-def _wire(monkeypatch, table, first, ml, own_bet=(), other_bet=(), now=NOW):
+def _wire(monkeypatch, table, first, ml, own_bet=(), other_bet=(), now=NOW, sp=SPREADS):
     """The card's decide() with its reads stubbed. first: {(game, book):
     (minutes before now it was stored, p1, p2)}."""
     import scripts.ncaab_moneyline_first_post_card as card
@@ -295,7 +295,7 @@ def _wire(monkeypatch, table, first, ml, own_bet=(), other_bet=(), now=NOW):
     monkeypatch.setattr(card, "bet_games", lambda conn, gids, model_id: set(
         own_bet if model_id == fp.MODEL_ID else other_bet))
     monkeypatch.setattr(card, "standing_rows", lambda conn, games, instant: (
-        _rows(ml, instant=t), _rows(SPREADS, instant=t)))
+        _rows(ml, instant=t), _rows(sp, instant=t)))
     return card
 
 
@@ -355,6 +355,68 @@ def test_a_game_this_model_or_the_15z_model_bet_is_closed(monkeypatch, table):
     card = _wire(monkeypatch, table, first, ml, other_bet={"g"})
     (d,), _, _ = card.decide(_Conn(), NOW.to_pydatetime(), GAMES, [("g", "betrivers")], False)
     assert d.status == "other_model_bet"
+
+
+# ── feed typos (models/ncaab_quote_bounds.py), as on the 15:00 UTC card ──────
+
+def test_a_first_post_priced_beyond_100000_is_dropped_and_never_bet(monkeypatch, table):
+    """Hard Rock's typo shape: -300000 / +250000. Dropped before any flag or
+    count reads it, written no_clean_quote, counted on the run's line."""
+    card = _wire(monkeypatch, table, {("g", "hardrockbet"): (1, -300000.0, 250000.0)},
+                 _others(table) + [("g", "hardrockbet", 1, None, -300000.0, 250000.0)])
+    ds, _, problems = card.decide(_Conn(), NOW.to_pydatetime(), GAMES, [("g", "hardrockbet")], False)
+    (d,) = ds
+    assert d.status == "no_clean_quote" and "data error" in d.detail and "100000" in d.detail
+    assert ds.dropped == 1 and not problems
+
+
+def test_a_typo_at_another_book_is_not_one_of_the_three_others(monkeypatch, table):
+    p = _ph(table, -3.5)
+    cheap = float(round(_american(p - 0.04)))
+    ml = _others(table, ("draftkings", "fanduel")) + [
+        ("g", "betmgm", 300, None, -300000.0, 250000.0), ("g", "betrivers", 1, None, cheap, 120.0)]
+    card = _wire(monkeypatch, table, {("g", "betrivers"): (1, cheap, 120.0)}, ml)
+    ds, _, _ = card.decide(_Conn(), NOW.to_pydatetime(), GAMES, [("g", "betrivers")], False)
+    (d,) = ds
+    assert d.status == "too_few_books" and d.n_books == 3 and ds.dropped == 1
+    assert "betmgm h2h" in d.detail and any(q.get("flags") == ["out_of_range"] for q in d.quotes)
+
+
+def test_a_spread_beyond_60_is_not_the_posting_books_own_spread(monkeypatch, table):
+    p = _ph(table, -3.5)
+    cheap = float(round(_american(p - 0.04)))
+    sp = [s for s in SPREADS if s[1] != "betrivers"] + [("g", "betrivers", 600, -350.0, -110.0, -110.0)]
+    card = _wire(monkeypatch, table, {("g", "betrivers"): (1, cheap, 120.0)},
+                 _others(table) + [("g", "betrivers", 1, None, cheap, 120.0)], sp=sp)
+    (d,), _, _ = card.decide(_Conn(), NOW.to_pydatetime(), GAMES, [("g", "betrivers")], False)
+    assert d.status == "no_clean_quote" and "spreads is a data error" in d.detail
+
+
+def test_an_edge_above_the_data_error_cap_is_recorded_not_bet_and_fails_the_run(monkeypatch, table):
+    """The moment's largest edge above models/ncaab_quote_bounds.EDGE_CAP is a
+    data error: written edge_cap, no bet, the run fails; the game stays open."""
+    from models import ncaab_quote_bounds as qb
+    cap = qb.EDGE_CAP[fp.MODEL_ID]
+    sp = [(s[0], s[1], s[2], 1.0, -110.0, -110.0) for s in SPREADS]          # away by a point
+    p_away = 1 - _ph(table, 1.0)
+    dog = float(round(_american(p_away - cap - 0.03)))                     # edge cap + 0.03
+    fav = float(round(_american(1.03 - (p_away - cap - 0.03))))            # implied sum 1.03
+    ml = [("g", b, 300, None, -130.0, 110.0) for b in ("draftkings", "fanduel", "betmgm")] + [
+        ("g", "betrivers", 1, None, fav, dog)]
+    card = _wire(monkeypatch, table, {("g", "betrivers"): (1, fav, dog)}, ml, sp=sp)
+    (d,), _, problems = card.decide(_Conn(), NOW.to_pydatetime(), GAMES, [("g", "betrivers")], False)
+    assert d.status == "edge_cap" and d.best["side"] == "away" and d.best["edge"] > cap
+    assert problems and problems[0].startswith("edge_cap")
+    assert "edge_cap" in fp.STATUSES
+
+
+def test_the_cap_sits_above_every_edge_the_replay_priced(art):
+    """The cap must not remove a real bet: above the largest bet's edge and the
+    largest edge of any post priced with 3+ other books up."""
+    from models import ncaab_quote_bounds as qb
+    r = art["replay"]
+    assert r["max_edge_bets"] <= r["max_edge_priced_posts"] < qb.EDGE_CAP[fp.MODEL_ID]
+    assert r["statuses_at_lowest_cut"].get("edge_cap", 0) == 0
 
 
 def test_a_post_below_the_cut_leaves_the_game_open_for_a_later_post(monkeypatch, table):

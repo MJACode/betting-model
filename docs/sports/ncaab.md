@@ -730,6 +730,19 @@ that an opening price often changes within half an hour.
    0.015. When two books post in the same moment, the larger edge wins and a
    tie goes to the book's name in alphabetical order (the research's order).
    A moment less than five minutes before tip is not priced.
+7. **Feed typos out first, as on the 15:00 UTC card**
+   (`models/ncaab_quote_bounds.py`). A moneyline priced beyond +/-100000, and
+   a spread beyond +/-60 or priced beyond +/-100000, is dropped before any
+   flag, count or price reads it; that book has no such quote at that moment.
+   Each is logged, counted on the run's line and kept in the ledger row's
+   quotes as `out_of_range`. A posting book whose own first moneyline is a
+   typo is `no_clean_quote`. A moment whose largest edge is above the
+   data-error cap, **0.40**, bets nothing: that post is `edge_cap` and the run
+   fails. The cap sits above the largest edge the replay priced, 0.2416 (one
+   BetMGM +340 first post in 2021-22, a bet, and the largest of all 97,429
+   posts priced with 3+ other books up), which is why it is not the 15:00 UTC
+   model's 0.25. With the guard in place the replay dropped no quote at any
+   first-post moment and its 353 bets are identical, row for row.
 
 **One bet a game, across both moneyline models.** A first post below the cut
 does not close the game: a later book's first post can still bet it (157 of
@@ -753,7 +766,7 @@ before 15:05 UTC changes hands.
 **The ledger** (`ncaab_moneyline_first_post_decisions`, one row per (game,
 book) first post, bet or not, worker-only): its status (`bets`, `below_cut`,
 `too_few_books`, `no_clean_quote`, `not_best`, `book_not_bettable`,
-`game_already_bet`, `other_model_bet`, `moved_before_seen`, `tipped`,
+`edge_cap`, `game_already_bet`, `other_model_bet`, `moved_before_seen`, `tipped`,
 `pre_model`, `before_window`, `missed`), the posted prices, the priced side,
 every book's quotes, and the fill check. **A post is never decided on a stale
 quote:** the card's first run writes every post already up as `pre_model`; a
@@ -783,6 +796,7 @@ moneyline, overtime included.
 | price cap | -200, removed before the pick and pinned again | `MIN_PRICE`, `MODEL_MIN_ODDS` |
 | EV floor | 0.022, just under the smallest EV the cut admitted in the replay (+0.0226; median +0.0359). An edge above 0.015 at -200 or longer is always EV above 0.0225, so it removes nothing the cut takes | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | other books | 3 or more other bettable moneylines up | `models/ncaab_moneyline_first_post.MIN_OTHER_BOOKS` |
+| feed typos | a moneyline or spread price beyond +/-100000, a spread beyond +/-60: dropped first; an edge above 0.40 is a data error, not a bet, and fails the run | `models/ncaab_quote_bounds.py` (`EDGE_CAP`) |
 | cadence | every minute, 24x7; the scheduler's planning read starts the card only for a new post | `scheduler.run_ncaab_moneyline_first_post` |
 | decided once | one ledger row per (game, book), bet or not; one bet a game across both moneyline models | `scripts/ncaab_moneyline_first_post_card.py` |
 | kill switch | `RUN_NCAAB_MONEYLINE_FIRST_POST=0` | the card and the plan |

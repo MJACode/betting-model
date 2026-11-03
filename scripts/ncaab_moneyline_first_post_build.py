@@ -237,6 +237,7 @@ def replay(h2h: pd.DataFrame, spr: pd.DataFrame, games: pd.DataFrame, tables: di
     print(f"first-post moments {len(ev)} over {ev['game_id'].nunique()} games "
           f"({time.time() - t0:.0f}s)", flush=True)
     out = []
+    n_drops = 0
     for s in sorted(ev["season"].unique()):
         es = ev[ev["season"] == s]
         mh = standing(h2h, es, fp.REF_BOOKS)
@@ -247,8 +248,14 @@ def replay(h2h: pd.DataFrame, spr: pd.DataFrame, games: pd.DataFrame, tables: di
         post = mh[hr["first"].values & (hr["obs"].values == mh["e"].values)
                   & mh["bookmaker"].isin(bq.BOOKS).values]
         posting = pd.DataFrame({"game_id": post["key"].values, "bookmaker": post["bookmaker"].values})
-        ml, sp = fp.read(as_card_rows(mh, h2h, tips), as_card_rows(ms, spr, tips), tables[int(s)])
-        ds = fp.decide_posts(posting, ml, sp, cut, with_quotes=False)
+        ml_rows, sp_rows = as_card_rows(mh, h2h, tips), as_card_rows(ms, spr, tips)
+        # Feed typos out first, as the card does (models/ncaab_quote_bounds).
+        drops = pd.concat([bq.dropped_quotes(ml_rows, window_min=None, books=fp.REF_BOOKS,
+                                             need_line=False),
+                           bq.dropped_quotes(sp_rows, window_min=None)], ignore_index=True)
+        n_drops += len(drops)
+        ml, sp = fp.read(ml_rows, sp_rows, tables[int(s)])
+        ds = fp.decide_posts(posting, ml, sp, cut, with_quotes=False, dropped=drops)
         for d in ds:
             b = d.best or {}
             out.append({"key": d.game_id, "bookmaker": d.bookmaker, "status": d.status,
@@ -258,6 +265,7 @@ def replay(h2h: pd.DataFrame, spr: pd.DataFrame, games: pd.DataFrame, tables: di
         print(f"  replayed {s}: {len(es)} moments, {len(posting)} posts "
               f"({time.time() - t0:.0f}s)", flush=True)
     d = pd.DataFrame(out).merge(ev[["key", "game_id", "e", "season"]], on="key", how="left")
+    d.attrs["quotes_dropped"] = n_drops
     return d
 
 
@@ -334,6 +342,15 @@ def main(argv=None) -> None:
                        "moment, flagged quotes out, sides shorter than -200 out before the pick, "
                        "3+ other bettable moneylines up, edge above the cut, one bet a game",
                "posts_decided": int(len(d)), "statuses_at_lowest_cut": status_counts,
+               "quotes_dropped_as_data_errors": int(d.attrs.get("quotes_dropped", 0)),
+               # The data-error cap (models/ncaab_quote_bounds.EDGE_CAP) must sit
+               # above every real edge: the largest bet, and the largest edge of
+               # any post priced with 3+ other books up.
+               "max_edge_bets": round(float(bets["edge"].max()), 4),
+               "max_edge_priced_posts": round(float(
+                   d.loc[d["status"].isin(["bets", "below_cut", "not_best", "edge_cap"]), "edge"].max()), 4),
+               "priced_posts_with_3_others": int(d["status"].isin(
+                   ["bets", "below_cut", "not_best", "edge_cap"]).sum()),
                "by_season": per, "neighbour_cuts": neighbours,
                "min_ev": round(min_ev, 4), "min_prob": round(float(bets["prob"].min()), 4),
                "books": bets["bookmaker"].value_counts().to_dict()}

@@ -3,7 +3,7 @@
  "model_id": "ncaab_moneyline_first_post",
  "season": 2027,
  "prior_season": 2026,
- "built_at": "2026-11-03T20:49:04Z",
+ "built_at": "2026-11-03T22:37:40Z",
  "command": "python -m scripts.ncaab_moneyline_first_post_build --rows <rows.parquet> --instants <ledger.parquet> --games <games.parquet> --table-cache <cache> --last-season 2026",
  "books": [
   "draftkings",
@@ -83,6 +83,10 @@
    "bets": 732,
    "not_best": 72
   },
+  "quotes_dropped_as_data_errors": 0,
+  "max_edge_bets": 0.2416,
+  "max_edge_priced_posts": 0.2416,
+  "priced_posts_with_3_others": 97429,
   "by_season": {
    "2021": {
     "bets": 4,

@@ -51,7 +51,10 @@ def test_each_market_has_its_measured_range():
     assert qb.MAX_ABS_PRICE == 100_000
     assert qb.EDGE_CAP == {"ncaab_total_blend": 0.25, "ncaab_spread_market": 0.25,
                            "ncaab_moneyline_own_spread": 0.25, "ncaab_first_half_spread": 0.60,
-                           "ncaab_first_half_total": 0.50}
+                           "ncaab_first_half_total": 0.50,
+                           # the opening moneyline model (models/ncaab_moneyline_first_post.py):
+                           # its replay's bets reached 0.2416, so not 0.25
+                           "ncaab_moneyline_first_post": 0.40}
 
 
 def test_a_typo_is_a_data_error_and_the_extremes_history_holds_are_not():
