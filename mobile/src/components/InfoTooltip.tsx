@@ -145,9 +145,7 @@ export function InfoTooltip({
       <Pressable
         onPress={() => setOpen(true)}
         // Bare icon: 20pt glyph + 12 + 12 = 44pt (audit M18; 10 reached 40).
-        // A labelled row is full width already; slop only below, so it does
-        // not reach up into a chip row above it (UX review, 2026-11-03).
-        hitSlop={label ? { top: 0, bottom: 8, left: 0, right: 0 } : 12}
+        hitSlop={12}
         accessibilityRole="button"
         // Voice Control matches the label against what is on screen, and the
         // visible word is "Details" — "More info" made "tap Details" miss.
