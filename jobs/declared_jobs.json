@@ -1579,5 +1579,12 @@
     "requested_by": "mike",
     "note": "Reachability of the two public NCAAB injury pages (RotoWire JSON and Covers HTML) from the worker. Writes nothing. A non-200 or a body that does not parse fails the job; zero player rows is still a successful check.",
     "args": {}
+  },
+  {
+    "key": "splits-source-probe-2026-11-03",
+    "job_type": "splits_source_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-03: 'Pull the numbers where we can reliably.' Fetches DK Network's betting-splits page and Action Network's v2 scoreboard (no bookIds filter) plus /web/v1/books, to measure whether DraftKings' own handle/bets % can be pulled and which AN book ids carry splits. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]

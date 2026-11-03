@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, Scoreboard splits source probe: stored splits are Action Network consensus, not DraftKings; worker probe of DK Network and AN book ids; writes nothing |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB moneyline model LIVE (`ncaab_moneyline_own_spread`): each book's 15:00 UTC moneyline priced off its own spread, sides shorter than -200 out before the pick, edge > 0.01; replay matched the research's 914 bets; did not clear the research bar |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB spread model LIVE (`ncaab_spread_market`): best of eight books' 15:00 UTC spreads vs the books' median line, edge > 0.03, 3+ other books, no games-played wait; replay matched the research's 613 bets |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, no-restated-records merged over 89 master commits (session-log conflicts only). 10-30 and 11-01 restated while it waited; both were goalie saves props. |
