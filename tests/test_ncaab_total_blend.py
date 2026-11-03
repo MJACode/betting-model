@@ -297,7 +297,7 @@ def test_a_team_whose_old_games_have_no_team_ids_is_not_held():
     assert b[b["game_id"].isin(old)].groupby("game_id").size().tolist() == [2, 2]
     art = _art(sorted(set(sg["home_espn_id"])))
     t = sg[sg["game_id"] == gid]
-    (d,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, sg, b, art, 0.04)
+    (d,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, sg, b, art, 0.04)
     assert d.status == "bets", d.detail
 
 
@@ -411,7 +411,7 @@ def test_a_game_is_decided_at_its_quote_with_both_teams_past_ten_games():
     t, at = _late_target(sg)
     gid = t["game_id"].iloc[0]
     # a line far under the model: an over with a large edge
-    out = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, sg, b, art, 0.04)
+    out = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, sg, b, art, 0.04)
     (d,) = out
     assert min(d.ng) >= 10, d.ng
     assert d.status == "bets" and d.priced.side == "over" and d.priced.edge > 0.04
@@ -431,7 +431,7 @@ def test_an_early_game_is_priced_with_no_games_played_wait():
     early = sg.sort_values("dn").iloc[[10]]
     gid = early["game_id"].iloc[0]
     at = (pd.Timestamp(early["game_date"].iloc[0]) - pd.Timedelta(hours=2)).tz_localize("UTC").to_pydatetime()
-    (d,) = nb.decide(early, {gid: _quote(gid, line=100.5, at=at)}, sg, b, art, 0.04)
+    (d,) = nb.decide(early, {gid: _quote(gid, line=125.5, at=at)}, sg, b, art, 0.04)
     assert min(d.ng) < 10, d.ng
     assert d.status == "bets" and d.priced.side == "over"
     assert f"games {d.ng[0]}/{d.ng[1]}" in d.detail
@@ -455,21 +455,21 @@ def test_a_missing_box_for_a_game_that_just_ended_holds_the_game():
     # the team's last game ended five hours before the quote
     recent = sg.copy()
     recent.loc[recent["game_id"] == last, "end_ns"] = cut_ns - 5 * 3600 * 10 ** 9
-    (ok,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, recent, b, art, 0.04)
+    (ok,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, recent, b, art, 0.04)
     assert ok.status == "bets"
-    (d,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, recent,
+    (d,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, recent,
                      b[b["game_id"] != last], art, 0.04)
     assert d.status == "box_pending", d.detail
     # a final score not stored yet holds it the same way
     unscored = recent.copy()
     unscored.loc[unscored["game_id"] == last, ["home_score", "away_score"]] = np.nan
-    (d2,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, unscored, b, art, 0.04)
+    (d2,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, unscored, b, art, 0.04)
     assert d2.status == "box_pending"
     # one old box that never landed does not hold it; two do
     old1 = mine.iloc[-2]["game_id"]; old2 = mine.iloc[-3]["game_id"]
-    (d3,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, sg, b[b["game_id"] != old1], art, 0.04)
+    (d3,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, sg, b[b["game_id"] != old1], art, 0.04)
     assert d3.status == "bets"
-    (d4,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, sg,
+    (d4,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, sg,
                       b[~b["game_id"].isin([old1, old2])], art, 0.04)
     assert d4.status == "box_missing"
 
@@ -491,7 +491,7 @@ def test_a_held_first_post_is_decided_as_of_its_own_hour_and_the_wait_ages_to_no
     recent = sg.copy()
     recent.loc[recent["game_id"] == last, "end_ns"] = cut_ns - 5 * 3600 * 10 ** 9
     nobox = b[b["game_id"] != last]
-    q = {gid: _quote(gid, line=100.5, at=at)}
+    q = {gid: _quote(gid, line=125.5, at=at)}
     # an hour later the box is still missing: held, at the same first post
     (d,) = nb.decide(t, q, recent, nobox, art, 0.04, now=at + timedelta(hours=1))
     assert d.status == "box_pending" and d.quote.quote_at == at
@@ -683,12 +683,12 @@ def _card_run(monkeypatch, art, extra_season=None, drop_boxes=(), standing="same
     monkeypatch.setattr(card, "ensure_decisions_table", lambda conn: None)
     monkeypatch.setattr(card, "artifact", lambda: art)
     monkeypatch.setattr(card, "load_season", lambda conn, season: (games, box))
-    firsts = {x: _quote(x, line=100.5, at=at) for x in slate}
+    firsts = {x: _quote(x, line=125.5, at=at) for x in slate}
     monkeypatch.setattr(card, "load_first_posts", lambda conn, g, now: {
         x: q for x, q in firsts.items() if x in g})
     later = at + timedelta(minutes=20)
-    now_q = {"same": lambda x: _quote(x, line=100.5, at=later),
-             "moved": lambda x: _quote(x, line=101.5, at=later),
+    now_q = {"same": lambda x: _quote(x, line=125.5, at=later),
+             "moved": lambda x: _quote(x, line=126.5, at=later),
              "typo": lambda x: _quote(x, line=1005.0, at=later),
              None: lambda x: None}[standing]
     monkeypatch.setattr(card, "load_quotes", lambda conn, g, now: {
@@ -767,8 +767,8 @@ def test_the_bet_is_at_the_first_post_as_of_its_hour(monkeypatch):
     assert out["bets"] == 1
     ((rows, (d,), hour),) = got
     assert d.status == "bets" and d.cutoff == at.replace(minute=0)
-    assert d.quote.quote_at == at and d.quote.line == 100.5
-    assert rows[0]["scored_line"] == 100.5 and hour == now
+    assert d.quote.quote_at == at and d.quote.line == 125.5
+    assert rows[0]["scored_line"] == 125.5 and hour == now
 
 
 def test_a_first_post_no_longer_standing_is_decided_with_no_bet(monkeypatch):
@@ -1065,7 +1065,7 @@ def test_a_box_whose_opponent_row_has_no_espn_id_does_not_hold_the_game():
     opp = int(last["away_espn_id"]) if int(last["home_espn_id"]) == home else int(last["home_espn_id"])
     no_id = b.copy()
     no_id.loc[(no_id["game_id"] == last["game_id"]) & (no_id["team_espn_id"] == opp), "team_espn_id"] = np.nan
-    (d,) = nb.decide(t, {gid: _quote(gid, line=100.5, at=at)}, recent, no_id, art, 0.04)
+    (d,) = nb.decide(t, {gid: _quote(gid, line=125.5, at=at)}, recent, no_id, art, 0.04)
     assert d.status == "bets", d.detail
 
 

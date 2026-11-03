@@ -27,7 +27,16 @@ written as `missed` without failing.
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS, after writing every game it could:
 an artifact for another season (the game is then `missed` next hour); every
 due game with no quote at all (the odds steps have stopped); a best quote at a
-book config.BEST_LINE_BOOKMAKERS no longer lists.
+book config.BEST_LINE_BOOKMAKERS no longer lists; a best edge above the
+data-error cap (models/ncaab_quote_bounds.EDGE_CAP: the game is written as
+edge_cap with no bet).
+
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A book's quote
+whose spread is beyond +/-60 or whose price is beyond +/-100000 is dropped
+before the consensus reads it, that book has no quote at 15:00 UTC, and the
+game is decided on the other books. Each dropped quote is logged with its
+game, book and value, counted as quotes_dropped on the diagnostic line, and
+kept in the decision row's quotes as out_of_range.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_spread_decisions in the same transaction as the game's bet, under the
@@ -311,7 +320,7 @@ def decision_row(d: sm.Decision, check_hour: datetime, instant: datetime | None,
             "quotes": json.dumps(d.quotes) if d.quotes else None, "detail": detail[:2000]}
 
 
-FINAL = ("bets", "below_cut", "too_few_books", "book_not_bettable", "no_quotes",
+FINAL = ("bets", "below_cut", "too_few_books", "book_not_bettable", "edge_cap", "no_quotes",
          "no_clean_quote", "missed", "tipped")
 
 
@@ -349,6 +358,13 @@ def publish(conn, rows: list[dict], decisions: list[sm.Decision], check_hour: da
 class CardIncomplete(RuntimeError):
     """A game the card could not decide at 15:00 UTC, or a run that found the
     odds missing: raised after the rest of the run is written."""
+
+
+def log_dropped(drops) -> None:
+    """One warning per quote dropped as a data error: game, book and value."""
+    from models.ncaab_quote_bounds import describe
+    for line in describe(drops):
+        logger.warning(f"NCAAB spread card: dropped a data-error quote, {line}")
 
 
 _ART: dict = {}
@@ -421,11 +437,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                     continue
                 part = {g: due[g] for g in gids}
                 rows = bq.load_rows(conn, part, hour)
+                drops = bq.dropped_quotes(rows)
+                log_dropped(drops)
+                diag["quotes_dropped"] += len(drops)
                 snap = sm.snapshot_for(rows, {g: v["game_date"] for g, v in part.items()})
                 got = sm.decide(gids, snap, art["c_by_phase"], art["table"],
                                 config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
                                 min_other_books=int(art["min_other_books"]),
-                                bettable=tuple(config.BEST_LINE_BOOKMAKERS))
+                                bettable=tuple(config.BEST_LINE_BOOKMAKERS), dropped=drops)
                 if got and all(d.status == "no_quotes" for d in got):
                     problems.append(f"no bettable book has a spread stamped 14:00-15:00 UTC for any of "
                                     f"the {len(got)} due game(s): the odds refresh and the capture "
@@ -433,6 +452,10 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 for d in got:
                     if d.status == "book_not_bettable":
                         problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
+                    elif d.status == "edge_cap":
+                        logger.error(f"NCAAB spread card: {d.game_id} not bet, its edge is a data "
+                                     f"error: {d.detail}")
+                        problems.append(f"edge_cap {d.game_id} ({d.detail})")
                 decisions += got
         for d in decisions:
             diag[d.status] = diag.get(d.status, 0) + 1
