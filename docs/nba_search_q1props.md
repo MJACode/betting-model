@@ -338,3 +338,141 @@ grades a real bet. `--full` refuses without its three variables, prints progress
 group, the bets and the beside tables.
 
 Counts before grading follow in a dated section once the lab's own run has printed them.
+
+## 13. Counts before grading, under the rules as registered (2026-11-03)
+
+Counted by `python -m scripts.nba_s_q1props --smoke` on the lab as first committed (`f00501cf`), before any cell was
+graded. Lines, prices, timestamps and settlement checks only; the fits read 2023-24's results, and 2024-25's for
+2025-26's factor and alpha. No win, loss or unit of any bet this search would place was computed. **Section 14 changes
+the points distribution after these counts; the points rows below are the registered rule's.**
+
+**Settlement (section 3), 2023-24 / 2024-25 / 2025-26: 1,230 games each, every one with plays.**
+
+| Check | Points | Rebounds | Assists |
+|---|---|---|---|
+| Full game differs from the box score: games (rows) | 30 (61) | 338 (585) | 127 (233) |
+| First-quarter points differ from the period score: games | 3 | – | – |
+| Segments miss 60 player-minutes: games | 1 | 1 | 1 |
+| A first-quarter event with no court time: games | 0 | 0 | 0 |
+| **Games kept, 2023-24 / 2024-25 / 2025-26** | **1,218 / 1,223 / 1,218** | **1,116 / 1,124 / 1,111** | **1,194 / 1,185 / 1,183** |
+
+- The full-game differences equal the postseason search's to the row (its 3.2: 61, 585, 233 rows; 30, 338, 127 games).
+- 0 ESPN ids with an event lack an NBA id. 12 of 62,006 first-quarter segments (2018-19 on) are not five a side, and 14
+  of 19,044 team-games miss 60 player-minutes; in these three seasons that leaves out 1 game, of 2023-24.
+
+**The row ledger (section 4).** 103,005 rows pulled. The first search's table drops 117: two games whose only snapshot
+was taken after tip (`NBA_2025-01-09_POR_DAL`, `NBA_2026-03-17_SAS_SAC`). Of the 102,888 left:
+
+| Rule | Rows |
+|---|---:|
+| Name not one player on the two teams (2 names unmatched; no namesake, no duplicate) | 6 |
+| Snapshot outside 45-75 minutes | 771 |
+| Price under 100 or over 10,000 in size | 0 |
+| Line outside 0.5 to the ceiling | 0 |
+| Two-sided and incoherent | 0 |
+| One-sided (to the control) | 46,389 |
+| In a game left out of the market by settlement | 4,280 |
+| Void: no first-quarter court time | 1,840 |
+| **Coherent two-sided rows the cells read** | **52,965** |
+| One-sided rows the control reads | 43,026 |
+
+**The void rule's weight (3.3).** In a kept game, after the row rules, 512 of 73,012 propositions are on a player who
+played the game and had no first-quarter court time: 70 in 2024-25, 442 in 2025-26. Under the other reading of a book's
+rule each would settle under.
+
+**Which books the judged cells read.** Coherent rows by season:
+
+| Season | Market | Hard Rock | FanDuel | Caesars | BetMGM | Fanatics |
+|---|---|---:|---:|---:|---:|---:|
+| 2024-25 | points | 8,612 | 2,522 | 3,815 | – | – |
+| 2024-25 | rebounds | 7,913 | – | 2,936 | – | – |
+| 2024-25 | assists | 8,381 | – | 3,431 | – | – |
+| 2025-26 | points | 447 | 6,993 | – | 2,418 | 198 |
+| 2025-26 | rebounds | 307 | – | – | 2,326 | 106 |
+| 2025-26 | assists | 129 | – | – | 2,370 | 61 |
+
+In 2025-26 Hard Rock's quotes are almost all one-sided, so that season's judged rebounds and assists population is
+about 2,400 propositions each, nearly all BetMGM's from March and April 2026 (two-sided propositions: points 8,454,
+rebounds 2,483, assists 2,437). **The strict season bar (section 7) will bite there:** a rebounds or assists cell needs
+30 bets and a positive return inside that window.
+
+**Propositions** (settled, not void; in brackets, with a projection): 2024-25 points 9,151 (9,039), rebounds 8,285
+(8,189), assists 8,782 (8,670); 2025-26 points 15,974 (15,825), rebounds 14,360 (14,244), assists 14,952 (14,824). No
+number: the team pool under 30 minutes 488, the latest team neither side 142, fewer than 3 earlier first-quarter games 83.
+
+**The fits.**
+
+- Kc, Kp (2023-24): points 100, 50; rebounds 200, 50; assists 100, 200 minutes.
+- The chance a listed player plays (reports of 2021-22 to the season before): Doubtful 0.02, Questionable 0.49 to 0.51,
+  Probable 0.92, **Available 0.72 to 0.76**. An unlisted player counts 1, as registered. "Available" is a listed status,
+  and players listed with it played that often.
+- The first-quarter factor: points 0.864 / 0.862, rebounds 0.894 / 0.885, assists 0.953 / 0.935 (2024-25 / 2025-26).
+- alpha: points 0.593 / 0.612, rebounds 0.062 / 0.061, assists 0.024 / 0.022.
+- Expected first-quarter minutes when he plays it, percentiles 1 / 25 / 50 / 75 / 99: 3.0, 6.1, 8.0, 9.7, 12.0. The
+  reallocation r: 1st percentile 0.98, median 1.14, 99th 1.75. The mean team pool expects 52 of the 60 minutes: about
+  8 minutes of each night's recent rotation is out or doubtful.
+
+**Bets each cell would place, under the rules as registered** (2024-25 + 2025-26 = pooled; no result read):
+
+| Market | Side | EV ≥ 0.02 | EV ≥ 0.04 | EV ≥ 0.06 |
+|---|---|---|---|---|
+| points | over | 634 + 273 = 907 | 553 + 220 = 773 | 499 + 187 = 686 |
+| points | under | 6,212 + 6,075 = 12,287 | 5,731 + 5,600 = 11,331 | 5,242 + 5,123 = 10,365 |
+| rebounds | over | 1,547 + 490 = 2,037 | 1,278 + 415 = 1,693 | 1,019 + 345 = 1,364 |
+| rebounds | under | 2,253 + 709 = 2,962 | 1,864 + 592 = 2,456 | 1,541 + 490 = 2,031 |
+| assists | over | 2,365 + 607 = 2,972 | 2,010 + 524 = 2,534 | 1,714 + 445 = 2,159 |
+| assists | under | 1,749 + 551 = 2,300 | 1,455 + 459 = 1,914 | 1,212 + 379 = 1,591 |
+
+The points under bets 12,287 of the 17,420 points propositions at the lowest cut. The points distribution decides that,
+not the projection (section 14).
+
+**The placebo on the real data.** The identity permutation returned the real bets in every group; no proposition is
+alone in its group (median group: points 59, rebounds 69, assists 74). Share of a run's bets that are not real bets,
+three runs: points over 0.91 to 0.93; **points under 0.25 to 0.34, named LOW by the lab**; rebounds 0.71 to 0.85;
+assists 0.66 to 0.80.
+
+**Overlap with the live full-game prop models** (share of the lowest cut's bets). On a player and game where either
+model bet any full-game prop: 0.81 to 0.94 in every cell. The same stat on the same side: **rebounds under 0.69 to
+0.73** (the projection card bets full-game rebounds under), points under 0.16, assists under 0.16 to 0.18, every over
+0.00. The live files hold 16,062 `nba_prop_market` bets and 54,571 projection-card bets in these two seasons (the card's
+is the postseason search's figure, to the bet).
+
+**Prices each cell would lay:** from −200 up to +184 on points, +260 on rebounds, +400 on assists. Assists overs have a
+median of +135 to +145; every other cell's median is −115 to +105.
+
+**Time and memory.** One placebo run across a group's three cuts took 0.22 to 0.50 seconds. The projected `--full` is
+6.8 minutes of cells plus 1.3 minutes of loading; peak memory 2.2 GB, plus at most 0.04 GB for one market's 200 runs.
+The smoke run took 2.6 minutes.
+
+## 14. A change before any grade: the points distribution (2026-11-03)
+
+No cell had been graded when this changed. No cell, cut, side, band, bar, season, book or minutes rule changes.
+
+**What was measured, on 2023-24 alone** (a season no bet is graded on, whose first-quarter points the factor and alpha
+were already fitted on). Over 21,251 settled player-games, the share above each line, against the registered negative
+binomial (alpha 0.593) and a Poisson at the same means:
+
+| Line | 0.5 | 1.5 | 2.5 | 3.5 | 4.5 | 5.5 | 6.5 |
+|---|---|---|---|---|---|---|---|
+| Actual share over | 0.693 | 0.678 | 0.495 | 0.382 | 0.289 | 0.211 | 0.147 |
+| Negative binomial | 0.787 | 0.591 | 0.439 | 0.327 | 0.245 | 0.186 | 0.141 |
+| Poisson | 0.899 | 0.721 | 0.535 | 0.376 | 0.256 | 0.170 | 0.109 |
+
+Points come in twos and threes: 30.7% of these player-games scored 0 and 1.5% scored exactly 1. A count that steps by
+one puts too much on 1 and too little on 0. At 2.5, 3.5 and 4.5, where the books hang most points lines, the negative
+binomial is 4 to 6 points too low on the over, and it is low in every band of the mean as well. That alone makes most
+points propositions read as unders, which is what section 13's counts show. Rebounds and assists are within 0.01 of
+actual at every line, so they keep the negative binomial.
+
+**The change, for points only.** The chance of over at line L is a logistic in the log of the projected mean, one fit
+per line: P(over L) = 1 / (1 + exp(−(a_L + b_L × log mean))), for L = 0.5, 1.5 … 15.5. It is fitted on the same settled
+player-games the factor and alpha read (2023-24 for 2024-25; 2023-24 and 2024-25 for 2025-26), each with its own
+season's mean (`models.nba_props.fit_platt` on the log of the mean). For one mean, the chance is made non-increasing
+across lines by carrying the smaller value forward. A line outside 0.5 to 15.5 falls back to the negative binomial and
+is counted. The placebo re-prices through the same map.
+
+**Its check, also on 2023-24 alone:** fitted on the season's first half of dates and read on its second half, at lines
+1.5 to 6.5. `--smoke` prints it, and section 15 records it before any grade.
+
+**Not re-checked:** the minutes, the rate and the factor are unchanged. Section 13's counts stand for rebounds and
+assists; section 15 repeats every count under the change.
