@@ -33,6 +33,7 @@ switch: `RUN_LIVE_LOOP=0` in Railway Variables. Manual runs on Matt's machine st
 | ~~`mlb_live_win_prob`~~ | binary + Platt | home wins | **RETIRED 2026-08-30** — 15 bets 6-9 / −34.1% |
 | ~~`mlb_live_runline`~~ | binary + Platt | home wins by 2+ | **RETIRED 2026-08-30** — 14 bets 5-9 / −39.9% |
 | `nfl_live_leader_ml` | per-lead logistic WP (JSON artifact) | the 4-16 point leader wins, 4th quarter, ≤ 10:00 on the last snap | DraftKings live moneyline, edge ≥ 0.02 vs 1/decimal with vig. **LIVE 2026-10-13** (mike); runs in `nfl_live_leader/`, not the MLB loop — `docs/sports/nfl.md` |
+| `nba_live_spread_q12`, `nba_live_ml_q3`, `nba_live_spread_q3` | IG-2 game-state model (Stern normal on the final home margin, JSON artifact) | the live spread in quarters 1-2; the live moneyline and spread in quarter 3 | the best of the eight deciding books, EV >= 0.05, -200 floor, first fresh fetch per game and rule, fetched only at the grade's instants. **LIVE 2026-11-04** (mike); runs in `models/nba_live_loop.py`, not the MLB loop. Section "NBA in play" below and `docs/sports/nba.md` |
 
 **MLB live is ONE model now (2026-08-30).** Both binary models were paused on 2026-08-29 and
 retired the next day: they were negative at every cut AND got worse as the probability floor rose
@@ -264,6 +265,60 @@ open; game final but the model flipped off that side (no settled pick for it) �
 `scripts/verify_live_tracked.ts` (17 cases).
 
 ---
+
+
+---
+
+## NBA in play: the game-state model's three rules (2026-11-04, mike)
+
+The full story, the evidence and the warning signs are in `docs/sports/nba.md`,
+"In play". What a session touching the live loops needs:
+
+```
+ESPN scoreboard every 20 s (free)          -> which games are in progress
+at each grade instant (every hour on the hour, every listed tip)
+   -> ONE bulk Odds API call: h2h + spreads, 8 deciding books + Pinnacle (2 credits)
+   -> rows to odds as in_play (live_price_log), credits to live_credit_telemetry
+   -> wait NBA_LIVE_PBP_WAIT_SEC (45 s)
+   -> ESPN summary per game -> nba_pbp rows (the parser that writes nba_pbp)
+   -> models/nba_live_ig2: state, freshness, phases, the decision
+   -> nba_live_decisions (one row per game and rule), then picks (is_live), then
+      push and Discord's NBA live channel
+```
+
+`python -m models.nba_live_loop` (scheduler job `nba_live`, pollers service,
+11am to 2:50am ET every 10 minutes; kill switch `RUN_NBA_LIVE=0`).
+`--dry-run` decides and logs and writes nothing (it still fetches).
+
+**How it differs from the other live loops, each on purpose:**
+
+- **It fetches at the grade's instants, not continuously.** The rule decides at
+  "the first fetch in the phase holding a fresh quote", and its evidence came
+  from hourly purchases. Polling every few seconds would make that first fetch
+  the first minute of each quarter, a population never graded.
+- **Its freshness guard is the grade's own** (`docs/nba_models_2026.md` 7.1): no
+  point scored between a quote's stamp and the fetch, for the deciding quote and
+  its Pinnacle pair, and Pinnacle within 60 seconds. It reads ESPN after a wait,
+  so the plays logged before the fetch are in the read; ESPN's wallclock is when
+  it logged a play, which is what the grade read.
+- **No BookMoveClock** (the picks rule's corollary for every live loop). The
+  clock anchors a book's number between changes in our state and needs a series
+  of quotes; this loop sees one quote per book per instant, 30 to 60 minutes
+  apart, so there is nothing for it to compare. The grade's freshness rule is
+  applied instead, on the information the grade had. Named in the PR as a
+  deviation from the house rule.
+- **No quote-age, edge or settled-state cap**: none existed in the grade.
+- **Decided at the best of the eight deciding books, at any line they hang**, as
+  graded (not "the best price at DraftKings' line"): `scored_line` is the
+  deciding book's HOME number, `line_book` names that book when DraftKings does
+  not hang the same number in the fetch, and the DraftKings columns are its own
+  quote at that number, else NULL.
+- **A decision ledger** (`nba_live_decisions`): a fresh fetch that does not clear
+  the cut spends the rule, and a pick row exists only for a bet, so without the
+  ledger a restart would decide a spent rule again.
+
+**Cost.** About ten instants a night at 2 credits each. The first call of each
+process logs its `x-requests-last`.
 
 
 ---

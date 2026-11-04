@@ -17,6 +17,7 @@
 | `nba_total_luck` | The full-game OVER, when the projected total with the opponents' three-point and free-throw shooting luck taken out is at least 3 points above the plain projected total. At the best bettable price under the market's fair line; each game decided once, on a fetch 60-66 minutes before tip made by its own one-minute job; regular-season games only (the NBA Cup final never counts); both teams need 10 games, so the first bets come in mid-November. | **LIVE** (rule with a parameter artifact — `models/nba_total_luck.py`, card `scripts/nba_total_luck_card.py`, step `nba-total-luck`, job `nba_total_luck_window`) |
 | `nba_first_half_total_luck` | The FIRST-HALF total OVER, when the full-game shooting-luck gap (`nba_total_luck`'s number, unscaled) is at least 2 points. At the best bettable price under the market's fair line; each game decided once, on this model's own first-half fetch 45-66 minutes before tip, made by the same one-minute job; settled on Q1 + Q2 points; a game with no trustworthy quarter scores stays pending; regular-season games only; both teams need 10 games. | **LIVE** (rule with a parameter artifact — `models/nba_first_half_total_luck.py`, card `scripts/nba_first_half_total_luck_card.py`, step `nba-first-half-total-luck`, job `nba_total_luck_window`) |
 | `nba_team_total_luck` | The HOME team total UNDER, when the home team's own part of that shooting-luck gap is at least 2 points toward the under (the away defence's luck, in the home team's points). At the best bettable price under the market's fair line; each game decided once, on this model's own team-total fetch 45-66 minutes before tip, made by the same one-minute job; settled on the home team's final score, overtime included; regular-season games only; both teams need 10 games. | **LIVE** (rule with a parameter artifact — `models/nba_team_total_luck.py`, card `scripts/nba_team_total_luck_card.py`, step `nba-team-total-luck`, job `nba_total_luck_window`) |
+| `nba_live_spread_q12`, `nba_live_ml_q3`, `nba_live_spread_q3` | IN PLAY. The game-state model (IG-2) against the live spread in quarters 1-2, and the live moneyline and spread in quarter 3: per game and rule, the first fetch holding a fresh quote decides, at the best of the eight deciding books, -200 floor, when the model's EV is 0.05 or better; the fetches are the grade's own instants, every hour on the hour and every listed tip. Settled on the full-game score (spreads at the HOME number, moneylines with overtime). Section "In play" below. | **LIVE 2026-11-04** (artifact `models/saved/nba_live_ig2_2027.json`, `models/nba_live_ig2.py`, loop `models/nba_live_loop.py`, job `nba_live`) |
 | `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most four a night, each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20). The only NBA model that bets the play-in, the playoffs and the Cup final (below). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
 
 Graded on 2023-24 → 2025-26, the population it bets (every qualifying
@@ -117,6 +118,121 @@ nothing is struck): `nba_moneyline`, `nba_over_under`, `nba_spread`,
 `nba_prop_player_{points,rebounds,assists,threes,pra,blocks,steals,turnovers,dd}`.
 Their feature engines (`features/nba_feature_engine.py`,
 `features/nba_prop_feature_engine.py`), artifacts and scorer loop are gone.
+
+## In play: the game-state model, three rules (mike, 2026-11-04)
+
+mike: *"everything goes live now, that's why we do back testing ... and you
+continually improve models as you get more data."* The third NBA search's
+game-state model (IG-2, `docs/nba_models_2026.md` 7.2-7.3) passed the house
+standard in six cells, which are three rules (the EV 0.08 cells sit inside the
+0.05 ones). Graded 2021-22 to 2025-26, best of the eight deciding books, -200
+floor, one unit to win, risk capped at 3:
+
+| Model | Rule | Bets | Units | ROI | 95% interval | Prices laid (min / median / max) |
+|---|---|---|---|---|---|---|
+| `nba_live_spread_q12` | spread, quarters 1-2, EV >= 0.05 | 1,475 | +103.6 | +6.2% | +1.4 .. +11.1 | -160 / -114 / +114 |
+| `nba_live_ml_q3` | moneyline, quarter 3, EV >= 0.05 | 651 | +40.1 | +10.0% | +0.1 .. +19.9 | -200 / +210 / +3500 |
+| `nba_live_spread_q3` | spread, quarter 3, EV >= 0.05 | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | -144 / -113 / +125 |
+
+**Read before trusting it.** Every warning sign written down before the grade
+was present: about half of each cell's units came from outlier prices, the
+deciding books' own moneyline prices showed no gain from the model, DraftKings
+alone lost in 2025-26 in all six cells, and the quarter-3 moneyline bets are
+mostly underdogs. 2026-27's re-run on the worker's live prices
+(`docs/nba_search_ingame27.md` section 12) read the quarter-3 spread +12.0% on
+51 bets, the quarter-3 moneyline -22.7% on 29 and the quarters 1-2 spread
+-5.7% on 36: too few bets to read. They ship regardless; each is judged on its
+live record.
+
+**Not built: the quarter-4 spread.** It failed the placebo bar in the grade.
+It is re-graded on the live record (this loop's own decisions, below) and
+added the day it passes. The quarters 1-2 and quarter-4 moneylines failed
+every bar.
+
+**The rule, as graded** (`models/nba_live_ig2.py` calls the graded code for each
+step). The model is fit for 2026-27 on every held season, 2020-21 to 2025-26.
+The prior is Pinnacle's last coherent pre-tip spread. The game state at a quote
+is the last ESPN play logged at or before its stamp, ties broken by play order
+(the 2026-27 search's stable join). A quote is fresh only if no point was scored
+between its stamp and the fetch, the same holds for its Pinnacle quote, and
+Pinnacle quoted within 60 seconds. A game whose first ESPN play is more than 15
+minutes before the listed tip, or with a 45-minute clock jump, is refused. A
+price between -100 and +100, or a deciding quote more than 6 points (spread) or
+0.25 no-vig (moneyline) from its Pinnacle pair, is dropped. Quarters 1-2 means
+periods 1-2 live or the break after quarter 1; quarter 3 means period 3 live or
+the break after it; the half is neither. Per game and rule, the first fetch
+holding a fresh quote decides: the side whose best offer has the higher model
+EV, at its best price, when EV >= 0.05 and the price is -200 or better. A fresh
+fetch that does not clear the cut spends the rule; a later fetch is never used.
+No 10-game wait (the prior is the market's pre-game spread). Regular season only.
+
+**The fetches are the grade's.** The graded fetches were the archive's
+purchases. Every in-play fetch fell on the hour, plus a half-hour fetch on 525
+of the 880 nights with a half-hour tip and on 1 of the 73 nights without one
+(the held quotes, 2020-21 to 2025-26). So the graded decision sat a median 43.7
+minutes after the first play for the quarters 1-2 spread (1,136 of its 1,475
+bets in quarter 2), and 75 to 104 minutes in for quarter 3. A loop polling
+every few seconds would decide every game in the first minute of each phase, a
+population never graded. The loop fetches at every hour on the hour and every
+listed tip time, nothing else.
+
+**What the loop reads live, and how fresh.** `nba_pbp` is written only after a
+game is final (`nba_pbp.fill_gaps`, the 6am run), so the loop reads ESPN's free
+summary endpoint itself, through the same parsing that wrote the 2026-27 rows
+the search graded. ESPN's play wallclock is when it LOGGED a play (74 plays of
+`NBA_2026-10-23_LAC_LAL` carry 02:35:53-54), and the grade read plays by that
+wallclock. The loop waits 45 seconds after a fetch before reading them
+(`NBA_LIVE_PBP_WAIT_SEC`), so a play logged before the fetch is in the read.
+Replayed on 2026-27's live rows with each fetch seeing only the plays logged by
+its served time plus 45 seconds, the loop makes all 86 quarter-3 moneyline and
+all 98 quarter-3 spread decisions at the same fetch as the search, and all 100
+of its quarters 1-2 spread decisions, with every one of the search's 116 bets at
+0.05 and no other. It makes 2 more quarters 1-2 decisions than the search,
+neither a bet. The search left 2 games out whole for a clock jump (doc 3.2); a
+live loop can only apply that rule from the moment it sees the jump.
+
+**Prices, cost, writes.** One bulk Odds API call per instant covers every game:
+h2h and spreads, the eight deciding books and Pinnacle (Pinnacle is what the
+freshness rule pairs with). Nine books stay inside one region group, so the
+feed's markets-times-regions billing gives 2 credits a call (the same NBA call
+with totals bills 3, `api_call_log` 2026-11-02 to 11-04); the loop logs the
+first call's `x-requests-last`. About ten instants a night, so about 20
+credits. Caps: 40 calls and 80 credits a process, and the shared
+`LIVE_DAILY_CREDIT_CAP` (`live_credit_telemetry`). The fetched rows go to `odds`
+as `in_play`.
+
+**Decided once, recorded once.** Every decision, bet or not, is a row in
+`nba_live_decisions`, one per game and rule, never replaced: the state, the
+prior, the model's mean and spread, every priced offer, and `play_lag_s` (the
+seconds from the newest ESPN play to the decision). A restart reads it, so a
+rule spent before a deploy is not decided again. The loop refuses to decide
+while that table is missing.
+
+**One game, no two bets that cannot both win** (mike, 2026-10-17). A later
+rule's bet that cannot win beside a standing one is declined; two decided in
+one pass that cannot both win are both declined. On the graded seasons this
+declines 66 of 3,181 bets, worth +15.98 units: the quarter-3 moneyline falls to
+619 bets, +31.0 units, +8.1%; the quarter-3 spread to 1,021 bets, +72.7 units,
++6.4%.
+
+**Published** to the NBA live Discord channel (`DISCORD_WEBHOOK_LIVE_NBA`, else
+the shared live channel, else the NBA channel) and push, by the loop after each
+bet and every 5 minutes while one is standing. Settled by the generic game path
+(`config.LIVE_MODELS`): spreads against `scored_line`, the HOME number;
+moneylines on `home_win`, overtime counted. No closing-line value in play.
+
+**NBA rows the live pulls receive after the tip are stored `in_play`**
+(2026-11-04). The refresh pass keeps receiving a game once it starts, and
+stored those rows `open`: on the 15 games of 2026-11-02, 5,735 of 16,508 `open`
+full-game NBA rows (35%) were stamped after the listed tip.
+`odds_ingestor.LIVE_PULL_IN_PLAY_SPORTS` relabels them at write time. Rows
+already stored are left as they are; the repair is
+`odds_ingestor.relabel_in_play('NBA', since)`, a production write, not run.
+
+Build and parity: `scripts/build_nba_live_ig2_artifact.py` (`--build`,
+`--parity-held`, `--parity-live27`; after the merge `--store` and
+`--register`). The parity replay reproduces every graded bet: 1,753 / 768 /
+1,210 bets over 2020-21 to 2025-26, the same book, side, number and price.
 
 ## No 10-game wait on the shooting-luck totals (mike, 2026-11-02)
 

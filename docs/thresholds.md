@@ -1329,6 +1329,45 @@ makes 1,143 bets, +74.40 units, +5.90%, [0.71, 11.69]: it now clears the bar it
 missed. No earlier fetch time beats tip minus 10 on the same games (research
 round 5 `h2h.csv`). `docs/sports/ncaab.md` has the seasons.
 
+## NBA — the in-play game-state model, three rules (2026-11-04, mike)
+
+mike, 2026-11-04: *"everything goes live now, that's why we do back testing ...
+and you continually improve models as you get more data."* IG-2's six passing
+cells (`docs/nba_models_2026.md` 7.3) are three rules; the EV 0.08 cells sit
+inside the 0.05 ones. The model, the loop and the warning signs:
+`docs/sports/nba.md`, "In play".
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | EV >= 0.05 (the harness's EV, a push returning the stake), at the first fresh fetch per game and rule, best of the eight deciding books | `MODEL_OWN_EV_FLOOR` (read by `models/nba_live_ig2.rule_cut`) |
+| prob / edge filter | 0.0 / 0.0: neither can bind beyond the cut, since an EV >= 0.05 bet has a positive edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS`, `MODEL_EDGE_THRESHOLDS` |
+| EV floor | 0.05, on its own probability. The row's probability is P(win given no push), whose `config.expected_value` is never below the rule's EV, so the platform gate cannot refuse a bet the rule took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, as graded, pinned | `MODEL_MIN_ODDS` |
+| early season | no wait (IG-2 had none: its prior is Pinnacle's pre-game spread) | the loop |
+| decided once | per game and rule, a row in `nba_live_decisions`, bet or not | `models/nba_live_loop.py` |
+
+**Graded 2021-22 to 2025-26** (each cell's 95% whole-day interval):
+
+| Model | Bets | Units | ROI | interval | Seasons positive | 2025-26 | Prices (min / median / max) |
+|---|---|---|---|---|---|---|---|
+| `nba_live_spread_q12` | 1,475 | +103.6 | +6.2% | +1.4 .. +11.1 | 4 of 5 | +6.0% on 334 | -160 / -114 / +114 |
+| `nba_live_ml_q3` | 651 | +40.1 | +10.0% | +0.1 .. +19.9 | 5 of 5 | +6.7% on 159 | -200 / +210 / +3500 |
+| `nba_live_spread_q3` | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | 5 of 5 | +5.5% on 286 | -144 / -113 / +125 |
+
+The neighbouring cells: EV >= 0.08 also passed in all three (948 bets +6.5%,
+545 bets +15.8%, 751 bets +9.2%); EV >= 0.02 failed the interval alone in all
+three. The quarter-4 spread failed the placebo bar and is not built.
+
+**Under the one-game rule** (two bets that cannot both win are not both made)
+the graded record loses 66 bets worth +15.98 units: the quarter-3 moneyline is
+619 bets +8.1%, the quarter-3 spread 1,021 bets +6.4%; the quarters 1-2 spread
+is unchanged.
+
+**Review at 50 settled bets each** (gate standing, CLAUDE.md §2). Read beside
+the ROI: the share of bets at an outlier price, DraftKings' share, the underdog
+share of the moneyline, and `play_lag_s` in `nba_live_decisions`.
+
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the
