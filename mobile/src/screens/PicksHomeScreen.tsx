@@ -146,6 +146,7 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
 import { useScoreboard } from '@/hooks/useScoreboard';
 import { useAuth } from '@/hooks/useAuth';
+import { freeSegmentOpensPaywall } from '@/lib/authShell';
 import { restorePurchases } from '@/lib/billing';
 import { type ScoreboardSport } from '@/lib/scoreboard';
 
@@ -337,10 +338,11 @@ export function PicksHomeScreen() {
   // switch tabs and land on whatever segment was already showing. The param is
   // cleared after use so a second tap works and a back-navigation does not
   // re-trigger it.
-  // A free member can use the Record tab (Matt, 2026-10-27). Today, Signals
-  // and Live lock. Scoreboard stays visible and soft-locks its content.
-  // `contentLocked` is false while billing is dark, and while the
-  // subscription row is still loading, so a subscriber does not flash the lock.
+  // A free member keeps Record and this teaser (Matt, 2026-10-27). Signals
+  // and Live Signals open the same paywall as a locked pick. Scoreboard stays
+  // visible and soft-locks its content. `contentLocked` is false while
+  // billing is dark, and while the subscription row is still loading, so a
+  // subscriber does not flash the lock.
   const { contentLocked: signalsLocked, hold: picksHold } = useMembership();
   const { user } = useAuth();
   const board = useScoreboard(
@@ -353,13 +355,22 @@ export function PicksHomeScreen() {
     navigation.navigate('Paywall');
   }, [navigation]);
   const selectView = useCallback((next: PicksView) => {
+    if (signalsLocked && freeSegmentOpensPaywall(next)) {
+      openPaywall();
+      return;
+    }
     setView(next);
-  }, []);
+  }, [openPaywall, signalsLocked]);
+
+  useEffect(() => {
+    if (signalsLocked && freeSegmentOpensPaywall(view)) setView('today');
+  }, [signalsLocked, view]);
 
   useEffect(() => {
     if (!requestedView || picksHold) return;
     const next = (requestedView as string) === 'lines' ? 'scoreboard' : requestedView;
-    if (signalsLocked && next !== 'scoreboard') openPaywall();
+    if (signalsLocked && freeSegmentOpensPaywall(next)) openPaywall();
+    else if (signalsLocked) setView(next === 'scoreboard' ? 'scoreboard' : 'today');
     else setView(next);
     navigation.setParams({ view: undefined } as never);
   }, [requestedView, navigation, signalsLocked, picksHold, openPaywall]);
@@ -710,7 +721,7 @@ export function PicksHomeScreen() {
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
             <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => selectView('today')} onLayout={onSegmentLayout('today')} />
-            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="Signals" count={signalsLocked || todayUnknown ? null : live.length} hideCount={signalsLocked} active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -719,11 +730,12 @@ export function PicksHomeScreen() {
                 dot the sport chips and the LIVE pill on a card use. */}
             <SubTabBtn
               label="Live Signals"
-              count={liveUnknown ? null : liveData.length}
+              count={signalsLocked || liveUnknown ? null : liveData.length}
+              hideCount={signalsLocked}
               active={view === 'live'}
               onPress={() => selectView('live')}
               live
-              dot={liveData.length > 0}
+              dot={!signalsLocked && liveData.length > 0}
               onLayout={onSegmentLayout('live')}
             />
             <SubTabBtn

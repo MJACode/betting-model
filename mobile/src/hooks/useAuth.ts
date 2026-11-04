@@ -95,6 +95,11 @@ export interface UseAuth {
   signOut: () => Promise<void>;
 }
 
+/** The session the listener already applied. React state can lag one frame. */
+export function readAuthStatus(): AuthStatus {
+  return state.status;
+}
+
 export function useAuth(): UseAuth {
   const [local, setLocal] = useState<AuthState>(state);
 

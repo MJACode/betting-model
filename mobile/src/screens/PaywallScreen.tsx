@@ -44,7 +44,7 @@ type PaywallRoute = RouteProp<RootStackParamList, 'Paywall'>;
 
 /** What a subscription buys. The Discord line depends on the selected plan. */
 const INCLUDED = [
-  'Every BET signal, all 7 sports',
+  'Every BET signal, all 8 sports',
   'A recommended stake, in units, on every pick',
   'Live in-play signals as games move',
   'Player props, parlays and same-game builder',

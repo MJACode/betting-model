@@ -4,6 +4,8 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 
 import { routeForPush, type PushRoute } from '@/lib/pushRoute';
 import { setSportForVisit } from '@/hooks/useSportFilter';
+import { readAuthStatus } from '@/hooks/useAuth';
+import { AUTH_ENABLED } from '@/lib/authConfig';
 import type { RootStackParamList } from '@/types';
 
 type NavRef = NavigationContainerRef<RootStackParamList>;
@@ -39,6 +41,9 @@ function clearNativeLastResponse(): void {
 
 /** Perform a resolved route. One place, so the two callers cannot drift. */
 function navigateTo(navRef: NavRef, route: PushRoute): void {
+  // The shell is signed-in only once auth is on. A tap that launched the app
+  // while signed out stays on SignIn; it is not replayed into a pick.
+  if (AUTH_ENABLED && readAuthStatus() === 'signedOut') return;
   switch (route.kind) {
     case 'pick':
       navRef.navigate('PickDetail', { pickId: route.pickId });

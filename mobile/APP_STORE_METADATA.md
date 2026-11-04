@@ -133,7 +133,7 @@ Golf is not in the sport list. The iPhone layout is the one to test. iPad is not
 
 8. Settings. Change sportsbooks and confirm Picks and Stats follow that set. Set your state. It is only for opening BetMGM, BetRivers, and Caesars links, and it stays on the device. The bankroll field is optional and display-only: it turns 1 unit into dollars and does not change the published stake. Leave it blank and confirm no dollar figure appears that you did not type. Turn notifications on only if you want the prompt. Send a feedback note if you can, and confirm the thread opens.
 
-9. Account, on a default build (no EXPO_PUBLIC_AUTH_ENABLED). Settings should not show Sign in, Delete account, or Subscription. Community should show "Join our Discord" as an invite link. If this build set the auth flag, Sign in should offer email code, Apple, and Google, and Delete account should be on the account card. Signing in is optional. Subscriptions appear only when billing is also on. Discord account linking replaces that invite only when that flag is on and you are signed in.
+9. Account, on a default build (no EXPO_PUBLIC_AUTH_ENABLED). Settings should not show Sign in, Delete account, or Subscription. There is no public Discord invite. If this build set the auth flag, the app opens on Sign in (email code, Apple, and Google) and there is no skip. Delete account is on the account card after sign-in. If billing is also on, a sign-in that is not subscribed opens the paywall. Closing it leaves Record and the picks teaser. Signals and Live Signals open that same paywall. The Discord invite appears only when the subscription status is active.
 
 10. Hand-off. From a pick or the bet slip, open a sportsbook you have installed. The app should leave Signalbase for that book. The wager is not placed inside Signalbase. If the state is unset, BetMGM, BetRivers, and Caesars should not open a broken link.
 
@@ -143,7 +143,7 @@ Known limits of the source this copy describes:
 - Automatic bet-history sync is labeled not switched on yet.
 - No in-app age gate. The website terms say 21+.
 ```
-3896 / 4000
+3975 / 4000
 
 ## TestFlight — Test Information
 - **First Name / Last Name:** Matt Alksninis
@@ -151,7 +151,7 @@ Known limits of the source this copy describes:
 - **Phone:** (your number)
 - **Sign-in required:** No
 
-Sign-in required stays No while `AUTH_ENABLED` is off. If a TestFlight build is made with `EXPO_PUBLIC_AUTH_ENABLED=true`, change this to Yes only if you want testers to sign in before they start. The app still treats sign-in as optional: Picks, Record, and Stats do not require it. Saving an NFL model does.
+Sign-in required stays No while `AUTH_ENABLED` is off. A build with `EXPO_PUBLIC_AUTH_ENABLED=true` requires sign-in before the tabs. Set Sign-in required to Yes for that binary. Picks, Record, and Stats are not available signed out.
 
 ---
 
@@ -160,7 +160,7 @@ Sign-in required stays No while `AUTH_ENABLED` is off. If a TestFlight build is 
 Signalbase (product name Signal Base) is a sports analytics app. It shows model output, a public record in units, stats, and bets the user tracks or logs. It is not a sportsbook.
 
 - No wager is placed, accepted, or settled in the app. A bet button opens a third-party sportsbook app or site. The user places any wager there.
-- No account is required in the source configuration. Sign-in, delete account, subscriptions, and Discord account linking are compiled in and hidden unless the build sets EXPO_PUBLIC_AUTH_ENABLED (and, for payments or Discord linking, those flags). eas.json does not set them. If the binary you are reviewing has them on, Settings shows Sign in. Email is a 6-digit code. Apple and Google are also offered. Delete account is on that same card.
+- No account is required in the source configuration. Sign-in, delete account, subscriptions, and Discord account linking are compiled in and hidden unless the build sets EXPO_PUBLIC_AUTH_ENABLED (and, for payments or Discord linking, those flags). eas.json does not set them. If the binary you are reviewing has auth on, the app opens on Sign in. Email is a 6-digit code. Apple and Google are also offered. There is no skip. Delete account is on the account card after sign-in. If billing is also on, a sign-in that is not subscribed opens the paywall; closing it leaves Record and a picks teaser, and Signals uses that same paywall. The Discord invite is shown only for an active subscription.
 - The anon Supabase key in the app reads model output. Row-level security limits that role. Crash reports, in-app feedback, and the user's sportsbook checklist are written under an app-generated device id. The optional bankroll and the state picker stay on the device.
 - Notifications are off until the user opts in. Opting in stores a push token for that device.
 - Settings → Connected books can start a SharpSports link for DraftKings or FanDuel. The screen says automatic read-only bet sync is not switched on yet. The app does not receive a sportsbook password.
@@ -168,7 +168,7 @@ Signalbase (product name Signal Base) is a sports analytics app. It shows model 
 
 To review: open the app, finish or skip the intro, confirm the sportsbook step, then browse Picks, Record, Performance, Models, and Stats. No demo account is required on a build with auth off.
 ```
-1639 / 4000
+1892 / 4000
 
 ## Age rating
 - Frequent/Intense Simulated Gambling: **Yes** → results in 17+
