@@ -986,7 +986,7 @@ graded games.
 | decision fetch | 5 to 10.5 minutes before tip, the tip-minus-10 call or its retries | `scripts/ncaab_first_half_spread_card.DECISION_LEAD_MIN` |
 | decided once | a row in `ncaab_first_half_spread_decisions`, bet or not | the card |
 | settlement | the first half's margin plus the home number (period 1 of `ncaab_period_scores`); pending while the periods are missing or do not add up to the final | `tracking/paper_tracker._ncaab_first_half_points` |
-| closing value | not measured: no fetch after tip minus 10, and the decision fetch is never read as its own close | `tracking/paper_tracker._closing_odds`, the CLV migration |
+| closing value | the bet book's newest pre-tip row on the same line, strictly after the pick was created. The card decides on the tip-minus-10 call, the last fetch, so that pull is the price taken and a spread usually stays unmeasured | `tracking/paper_tracker._closing_odds`, the CLV migration |
 | kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and the card | `scripts/ncaab_first_half_window.enabled` |
 | frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_spread_2027.json` |
 
@@ -1006,8 +1006,9 @@ graded games.
   Hard Rock 43, BetMGM 40, DraftKings 17 and Caesars 4.
 - **It is an away-side card.** 971 of the 1,253 bets are the away team (282
   home); 178 of 243 in 2025-26.
-- **No closing value can be measured.** The research has no quote after tip
-  minus 10, and live takes none.
+- **A spread decided at tip minus 10 usually has no close.** That call is the
+  last fetch, and it is the price taken. A later pre-tip row at the same book
+  and line would be the close; the decision pull is not.
 - **Live inputs are fresher than the evidence's.** The evidence's full-game
   consensus at tip minus 10 came from snapshots bought about an hour before
   tip; live it is the five-minute capture. The closing lines behind the team
@@ -1155,7 +1156,7 @@ difference 4e-16).
 | decision fetch | 55 to 60.5 minutes before tip, the tip-minus-60 call or its retries | `scripts/ncaab_first_half_total_card.DECISION_LEAD_MIN` |
 | decided once | a row in `ncaab_first_half_total_decisions`, bet or not | the card |
 | settlement | the first half's points against the line (period 1 of `ncaab_period_scores`); pending while the periods are missing or do not add up to the final | `tracking/paper_tracker.first_half_points` |
-| closing value | not measured live: no fetch after tip minus 10, and the decision call is never read as its own close | `tracking/paper_tracker._closing_odds`, the CLV migration |
+| closing value | the bet book's newest pre-tip row on the same line pulled after the pick was created. The card decides on the tip-minus-60 call; the later calls through tip minus 10 are the close. The decision pull is not the close | `tracking/paper_tracker._closing_odds`, the CLV migration |
 | kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and both first-half cards | `scripts/ncaab_first_half_window.enabled` |
 | frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_total_2027.json` |
 
@@ -1172,7 +1173,8 @@ difference 4e-16).
 - **It beat the close by nothing.** Re-priced at the ten-minute close, its
   bets were worth -1.95% on average: the market did not move toward them. The
   profit is information the close lacks, not stale lines being corrected. Live,
-  no close is taken, so closing value stays unmeasured.
+  the close is a later pre-tip pull at the same book and line, not the decision
+  call. No such pull leaves the pick unmeasured.
 - **It is an under card.** 1,969 of the 2,529 bets (78%) are unders (+67.84
   units); 560 overs made +57.93.
 - **Hard Rock posts one first-half total a game at skewed prices.** It took

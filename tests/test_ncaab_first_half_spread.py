@@ -309,14 +309,20 @@ def test_the_settler_routes_a_first_half_spread_through_the_first_half():
     assert "first_half_points(conn, game_id, home_score, away_score)" in body
 
 
-def test_a_first_half_spread_close_is_read_from_close_rows_only():
-    """Its last pre-tip row is the decision fetch itself; read as the close it
-    would grade every pick at 0.0, for good."""
+def test_an_ncaab_first_half_close_is_a_later_pre_tip_row():
+    """The feed files every pull 'open'. NBA first half still wants a 'close' row.
+    The decision pull is not the close."""
     src = (ROOT / "tracking" / "paper_tracker.py").read_text(encoding="utf-8")
-    assert 'market in ("totals_h1", "spreads_h1")' in src[src.index("snapshot_filter = ("):][:400]
+    close_only = src[src.index("def _close_rows_only"):src.index("def _real_close")]
+    assert "team_totals" in close_only
+    assert "_ncaab_first_half_market" in close_only
+    assert "snapshot_at::timestamptz >" in src[src.index("def _closing_odds"):src.index("def _sharp_close_book")]
     sql = (ROOT / "data/migrations/clv_standard_v2_2026_10_14.sql").read_text(encoding="utf-8")
-    assert sql.count("s.game_market IN ('totals_h1', 'spreads_h1'))") == 3
-    assert sql.count("s.game_market NOT IN ('totals_h1', 'spreads_h1')") == 3
+    assert sql.count(
+        "s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
+    assert sql.count("o.snapshot_at::timestamptz > s.created_at") == 3
+    assert sql.count(
+        "s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
 
 
 # ── the card's rows ──────────────────────────────────────────────────────────

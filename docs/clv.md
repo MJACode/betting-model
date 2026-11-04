@@ -85,6 +85,15 @@ Game rows require `snapshot_type <> 'in_play'` and
 still bounded by the start. A pick with `created_at` after first pitch is
 not measured.
 
+NCAAB first-half totals and spreads (`totals_h1`, `spreads_h1`) are not the
+NBA first-half shape. `data/ingestors/ncaab_first_half_odds.py` files every
+pull as `open`; it does not write a `close` row. The close is that bet book's
+newest pre-tip row on the same line, and only a row pulled strictly after the
+pick was created. The decision pull is the price taken. No such row leaves the
+pick unmeasured (`clv_method` stays unset). NBA first-half markets and team
+totals still read `snapshot_type = 'close'` only. A null close does not mark
+a pick measured.
+
 ## Worked examples
 
 Pinned by `tests/test_clv_standard_v2.py` and `tests/test_clv_math.py`.
@@ -129,4 +138,8 @@ and whose method is not yet `standard_v2`. A row with a measurable close or
 line move is stamped and captured. A row that cannot be measured, and whose
 game started more than six hours ago or that already carried an older
 stamp, is stamped `standard_v2` with NULLs so the old number leaves the
-average. A recent never-captured miss is left for the Python backfill.
+average, except an NCAAB first-half total or spread: that row stays
+unmeasured. A recent never-captured miss is left for the Python backfill.
+`scripts/recompute_empty_clv.py` recomputes rows already stamped
+`standard_v2` with every closing field empty. It is a dry run until
+`--apply`.
