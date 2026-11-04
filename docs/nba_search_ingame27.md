@@ -145,6 +145,39 @@ not a judgement on a price.
 `--smoke` prints the extremes of every line and price read, by season, the highest-EV offers, every
 row rules 1, 3 and 4 drop, and the gap to Pinnacle's paired number for every deciding quote.
 
+### 3.1 Changes after the data was first read, before any cell was graded (2026-11-03)
+
+The first `--smoke` attempt stopped before any count was printed. Reading the 2026-27 rows and the
+machine's files found three things. No cell had been graded and no bet counted when these were
+written.
+
+1. **Rule 5: a game whose ESPN clock starts before its listed tip is left out whole.**
+   - Two 2026-11-01 games, `NBA_2026-11-01_BOS_ORL` and `NBA_2026-11-01_BKN_IND`, have their
+     first ESPN play 60 minutes before the listed tip. That was the night the US clocks went back.
+   - The prices say the listed tip is right and ESPN's clock is an hour early. In BOS_ORL, ESPN
+     has Orlando 10 points up at 21:01 UTC, yet Pinnacle's moneyline sat at its pre-game level
+     (+244 / -282 at 20:17, +243 / -289 at 21:17) and first moved at 22:17 (+809).
+   - Joined as they are, those plays would give a quote the score from up to an hour after it.
+     So a game whose first play is more than 15 minutes before its listed tip is dropped.
+   - In 2026-27 the listed tip sits close to the first play: the other 105 games start between
+     4.4 minutes before and 1.2 minutes after it. In the held quotes no game is affected: every first play is at least 0.2 minutes
+     after the listed tip. The lab stops if one ever is.
+2. **Step 2's training states come from `nba_pbp`, not the ESPN release files.** The release
+   folders on this machine are empty (`%TEMP%/nba_free_data/sportsdataverse_espn/pbp_2025` and
+   the rest, emptied 2026-10-26). `nba_pbp` and `nba_pbp_box` hold the same rows: the ingestor
+   wrote them from those files. So:
+   - the held seasons' plays (2020-21 to 2025-26, regular season) and box rows (2019-20 to
+     2025-26) are read once, read-only, into the scratch folder (`--pull-held`), by indexed key
+     in chunks of 60 games with a pause;
+   - top players' prior minutes come from `nba_pbp_box` for every season, so 2026-27's
+     "last season" fallback reads the 2025-26 box rows from that pull (section 1.3 named the
+     release file);
+   - as a check, IG-2's own window (6:00 to 47:30 left) is rebuilt the same way for 2024-25 and
+     compared with IG-2's stored states. Section 11 reports how many states match.
+3. **`nba_pbp` is read by `espn_game_id`.** Its only index is (`espn_game_id`, `play_no`). The
+   first 2026-27 pull filtered it by `game_id`, which read the whole table twice. The rows it
+   returned are the same; every later read goes through the index.
+
 ---
 
 ## 4. Step 1: IG-2's 18 cells on 2026-27, unchanged
