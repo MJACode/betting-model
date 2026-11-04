@@ -94,9 +94,12 @@ invokes `python run_pipeline.py` again the same America/New_York calendar day
 and posts an ops Discord note. A deploy that kills that retry starts another
 one: on 2026-11-04 the 11:13Z retry stayed `finished_at` NULL and the old
 two-start cap refused every later boot. The in-process lock is the double-run
-guard. A crash-loop ceiling of 8 ledgered starts stops a container that dies
-and boots all day. A successful daily already today is a no-op. Kill switch:
-`RUN_DAILY_RETRY=0`. See `tracking/daily_retry.py`.
+guard. Aborted starts relaunch until 4 ledgered starts
+(`MAX_DAILY_STARTS_PER_ET_DAY`). A daily that finishes and fails before the
+MLB freshness steps for a reason other than aborted gets one retry, then
+stops, so an upstream outage does not buy odds on every boot. The ops note
+names which start this attempt is. A successful daily already today is a
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. See `tracking/daily_retry.py`.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`
@@ -122,7 +125,9 @@ again before the daily catch-up decides. It stamps unfinished `hourly`,
 `ok=false`, `failed_steps='aborted'`). It does not touch `manual`. A daily
 this process opened is stamped the same way only when it is older than 75
 minutes and the daily lock is free — a slow run still inside the subprocess
-stays open. The previous-process cutoff freezes on the first call, so a
+stays open. That 75-minute cutoff is daily only. An hourly or evening this
+process opened stays unfinished, so `refresh_pass_completion` can still see
+a hang past 2 hours. The previous-process cutoff freezes on the first call, so a
 second call cannot abort a pass this process has just opened. The one-off
 `abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
 view-migration pass if boot has not already. This sweep does not re-run

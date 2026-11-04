@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, daily relaunch: the 75-minute stale cutoff is daily-only, aborted starts relaunch until 4, a finished non-aborted failure gets one retry, the ops note names the start number; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a deploy-killed daily is stamped aborted and the boot catch-up starts today's daily again when none finished and none is running; daily_pipeline_completion flags an unfinished daily at 75 min; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Review rate limit uses the edge address and a global hourly ceiling; a faked first forwarded hop does not change the bucket |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Review code removed from the repo: Password is a placeholder, failures are counted per hashed caller, a full bucket is refused before the code is compared; master merged; migration still not applied |

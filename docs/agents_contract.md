@@ -132,10 +132,12 @@ twice; a daily that finished with only later-step failures (typically
 `health_check`) is treated as complete for MLB freshness. A deploy that kills
 the retry starts it again the same ET day (2026-11-04: the 11:13Z retry was
 left unfinished and the old two-start cap never relaunched it). Boot stamps
-that unfinished row `aborted` first. A crash-loop ceiling
-(`MAX_DAILY_STARTS_PER_ET_DAY`, 8) stops a container that dies and boots all
-day. Kill switch: `RUN_DAILY_RETRY=0`. No model, threshold, pause or
-calibration change.
+that unfinished row `aborted` first. Aborted starts relaunch until
+`MAX_DAILY_STARTS_PER_ET_DAY` (4). A daily that finishes and fails before the
+MLB freshness steps for any other reason gets one retry
+(`MAX_NON_ABORTED_FAILURES`, 2), then stops, so an upstream outage does not
+buy odds on every boot. The ops note names which start this is. Kill switch:
+`RUN_DAILY_RETRY=0`. No model, threshold, pause or calibration change.
 
 ---
 

@@ -361,6 +361,61 @@ def test_a_daily_this_process_started_stays_open_without_a_stale_cutoff(
     assert _row(db, "daily-live")[0] is None
 
 
+def test_the_stale_cutoff_does_not_abort_a_refresh_this_process_opened(
+        db, monkeypatch):
+    """The daily lock is free, so the caller passes stale_before. A daily
+    past that cutoff is aborted. An hourly and an evening this process
+    opened, also older than 75 minutes, stay open. Stamping them aborted
+    would hide the hang refresh_pass_completion exists to catch at 2 hours.
+
+    started_before is the boot cutoff. All three rows are after it, so only
+    the daily clause of the stale cutoff can close one."""
+    _insert_open(db, "daily-stale", "daily", "2026-11-04T11:14:00+00:00")
+    _insert_open(db, "hourly-hung", "hourly", "2026-11-04T11:00:00+00:00")
+    _insert_open(db, "evening-hung", "evening", "2026-11-04T10:30:00+00:00")
+    db.commit()
+    rl = _ledger(monkeypatch, _Conn(db))
+    n = rl.abort_prior_refresh_orphans(
+        _Conn(db),
+        started_before="2026-11-04T10:00:00+00:00",
+        stale_before="2026-11-04T12:00:00+00:00",
+        kinds=("hourly", "evening", "daily"),
+    )
+    assert n == 1
+    fin, ok, failed = _row(db, "daily-stale")
+    assert fin is not None and not ok and failed == "aborted"
+    assert _row(db, "hourly-hung")[0] is None
+    assert _row(db, "evening-hung")[0] is None
+
+
+def test_a_hung_hourly_stays_open_when_the_daily_lock_is_free(db, monkeypatch):
+    """Same shape through the scheduler: pipeline service, lock free, so
+    stale_before is set. The hourly this process opened 90 minutes ago
+    stays unfinished. The daily of the same age is aborted."""
+    from datetime import datetime, timedelta, timezone
+    import scheduler
+    from tracking import run_ledger
+
+    boot = datetime.now(timezone.utc) - timedelta(hours=3)
+    started = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
+    monkeypatch.setattr(run_ledger, "_BOOT_CUTOFF", boot.isoformat())
+    monkeypatch.setattr(run_ledger, "_ensure_table", lambda c: None)
+    _insert_open(db, "hourly-hung", "hourly", started)
+    _insert_open(db, "daily-stale", "daily", started)
+    db.commit()
+
+    monkeypatch.setattr(run_ledger, "get_connection", lambda: _Conn(db))
+    import data.db as dbmod
+    monkeypatch.setattr(dbmod, "get_connection", lambda: _Conn(db))
+    monkeypatch.setattr(scheduler, "SERVICE_ROLE", "pipeline")
+    assert not scheduler._DAILY_LOCK.locked()
+
+    assert scheduler.abort_orphaned_refresh_runs() == 1
+    assert _row(db, "hourly-hung")[0] is None
+    fin, ok, failed = _row(db, "daily-stale")
+    assert fin is not None and not ok and failed == "aborted"
+
+
 def test_a_daily_older_than_the_max_is_aborted_when_the_caller_says_so(
         db, monkeypatch):
     """Lock is free and the row this process opened is past the max.

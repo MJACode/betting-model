@@ -337,7 +337,8 @@ def _publish_new_signals(label: str) -> None:
 
 
 def run_daily_pipeline(*, retry_reason: str | None = None,
-                       retry_source: str | None = None) -> None:
+                       retry_source: str | None = None,
+                       retry_start_number: int | None = None) -> None:
     # Bare invocation == run_pipeline.run_daily_pipeline() (settle, ingest, score,
     # game log, prop scoring, health check).
     #
@@ -350,12 +351,18 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         return
     try:
         if retry_reason:
-            log.info("daily-pipeline retry (%s): %s",
-                     retry_source or "catch-up", retry_reason)
+            log.info("daily-pipeline retry (%s) start %s: %s",
+                     retry_source or "catch-up",
+                     retry_start_number if retry_start_number is not None
+                     else "?",
+                     retry_reason)
             try:
                 from tracking.daily_retry import announce_daily_retry
                 announce_daily_retry(
-                    retry_reason, source=retry_source or "catch-up")
+                    retry_reason,
+                    source=retry_source or "catch-up",
+                    start_number=retry_start_number,
+                )
             except Exception:  # noqa: BLE001 — the retry is the point
                 log.exception("daily-pipeline retry: ops note failed")
         _wait_for_nhl_window("daily-pipeline")
@@ -2108,10 +2115,11 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
     ET so a worker that was down all morning still retries the same ET day.
     Decision lives in tracking.daily_retry so the guards are unit-tested
     without starting a scheduler: aborted or unfinished with this process
-    not running it → run; successful → skip; in-process → skip; crash-loop
-    ceiling → skip. The open row is stamped aborted first, or a killed
-    retry looks in progress and the ceiling never sees that it is dead
-    (2026-11-04).
+    not running it → run, until the ceiling; a finished non-aborted failure
+    gets one retry, then skip; successful → skip; in-process → skip. The
+    open row is stamped aborted first, or a killed retry looks in progress
+    and the ceiling never sees that it is dead (2026-11-04). The ops note
+    names which start this attempt is.
 
     Best-effort: raising here must not stop the scheduler starting, and must
     not sink the pipeline watch's Discord post (the caller wraps this).
@@ -2148,8 +2156,14 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         if decision.action != "run":
             log.info("daily catch-up [%s]: skip — %s", source, decision.reason)
             return {"status": "skipped", "reason": decision.reason}
-        log.info("daily catch-up [%s]: run — %s", source, decision.reason)
-        run_daily_pipeline(retry_reason=decision.reason, retry_source=source)
+        start_number = len(runs) + 1
+        log.info("daily catch-up [%s]: run start %s — %s",
+                 source, start_number, decision.reason)
+        run_daily_pipeline(
+            retry_reason=decision.reason,
+            retry_source=source,
+            retry_start_number=start_number,
+        )
         return {"status": "run", "reason": decision.reason}
     except Exception:  # noqa: BLE001 — never block startup / the watch
         log.exception("daily catch-up [%s] failed (scheduler continues)", source)
@@ -2175,7 +2189,9 @@ def abort_orphaned_refresh_runs() -> int:
     still running. The previous-process cutoff freezes on the first call, so
     a second call cannot abort a pass this process has since opened. A daily
     this process opened is closed only when it is older than the max run and
-    this process is not inside the daily (the lock is free). Best-effort: a
+    this process is not inside the daily (the lock is free). That cutoff is
+    daily only: an hourly or evening this process opened stays unfinished
+    so the 2-hour refresh check can still see a hang. Best-effort: a
     ledger failure must not stop the scheduler.
     """
     from tracking.run_ledger import REFRESH_RUN_KINDS
