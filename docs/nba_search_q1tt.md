@@ -375,7 +375,7 @@ minus the team-total quote's own centre, in points, over every team and game at 
 - **So every family A cell is under 200 bets** (section 11.4) and fails bar 1 by construction. By
   section 7 its answer is **too few games to tell**, and its bets are graded and printed anyway. The
   measured reason is stronger than thinness: a book's team total says what its own spread and total
-  say, to within a tenth of a point.
+  say, to within a tenth or two of a point (the spreads in the table, 0.10 to 0.18).
 
 ### 11.2 Games per season
 
