@@ -214,19 +214,23 @@ or a paid plan. Record stays available without one.
 
 App Store Connect, App Review Information. **Sign-in required: Yes.**
 
-User name and Password are ready to paste. Do not submit while the Sandbox
-Apple ID line still says TODO.
+User name is ready to paste. Password is a placeholder. Do not submit while
+Password or the Sandbox Apple ID line still says TODO.
 
-The app accepts `847291` only for `review@signalbase-ai.com`, and only after
-the edge-function secrets `APP_REVIEW_DEMO_EMAIL` and `APP_REVIEW_DEMO_OTP`
-are set to those same values. The code is not in the app binary. No mailbox
-has to exist for this address.
+This repo is public. Do not write the six-digit code here. Matt picks a fresh
+code that has never been in git, pastes it only into App Store Connect, and
+sets `APP_REVIEW_DEMO_OTP` to that same value. `APP_REVIEW_DEMO_EMAIL` is
+`review@signalbase-ai.com`. No mailbox has to exist for this address.
+
+After App Review approves the binary, unset `APP_REVIEW_DEMO_OTP` (or replace
+it with a new code that is not the one just used). Leaving the secret set
+keeps this address open.
 
 - **User name:** review@signalbase-ai.com
-- **Password:** 847291. The app has no password field. Type the User name into the email field first, then tap Email me a code, or Continue with Apple, or Continue with Google. Type 847291. No email is sent.
+- **Password:** TODO — Matt fills a fresh 6-digit code in App Store Connect and sets APP_REVIEW_DEMO_OTP to the same value. The app has no password field. Type the User name into the email field first, then tap Email me a code, or Continue with Apple, or Continue with Google, and type that code. No email is sent.
 - **Sandbox Apple ID for StoreKit:** TODO — Matt fills the Sandbox tester that completes the purchase sheet, if it is different from the sign-in account. Purchases are StoreKit sandbox, not a production charge.
 
-The review notes repeat this email and code so the reviewer does not wait for a message.
+The review notes tell the reviewer to use the Password field. They do not contain the code.
 
 ---
 
@@ -238,8 +242,8 @@ No wager is placed, accepted, or settled in the app. A bet button opens a third-
 
 Sign-in is required. There is no guest mode and no skip. The first screen is Sign in to Signalbase. The app has no password field.
 
-Demo account, same as the User name and Password fields: review@signalbase-ai.com and code 847291.
-Type review@signalbase-ai.com into the email field first. Then tap Email me a code, or Continue with Apple, or Continue with Google. Any of those opens the code step for this address. Type 847291. Do not wait for an email. No email is sent. Apple or Google with an empty email field starts that provider instead of this account.
+Demo account: review@signalbase-ai.com. The Password field above this note is the 6-digit code. This note does not contain that code.
+Type review@signalbase-ai.com into the email field first. Then tap Email me a code, or Continue with Apple, or Continue with Google. Any of those opens the code step for this address. Type the code from the Password field. Do not wait for an email. No email is sent. Apple or Google with an empty email field starts that provider instead of this account.
 
 Premium is an auto-renewable subscription sold only through StoreKit. Review purchases in the sandbox. Use a Sandbox Apple ID (Settings, App Store, Sandbox Account). Do not use a production card. The paywall has no external checkout.
 - Weekly, $9.99, no free trial, button Subscribe. Product id com.mja.bettingpicks.premium.weekly.
@@ -253,7 +257,7 @@ Discord: Settings, Discord for members. During a trial the screen does not show 
 
 To review: sign in, subscribe or start a trial in the sandbox, then browse Picks (All, Signals, Live Signals, Scoreboard), Record, Performance, Models, and Stats. Confirm a trial does not reveal the Discord invite, and that a paid plan does.
 ```
-3143 / 4000
+3204 / 4000
 
 ## Age rating
 - Frequent/Intense Simulated Gambling: **Yes** → results in 17+

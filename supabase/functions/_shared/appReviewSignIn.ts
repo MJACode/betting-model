@@ -10,6 +10,7 @@ export const REVIEW_FAILURE_LIMIT = 8;
 export const REVIEW_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 
 export const REVIEW_NOT_CONFIGURED = "Review sign-in is not configured.";
+export const REVIEW_UNAVAILABLE = "Review sign-in is unavailable. Try again.";
 export const REVIEW_CODE_MISMATCH = "That code doesn't match. Check it and try again.";
 export const REVIEW_TOO_MANY = "Too many tries. Wait a few minutes and try again.";
 export const REVIEW_MINT_FAILED = "Could not sign in. Try again.";
@@ -72,4 +73,31 @@ export function reviewCredentialsMatch(
 /** `recentFailures` includes the failure just recorded. */
 export function reviewFailureLimitReached(recentFailures: number): boolean {
   return recentFailures > REVIEW_FAILURE_LIMIT;
+}
+
+/**
+ * First address in `x-forwarded-for`, else `x-real-ip`, else a shared
+ * label. Callers with no address share one bucket and do not spend the
+ * budget of a caller who sent one.
+ */
+export function clientIpFromHeaders(
+  forwardedFor: string | null | undefined,
+  realIp: string | null | undefined,
+): string {
+  const first = (forwardedFor ?? "").split(",")[0]?.trim() ?? "";
+  if (first) return first;
+  const real = (realIp ?? "").trim();
+  if (real) return real;
+  return "unknown";
+}
+
+/** SHA-256 hex. The attempt table stores this, not the address. */
+export async function hashAttemptBucket(ip: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(ip),
+  );
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

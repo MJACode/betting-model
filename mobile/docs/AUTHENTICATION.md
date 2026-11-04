@@ -184,25 +184,29 @@ JS-only, so: **Actions → Mobile OTA update (production) → Run workflow**.
 
 ## App Review demo account
 
-Apple's reviewer signs in as `review@signalbase-ai.com` with the six-digit
-code in `APP_STORE_METADATA.md` (User name, Password, and the review notes).
-The app has no password field. That code is not in the binary.
+Apple's reviewer signs in as `review@signalbase-ai.com`. The app has no
+password field. The six-digit code is not in this repo. The repo is public,
+so a code that has been committed is burned. Matt picks a fresh code, pastes
+it only into App Store Connect (the Password field), and sets the secret to
+the same value.
 
 The address is `APP_REVIEW_DEMO_EMAIL` in `src/lib/appReview.ts`. For that
 address only, Email me a code does not call `signInWithOtp`, and the code
 step calls the `app-review-sign-in` edge function. Continue with Apple and
-Continue with Google do the same when that email is already in the field.
-An empty field still starts Apple or Google.
+Continue with Google do the same when that email is already in the field,
+including when someone who is not the reviewer types it. An empty field
+still starts Apple or Google.
 
 The function accepts the code only when both secrets are set:
 
 ```
 APP_REVIEW_DEMO_EMAIL=review@signalbase-ai.com
-APP_REVIEW_DEMO_OTP=<the six-digit code in APP_STORE_METADATA.md>
+APP_REVIEW_DEMO_OTP=<fresh six-digit code, App Store Connect only>
 ```
 
 `APP_REVIEW_DEMO_EMAIL` has to be that exact address. A different secret
-never receives a call from this app. Deploy:
+never receives a call from this app. Deploy only after Matt says the code
+is no longer in git:
 
 ```
 supabase functions deploy app-review-sign-in --no-verify-jwt
@@ -214,9 +218,17 @@ apply it. Until that table exists, the function refuses every code,
 including the right one. The function creates the auth user on the first
 success. No mailbox is required.
 
-Wrong codes are capped at 8 per 15 minutes. The right code is not capped.
-Deleting the review account still asks for this code, because reauth uses
-the same verify path.
+Wrong codes are counted per caller. The table stores a SHA-256 of the
+address, not the address. Eight failures in 15 minutes fill that caller's
+bucket. The next request from that caller is refused before the code is
+compared. Another caller's budget is separate. A database error on the count
+is 503. Deleting the review account still asks for this code, because reauth
+uses the same verify path.
+
+After App Review approves the binary, unset `APP_REVIEW_DEMO_OTP`, or replace
+it with a new code that was not the one just submitted. Leaving the secret
+set keeps the demo address open. Do not write the old or the new code into
+the repo.
 
 ## App Store note (guideline 4.8)
 

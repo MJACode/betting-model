@@ -1,11 +1,15 @@
 /**
- * App Review fixed-code gate. The code itself is not an argument here.
+ * App Review fixed-code gate.
  *
  *   npx tsx scripts/verify_app_review_sign_in.ts
  *
  * Run from mobile/. Extensionless imports, same as verify_auth.ts: tsc rejects
- * a .ts suffix (TS5097), and tsx resolves these. The OTP value lives in
- * APP_STORE_METADATA.md and is asserted from tests/test_app_review_sign_in.py.
+ * a .ts suffix (TS5097), and tsx resolves these.
+ *
+ * Most checks below are source greps (the order of calls in auth.ts and the
+ * edge function). They are not a call to the deployed function. The matcher,
+ * the failure cap, and the address hash are the behavioral checks. Fixture
+ * codes in this file are not a published sign-in code.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,6 +26,9 @@ import {
   REVIEW_MINT_FAILED,
   REVIEW_NOT_CONFIGURED,
   REVIEW_TOO_MANY,
+  REVIEW_UNAVAILABLE,
+  clientIpFromHeaders,
+  hashAttemptBucket,
   reviewBypassConfigured,
   reviewCredentialsMatch,
   reviewFailureLimitReached,
@@ -36,53 +43,54 @@ function check(label: string, cond: boolean) {
 }
 
 const EMAIL = 'review@signalbase-ai.com';
-const OTP = '847291';
+const FIXTURE = '111111';
 
 check('demo address is the documented one', APP_REVIEW_DEMO_EMAIL === EMAIL);
 check('trims and lowercases the demo address', isAppReviewDemoEmail(`  ${EMAIL.toUpperCase()} `));
 check('a normal address is not the demo', !isAppReviewDemoEmail('matt@example.com'));
 check('empty is not the demo', !isAppReviewDemoEmail(''));
 
-check('both secrets configure the bypass', reviewBypassConfigured(EMAIL, OTP));
-check('missing email leaves it off', !reviewBypassConfigured('', OTP));
+check('both secrets configure the bypass', reviewBypassConfigured(EMAIL, FIXTURE));
+check('missing email leaves it off', !reviewBypassConfigured('', FIXTURE));
 check('missing code leaves it off', !reviewBypassConfigured(EMAIL, ''));
-check('a five-digit code leaves it off', !reviewBypassConfigured(EMAIL, '84729'));
+check('a five-digit code leaves it off', !reviewBypassConfigured(EMAIL, '11111'));
 check('a word leaves it off', !reviewBypassConfigured(EMAIL, 'password'));
-check('seven digits leave it off', !reviewBypassConfigured(EMAIL, '8472910'));
+check('seven digits leave it off', !reviewBypassConfigured(EMAIL, '1111111'));
 
 check(
-  'the documented pair matches',
-  reviewCredentialsMatch(EMAIL, OTP, EMAIL, OTP),
+  'a fixture pair matches',
+  reviewCredentialsMatch(EMAIL, FIXTURE, EMAIL, FIXTURE),
 );
 check(
   'email case and surrounding space still match',
-  reviewCredentialsMatch(` ${EMAIL.toUpperCase()} `, ` ${OTP} `, EMAIL, OTP),
+  reviewCredentialsMatch(` ${EMAIL.toUpperCase()} `, ` ${FIXTURE} `, EMAIL, FIXTURE),
 );
 check(
   'a formatted code still matches',
-  reviewCredentialsMatch(EMAIL, '847-291', EMAIL, OTP),
+  reviewCredentialsMatch(EMAIL, '111-111', EMAIL, FIXTURE),
 );
 check(
   'the right code on another email does not match',
-  !reviewCredentialsMatch('other@signalbase-ai.com', OTP, EMAIL, OTP),
+  !reviewCredentialsMatch('other@signalbase-ai.com', FIXTURE, EMAIL, FIXTURE),
 );
 check(
   'the right email with the wrong code does not match',
-  !reviewCredentialsMatch(EMAIL, '111111', EMAIL, OTP),
+  !reviewCredentialsMatch(EMAIL, '222222', EMAIL, FIXTURE),
 );
 check(
   'a short code does not match',
-  !reviewCredentialsMatch(EMAIL, '84729', EMAIL, OTP),
+  !reviewCredentialsMatch(EMAIL, '11111', EMAIL, FIXTURE),
 );
 check(
   'both compares run: wrong email and wrong code',
-  !reviewCredentialsMatch('nope@example.com', '000000', EMAIL, OTP),
+  !reviewCredentialsMatch('nope@example.com', '000000', EMAIL, FIXTURE),
 );
 
 check(
-  'the app shows the same four sentences the function returns',
-  REVIEW_SIGN_IN_ERRORS.length === 4 &&
+  'the app shows the same sentences the function returns',
+  REVIEW_SIGN_IN_ERRORS.length === 5 &&
     REVIEW_SIGN_IN_ERRORS.includes(REVIEW_NOT_CONFIGURED) &&
+    REVIEW_SIGN_IN_ERRORS.includes(REVIEW_UNAVAILABLE) &&
     REVIEW_SIGN_IN_ERRORS.includes(REVIEW_CODE_MISMATCH) &&
     REVIEW_SIGN_IN_ERRORS.includes(REVIEW_TOO_MANY) &&
     REVIEW_SIGN_IN_ERRORS.includes(REVIEW_MINT_FAILED),
@@ -99,6 +107,27 @@ check('a non-object body is not shown', reviewFunctionErrorMessage(null) === nul
 
 check('eight failures are still allowed', !reviewFailureLimitReached(REVIEW_FAILURE_LIMIT));
 check('the next failure is refused', reviewFailureLimitReached(REVIEW_FAILURE_LIMIT + 1));
+
+check(
+  'the first forwarded address is the caller',
+  clientIpFromHeaders('203.0.113.5, 10.0.0.1', '198.51.100.9') === '203.0.113.5',
+);
+check(
+  'a missing forwarded address uses x-real-ip',
+  clientIpFromHeaders(null, '198.51.100.9') === '198.51.100.9',
+);
+check(
+  'no address is its own bucket label',
+  clientIpFromHeaders('  ', '') === 'unknown',
+);
+async function checkBuckets(): Promise<void> {
+  const bucketA = await hashAttemptBucket('203.0.113.5');
+  const bucketB = await hashAttemptBucket('198.51.100.9');
+  const bucketAAgain = await hashAttemptBucket('203.0.113.5');
+  check('the same address hashes the same', bucketA === bucketAAgain);
+  check('two addresses hash differently', bucketA !== bucketB);
+  check('the hash is not the address', bucketA !== '203.0.113.5' && bucketA.length === 64);
+}
 
 const root = join(__dirname, '..', '..');
 const authSrc = readFileSync(join(root, 'mobile/src/lib/auth.ts'), 'utf8');
@@ -149,10 +178,18 @@ const fn = readFileSync(
 );
 check('the function reads both secrets', fn.includes('APP_REVIEW_DEMO_EMAIL') && fn.includes('APP_REVIEW_DEMO_OTP'));
 check('a missing attempt table refuses the call', fn.includes('attemptsTableReady'));
-check('the right code is checked before a failure is recorded', (() => {
+check('a full bucket is refused before the code is compared', (() => {
   const handler = fn.split('Deno.serve')[1] ?? '';
-  return handler.indexOf('reviewCredentialsMatch') < handler.indexOf('recordFailure');
+  return handler.indexOf('reviewFailureLimitReached') !== -1 &&
+    handler.indexOf('reviewFailureLimitReached') < handler.indexOf('reviewCredentialsMatch') &&
+    handler.indexOf('reviewCredentialsMatch') < handler.indexOf('recordFailure');
 })());
+check('failures are stored on the caller bucket', fn.includes('.eq("bucket", bucket)'));
+check('a database error on the count is 503', fn.includes('unavailable()') && fn.includes('503'));
+check(
+  'an existing user is only email_exists',
+  fn.includes('=== "email_exists"') && !fn.includes('status === 422'),
+);
 const deleteSrc = readFileSync(
   join(root, 'mobile/src/screens/DeleteAccountScreen.tsx'),
   'utf8',
@@ -163,20 +200,24 @@ check(
     deleteSrc.includes('reviewAccount ? null'),
 );
 
-check(
-  'the documented code is not hardcoded in the function',
-  !fn.includes(OTP),
-);
+check('the function source has no six-digit code', !/(?<!\d)\d{6}(?!\d)/.test(fn));
 const shared = readFileSync(
   join(root, 'supabase/functions/_shared/appReviewSignIn.ts'),
   'utf8',
 );
-check('the shared gate does not contain the documented code', !shared.includes(OTP));
+check('the shared gate has no six-digit code', !/(?<!\d)\d{6}(?!\d)/.test(shared));
 
-if (failures.length === 0) {
-  console.log(`ALL PASS (${passed} assertions)`);
-} else {
-  console.error(`${failures.length} FAILED, ${passed} passed:`);
-  failures.forEach((f) => console.error('  ✗ ' + f));
-  process.exit(1);
-}
+checkBuckets()
+  .then(() => {
+    if (failures.length === 0) {
+      console.log(`ALL PASS (${passed} assertions)`);
+    } else {
+      console.error(`${failures.length} FAILED, ${passed} passed:`);
+      failures.forEach((f) => console.error('  ✗ ' + f));
+      process.exit(1);
+    }
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

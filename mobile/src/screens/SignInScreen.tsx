@@ -85,9 +85,10 @@ export function SignInScreen() {
 
   const onProvider = useCallback(
     async (provider: AuthProvider) => {
-      // Review account: the email is already in the field, so Apple and
-      // Google open the same code step as Email me a code. An empty field
-      // still starts that provider.
+      // The demo address takes the code step from these buttons, for the
+      // reviewer and for anyone else who types that address. An empty field
+      // still starts Apple or Google. The labels stay Apple and Google
+      // because the review notes tell the reviewer to tap them.
       if (isAppReviewDemoEmail(email)) {
         await startEmailCode();
         return;

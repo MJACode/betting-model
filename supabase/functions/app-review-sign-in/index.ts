@@ -8,7 +8,12 @@
 //   APP_REVIEW_DEMO_EMAIL   must be review@signalbase-ai.com (the app
 //                           constant). Any other value never receives a call
 //                           from this app.
-//   APP_REVIEW_DEMO_OTP     six digits. Not in the app binary.
+//   APP_REVIEW_DEMO_OTP     six digits. Never committed. Unset it after
+//                           App Review approves the binary.
+//
+// Wrong codes are counted per caller. The table stores a SHA-256 of the
+// address, not the address. A full bucket is 429 before the code is
+// compared. A database error on that count is 503, not "not configured".
 //
 // SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY are injected.
 //
@@ -24,6 +29,9 @@ import {
   REVIEW_MINT_FAILED,
   REVIEW_NOT_CONFIGURED,
   REVIEW_TOO_MANY,
+  REVIEW_UNAVAILABLE,
+  clientIpFromHeaders,
+  hashAttemptBucket,
   normalizeReviewEmail,
   reviewBypassConfigured,
   reviewCredentialsMatch,
@@ -54,13 +62,12 @@ function notConfigured(): Response {
   return json({ error: REVIEW_NOT_CONFIGURED }, 404);
 }
 
-function alreadyRegistered(error: { message?: string; code?: string; status?: number }): boolean {
-  const code = (error.code ?? "").toLowerCase();
-  const message = (error.message ?? "").toLowerCase();
-  return code === "email_exists" ||
-    error.status === 422 ||
-    message.includes("already been registered") ||
-    message.includes("already exists");
+function unavailable(): Response {
+  return json({ error: REVIEW_UNAVAILABLE }, 503);
+}
+
+function alreadyRegistered(error: { code?: string }): boolean {
+  return (error.code ?? "").toLowerCase() === "email_exists";
 }
 
 async function attemptsTableReady(admin: SupabaseClient): Promise<boolean> {
@@ -71,18 +78,23 @@ async function attemptsTableReady(admin: SupabaseClient): Promise<boolean> {
   return !error;
 }
 
-async function recentFailures(admin: SupabaseClient): Promise<number | null> {
+async function recentFailures(
+  admin: SupabaseClient,
+  bucket: string,
+): Promise<number | null> {
   const since = new Date(Date.now() - REVIEW_FAILURE_WINDOW_MS).toISOString();
   const { count, error } = await admin
     .from(ATTEMPTS)
     .select("id", { count: "exact", head: true })
+    .eq("bucket", bucket)
     .gte("attempted_at", since);
   if (error || count == null) return null;
   return count;
 }
 
-async function recordFailure(admin: SupabaseClient): Promise<boolean> {
+async function recordFailure(admin: SupabaseClient, bucket: string): Promise<boolean> {
   const { error } = await admin.from(ATTEMPTS).insert({
+    bucket,
     attempted_at: new Date().toISOString(),
   });
   if (error) return false;
@@ -131,6 +143,25 @@ Deno.serve(async (req) => {
   if (!reviewBypassConfigured(emailSecret, otpSecret)) return notConfigured();
   if (!SUPABASE_URL || !SERVICE_ROLE || !ANON_KEY) return notConfigured();
 
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  if (!await attemptsTableReady(admin)) return notConfigured();
+
+  // A full bucket is refused before the code is compared, so one address
+  // cannot lock every other caller, including App Review.
+  const bucket = await hashAttemptBucket(
+    clientIpFromHeaders(
+      req.headers.get("x-forwarded-for"),
+      req.headers.get("x-real-ip"),
+    ),
+  );
+  const already = await recentFailures(admin, bucket);
+  if (already == null) return unavailable();
+  if (reviewFailureLimitReached(already)) {
+    return json({ error: REVIEW_TOO_MANY }, 429);
+  }
+
   let body: { email?: unknown; token?: unknown };
   try {
     body = await req.json();
@@ -140,21 +171,11 @@ Deno.serve(async (req) => {
   const email = typeof body.email === "string" ? body.email : "";
   const token = typeof body.token === "string" ? body.token : "";
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  if (!await attemptsTableReady(admin)) return notConfigured();
-
   const expectedEmail = normalizeReviewEmail(emailSecret ?? "");
   if (!reviewCredentialsMatch(email, token, expectedEmail, (otpSecret ?? "").trim())) {
-    const already = await recentFailures(admin);
-    if (already == null) return notConfigured();
-    if (reviewFailureLimitReached(already)) {
-      return json({ error: REVIEW_TOO_MANY }, 429);
-    }
-    if (!await recordFailure(admin)) return notConfigured();
-    const failures = await recentFailures(admin);
-    if (failures == null) return notConfigured();
+    if (!await recordFailure(admin, bucket)) return unavailable();
+    const failures = await recentFailures(admin, bucket);
+    if (failures == null) return unavailable();
     if (reviewFailureLimitReached(failures)) {
       return json({ error: REVIEW_TOO_MANY }, 429);
     }

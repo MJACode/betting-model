@@ -27,6 +27,7 @@ export function appReviewCodePrompt(otpLength: number): string {
  */
 export const REVIEW_SIGN_IN_ERRORS = [
   'Review sign-in is not configured.',
+  'Review sign-in is unavailable. Try again.',
   "That code doesn't match. Check it and try again.",
   'Too many tries. Wait a few minutes and try again.',
   'Could not sign in. Try again.',
