@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, CFBD 429 uses Retry-After and a capped backoff; BYOM commits each season's official legs before the next odds read |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, the results recap waits on a game that carries a published or counted pick; an unbet unscored game no longer holds the day; X dedupe unchanged; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, covering index for the official lock read on byom_official_legs; migration only, not applied; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM official lock includes line/price/spread/total bands; a missing byom_official_legs skips the official write and the facts still commit; an empty official headline falls back to the close |
