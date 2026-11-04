@@ -53,7 +53,9 @@ ONE BET A GAME ACROSS BOTH MONEYLINE MODELS, whichever writes its bet first.
 Both cards take BOTH models' publish locks (sorted, so neither can deadlock
 the other) and re-read the other model's BETs inside them before writing.
 
-BET ROWS ONLY in picks, at the posting book's price (decision_* and best_*),
+BET ROWS ONLY in picks (no NONE rows, unlike the other NCAAB cards: one game
+is decided once per book's first post, and a NONE row from an early post
+would hold the unique key a later post's BET needs), at the posting book's price (decision_* and best_*),
 scored_line NULL and line_book NULL; DraftKings' own moneyline, when it had a
 clean one, as the reference (dk_odds). The rows are built by the 15:00 UTC
 card's own pick_rows (scripts/ncaab_moneyline_card.pick_rows, model_id this
@@ -576,7 +578,8 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
             from models.scorer import _get_current_bankroll
             from scripts.ncaab_moneyline_card import pick_rows
             bets = [d for d in decisions if d.status == "bets"]
-            prows, refused = pick_rows(bets, games, _get_current_bankroll(conn), model_id=MODEL_ID)
+            prows, refused = pick_rows(bets, games, _get_current_bankroll(conn), model_id=MODEL_ID,
+                                      scored=False)
             published, n_decided = publish(conn, prows, decisions, now, firsts, refused)
         logger.info("\n" + render(decisions, diag, published if do_publish else None,
                                   n_decided if do_publish else None))

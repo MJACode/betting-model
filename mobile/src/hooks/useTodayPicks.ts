@@ -123,7 +123,9 @@ export function useTodayPicks(date?: string) {
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
         fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
-        fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS)).catch(swallow('the upcoming NCAAB card')),
+        fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS), (what, e) =>
+          note(what)(e),
+        ).catch(swallow('the upcoming NCAAB card')),
         fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't

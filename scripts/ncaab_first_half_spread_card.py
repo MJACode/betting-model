@@ -52,7 +52,10 @@ or with any ncaab_first_half_spread BET, is never decided again: a later tick,
 a moved line or a better price writes nothing. The row keeps every book's
 priced quote, so the cut can be swept on live data (CLAUDE.md 1b).
 
-BET ROWS ONLY in picks, at the bet book's own number and price: scored_line is
+A game priced below the cut is a NONE row (no stake) in the same
+transaction, so the app's All board shows every scored game (Matt,
+2026-11-04); nothing publishes or settles a NONE row.
+BET ROWS in picks, at the bet book's own number and price: scored_line is
 the HOME number (CLAUDE.md 4), pick_side 'home' / 'away', decision_* the book
 taken; dk_* / edge are DraftKings' own price for the same side at the same
 number in the same fetch, else NULL / 0.0 / 0.0 with line_book naming the book
@@ -424,6 +427,10 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"ON CONFLICT DO NOTHING RETURNING pick_id")
 
 
+# Priced, and its best side did not clear the cut: written as a NONE row.
+SCORED_NO_BET = ("below_cut",)
+
+
 def pick_label(side: str, home: str, away: str, line: float) -> str:
     from models.scorer import _build_pick_label
     return _build_pick_label(side, home, away, fh.MARKET, float(line))
@@ -431,32 +438,40 @@ def pick_label(side: str, home: str, away: str, line: float) -> str:
 
 def pick_rows(decisions: list[fh.Decision], games: dict[str, dict],
               bankroll: float) -> tuple[list[dict], dict[str, str]]:
-    """Bet decisions -> picks rows, and {game_id: why} for a bet refused here.
-    Pure given its inputs."""
+    """Decisions -> picks rows, and {game_id: why} for a bet refused here.
+    Pure given its inputs.
+
+    A bet is a BET row. A game priced below the cut (SCORED_NO_BET), or a bet
+    the price or EV floor refused, is a NONE row at the same book, side and
+    number with no stake (Matt, 2026-11-04: the All board shows every scored
+    pick, not only the bets). Nothing publishes or settles a NONE row."""
     from models.honest_ev import gate
     from models.scorer import _pause_note, quarter_kelly
     pause = _pause_note(MODEL_ID)
     floor = config.min_odds_for(MODEL_ID)
     rows, refused = [], {}
     for d in decisions:
-        if d.status != "bets" or d.best is None:
+        if d.best is None or d.status not in ("bets",) + SCORED_NO_BET:
             continue
+        is_bet = d.status == "bets"
         b, price = d.best, float(d.price)
         g = games.get(d.game_id, {})
         home, away = g.get("home", ""), g.get("away", "")
-        if floor is not None and price < floor:
+        if is_bet and floor is not None and price < floor:
             refused[d.game_id] = f"below_price_floor:{price:+.0f}"
-            continue
-        ev = gate(MODEL_ID, b.prob, price)
-        if not ev.clears:
-            logger.info(f"{MODEL_ID}: {ev.reason} - dropped {d.game_id} {b.side} @{b.book}")
-            refused[d.game_id] = ev.reason or "below_ev_floor"
-            continue
+            is_bet = False
+        if is_bet:
+            ev = gate(MODEL_ID, b.prob, price)
+            if not ev.clears:
+                logger.info(f"{MODEL_ID}: {ev.reason} - dropped {d.game_id} {b.side} @{b.book}")
+                refused[d.game_id] = ev.reason or "below_ev_floor"
+                is_bet = False
         label = pick_label(b.side, home, away, b.line)
         problems = pick_problems(label, b.side, float(b.line), MODEL_ID, home, away)
         if problems:
             logger.error(f"{MODEL_ID}: refusing {d.game_id} {label!r}: {'; '.join(problems)}")
-            refused[d.game_id] = "label_mismatch"
+            if d.game_id not in refused and is_bet:
+                refused[d.game_id] = "label_mismatch"
             continue
         imp = implied(price)
         decision_edge = round(b.prob - imp, 4)
@@ -466,7 +481,7 @@ def pick_rows(decisions: list[fh.Decision], games: dict[str, dict],
             dk_price = dk.home_price if b.side == "home" else dk.away_price
         dk_implied = implied(dk_price) if dk_price is not None else None
         at_dk = b.book == fh.REFERENCE_BOOK
-        kelly_frac, rec_bet = quarter_kelly(b.prob, imp, bankroll)
+        kelly_frac, rec_bet = quarter_kelly(b.prob, imp, bankroll) if is_bet else (0.0, 0.0)
         rows.append({
             "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
             "game_date": g.get("game_date"), "game_time": g.get("commence_time"),
@@ -482,7 +497,7 @@ def pick_rows(decisions: list[fh.Decision], games: dict[str, dict],
             "line_book": None if dk_price is not None else b.book,
             "scored_line": float(b.line),
             "kelly_fraction": kelly_frac, "recommended_bet": rec_bet,
-            "bankroll_at_pick": bankroll, "signal_type": "BET",
+            "bankroll_at_pick": bankroll, "signal_type": "BET" if is_bet else "NONE",
             # MED on every bet, as the other rule cards write: the evidence
             # gives no tier.
             "confidence_tier": "MED",
@@ -522,7 +537,8 @@ def decision_row(d: fh.Decision, fetch_at: datetime, lead: float, ages: dict, mi
 
 
 def publish(conn, rows: list[dict], decided: list[dict]) -> tuple[int, int]:
-    """Write each decided game once: its decision row and its bet in ONE
+    """Write each decided game once: its decision row and its pick (BET or
+    NONE) in ONE
     transaction, under the model's lock, the ledger and the picks re-read
     inside it. -> (bets written, decisions written)."""
     if not decided:
@@ -541,7 +557,7 @@ def publish(conn, rows: list[dict], decided: list[dict]) -> tuple[int, int]:
         n_decided += 1
         row = by_game.get(rec["game_id"])
         if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
-            n_bets += 1
+            n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided
 
@@ -670,7 +686,7 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
-            bet_ids = {r["game_id"] for r in rows}
+            bet_ids = {r["game_id"] for r in rows if r["signal_type"] == "BET"}
             decided = [decision_row(d, fa, lead, ages, miss, d.game_id in bet_ids,
                                     refused.get(d.game_id))
                        for d, fa, lead, ages, miss in records]

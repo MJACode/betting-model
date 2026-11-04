@@ -122,13 +122,19 @@ def test_the_15z_run_bets_once_at_the_bet_books_number_and_a_rerun_writes_nothin
     (pick,) = db.execute(
         "SELECT game_id, model_id, pick_side, pick_label, scored_line, line_book, dk_odds, "
         "dk_implied_prob, edge, decision_book, decision_odds, best_book, best_bet_link, signal_type, "
-        "model_probability FROM picks").fetchall()
+        "model_probability FROM picks WHERE signal_type = 'BET'").fetchall()
     assert pick[:6] == ("NCAAB_2026-12-05_kansas_duke", "ncaab_spread_market", "home",
                         "Duke -8.0", -8.0, "betrivers")
     assert pick[6] is None and float(pick[7]) == 0.0 and float(pick[8]) == 0.0
     assert pick[9:14] == ("betrivers", "-110.0", "betrivers",
                           "betrivers/NCAAB_2026-12-05_kansas_duke/h", "BET")
     assert 0.55 < float(pick[14]) < 0.6
+    # The game priced and not bet (too few books) is a NONE row with no stake,
+    # for the app's All board; the unpriced one (no quotes) writes no row.
+    assert db.execute(
+        "SELECT game_id, signal_type, kelly_fraction, recommended_bet FROM picks "
+        "WHERE signal_type <> 'BET'").fetchall() == [
+        ("NCAAB_2026-12-05_ucla_gonzaga", "NONE", "0.0", "0.0")]
     # the same hour again, and an hour later with a better number up: nothing
     card._ART.clear()
     again = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 40, tzinfo=UTC))
@@ -139,7 +145,8 @@ def test_the_15z_run_bets_once_at_the_bet_books_number_and_a_rerun_writes_nothin
     db.commit()
     later = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 16, 5, tzinfo=UTC))
     assert later["decided"] == 0
-    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 1
+    assert db.execute("SELECT signal_type, COUNT(*) FROM picks GROUP BY 1 ORDER BY 1"
+                      ).fetchall() == [("BET", 1), ("NONE", 1)]
 
 
 def test_a_game_nobody_decided_at_15z_is_written_missed_and_the_run_fails(db):

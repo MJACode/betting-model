@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Review demo sign-in: one email accepts a fixed code from Supabase secrets; keywords replace discord with signals; attempt-log migration is in the PR and not applied |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, the All board shows every scored NCAAB game: five NCAAB cards write a NONE row (no stake) for each game priced and not bet, first-post stays BET-only (unique key); the app's day read is two paged reads (signals required, NONE enrichment), the NCAAB look-ahead reads lines for signal games only; UX review applied, betslip-on-NONE left for Matt |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Store flags stay off: signed-out shell returns to SignIn, Signals and Live Signals open the same paywall as a locked pick, a Whop-only access row cannot stay entitled |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Store listing copy for the login and Premium binary: sign-in required Yes, five product ids from billingConfig.ts, Discord only after a paid plan; reviewer credentials left TODO; no app code |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, Support page at /support for App Store Review; same build as Terms and Privacy; contact address already on those pages; no model change |
