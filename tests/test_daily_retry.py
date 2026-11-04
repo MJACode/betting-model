@@ -9,7 +9,8 @@ the abort and did not re-queue. mlb_bullpen_workload / mlb_team_stats went
 STALE — they are written only by the once-daily run.
 
 These tests pin the guards the catch-up must not get wrong:
-  aborted today → retry, until 4 ledgered starts
+  aborted today → retry; deploy-kills do not use the failure cap
+  a deploy-kill loop stops at 12, and automatic catch-up stops at 22:00 ET
   a finished non-aborted failure → one retry, then stop
   successful today → no retry
   in-progress in this process → no second start
@@ -26,8 +27,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tracking.daily_retry import (
+    DAILY_RETRY_CUTOFF_HOUR,
     MAX_DAILY_RUN,
-    MAX_DAILY_STARTS_PER_ET_DAY,
+    MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY,
     MAX_NON_ABORTED_FAILURES,
     DailyRun,
     announce_daily_retry,
@@ -133,39 +135,89 @@ def test_two_aborted_dailies_with_no_success_are_retried():
     assert "aborted" in d.reason
 
 
-def test_a_crash_loop_stops_at_the_ceiling():
-    """The lock is the double-run guard. Aborted relaunches stop at 4.
-    Three killed starts still relaunch — 2026-11-04 was two, and a busy
-    merge morning killed the retry again. The fourth does not. 8 would
-    buy odds on every boot of that morning."""
-    assert MAX_DAILY_STARTS_PER_ET_DAY == 4
+def test_a_deploy_kill_loop_stops_at_the_bound():
+    """The lock is the double-run guard. Deploy-kills do not use the
+    one-retry failure cap. They stop at 12. 2026-11-04 was four aborted
+    starts before 13:30Z; a cap of 4 then skipped the day. 12 covers that
+    rate through the afternoon and stops a restart every few minutes."""
+    assert MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY == 12
 
     def _killed(i: int) -> DailyRun:
         return _run(
-            started=SIX_AM + timedelta(minutes=5 * i),
-            finished=SIX_AM + timedelta(minutes=5 * i + 1),
+            started=SIX_AM + timedelta(minutes=i),
+            finished=SIX_AM + timedelta(minutes=i, seconds=30),
             ok=False,
             failed="aborted",
         )
 
-    under = [_killed(i) for i in range(MAX_DAILY_STARTS_PER_ET_DAY - 1)]
+    under = [_killed(i) for i in range(MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY - 1)]
     d = decide_daily_retry(now=WATCH_TIME, runs=under)
     assert d.action == "run"
     assert "aborted" in d.reason
 
-    full = [_killed(i) for i in range(MAX_DAILY_STARTS_PER_ET_DAY)]
+    full = [_killed(i) for i in range(MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY)]
     d = decide_daily_retry(now=WATCH_TIME, runs=full)
     assert d.action == "skip"
-    assert "cap" in d.reason
-    assert "another" in d.reason
+    assert "deploy-killed" in d.reason
+    assert "not started again" in d.reason
+
+
+def test_four_deploy_kills_on_2026_11_04_still_relaunch():
+    """pipeline_runs for 2026-11-04, all run_kind=daily, all aborted.
+    Read at 13:34Z: 3d3685c1, 8a44ef65, c1869c15, d5a27075. The cap of 4
+    skipped the day. None of them finished a step."""
+    specs = (
+        ("2026-11-04T11:00:00+00:00", "2026-11-04T11:13:34+00:00"),
+        ("2026-11-04T11:13:34+00:00", "2026-11-04T13:01:36+00:00"),
+        ("2026-11-04T13:01:40+00:00", "2026-11-04T13:19:13+00:00"),
+        ("2026-11-04T13:19:17+00:00", "2026-11-04T13:29:24+00:00"),
+    )
+    runs = [
+        _run(
+            started=datetime.fromisoformat(started),
+            finished=datetime.fromisoformat(finished),
+            ok=False,
+            failed="aborted",
+        )
+        for started, finished in specs
+    ]
+    now = datetime(2026, 11, 4, 13, 34, tzinfo=timezone.utc)
+    d = decide_daily_retry(now=now, runs=runs, in_process_running=False)
+    assert d.action == "run"
+    assert "aborted" in d.reason
+
+
+def test_deploy_kills_do_not_relaunch_after_the_cutoff():
+    """A restart loop must not run overnight. 22:00 ET still covers a
+    fix that deploys in the evening of the killed day."""
+    assert DAILY_RETRY_CUTOFF_HOUR == 22
+    killed = _run(
+        started=datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc),
+        finished=datetime(2026, 11, 4, 11, 13, tzinfo=timezone.utc),
+        ok=False,
+        failed="aborted",
+    )
+    before = datetime(2026, 11, 4, 21, 59, tzinfo=ET)
+    after = datetime(2026, 11, 4, 22, 0, tzinfo=ET)
+    assert decide_daily_retry(now=before, runs=[killed]).action == "run"
+    d = decide_daily_retry(now=after, runs=[killed])
+    assert d.action == "skip"
+    assert "cutoff" in d.reason
+
+
+def test_a_missing_daily_after_the_cutoff_waits_until_tomorrow():
+    now = datetime(2026, 11, 4, 22, 5, tzinfo=ET)
+    d = decide_daily_retry(now=now, runs=[])
+    assert d.action == "skip"
+    assert "cutoff" in d.reason
 
 
 def test_a_real_failure_is_retried_once_and_then_stops():
-    """An upstream outage before MLB freshness is not a killed worker.
-    The scheduled run plus one retry is the old cap. A third start would
-    buy odds again on every boot and at 7:15. An aborted start between
-    the two failures does not reset the count, and the stop is the
-    one-retry cap, not the ceiling of 4."""
+    """    An upstream outage before MLB freshness is not a killed worker.
+    The scheduled run plus one retry is the failure cap. A third start
+    would buy odds again on every boot and at 7:15. An aborted start
+    between the two failures does not reset the count, and does not
+    consume it. The stop is the one-retry cap, not the deploy-kill bound."""
     assert MAX_NON_ABORTED_FAILURES == 2
     first = _run(
         started=SIX_AM,
@@ -185,7 +237,7 @@ def test_a_real_failure_is_retried_once_and_then_stops():
     d = decide_daily_retry(now=WATCH_TIME, runs=[first, second])
     assert d.action == "skip"
     assert "one retry" in d.reason
-    assert len([first, second]) < MAX_DAILY_STARTS_PER_ET_DAY
+    assert len([first, second]) < MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY
 
     killed = _run(
         started=datetime(2026, 9, 18, 6, 25, tzinfo=ET),
@@ -492,15 +544,24 @@ def test_run_daily_pipeline_lock_skips_a_second_in_process_start(
     assert ran == []
 
 
-def test_boot_calls_the_daily_catch_up():
+def test_boot_schedules_the_daily_catch_up_without_blocking_the_scheduler():
+    """2026-11-04 13:17Z. The hourly (8:17am ET) never ledgered. The last
+    hourly was 12:17Z. The 13:01Z boot called the daily catch-up on the
+    main thread before sched.start(), and the daily held that thread
+    until the 13:19Z deploy. The :17 cron was not registered yet. The
+    evening pass uses the same scheduler, so it was blocked the same way
+    whenever a boot landed inside a daily. The catch-up is a one-off job."""
     src = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     main = src[src.index("def main"):]
-    assert "catch_up_daily_pipeline(source=\"boot\")" in main, (
-        "a CronTrigger whose 6am fire has passed does not misfire on a "
-        "fresh scheduler — boot is the 2026-09-18 hole"
-    )
-    assert main.index("catch_up_weekly_jobs()") < main.index(
-        "catch_up_daily_pipeline")
+    assert "catch_up_daily_pipeline(source=\"boot\")" not in main
+    assert 'id="daily_catch_up"' in main
+    assert 'kwargs={"source": "boot"}' in main
+    assert main.index("catch_up_weekly_jobs()") < main.index('id="daily_catch_up"')
+    start = main.index("\n        sched.start()\n")
+    assert main.index('id="daily_catch_up"') < start
+    assert main.index('id="refresh_catch_up"') < start
+    refresh = src[src.index("def run_refresh_pass"):src.index("def run_savant_refresh")]
+    assert "_DAILY_LOCK" not in refresh
 
 
 def test_pipeline_watch_requeues_after_it_reports():
@@ -521,9 +582,10 @@ def test_the_contract_names_the_daily_catch_up():
     assert "catch_up_daily_pipeline" in block
 
 
-def test_the_ops_note_names_which_start_this_is(monkeypatch):
-    """A boot loop has to be visible in the channel before it hits the
-    ceiling. The note says which start this attempt is."""
+def test_the_ops_note_names_which_start_this_is_and_why(monkeypatch):
+    """A boot loop has to be visible in the channel. The note says which
+    start this attempt is, and whether it is a deploy-kill or a real
+    failure. Deploy-kills are not the one-retry cap."""
     captured: dict = {}
 
     def _capture(title, detail, *, recovery=False, post=None):
@@ -536,11 +598,18 @@ def test_the_ops_note_names_which_start_this_is(monkeypatch):
     assert announce_daily_retry(
         "today's daily is unfinished and this process is not running it",
         source="boot",
-        start_number=3,
+        start_number=5,
+        relaunch_kind="deploy-kill",
+        deploy_kills=4,
+        real_failures=0,
     )
     assert captured["recovery"] is True
-    assert "**Start:** 3 of 4 today" in captured["detail"]
+    assert "**Start:** 5 today" in captured["detail"]
+    assert "**Why:** deploy-kill." in captured["detail"]
+    assert "unfinished" in captured["detail"]
     assert "one retry" in captured["detail"]
+    assert "do not use the failure cap" in captured["detail"]
+    assert "deploy-kills 4" in captured["detail"]
     assert "boot" in captured["detail"]
 
 
@@ -602,6 +671,76 @@ def test_no_daily_before_the_deadline_is_not_a_failure():
     now = datetime(2026, 11, 4, 11, 20, tzinfo=timezone.utc)
     status, _detail = assess_daily_completion(now, [])
     assert status == "SKIPPED"
+
+
+def test_catch_up_relaunches_four_deploy_kills(wired):
+    """The 2026-11-04 ledger, on the wiring: four aborted rows, nothing
+    completed, the next boot starts number 5 and says why."""
+    rows = []
+    for minute in (0, 8, 16, 24):
+        started = (SIX_AM + timedelta(minutes=minute)).astimezone(
+            timezone.utc).isoformat()
+        finished = (SIX_AM + timedelta(minutes=minute + 2)).astimezone(
+            timezone.utc).isoformat()
+        rows.append((started, finished, False, "aborted"))
+    result, fired = wired(_Conn(rows=rows))
+    assert result["status"] == "run"
+    assert len(fired) == 1
+    assert fired[0]["retry_start_number"] == 5
+    assert fired[0]["retry_kind"] == "deploy-kill"
+    assert fired[0]["deploy_kills"] == 4
+    assert fired[0]["real_failures"] == 0
+
+
+def test_the_manual_job_runs_one_daily_and_skips_when_the_lock_is_held(
+        sched, monkeypatch):
+    """worker_jobs daily_pipeline is the kick when the catch-up has
+    stopped. It runs run_pipeline.py once. The daily lock is the same
+    object the cron holds, so a second start in this process does not
+    happen. A skip is not a raised failure: the queue would retry it."""
+    from tracking.job_queue import JOBS, _job_daily_pipeline, _validate_daily_pipeline
+
+    assert "daily_pipeline" in JOBS
+    assert JOBS["daily_pipeline"][0] is _job_daily_pipeline
+    assert _validate_daily_pipeline({}) == {}
+    with pytest.raises(ValueError, match="no arguments"):
+        _validate_daily_pipeline({"stake": 5})
+    declared = (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8")
+    assert "daily_pipeline" not in declared
+
+    ran = []
+    announced = []
+    monkeypatch.setattr(sched, "_run", lambda *a, **k: ran.append(a) or "ok")
+    monkeypatch.setattr(sched, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(
+        "tracking.daily_retry.announce_daily_retry",
+        lambda *a, **k: announced.append(k) or True,
+    )
+    started = datetime.now(timezone.utc).isoformat()
+    monkeypatch.setattr(
+        "data.db.get_connection",
+        lambda: _Conn(rows=[(started, started, False, "aborted")]),
+    )
+
+    out = _job_daily_pipeline()
+    assert out["status"] == "ok"
+    assert out["start_number"] == 2
+    assert len(ran) == 1
+    assert ran[0][0][-1] == "run_pipeline.py"
+    assert announced[0]["relaunch_kind"] == "manual"
+    assert announced[0]["start_number"] == 2
+    assert announced[0]["deploy_kills"] == 1
+    assert announced[0]["source"] == "worker_jobs"
+
+    ran.clear()
+    assert sched._DAILY_LOCK.acquire(blocking=False)
+    try:
+        skipped = _job_daily_pipeline()
+    finally:
+        sched._DAILY_LOCK.release()
+    assert ran == []
+    assert skipped["status"] == "skipped"
+    assert "already running" in skipped["reason"]
 
 
 def test_a_daily_that_finished_its_freshness_steps_is_ok():
