@@ -282,6 +282,10 @@ cut), 2-3, 3-4 and 4+, in full-game points.
   return, interval and season split are printed anyway. Its answer is "too few games to tell", not "it
   loses".
 
+**One line added 2026-11-03, with the lab and before any cell was graded. It changes no cell and no
+bar:** DraftKings alone is also written pooled over both seasons beside each cell (`dk_pool_n`,
+`dk_pool_units`, `dk_pool_roi`), since the harness writes it only season by season.
+
 ## 8. Seasons
 
 - **Graded and pooled: 2024-25 and 2025-26**, the only seasons with team totals.
@@ -343,9 +347,163 @@ minus the share of the population the cell bets). Section 11 reports both.
 
 ## 11. Counts before grading
 
-Written in a later commit, from `python -m scripts.nba_s_q1tt --smoke` on the real data: games and
-coverage per season, what each main-number rule removed, the settlement check, the bets each cell would
-place per season, the overlap with the live models, the placebo's null share, and the clock.
+Counted 2026-11-03 by `python -m scripts.nba_s_q1tt --smoke` on the real data, before any cell was
+graded. Prices, lines, timestamps and settlement checks only: no win,
+loss or unit of any bet this search would place was computed, and no 2024-25 or 2025-26 result was
+read except to know that its period scores pass the check.
+
+### 11.1 The answer before grading: family A has almost nothing to bet
+
+**The books set their period team totals from their own period spread and total.** The implied number
+minus the team-total quote's own centre, in points, over every team and game at T:
+
+| Period | Reference | Team-games | Average | Spread (sd) | 1st to 99th percentile |
+|---|---|---|---|---|---|
+| First quarter | same book | 10,516 | -0.00 | 0.10 | -0.23 to +0.25 |
+| | consensus | 4,882 | +0.04 | 0.14 | -0.27 to +0.41 |
+| First half | same book | 12,352 | -0.06 | 0.14 | -0.40 to +0.30 |
+| | consensus | 4,864 | -0.06 | 0.18 | -0.48 to +0.37 |
+
+- **A bet needs half a point in the first quarter and most of a point in the first half.** Through the
+  shapes used, an over at -110 whose centre sits exactly on its line is worth -0.051 (first quarter) and
+  -0.057 (first half): the books' margin. With the centre a point above the line it is worth +0.080 and
+  +0.036. Reaching 0.02 takes 0.53 to 0.55 points in the first quarter and 0.83 in the first half. The
+  typical disagreement is 0.10 to 0.18.
+- **The expected value of every deciding offer** averages -0.053 (first quarter, same book), -0.058
+  (first quarter, consensus), -0.047 and -0.054 (first half). The best single offers reach 0.10, 0.11,
+  0.07 and 0.14.
+- **So every family A cell is under 200 bets** (section 11.4) and fails bar 1 by construction. By
+  section 7 its answer is **too few games to tell**, and its bets are graded and printed anyway. The
+  measured reason is stronger than thinness: a book's team total says what its own spread and total
+  say, to within a tenth of a point.
+
+### 11.2 Games per season
+
+| Season | Games | A team-total row before tip | A purchase 45-75 min before tip | Trusted period score | First quarter: offers / consensus number / same-book number / home part | First half: the same |
+|---|---|---|---|---|---|---|
+| 2024-25 | 1,230 | 1,229 | 1,224 | 1,230 | 1,224 / 1,224 / 1,213 / 1,208 | 1,224 / 1,224 / 1,224 / 1,208 |
+| 2025-26 | 1,230 | 1,228 | 1,218 | 1,230 | 1,218 / 1,217 / 1,212 / 1,202 | 1,218 / 1,208 / 1,206 / 1,202 |
+
+- **The choosing season keeps its gate.** 2024-25's purchases reach 99.5% of its games at D, above the
+  harness's 95% (`H.gated_seasons`), so the placebo bar reads it.
+- **Settlement: no graded game is left out.** All 2,460 games of 2024-25 and 2025-26 pass the check
+  (their periods, overtime included, sum to the final), and so does every game of 2020-21 to 2023-24.
+  The cache's only failures are 4 games of 2019-20 with no period rows, a season this search never
+  reads.
+
+### 11.3 What the number rules removed
+
+- **The impossible-number rule removed no row,** of the team totals or the period spreads and totals.
+- **The main-number rule:** 35,317 first-quarter lines read became 19,958 main numbers; 36,103
+  first-half lines became 20,194. The ladder rule then removed 0 and 1, and no visible main number was
+  priced past ±250. The ladder table of section 3.1, recounted after dropping rows stamped after tip,
+  moves by at most 6 quotes a book.
+- **The main numbers visible at T:** first-quarter team totals 22.5 to 35.5, first-half 45.5 to 70.5,
+  priced -150 to +118. Period spreads and totals visible at T: first-quarter spreads -9.5 to 7.5 and
+  totals 48.5 to 66.5; first-half spreads -14.5 to 13 and totals 97 to 130.5; priced -200 to +145.
+- **Implied points:** first quarter 22.9 to 35.7, first half 45.9 to 70.7. The team-total market's
+  own fair centres: 22.9 to 35.5 and 46.1 to 70.6.
+- **The highest-EV offers are disagreements, not bad rows.** First quarter, consensus, 0.106: FanDuel's
+  Boston under 29.5 at +100 against Portland (2025-03-05), where the consensus implies 28.8 and the other
+  books hang 28.5 to 29.5. First half, consensus, 0.141: Hard Rock's Cleveland over 64.5 at +100 against
+  New Orleans (2025-12-23), where the consensus implies 66.1 and the other books hang 65.5.
+- **Same-book numbers are mostly DraftKings and FanDuel.** Games where a book has a team total and its
+  own visible period spread and total:
+
+  | Book | First quarter, 2024-25 / 2025-26 | First half, 2024-25 / 2025-26 |
+  |---|---|---|
+  | DraftKings | 1,102 of 1,105 / 1,149 of 1,155 | 1,202 of 1,207 / 1,161 of 1,164 |
+  | FanDuel | 1,184 of 1,197 / 1,205 of 1,215 | 1,183 of 1,202 / 1,200 of 1,215 |
+  | BetRivers | 175 of 864 / 0 of 1,218 | 41 of 864 / 0 of 1,218 |
+  | Hard Rock | 8 of 834 / 124 of 1,173 | 428 of 833 / 869 of 1,176 |
+  | betPARX | none / 311 of 1,218 | none / 92 of 1,218 |
+
+  BetRivers prices no period spread or total at all in 2025-26. Otherwise BetRivers, Hard Rock and
+  betPARX lose theirs to the ladder rule: their stored period number is the last line listed (§8.4),
+  often an alternate more than 1 point from the other books. Counted at T: the rule removes Hard Rock's
+  first-quarter spread on 1,163 of 1,195 games in 2024-25 and 1,036 of 1,183 in 2025-26, BetRivers'
+  first-half total on 1,011 of 1,221 in 2024-25, and betPARX's first-half total on 950 of 1,218 in
+  2025-26; DraftKings and FanDuel lose at most 16 of about 1,200 in any market.
+
+### 11.4 The bets each cell would place
+
+An offer at a deciding book at -200 or better that clears the cell's cut; counted, never graded.
+
+| Family | Period | Side | Cut | 2024-25 | 2025-26 | Pooled | On the live home team-total model's games | On the live first-half total model's games |
+|---|---|---|---|---|---|---|---|---|
+| A_same | first quarter | over | 0.02 / 0.04 / 0.06 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | | |
+| | | under | | 2 / 1 / 1 | 0 / 0 / 0 | 2 / 1 / 1 | 0 | 0 |
+| | first half | over | | 3 / 1 / 0 | 1 / 0 / 0 | 4 / 1 / 0 | 1 / 0 / 0 | 0 |
+| | | under | | 2 / 2 / 1 | 2 / 0 / 0 | 4 / 2 / 1 | 1 / 0 / 0 | 0 |
+| A_consensus | first quarter | over | | 28 / 3 / 1 | 53 / 5 / 2 | 81 / 8 / 3 | 12 / 1 / 0 | 14 / 2 / 1 |
+| | | under | | 27 / 3 / 1 | 14 / 3 / 2 | 41 / 6 / 3 | 9 / 0 / 0 | 7 / 2 / 0 |
+| | first half | over | | 16 / 5 / 1 | 15 / 4 / 2 | 31 / 9 / 3 | 4 / 2 / 0 | 6 / 1 / 0 |
+| | | under | | 45 / 11 / 2 | 35 / 6 / 2 | 80 / 17 / 4 | 6 / 2 / 0 | 23 / 6 / 2 |
+| B | first quarter | under | home part ≤ -2 | 156 | 131 | 287 | 287 | 10 |
+| B | first half | under | home part ≤ -2 | 156 | 131 | 287 | 287 | 10 |
+
+- **24 of the 26 cells are under 200 bets: every family A cell.** The largest holds 81. They fail bar 1
+  and read "too few games to tell" (11.1 says why).
+- **Both family B cells clear 200: 287 bets each.** Every one of them falls on a game the live home
+  team-total model would bet: it is the same rule on the same games, so family B tests whether the
+  rule's edge reaches the period's home total, not new games. 10 of them (3.5%) are also on the live
+  first-half total model's games, and 77 fall inside either team's first 10 games (the live model now
+  bets from the first game; its graded evidence was on 10+).
+- **The two B cells bet the same 287 games,** one on the first-quarter home total, one on the first-half
+  home total, and they are exactly the live home team-total model's 287 (`b_games` in `--smoke`): every
+  game the rule picks has both periods' home team-total offers.
+- **The live models' games on the graded seasons:** the home team-total model 287, the first-half total
+  model 444, each by its own rule on the cache's period purchase.
+- **Bands (bar 5), pooled bets:** family B, home part 1-2: 373, 2-3: 172, 3-4: 58, 4 and up: 57, in both
+  periods, so all four bands are judged. Family A's bands from the cut up hold 0 to 73 bets; the band
+  below the lowest cut holds 5 to 343.
+
+### 11.5 The shape and the period's share
+
+| Period | Season | Kind | Residuals | Spread (sd) |
+|---|---|---|---|---|
+| First quarter | 2020-21 / 2021-22 / 2022-23 | stand-in | 2,160 / 2,460 / 2,460 | 5.83 / 5.81 / 5.82 |
+| | 2023-24 / 2024-25 | implied | 2,450 / 2,448 | 5.77 / 5.74 |
+| First half | 2020-21 / 2021-22 / 2022-23 | stand-in | 2,160 / 2,460 / 2,460 | 8.13 / 8.20 / 8.04 |
+| | 2023-24 / 2024-25 | implied | 2,450 / 2,448 | 8.07 / 7.84 |
+
+The shapes used: 2024-25 is priced on 9,530 residuals (first quarter 5.81 wide, first half 8.12);
+2025-26 on 11,978 (5.79 and 8.06). 2024-25's residuals enter only 2025-26's shape. Their average is not
+printed: it would read like a blind over or under on a graded season.
+
+**Family B's share** (both teams' period points over their final points, earlier seasons from 2020-21):
+first quarter 0.2524 for 2024-25 and 0.2520 for 2025-26; first half 0.5035 and 0.5025. The live cut of
+2.0 full-game points is so about 0.50 first-quarter points and 1.01 first-half points; the gap scales
+the same way, and no bet moves.
+
+### 11.6 The placebo on the real prices
+
+The share of placebo bets that are not the real bets, 10 runs per cell, no result read; the ceiling is 1
+minus the share of the population the cell bets.
+
+| Family | Cells | Share of placebo bets that differ | Ceiling |
+|---|---|---|---|
+| A_consensus | 12 | 0.55 to 0.91, mean 0.78 | 0.98 to 1.00 |
+| A_same | 12 (8 with any bet) | 0.85 to 1.00, mean 0.93 | 1.00 |
+| B | 2 | 0.73 in both | 0.88 |
+
+- **It is a null on the real data:** most placebo bets are other games' bets in every cell.
+- **The consensus runs place more bets than the real cells:** 149 against 81 at the first-quarter over,
+  cut 0.02; 159.6 against 80 at the first-half under. The same-book runs place a little fewer (the
+  mechanical reason in section 10).
+
+### 11.7 The clock
+
+Two smoke runs, the counts above identical in both; the times are the second's, the first's beside.
+
+- **A family A placebo run takes 0.025 to 0.029 seconds** (0.33 to 0.45 frame by frame; first run
+  0.019 to 0.031). On the real offers with made-up scores, the two paths agreed on all six
+  first-quarter cells of each reference, two runs each.
+- One group of six family A cells without its placebo: 8.1 seconds (6.7). One family B cell with its 200
+  runs: 3.3 seconds (4.1).
+- **`--full` is projected at 5.9 minutes (4.9):** 4.9 for the setup with Pinnacle's closes saved (3.8),
+  1.1 for the cells. Building the closes afresh took the first smoke's cache read from 3 seconds to 27.
+  **Peak memory in `--smoke` was 1.8 GB** in both.
 
 ## 12. Expected passes by chance
 
