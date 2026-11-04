@@ -35,10 +35,16 @@ BEGIN
     RAISE EXCEPTION 'apply byom_official_legs_2026_11_04.sql first';
   END IF;
 
+  -- pg_get_function_identity_arguments includes the parameter names.
+  -- On PostgreSQL 16 and 17 this function's identity is
+  -- 'p_season integer, p_filters jsonb, p_timing text'. A types-only
+  -- comparison never matches, so the ALTER below ran on every pass
+  -- and took AccessExclusiveLock whenever a reader held the table.
   IF EXISTS (
     SELECT 1 FROM pg_proc p
-     WHERE p.proname = 'byom_legs'
-       AND pg_get_function_identity_arguments(p.oid) = 'integer, jsonb, text'
+     WHERE p.pronamespace = 'public'::regnamespace
+       AND p.proname = 'byom_legs'
+       AND pg_get_function_identity_arguments(p.oid) = 'p_season integer, p_filters jsonb, p_timing text'
        AND position('byom_official_lock_bands_v1' in p.prosrc) > 0
   ) THEN
     RAISE NOTICE 'byom official lock bands already present - skipping';
