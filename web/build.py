@@ -267,7 +267,7 @@ def footer(year: int) -> str:
       <p><strong class="age">21+</strong> For people 21 and older. Signal Base is for information and entertainment. It is not a sportsbook, takes no bets and does not pay out winnings. Past results don't guarantee future results.</p>
       <p>Gambling problem? Call <a href="{PHONE_HREF}">{PHONE_LABEL}</a>. Bet only where it's legal for you.</p>
     </div>
-    <p class="copyright">© {year} Signal Base. Apple and App Store are trademarks of Apple Inc.</p>
+    <p class="copyright">© {year} Signal Base LLC. Apple and App Store are trademarks of Apple Inc.</p>
   </div>
 </footer>"""
 
