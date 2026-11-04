@@ -390,4 +390,158 @@ PYTHONPATH=. python -m scripts.nba_game2_verdict --results <folder> --house5
 
 ## 11. Counts before grading
 
-Added after `--smoke` ran on the real data, before any cell was graded.
+Added after `--smoke` ran on the real data, before any cell was graded (2026-11-04, about 04:10
+UTC; log `%TEMP%/nba_s/ingame27/smoke3.txt`). Every number below comes from prices, clocks and
+counts. No result of any bet this search would place was computed or read: every grade inside
+`--smoke` read random scores.
+
+### 11.1 The 2026-27 in-play prices found
+
+- **Games.** 107 regular-season games were final between 2026-10-20 and 2026-11-02, each with a
+  play-by-play. Rule 5 left out 2, so 105 are used. All 43,001 rows read have an empty `source`
+  and the label `open`.
+- **In-play quotes** by the play-by-play clock: 26,076 after every rule. 62 rows were in play by
+  the clock but stamped at or before the listed tip, and the tip bound dropped them. 496 rows
+  repeat a stamp from an earlier fetch: dropped for the decision, kept for "still offered".
+- **Quotes per book per game** (median, range): moneyline 11-13 (2-20), spread 14 (2-20);
+  Pinnacle 11 moneyline and 12 spread.
+- **Spacing.** Median 10.0 minutes between in-play fetches (10th percentile 6.2, 90th 10.1);
+  16 in-play fetches per game at the median (3 to 21).
+- **Quote age when served:** median 23 seconds, 90th percentile 70.
+- **Freshness under record 7.1's rule.** Of 21,123 deciding-book quotes in play, 71.3% have a
+  Pinnacle quote in the same fetch within 60 seconds, and 53.3% pass the whole rule.
+- **Decisions** (game x market x phase): quarters 1-2, 101 moneyline and 102 spread; quarter 3,
+  87 and 98; quarter 4 with 6:00 or more left, 53 and 72.
+- **The model's prior** (Pinnacle's pre-game spread close) exists for all 107 games.
+
+### 11.2 Bad rows
+
+- **Rule 1** (a price between -100 and +100): 0 rows, in 2026-27 and in the held moneylines.
+- **Rule 5** (an early ESPN clock): 2 games, section 3.1. None in the held quotes.
+- **Rules 3 and 4** (a deciding quote far from its Pinnacle pair): 644 rows in 2026-27, 2,034 held
+  moneyline rows. In the biggest gaps the deciding books agree with each other and Pinnacle is the
+  odd one out, often with its two sides swapped. Example: `NBA_2026-10-20_BOS_DET`, quarter 4 with
+  5:10 left, home up 8. Seven books hang the home side at -4.5 to -7.5 and Pinnacle at +8.0; on the
+  moneyline Pinnacle gives home 0.16 against 0.73-0.86 at the others.
+- **How often Pinnacle disagrees with the deciding books at the same score** (fresh, coherent
+  in-play quotes, fetches with 4 or more fresh deciding books; before rules 3 and 4):
+
+  | | Pinnacle more than 0.15 from the books' median (moneyline) | Pinnacle more than 3 points from it (spread) | Any other single book, the same tests |
+  |---|---|---|---|
+  | 2026-27 | 63 of 763 (8.3%) | 208 of 875 (23.8%) | at most 3 rows per book |
+  | Held, 2020-21 to 2025-26 | 734 of 6,892 (10.7%) | 1,574 of 6,071 (25.9%) | at most 59, except Bovada (261, 470) and William Hill (194, 87) |
+
+  So the price IG-2 is measured against, and that its blind bets and placebo are built on, is the
+  least consistent quote in the fetch, in both data sets. IG-2 was graded on the same property.
+- **Extremes kept** (2026-27 in play): moneyline prices -100,000 to +9,000; spreads -45.5 to +48.5
+  (home number), spread prices -15,000 to +2,500. Held moneylines go as short as -10,000,000
+  (2022-23 and 2023-24). None is impossible by the rules; the -200 floor keeps every one of them
+  out of a bet.
+- **The highest-EV offers include prices that look stale and pass every rule.**
+  - FanDuel +1200 on the away side of `NBA_2026-10-31_MIN_SAS`, down 4 with 6:49 left; the model
+    gives it 0.21, EV +1.68 (step 1, quarter 4).
+  - DraftKings -164 on a 6-point leader with 9.6 seconds left (`NBA_2021-11-15_BOS_CLE`, step 2,
+    held).
+  - These are the prices section 9's "still offered" and "just outscored" numbers exist for.
+
+### 11.3 Counts by cell and season
+
+Bets each cell would place, from prices alone. "Reaches 200" counts the 2026-27 schedule after
+2026-11-02 (1,096 games, last on 2027-04-11) at the cell's bets per final game so far (107 games,
+the 2 left out by rule 5 included).
+
+**Step 1, 2026-27 (all 18 cells are under 200 bets: too few games to tell):**
+
+| Phase | Market | EV >= 0.02 | EV >= 0.05 | EV >= 0.08 | Games decided | Reaches 200 bets (0.02 / 0.05 / 0.08) |
+|---|---|---|---|---|---|---|
+| Quarters 1-2 | moneyline | 47 | 19 | 9 | 101 | 2026-12-29 / 2027-04-02 / not this season |
+| Quarters 1-2 | spread | 56 | 35 | 14 | 102 | 2026-12-18 / 2027-01-18 / not this season |
+| Quarter 3 | moneyline | 32 | 29 | 28 | 87 | 2027-01-26 / 2027-02-04 / 2027-02-07 |
+| Quarter 3 | spread | 69 | 50 | 36 | 98 | 2026-12-01 / 2026-12-25 / 2027-01-16 |
+| Quarter 4, 6:00+ | moneyline | 24 | 18 | 17 | 53 | 2027-03-02 / 2027-04-11 / not this season |
+| Quarter 4, 6:00+ | spread | 56 | 41 | 30 | 72 | 2026-12-18 / 2027-01-06 / 2027-01-31 |
+
+The six cells that passed in IG-2 are quarters 1-2 spread at 0.05 and 0.08, quarter 3 moneyline at
+0.05 and 0.08, quarter 3 spread at 0.05 and 0.08. At the measured rates they reach 200 bets on
+2027-01-18, never this season, 2027-02-04, 2027-02-07, 2026-12-25 and 2027-01-16. Bar 3 needs a
+second season in any case (section 7.2), so 2027-28 is the earliest any of them can pass.
+
+**Step 2, the leader's moneyline in the last six minutes:**
+
+| | Decisions | Leader's best price shorter than -200 | Bets at every cut | Leader's best price, median |
+|---|---|---|---|---|
+| Held, by season 2020-21 .. 2025-26 | 22, 41, 21, 22, 28, 41 (175) | 19, 39, 21, 22, 26, 41 (168) | 3, 2, 0, 0, 2, 0 (2020-21 is reported only) | -1,430 |
+| 2026-27 | 25 | 24 | 1 | -1,300 |
+
+- The three cuts bet the same games: every decision priced -200 or better clears EV 0.08.
+- On the graded held seasons the cell places **4 bets in five seasons**; 2026-27 has 1 in 107
+  games. **Too few games to tell, and at the -200 floor it never will be:** at its rate the
+  2026-27 cell does not reach 200 bets this season, and the held seasons hold 4.
+- The floor is what removes them, as section 5 expected: 168 of 175 held decisions and 24 of 25
+  in 2026-27 have the leader priced shorter than -200. Leads at the held decisions run 4 to 15
+  points; the clock from 0:03 to 5:56 (median 2:11).
+
+### 11.4 The placebo on real prices
+
+Share of placebo bets (20 seeds) on a game the cell itself does not bet:
+
+| Phase | Market | EV >= 0.02 | EV >= 0.05 | EV >= 0.08 |
+|---|---|---|---|---|
+| Quarters 1-2 | moneyline | 45% | 76% | 87% |
+| Quarters 1-2 | spread | 38% | 58% | 81% |
+| Quarter 3 | moneyline | 52% | 56% | 58% |
+| Quarter 3 | spread | 25% | 40% | 54% |
+| Quarter 4, 6:00+ | moneyline | 47% | 60% | 62% |
+| Quarter 4, 6:00+ | spread | 18% | 34% | 47% |
+
+- **Seven cells with 30 or more real bets are under 50%:** quarters 1-2 moneyline and spread at
+  0.02; quarter 3 spread at 0.02 and 0.05; quarter 4 spread at all three cuts. Section 8 says this
+  is written here; the shuffle is not changed.
+- **Why, measured:** the shuffle does move the model's disagreement (its correlation with the
+  real one is 0.06 to 0.28 across phases and markets). What stays is the placebo's base price,
+  Pinnacle's live no-vig. Priced at Pinnacle alone, with no disagreement added, the best deciding
+  offer clears EV 0.02 on 41 to 81 games per phase and market, and 60% to 77% of those bets fall on
+  the spread cells' own games at 0.02 (74% in quarter 3, 77% in quarter 4). So in those cells the
+  placebo mostly bets Pinnacle against the deciding books, the same stale-quote gap section 11.2
+  measured, on the same games. Bar 6 then asks the cell to beat Pinnacle's own disagreement with
+  the books. IG-2's placebo was built the same way.
+- **Step 2's placebo is no null:** 145 of the 175 held decisions are alone on their date, so the
+  shuffle cannot move them; every placebo bet in 20 runs falls on one of the cell's own 4 games.
+  With 4 bets the cell is too few games to tell in any case.
+- In 2026-27 no step-1 phase has more than 4 decisions alone on their date.
+
+### 11.5 Still offered at the next fetch (step 1, 2026-27, prices only)
+
+The share of each cell's bets whose book, at the next fetch about 10 minutes later, still hangs the
+same number at a price at least as good:
+
+- **Moneyline:** 47% / 63% / 78% (quarters 1-2, by cut), 44% / 48% / 46% (quarter 3), 38% / 33% /
+  35% (quarter 4). At the identical price: 0% to 22%.
+- **Spread:** 4% to 11% in quarters 1-2 and 3, 0% to 4% in quarter 4. A live spread moves its number
+  with the score, so ten minutes later the same number is rarely there; this measures the number
+  more than the staleness.
+
+### 11.6 The late-window training states, and the check against IG-2
+
+- 79,700 states with 6:00 or less left, 11,972 to 13,644 per season, 2020-21 to 2025-26; games
+  whose play-by-play final differs from the official one are left out. Built in 187 seconds.
+- **IG-2's own window rebuilt from `nba_pbp` for 2024-25 reproduces IG-2's stored states:**
+  102,036 of 102,036 states match on game, time left and score. Every input matches on 100% of
+  them except two foul inputs: who-is-in-foul-trouble on 99.99% and the top players' summed fouls
+  on 99.79% (the top-three ranking reads minutes from `nba_pbp_box`, not the release file).
+
+### 11.7 Time and memory for `--full`
+
+- One placebo run: 0.742 seconds for one step-1 phase (6 cells), 0.491 seconds for step 2's held
+  cells (3 cells).
+- **Projected `--full`: 16.5 minutes** (step 1 7.7, step 2 held 1.7, step 2 2026-27 at most 6.1,
+  loads 1.0), peak working set 3.2 GB. The late-window states are read from the scratch folder;
+  rebuilding them adds about 3 minutes.
+
+```
+NBA_GAME2_GO=1 NBA_GAME2_RESULTS=C:/Users/micha/AppData/Local/Temp/nba_s/ingame27/results \
+NBA_GAME2_BETS=C:/Users/micha/AppData/Local/Temp/nba_s/ingame27/results/bets \
+NBA_RESEARCH_CACHE=C:/Users/micha/documents/bm-nba-q1trend/data/local/nba \
+PYTHONPATH=. PYTHONIOENCODING=utf-8 python -W ignore -m scripts.nba_s_ingame27 --full
+PYTHONPATH=. python -m scripts.nba_game2_verdict --results C:/Users/micha/AppData/Local/Temp/nba_s/ingame27/results --house5
+```
