@@ -23,6 +23,7 @@ the files.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -381,3 +382,28 @@ def test_a_dropped_connection_replays_the_migration_with_its_lock_timeout(monkey
     (replayed,) = opened[0].executed
     assert replayed.startswith(f"SET LOCAL lock_timeout = '{vm.LOCK_TIMEOUT}';")
     assert replayed.rstrip().endswith(body)
+
+
+# A named identity argument is "p_season integer" or "p_seasons integer[]".
+# A types-only piece ("integer", "integer[]", "jsonb") is what
+# pg_get_function_identity_arguments does not return once the CREATE
+# named its parameters.
+_IDENTITY_EQ = re.compile(
+    r"pg_get_function_identity_arguments\s*\([^)]*\)\s*=\s*'([^']*)'",
+)
+_NAMED_IDENTITY_ARG = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s+\S.*$")
+
+
+def test_identity_argument_guards_include_parameter_names():
+    """Comparing pg_get_function_identity_arguments to a types-only list
+    never matches. The guard stays false and the file re-runs its DDL
+    on every pass."""
+    bad: list[str] = []
+    for path in sorted(MIG.glob("*.sql")):
+        code = _code(path.read_text(encoding="utf-8"))
+        for match in _IDENTITY_EQ.finditer(code):
+            literal = match.group(1)
+            parts = [part.strip() for part in literal.split(",")]
+            if not parts or any(not _NAMED_IDENTITY_ARG.fullmatch(part) for part in parts):
+                bad.append(f"{path.name}: {literal}")
+    assert bad == []

@@ -241,6 +241,30 @@ def test_the_lock_read_index_is_registered_and_guarded():
     assert "ALTER TABLE" not in text
 
 
+def test_lock_bands_skip_matches_named_identity_arguments():
+    """pg_get_function_identity_arguments includes the parameter names.
+    The types-only literal never matches the function this file creates,
+    so the ALTER ran on every pass."""
+    bands = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    code = "\n".join(ln.split("--", 1)[0] for ln in bands.splitlines())
+    named = "p_season integer, p_filters jsonb, p_timing text"
+    assert f"pg_get_function_identity_arguments(p.oid) = '{named}'" in code
+    assert "pg_get_function_identity_arguments(p.oid) = 'integer, jsonb, text'" not in code
+    head = code.split("ALTER TABLE", 1)[0]
+    assert "byom official lock bands already present" in head
+    assert "RETURN;" in head
+    assert "CREATE OR REPLACE" not in head
+    # A fresh database still has the DDL after the skip. The version
+    # marker is a comment inside the function, so it is read from the
+    # file rather than from the comment-stripped guard.
+    body = bands.split("RETURN;", 1)[1]
+    assert "ADD COLUMN IF NOT EXISTS team_spread" in body
+    assert "ADD COLUMN IF NOT EXISTS game_total" in body
+    assert "ADD COLUMN IF NOT EXISTS context_at_lock" in body
+    assert "ADD PRIMARY KEY" in body
+    assert "byom_official_lock_bands_v1" in body
+
+
 @pytest.fixture
 def scratch():
     psycopg2 = pytest.importorskip("psycopg2")
@@ -517,6 +541,53 @@ def test_a_missing_official_table_skips_the_write_and_logs(caplog):
         assert write_official_legs(conn, ["2026_08_BUF_KC"], [{"canonical_key": "x"}], False) == 0
     assert any("official-leg write skipped" in rec.message for rec in caplog.records)
     assert all("DELETE" not in sql and "INSERT" not in sql for sql in conn.writes)
+
+
+def test_an_applied_lock_bands_migration_takes_no_table_lock(scratch):
+    """The second pass is a catalog read. A reader holding the table
+    must not make it wait on AccessExclusiveLock."""
+    psycopg2, cur = scratch
+    cur.execute("""
+        SELECT pg_get_function_identity_arguments(p.oid)
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.proname = 'byom_legs'
+    """)
+    identity = cur.fetchone()[0]
+    assert identity == "p_season integer, p_filters jsonb, p_timing text"
+    cur.execute("""
+        SELECT a.attname
+          FROM pg_attribute a
+         WHERE a.attrelid = 'public.byom_official_legs'::regclass
+           AND a.attname IN ('team_spread', 'game_total', 'context_at_lock')
+           AND NOT a.attisdropped
+    """)
+    assert {row[0] for row in cur.fetchall()} == {
+        "team_spread", "game_total", "context_at_lock"}
+    cur.execute("""
+        SELECT a.attname
+          FROM pg_constraint c
+          JOIN pg_attribute a
+            ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+         WHERE c.conrelid = 'public.byom_official_legs'::regclass
+           AND c.contype = 'p'
+         ORDER BY a.attnum
+    """)
+    assert [row[0] for row in cur.fetchall()] == [
+        "canonical_key", "market", "leg_side", "player_key", "match_role",
+        "locked_at"]
+    sql = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    holder = psycopg2.connect(cur.connection.dsn)
+    holder.autocommit = False
+    try:
+        holder.cursor().execute(
+            "LOCK TABLE public.byom_official_legs IN ACCESS SHARE MODE")
+        cur.execute("SET lock_timeout = '200ms'")
+        cur.execute(sql)
+    finally:
+        cur.execute("RESET lock_timeout")
+        holder.rollback()
+        holder.close()
 
 
 def test_unknown_keys_and_timing_still_raise(scratch):
