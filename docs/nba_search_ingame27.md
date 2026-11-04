@@ -665,3 +665,27 @@ NBA_RESEARCH_CACHE=C:/Users/micha/documents/bm-nba-q1trend/data/local/nba \
 PYTHONPATH=. PYTHONIOENCODING=utf-8 python -W ignore -m scripts.nba_s_ingame27 --full
 PYTHONPATH=. python -m scripts.nba_game2_verdict --results C:/Users/micha/AppData/Local/Temp/nba_s/ingame27/results --house5
 ```
+
+
+## 12. Results (graded 2026-11-04)
+
+Run `2026-11-04-ingame27`, stored in Supabase. 24 cells, graded after the review fixes of section 3.2. The grade took
+558 seconds.
+
+**0 of the 24 cells pass, and every cell is under 200 bets: too few games to tell.** No 2026-27 cell can pass this
+season, whatever it shows (section 7.2).
+
+| Step 1, 2026-27 | EV 0.02 | EV 0.05 | EV 0.08 |
+|---|---|---|---|
+| Quarters 1-2, moneyline | 46 bets, -16.4% | 18, -22.0% | 10, -43.6% |
+| Quarters 1-2, spread | 57, -7.1% | 36, -5.7% | 14, -5.5% |
+| Quarter 3, moneyline | 32, -24.3% | 29, -22.7% | 28, -16.3% |
+| Quarter 3, spread | 70, +5.6% | 51, +12.0% | 36, +11.7% |
+| Quarter 4, moneyline | 23, -28.1% | 18, -28.7% | 17, -28.4% |
+| Quarter 4, spread | 55, +5.9% | 42, +21.1% | 31, +35.0% |
+
+- **The spread cells in quarters 3 and 4 are positive and the moneyline cells lose.** Intervals on this few bets run
+  from about -25% to +50%, so this is a reading, not a result. At this season's rate the quarter 3 and quarter 4 spread
+  cells reach 200 bets between 2026-12-01 and 2027-01-31 (section 11), and the earliest any can pass bar 3 is 2027-28.
+- **The late-game leader (step 2) is closed by the -200 floor:** 4 bets in five held seasons and 0 in 2026-27. Leaders
+  are priced around -1,400 in the last six minutes.
