@@ -368,6 +368,24 @@ def test_the_test_suite_never_writes_to_the_call_log():
     assert s["writer_wanted"] is False and s["writer"] is False
 
 
+def test_a_pytest_process_never_arms_the_writer(tmp_path):
+    """The subproject suites (ncaaf_live/tests, nfl/live_model/tests) have no
+    conftest that installs first, so config's own install has to know it is
+    inside pytest. Checked in a fresh process with pytest imported."""
+    env = {k: v for k, v in os.environ.items()
+           if k != "PIPELINE_TELEMETRY" and not k.startswith("API_LOG_")}
+    env.update({"DATABASE_URL": "postgresql://odds-call-log-test.invalid:1/none",
+                "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"})
+    code = ("import pytest, config\n"
+            "from monitoring import probe\n"
+            "s = probe.stats()\n"
+            "print('WANTED' if s['writer_wanted'] else 'NOT_WANTED', s['source'])\n")
+    proc = subprocess.run([sys.executable, "-c", code], cwd=str(tmp_path), env=env,
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert proc.stdout.split() == ["NOT_WANTED", "pytest"], proc.stdout
+
+
 def test_a_test_cannot_reach_the_real_odds_api():
     """A test that forgets to mock fails instead of billing credits."""
     import requests

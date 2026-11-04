@@ -693,6 +693,13 @@ def install(source: str | None = None, start_writer: bool = True) -> bool:
             _source = source or _source
             return False
 
+        if source is None and "_pytest" in sys.modules:
+            # config.py's install inside a pytest run -- this repo's suite, a
+            # subproject's (ncaaf_live/tests, nfl/live_model/tests) or a test
+            # file run on its own. It never writes: on a machine whose .env
+            # names production, each test's calls would land in the real log.
+            # tests/conftest.py says the same before config is imported.
+            source, start_writer = "pytest", False
         _source = source or _default_source()
         # If the bare floor got in first, unwrap it: this wrapper applies the
         # same default, and stacking them would double every call's frames for
