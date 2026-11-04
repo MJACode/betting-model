@@ -186,40 +186,95 @@ def test_a_model_page_row_says_the_day_of_a_game_that_is_not_today():
 
 def _timing_branch(src: str) -> str:
     body = _fn(src, "modelPageTiming")
-    m = re.search(r"if \(EVENING_BEFORE_MODELS\.includes\(modelId\)\) \{(.*?)\n  \}\n", body, re.S)
-    assert m, "modelPageTiming has no branch for the models that decide the evening before"
+    m = re.search(r"if \(FIRST_POST_TOTAL_MODELS\.includes\(modelId\)\) \{(.*?)\n  \}\n", body, re.S)
+    assert m, "modelPageTiming has no branch for the models that decide at DraftKings' first posted total"
     return m.group(1)
 
 
-def test_the_model_page_says_it_decides_the_evening_before():
+def test_the_model_page_says_it_decides_at_draftkings_first_total():
     """The default copy says a pick locks the first time the model scores it
     today, that lines refresh hourly, and to check back after the next
-    refresh. The NCAAB card decides each game once, the evening before, so all
-    three sent a member back at the wrong time."""
+    refresh. The NCAAB card decides each game once, so all three sent a member
+    back at the wrong time.
+
+    From 2026-11-03 (PR #1139) the card decides minutes after DraftKings first
+    posts a game's total, and bets only while that first total still stands.
+    The page said "Decided the evening before", the 22:00 UTC rule it
+    replaced. DraftKings posts most first totals the day before the game and
+    some on game day (76% and 21%, measured for #1139; docs/sessions/2026-11.md),
+    so the page says "usually the day before" and prints no hour."""
     src = _read(MODEL_META)
-    lst = re.search(r"const EVENING_BEFORE_MODELS: readonly string\[\] = \[(.*?)\];", src, re.S)
+    lst = re.search(r"const FIRST_POST_TOTAL_MODELS: readonly string\[\] = \[(.*?)\];", src, re.S)
     assert lst and f"'{NCAAB_TOTALS_ID}'" in lst.group(1)
+    assert "EVENING_BEFORE_MODELS" not in src
     branch = _timing_branch(src)
     body = _fn(src, "modelPageTiming")
-    assert body.index("EVENING_BEFORE_MODELS.includes(modelId)") < body.index("title: 'Picks lock for the day'")
-    assert "title: 'Decided the evening before'" in branch
-    assert "the evening before" in branch
-    assert "never re-priced" in branch
-    # No Eastern clock time: the card runs at 22:00 UTC, which is 6pm ET until
-    # 1 November and 5pm ET after it.
+    assert body.index("FIRST_POST_TOTAL_MODELS.includes(modelId)") < body.index("title: 'Picks lock for the day'")
+    assert "title: 'Decided when the total opens'" in branch
+    flat = "".join(re.findall(r"'([^']*)'", branch))
+    assert "DraftKings first posts its total" in flat
+    assert "usually the day before the game, sometimes on game day" in flat
+    # It bets only while the first total stands, and says the number moves.
+    assert "still DraftKings’ number" in flat
+    assert "within half an hour" in flat
+    assert "never re-priced" in flat
+    # No Eastern clock time: DraftKings posts at no fixed hour.
     for s in re.findall(r"'([^']*)'", branch):
         assert not re.search(r"\d\s?(?:am|pm)\b|\d:\d\d", s, re.I), s
-    for stale in ("first time this model scores it today", "pipeline refresh", "hourly"):
+    for stale in ("first time this model scores it today", "pipeline refresh", "hourly", "evening before"):
         assert stale not in branch, stale
 
 
 def test_the_pick_screen_says_posted_once_not_first_scoring_run():
     """Pick Detail's lock note for a game pick says it locked at the first
     scoring run of the day. The NCAAB card posts once and never re-prices, so
-    it takes the posted note the NBA and NHL totals cards use."""
+    it takes the posted note the NBA and NHL totals cards use. It bets
+    DraftKings' first total, which often moves within half an hour, so the
+    note says to check DraftKings' total, as the opening moneyline's does."""
     body = _fn(_read(MARKETS), "pickTimingInfo")
     chain = body[body.index("const nbaPosted ="):body.index("kind: 'posted',")]
     assert f"pick.model_id === '{NCAAB_TOTALS_ID}'" in chain
+    m = re.search(rf"pick\.model_id === '{NCAAB_TOTALS_ID}'\s*\n\s*\? '([^']*)'", body)
+    assert m, "the totals model's Pick Detail note has no sentence of its own"
+    assert "An opening total often changes within half an hour" in m.group(1)
+    assert "DraftKings" in m.group(1)
+
+
+def _branch(src: str, models_const: str) -> str:
+    body = _fn(src, "modelPageTiming")
+    m = re.search(rf"if \({models_const}\.includes\(modelId\)\) \{{(.*?)\n  \}}\n", body, re.S)
+    assert m, f"modelPageTiming has no {models_const} branch"
+    return "".join(re.findall(r"'([^']*)'", m.group(1)))
+
+
+def test_the_morning_models_say_10am_et_and_the_eight_books():
+    """The spread and moneyline models decide at 15:00 UTC on game day: 10am ET
+    in winter, 11am ET from mid-March (docs/sports/ncaab.md), at the eight
+    bettable books. Their page said only "the morning of game day", and the
+    moneyline model's page left out its -200 cap."""
+    src = _read(MODEL_META)
+    lst = re.search(r"const GAME_MORNING_MODELS: readonly string\[\] = \[(.*?)\];", src, re.S)
+    assert lst and "'ncaab_spread_market'" in lst.group(1) and "'ncaab_moneyline_own_spread'" in lst.group(1)
+    spread = _branch(src, "GAME_MORNING_MODELS")
+    assert "at 10am ET on game day (11am ET from mid-March)" in spread
+    assert "eight sportsbooks" in spread
+    assert "by noon ET" in spread
+    ml = re.search(r"const GAME_MORNING_BODY: Readonly<Record<string, string>> = \{(.*?)\n\};", src, re.S)
+    assert ml, "GAME_MORNING_BODY not found"
+    ml_text = "".join(re.findall(r"'([^']*)'", ml.group(1)))
+    assert "at 10am ET on game day (11am ET from mid-March)" in ml_text
+    assert "eight sportsbooks" in ml_text
+    assert "never lays more than -200" in ml_text
+
+
+def test_the_opening_moneyline_says_minutes_after_the_post_and_the_cap():
+    """The opening moneyline model bets a book's first posted moneyline within
+    minutes of it posting, never past -200 (docs/sports/ncaab.md). Its page
+    left out the cap."""
+    fp = _branch(_read(MODEL_META), "OPENING_LINE_MODELS")
+    assert "minutes after each book first posts its moneyline" in fp
+    assert "never lays more than -200" in fp
+    assert "within half an hour" in fp
 
 
 # -- the board reaches the evening-before pick --------------------------------

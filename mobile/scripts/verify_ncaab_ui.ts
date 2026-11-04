@@ -65,10 +65,23 @@ check('it is priced off the totals rows', gameMarketForModel(TOTALS) === 'totals
   String(gameMarketForModel(TOTALS)));
 check('a parlay treats it as a game total', marketClassForModel(TOTALS) === 'game_total',
   marketClassForModel(TOTALS));
-// It decides each game once, the evening before (scripts/ncaab_total_card.py).
+// It decides each game once, minutes after DraftKings first posts its total,
+// and bets only while that first total still stands (scripts/ncaab_total_card.py,
+// every five minutes, from 2026-11-03; PR #1139). It no longer decides the
+// evening before, at 22:00 UTC.
 const timing = modelPageTiming(TOTALS);
-check('its page says it decides the evening before', timing.title === 'Decided the evening before', timing.title);
-check('its page names no Eastern clock time (22:00 UTC moves with DST)',
+check('its page says it decides when DraftKings first posts its total, usually the day before',
+  timing.title === 'Decided when the total opens' && timing.body.includes('DraftKings first posts its total')
+    && timing.body.includes('usually the day before the game, sometimes on game day'),
+  `${timing.title} | ${timing.body}`);
+check('its page says it bets only while that first total stands, and that an opening total moves',
+  timing.body.includes('still DraftKings’ number') && timing.body.includes('does not bet the game')
+    && timing.body.includes('within half an hour') && timing.body.includes('never re-priced'),
+  timing.body);
+check('its page no longer says it decides the evening before',
+  ![timing.title, timing.body, timing.empty, timing.note].some((s) => s.includes('evening before')),
+  `${timing.title} | ${timing.empty} | ${timing.note}`);
+check('its page names no Eastern clock time (DraftKings posts at no fixed hour)',
   ![timing.title, timing.body, timing.empty, timing.note].some((s) => /\d\s?(am|pm)\b|\d:\d\d/i.test(s)));
 const posted = pickTimingInfo({
   pick_id: 1, model_id: TOTALS, sport: 'NCAAB', signal_type: 'BET', created_at: '2026-11-01T22:05:00Z',
@@ -76,6 +89,10 @@ const posted = pickTimingInfo({
 } as unknown as Pick);
 check('its Pick Detail note says posted once, not the first scoring run of the day',
   !!posted && posted.kind === 'posted' && !posted.note.includes('first scoring run'), posted?.note ?? 'null');
+check('its Pick Detail note says an opening total moves, and to check DraftKings before betting',
+  !!posted && posted.note.includes('An opening total often changes within half an hour')
+    && posted.note.includes('DraftKings'),
+  posted?.note ?? 'null');
 // The moneyline model (models/ncaab_moneyline_own_spread.py) has 'spread' in
 // its id, because each book's moneyline is priced off that book's own spread,
 // but every pick it writes is a MONEYLINE (2026-11-02).
@@ -93,9 +110,19 @@ check('its page says it decides the morning of the game, against each book\'s ow
   mlTiming.title === 'Decided the morning of the game' && mlTiming.body.includes('moneyline')
     && mlTiming.body.includes('same book’s spread') && !mlTiming.body.includes('line and price'),
   mlTiming.body);
-check('the spread model\'s page is unchanged',
-  modelPageTiming('ncaab_spread_market').body.startsWith(
-    'This model decides each game once, on the morning of game day, from the spread at each book we price.'));
+// Both morning models decide at 15:00 UTC on game day: 10am ET in winter,
+// 11am ET from mid-March (docs/sports/ncaab.md). The page says both.
+check('its page says 10am ET on game day, 11am ET from mid-March, at the eight books, never past -200',
+  mlTiming.body.includes('at 10am ET on game day (11am ET from mid-March)')
+    && mlTiming.body.includes('eight sportsbooks') && mlTiming.body.includes('never lays more than -200'),
+  mlTiming.body);
+const spTiming = modelPageTiming('ncaab_spread_market');
+check('the spread model\'s page says 10am ET on game day, 11am ET from mid-March, at the best of eight books',
+  spTiming.title === 'Decided the morning of the game'
+    && spTiming.body.startsWith('This model decides each game once, at 10am ET on game day (11am ET from mid-March)')
+    && spTiming.body.includes('eight sportsbooks') && spTiming.body.includes('best line and price')
+    && spTiming.empty.includes('10am ET') && spTiming.empty.includes('by noon ET'),
+  `${spTiming.body} | ${spTiming.empty}`);
 check('its probability note says the chance comes from the bet book\'s own spread',
   modelProbabilityNote(ML).includes('spread at the book we bet'), modelProbabilityNote(ML));
 check('its record note never claims the best price (the edge book is not always the best price)',
@@ -126,6 +153,10 @@ check('its page says it decides when the line opens, names the moving price, and
     && fpTiming.body.includes('within half an hour')
     && fpTiming.body.includes('never a game the NCAAB Moneyline model has already bet')
     && ![fpTiming.title, fpTiming.body, fpTiming.empty, fpTiming.note].some((s) => /\d\s?(am|pm)\b|\d:\d\d/i.test(s)),
+  fpTiming.body);
+check('its page says it bets minutes after the book posts, and never lays more than -200',
+  fpTiming.body.includes('minutes after each book first posts its moneyline')
+    && fpTiming.body.includes('never lays more than -200'),
   fpTiming.body);
 check('its probability note says the chance comes from the bet book\'s own spread when it opened',
   modelProbabilityNote(FP).includes('spread at the book we bet') && modelProbabilityNote(FP).includes('first posted'),
@@ -161,9 +192,12 @@ check('the custom-model picker has one NCAAB row: ML (both moneyline models) and
     && JSON.stringify(ncaabChoice('Spread')?.modelIds) === JSON.stringify(['ncaab_spread_market']),
   JSON.stringify(ncaabRows));
 
-// ── Stats: nothing to show yet, and nothing broken ───────────────────────────
-check('NCAAB has no leaderboard stats', GROUP_ORDER.NCAAB.length === 0 && defaultStatFor(NCAAB) === null);
-check('NCAAB has no hit-rate view', !supportsHitRate(NCAAB));
+// ── Stats: the Players board (Matt, 2026-11-03), and nothing broken ─────────
+// The two checks here said NCAAB had no stats and no hit rates, true until the
+// Players board landed (PR #1134), and failed on master from then on.
+check('NCAAB has leaderboard stats, Points first', GROUP_ORDER.NCAAB.length > 0 && defaultStatFor(NCAAB)?.key === 'points',
+  String(defaultStatFor(NCAAB)?.key));
+check('NCAAB has a hit-rate view', supportsHitRate(NCAAB));
 check('NCAAB has no Teams board', !supportsTeamBoard(NCAAB));
 check('NCAAB draws no segment row', segmentsForSport(NCAAB).length < 2, segmentsForSport(NCAAB).join(','));
 check('an NCAAB form strip reads PTS', teamScoreUnit('NCAAB') === 'PTS');

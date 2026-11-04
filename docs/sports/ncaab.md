@@ -1524,7 +1524,7 @@ built; **nothing is bought until a worker job is queued.**
 |---|---|---|
 | ESPN schedule + results | Teams, venues, every game (neutral flag, conference game), finals for settlement; the daily pipeline refreshes 14 days ahead, every refresh pass fills finals for started games | `data/ingestors/ncaab_espn_ingestor.py`, steps `ncaab-schedule` / `ncaab-results` |
 | Live odds | Full-game moneyline, spread and total from the ten line-shop books on every refresh pass; NCAAB is exempt from the DraftKings-must-list gate so every book's first post is kept | `data/ingestors/odds_ingestor.py` |
-| Totals model card | Hourly at five past, UTC: decides each game once at DraftKings' standing total (22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip), writes the bets, then publishes them | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
+| Totals model card | Every five minutes, three after each capture poll: decides each game once at DraftKings' first posted total, bets only while it still stands, writes the bets, then publishes them (the 22:00 / 15:00 UTC rule until 2026-11-03) | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
 | First-half spread model and capture | Every minute: each listed game's first-half lines (moneyline, spread, total, team totals) at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip, at most 4 credits a call; the first-half spread model decides each game once on the tip-minus-10 fetch and the first-half total model on the tip-minus-60 fetch, each writes its bets, then the job publishes them | `scripts/ncaab_first_half_window.py`, `data/ingestors/ncaab_first_half_odds.py`, `scripts/ncaab_first_half_spread_card.py`, `scripts/ncaab_first_half_total_card.py`, job `ncaab_first_half_window` |
 | Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known; each tick also writes the opening moneyline model's fill check | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
 | Opening moneyline model card | Every minute: one planning read for a bettable book's new moneyline on a game; the card prices it off the same book's spread, decides it once, writes the bet, then publishes it | `scripts/ncaab_moneyline_first_post_card.py`, job `ncaab_moneyline_first_post` |
@@ -1718,17 +1718,22 @@ stored row names its endpoint.
   movement and line-shop lookup reads the moneyline rows), and so does
   `marketClassForModel` (else a parlay treats it as independent of the same
   game's other legs).
-- **Its page and its picks say when it decides.** The model page says it
-  decides each game once, the evening before, at DraftKings' total, and that a
+- **Its page and its picks say when it decides.** The model page ("Decided
+  when the total opens", from 2026-11-03) says it decides each game once,
+  minutes after DraftKings first posts its total, usually the day before the
+  game, sometimes on game day; that it bets only while that first total and
+  its prices are still DraftKings' number; that an opening total often changes
+  within half an hour, so check DraftKings' total before betting; and that a
   posted bet is never re-priced (`modelMeta.modelPageTiming`). It prints no
-  Eastern clock time: the card runs at 22:00 UTC, which is 6pm ET until
-  1 November and 5pm ET after it. Pick Detail says "Posted" once, not "the
-  first scoring run of the day" (`markets.pickTimingInfo`). A row for a game
+  Eastern clock time, because DraftKings posts at no fixed hour. Until
+  2026-11-03 it said "Decided the evening before", the 22:00 UTC rule. Pick
+  Detail says "Posted" once, not "the first scoring run of the day", and adds
+  the same check-the-total sentence (`markets.pickTimingInfo`). A row for a game
   that is not today shows its day as well as its time, as the Signals card
   does.
 - **The Today board reads NCAAB picks up to 7 days ahead**
-  (`fetchUpcomingNcaabPicks`), because the totals model decides the evening
-  before the game. It reads the picks first, then only those
+  (`fetchUpcomingNcaabPicks`), because the totals model usually decides the
+  day before the game. It reads the picks first, then only those
   picks' games and lines, 80 game ids per request. Reading the whole window
   instead would have been too big: over 2025-26 the biggest day held 4,417
   main-market rows across all books, and the biggest seven days held 10,424
