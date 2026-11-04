@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a relaunched daily and a refresh do not score at the same time; a deploy-killed manual daily_pipeline is reclaimed only inside the catch-up bounds; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, deploy-kills do not use the daily failure cap (bound 12, cutoff 22:00 ET); the boot catch-up is a job so the 13:17Z hourly is not stuck behind the daily; worker_jobs daily_pipeline runs one daily under the lock; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NFL: official pick (first match) beside the close, main-model staking (risk cap 3u), the bet list, daily refresh at 10:41 ET; stale facts since 10-24 were the 7-0 |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, daily relaunch: the 75-minute stale cutoff is daily-only, aborted starts relaunch until 4, a finished non-aborted failure gets one retry, the ops note names the start number; no model change |
