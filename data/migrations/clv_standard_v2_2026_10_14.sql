@@ -27,7 +27,7 @@
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaab-first-half-total';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
   work_left boolean;
   def text;
   new_def text;
@@ -214,6 +214,7 @@ BEGIN
         WHEN 'ncaab_total_blend' THEN 'totals'
         WHEN 'ncaab_spread_market' THEN 'spreads'
         WHEN 'ncaab_moneyline_own_spread' THEN 'h2h'
+        WHEN 'ncaab_moneyline_first_post' THEN 'h2h'
         WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
         WHEN 'ncaab_first_half_total' THEN 'totals_h1'
         ELSE 'h2h'
@@ -367,7 +368,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-ncaab-first-half-total';
+      'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
   END IF;
 
   SELECT EXISTS (

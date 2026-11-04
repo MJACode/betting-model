@@ -37,6 +37,11 @@ THE MODEL, per game, as of the moment DraftKings' total is read (the QUOTE):
      priced from the first game of the season, on last season's ratings until
      this season's games come in. The early games are priced with the November
      blend, fitted on every quoted November game, so nothing frozen changed.
+  6. A FEED TYPO IS NOT A QUOTE (models/ncaab_quote_bounds.py). A quote whose
+     total is outside 90-220 or whose price is beyond +/-100000 is never
+     priced: decide() returns out_of_range, not final, and the game is looked
+     at again on the next run. An edge above the data-error cap is never bet:
+     the game is edge_cap, waits the same way, and the card's run fails.
 
 THE QUOTE (from 2026-11-03, mike): DraftKings' first posted full-game total for
 the game, the earliest pre-game row stored, by DraftKings' own time on it, with
@@ -71,6 +76,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from models import ncaab_quote_bounds as qb
+
 MODEL_ID = "ncaab_total_blend"
 SPORT = "NCAAB"
 MARKET = "totals"
@@ -97,8 +104,10 @@ _EPOCH = pd.Timestamp("2000-01-01")
 # quote: the stored history holds 1465.0 for 146.5 (2023-03-17, Providence vs
 # Kentucky), and that one row moved the walk-forward blend's December beta from
 # 0.48 to about 1.0. It is the only DraftKings total outside 90-220 in 2021-2026
-# (research round 5). The first post is the first row INSIDE it.
-TOTAL_RANGE = (90.0, 220.0)
+# (research round 5). The first post is the first row INSIDE it. The range is
+# the shared NCAAB bounds' (models/ncaab_quote_bounds.LINE_RANGE), so every
+# card reads one number.
+TOTAL_RANGE = qb.LINE_RANGE["totals"]
 
 
 def valid_total(line) -> bool:
@@ -618,7 +627,8 @@ def load_artifact(path: str | Path | None = None) -> dict:
 # ── the live decision ──────────────────────────────────────────────────────────
 
 DIAG_KEYS = ("games", "already_decided", "wrong_season", "no_dk_total", "first_post_gone",
-             "out_of_range", "box_pending", "box_missing", "no_blend", "below_cut", "bets")
+             "out_of_range", "box_pending", "box_missing", "no_blend", "edge_cap", "below_cut",
+             "bets")
 # Hold a game while a team's earlier game that ended before the quote has no
 # final score or no box yet, for this long after it ended (counted to now, so a
 # box that never lands stops holding while the quote stays the first post). A
@@ -706,6 +716,15 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
         if q is None:
             out.append(Decision(r.game_id, "no_dk_total", "no DraftKings total posted"))
             continue
+        bad = qb.problem(MARKET, q.line, (q.over_price, q.under_price))
+        if bad:
+            # A feed typo, never priced: the game waits for its next hour.
+            out.append(Decision(r.game_id, "out_of_range",
+                                f"{BOOK} total {q.line:g} over {q.over_price:+g} under "
+                                f"{q.under_price:+g} stamped {q.quote_at.isoformat()}: {bad}; "
+                                f"dropped as a data error, waits for the next decision hour",
+                                quote=q))
+            continue
         cut_ns = floor_hour_ns(to_ns(q.quote_at))
         held = []
         old_total = 0
@@ -752,10 +771,12 @@ def decide(targets: pd.DataFrame, quotes: dict, sg: pd.DataFrame, box: pd.DataFr
                                 quote=q, cutoff=cutoff, model_total=float(x.pt), ng=ng))
             continue
         pz = price(float(x.pt), q.line, q.over_price, q.under_price, b)
-        status = "bets" if pz.edge > cut else "below_cut"
+        capped = qb.edge_problem(pz.edge, MODEL_ID)
+        status = "edge_cap" if capped else "bets" if pz.edge > cut else "below_cut"
         out.append(Decision(r.game_id, status,
                             f"{pz.side} {q.line:g} edge {pz.edge:+.4f} model {x.pt:.2f} mean {pz.mean:.2f} "
-                            f"games {ng[0]}/{ng[1]}",
+                            f"games {ng[0]}/{ng[1]}"
+                            + (f"; {capped}: a data error, not a bet" if capped else ""),
                             quote=q, cutoff=cutoff, model_total=float(x.pt), priced=pz, ng=ng,
                             extra={"pt_s1": float(x.pt_s1), "rhat": float(x.rhat), "pp": float(x.pp)}))
     return out

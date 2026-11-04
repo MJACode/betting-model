@@ -273,10 +273,10 @@ export function ExplainerScreen() {
           </P>
           <P>
             Below that, <Strong>Tracked picks</Strong> grades the picks you tap
-            Track on. Those score automatically from our settled results at the
-            stake basis you choose (1u flat, or a custom stake in units), so
-            you can see how the model's calls would have done for you without
-            logging anything.
+            Track on, with nothing to log. They score automatically from our
+            settled results at the stake each pick was posted at, so they match
+            the Record tab. Choose <Strong>My stakes</Strong> to set your own
+            stake on any of them, in units.
           </P>
           <P>
             <Strong>Automatic sportsbook sync is coming soon.</Strong> When it

@@ -62,6 +62,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import models.ncaab_quote_bounds as qb  # noqa: E402
 import models.ncaab_total_blend as nb  # noqa: E402
 
 FIRST_SEASON = 2011          # burn-in season (no prior)
@@ -93,15 +94,16 @@ def load(cache: Path, last: int):
                                    "o_over_price", "o_under_price"])
     dk = red[(red["market"] == "totals") & (red["bookmaker"] == nb.BOOK)]
     dk = dk.dropna(subset=["o_ts", "o_total_line", "o_over_price", "o_under_price"])
-    bad = dk[~dk["o_total_line"].map(nb.valid_total)]
-    if len(bad):
-        # The reduction must drop a feed typo BEFORE it takes the first row,
-        # so the next row is the first post; dropping the game here would not.
-        raise ValueError(f"{len(bad)} DraftKings total(s) outside {nb.TOTAL_RANGE} in "
-                         f"odds_reduced.parquet (e.g. {bad.iloc[0]['game_id']} "
-                         f"{bad.iloc[0]['o_total_line']}): rebuild the reduction with them dropped first")
     dk = dk.rename(columns={"o_total_line": "line", "o_over_price": "over_price",
                             "o_under_price": "under_price"})
+    # The card never prices a feed typo (models/ncaab_quote_bounds.py), so
+    # neither does the replay nor the blend fit. The reduction should already
+    # have dropped a typo BEFORE taking the first row (so the next row is the
+    # first post, as the card reads it); one that slipped through is dropped
+    # here and counted, and that game has no quote.
+    dk, bad = qb.split(dk, nb.MARKET, "line", ("over_price", "under_price"))
+    print(f"DraftKings first totals dropped as data errors: {len(bad)}"
+          + "".join(f"\n  {x}" for x in qb.describe(bad, "line", ("over_price", "under_price"))))
     dk["quote_ns"] = pd.to_datetime(dk["o_ts"], utc=True).dt.as_unit("ns").astype("int64")
     return g, box, dk[["game_id", "line", "over_price", "under_price", "quote_ns"]]
 

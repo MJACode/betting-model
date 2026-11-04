@@ -1051,12 +1051,21 @@ def step_ncaab_box(run_date: str) -> bool:
     """
     try:
         from data.ingestors.ncaab_espn_box import run_recent
+        from data.ingestors.ncaab_player_box import run_recent as run_recent_players
         t = run_recent(run_date)
         summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
-        if t["failed"]:
-            logger.error(f"✗ NCAAB box scores (ESPN): {summary}")
+        # Player boxes: stored from the team feed's own payload above; this
+        # catches up only finals with none (refused, or stored before the
+        # player table existed). No ESPN call when nothing is due.
+        try:
+            pt = run_recent_players(run_date)
+        except Exception as exc:                          # noqa: BLE001
+            pt = {"failed": [f"player-box: {exc}"]}
+        psum = {k: (len(v) if isinstance(v, list) else v) for k, v in pt.items()}
+        if t["failed"] or pt["failed"]:
+            logger.error(f"✗ NCAAB box scores (ESPN): {summary} players: {psum}")
             return False
-        logger.success(f"✓ NCAAB box scores (ESPN): {summary}")
+        logger.success(f"✓ NCAAB box scores (ESPN): {summary} players: {psum}")
         return True
     except Exception as exc:
         logger.error(f"✗ NCAAB box scores failed: {exc}")

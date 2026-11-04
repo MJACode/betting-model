@@ -9,6 +9,23 @@
 
 ## The models
 
+**A feed typo never becomes a bet (2026-11-03).** Every live NCAAB card reads
+one guard, `models/ncaab_quote_bounds.py`. A quote whose line is outside its
+market's range (full-game total 90-220, spread +/-60, first-half total 40-120,
+first-half spread +/-35) or whose price is beyond +/-100000 is dropped before
+any consensus or price reads it, and that book's older row is not used
+instead (the totals card's first post is the exception: it is the first row
+inside the range). A typo in the totals card's standing number or a first
+post's price makes the game wait; the other cards decide on the books that
+are left. Each drop is logged with its
+game, book and value and counted on the run's line. A best edge above the
+model's cap (0.25; 0.60 and 0.50 for the first-half spread and total
+models, whose own replays reached 0.46 and 0.34) is never bet and fails the
+run. The ranges are the stored
+2021-2026 and 2026-27 lines with a margin, and every card's replay gave the
+same bets with the guard as without it. It was found because the feed held a
+DraftKings total of 1465.0 (Providence at Kentucky, 2023-03-17).
+
 ### The NCAAB totals model (`ncaab_total_blend`), live from 2026-10-30
 
 mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model
@@ -657,10 +674,204 @@ settled picks, positive flat-bet ROI, calibration within 5%). Read beside the
 ROI: the close value, and how often the bet book's price was still up when the
 pick posted (the ledger keeps every book's 15:00 quote).
 
+**One bet a game with the opening moneyline model (2026-11-03).** A game the
+opening moneyline model (`ncaab_moneyline_first_post`, below) has already
+bet is written `other_model_bet`: not priced, not missed, no bet. A game this
+card bets first is closed to that model. Both cards hold both models' locks.
+
 **Before the 2027-28 season** rebuild the spread model's frozen numbers first,
 then this one (`python -m scripts.ncaab_moneyline_build --cache <copy>
 --last-season 2027`): it refuses to write unless its own fit equals the spread
 artifact's table, and the card refuses a table whose digest moved.
+### The NCAAB opening moneyline model (`ncaab_moneyline_first_post`), live from 2026-11-03
+
+mike, 2026-11-03: a new model goes live when a new search beats what is live,
+with NCAAB moneylines capped at *"-200 max"*. Real money, like every model
+(CLAUDE.md §2), no games-played wait. Code: `models/ncaab_moneyline_first_post.py`
+(the rule), `scripts/ncaab_moneyline_first_post_card.py` (the card, every
+minute), `scripts/ncaab_first_post_fill.py` (the fill check the capture
+writes), `scripts/ncaab_moneyline_first_post_build.py` (the frozen numbers
+and the replay), `models/saved/ncaab_moneyline_first_post_2027.json`. It
+prices exactly as the 15:00 UTC moneyline model above, with the same margin
+table; only the moment differs.
+
+**What it bets.** The moment a bettable book FIRST posts its full-game
+moneyline for a game, that new moneyline is priced off the same book's
+full-game spread at that moment. When at least three OTHER bettable books
+already have a moneyline up and the edge is above **0.015**, it bets that
+book's side, never at a price shorter than -200. In the app it is "NCAAB
+Opening Moneyline", badge "Open ML"; its page and Pick Detail tell the member
+that an opening price often changes within half an hour.
+
+**How a post is decided, step by step:**
+
+1. **The trigger.** The five-minute capture (`scripts/ncaab_odds_capture.py`)
+   or a refresh pass stores a book's first moneyline row for a game. The card
+   runs every minute; a (game, book) with a moneyline in `latest_odds` and no
+   row in its ledger is a new first post. It is decided within the minute
+   after it was stored.
+2. **Still the first number.** The book's standing moneyline must still be
+   its first complete row, by price. A post that already moved before the
+   card saw it is `moved_before_seen`, never priced.
+3. **Every book's standing quotes at that moment**: each book's newest
+   pre-game moneyline (the eight bettable books, plus Pinnacle and Bovada for
+   the favourite check) and spread (the eight), however old. There is no
+   one-hour window, because the capture stores a row only when a number
+   moves, so an unchanged quote keeps its first stamp.
+4. **Price, flags and floor exactly as the 15:00 UTC model** (steps 2 to 4
+   above): the fair chance from the posting book's own spread, the three
+   suspect-quote flags, and every side shorter than -200 removed before the
+   pick.
+5. **Three others up.** At least 3 other bettable books with a price-valid
+   moneyline (both prices -100/+100 or longer) standing at that moment. A
+   flagged quote still counts, as the evidence counted it; a book posting in
+   the same moment counts too; Pinnacle and Bovada never count.
+6. **The bet** is the posting book's better side when its edge is above
+   0.015. When two books post in the same moment, the larger edge wins and a
+   tie goes to the book's name in alphabetical order (the research's order).
+   A moment less than five minutes before tip is not priced.
+7. **Feed typos out first, as on the 15:00 UTC card**
+   (`models/ncaab_quote_bounds.py`). A moneyline priced beyond +/-100000, and
+   a spread beyond +/-60 or priced beyond +/-100000, is dropped before any
+   flag, count or price reads it; that book has no such quote at that moment.
+   Each is logged, counted on the run's line and kept in the ledger row's
+   quotes as `out_of_range`. A posting book whose own first moneyline is a
+   typo is `no_clean_quote`. A moment whose largest edge is above the
+   data-error cap, **0.40**, bets nothing: that post is `edge_cap` and the run
+   fails. The cap sits above the largest edge the replay priced, 0.2416 (one
+   BetMGM +340 first post in 2021-22, a bet, and the largest of all 97,429
+   posts priced with 3+ other books up), which is why it is not the 15:00 UTC
+   model's 0.25. With the guard in place the replay dropped no quote at any
+   first-post moment and its 353 bets are identical, row for row.
+
+**One bet a game, across both moneyline models.** A first post below the cut
+does not close the game: a later book's first post can still bet it (157 of
+the evidence's 353 bets came at DraftKings, 122 at Caesars, which posts its
+moneylines later). The first BET closes the game for this model and for the
+15:00 UTC model, whichever writes its bet first. Both cards take both models'
+publish locks, in sorted order, and re-read the other model's BETs inside
+them before writing. The 15:00 UTC card writes a game this model bet as
+`other_model_bet`, never prices it and never counts it missed; this card
+writes `other_model_bet` for a game the 15:00 UTC card bet. The 15:00 UTC
+card decides when it runs (15:05 UTC, on the 15:00 quotes), so a first post
+stored in those five minutes takes the game. That is the one place live
+differs from the research's combined rule: there, a post made after 15:00 UTC
+was first seen at the 15:30 snapshot and the 15:00 UTC model kept the game
+(only a post seen at exactly 15:00 UTC went to this model). In the replay, 2
+of this model's 353 bets were posted after 15:00 UTC on a game the 15:00 UTC
+model bet (stamped 15:20 and 15:50 UTC, first seen at 15:30 and 16:00), so the
+15:00 UTC model kept both; live it keeps them too, since only a post stored
+before 15:05 UTC changes hands.
+
+**The ledger** (`ncaab_moneyline_first_post_decisions`, one row per (game,
+book) first post, bet or not, worker-only): its status (`bets`, `below_cut`,
+`too_few_books`, `no_clean_quote`, `not_best`, `book_not_bettable`,
+`edge_cap`, `game_already_bet`, `other_model_bet`, `moved_before_seen`, `tipped`,
+`pre_model`, `before_window`, `missed`), the posted prices, the priced side,
+every book's quotes, and the fill check. **A post is never decided on a stale
+quote:** the card's first run writes every post already up as `pre_model`; a
+post stored while its game was more than seven days away is `before_window`;
+a post the card first sees more than 15 minutes after it was stored is
+`missed`, no bet, and the run fails (the heartbeat records `error`).
+
+**The fill check, the first thing to measure live.** The capture's next poll
+after each bet writes, on the bet's ledger row, whether that book still
+listed the moneyline at the bet's two prices: `unchanged`, `changed` (with
+the new prices), `book_not_listed` or `game_not_listed`. The research could
+not measure this (below).
+
+**The bet row** is built by the 15:00 UTC card's own function
+(`scripts/ncaab_moneyline_card.pick_rows`, under this model's id): a
+moneyline, `scored_line` and `line_book` empty, the label the platform's
+("Duke ML") checked against the side, `decision_*` and `best_*` the posting
+book's price, DraftKings' own moneyline as the reference when it had a clean
+one. `model_probability` is the fair chance from the posting book's own
+spread, the number the 0.015 cut was measured on. Settlement: full-game
+moneyline, overtime included.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.015 at the posting book's own price | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.015: the edge filter IS the card's cut | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| price cap | -200, removed before the pick and pinned again | `MIN_PRICE`, `MODEL_MIN_ODDS` |
+| EV floor | 0.022, just under the smallest EV the cut admitted in the replay (+0.0226; median +0.0359). An edge above 0.015 at -200 or longer is always EV above 0.0225, so it removes nothing the cut takes | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| other books | 3 or more other bettable moneylines up | `models/ncaab_moneyline_first_post.MIN_OTHER_BOOKS` |
+| feed typos | a moneyline or spread price beyond +/-100000, a spread beyond +/-60: dropped first; an edge above 0.40 is a data error, not a bet, and fails the run | `models/ncaab_quote_bounds.py` (`EDGE_CAP`) |
+| cadence | every minute, 24x7; the scheduler's planning read starts the card only for a new post | `scheduler.run_ncaab_moneyline_first_post` |
+| decided once | one ledger row per (game, book), bet or not; one bet a game across both moneyline models | `scripts/ncaab_moneyline_first_post_card.py` |
+| kill switch | `RUN_NCAAB_MONEYLINE_FIRST_POST=0` | the card and the plan |
+| frozen numbers | the spread model's 2012-2026 distribution, pinned by its SHA-256 (the same one the 15:00 UTC model pins) | `models/saved/ncaab_moneyline_first_post_2027.json` |
+
+**The evidence: the card's own functions, replayed** (2026-11-03,
+`scripts/ncaab_moneyline_first_post_build.py` on the round-5 research's copy
+of `odds`: the lines purchase plus the half-hourly opener grid, 2,268,688
+moneyline and 1,790,416 spread rows, and the fetch ledger of the 43,415
+instants bought). A row is first seen at the first bought instant at or after
+its own stamp; each first post is decided there. Each season is priced with
+the margin table fitted on the seasons before it, which equals the
+research's to the last digit. It decided 183,212 first posts at 138,563
+moments in 31,969 games, and matched all 353 of the research's bets game by
+game: the same game, side, price, book and moment, and the same edge to the
+last digit (largest difference 0.0). Stake_for, units, 95% interval
+resampled by date.
+
+| Seasons | Bets | Record | Units | ROI | 95% interval | Without the 10 best dates |
+|---|---|---|---|---|---|---|
+| **2021-2025** | **297** | **201-96** | **+67.11** | **+15.15%** | **[7.34, 23.37]** | +41.86 units |
+| **2025-26** | **56** | **33-23** | **+9.33** | **+13.87%** | **[-9.2, 35.2]** | -6.95 units |
+
+By season: 2020-21 +23.52% (4 bets), 2021-22 +11.66% (96), 2022-23 +30.01%
+(63), 2023-24 +10.53% (64), 2024-25 +9.06% (70), 2025-26 +13.87% (56).
+Neighbouring cuts, 2021-2025: 0.01 587 bets +62.77 units +7.27% [0.89, 13.79]
+but only 3 of 5 seasons positive, so it fails the bar; 0.02 150 bets +33.78
+units +14.78% [3.74, 26.46], 2025-26 22 bets +10.43%. Prices -200 to +400
+(median -161); 80% favourites. Median 14 hours before tip; 69% of the bets
+came between midnight and noon ET on game day (the most common hours 9 a.m. ET
+and, the evening before, 10 p.m. ET), 26% the afternoon or evening before. Against Pinnacle's no-vig
+close the bets were worth +1.54% a bet on 2021-2025 and +0.42% on 2025-26
+(the research's `q3_bets.parquet`, the same 353 bets).
+
+**Beside the 15:00 UTC model, one bet a game** (the earlier bet first, this
+model first on a tie; the 15:00 UTC model's 914 bets from the same research
+file, which its own build matched 914 of 914): 2021-2025 1,053 bets, 655-398, +102.42
+units, +6.52%, 95% interval [1.76, 11.01] (+52.27 units without the 10 best
+dates); 2025-26 123 bets, 71-52, +17.46 units, +11.82% [-5.78, 27.32]. The
+15:00 UTC model alone made +4.22% [-1.22, 9.25] on 2021-2025 and +15.05% on
+2025-26. This model took 351 of its 353 games; in the other 2 its first
+qualifying post came after 15:00 UTC on a game the 15:00 UTC model had bet.
+The 15:00 UTC model bet 91 of this model's 353 games too.
+
+**The risks, plainly:**
+
+- **It is a secondary cell, not the search's pre-registered one.** The
+  round-5 search's pre-registered moneyline cell was the first moment four
+  books stand (701 bets, +6.17%, passed, 2025-26 barely); this first-post
+  cell at 0.015 and 0.02 passed as a secondary test, and about 330 cells were
+  graded, so some passes are expected by chance. The two cells share 60% of
+  their games: one signal seen twice, not two confirmations.
+- **Nobody knows yet how often the bet can be filled.** The history saw the
+  board every 30 minutes, so it can only bound how long a first post stood.
+  At least 206 of the 297 2021-2025 bet quotes (69%, +19.64%) and only 19 of
+  the 56 in 2025-26 (34%) are confirmed still posted five minutes later; the
+  rest changed at an unknown time before the next half-hourly snapshot. 45%
+  of the bet quotes had changed within 30 minutes. The fill check above is the
+  first live measurement.
+- **It leans on a few dates in 2025-26.** Without its 10 best dates 2025-26
+  is -6.95 units; 2021-2025 stays +41.86.
+- **The 0.01 neighbour fails.** At 0.01 two of five seasons lose, so the
+  cut sits on the edge of the region that passes, not in its middle.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2). Read beside the
+ROI: the fill check (how many bets were `unchanged` at the next poll), the
+close value, and how many games this model took from the 15:00 UTC model.
+
+**Before the 2027-28 season** rebuild the spread model's frozen numbers
+first, then this one (`python -m scripts.ncaab_moneyline_first_post_build
+--rows <rows.parquet> --instants <ledger.parquet> --games <games.parquet>
+--table-cache <copy> --last-season 2027`): it refuses to write unless its own
+fit equals the spread artifact's table, and the card refuses a table whose
+digest moved.
+
 ### The NCAAB first-half spread model (`ncaab_first_half_spread`), live from 2026-11-02
 
 mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
@@ -1313,9 +1524,10 @@ built; **nothing is bought until a worker job is queued.**
 |---|---|---|
 | ESPN schedule + results | Teams, venues, every game (neutral flag, conference game), finals for settlement; the daily pipeline refreshes 14 days ahead, every refresh pass fills finals for started games | `data/ingestors/ncaab_espn_ingestor.py`, steps `ncaab-schedule` / `ncaab-results` |
 | Live odds | Full-game moneyline, spread and total from the ten line-shop books on every refresh pass; NCAAB is exempt from the DraftKings-must-list gate so every book's first post is kept | `data/ingestors/odds_ingestor.py` |
-| Totals model card | Hourly at five past, UTC: decides each game once at DraftKings' standing total (22:00 UTC the evening before, else 15:00 UTC on the day and each hour to tip), writes the bets, then publishes them | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
+| Totals model card | Every five minutes, three after each capture poll: decides each game once at DraftKings' first posted total, bets only while it still stands, writes the bets, then publishes them (the 22:00 / 15:00 UTC rule until 2026-11-03) | `scripts/ncaab_total_card.py`, job `ncaab_total_card` |
 | First-half spread model and capture | Every minute: each listed game's first-half lines (moneyline, spread, total, team totals) at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip, at most 4 credits a call; the first-half spread model decides each game once on the tip-minus-10 fetch and the first-half total model on the tip-minus-60 fetch, each writes its bets, then the job publishes them | `scripts/ncaab_first_half_window.py`, `data/ingestors/ncaab_first_half_odds.py`, `scripts/ncaab_first_half_spread_card.py`, `scripts/ncaab_first_half_total_card.py`, job `ncaab_first_half_window` |
-| Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
+| Opener capture | Every 5 minutes, change-only (a row is written only when a book's price or line moved), so the time each book first posts is known; each tick also writes the opening moneyline model's fill check | `scripts/ncaab_odds_capture.py`, job `ncaab_odds_capture` |
+| Opening moneyline model card | Every minute: one planning read for a bettable book's new moneyline on a game; the card prices it off the same book's spread, decides it once, writes the bet, then publishes it | `scripts/ncaab_moneyline_first_post_card.py`, job `ncaab_moneyline_first_post` |
 | Price-path retention | NCAAB keeps every book's whole price path (the clean-up job only removes unchanged middles), and the close it keeps for any sport is the last price before the start | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |
 | Paid history | Game lines 2020-21 → 2025-26 (bulk snapshots: the evening before, mid-morning, and the hour before every tip); first-half and team-total lines 2023-24 → 2025-26, opener and close; the same at 15:00 UTC and 18:00 UTC on game day and 60 minutes before the tip (built 2026-11-02, bought only by a queued job; First-half lines and team totals at three game-day times, above). Unmatched events are kept raw in `ncaab_odds_unmatched`, never dropped | `data/ingestors/ncaab_odds_history.py`, job `ncaab_odds_history` |
 | Free history | Prediction Tracker lines and systems 2004-26, SBRO lines 2007-21 (matched onto ESPN games by date and final score), NCAA possession box scores and season player minutes 2010-26 | `data/ingestors/ncaab_archive_import.py`, `ncaab_sdv_import.py` |
@@ -1506,17 +1718,26 @@ stored row names its endpoint.
   movement and line-shop lookup reads the moneyline rows), and so does
   `marketClassForModel` (else a parlay treats it as independent of the same
   game's other legs).
-- **Its page and its picks say when it decides.** The model page says it
-  decides each game once, the evening before, at DraftKings' total, and that a
-  posted bet is never re-priced (`modelMeta.modelPageTiming`). It prints no
-  Eastern clock time: the card runs at 22:00 UTC, which is 6pm ET until
-  1 November and 5pm ET after it. Pick Detail says "Posted" once, not "the
-  first scoring run of the day" (`markets.pickTimingInfo`). A row for a game
+- **Its page and its picks say when it decides.** The model page ("Decided
+  when the total opens", from 2026-11-03) says it decides each game once at
+  DraftKings' opening total, usually within minutes of it posting; that
+  DraftKings opens most totals the day before the game, some on game day;
+  that it bets only if DraftKings still offers that opening total at the same
+  prices; that an opening total often changes within half an hour, so check
+  DraftKings' total and price before betting; and that a posted bet is never
+  re-priced (`modelMeta.modelPageTiming`). It prints no Eastern clock time,
+  because DraftKings posts at no fixed hour. Until 2026-11-03 it said "Decided
+  the evening before", the 22:00 UTC rule. Pick Detail says "Posted" once, not
+  "the first scoring run of the day", and adds the same check-the-total-and-price
+  sentence (`markets.pickTimingInfo`). The spread and moneyline pages say they
+  decide at 10am ET on game day (11am ET from mid-March) and name no count of
+  books; the moneyline and opening moneyline pages say they never lay more
+  than -200. A row for a game
   that is not today shows its day as well as its time, as the Signals card
   does.
 - **The Today board reads NCAAB picks up to 7 days ahead**
-  (`fetchUpcomingNcaabPicks`), because the totals model decides the evening
-  before the game. It reads the picks first, then only those
+  (`fetchUpcomingNcaabPicks`), because the totals model usually decides the
+  day before the game. It reads the picks first, then only those
   picks' games and lines, 80 game ids per request. Reading the whole window
   instead would have been too big: over 2025-26 the biggest day held 4,417
   main-market rows across all books, and the biggest seven days held 10,424
@@ -1530,9 +1751,23 @@ stored row names its endpoint.
 - **When a game leaves the board.** Three hours after the tip if ESPN's final
   has not landed by then (`format.GAME_DURATION_HOURS`); it stops reading
   LIVE on the clock alone after four (`BLIND_LIVE_WINDOW_MS`).
-- **Not in the app yet.** NCAAB player and team stats (the Stats tab shows its
-  "No player leaderboard" state, and every Stats read returns nothing for
-  NCAAB before it asks the server). School abbreviations: cards show the
+- **Stats tab, Players board (Matt, 2026-11-03).** Men's college basketball
+  player stats: Points, Rebounds, Assists, 3PM, PRA, Steals, Blocks, Minutes,
+  with Hit Rates (H2H, L3, L5, L10, season) and Averages, the WNBA set.
+  Source `ncaab_player_game_log`, one row per player per game from ESPN's
+  game summary `boxscore.players` (`data/ingestors/ncaab_player_box.py`). The
+  team box feed hands over the summary it already fetched, so a new final
+  costs no second call; the `ncaab-box` step's catch-up and the
+  `ncaab-player-box-2026-2027` job (kind `players`) fetch games with no
+  player rows. A team whose players' points do not sum to the stored final is
+  refused (`ncaab_player_box_misses`). Reads: `v_player_season_totals_ncaab`,
+  `player_window_totals_ncaab`, `player_recent_games_ncaab`,
+  `player_season_stat_values_ncaab`, `player_h2h_stat_values_ncaab`
+  (`add_ncaab_player_game_log_2026_11_03.sql`). No player-prop line column:
+  Matt, 2026-11-03, "Don't include those". Season label is the ending year
+  (`boardSeasonET`). Not built yet: the Teams board, the same-position card
+  on the player page (no college position source), team names abbreviated.
+- **Not in the app yet.** NCAAB team stats. School abbreviations: cards show the
   school name, because the app cannot read `ncaab_teams` (anon has no SELECT
   on it, RLS is on and it has no policy; read only, 2026-10-30). Opening it is
   a worker-side change as well as an app one: the code that creates the table

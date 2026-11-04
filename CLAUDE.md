@@ -209,6 +209,9 @@ stored. The old version of this rule carried exceptions "worth fixing when
 touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
 laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
 undeclared store on disk, and the fix is an importer, not an allowlist entry.
+**Everything is also carbon-copied to mike's PC** (mike, 2026-11-03): database,
+storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
+never a second store: `docs/local_ops.md`.
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
 UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
@@ -410,8 +413,10 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
   3,201 bets", never "-$20,670 at $100 flat" — the dollar figure invents a stake
   size nobody chose, changes meaning the moment the bankroll does, and cannot be
   compared against any other number in this repo. This governs EVERY surface:
-  replies, docs, commit messages, the dashboard, Discord, the app. `profit_flat`
-  is stored as dollars-per-$100 stake, so divide by 100 to report it.
+  replies, docs, commit messages, the dashboard, Discord, the app. Report units
+  on the posted stake (§2: `stake_for` at `COALESCE(decision_odds, dk_odds)`,
+  `published_pick_unit_profit`). `profit_flat` / 100 is 1u risked; no surface
+  shows it.
 - Edge: always expressed as decimal (0.05 = 5%), not percentage
 - `home_win = 1` means home team won the full game
 - `home_win_reg = 1` means home team won in regulation (NHL only)
@@ -569,7 +574,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 72 models carry
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 73 models carry
   their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no

@@ -30,13 +30,29 @@ are written as `missed` without failing.
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS, after writing every game it could:
 an artifact for another season (the game is then `missed` next hour); every
 due game with no moneyline at all (the odds steps have stopped); a best side
-at a book config.BEST_LINE_BOOKMAKERS no longer lists.
+at a book config.BEST_LINE_BOOKMAKERS no longer lists; a best edge above the
+data-error cap (models/ncaab_quote_bounds.EDGE_CAP: the game is written as
+edge_cap with no bet).
+
+A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A moneyline
+priced beyond +/-100000, and a spread beyond +/-60 or priced beyond +/-100000,
+is dropped before any flag, count or price reads it, and that book has no such
+quote at 15:00 UTC. Each is logged with its game, book and value, counted as
+quotes_dropped on the diagnostic line, and kept in the decision row's quotes
+as out_of_range.
 
 EACH GAME DECIDED ONCE (CLAUDE.md 1c). The decision, bet or not, is written to
 ncaab_moneyline_decisions in the same transaction as the game's bet, under the
 model's transaction-scoped advisory lock. A game with a decision row, or with
 any ncaab_moneyline_own_spread BET, is never decided again: a moved price
 writes nothing.
+
+ONE BET A GAME ACROSS BOTH MONEYLINE MODELS. A game the first-post moneyline
+model (ncaab_moneyline_first_post, scripts/ncaab_moneyline_first_post_card.py)
+has already BET is written here as `other_model_bet` and not priced; a game
+this card bets first is closed to that model. Both cards take both models'
+locks (sorted) and re-read the other's BETs inside them, so the two can never
+both bet one game.
 
 BET ROWS ONLY in picks, at the BET book's price: decision_* and best_* are
 that book's moneyline, scored_line is NULL (a moneyline has no line), and
@@ -60,6 +76,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -176,13 +193,16 @@ def _link(v):
 
 
 def pick_rows(decisions: list[om.Decision], games: dict[str, dict],
-              bankroll: float) -> tuple[list[dict], dict[str, str]]:
+              bankroll: float, model_id: str = MODEL_ID) -> tuple[list[dict], dict[str, str]]:
     """Bet decisions -> picks rows, and {game_id: why} for a bet refused here.
-    Pure given its inputs."""
+    Pure given its inputs. model_id: the model the rows are written under (the
+    first-post moneyline card, scripts/ncaab_moneyline_first_post_card.py,
+    writes its bets through this same function); its own price floor, EV
+    floor and pause apply."""
     from models.honest_ev import gate
     from models.scorer import _build_pick_label, _pause_note, quarter_kelly
-    pause = _pause_note(MODEL_ID)
-    floor = config.min_odds_for(MODEL_ID)
+    pause = _pause_note(model_id)
+    floor = config.min_odds_for(model_id)
     rows, refused = [], {}
     for d in decisions:
         if d.status != "bets":
@@ -195,17 +215,17 @@ def pick_rows(decisions: list[om.Decision], games: dict[str, dict],
         if floor is not None and price < floor:
             refused[d.game_id] = f"below_price_floor:{price:+.0f}"
             continue
-        ev = gate(MODEL_ID, prob, price)
+        ev = gate(model_id, prob, price)
         if not ev.clears:
-            logger.info(f"{MODEL_ID}: {ev.reason} - dropped {d.game_id} {side}")
+            logger.info(f"{model_id}: {ev.reason} - dropped {d.game_id} {side}")
             refused[d.game_id] = ev.reason or "below_ev_floor"
             continue
         label = _build_pick_label(side, home, away, om.MARKET, None)
         # line None: a moneyline has none. The id has 'spread' in it, so a
         # line here would be checked as a spread (pick_integrity._SPREAD_HINTS).
-        problems = pick_problems(label, side, None, MODEL_ID, home, away)
+        problems = pick_problems(label, side, None, model_id, home, away)
         if problems:
-            logger.error(f"{MODEL_ID}: refusing {d.game_id} {label!r}: {'; '.join(problems)}")
+            logger.error(f"{model_id}: refusing {d.game_id} {label!r}: {'; '.join(problems)}")
             refused[d.game_id] = "label_mismatch"
             continue
         imp = implied(price)
@@ -221,11 +241,13 @@ def pick_rows(decisions: list[om.Decision], games: dict[str, dict],
         else:
             dk_cols = {"dk_odds": None, "dk_implied_prob": 0.0, "edge": 0.0, "dk_bet_link": None}
         rows.append({
-            "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
+            "game_id": d.game_id, "model_id": model_id, "sport": SPORT,
             "game_date": g.get("game_date"), "game_time": g.get("commence_time"),
             "pick_side": side, "pick_label": label,
             # P(the bet side wins) from the bet book's own spread: the number
-            # the 0.01 cut was measured on (models/ncaab_moneyline_own_spread.py).
+            # each model's cut was measured on (0.01 here, 0.015 at the first
+            # post; models/ncaab_moneyline_own_spread.py and
+            # models/ncaab_moneyline_first_post.py).
             "model_probability": round(prob, 4),
             "model_probability_cal": round(prob, 4),
             "scored_line": None,
@@ -252,7 +274,8 @@ def decision_row(d: om.Decision, check_hour: datetime, instant: datetime | None,
     b = d.best or {}
     detail = d.status + ": " + d.detail + (f"; refused {refused}" if refused else "")
     side = b.get("side")
-    n_books = sum(1 for q in d.quotes if q.get("book") in bq.BOOKS and q.get("p1") is not None)
+    n_books = sum(1 for q in d.quotes if q.get("book") in bq.BOOKS and q.get("p1") is not None
+                  and "out_of_range" not in (q.get("flags") or ()))
     return {"game_id": d.game_id, "check_hour": check_hour.isoformat(),
             "instant": instant.isoformat() if instant else None, "status": d.status,
             "book": b.get("bookmaker"), "side": side,
@@ -265,8 +288,29 @@ def decision_row(d: om.Decision, check_hour: datetime, instant: datetime | None,
             "quotes": json.dumps(d.quotes) if d.quotes else None, "detail": detail[:2000]}
 
 
-FINAL = ("bets", "below_cut", "book_not_bettable", "no_quotes", "no_clean_quote", "missed",
-         "tipped")
+FINAL = ("bets", "below_cut", "book_not_bettable", "edge_cap", "no_quotes", "no_clean_quote",
+         "missed", "tipped", "other_model_bet")
+
+# The other moneyline model: one bet a game across the two.
+FIRST_POST_MODEL_ID = "ncaab_moneyline_first_post"
+
+
+def first_post_bets(conn, game_ids) -> set[str]:
+    """Games the first-post moneyline model has BET (whatever became of it)."""
+    if not game_ids:
+        return set()
+    return {r[0] for r in conn.execute("""
+        SELECT DISTINCT game_id FROM picks
+        WHERE model_id = %s AND signal_type = 'BET' AND game_id = ANY(%s)
+    """, (FIRST_POST_MODEL_ID, sorted(game_ids))).fetchall()}
+
+
+def lock_both(conn) -> None:
+    """Both moneyline models' publish locks, sorted: the first-post card
+    takes the same two in the same order, so neither can deadlock the other."""
+    from scripts.nfl_wind_publisher import _lock_model
+    for m in sorted((MODEL_ID, FIRST_POST_MODEL_ID)):
+        _lock_model(conn, m)
 
 
 def publish(conn, rows: list[dict], decisions: list[om.Decision], check_hour: datetime,
@@ -277,15 +321,20 @@ def publish(conn, rows: list[dict], decisions: list[om.Decision], check_hour: da
     final = [d for d in decisions if d.status in FINAL]
     if not final:
         return 0, 0
-    from scripts.nfl_wind_publisher import _lock_model
-    _lock_model(conn, MODEL_ID)
+    lock_both(conn)
     done = decided_games(conn, sorted({d.game_id for d in final}))
+    fp_bet = first_post_bets(conn, sorted({d.game_id for d in final}))
     by_game = {r["game_id"]: r for r in rows}
     n_bets = n_decided = 0
     for d in sorted(final, key=lambda x: x.game_id):
         if d.game_id in done:
             continue
         row = by_game.get(d.game_id)
+        if d.status == "bets" and d.game_id in fp_bet:
+            # The first-post model bet this game while this run priced it.
+            d.status = "other_model_bet"
+            d.detail += f"; {FIRST_POST_MODEL_ID} bet this game first"
+            row = None
         g = games.get(d.game_id, {})
         got = conn.execute(_INSERT_DECISION, decision_row(
             d, check_hour, g.get("instant"), row is not None, refused.get(d.game_id))).fetchone()
@@ -303,6 +352,13 @@ def publish(conn, rows: list[dict], decisions: list[om.Decision], check_hour: da
 class CardIncomplete(RuntimeError):
     """A game the card could not decide at 15:00 UTC, or a run that found the
     odds missing: raised after the rest of the run is written."""
+
+
+def log_dropped(drops) -> None:
+    """One warning per quote dropped as a data error: game, book and value."""
+    from models.ncaab_quote_bounds import describe
+    for line in describe(drops):
+        logger.warning(f"NCAAB moneyline card: dropped a data-error quote, {line}")
 
 
 _ART: dict = {}
@@ -350,6 +406,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         due = {g: v for g, v in due.items() if g not in done}
         overdue = {g: v for g, v in overdue.items() if g not in done}
         decisions: list[om.Decision] = []
+        # One bet a game across both moneyline models: a game the first-post
+        # model has bet is recorded, not priced, and not missed.
+        fp_bet = first_post_bets(conn, sorted(due) + sorted(overdue))
+        for gid in sorted(fp_bet):
+            decisions.append(om.Decision(gid, "other_model_bet",
+                                         f"{FIRST_POST_MODEL_ID} bet this game first"))
+        due = {g: v for g, v in due.items() if g not in fp_bet}
+        overdue = {g: v for g, v in overdue.items() if g not in fp_bet}
         problems: list[str] = []          # each fails the run, after the writes
         missed = []
         for gid, v in sorted(overdue.items()):
@@ -382,10 +446,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 part = {g: due[g] for g in gids}
                 ml_rows = bq.load_rows(conn, part, hour, market="h2h", books=om.REF_BOOKS)
                 sp_rows = bq.load_rows(conn, part, hour, market="spreads")
+                drops = pd.concat([bq.dropped_quotes(ml_rows, books=om.REF_BOOKS, need_line=False),
+                                   bq.dropped_quotes(sp_rows)], ignore_index=True)
+                log_dropped(drops)
+                diag["quotes_dropped"] += len(drops)
                 ml, sp = om.read(ml_rows, sp_rows, art["table"])
                 got = om.decide(gids, ml, sp, config.MODEL_EDGE_THRESHOLDS[MODEL_ID],
                                 bettable=tuple(config.BEST_LINE_BOOKMAKERS),
-                                min_price=float(art["min_price"]))
+                                min_price=float(art["min_price"]), dropped=drops)
                 if got and all(d.status == "no_quotes" for d in got):
                     problems.append(f"no bettable book has a moneyline stamped 14:00-15:00 UTC for any "
                                     f"of the {len(got)} due game(s): the odds refresh and the capture "
@@ -393,6 +461,10 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 for d in got:
                     if d.status == "book_not_bettable":
                         problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
+                    elif d.status == "edge_cap":
+                        logger.error(f"NCAAB moneyline card: {d.game_id} not bet, its edge is a "
+                                     f"data error: {d.detail}")
+                        problems.append(f"edge_cap {d.game_id} ({d.detail})")
                 decisions += got
         for d in decisions:
             diag[d.status] = diag.get(d.status, 0) + 1

@@ -1,8 +1,9 @@
 """Every result in the app is in units, never dollars (mike, 2026-11-03:
 "everything must be units"; CLAUDE.md §4).
 
-One unit is one flat bet. `profit_flat` is stored as dollars per $100 staked,
-so a screen divides it by 100 and prints "u". Stakes are units too. The only
+A unit is the posted stake (CLAUDE.md §2): 1u to win at the decided price,
+risk capped at 3u. `profit_flat` / 100 is the 1u-risked figure and no screen
+prints it (tests/test_mobile_units_one_basis.py). Stakes are units too. The only
 dollar amounts left in the app are real money that is not a betting result:
 the subscription prices on the paywall, and the optional bankroll a member
 types into Settings to see what one of their units is worth.
@@ -150,8 +151,10 @@ def test_each_record_surface_tones_from_the_units_it_prints(rel):
 
 def test_the_performance_tab_is_units():
     screen = _read(SRC / "screens/PerformanceScreen.tsx")
-    assert "label: '1u flat'" in screen
-    assert "Reset to 1u" in screen
+    # Tracked picks default to the posted stake (#1138 Decision 1); the
+    # member's own stake is typed in units.
+    assert "label: 'As posted'" in screen
+    assert "Use posted stake" in screen
     assert 'accessibilityLabel="Stake in units"' in screen
     # Synced bets (not live yet) read at the tab's one scale until the unit for
     # them is decided; the bankroll stays a Settings-only display (#831).

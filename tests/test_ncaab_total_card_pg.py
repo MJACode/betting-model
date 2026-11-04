@@ -153,19 +153,19 @@ def _stub_season(monkeypatch, at):
 def test_run_card_bets_the_standing_first_post_once(board, dsn, monkeypatch):
     c = board
     first = datetime(2027, 1, 11, 0, 10, tzinfo=timezone.utc)
-    _odds(c, "2027-01-11T00:10:00Z", "2027-01-11 00:11:00+00", 100.5)
+    _odds(c, "2027-01-11T00:10:00Z", "2027-01-11 00:11:00+00", 125.5)
     _stub_season(monkeypatch, first)
     monkeypatch.setattr(card, "get_connection", lambda: DBConnection(psycopg2.connect(dsn), url=dsn))
     out = card.run_card(do_publish=True, now=first + timedelta(minutes=3))
     assert out["bets"] == 1 and out["published"] == 1 and out["decided"] == 1
     ((line, side, quote_at, cutoff),) = c.execute(
         "SELECT total_line, side, quote_at, cutoff FROM ncaab_total_decisions").fetchall()
-    assert float(line) == 100.5 and side == "over"
+    assert float(line) == 125.5 and side == "over"
     assert quote_at.startswith("2027-01-11T00:10:00") and cutoff.startswith("2027-01-11T00:00:00")
     ((label, scored),) = c.execute("SELECT pick_label, scored_line FROM picks").fetchall()
-    assert label == "Duke vs Kansas Over 100.5" and float(scored) == 100.5
+    assert label == "Duke vs Kansas Over 125.5" and float(scored) == 125.5
     # the line moves and the card runs again: nothing new is written
-    _odds(c, "2027-01-11T00:20:00Z", "2027-01-11 00:21:00+00", 104.5)
+    _odds(c, "2027-01-11T00:20:00Z", "2027-01-11 00:21:00+00", 129.5)
     again = card.run_card(do_publish=True, now=first + timedelta(minutes=13))
     assert again["decided"] == 0 and again["diag"]["already_decided"] == 1
     assert c.execute("SELECT count(*) FROM picks").fetchone()[0] == 1
@@ -174,13 +174,13 @@ def test_run_card_bets_the_standing_first_post_once(board, dsn, monkeypatch):
 def test_run_card_never_bets_a_first_post_that_moved(board, dsn, monkeypatch):
     c = board
     first = datetime(2027, 1, 11, 0, 10, tzinfo=timezone.utc)
-    _odds(c, "2027-01-11T00:10:00Z", "2027-01-11 00:11:00+00", 100.5)
-    _odds(c, "2027-01-11T00:12:00Z", "2027-01-11 00:13:00+00", 101.5)
+    _odds(c, "2027-01-11T00:10:00Z", "2027-01-11 00:11:00+00", 125.5)
+    _odds(c, "2027-01-11T00:12:00Z", "2027-01-11 00:13:00+00", 126.5)
     _stub_season(monkeypatch, first)
     monkeypatch.setattr(card, "get_connection", lambda: DBConnection(psycopg2.connect(dsn), url=dsn))
     out = card.run_card(do_publish=True, now=first + timedelta(minutes=8))
     assert out["bets"] == 0 and out["decided"] == 1 and out["diag"]["first_post_gone"] == 1
     ((detail, n_bets, line),) = c.execute(
         "SELECT detail, n_bets, total_line FROM ncaab_total_decisions").fetchall()
-    assert detail.startswith("first_post_gone: first post 100.5") and n_bets == 0 and float(line) == 100.5
+    assert detail.startswith("first_post_gone: first post 125.5") and n_bets == 0 and float(line) == 125.5
     assert c.execute("SELECT count(*) FROM picks").fetchone()[0] == 0

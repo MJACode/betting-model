@@ -1981,7 +1981,10 @@ nothing; it needs a caller and a comparison against the pruned list.
 so **prop credit spend is invisible in that table for every sport**. Today's
 590-credit college pass had to be read out of the Railway worker log. Worth
 doing at the same time — both are about a measurement that exists nowhere
-queryable. Detail in `docs/market_coverage.md`.
+queryable. Detail in `docs/market_coverage.md`. **That half is closed
+(2026-11-03):** config.py now installs the call logger in every process that
+imports it, so a prop ingestor's calls are in `api_call_log` however it was
+started (`docs/monitoring.md`). The drift check above is still open.
 
 ---
 

@@ -204,7 +204,7 @@ export function usePlayerDetail(args: {
   const gamesById = useMemo(() => new Map(logGames.data.map((g) => [g.game_id, g] as const)), [logGames.data]);
   const splits: StatSplits | null = useMemo(() => {
     if (!stat || threshold == null || games.length === 0) return null;
-    return statSplits(games, gamesById, stat, selection.line, selection.side, sport === 'NBA' || sport === 'WNBA');
+    return statSplits(games, gamesById, stat, selection.line, selection.side, sport === 'NBA' || sport === 'WNBA' || sport === 'NCAAB');
   }, [games, gamesById, stat, threshold, selection.line, selection.side, sport]);
 
   // ── Head-to-head with the next opponent, last two seasons ─────────────

@@ -1,8 +1,8 @@
 """Results and stakes are shown in units, never dollars (CLAUDE.md §4).
 
-mike, 2026-11-03: "everything must be units". One unit is one flat bet.
-`profit_flat` is stored as dollars on a $100 stake, so a report divides it by
-100. A stake is `stake_for`: one unit to win, risk capped at 3.
+mike, 2026-11-03: "everything must be units". A unit is the posted stake,
+`stake_for`: one unit to win at the decided price, risk capped at 3.
+`profit_flat` / 100 is the 1u-risked figure, which no surface shows.
 
 Each test here pins one surface a person reads: the Streamlit dashboard, the
 picks email, the settle and summary logs, the shadow-track logs, the

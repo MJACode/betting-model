@@ -123,6 +123,11 @@ MAX_SILENCE: dict = {
     # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
     # tipping meanwhile undecided by the NCAAB first-half spread model.
     "ncaab_first_half_window": 20,
+    # The NCAAB first-post moneyline job: every minute, 24x7, beating on the
+    # idle ticks too (one planning read, then return). 20 minutes is 20 missed
+    # ticks, and every first post stored meanwhile goes past the card's
+    # 15-minute limit and is written `missed`.
+    "ncaab_moneyline_first_post": 20,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,

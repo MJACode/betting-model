@@ -101,7 +101,7 @@ def closing_lines(g: pd.DataFrame, fg: pd.DataFrame) -> pd.DataFrame:
     for mk, col, name in (("spreads", "spread_home", "spread_close"),
                           ("totals", "total_line", "total_close")):
         rows = fg[fg["market"] == mk][["game_id", "bookmaker", "ts", col]].rename(columns={col: "line"})
-        c = fh.asof_consensus(rows, cut)
+        c = fh.asof_consensus(rows, cut, market=mk)
         out = out.merge(c.rename(columns={"cons": name, "nb": name + "_nb"}), on="game_id", how="left")
     return out
 
@@ -166,7 +166,7 @@ def replay(art: dict, games: pd.DataFrame, team_games: pd.DataFrame, fg: pd.Data
     rows = fg[fg["market"] == "spreads"][["game_id", "bookmaker", "ts", "spread_home"]] \
         .rename(columns={"spread_home": "line"})
     cons = fh.asof_consensus(rows[rows["game_id"].isin(stamp["game_id"])],
-                             stamp.rename(columns={"stamp": "cutoff"}))
+                             stamp.rename(columns={"stamp": "cutoff"}), market="spreads")
     cons = cons.set_index("game_id")
     res = fh.team_game_residuals(team_games[team_games["season"] == S],
                                  art["tilt"]["alpha"], art["tilt"]["beta"])

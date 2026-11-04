@@ -751,7 +751,18 @@ def test_the_refresh_pass_runs_it_on_hourly_passes_only_after_the_ncaab_results_
 @pytest.mark.parametrize("failed,ok", [([], True), (["espn-403"], False)])
 def test_the_step_goes_red_only_on_a_failure(monkeypatch, failed, ok):
     import run_pipeline
+    from data.ingestors import ncaab_player_box as pbox
     monkeypatch.setattr(box, "run_recent", lambda run_date: {**box.new_totals(), "failed": failed})
+    monkeypatch.setattr(pbox, "run_recent", lambda run_date: pbox.new_totals())
+    assert run_pipeline.step_ncaab_box("2026-11-04") is ok
+
+
+@pytest.mark.parametrize("failed,ok", [([], True), (["espn-403"], False)])
+def test_the_player_catch_up_turns_the_step_red_too(monkeypatch, failed, ok):
+    import run_pipeline
+    from data.ingestors import ncaab_player_box as pbox
+    monkeypatch.setattr(box, "run_recent", lambda run_date: box.new_totals())
+    monkeypatch.setattr(pbox, "run_recent", lambda run_date: {**pbox.new_totals(), "failed": failed})
     assert run_pipeline.step_ncaab_box("2026-11-04") is ok
 
 
@@ -780,14 +791,16 @@ def test_the_backfill_jobs_validate_and_are_free():
             validate(bad)
     declared = json.loads((ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     mine = {e["key"]: e for e in declared if e["job_type"] == "ncaab_box_backfill"}
-    assert set(mine) == {"ncaab-period-scores-2021-2026", "ncaab-box-scores-2027"}
+    assert set(mine) == {"ncaab-period-scores-2021-2026", "ncaab-box-scores-2027",
+                         "ncaab-player-box-2026-2027"}
     for e in mine.values():
         assert validate(e["args"]) == e["args"]
         assert isinstance(e.get("enabled", True), bool)
         assert not any("credit" in k for k in e["args"])
 
 
-@pytest.mark.parametrize("key", ["ncaab-period-scores-2021-2026", "ncaab-box-scores-2027"])
+@pytest.mark.parametrize("key", ["ncaab-period-scores-2021-2026", "ncaab-box-scores-2027",
+                                 "ncaab-player-box-2026-2027"])
 def test_turning_a_backfill_on_is_one_line(monkeypatch, key):
     """The after-merge step: set `enabled` to true on one declaration. Every
     declaration test in the suite still passes with it on."""

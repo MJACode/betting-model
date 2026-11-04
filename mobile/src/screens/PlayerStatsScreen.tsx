@@ -444,11 +444,11 @@ export function PlayerStatsScreen() {
       return (detail.h2hMeetings ?? []).map((m) => ({
         value: m.value,
         date: shortGameDate(m.date),
-        opp: opponentLabel(row, true, ncaafAbbrevs),
+        opp: opponentLabel(row, true, ncaafAbbrevs, sport === 'NCAAB'),
         oppFull: opponentLabel(row, false),
       }));
     }
-    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
+    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs, sport === 'NCAAB');
     return range === 'all' ? all : all.slice(0, range);
   }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs]);
   // The values ARE the labelled games' values, so the chart's bars and labels
@@ -1182,6 +1182,7 @@ export function PlayerStatsScreen() {
                 stat={stat}
                 line={selection.line}
                 side={selection.side}
+                currentTeam={games[0]?.team ?? null}
               />
             ))}
           </>
@@ -1262,10 +1263,14 @@ function GameRow({
   stat,
   line,
   side,
+  currentTeam,
 }: {
   row: PlayerLogEntry;
   sport: PlayerLogSport;
   stat: StatDef | null;
+  /** The newest game's team, which the header names: NCAAB prints a row's
+   *  own school only when it differs (gameContextLine). */
+  currentTeam?: string | null;
   /** The book's half-point line, so the dot, the chart and the count all
    *  compare the same number the same way. */
   line: number;
@@ -1289,7 +1294,7 @@ function GameRow({
         {/* The chart's own date idiom ("10/26"), so the bar and the row
             name the game the same way. */}
         <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
-        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row)}</Text>
+        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row, currentTeam)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>
@@ -1515,6 +1520,26 @@ function TonightLineCard({
           lineup.is_confirmed ? ' · lineup confirmed' : ' · projected'
         }`
       : null;
+
+  // College basketball shows no player-prop lines (Matt, 2026-11-03), so the
+  // card is the fixture only: no line copy, no tooltip about prices it can
+  // never show, and no claim that books do not price the stat.
+  if (sport === 'NCAAB') {
+    return (
+      <>
+        <SectionTitle title="Next game" />
+        <View style={styles.card}>
+          <Text style={styles.fixture}>
+            {side}
+            <Text style={styles.fixtureWhen}>  {when}</Text>
+          </Text>
+          <Text style={[styles.muted, styles.gapTop]}>
+            Player props aren’t shown for college basketball.
+          </Text>
+        </View>
+      </>
+    );
+  }
 
   return (
     <>

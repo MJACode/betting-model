@@ -793,6 +793,27 @@ ACTION_THRESHOLDS: dict = {
     # spread and decision_edge that minus the bet price's implied, so every
     # publisher agrees with the card. min_prob 0.0: the edge is the cut.
     "ncaab_moneyline_own_spread": {"min_prob": 0.0, "min_edge": 0.01},
+    # NCAAB full-game moneylines at a book's FIRST moneyline post (2026-11-03,
+    # mike: a new model when a new search beats what is live; "-200 max"):
+    # models/ncaab_moneyline_first_post.py, written every minute by
+    # scripts/ncaab_moneyline_first_post_card.py. The moment a bettable book
+    # first posts its moneyline for a game, that new moneyline is priced off
+    # the SAME book's spread at that moment (the 15:00 UTC model's pricing,
+    # flags and -200 floor before the pick), with 3+ OTHER bettable
+    # moneylines already up; bet when the edge is above 0.015. One bet a game
+    # across both moneyline models, whichever bets first. Replay of the card's
+    # own code on the round-5 half-hourly history (the research's 297 + 56
+    # bets matched game by game): 2021-2025 297 bets, +67.11 units, +15.15%,
+    # date-resampled 95% interval [7.34, 23.37], every season positive;
+    # 2025-26 56 bets +9.33 units +13.87%. Neighbours: 0.02 150 bets +14.78%
+    # [3.74]; 0.01 587 bets +7.27% but 3 of 5 seasons positive, so it fails
+    # the bar. A SECONDARY cell of that search (its pre-registered moneyline
+    # cell was the first moment four books stand), and the history saw the
+    # board only every 30 minutes: at least 69% of the 2021-2025 bet quotes,
+    # and only 34% in 2025-26, are known to have stood five minutes. min_edge
+    # 0.015 IS the card's cut (decision_edge = P(side wins) minus the bet
+    # price's implied). min_prob 0.0: the edge is the cut.
+    "ncaab_moneyline_first_post": {"min_prob": 0.0, "min_edge": 0.015},
     # NCAAB FIRST-HALF spread (2026-11-02, mike: "we need to build 1H and game
     # lines ML and Spread no matter what"; no games-played wait):
     # models/ncaab_first_half_spread.py, written by
@@ -2102,6 +2123,12 @@ MODEL_MIN_ODDS: dict = {
     # DEFAULT_MIN_ODDS override cannot move it. It laid -200 to +1000 on its
     # 914 replayed bets (median -159).
     "ncaab_moneyline_own_spread": -200,
+    # NCAAB moneylines at a book's first post (2026-11-03, mike: "-200 max").
+    # The card removes every side shorter than -200 BEFORE it picks
+    # (models/ncaab_moneyline_first_post.py), so this is the second guard,
+    # pinned so a Railway DEFAULT_MIN_ODDS override cannot move it. It laid
+    # -200 to +400 on its 353 replayed bets (median -161).
+    "ncaab_moneyline_first_post": -200,
     # NCAAB first-half spread (2026-11-02, mike): it laid -140 to +125 on its
     # 1,253 graded bets, so -200 admits prices it was never graded at. Pinned
     # so a Railway DEFAULT_MIN_ODDS override cannot move it.
@@ -2398,6 +2425,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # is EV above 0.015 at every price it can bet: this floor never removes a
     # bet the cut takes.
     "ncaab_moneyline_own_spread": 0.015,
+    # NCAAB moneylines at a book's first post (2026-11-03, mike). The cut is
+    # the edge (0.015, in MODEL_EDGE_THRESHOLDS), so this floor sits just
+    # under the smallest EV that cut admitted in the replay of 2021-2026:
+    # P(side wins) x decimal - 1 = +0.0226 (353 bets; median +0.0359). EV is
+    # edge x decimal and the shortest price it may lay is -200 (decimal 1.5),
+    # so an edge above 0.015 is EV above 0.0225 at every price it can bet:
+    # this floor never removes a bet the cut takes.
+    "ncaab_moneyline_first_post": 0.022,
     # NCAAB first-half spread (2026-11-02, mike). The cut is the edge (0.02, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted in the replay of 2023-24..2025-26: P(cover | no push) x
@@ -2565,6 +2600,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # from the bet book's own spread through the final-margin distribution,
     # which its 0.01 cut was measured on. No record either.
     "ncaab_moneyline_own_spread",
+    # 2026-11-03 (mike). NCAAB moneylines at a book's first post: the same
+    # number, P(the bet side wins) from the posting book's own spread, which
+    # its 0.015 cut was measured on. No record either.
+    "ncaab_moneyline_first_post",
     # 2026-11-02 (mike). NCAAB first-half spread: its number is P(cover | no
     # push) from its own first-half table, which its 0.02 cut was measured on.
     # It has no record, so its map would be the offset borrowed from others.
@@ -2709,6 +2748,11 @@ SCORING_METHODS: dict = {
     # (models/ncaab_moneyline_own_spread.py), loaded by
     # scripts/ncaab_moneyline_card.py by its pinned path, never registered.
     "ncaab_moneyline_own_spread": "rule",
+    # The same shape: the first-post moneyline rule's artifact names the same
+    # final-margin table and pins its digest
+    # (models/ncaab_moneyline_first_post.py), loaded by
+    # scripts/ncaab_moneyline_first_post_card.py by its pinned path.
+    "ncaab_moneyline_first_post": "rule",
     # The same shape: a rule whose parameter artifact
     # (models/saved/ncaab_first_half_spread_<season>.json) holds its first-half
     # map, table sample and team term, loaded by the card, never registered.
@@ -2749,6 +2793,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_total_blend":        0.04,   # 2026-10-30 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
+    "ncaab_moneyline_first_post": 0.015,  # 2026-11-03 mike: THE cut, at a book's first moneyline post; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.02,   # 2026-11-02 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "ncaab_first_half_total":   0.02,   # 2026-11-03 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
@@ -2845,6 +2890,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.0,  # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaab_moneyline_first_post": 0.0,  # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_first_half_total":   0.0,    # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
@@ -5157,3 +5203,23 @@ PLAYER_NEWS_MAX_TEAM_FETCHES: int = int(
 # sheet shows the most recent few and the table is a cache we can always re-read.
 PLAYER_NEWS_RETENTION_DAYS: int = int(
     os.environ.get("PLAYER_NEWS_RETENTION_DAYS", 21))
+
+# ── every paid call is logged, however the process was started ──────────────
+# Last in this file on purpose: every constant above exists before anything is
+# imported here. Every Odds API caller in the repo imports this module, so
+# installing the call logger here is what makes api_call_log hold a call made
+# by a plain module run, a runpy launcher or a one-off script -- not only by
+# the scheduler, the pipeline and the entrypoints that install it themselves.
+# On 2026-11-03 the NBA first-quarter history purchase ran on mike's PC as a
+# module run (runpy.run_module("data.ingestors.nba_odds_history")) and about
+# 112,813 credits went out with almost nothing in the log. An entrypoint that
+# calls install("pipeline") afterwards only renames its rows; nothing is
+# wrapped twice. The writer thread starts on the first recorded call, so a
+# process that makes none starts no thread. PIPELINE_TELEMETRY=0 still turns it
+# off. Best-effort: importing config must never fail because of telemetry.
+# monitoring/probe.py, tests/test_odds_call_log_everywhere.py.
+try:
+    from monitoring.probe import install as _install_api_call_log
+    _install_api_call_log()
+except Exception:  # noqa: BLE001
+    pass
