@@ -360,9 +360,11 @@ def test_a_bet_at_draftkings_has_no_best_book():
 def test_the_price_floor_and_the_ev_floor_refuse_a_bet():
     from scripts.ncaab_first_half_spread_card import pick_rows
     rows, refused = pick_rows([_decision(ap=-250, p=0.75, edge=0.04)], GAMES, 1000.0)
-    assert not rows and refused["g"].startswith("below_price_floor")
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and refused["g"].startswith("below_price_floor")
     rows, refused = pick_rows([_decision(ap=+100, p=0.51, edge=0.01)], GAMES, 1000.0)
-    assert not rows and "g" in refused
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and "g" in refused
 
 
 def test_the_card_bets_only_at_books_config_still_lists(monkeypatch):
@@ -412,3 +414,19 @@ def test_the_scheduler_runs_it_every_minute_on_the_pipeline_service():
     body = src[i:src.index("\ndef ", i + 10)]
     # the bets the card wrote go out before a failed step raises
     assert body.index("_publish_new_signals") < body.index("raise RuntimeError")
+
+
+def test_a_game_priced_below_the_cut_is_a_none_row_and_one_with_no_quote_is_no_row():
+    """The All board shows every scored game (Matt, 2026-11-04): a priced game
+    under the cut is written as NONE at the same book, side and number with no
+    stake. Nothing publishes or settles a NONE row (they select BETs)."""
+    from scripts.ncaab_first_half_spread_card import pick_rows
+    d = _decision(edge=0.01)
+    d.status = "below_cut"
+    (r,), refused = pick_rows([d], GAMES, 1000.0)
+    assert not refused
+    assert (r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) == ("NONE", 0.0, 0.0)
+    assert (r["pick_side"], r["scored_line"], r["decision_book"]) == ("away", -3.5, "fanduel")
+    assert r["pick_label"] == "Duke @ Kansas — First Half Duke +3.5"
+    unpriced = fh.Decision("g", "no_quote", "x")
+    assert pick_rows([unpriced], GAMES, 1000.0) == ([], {})

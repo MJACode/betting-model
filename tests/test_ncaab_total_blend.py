@@ -545,7 +545,8 @@ def test_a_bet_under_its_ev_floor_is_refused():
     d = _bet_decision()
     d.priced = nb.Priced(side="over", prob=0.56, price=-150.0, edge=0.56 - 0.6, mean=149.0, sigma=16.5)
     rows, refused = card.pick_rows([d], GAMES, 1000.0)
-    assert not rows and d.game_id in refused
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and d.game_id in refused
 
 
 class _Conn:
@@ -1132,3 +1133,34 @@ def test_the_channel_job_accepts_an_emoji_prefix(monkeypatch):
                 "🔴-ncaab live", "🔴🔴-ncaab", "ncaab!", "a" * 40):
         with pytest.raises(ValueError):
             validate({"name": bad, "like": "ncaaf"})
+
+
+def test_a_game_priced_below_the_cut_is_a_none_row_and_one_waiting_is_no_row():
+    """The All board shows every scored game (Matt, 2026-11-04)."""
+    import models.ncaab_total_blend as nb
+    import scripts.ncaab_total_card as card
+    d = _bet_decision()
+    d.status = "below_cut"
+    (r,), refused = card.pick_rows([d], GAMES, 1000.0)
+    assert not refused
+    assert (r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) == ("NONE", 0.0, 0.0)
+    assert (r["pick_side"], r["scored_line"]) == ("over", 145.5)
+    waiting = nb.Decision(d.game_id, "box_pending", "x", quote=d.quote)
+    assert card.pick_rows([waiting], GAMES, 1000.0) == ([], {})
+
+
+def test_publish_counts_only_bets_and_marks_a_none_row_as_no_bet_in_the_ledger():
+    import scripts.ncaab_total_card as card
+    d = _bet_decision()
+    d.status = "below_cut"
+    rows, refused = card.pick_rows([d], GAMES, 1000.0)
+    conn = _Conn()
+    import scripts.nfl_wind_publisher as wp
+    orig, wp._lock_model = wp._lock_model, (lambda c, m: None)
+    try:
+        assert card.publish(conn, rows, [d], datetime(2027, 1, 10, 21, tzinfo=timezone.utc),
+                            refused) == (0, 1)
+    finally:
+        wp._lock_model = orig
+    assert [p["signal_type"] for p in conn.picks] == ["NONE"]
+    assert conn.ledger[0]["n_bets"] == 0

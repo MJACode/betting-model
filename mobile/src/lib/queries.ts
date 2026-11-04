@@ -1195,20 +1195,28 @@ export async function fetchPicksForDate(
   onEnrichmentError?: (what: string, error: unknown) => void,
 ): Promise<EnrichedPick[]> {
   const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
-    supabase
-      .from('picks')
-      .select(PICK_COLUMNS)
-      .eq('game_date', date)
-      // In-play picks live on the Live tab only — they churn with every
-      // inning and would otherwise mix into the locked pre-game board.
-      .not('is_live', 'is', true)
-      // Order BET/AVOID before NONE so signals are NEVER dropped by the row cap.
-      // ('AVOID' < 'BET' < 'NONE' alphabetically.) The day's NONE prop rows can
-      // exceed the cap by evening; without this, the morning's locked game
-      // signals (oldest rows) fell off a created_at-only ordering and vanished.
-      .order('signal_type', { ascending: true })
-      .order('created_at', { ascending: false })
-      .limit(5000),
+    // PAGED. The All board is every scored pick (Matt, 2026-11-04), and one
+    // day's pre-game rows pass the 1,000-row response cap (fetchAllPages):
+    // 1,432 on 2026-09-19, 1,355 of them NONE. Unpaged, `.limit(5000)` got
+    // the first 1,000 and the rest of the day's NONE rows never reached All,
+    // on whichever sport sorted last. The order is kept (BET/AVOID before
+    // NONE, 'AVOID' < 'BET' < 'NONE') and pick_id makes it total, which range
+    // paging needs so no row repeats or drops at a page seam.
+    fetchAllPages<Pick>(
+      (from, to) =>
+        supabase
+          .from('picks')
+          .select(PICK_COLUMNS)
+          .eq('game_date', date)
+          // In-play picks live on the Live tab only — they churn with every
+          // inning and would otherwise mix into the locked pre-game board.
+          .not('is_live', 'is', true)
+          .order('signal_type', { ascending: true })
+          .order('created_at', { ascending: false })
+          .order('pick_id', { ascending: true })
+          .range(from, to),
+      (p) => String(p.pick_id),
+    ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     // Paged, on an order the request names, and only the markets a pick reads
