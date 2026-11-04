@@ -218,12 +218,14 @@ apply it. Until that table exists, the function refuses every code,
 including the right one. The function creates the auth user on the first
 success. No mailbox is required.
 
-Wrong codes are counted per caller. The table stores a SHA-256 of the
-address, not the address. Eight failures in 15 minutes fill that caller's
-bucket. The next request from that caller is refused before the code is
-compared. Another caller's budget is separate. A database error on the count
-is 503. Deleting the review account still asks for this code, because reauth
-uses the same verify path.
+Wrong codes are counted per caller and across every caller. The table
+stores a SHA-256 of the edge address (`cf-connecting-ip`, otherwise the
+last `x-forwarded-for` hop), not the address and not the first hop. Eight
+failures in 15 minutes fill that caller's bucket. More than 200 failures
+in an hour, from every caller together, refuse the next request before
+the code is compared. A database error on the count is 503. Deleting the
+review account still asks for this code, because reauth uses the same
+verify path.
 
 After App Review approves the binary, unset `APP_REVIEW_DEMO_OTP`, or replace
 it with a new code that was not the one just submitted. Leaving the secret

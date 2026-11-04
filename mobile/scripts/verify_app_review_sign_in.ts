@@ -23,6 +23,7 @@ import {
 import {
   REVIEW_CODE_MISMATCH,
   REVIEW_FAILURE_LIMIT,
+  REVIEW_GLOBAL_FAILURE_LIMIT,
   REVIEW_MINT_FAILED,
   REVIEW_NOT_CONFIGURED,
   REVIEW_TOO_MANY,
@@ -32,6 +33,7 @@ import {
   reviewBypassConfigured,
   reviewCredentialsMatch,
   reviewFailureLimitReached,
+  reviewGlobalFailureLimitReached,
 } from '../../supabase/functions/_shared/appReviewSignIn';
 
 let passed = 0;
@@ -107,26 +109,51 @@ check('a non-object body is not shown', reviewFunctionErrorMessage(null) === nul
 
 check('eight failures are still allowed', !reviewFailureLimitReached(REVIEW_FAILURE_LIMIT));
 check('the next failure is refused', reviewFailureLimitReached(REVIEW_FAILURE_LIMIT + 1));
-
 check(
-  'the first forwarded address is the caller',
-  clientIpFromHeaders('203.0.113.5, 10.0.0.1', '198.51.100.9') === '203.0.113.5',
+  'two hundred failures in an hour are still allowed',
+  !reviewGlobalFailureLimitReached(REVIEW_GLOBAL_FAILURE_LIMIT),
 );
 check(
-  'a missing forwarded address uses x-real-ip',
-  clientIpFromHeaders(null, '198.51.100.9') === '198.51.100.9',
+  'the next failure in that hour is refused for every caller',
+  reviewGlobalFailureLimitReached(REVIEW_GLOBAL_FAILURE_LIMIT + 1),
+);
+
+const edgeAddress = '198.51.100.9';
+check(
+  'cf-connecting-ip is the caller',
+  clientIpFromHeaders('192.0.2.10', '203.0.113.5, ' + edgeAddress) === '192.0.2.10',
+);
+check(
+  'without cf-connecting-ip the last forwarded hop is the caller',
+  clientIpFromHeaders(null, '203.0.113.5, ' + edgeAddress) === edgeAddress,
+);
+check(
+  'a single forwarded hop is the caller',
+  clientIpFromHeaders(null, edgeAddress) === edgeAddress,
 );
 check(
   'no address is its own bucket label',
-  clientIpFromHeaders('  ', '') === 'unknown',
+  clientIpFromHeaders('  ', ' , ') === 'unknown',
 );
 async function checkBuckets(): Promise<void> {
-  const bucketA = await hashAttemptBucket('203.0.113.5');
-  const bucketB = await hashAttemptBucket('198.51.100.9');
-  const bucketAAgain = await hashAttemptBucket('203.0.113.5');
-  check('the same address hashes the same', bucketA === bucketAAgain);
-  check('two addresses hash differently', bucketA !== bucketB);
-  check('the hash is not the address', bucketA !== '203.0.113.5' && bucketA.length === 64);
+  const spoofed = await hashAttemptBucket(
+    clientIpFromHeaders(null, '203.0.113.5, ' + edgeAddress),
+  );
+  const real = await hashAttemptBucket(clientIpFromHeaders(null, edgeAddress));
+  check(
+    'a faked first XFF hop does not change the rate-limit bucket',
+    spoofed === real,
+  );
+  const viaEdge = await hashAttemptBucket(
+    clientIpFromHeaders(edgeAddress, '203.0.113.5, 192.0.2.10'),
+  );
+  check(
+    'cf-connecting-ip keeps the bucket when the first hop is faked',
+    viaEdge === real,
+  );
+  const other = await hashAttemptBucket('203.0.113.5');
+  check('two addresses hash differently', spoofed !== other);
+  check('the hash is not the address', spoofed !== edgeAddress && spoofed.length === 64);
 }
 
 const root = join(__dirname, '..', '..');
@@ -180,10 +207,14 @@ check('the function reads both secrets', fn.includes('APP_REVIEW_DEMO_EMAIL') &&
 check('a missing attempt table refuses the call', fn.includes('attemptsTableReady'));
 check('a full bucket is refused before the code is compared', (() => {
   const handler = fn.split('Deno.serve')[1] ?? '';
-  return handler.indexOf('reviewFailureLimitReached') !== -1 &&
-    handler.indexOf('reviewFailureLimitReached') < handler.indexOf('reviewCredentialsMatch') &&
-    handler.indexOf('reviewCredentialsMatch') < handler.indexOf('recordFailure');
+  const limitAt = handler.indexOf('overFailureLimit');
+  const matchAt = handler.indexOf('reviewCredentialsMatch');
+  return limitAt !== -1 &&
+    limitAt < matchAt &&
+    matchAt < handler.indexOf('recordFailure') &&
+    fn.includes('reviewGlobalFailureLimitReached');
 })());
+check('the caller is cf-connecting-ip, not the first forwarded hop', fn.includes('cf-connecting-ip'));
 check('failures are stored on the caller bucket', fn.includes('.eq("bucket", bucket)'));
 check('a database error on the count is 503', fn.includes('unavailable()') && fn.includes('503'));
 check(

@@ -8,6 +8,8 @@
 
 export const REVIEW_FAILURE_LIMIT = 8;
 export const REVIEW_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+export const REVIEW_GLOBAL_FAILURE_LIMIT = 200;
+export const REVIEW_GLOBAL_WINDOW_MS = 60 * 60 * 1000;
 
 export const REVIEW_NOT_CONFIGURED = "Review sign-in is not configured.";
 export const REVIEW_UNAVAILABLE = "Review sign-in is unavailable. Try again.";
@@ -75,19 +77,30 @@ export function reviewFailureLimitReached(recentFailures: number): boolean {
   return recentFailures > REVIEW_FAILURE_LIMIT;
 }
 
+/** Hourly ceiling across every caller. `count` includes the failure just recorded. */
+export function reviewGlobalFailureLimitReached(count: number): boolean {
+  return count > REVIEW_GLOBAL_FAILURE_LIMIT;
+}
+
 /**
- * First address in `x-forwarded-for`, else `x-real-ip`, else a shared
- * label. Callers with no address share one bucket and do not spend the
- * budget of a caller who sent one.
+ * The edge's own address, not a hop the caller can invent.
+ *
+ * `cf-connecting-ip` is set by Cloudflare in front of Supabase. If it is
+ * missing, the last `x-forwarded-for` hop is the one the proxy appended.
+ * The first hop is caller-controlled and is ignored.
  */
 export function clientIpFromHeaders(
+  cfConnectingIp: string | null | undefined,
   forwardedFor: string | null | undefined,
-  realIp: string | null | undefined,
 ): string {
-  const first = (forwardedFor ?? "").split(",")[0]?.trim() ?? "";
-  if (first) return first;
-  const real = (realIp ?? "").trim();
-  if (real) return real;
+  const cf = (cfConnectingIp ?? "").trim();
+  if (cf) return cf;
+  const hops = (forwardedFor ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  const last = hops.length > 0 ? hops[hops.length - 1] : "";
+  if (last) return last;
   return "unknown";
 }
 

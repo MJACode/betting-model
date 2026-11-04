@@ -11,9 +11,12 @@
 //   APP_REVIEW_DEMO_OTP     six digits. Never committed. Unset it after
 //                           App Review approves the binary.
 //
-// Wrong codes are counted per caller. The table stores a SHA-256 of the
-// address, not the address. A full bucket is 429 before the code is
-// compared. A database error on that count is 503, not "not configured".
+// Wrong codes are counted per caller, and again across every caller.
+// The table stores a SHA-256 of the edge address (cf-connecting-ip, else
+// the last x-forwarded-for hop), not the address and not the first hop.
+// A full per-caller bucket, or more than 200 failures in an hour from
+// everyone, is 429 before the code is compared. A database error on that
+// count is 503, not "not configured".
 //
 // SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY are injected.
 //
@@ -26,6 +29,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import {
   REVIEW_CODE_MISMATCH,
   REVIEW_FAILURE_WINDOW_MS,
+  REVIEW_GLOBAL_WINDOW_MS,
   REVIEW_MINT_FAILED,
   REVIEW_NOT_CONFIGURED,
   REVIEW_TOO_MANY,
@@ -36,6 +40,7 @@ import {
   reviewBypassConfigured,
   reviewCredentialsMatch,
   reviewFailureLimitReached,
+  reviewGlobalFailureLimitReached,
 } from "../_shared/appReviewSignIn.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -76,6 +81,27 @@ async function attemptsTableReady(admin: SupabaseClient): Promise<boolean> {
     .select("id", { count: "exact", head: true })
     .limit(1);
   return !error;
+}
+
+async function recentGlobalFailures(admin: SupabaseClient): Promise<number | null> {
+  const since = new Date(Date.now() - REVIEW_GLOBAL_WINDOW_MS).toISOString();
+  const { count, error } = await admin
+    .from(ATTEMPTS)
+    .select("id", { count: "exact", head: true })
+    .gte("attempted_at", since);
+  if (error || count == null) return null;
+  return count;
+}
+
+async function overFailureLimit(
+  admin: SupabaseClient,
+  bucket: string,
+): Promise<boolean | null> {
+  const perCaller = await recentFailures(admin, bucket);
+  if (perCaller == null) return null;
+  const everyone = await recentGlobalFailures(admin);
+  if (everyone == null) return null;
+  return reviewFailureLimitReached(perCaller) || reviewGlobalFailureLimitReached(everyone);
 }
 
 async function recentFailures(
@@ -148,19 +174,18 @@ Deno.serve(async (req) => {
   });
   if (!await attemptsTableReady(admin)) return notConfigured();
 
-  // A full bucket is refused before the code is compared, so one address
-  // cannot lock every other caller, including App Review.
+  // The per-caller cap and the hourly ceiling are both checked before the
+  // code is compared. The address is cf-connecting-ip, else the last
+  // forwarded hop. The first hop is ignored.
   const bucket = await hashAttemptBucket(
     clientIpFromHeaders(
+      req.headers.get("cf-connecting-ip"),
       req.headers.get("x-forwarded-for"),
-      req.headers.get("x-real-ip"),
     ),
   );
-  const already = await recentFailures(admin, bucket);
-  if (already == null) return unavailable();
-  if (reviewFailureLimitReached(already)) {
-    return json({ error: REVIEW_TOO_MANY }, 429);
-  }
+  const blocked = await overFailureLimit(admin, bucket);
+  if (blocked == null) return unavailable();
+  if (blocked) return json({ error: REVIEW_TOO_MANY }, 429);
 
   let body: { email?: unknown; token?: unknown };
   try {
@@ -174,11 +199,9 @@ Deno.serve(async (req) => {
   const expectedEmail = normalizeReviewEmail(emailSecret ?? "");
   if (!reviewCredentialsMatch(email, token, expectedEmail, (otpSecret ?? "").trim())) {
     if (!await recordFailure(admin, bucket)) return unavailable();
-    const failures = await recentFailures(admin, bucket);
-    if (failures == null) return unavailable();
-    if (reviewFailureLimitReached(failures)) {
-      return json({ error: REVIEW_TOO_MANY }, 429);
-    }
+    const blockedAfter = await overFailureLimit(admin, bucket);
+    if (blockedAfter == null) return unavailable();
+    if (blockedAfter) return json({ error: REVIEW_TOO_MANY }, 429);
     return json({ error: REVIEW_CODE_MISMATCH }, 401);
   }
 

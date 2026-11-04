@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Review rate limit uses the edge address and a global hourly ceiling; a faked first forwarded hop does not change the bucket |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Review code removed from the repo: Password is a placeholder, failures are counted per hashed caller, a full bucket is refused before the code is compared; master merged; migration still not applied |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Review demo sign-in: one email accepts a fixed code from Supabase secrets; keywords replace discord with signals; attempt-log migration is in the PR and not applied |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, the All board shows every scored NCAAB game: five NCAAB cards write a NONE row (no stake) for each game priced and not bet, first-post stays BET-only (unique key); the app's day read is two paged reads (signals required, NONE enrichment), the NCAAB look-ahead reads lines for signal games only; UX review applied, betslip-on-NONE left for Matt |
