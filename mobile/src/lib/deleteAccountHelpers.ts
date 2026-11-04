@@ -11,6 +11,8 @@
  * banner, and nothing was deleted.
  */
 
+import { isAppReviewDemoEmail } from './appReview';
+import { EMAIL_OTP_LENGTH } from './authConfig';
 import { errorText } from './errors';
 
 /** Must match interval '10 minutes' in delete_my_account() and delete_my_login(). */
@@ -69,6 +71,9 @@ export const REAUTH_APPLE_BODY =
   'For your security, sign in again before we delete your account. You signed in a while ago.';
 
 export function reauthEmailBody(email: string): string {
+  if (isAppReviewDemoEmail(email)) {
+    return `Enter the ${EMAIL_OTP_LENGTH}-digit code from App Review Information to delete this account. No email is sent.`;
+  }
   return `We sent a 6-digit code to ${email}. Enter it to delete your account.`;
 }
 

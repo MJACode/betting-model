@@ -9,6 +9,7 @@
 | `revenuecat-webhook` | **false** | IAP entitlement → `subscriptions`, **and** the Discord role sync. Authorization header, constant-time. | `mobile/docs/BILLING.md` |
 | `discord-link` | true | Discord OAuth link, one-tap guild join, role sync, unlink. A link asserts who someone IS, so it must never be makeable on another account's behalf. | `mobile/docs/DISCORD_LINKING.md` |
 | `whop-webhook` | **false** | Whop membership mirror + identity keys in `whop_memberships`. Does not unlock the app and does not touch our Discord role. HMAC over the raw body. | `mobile/docs/DISCORD_LINKING.md` |
+| `app-review-sign-in` | **false** | App Review only. One email plus a fixed code, both from secrets. Refuses every code until `app_review_sign_in_attempts` exists. | `mobile/docs/AUTHENTICATION.md` |
 
 `_shared/discord.ts` (bot API) and `_shared/entitlement.ts` (Apple subscription
 → our Discord role) are imported by `discord-link` and `revenuecat-webhook`.

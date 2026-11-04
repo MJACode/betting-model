@@ -68,6 +68,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_scoreboard.ts
 
+      # Same skip as the steps above. The pytest job runs this only when
+      # mobile/node_modules is already installed, which it is not there.
+      - name: App Review sign-in
+        working-directory: mobile
+        run: npx tsx scripts/verify_app_review_sign_in.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -255,4 +261,5 @@ jobs:
             tests/test_scoreboard_splits.py \
             tests/test_pregame_insert_cutoff.py \
             tests/test_health_pregame_prices_current.py \
-            tests/test_web_site.py
+            tests/test_web_site.py \
+            tests/test_app_review_sign_in.py
