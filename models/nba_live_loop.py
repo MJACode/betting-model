@@ -487,7 +487,9 @@ def evaluate_game(ctx: GameCtx, art: M.Artifact, q: pd.DataFrame, summary: dict,
             continue
         d = M.decide(el, rule, art.models, ctx.mu_pre)
         if d is not None:
-            st = state_of(el)
+            # a bet's state is its own quote's (each quote is priced at the state
+            # at its own stamp); a no-bet records the fetch's earliest quote's
+            st = state_of(pd.DataFrame([d.pick])) if d.pick else state_of(el)
             if d.pick:
                 st.update({"mean": d.pick.get("mean"), "sd": d.pick.get("sd"), "p_home": d.pick.get("p_home")})
             out.append((rule, d, st))

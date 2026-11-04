@@ -46,8 +46,12 @@ class Clock:
 
 
 class FakeEspn:
-    def __init__(self, plays, clock, period=2, state="in"):
+    """`lag`: seconds between a play's wallclock (when ESPN logged it) and
+    the moment the summary serves it."""
+
+    def __init__(self, plays, clock, period=2, state="in", lag=0.0):
         self.plays, self.clock, self.period, self.state = plays, clock, period, state
+        self.lag = float(lag)
         self.calls = 0
 
     def scoreboard(self, d):
@@ -56,7 +60,7 @@ class FakeEspn:
 
     def summary(self, eid):
         self.calls += 1
-        return S.summary(self.plays, known_until=self.clock.now)
+        return S.summary(self.plays, known_until=self.clock.now - timedelta(seconds=self.lag))
 
 
 class FakeFeed:
@@ -87,6 +91,7 @@ class Db:
 
     def __init__(self, extra_tip=None, standing=None):
         self.ledger: dict = {}
+        self.ledger_attempts: list = []
         self.picks: list = []
         self.credits: list = []
         self.prices: list = []
@@ -114,6 +119,7 @@ class Db:
 
         def insert_ledger(conn, row):
             k = (row["game_id"], row["model_id"])
+            db.ledger_attempts.append(k)
             if k in db.ledger:
                 return False
             db.ledger[k] = row
@@ -148,8 +154,9 @@ def books(stamp, fd_spread=(-2.5, -120, 100), dk_spread=(-3.5, -105, -115), ml=(
             S.book("fanduel", stamp, h2h=(ml[0] - 5, ml[1] + 5), spread=fd_spread)]
 
 
-def make_loop(art, plays, clock, books_at, db, dry_run=False, period=2):
-    return LP.Loop(art, FakeEspn(plays, clock, period=period), FakeFeed(clock, books_at), lambda: FakeConn(),
+def make_loop(art, plays, clock, books_at, db, dry_run=False, period=2, lag=0.0):
+    return LP.Loop(art, FakeEspn(plays, clock, period=period, lag=lag), FakeFeed(clock, books_at),
+                   lambda: FakeConn(),
                    dry_run=dry_run, wait=45.0, sleep=clock.sleep, clock=clock,
                    slate_dates=lambda: [S.GAME_DATE])
 
@@ -213,19 +220,24 @@ def test_a_slot_fetches_once_decides_and_writes_the_bet(art, monkeypatch):
 
 
 def test_the_wait_puts_a_basket_logged_before_the_served_time_into_the_rule(art, monkeypatch):
-    """A basket logged 10 s after the quotes' stamp and before the fetch:
-    the loop reads ESPN only after its wait, so the quote is stale and the
-    fetch decides nothing."""
+    """A basket ESPN logged 10 s after the quotes' stamp and 5 s before the
+    fetch, served 30 s after it was logged. Reading ESPN at the fetch would
+    miss it and bet a stale price; the loop reads after its 45 s wait, sees
+    it, and the fetch decides nothing."""
     base = S.build_plays()
     w = S.wall_of(base, 2, 420.0)
     plays = S.build_plays(extra=[{"period": 2, "clock_s": 412.0, "wallclock": w + timedelta(seconds=15),
                                   "team": "A", "points": 2}])
     slot = w + timedelta(seconds=20)
     db = Db(extra_tip=slot).install(monkeypatch)
-    clock = Clock(slot)
-    loop = make_loop(art, plays, clock, lambda now: books(w + timedelta(seconds=5)), db)
+    loop = make_loop(art, plays, Clock(slot), lambda now: books(w + timedelta(seconds=5)), db, lag=30.0)
     loop.tick()
     assert loop.feed.calls == 1 and db.ledger == {}
+    # the same game without the basket, the same 30 s publication lag: decided
+    db2 = Db(extra_tip=slot).install(monkeypatch)
+    loop2 = make_loop(art, base, Clock(slot), lambda now: books(w + timedelta(seconds=5)), db2, lag=30.0)
+    loop2.tick()
+    assert (S.GAME_ID, M.SPREAD_Q12) in db2.ledger
 
 
 def test_an_ineligible_slot_carries_and_the_next_one_decides(art, monkeypatch):
@@ -274,15 +286,23 @@ def test_an_eligible_fetch_that_misses_the_cut_spends_the_rule(art, monkeypatch)
 
 
 def test_a_restart_never_decides_a_rule_the_ledger_holds(art, monkeypatch):
+    """A new process reads the ledger: a rule decided by an earlier process is
+    not evaluated again, and a game whose three rules are all decided costs
+    no fetch at all."""
     plays = S.build_plays()
     w = S.wall_of(plays, 2, 420.0)
     slot = w + timedelta(seconds=20)
     db = Db(extra_tip=slot).install(monkeypatch)
     db.ledger[(S.GAME_ID, M.SPREAD_Q12)] = {"outcome": "no_bet"}
-    clock = Clock(slot)
-    loop = make_loop(art, plays, clock, lambda now: books(w + timedelta(seconds=5)), db)
+    loop = make_loop(art, plays, Clock(slot), lambda now: books(w + timedelta(seconds=5)), db)
     loop.tick()
-    assert db.picks == [] and len(db.ledger) == 1
+    assert db.picks == [] and (S.GAME_ID, M.SPREAD_Q12) not in db.ledger_attempts
+    db_all = Db(extra_tip=slot).install(monkeypatch)
+    for mid in M.MODEL_IDS:
+        db_all.ledger[(S.GAME_ID, mid)] = {"outcome": "no_bet"}
+    loop_all = make_loop(art, plays, Clock(slot), lambda now: books(w + timedelta(seconds=5)), db_all)
+    loop_all.tick()
+    assert loop_all.feed.calls == 0
 
 
 def test_a_bet_that_cannot_win_beside_a_standing_one_is_declined(art, monkeypatch):

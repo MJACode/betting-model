@@ -267,8 +267,11 @@ def test_rule_3_a_deciding_spread_more_than_6_points_from_pinnacle_is_dropped():
 def test_rule_1_a_price_between_minus_100_and_plus_100_is_dropped():
     plays = S.build_plays()
     w = S.wall_of(plays, 2, 420.0)
-    qt = pipeline(plays, q2_books(w, fd_spread=(-2.5, 50, -150)), w + timedelta(seconds=20))
+    # +95 / -105 sums to a coherent 1.02, so only rule 1 can drop it
+    qt = pipeline(plays, q2_books(w, fd_spread=(-2.5, 95, -105)), w + timedelta(seconds=20))
     assert "fanduel" not in set(M.eligible_for(qt, SPREAD_Q12)["book"])
+    ok = pipeline(plays, q2_books(w, fd_spread=(-2.5, 105, -115)), w + timedelta(seconds=20))
+    assert "fanduel" in set(M.eligible_for(ok, SPREAD_Q12)["book"])
 
 
 # ─── the decision ──────────────────────────────────────────────────────────────
