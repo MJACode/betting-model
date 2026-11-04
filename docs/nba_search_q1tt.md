@@ -162,6 +162,11 @@ Each game's one purchase, used only when it falls 45-75 minutes before tip (deci
   earlier period search read them. So a book whose stored period number sits more than 1 point from
   the deciding books' median has no number of its own that game.
 
+**Corrected 2026-11-03, before any cell was graded (section 14.2):** "at -110 / -110 the centre is the
+number itself" is not exact, and neither are the two worked examples above. The centre sits a few
+hundredths of a point off the number, because the shape is centred on its average and not its middle.
+The lab always solved the centre, so no bet moves.
+
 ### 4.3 Two references
 
 - **(i) The same book.** A team-total offer at a book is priced at the points implied by **that book's
@@ -530,3 +535,96 @@ it ships. It needs a live capture of these markets first; whether one exists has
   scores, hold both equal to the harness's frame-by-frame path.
 - **What is saved** under `NBA_S_Q1TT_SCRATCH`: the pulled rows and Pinnacle's full-game closes, each
   regenerable (the first by `--pull`, the second from the cache, with a fingerprint of the cache files).
+
+## 14. Changes after an independent review, before any cell was graded (2026-11-03)
+
+An independent review of this section's rules and its lab ran before any cell was graded. It found no
+fault that changes what a cell bets or how it is judged, and four smaller points. Each is recorded here
+before `--full` runs. The reviewer's scripts and logs are in
+`C:/Users/micha/AppData/Local/Temp/nba_s/q1tt_review/`; the lab's own re-measurement is
+`C:/Users/micha/AppData/Local/Temp/nba_s/q1tt/review_points.py`. Prices, shapes and drawn results only:
+no real result of a bet this search would place was read.
+
+### 14.1 Bar 6 is looser for family A than intended
+
+**What happens.** Family A's placebo runs place more bets than the real cell: about twice as many
+pooled (149 against 81 at the first-quarter over, cut 0.02, section 11.6), and 1.2 to 1.6 times as many
+on 2024-25, the season bar 6 reads (the four consensus cells at cut 0.02).
+
+**Why.** An offer's price in a placebo run is the game's own team-total centre plus another game's
+disagreement. The own centre carries how far the market's fair centre sits from that offer's own
+centre. In the real price that gap partly cancels against the game's own disagreement: across every
+consensus offer the two correlate at -0.16 (first quarter) and -0.13 (first half). A placebo run breaks
+the pairing, so its prices spread wider than the real ones: a spread of 0.216 against 0.202 points in
+the first quarter, 0.282 against 0.266 in the first half. More offers then clear each cut.
+
+**And the runs repeat each other.** Across 20 runs of each consensus cell, a run's bets also appear in
+another run 34% to 44% of the time at cut 0.02 (pooled; 29% to 42% on 2024-25), and 17% to 49% across
+all twelve consensus cells.
+
+**How much looser.** The reviewer drew results from the fair distribution, so no real cell carried an
+edge, and asked how often bar 6 would pass:
+
+| Cells | Drawn worlds each | Bar 6 passed |
+|---|---|---|
+| Consensus, cut 0.02 (16 to 45 bets on 2024-25) | 300 | 4.7% to 13.7% |
+| Every consensus cell | 300 | 0% to 19.3% |
+| Family B, both periods | 500 | 5.8% and 5.0% |
+
+The intended rate is 5%. So bar 6 passes a no-edge family A cell up to 2.7 times too often at cut 0.02,
+and up to 3.9 times in its thinnest cells.
+Family B's placebo holds the intended rate.
+
+**What this changes: nothing now.** Every family A cell is under 200 bets (section 11.4), so each fails
+bar 1 whatever bar 6 reads. The lab is not changed. Bar 6 is still reported for family A. **It is
+read as looser than 5% for that family: a family A cell that passed bar 6 and nothing else would not be
+evidence of anything.**
+
+### 14.2 The centre at even prices (section 4.2, corrected)
+
+At -110 / -110 a quote's centre is its number less the shape's middle offset: the shape is re-centred
+on its average, and the average and the middle of a skewed scatter differ.
+
+- **Measured** through every shape used, over every half and whole number in the range quoted:
+  - period spreads and totals: within 0.06 points on half-point numbers, 0.07 on whole numbers;
+  - first-quarter team totals: within 0.06;
+  - first-half team totals: within 0.14.
+- On the quotes themselves, the reviewer measured at most 0.053 points for the implied team points from
+  DraftKings' even-priced period quotes, and 0.045 (first quarter) and 0.14 (first half) for the
+  team-total quotes at even prices.
+- **No bet moves.** The lab solves every centre through the shape and never assumes the number. Only
+  the sentence and its two worked examples (home -2 has a centre of +2; home 30, away 28) were too
+  round.
+
+### 14.3 The same-book cells' blind bet
+
+The blind over and blind under beside a same-book cell are bet on the cell's own population of games.
+They take the best offer at **any** deciding book that game, not only at the books the cell can bet
+there (a book with its own visible spread and total). That is how `H.run_cells` builds every blind bet.
+
+Measured on the real prices: 13% to 37% of those blind bets fall at a book the same-book cell cannot
+bet in that game:
+
+| Period | Blind over | Blind under |
+|---|---|---|
+| First quarter | 1,805 of 4,850 (37.2%) | 627 of 4,850 (12.9%) |
+| First half | 816 of 4,860 (16.8%) | 831 of 4,860 (17.1%) |
+
+Most of them are at Hard Rock, betPARX and BetRivers, the books section 11.3 found without a same-book
+number. So bar 4 compares a same-book cell with a blind bet that can shop more books than the cell
+can. Bar 4 is unchanged; read it with that in mind.
+
+### 14.4 Family B is now checked against the live decision function
+
+The test that family B bets exactly the live rule's games compared the lab with its own copy of the
+rule. With family B's sign flipped, it still passed.
+
+**It is replaced.** `test_family_b_bets_exactly_the_games_the_live_decision_function_bets` hands each
+period's home team-total quotes to the live model's own decision function,
+`models.nba_team_total_luck.decide`, through the lab's `live_rule_games`, on a synthetic world. It
+requires decide's bet games to equal family B's in every graded season and both periods.
+
+- **Watched failing:** with family B's sign flipped, the new test fails, and the old one passes.
+- **On the real data** (the same call, `q1tt/live_real.py`): family B's games equal decide's in both
+  periods and both seasons, 156 in 2024-25 and 131 in 2025-26. The reviewer found the same with decide
+  on the full-game home team-total quotes: 287 of 287, and all 2,410 home parts it compared identical.
