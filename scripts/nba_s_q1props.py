@@ -102,6 +102,10 @@ LOW_SHARE = 0.5
 FAMILY = "Q1P"
 CTL_HR, CTL_FD, CTL_BLIND, CTL_ONE = "control_HR", "control_FD", "control_blind", "control_one_sided"
 BOOK_HR, BOOK_FD = "hardrockbet", "fanduel"
+# doc section 16: the deciding books and the floor the doc registers; --full refuses any other
+REGISTERED_BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us", "fanatics", "betrivers", "hardrockbet", "betparx")
+REGISTERED_FLOOR = -200.0
+BESIDE_MONTHS = {"10": "October", "02": "February"}     # doc section 16: departed players sit in these months
 PICK_COLS = ["game_id", "market", "side", "book", "price", "line", "season", "game_date", "T"]
 KEY = ["game_id", "player_id", "market"]
 PBP_COLS = ("espn_game_id, play_no, sequence_number, game_id, season, season_type, period, type_id, type_text, "
@@ -442,6 +446,9 @@ def _asof(left: pd.DataFrame, right: pd.DataFrame, cols, by) -> pd.DataFrame:
     by = [by] if isinstance(by, str) else list(by)
     lft = left.reset_index(drop=True).assign(_i=np.arange(len(left))).sort_values("date")
     rgt = right[["date", *by, *cols]].sort_values("date")
+    for c in by:                                  # one key type on both sides (string and object ids mix)
+        if lft[c].dtype != rgt[c].dtype:
+            lft[c], rgt[c] = lft[c].astype(object), rgt[c].astype(object)
     out = pd.merge_asof(lft, rgt, on="date", by=by, allow_exact_matches=False, direction="backward")
     return out.sort_values("_i").drop(columns="_i").reset_index(drop=True)
 
@@ -505,42 +512,87 @@ def report_at(report: pd.DataFrame, decisions: pd.DataFrame, roster: pd.DataFram
     return rep.drop_duplicates(["game_id", "player_id"])[["game_id", "team", "player_id", "status"]]
 
 
-def status_rates(report: pd.DataFrame, games: pd.DataFrame, log: pd.DataFrame, roster: pd.DataFrame,
-                 seasons) -> dict:
-    """{season S: {status: the share of listed players who played}}, fitted on the reports of STATUS_FIRST
-    through S-1 at tip minus REF_LEAD_MIN (read with the lag). Out is 0 by rule."""
-    g = games[games.season.between(STATUS_FIRST, max(seasons) - 1)]
-    dec = pd.DataFrame({"game_id": g.game_id.values,
-                        "decision_ts": pd.to_datetime(g.commence_time, utc=True) - pd.Timedelta(minutes=REF_LEAD_MIN)})
-    rep = report_at(report[report.game_id.isin(set(g.game_id))], dec, roster)
-    played = set(zip(log.loc[log.minutes.fillna(0) > 0, "game_id"], log.loc[log.minutes.fillna(0) > 0, "player_id"].astype(str)))
-    rep["played"] = [k in played for k in zip(rep.game_id, rep.player_id)]
-    rep["season"] = rep.game_id.map(g.set_index("game_id").season)
+def pool_status_rates(fit: pd.DataFrame, seasons) -> dict:
+    """Doc section 16. {season S: {status: the share of POOL players listed with it who played}}, from `fit`
+    (season, status, played: one row per pool player of a fit team-game, status at tip minus REF_LEAD_MIN),
+    seasons STATUS_FIRST through S-1 only. Out is 0 by rule."""
     out = {}
     for S in seasons:
-        x = rep[(rep.season >= STATUS_FIRST) & (rep.season < S)]
+        x = fit[(fit.season >= STATUS_FIRST) & (fit.season < S)]
         out[int(S)] = {st: float(x.loc[x.status == st, "played"].mean()) for st in FIT_STATUSES}
         out[int(S)]["Out"] = 0.0
         out[int(S)]["_n"] = {st: int((x.status == st).sum()) for st in FIT_STATUSES}
     return out
 
 
+def roster_events(log: pd.DataFrame, inactives: pd.DataFrame, report: pd.DataFrame, reg: set,
+                  roster: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Doc section 16: what says which team a player is on, as it becomes known.
+    (box lines and inactive lists: player_id, date, team), read for games strictly before a target's date;
+    (report listings: player_id, known, game_date, team), read when printed time + REPORT_LAG_MIN <= T.
+    A report row with no NBA id takes the one roster player with its name."""
+    lg = log[log.game_id.isin(reg)][["player_id", "game_date", "team"]]
+    ina = inactives[inactives.game_id.isin(reg)][["player_id", "game_date", "team"]]
+    box = pd.concat([lg, ina], ignore_index=True).dropna(subset=["player_id"])
+    box["player_id"] = box.player_id.astype(str).str.replace(r"\.0$", "", regex=True)
+    box["date"] = pd.to_datetime(box.game_date)
+    box = box.drop_duplicates(["player_id", "date", "team"])[["player_id", "date", "team"]]
+    r = report[report.status.isin(nb.REAL_STATUS)][["game_id", "team", "report_ts", "player_id", "player_name", "game_date"]]
+    r = nb._attach_report_ids(r, roster)
+    r = r.assign(player_id=r.player_id.astype(str).str.replace(r"\.0$", "", regex=True),
+                 known=r.report_ts + pd.Timedelta(minutes=REPORT_LAG_MIN), rep_date=pd.to_datetime(r.game_date))
+    return box, r[["player_id", "known", "rep_date", "team"]].drop_duplicates()
+
+
+def team_as_of(rows: pd.DataFrame, box: pd.DataFrame, rep: pd.DataFrame) -> np.ndarray:
+    """Each row's team as known at its decision: rows (player_id, date, T). The team of the latest of his box
+    lines and inactive listings before the date, unless a report known at T lists him for a game on or after
+    that one, in which case that report's team."""
+    a = _asof(rows[["player_id", "date"]], box.assign(ev_date=box.date), ["team", "ev_date"], "player_id")
+    lft = rows[["player_id", "T"]].reset_index(drop=True).assign(_i=np.arange(len(rows)))
+    lft["T"] = pd.to_datetime(lft["T"], utc=True).astype("datetime64[ns, UTC]")
+    lft = lft.sort_values("T")
+    rgt = rep.rename(columns={"team": "rep_team"}).sort_values("known")
+    lft["player_id"], rgt["player_id"] = lft.player_id.astype(object), rgt.player_id.astype(object)
+    rgt["known"] = pd.to_datetime(rgt.known, utc=True).astype("datetime64[ns, UTC]")
+    b = pd.merge_asof(lft, rgt, left_on="T", right_on="known", by="player_id", direction="backward")
+    b = b.sort_values("_i").reset_index(drop=True)
+    use_rep = b.rep_team.notna().to_numpy() & (a.ev_date.isna().to_numpy()
+                                               | (b.rep_date.to_numpy() >= a.ev_date.to_numpy()))
+    return np.where(use_rep, b.rep_team.to_numpy(dtype=object), a.team.to_numpy(dtype=object))
+
+
+def pool_frame(pg: pd.DataFrame, hist: pd.DataFrame, tt: pd.DataFrame, box: pd.DataFrame, rep: pd.DataFrame
+               ) -> pd.DataFrame:
+    """Doc 5.2 and section 16: each target team-game's pool (tt: game_id, team, date, T, season), with s, m,
+    and only players whose team as of the decision is this team."""
+    pool = team_pools(pg, tt)
+    pool = pool.merge(tt[["game_id", "team", "date", "T", "season"]], on=["game_id", "team"])
+    pool = _asof(pool, hist, ["m"], "player_id")
+    pool["team_now"] = team_as_of(pool[["player_id", "date", "T"]], box, rep)
+    return pool[(pool.team_now == pool.team) & pool.m.notna() & pool.s.notna()].reset_index(drop=True)
+
+
 def reallocate(tg: pd.DataFrame, pool: pd.DataFrame, st: dict, status: dict) -> pd.DataFrame:
     """Doc 5.2. `pool`: game_id, team, player_id, season, s, m (one row per pool player of a target team-game);
     `st`: {(game_id, player_id): status at T}; `status`: status_rates' {season: {status: rate}}.
-    a = 0 if Out, the fitted rate if listed otherwise, 1 if not listed. E = sum a*s*m per team-game,
-    r = 60 / E, and each target's expected minutes = min(12, his own m * r): his own status is never a
-    factor on his own minutes (a void-if-he-sits bet is priced given that he plays)."""
+    a = 0 if Out, the fitted rate if listed otherwise, 1 if not listed. E = sum a*s*m per team-game, and
+    each target's own E counts HIS OWN status as 1 (E - a*s*m + s*m, doc section 16): a void-if-he-sits bet
+    is priced given that he plays, so his own status never moves his own minutes. r = 60 / his E, and his
+    expected minutes = min(12, his own m * r)."""
     a = np.ones(len(pool))
     for i, (k, se) in enumerate(zip(zip(pool.game_id, pool.player_id), pool.season)):
         sname = st.get(k)
         if isinstance(sname, str):
             a[i] = status[int(se)].get(sname, 1.0)
     pool = pool.assign(a=a)
-    E = (pool.a * pool.s * pool.m).groupby([pool.game_id, pool.team]).sum()
+    term = pool.a * pool.s * pool.m
+    E = term.groupby([pool.game_id, pool.team]).sum()
     E = dict(zip(E.index, E.to_numpy(float)))
+    own = dict(zip(zip(pool.game_id, pool.player_id), ((1.0 - pool.a) * pool.s * pool.m).to_numpy(float)))
     out = tg.copy()
-    out["E"] = np.array([E.get(k, np.nan) for k in zip(out.game_id, out.team)], float)
+    out["E"] = np.array([E.get(k, np.nan) for k in zip(out.game_id, out.team)], float) \
+        + np.array([own.get(k, 0.0) for k in zip(out.game_id, out.player_id)], float)
     out["r"] = QUARTER_PLAYER_MIN / out.E
     out["mu_min"] = np.minimum(QUARTER_MIN, out.m * out.r)
     return out
@@ -608,12 +660,12 @@ def fit_line_map(y: np.ndarray, mu: np.ndarray, lines=POINTS_LINES) -> dict:
     ok = np.isfinite(y) & np.isfinite(mu) & (mu > 0)
     y, mu = y[ok], mu[ok]
     keep, a, b = [], [], []
-    for L in lines:
-        over = (y > L).astype(float)
+    for ln in lines:
+        over = (y > ln).astype(float)
         if over.sum() < MAP_MIN_EVENTS or (1 - over).sum() < MAP_MIN_EVENTS:
             continue
         ai, bi = nb.fit_platt(mu / (1.0 + mu), over)
-        keep.append(float(L))
+        keep.append(float(ln))
         a.append(ai)
         b.append(bi)
     return {"lines": np.array(keep), "a": np.array(a), "b": np.array(b)}
@@ -656,6 +708,23 @@ def walk_forward(y: np.ndarray, raw: np.ndarray, season: np.ndarray, ok: np.ndar
     return factor, alpha, maps, mu
 
 
+def map_check(y: np.ndarray, raw: np.ndarray, date: np.ndarray, hist: np.ndarray, lines=(1.5, 2.5, 3.5, 4.5, 5.5, 6.5)
+              ) -> list[dict]:
+    """Section 14's check on 2023-24 alone (`hist`): the factor, the line map and the negative binomial are all
+    fitted on the season's first half of dates (doc section 16: the factor too), and read on its second half."""
+    dates = np.sort(np.unique(date[hist]))
+    first = hist & (date < dates[len(dates) // 2])
+    second = hist & ~first
+    f = float(np.nansum(y[first]) / np.nansum(raw[first]))
+    mu = raw * f
+    mh = fit_line_map(y[first], mu[first])
+    a_h = float(nb.fit_alpha(y[first], mu[first]))
+    n2 = int(second.sum())
+    return [{"line": ln, "games": n2, "factor_first_half": f, "actual": float((y[second] > ln).mean()),
+             "line_map": float(np.nanmean(map_p_over(mh, mu[second], np.full(n2, ln)))),
+             "negative_binomial": float(np.mean(nb.p_over(mu[second], np.full(n2, ln), a_h)))} for ln in lines]
+
+
 @dataclass
 class Projection:
     table: pd.DataFrame           # per (game_id, player_id): season, has_number, why, mu_min, raw_<stat>
@@ -684,11 +753,11 @@ def project(data: dict, settled: Settled, targets: pd.DataFrame) -> Projection:
     tg["date"] = pd.to_datetime(tg.game_id.map(g.game_date))
     hist = minutes_history(pg)
     tg = _asof(tg, hist, ["m", "n_q1"], "player_id")
-    teams = pg[["player_id", "date", "team"]].rename(columns={"team": "team_now"})
-    tg = _asof(tg, teams, ["team_now"], "player_id")
+    roster = log[["team", "season", "player_id", "player_name"]].assign(player_id=lambda f: f.player_id.astype(str))
+    box, rep_ev = roster_events(log, data["inactives"], data["report"], set(reg), roster)
+    tg["team_now"] = team_as_of(tg[["player_id", "date", "T"]], box, rep_ev)
     home, away = tg.game_id.map(g.home_team), tg.game_id.map(g.away_team)
     tg["team"] = np.where((tg.team_now == home) | (tg.team_now == away), tg.team_now, None)
-    roster = log[["team", "season", "player_id", "player_name"]].assign(player_id=lambda f: f.player_id.astype(str))
     dec = tg.drop_duplicates("game_id")[["game_id", "T"]].rename(columns={"T": "decision_ts"})
     rep = report_at(data["report"][data["report"].game_id.isin(set(dec.game_id))], dec, roster)
     st = dict(zip(zip(rep.game_id, rep.player_id), rep.status))
@@ -696,14 +765,25 @@ def project(data: dict, settled: Settled, targets: pd.DataFrame) -> Projection:
     covered = set(dec.loc[nb.injury_coverage(data["report"].assign(report_ts=data["report"].report_ts
                                                                    + pd.Timedelta(minutes=REPORT_LAG_MIN)),
                                              dec).values, "game_id"])
-    status = status_rates(data["report"], rg, log, roster, sorted(set(tg.season)))
+    # the chance a listed pool player plays: every team-game of STATUS_FIRST .. the last priced season - 1, its
+    # pool at tip minus REF_LEAD_MIN, his status then, and whether he played (doc section 16)
+    fg = rg[rg.season.between(STATUS_FIRST, int(tg.season.max()) - 1)]
+    ftip = pd.to_datetime(fg.commence_time, utc=True) - pd.Timedelta(minutes=REF_LEAD_MIN)
+    ftt = pd.concat([pd.DataFrame({"game_id": fg.game_id.values, "team": fg[c].values, "date": pd.to_datetime(fg.game_date).values,
+                                   "T": ftip.reset_index(drop=True), "season": fg.season.astype(int).values}) for c in ("home_team", "away_team")],
+                    ignore_index=True)
+    fpool = pool_frame(pg, hist, ftt, box, rep_ev)
+    frep = report_at(data["report"][data["report"].game_id.isin(set(fg.game_id))],
+                     pd.DataFrame({"game_id": fg.game_id.to_numpy(), "decision_ts": ftip.reset_index(drop=True)}), roster)
+    fst = dict(zip(zip(frep.game_id, frep.player_id), frep.status))
+    played = set(zip(log.loc[log.minutes.fillna(0) > 0, "game_id"], log.loc[log.minutes.fillna(0) > 0, "player_id"].astype(str)))
+    fit = pd.DataFrame({"season": fpool.season.to_numpy(int),
+                        "status": [fst.get(k) for k in zip(fpool.game_id, fpool.player_id)],
+                        "played": [k in played for k in zip(fpool.game_id, fpool.player_id)]})
+    status = pool_status_rates(fit, sorted(set(tg.season)))
     # the team's pool and its expected first-quarter minutes
     tt = tg[tg.team.notna()][["game_id", "team", "date", "T", "season"]].drop_duplicates(["game_id", "team"])
-    pool = team_pools(pg, tt)
-    pool = pool.merge(tt[["game_id", "team", "date", "season"]], on=["game_id", "team"])
-    pool = _asof(pool, hist, ["m"], "player_id")
-    pool = _asof(pool, teams, ["team_now"], "player_id")
-    pool = pool[(pool.team_now == pool.team) & pool.m.notna() & pool.s.notna()]
+    pool = pool_frame(pg, hist, tt, box, rep_ev)
     tg = reallocate(tg, pool, st, status)
     why = np.full(len(tg), "", dtype=object)
     why[(tg.n_q1.fillna(0) < MIN_Q1_GAMES).to_numpy()] = "fewer than 3 earlier first-quarter games"
@@ -734,17 +814,8 @@ def project(data: dict, settled: Settled, targets: pd.DataFrame) -> Projection:
         maps.update({(s, S): v for S, v in m_s.items()})
         tg[f"mu_{s}"] = mu_all
         if s in MAP_STATS:
-            h = ok & (tg.season == HISTORY).to_numpy()
-            dates = np.sort(tg.date[h].unique())
-            first = h & (tg.date < dates[len(dates) // 2]).to_numpy()
-            second = h & ~first
-            mh = fit_line_map(y[first], mu_all[first])
-            a_h = float(nb.fit_alpha(y[first], mu_all[first]))
-            n2 = int(second.sum())
-            checks[s] = [{"line": L, "games": n2, "actual": float((y[second] > L).mean()),
-                          "line_map": float(np.nanmean(map_p_over(mh, mu_all[second], np.full(n2, L)))),
-                          "negative_binomial": float(np.mean(nb.p_over(mu_all[second], np.full(n2, L), a_h)))}
-                         for L in (1.5, 2.5, 3.5, 4.5, 5.5, 6.5)]
+            checks[s] = map_check(y, tg[f"raw_{s}"].to_numpy(float), tg.date.to_numpy(),
+                                  ok & (tg.season == HISTORY).to_numpy())
     notes = {"seconds": round(time.time() - t0, 1), "targets": int(len(tg)), "with_number": int(tg.has_number.sum()),
              "why_no_number": tg.loc[~tg.has_number, "why"].value_counts().to_dict(),
              "report_covered_share": float(tg.drop_duplicates("game_id").report_covered.mean()),
@@ -1124,6 +1195,10 @@ def beside_rows(g: Group, games: pd.DataFrame, props: pd.DataFrame, live: dict) 
             rows.append(_line(g, cut, f"season {int(s)}", b[b.season == s]))
             for bk, d in b[b.season == s].groupby("book"):
                 rows.append(_line(g, cut, f"season {int(s)} at {bk}", d))
+        mon = b.game_date.astype(str).str[5:7].to_numpy()
+        for mm, nm in BESIDE_MONTHS.items():
+            rows.append(_line(g, cut, f"month {nm}", b[mon == mm]))
+        rows.append(_line(g, cut, "other months", b[~np.isin(mon, list(BESIDE_MONTHS))]))
         ld = b.game_id.map(lead).to_numpy(float)
         rows.append(_line(g, cut, "lead 50-60", b[(ld >= 50) & (ld < 60)]))
         rows.append(_line(g, cut, "lead 60-70", b[(ld >= 60) & (ld <= 70)]))
@@ -1165,6 +1240,7 @@ def load_data(cache: Path, work: Path) -> dict:
     games = games[(games.sport == "NBA") & games.home_score.notna()].copy()
     return {"games": games, "schedule": rd("nba_schedule"), "log": rd("nba_player_game_log"),
             "report": rd("nba_injury_report"), "stints": rd("nba_stints"), "id_map": rd("nba_player_id_map"),
+            "inactives": rd("nba_game_inactives"),
             "periods": rd("nba_period_scores"),
             "plays": pd.read_parquet(pulled / "nba_pbp_slim.parquet"), "pbp_games": pd.read_parquet(pulled / "nba_pbp_games.parquet")}
 
@@ -1449,6 +1525,17 @@ def smoke_report(prep: Prep) -> dict:
                 b = H.choose(g.cand, cut, sides=[g.side])
                 ov.append({"market": g.market, "side": g.side, "cut": cut, "bets": len(b), **overlap(b, p, live)})
     print(pd.DataFrame(ov).round(3).to_string(index=False))
+    print("\nBets each registered cell would place in October and in February (beside, never judged; counts only):")
+    mrows = []
+    for g in groups:
+        if g.family == FAMILY:
+            for cut in g.cuts:
+                b = H.choose(g.cand, cut, sides=[g.side])
+                mon = b.game_date.astype(str).str[5:7]
+                mrows.append({"market": g.market, "side": g.side, "cut": cut,
+                              **{f"{nm} of {s - 1}-{str(s)[2:]}": int(((mon == mm) & (b.season == s)).sum())
+                                 for mm, nm in BESIDE_MONTHS.items() for s in PROP_SEASONS}})
+    print(pd.DataFrame(mrows).to_string(index=False))
     print("\nBets at the lowest cut by reallocation band r (counts only):")
     rb = []
     for g in groups:
@@ -1508,6 +1595,14 @@ def refuse_full(cache: Path, work: Path) -> list[str]:
             why.append(f"{Path(work) / 'pulled' / f}.parquet does not exist: run --pull")
     if not (Path(cache) / "nba_stints.parquet").exists():
         why.append(f"{Path(cache) / 'nba_stints.parquet'} does not exist: refresh the cache")
+    import config
+    books = (tuple(config.BEST_LINE_BOOKMAKERS), tuple(H.BETTABLE))
+    if any(b != REGISTERED_BOOKS for b in books):
+        why.append(f"the deciding books {books} are not the registered {REGISTERED_BOOKS}: an override (an .env or "
+                   "environment variable) changed BEST_LINE_BOOKMAKERS")
+    floors = (float(config.DEFAULT_MIN_ODDS), float(H.PRICE_FLOOR))
+    if any(f != REGISTERED_FLOOR for f in floors):
+        why.append(f"the price floor {floors} is not the registered {REGISTERED_FLOOR}: an override changed DEFAULT_MIN_ODDS")
     return why
 
 

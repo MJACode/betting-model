@@ -181,7 +181,8 @@ def test_reallocation_moves_a_newly_out_starters_minutes_and_never_scales_a_play
     out = Q.reallocate(tg, pool, {("G", "S"): "Out"}, status)
     assert np.isclose(out.r.iloc[0], 60 / 51)
     q = Q.reallocate(tg, pool, {("G", "X"): "Questionable"}, status)
-    assert np.isclose(q.mu_min.iloc[0], 8.0 * 60 / 56), "X's own Questionable moves the team's E only"
+    assert np.isclose(q.mu_min.iloc[0], 8.0), "X's own Questionable leaves X's own minutes unchanged (section 16)"
+    assert np.isclose(q.mu_min.iloc[1], 6.0 * 60 / 56), "his teammates read the plain team total, with him at 0.5"
     long_gone = Q.reallocate(tg, pool.assign(s=[1.0, 1.0, 0.0, 1.0]), {("G", "S"): "Out"}, status)
     assert np.isclose(long_gone.r.iloc[0], 60 / 51), "a teammate with no recent minutes changes nothing when Out"
     assert (Q.reallocate(tg.assign(m=[11.0, 6.0]), pool, {("G", "S"): "Out"}, status).mu_min <= 12.0).all()
@@ -363,3 +364,108 @@ def test_walk_forward_never_lets_a_season_reach_its_own_fits():
     assert f3[2025] == f[2025] and a3[2025] == a[2025] and f3[2026] != f[2026]
     assert f[2024] == f[2025], "2024-25 is priced with 2023-24's factor"
     assert np.allclose(mu[season == 2025], raw[season == 2025] * f[2025])
+
+
+# ── section 16: the review's fixes ──────────────────────────────────────────
+
+def test_the_pool_status_rates_read_only_earlier_seasons_and_out_is_zero():
+    fit = pd.DataFrame({"season": [2022, 2022, 2023, 2023, 2024, 2024],
+                        "status": ["Available", "Available", "Available", "Questionable", "Available", "Available"],
+                        "played": [True, True, False, True, False, False]})
+    r = Q.pool_status_rates(fit, [2024, 2025])
+    assert np.isclose(r[2024]["Available"], 2 / 3) and np.isclose(r[2024]["Questionable"], 1.0)
+    assert np.isclose(r[2025]["Available"], 2 / 5), "2025 reads 2021-22 through 2023-24, never 2024-25 itself"
+    assert r[2024]["Out"] == 0.0
+
+
+def test_the_team_as_of_reads_box_lines_inactive_lists_and_known_reports_only():
+    box = pd.DataFrame({"player_id": ["P", "P"], "date": pd.to_datetime(["2025-02-01", "2025-02-04"]),
+                        "team": ["AAA", "BBB"]})                  # played for AAA; then on BBB's inactive list
+    rep = pd.DataFrame({"player_id": ["P", "P"], "team": ["CCC", "DDD"],
+                        "known": pd.to_datetime(["2025-02-06 20:00", "2025-02-06 23:30"], utc=True),
+                        "rep_date": pd.to_datetime(["2025-02-06", "2025-02-06"])})
+    rows = pd.DataFrame({"player_id": ["P", "P", "P", "P"],
+                         "date": pd.to_datetime(["2025-02-03", "2025-02-05", "2025-02-06", "2025-02-04"]),
+                         "T": pd.to_datetime(["2025-02-03 23:00", "2025-02-05 23:00", "2025-02-06 23:00",
+                                              "2025-02-04 23:00"], utc=True)})
+    got = list(Q.team_as_of(rows, box, rep))
+    assert got == ["AAA", "BBB", "CCC", "AAA"], got
+    # the 23:30 report is known after the 23:00 decision; the inactive list of the 4th is not read on the 4th
+
+
+def test_the_departed_player_leaves_the_pool_once_his_new_team_lists_him():
+    rows = []
+    for k in range(6):
+        d = pd.Timestamp("2025-02-01") + pd.Timedelta(days=k)
+        for pl, sec in (("S", 500.0), ("T", 400.0)):
+            if pl == "T" and k >= 4:
+                continue                                          # T traded away after game 3
+            rows.append({"team": "HOM", "game_id": f"G{k}", "date": d, "court_ok": True, "player_id": pl,
+                         "q1_sec": sec, "season": 2025})
+    pg = pd.DataFrame(rows)
+    hist = Q.minutes_history(pg)
+    tt = pd.DataFrame({"game_id": ["G5"], "team": ["HOM"], "date": [pd.Timestamp("2025-02-06")],
+                       "T": [pd.Timestamp("2025-02-06 23:00", tz="UTC")], "season": [2025]})
+    box = pg[["player_id", "date", "team"]].drop_duplicates()
+    rep = pd.DataFrame({"player_id": pd.Series(dtype=object), "known": pd.Series(dtype="datetime64[ns, UTC]"),
+                        "rep_date": pd.Series(dtype="datetime64[ns]"), "team": pd.Series(dtype=object)})
+    before = Q.pool_frame(pg, hist, tt, box, rep)
+    assert set(before.player_id) == {"S", "T"}
+    moved = pd.concat([box, pd.DataFrame({"player_id": ["T"], "date": [pd.Timestamp("2025-02-05")], "team": ["AWY"]})])
+    after = Q.pool_frame(pg, hist, tt, moved, rep)
+    assert set(after.player_id) == {"S"}, "on AWY's inactive list the day before: no longer in HOM's pool"
+
+
+def test_full_refuses_a_checkout_whose_books_or_floor_are_not_the_registered_ones(monkeypatch, tmp_path):
+    import config
+    for v, val in ((Q.GO_ENV, "1"), (Q.RESULTS_ENV, str(tmp_path)), (Q.BETS_ENV, str(tmp_path))):
+        monkeypatch.setenv(v, val)
+    assert not any("deciding books" in x or "price floor" in x for x in Q.refuse_full(tmp_path, tmp_path))
+    monkeypatch.setattr(config, "BEST_LINE_BOOKMAKERS", ["draftkings", "fanduel"])
+    assert any("deciding books" in x for x in Q.refuse_full(tmp_path, tmp_path))
+    monkeypatch.setattr(config, "BEST_LINE_BOOKMAKERS", list(Q.REGISTERED_BOOKS))
+    monkeypatch.setattr(H, "PRICE_FLOOR", -250.0)
+    assert any("price floor" in x for x in Q.refuse_full(tmp_path, tmp_path))
+
+
+def test_the_map_check_fits_its_factor_on_the_first_half_only():
+    rng = np.random.default_rng(9)
+    n = 6000
+    date = np.repeat(np.arange(60), n // 60).astype("datetime64[D]")
+    raw = rng.gamma(3.0, 1.2, n)
+    y = lumpy_points(rng, raw * 0.9).astype(float)
+    hist = np.ones(n, bool)
+    a = Q.map_check(y, raw, date, hist)
+    y2 = y.copy()
+    y2[date >= date[n // 2]] *= 2                             # the second half's own results
+    b = Q.map_check(y2, raw, date, hist)
+    assert a[0]["factor_first_half"] == b[0]["factor_first_half"]
+    assert all(np.isclose(x["line_map"], z["line_map"]) and np.isclose(x["negative_binomial"], z["negative_binomial"])
+               for x, z in zip(a, b))
+
+
+def test_october_and_february_are_reported_beside_each_cell(fast_boot):
+    w = Q.synthetic_world(days=4)
+    w["props"]["game_date"] = np.where(np.arange(len(w["props"])) % 2 == 0, "2025-02-03", "2025-10-24")
+    g = [x for x in Q.world_groups(w) if x.family == Q.FAMILY and x.market == "player_points_q1" and x.side == "over"][0]
+    g.cand["game_date"] = g.cand.game_id.map(w["props"].set_index("prop_id").game_date)
+    games = Q.games_table(w["props"], w["props"].stat.to_numpy())
+    rows = Q.beside_rows(g, games, w["props"], {"any": set(), "stat": set(), "side": set()})
+    what = {r["what"] for r in rows}
+    assert {"month October", "month February", "other months"} <= what
+    oct_n = sum(r["bets"] for r in rows if r["what"] == "month October" and r["cut"] == g.cuts[0])
+    all_n = sum(r["bets"] for r in rows if r["what"] == "all" and r["cut"] == g.cuts[0])
+    assert 0 < oct_n < all_n
+
+
+def test_roster_events_hold_box_lines_inactive_lists_and_reports_read_30_minutes_late():
+    log = pd.DataFrame({"game_id": ["G1"], "player_id": ["P"], "game_date": ["2025-02-01"], "team": ["AAA"]})
+    ina = pd.DataFrame({"game_id": ["G2", "GX"], "player_id": ["P", "P"], "game_date": ["2025-02-03", "2025-02-03"],
+                        "team": ["BBB", "ZZZ"]})
+    rep = pd.DataFrame({"game_id": ["G3", "G3"], "team": "CCC", "player_id": ["P", None], "player_name": ["p", "q"],
+                        "status": ["Out", "NOT YET SUBMITTED"], "game_date": "2025-02-05",
+                        "report_ts": pd.to_datetime(["2025-02-05 17:30", "2025-02-05 17:30"], utc=True)})
+    roster = pd.DataFrame({"team": "CCC", "season": 2025, "player_id": ["P"], "player_name": ["p"]})
+    box, r = Q.roster_events(log, ina, rep, {"G1", "G2", "G3"}, roster)
+    assert sorted(box.team) == ["AAA", "BBB"], "an inactive listing counts; a game outside the regular set does not"
+    assert list(r.team) == ["CCC"] and r.known.iloc[0] == pd.Timestamp("2025-02-05 18:00", tz="UTC")
