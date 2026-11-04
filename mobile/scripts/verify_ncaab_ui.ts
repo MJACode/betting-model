@@ -65,19 +65,24 @@ check('it is priced off the totals rows', gameMarketForModel(TOTALS) === 'totals
   String(gameMarketForModel(TOTALS)));
 check('a parlay treats it as a game total', marketClassForModel(TOTALS) === 'game_total',
   marketClassForModel(TOTALS));
-// It decides each game once, minutes after DraftKings first posts its total,
-// and bets only while that first total still stands (scripts/ncaab_total_card.py,
-// every five minutes, from 2026-11-03; PR #1139). It no longer decides the
-// evening before, at 22:00 UTC.
+// It decides each game once at DraftKings' opening (first posted) total,
+// usually within minutes of it posting, and bets only while that total and
+// both prices still stand (scripts/ncaab_total_card.py, every five minutes,
+// from 2026-11-03; PR #1139). It no longer decides the evening before, at
+// 22:00 UTC. "Usually within minutes": a game whose team's last box score is
+// not stored yet waits, and is decided at the same opening total later.
 const timing = modelPageTiming(TOTALS);
-check('its page says it decides when DraftKings first posts its total, usually the day before',
-  timing.title === 'Decided when the total opens' && timing.body.includes('DraftKings first posts its total')
-    && timing.body.includes('usually the day before the game, sometimes on game day'),
+check('its page says it decides at DraftKings\' opening total, usually the day before',
+  timing.title === 'Decided when the total opens'
+    && timing.body.includes('at DraftKings’ opening total, usually within minutes of it posting')
+    && timing.body.includes('DraftKings opens most totals the day before the game, some on game day'),
   `${timing.title} | ${timing.body}`);
-check('its page says it bets only while that first total stands, and that an opening total moves',
-  timing.body.includes('still DraftKings’ number') && timing.body.includes('does not bet the game')
-    && timing.body.includes('within half an hour') && timing.body.includes('never re-priced'),
-  timing.body);
+check('its page says it bets only that opening total at the same prices, and that an opening total moves',
+  timing.body.includes('only if DraftKings still offers that opening total at the same prices')
+    && timing.body.includes('it skips the game') && timing.body.includes('within half an hour')
+    && timing.body.includes('check DraftKings’ total and price') && timing.body.includes('never re-priced')
+    && timing.note === 'Posted at DraftKings’ opening total and never re-priced.',
+  `${timing.body} | ${timing.note}`);
 check('its page no longer says it decides the evening before',
   ![timing.title, timing.body, timing.empty, timing.note].some((s) => s.includes('evening before')),
   `${timing.title} | ${timing.empty} | ${timing.note}`);
@@ -89,9 +94,9 @@ const posted = pickTimingInfo({
 } as unknown as Pick);
 check('its Pick Detail note says posted once, not the first scoring run of the day',
   !!posted && posted.kind === 'posted' && !posted.note.includes('first scoring run'), posted?.note ?? 'null');
-check('its Pick Detail note says an opening total moves, and to check DraftKings before betting',
+check('its Pick Detail note says an opening total moves, and to check DraftKings\' total and price',
   !!posted && posted.note.includes('An opening total often changes within half an hour')
-    && posted.note.includes('DraftKings'),
+    && posted.note.includes('check DraftKings’ total and price before you bet'),
   posted?.note ?? 'null');
 // The moneyline model (models/ncaab_moneyline_own_spread.py) has 'spread' in
 // its id, because each book's moneyline is priced off that book's own spread,
@@ -111,17 +116,22 @@ check('its page says it decides the morning of the game, against each book\'s ow
     && mlTiming.body.includes('same book’s spread') && !mlTiming.body.includes('line and price'),
   mlTiming.body);
 // Both morning models decide at 15:00 UTC on game day: 10am ET in winter,
-// 11am ET from mid-March (docs/sports/ncaab.md). The page says both.
-check('its page says 10am ET on game day, 11am ET from mid-March, at the eight books, never past -200',
+// 11am ET from mid-March (docs/sports/ncaab.md). The tooltip says both; the
+// empty state says only "by noon ET". No count of books: the server's list is
+// set by an environment variable and the app's sportsbook picker lists more
+// (UX review, 2026-11-03).
+check('its page says 10am ET on game day, 11am ET from mid-March, at each book, never past -200',
   mlTiming.body.includes('at 10am ET on game day (11am ET from mid-March)')
-    && mlTiming.body.includes('eight sportsbooks') && mlTiming.body.includes('never lays more than -200'),
+    && mlTiming.body.includes('At each sportsbook we check') && mlTiming.body.includes('never lays more than -200')
+    && !/\beight\b/.test(mlTiming.body),
   mlTiming.body);
 const spTiming = modelPageTiming('ncaab_spread_market');
-check('the spread model\'s page says 10am ET on game day, 11am ET from mid-March, at the best of eight books',
+check('the spread model\'s page says 10am ET on game day, 11am ET from mid-March, at the best book',
   spTiming.title === 'Decided the morning of the game'
     && spTiming.body.startsWith('This model decides each game once, at 10am ET on game day (11am ET from mid-March)')
-    && spTiming.body.includes('eight sportsbooks') && spTiming.body.includes('best line and price')
-    && spTiming.empty.includes('10am ET') && spTiming.empty.includes('by noon ET'),
+    && spTiming.body.includes('each sportsbook we check') && spTiming.body.includes('best line and price')
+    && !/\beight\b/.test(spTiming.body)
+    && spTiming.empty.includes('by noon ET') && !spTiming.empty.includes('10am'),
   `${spTiming.body} | ${spTiming.empty}`);
 check('its probability note says the chance comes from the bet book\'s own spread',
   modelProbabilityNote(ML).includes('spread at the book we bet'), modelProbabilityNote(ML));

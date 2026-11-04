@@ -974,9 +974,11 @@ const FIRST_POST_TOTAL_MODELS: readonly string[] = [
 // then, in one batch. Nothing posts later in the day, so the hourly-refresh
 // copy sent people back for picks that would never come. 15:00 UTC is 10am ET
 // in winter and 11am ET from mid-March (the clocks change on the second
-// Sunday of March), and the page says both. The empty state's "by noon ET"
-// covers both: the run is at five past, and a late run still reads 15:00 UTC
-// quotes only until 15:59 UTC.
+// Sunday of March), and the tooltip says both. The empty state says only "by
+// noon ET", which covers both: the run is at five past, and a late run still
+// reads 15:00 UTC quotes only until 15:59 UTC. The page names no count of
+// books: the server's list is set by an environment variable, and the app's
+// sportsbook picker lists more books than it (UX review, 2026-11-03).
 // The NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decides at the
 // same instant and posts in the same batch; its body says what it compares.
 const GAME_MORNING_MODELS: readonly string[] = [
@@ -990,12 +992,11 @@ const GAME_MORNING_MODELS: readonly string[] = [
 // bets a side priced shorter than -200 (mike, "-200 max").
 const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
   ncaab_moneyline_own_spread:
-    'This model decides each game once, at 10am ET on game day (11am ET from mid-March). At each of the ' +
-    'eight sportsbooks we price, it compares the book’s moneyline with the chance of winning that the ' +
-    'same book’s spread implies. It bets only some games, each at the one book where that gap is ' +
-    'largest, which may not be DraftKings. It never lays more than -200. It skips a game the NCAAB ' +
-    'Opening Moneyline model has already bet. A posted bet is never re-priced: it stays at the price it ' +
-    'posted at.',
+    'This model decides each game once, at 10am ET on game day (11am ET from mid-March). At each ' +
+    'sportsbook we check, it compares the book’s moneyline with the chance of winning that the same ' +
+    'book’s spread implies. It bets only some games, each at the one book where that gap is largest, ' +
+    'which may not be DraftKings. It never lays more than -200. It skips a game the NCAAB Opening ' +
+    'Moneyline model has already bet. A posted bet is never re-priced: it stays at the price it posted at.',
 };
 // The model that bets a book's moneyline minutes after the book first posts
 // it (scripts/ncaab_moneyline_first_post_card.py, every minute, on the
@@ -1066,9 +1067,9 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'check the book’s price before you bet. A posted bet is never re-priced: it stays at the price it ' +
         'posted at.',
       empty:
-        'This model posts minutes after a book first opens its moneyline, usually overnight or on the ' +
-        'morning of the game, sometimes the afternoon or evening before, and bets only some games. Nothing ' +
-        'has posted yet.',
+        'This model bets only some games, minutes after a book first opens its moneyline. That is usually ' +
+        'overnight or on the morning of the game, sometimes the afternoon or evening before. Nothing has ' +
+        'posted yet.',
       note: 'Posted when the book opened its moneyline and never re-priced.',
     };
   }
@@ -1076,15 +1077,16 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
     return {
       title: 'Decided when the total opens',
       body:
-        'This model decides each game once, minutes after DraftKings first posts its total, usually the ' +
-        'day before the game, sometimes on game day. It bets only while that first total and its prices ' +
-        'are still DraftKings’ number. If they have already changed, it does not bet the game. An opening ' +
-        'total often changes within half an hour: check DraftKings’ total before you bet. A posted bet is ' +
-        'never re-priced: it stays at the line and price it posted at.',
+        'This model decides each game once, at DraftKings’ opening total, usually within minutes of it ' +
+        'posting. DraftKings opens most totals the day before the game, some on game day. It bets at ' +
+        'DraftKings, and only if DraftKings still offers that opening total at the same prices. If the ' +
+        'total or a price has moved, it skips the game. An opening total often changes within half an ' +
+        'hour: check DraftKings’ total and price before you bet. A posted bet is never re-priced: it stays ' +
+        'at the line and price it posted at.',
       empty:
-        'This model posts minutes after DraftKings first posts each game’s total, usually the day before ' +
-        'the game, and bets only some games. Nothing has posted yet.',
-      note: 'Posted minutes after DraftKings first posted its total, and never re-priced.',
+        'This model bets only some games, usually the day before each one, as DraftKings opens its totals. ' +
+        'Nothing has posted yet.',
+      note: 'Posted at DraftKings’ opening total and never re-priced.',
     };
   }
   if (GAME_MORNING_MODELS.includes(modelId)) {
@@ -1093,12 +1095,12 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       body:
         GAME_MORNING_BODY[modelId] ??
         'This model decides each game once, at 10am ET on game day (11am ET from mid-March), from the ' +
-        'spread at each of the eight sportsbooks we price. It bets only some games, each at the book with ' +
-        'the best line and price, which may not be DraftKings. A posted bet is never re-priced: it stays at ' +
-        'the line and price it posted at.',
+        'spread at each sportsbook we check. It bets only some games, each at the book with the best line ' +
+        'and price, which may not be DraftKings. A posted bet is never re-priced: it stays at the line and ' +
+        'price it posted at.',
       empty:
-        'This model posts once, at about 10am ET on each game day (11am ET from mid-March), and bets only ' +
-        'some games. If nothing is here by noon ET, it found no bet today.',
+        'This model posts once, in the morning on each game day, and bets only some games. If nothing is ' +
+        'here by noon ET, it found no bet today.',
       note: 'Posted the morning of the game and never re-priced.',
     };
   }

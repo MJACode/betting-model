@@ -1719,16 +1719,20 @@ stored row names its endpoint.
   `marketClassForModel` (else a parlay treats it as independent of the same
   game's other legs).
 - **Its page and its picks say when it decides.** The model page ("Decided
-  when the total opens", from 2026-11-03) says it decides each game once,
-  minutes after DraftKings first posts its total, usually the day before the
-  game, sometimes on game day; that it bets only while that first total and
-  its prices are still DraftKings' number; that an opening total often changes
-  within half an hour, so check DraftKings' total before betting; and that a
-  posted bet is never re-priced (`modelMeta.modelPageTiming`). It prints no
-  Eastern clock time, because DraftKings posts at no fixed hour. Until
-  2026-11-03 it said "Decided the evening before", the 22:00 UTC rule. Pick
-  Detail says "Posted" once, not "the first scoring run of the day", and adds
-  the same check-the-total sentence (`markets.pickTimingInfo`). A row for a game
+  when the total opens", from 2026-11-03) says it decides each game once at
+  DraftKings' opening total, usually within minutes of it posting; that
+  DraftKings opens most totals the day before the game, some on game day;
+  that it bets only if DraftKings still offers that opening total at the same
+  prices; that an opening total often changes within half an hour, so check
+  DraftKings' total and price before betting; and that a posted bet is never
+  re-priced (`modelMeta.modelPageTiming`). It prints no Eastern clock time,
+  because DraftKings posts at no fixed hour. Until 2026-11-03 it said "Decided
+  the evening before", the 22:00 UTC rule. Pick Detail says "Posted" once, not
+  "the first scoring run of the day", and adds the same check-the-total-and-price
+  sentence (`markets.pickTimingInfo`). The spread and moneyline pages say they
+  decide at 10am ET on game day (11am ET from mid-March) and name no count of
+  books; the moneyline and opening moneyline pages say they never lay more
+  than -200. A row for a game
   that is not today shows its day as well as its time, as the Signals card
   does.
 - **The Today board reads NCAAB picks up to 7 days ahead**

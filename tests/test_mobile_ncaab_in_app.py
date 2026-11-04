@@ -212,11 +212,12 @@ def test_the_model_page_says_it_decides_at_draftkings_first_total():
     assert body.index("FIRST_POST_TOTAL_MODELS.includes(modelId)") < body.index("title: 'Picks lock for the day'")
     assert "title: 'Decided when the total opens'" in branch
     flat = "".join(re.findall(r"'([^']*)'", branch))
-    assert "DraftKings first posts its total" in flat
-    assert "usually the day before the game, sometimes on game day" in flat
-    # It bets only while the first total stands, and says the number moves.
-    assert "still DraftKings’ number" in flat
+    assert "at DraftKings’ opening total, usually within minutes of it posting" in flat
+    assert "DraftKings opens most totals the day before the game, some on game day" in flat
+    # It bets only that opening total at the same prices, and says it moves.
+    assert "only if DraftKings still offers that opening total at the same prices" in flat
     assert "within half an hour" in flat
+    assert "check DraftKings’ total and price before you bet" in flat
     assert "never re-priced" in flat
     # No Eastern clock time: DraftKings posts at no fixed hour.
     for s in re.findall(r"'([^']*)'", branch):
@@ -237,7 +238,7 @@ def test_the_pick_screen_says_posted_once_not_first_scoring_run():
     m = re.search(rf"pick\.model_id === '{NCAAB_TOTALS_ID}'\s*\n\s*\? '([^']*)'", body)
     assert m, "the totals model's Pick Detail note has no sentence of its own"
     assert "An opening total often changes within half an hour" in m.group(1)
-    assert "DraftKings" in m.group(1)
+    assert "check DraftKings’ total and price before you bet" in m.group(1)
 
 
 def _branch(src: str, models_const: str) -> str:
@@ -247,24 +248,28 @@ def _branch(src: str, models_const: str) -> str:
     return "".join(re.findall(r"'([^']*)'", m.group(1)))
 
 
-def test_the_morning_models_say_10am_et_and_the_eight_books():
+def test_the_morning_models_say_10am_et_and_the_cap():
     """The spread and moneyline models decide at 15:00 UTC on game day: 10am ET
-    in winter, 11am ET from mid-March (docs/sports/ncaab.md), at the eight
-    bettable books. Their page said only "the morning of game day", and the
-    moneyline model's page left out its -200 cap."""
+    in winter, 11am ET from mid-March (docs/sports/ncaab.md). Their page said
+    only "the morning of game day", and the moneyline model's page left out its
+    -200 cap. No count of books is printed: the server's list is set by an
+    environment variable, and the app's sportsbook picker lists more (UX
+    review, 2026-11-03). The empty state keeps one clock time, "by noon ET"."""
     src = _read(MODEL_META)
     lst = re.search(r"const GAME_MORNING_MODELS: readonly string\[\] = \[(.*?)\];", src, re.S)
     assert lst and "'ncaab_spread_market'" in lst.group(1) and "'ncaab_moneyline_own_spread'" in lst.group(1)
     spread = _branch(src, "GAME_MORNING_MODELS")
     assert "at 10am ET on game day (11am ET from mid-March)" in spread
-    assert "eight sportsbooks" in spread
+    assert "each sportsbook we check" in spread
     assert "by noon ET" in spread
+    assert not re.search(r"\beight\b", spread)
     ml = re.search(r"const GAME_MORNING_BODY: Readonly<Record<string, string>> = \{(.*?)\n\};", src, re.S)
     assert ml, "GAME_MORNING_BODY not found"
     ml_text = "".join(re.findall(r"'([^']*)'", ml.group(1)))
     assert "at 10am ET on game day (11am ET from mid-March)" in ml_text
-    assert "eight sportsbooks" in ml_text
+    assert "At each sportsbook we check" in ml_text
     assert "never lays more than -200" in ml_text
+    assert not re.search(r"\beight\b", ml_text)
 
 
 def test_the_opening_moneyline_says_minutes_after_the_post_and_the_cap():
