@@ -36,7 +36,7 @@ export function ByomModelRow({
   failed?: boolean;
   /** Shown when the row has no bets. NBA game facts use “No history yet”. */
   emptyLabel?: string;
-  /** NFL, and this row's number is the close because official rows are empty. */
+  /** This row's number is the close because official rows are empty. */
   closingHeadline?: boolean;
   onPress: () => void;
 }) {

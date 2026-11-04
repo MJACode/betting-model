@@ -11,8 +11,8 @@
  * Two timings (Matt, 2026-11-04). `official` is the first DraftKings
  * quote where the bet fit the model's rules: the line and price it
  * became a pick at. `close` is the last DraftKings quote before kickoff.
- * byom_record returns both, byom_bets lists one. NFL only has official
- * rows; an NBA model is graded at the close.
+ * byom_record returns both, byom_bets lists one. NFL and NBA both have
+ * official rows (Matt, 2026-11-04).
  *
  * LINE_BASIS is the label stored on each fact row. The backtest RPC
  * returns season totals, not that label per game. A screen shows this
@@ -232,7 +232,7 @@ export async function fetchByomBacktest(
 export type ByomTiming = 'official' | 'close';
 
 export interface ByomTimedRows {
-  /** The timing the screen leads with: official on NFL, close otherwise. */
+  /** The timing the screen leads with: official, or the close when official is empty. */
   headline: ByomTiming;
   official: ByomBacktestRow[];
   close: ByomBacktestRow[];

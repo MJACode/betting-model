@@ -1,6 +1,6 @@
 /**
  * One scoped byom_record read, summed to two records: the headline
- * (official on NFL, the close otherwise) and the closing line beside
+ * (official, or the close while official is empty) and the closing line beside
  * it. A null filter does not call: an empty filter is the whole season
  * and is not a model preview. A slower response does not replace a
  * newer one.

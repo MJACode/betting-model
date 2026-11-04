@@ -45,7 +45,7 @@ export function headlineFromCounts(
 export const BYOM_MODEL_CAP = 25;
 
 export const BYOM_UNITS_COPY =
-  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. Bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before kickoff. A push returns the stake.';
+  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. Bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before the game starts. A push returns the stake.';
 
 export type ByomSeasonScope = 'all' | 'current';
 
