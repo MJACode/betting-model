@@ -310,9 +310,11 @@ whether it came from the worker, `python -m <module>`, a launcher that calls
   wrapper, so nothing is wrapped twice and no call is logged twice.
 - **No thread without a call.** The writer starts on the first recorded call,
   so the many processes that import config and make no HTTP call start none.
-- **The test suite writes nothing.** `tests/conftest.py` installs the probe
-  with no writer before anything imports config, so a pytest run on a machine
-  whose `.env` names production keeps its calls in memory. It also refuses the
+- **A test run writes nothing.** `tests/conftest.py` installs the probe with
+  no writer before anything imports config, and config's own install starts
+  no writer whenever pytest is loaded (the `ncaaf_live` and `nfl/live_model`
+  suites have no such conftest). So a pytest run on a machine whose `.env`
+  names production keeps its calls in memory. The main suite also refuses the
   Odds API host at the transport, so a test that forgets to mock fails instead
   of billing credits.
 - **The tests.** `tests/test_odds_call_log_everywhere.py` runs the purchase's
