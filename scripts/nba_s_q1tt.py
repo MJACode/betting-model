@@ -1403,7 +1403,9 @@ def judge_table(cells: pd.DataFrame) -> pd.DataFrame:
     each with 30 or more bets. A cell under 200 pooled bets reads "too few games
     to tell", not "it loses"."""
     c = V.house_verdict_bands(cells, judge_controls=(), credit={})
-    n1, r1 = c.get(f"n_{CHOOSE[0]}", 0), c.get(f"roi_{CHOOSE[0]}", np.nan)
+    # indexed, never .get with a default: a column lost on the way through parquet
+    # must stop the judge, not read every cell as a fail
+    n1, r1 = c[f"n_{CHOOSE[0]}"], c[f"roi_{CHOOSE[0]}"]
     n2, r2 = c["n_confirm"], c["roi_confirm"]
     c["both_seasons_positive"] = ((n1 >= V.MIN_SEASON_BETS) & (r1 > 0) & (n2 >= V.MIN_SEASON_BETS) & (r2 > 0))
     c["passes"] = c["house5_passes"] & c["both_seasons_positive"]

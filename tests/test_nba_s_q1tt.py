@@ -378,6 +378,20 @@ def test_the_judge_needs_both_seasons_positive(ran):
     assert not bool(c["passes"].iloc[0]) and c["reading"].iloc[0] == "fails"
 
 
+def test_the_judge_reads_the_cells_file_full_writes(ran, tmp_path):
+    from scripts import nba_game2_luck as L
+    from scripts import nba_game2_verdict as V
+    good = _passing_row(ran)
+    rows = [{**r, "placebo_rois": [0.0] * 200} for r in ran["rows"][Q.FAM_CONS][1:]] + [good]
+    L.write_cells(rows, tmp_path / f"cells_{Q.FAM_CONS}.parquet")
+    back = V.load_cells(tmp_path)
+    assert {f"n_{Q.CHOOSE[0]}", f"roi_{Q.CHOOSE[0]}", "n_confirm", "roi_confirm"} <= set(back.columns)
+    c = Q.judge_table(back)
+    assert len(c) == len(rows) and c["reading"].notna().all()
+    me = c["period"].eq(good["period"]) & c["cut"].eq(good["cut"]) & c["side"].eq(good["side"])
+    assert int(me.sum()) == 1 and bool(c.loc[me, "passes"].iloc[0])
+
+
 def test_a_thin_cell_reads_too_few_games_to_tell(ran):
     r = _passing_row(ran)
     r["pool_n"] = 150
