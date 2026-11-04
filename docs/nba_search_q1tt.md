@@ -628,3 +628,23 @@ requires decide's bet games to equal family B's in every graded season and both 
 - **On the real data** (the same call, `q1tt/live_real.py`): family B's games equal decide's in both
   periods and both seasons, 156 in 2024-25 and 131 in 2025-26. The reviewer found the same with decide
   on the full-game home team-total quotes: 287 of 287, and all 2,410 home parts it compared identical.
+
+
+## 15. Results (graded 2026-11-04)
+
+Run `2026-11-04-q1tt`, stored in Supabase. 26 cells. The grade took 417 seconds.
+
+**0 of the 26 cells pass. The first-quarter and first-half team totals stay closed.**
+
+- **Family A, 24 cells: too few games to tell.** The books set these totals from their own period spread and total,
+  so a disagreement big enough to bet is rare (section 11). The largest cell holds 81 bets.
+- **Family B, the live home team-total rule carried to the period totals:**
+
+| Cell | Bets | Units | Return | 95% interval | 2024-25 / 2025-26 | Fails |
+|---|---|---|---|---|---|---|
+| Home first-quarter team total, under | 287 | +10.67 | +3.3% | -8.7% to +14.7% | +3.9% / +2.7% | interval, bands, placebo |
+| Home first-half team total, under | 287 | +9.91 | +3.1% | -8.8% to +14.7% | +3.8% / +2.3% | interval, placebo |
+
+  Both cells bet exactly the 287 games the live home team-total model bets. Both seasons are positive in both, but
+  287 bets cannot separate +3% from nothing. They say the live model's lean does not get stronger in the shorter
+  period.
