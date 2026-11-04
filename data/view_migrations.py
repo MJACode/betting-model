@@ -466,6 +466,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # the primary key. Keeps byom_official_legs_v1 in the function so the
     # file above still skips. Does not write picks.
     "byom_official_lock_bands_2026_11_04.sql",
+    # 2026-11-04: covering index for the official lock read (#1159, CE).
+    # byom_legs filters sport/season/match_role, then DISTINCT ON the leg
+    # key ordered by locked_at. Returns on a catalog read once the index
+    # exists. No function change. Sits before the posted-stake pair.
+    "byom_official_legs_lock_read_idx_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
