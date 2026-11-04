@@ -21,6 +21,35 @@
 
 ---
 
+## [ ] NBA first quarter: grade what was bought (2026-11-03)
+
+mike, 2026-11-03: "Buy 1Q data". Bought the same day, at tip minus 60 minutes, by
+`data/ingestors/nba_odds_history.py --q1-props` and `--period-team-totals`:
+
+| What | 2023-24 | 2024-25 | 2025-26 | Where |
+|---|---|---|---|---|
+| First-quarter points, rebounds and assists props | none in the feed | 1,213 games, 40,144 rows | 1,225 games, 62,861 rows | `player_prop_odds`, markets `player_points_q1` and so on |
+| First-quarter and first-half team totals | none in the feed | 1,230 games, 29,709 rows | 1,230 games, at least 41,627 rows | `odds`, source `odds_api_nba_period_team_total_history` |
+
+About 112,900 credits in all (each run's own meter; the two runs stopped and restarted per season
+count to their last logged line). What the search must handle, measured on the stored rows:
+
+- **No Pinnacle on any of the five markets**, so the same-line under rule cannot run. First-quarter props
+  come from FanDuel and Hard Rock, and rebounds and assists from Hard Rock alone. The team totals come
+  from betPARX, BetRivers, DraftKings, FanDuel and Hard Rock.
+- **Hard Rock files a ladder under the period team-total key** (five lines a team on 2026-01-15 MEM at
+  ORL), and each line is stored as its own row. The main number has to be chosen, as the first-half
+  model does (`models/nba_book_numbers.split_main_rungs`).
+- **First-quarter player results do not exist yet.** Settlement must be built from play-by-play and
+  checked against full-game box scores first.
+- Seven games did not match a scheduled game (postponed or moved) and were skipped.
+
+Next, from the sweep that ranked these: pre-register a search before any grade. For the props, with no
+Pinnacle, a projection of first-quarter minutes from `nba_stints`, fit walk-forward. For the team totals, (a)
+the team number a book's own period spread and total imply against its period team-total price, and (b) the
+live home team-total rule carried to the home first-half team total, re-graded with no new choices. Build
+first-quarter settlement first.
+
 ## [ ] nba_prop_market on the Cup final: the reads before it can bet (2026-11-02)
 
 The play-in, playoffs and Cup final went live with no game to run on, so what the tests cannot see has
@@ -1952,7 +1981,10 @@ nothing; it needs a caller and a comparison against the pruned list.
 so **prop credit spend is invisible in that table for every sport**. Today's
 590-credit college pass had to be read out of the Railway worker log. Worth
 doing at the same time — both are about a measurement that exists nowhere
-queryable. Detail in `docs/market_coverage.md`.
+queryable. Detail in `docs/market_coverage.md`. **That half is closed
+(2026-11-03):** config.py now installs the call logger in every process that
+imports it, so a prop ingestor's calls are in `api_call_log` however it was
+started (`docs/monitoring.md`). The drift check above is still open.
 
 ---
 
