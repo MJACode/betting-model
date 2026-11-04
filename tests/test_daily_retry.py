@@ -19,15 +19,17 @@ from __future__ import annotations
 
 import inspect
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from tracking.daily_retry import (
+    MAX_DAILY_RUN,
     MAX_DAILY_STARTS_PER_ET_DAY,
     DailyRun,
+    assess_daily_completion,
     decide_daily_retry,
     load_today_dailies,
 )
@@ -92,21 +94,60 @@ def test_an_in_progress_daily_does_not_start_a_second():
     assert "already running" in d.reason
 
 
-def test_already_retried_today_does_not_start_a_third():
-    """Cap is 2: the scheduled 6am start + one automatic retry. A crash-loop
-    after the retry must not keep launching full dailies."""
-    assert MAX_DAILY_STARTS_PER_ET_DAY == 2
+def test_a_killed_retry_is_started_again():
+    """2026-11-04. The 6:00am ET daily was aborted at 11:13Z, the catch-up
+    started a second daily at that second, and later deploys killed the
+    retry. Two dead starts are not a finished daily."""
+    first = _run(
+        started=datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc),
+        finished=datetime(2026, 11, 4, 11, 13, 34, tzinfo=timezone.utc),
+        ok=False,
+        failed="aborted",
+    )
+    orphan = _run(
+        started=datetime(2026, 11, 4, 11, 13, 34, tzinfo=timezone.utc),
+        finished=None,
+    )
+    now = datetime(2026, 11, 4, 12, 34, tzinfo=timezone.utc)
+    d = decide_daily_retry(
+        now=now, runs=[first, orphan], in_process_running=False,
+    )
+    assert d.action == "run"
+    assert "unfinished" in d.reason
+
+
+def test_two_aborted_dailies_with_no_success_are_retried():
+    """The boot sweep stamps the open retry aborted before the decision.
+    That must still relaunch: nothing today completed."""
     first = _aborted()
     retry = _run(
-        started=datetime(2026, 9, 18, 6, 8, tzinfo=ET),
-        finished=datetime(2026, 9, 18, 6, 10, tzinfo=ET),
+        started=datetime(2026, 9, 18, 6, 13, tzinfo=ET),
+        finished=datetime(2026, 9, 18, 7, 2, tzinfo=ET),
         ok=False,
         failed="aborted",
     )
     d = decide_daily_retry(now=WATCH_TIME, runs=[first, retry])
+    assert d.action == "run"
+    assert "aborted" in d.reason
+
+
+def test_a_crash_loop_stops_at_the_ceiling():
+    """The lock is the double-run guard. This cap only stops a container
+    that dies and boots again until the ledger is full of aborted starts."""
+    assert MAX_DAILY_STARTS_PER_ET_DAY == 8
+    runs = [
+        _run(
+            started=SIX_AM + timedelta(minutes=5 * i),
+            finished=SIX_AM + timedelta(minutes=5 * i + 1),
+            ok=False,
+            failed="aborted",
+        )
+        for i in range(MAX_DAILY_STARTS_PER_ET_DAY)
+    ]
+    d = decide_daily_retry(now=WATCH_TIME, runs=runs)
     assert d.action == "skip"
     assert "cap" in d.reason
-    assert "third" in d.reason
+    assert "another" in d.reason
 
 
 # ── the 2026-09-18 boot shape: unfinished, process already gone ──────────────
@@ -183,6 +224,7 @@ def test_kill_switch_skips_even_when_aborted():
 class _Cursor:
     def __init__(self, rows):
         self._rows = rows
+        self.rowcount = 0
 
     def fetchall(self):
         return self._rows
@@ -194,12 +236,19 @@ class _Conn:
         self.raises = raises
         self.rolled_back = 0
         self.closed = False
+        self.commits = 0
+        self.sqls: list[str] = []
 
     def execute(self, sql, params=None):
-        if self.raises:
+        self.sqls.append(sql)
+        if self.raises and "SELECT" in sql.upper():
             raise RuntimeError('relation "pipeline_runs" does not exist')
-        assert "run_kind = 'daily'" in sql or "run_kind = ?" in sql
+        if "SELECT" in sql.upper():
+            assert "run_kind = 'daily'" in sql or "run_kind = ?" in sql
         return _Cursor(self.rows)
+
+    def commit(self):
+        self.commits += 1
 
     def rollback(self):
         self.rolled_back += 1
@@ -300,17 +349,33 @@ def test_catch_up_does_not_run_when_today_succeeded(wired):
     assert fired == []
 
 
-def test_catch_up_does_not_run_a_third_start(wired):
+def test_catch_up_relaunches_when_both_starts_were_aborted(wired):
+    """2026-11-04 after the boot sweep: the retry is aborted too, and
+    nothing today completed. The old two-start cap skipped this."""
     first = _aborted_row()
     retry_started = datetime(2026, 9, 18, 6, 8, tzinfo=ET).astimezone(
         timezone.utc).isoformat()
     retry_finished = datetime(2026, 9, 18, 6, 10, tzinfo=ET).astimezone(
         timezone.utc).isoformat()
     second = (retry_started, retry_finished, False, "aborted")
+    conn = _Conn(rows=[first, second])
+    result, fired = wired(conn)
+    assert result["status"] == "run"
+    assert len(fired) == 1
+    assert any("UPDATE pipeline_runs" in sql for sql in conn.sqls)
+
+
+def test_catch_up_relaunches_an_unfinished_retry(wired):
+    """The open row itself, before the sweep's stamp is what the decision
+    sees if the stamp failed. Still a run: this process is not in it."""
+    first = _aborted_row()
+    retry_started = datetime(2026, 9, 18, 6, 8, tzinfo=ET).astimezone(
+        timezone.utc).isoformat()
+    second = (retry_started, None, None, None)
     result, fired = wired(_Conn(rows=[first, second]))
-    assert result["status"] == "skipped"
-    assert fired == []
-    assert "cap" in result["reason"]
+    assert result["status"] == "run"
+    assert len(fired) == 1
+    assert "unfinished" in fired[0]["retry_reason"]
 
 
 def test_catch_up_is_a_no_op_when_this_process_already_holds_the_lock(
@@ -391,3 +456,68 @@ def test_kill_switch_is_honoured_from_the_env(monkeypatch, wired):
     assert result["status"] == "skipped"
     assert fired == []
     assert "disabled" in result["reason"]
+
+
+# ── health: the 2026-11-04 open daily ────────────────────────────────────────
+
+def test_an_unfinished_daily_past_the_max_is_stale():
+    """12:34Z on 2026-11-04. The retry had been open 81 minutes. Hourlies
+    were finishing, so the 2h stuck check had not fired."""
+    assert MAX_DAILY_RUN == timedelta(minutes=75)
+    started = datetime(2026, 11, 4, 11, 13, 34, tzinfo=timezone.utc)
+    # 12:34:34Z is 81 minutes after 11:13:34Z. At 12:34:00Z the age is 80.
+    now = datetime(2026, 11, 4, 12, 34, 34, tzinfo=timezone.utc)
+    status, detail = assess_daily_completion(
+        now, [DailyRun(started_at=started, finished_at=None)],
+    )
+    assert status == "STALE"
+    assert "never finished" in detail
+    assert "81" in detail
+
+
+def test_two_aborted_dailies_and_no_open_row_are_stale_after_the_deadline():
+    now = datetime(2026, 11, 4, 12, 34, tzinfo=timezone.utc)
+    runs = [
+        DailyRun(
+            started_at=datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 11, 4, 11, 13, tzinfo=timezone.utc),
+            ok=False, failed_steps="aborted",
+        ),
+        DailyRun(
+            started_at=datetime(2026, 11, 4, 11, 13, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 11, 4, 12, 2, tzinfo=timezone.utc),
+            ok=False, failed_steps="aborted",
+        ),
+    ]
+    status, detail = assess_daily_completion(now, runs)
+    assert status == "STALE"
+    assert "no successful daily" in detail
+
+
+def test_a_daily_still_inside_the_max_is_in_progress():
+    started = datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 4, 11, 30, tzinfo=timezone.utc)
+    status, detail = assess_daily_completion(
+        now, [DailyRun(started_at=started, finished_at=None)],
+    )
+    assert status == "OK"
+    assert "in progress" in detail
+
+
+def test_no_daily_before_the_deadline_is_not_a_failure():
+    now = datetime(2026, 11, 4, 11, 20, tzinfo=timezone.utc)
+    status, _detail = assess_daily_completion(now, [])
+    assert status == "SKIPPED"
+
+
+def test_a_daily_that_finished_its_freshness_steps_is_ok():
+    now = datetime(2026, 11, 4, 16, 0, tzinfo=timezone.utc)
+    run = DailyRun(
+        started_at=datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 11, 4, 11, 40, tzinfo=timezone.utc),
+        ok=False,
+        failed_steps="health_check",
+    )
+    status, detail = assess_daily_completion(now, [run])
+    assert status == "OK"
+    assert "completed" in detail

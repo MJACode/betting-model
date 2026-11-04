@@ -119,6 +119,28 @@ class TestPassCompletion:
         assert _results("refresh_pass_completion")["status"] != sh.OK
 
 
+# ── daily_pipeline_completion ────────────────────────────────────────────────
+
+class TestDailyPipelineCompletion:
+    def test_an_unfinished_daily_past_the_max_is_stale(self, db):
+        """The 2026-11-04 retry was unfinished while hourlies completed.
+        refresh_pass_completion waits 2h; this check does not."""
+        _add_run(db, kind="hourly", started=20, finished=5)
+        _add_run(db, kind="daily", started=81, finished=None)
+        row = _results("daily_pipeline_completion")
+        assert row["status"] == sh.STALE
+        assert row["severity"] == "CRIT"
+        assert "never finished" in row["detail"]
+        # The hourly finishing keeps the pass-completion check off this row
+        # until the daily is 2h old. That is why this check exists.
+        assert _results("refresh_pass_completion")["status"] in (sh.OK, sh.SKIPPED)
+
+    def test_a_finished_daily_today_is_ok(self, db):
+        _add_run(db, kind="daily", started=40, finished=5)
+        row = _results("daily_pipeline_completion")
+        assert row["status"] == sh.OK
+
+
 # ── refresh_pass_steps ───────────────────────────────────────────────────────
 
 class TestPassSteps:

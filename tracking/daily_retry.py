@@ -23,8 +23,18 @@ assumed to be "until tomorrow" — which is exactly what happened, and is too
 long for tables that only get written once a day.
 
 This module is the decision. Scheduler boot and `run_pipeline_watch` both call
-it; the 6am cron is unchanged. One automatic retry per America/New_York
-calendar day. Kill switch: `RUN_DAILY_RETRY=0`.
+it; the 6am cron is unchanged. A dead run is retried again the same
+America/New_York day until one daily finishes the MLB freshness steps, a
+daily is actually running in this process, or the crash-loop ceiling is hit.
+Kill switch: `RUN_DAILY_RETRY=0`.
+
+2026-11-04: the 6:00am ET daily (run 3d3685c194b949d69243f13a1d3c52e7) was
+aborted at 11:13:34Z by the deploy of 1934d8b. The catch-up started
+8a44ef65d4364828af08e025aa292a51 at that same second. Deploys at 11:39Z and
+12:02Z killed that retry and left its row unfinished. The two-start cap then
+treated the open row as the retry already spent, so no later boot relaunched
+it. There is no SIGTERM handler that closes the ledger; a row stays
+unfinished until a later same-kind start or the boot sweep stamps it aborted.
 """
 
 from __future__ import annotations
@@ -43,9 +53,19 @@ ET = ZoneInfo("America/New_York")
 DAILY_HOUR = 6
 DAILY_MINUTE = 0
 
-# Scheduled 6am start + one automatic retry. A crash-looping container must
-# not start a third full pipeline the same ET day.
-MAX_DAILY_STARTS_PER_ET_DAY = 2
+# Longest finished daily from 2026-10-15 through 2026-11-03 was 47.5 minutes
+# (pipeline_runs 16c6612cbcf54ca8b922c6959b7825b6, 54 steps). The 2026-11-01
+# through 2026-11-03 runs were 37.6, 41.5 and 39.5 minutes (58–61 steps).
+# A row still open past this is not a live pass of that shape.
+MAX_DAILY_RUN = timedelta(minutes=75)
+
+# Crash-loop ceiling, not the double-run guard. The in-process lock is what
+# stops two dailies in one process. This stops a container that dies inside
+# the daily and boots again all day. 2 was the 2026-11-04 hole: the 6:00am
+# start and its one automatic retry were both killed by deploys, and every
+# later boot saw two ledgered starts and refused another while the retry's
+# row was still unfinished.
+MAX_DAILY_STARTS_PER_ET_DAY = 8
 
 # Steps that write the daily-only MLB freshness tables (health-check names
 # `mlb_bullpen_workload` / `mlb_team_stats` / `mlb_player_game_log` /
@@ -180,7 +200,7 @@ def decide_daily_retry(
         return Decision(
             "skip",
             f"already started {len(todays)} dailies today "
-            f"(cap {MAX_DAILY_STARTS_PER_ET_DAY}; not starting a third)",
+            f"(cap {MAX_DAILY_STARTS_PER_ET_DAY}; not starting another)",
         )
 
     if not todays:
@@ -193,8 +213,7 @@ def decide_daily_retry(
     if latest.finished_at is None:
         return Decision(
             "run",
-            "today's daily is unfinished — worker was replaced mid-run "
-            "and the process is gone",
+            "today's daily is unfinished and this process is not running it",
         )
     failed = latest.failed_steps or "unknown"
     return Decision(
@@ -251,8 +270,13 @@ def announce_daily_retry(reason: str, *, source: str) -> bool:
         "`mlb_team_stats`. After a mid-run deploy APScheduler's next fire is "
         "tomorrow 6:00am, which leaves live MLB models on stale features "
         "until then (2026-09-18, run `b65a709cdf734a15bdf7a5d3c8cf7983`, "
-        "failed_steps=`aborted`). This is the same-day retry, capped at one "
-        "automatic re-run per ET calendar day."
+        "failed_steps=`aborted`). This is the same-day retry. A deploy that "
+        "kills the retry starts it again (2026-11-04, runs "
+        "`3d3685c194b949d69243f13a1d3c52e7` and "
+        "`8a44ef65d4364828af08e025aa292a51`). The in-process lock stops a "
+        "second daily in this process; the crash-loop ceiling stops a "
+        f"container that restarts all day ({MAX_DAILY_STARTS_PER_ET_DAY} "
+        "starts)."
     )
     try:
         return post_ops_alert(
@@ -263,3 +287,75 @@ def announce_daily_retry(reason: str, *, source: str) -> bool:
     except Exception:  # noqa: BLE001 — the retry is the point; the note is not
         logger.exception("daily_retry: ops note failed (retry continues)")
         return False
+
+
+def _minutes(delta: timedelta) -> int:
+    return int(delta.total_seconds() // 60)
+
+
+def assess_daily_completion(
+    now: datetime, runs: list[DailyRun],
+) -> tuple[str, str]:
+    """Health-check view of today's daily. Status is OK, STALE or SKIPPED.
+
+    An unfinished daily older than ``MAX_DAILY_RUN`` is STALE at any hour:
+    that is the 2026-11-04 row ``8a44ef65d4364828af08e025aa292a51``, still
+    open 81 minutes later while hourlies were completing. ``refresh_pass_completion``
+    only counts an unfinished row after 2 hours, and only when the latest
+    finished pass is inside 90 minutes, so a killed daily under that age
+    stays green beside a healthy hourly.
+
+    A daily that finished the MLB freshness steps is OK. Before 6:00am ET,
+    and until ``MAX_DAILY_RUN`` after 6:00am when nothing has finished and
+    nothing is open past the max, the check skips — the run is not late yet.
+    """
+    now_et = now.astimezone(ET) if now.tzinfo else now.replace(tzinfo=ET)
+    if now.tzinfo is None:
+        now = now_et
+    today = now_et.date()
+    scheduled = now_et.replace(
+        hour=DAILY_HOUR, minute=DAILY_MINUTE, second=0, microsecond=0,
+    )
+    deadline = scheduled + MAX_DAILY_RUN
+    max_min = _minutes(MAX_DAILY_RUN)
+
+    open_runs = [r for r in runs if r.started_at and r.finished_at is None]
+    stale_open = [r for r in open_runs if now - r.started_at >= MAX_DAILY_RUN]
+    fresh_open = [r for r in open_runs if now - r.started_at < MAX_DAILY_RUN]
+    todays = [r for r in runs if r.started_at and _et_day(r.started_at) == today]
+
+    if stale_open:
+        oldest = min(stale_open, key=lambda r: r.started_at)
+        started = oldest.started_at.astimezone(timezone.utc).strftime("%H:%M UTC")
+        return (
+            "STALE",
+            f"daily started {started} never finished "
+            f"({_minutes(now - oldest.started_at)} min, max {max_min}) "
+            f"— a killed worker leaves finished_at NULL",
+        )
+
+    if any(completed_mlb_freshness(r) for r in todays):
+        return ("OK", f"today's daily completed ({today.isoformat()})")
+
+    if now_et < scheduled:
+        return (
+            "SKIPPED",
+            f"before today's 6:00am ET daily ({today.isoformat()})",
+        )
+
+    if fresh_open:
+        age = _minutes(now - fresh_open[-1].started_at)
+        return ("OK", f"daily in progress, started {age} min ago")
+
+    if now_et < deadline:
+        return (
+            "SKIPPED",
+            f"no finished daily yet for {today.isoformat()}; "
+            f"the 6:00am run has until {deadline.strftime('%H:%M')} ET",
+        )
+
+    return (
+        "STALE",
+        f"no successful daily for {today.isoformat()} "
+        f"and none is still inside {max_min} min",
+    )
