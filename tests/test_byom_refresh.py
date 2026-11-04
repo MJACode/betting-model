@@ -20,8 +20,10 @@ def test_the_job_is_on_daily_and_does_not_write_by_default():
 
     assert "byom_refresh" in JOBS
     assert _validate_byom_refresh({}) == {"sport": "NFL", "apply": False}
+    # NBA joined 2026-11-04. Any other sport is refused.
+    assert _validate_byom_refresh({"sport": " nba ", "apply": True}) == {"sport": "NBA", "apply": True}
     with pytest.raises(ValueError):
-        _validate_byom_refresh({"sport": "NBA"})
+        _validate_byom_refresh({"sport": "MLB"})
     with pytest.raises(ValueError):
         _validate_byom_refresh({"apply": "yes"})
     declared = json.loads(
@@ -33,7 +35,8 @@ def test_the_job_is_on_daily_and_does_not_write_by_default():
     assert found[0]["args"]["apply"] is True
     sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     assert 'id="byom_nfl_refresh"' in sched
-    assert 'dedupe_key=f"byom-nfl-refresh-{today}"' in sched
+    assert 'dedupe_key=f"byom-{sport.lower()}-refresh-{today}"' in sched
+    assert 'for sport in ("NFL", "NBA")' in sched
     assert '"byom_nfl_refresh"}' in sched  # owned by the pipeline role
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()

@@ -111,3 +111,16 @@ applied by hand and Matt confirms it.
 
 The list on My models, when the Models tab is NBA, is that user's NBA
 rows. Other sports still have no builder.
+
+## Official line, refresh, and backfill (2026-11-04)
+
+The NBA builder works like the NFL one (`docs/byom_nfl.md`, "Official
+pick and the bet list"). A bet is official at the first DraftKings quote
+where it fit the model's rules. The closing line is shown beside it.
+Staking is 1u to win, with risk capped at 3u. A prop candidate is stored
+only when the prop's own line or price changes, because props do not
+filter on team role, spread, or total. `scheduler.run_byom_nfl_refresh`
+queues an NBA `byom_refresh` every day at 10:41 ET. The season is the
+ending year, and the key is the game id. `byom-nba-game-facts` (2021 on)
+and `byom-nba-prop-facts` (2023-09-01 on) are declared on. They read
+stored odds and logs. No API credits are used.

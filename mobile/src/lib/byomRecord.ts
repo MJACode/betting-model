@@ -27,7 +27,7 @@ export const BYOM_NBA_FIRST_SEASON = 2023;
 export type ByomSport = 'NFL' | 'NBA';
 
 /**
- * The card headline. `preferred` is official on NFL once the server has
+ * The card headline. `preferred` is official once the server has
  * the RPC. An empty official count beside a closing count leads with
  * the close (rebuild not finished, or a season with no official rows).
  */
@@ -45,7 +45,7 @@ export function headlineFromCounts(
 export const BYOM_MODEL_CAP = 25;
 
 export const BYOM_UNITS_COPY =
-  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. NFL bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before kickoff. A push returns the stake.';
+  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. Bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before the game starts. A push returns the stake.';
 
 export type ByomSeasonScope = 'all' | 'current';
 

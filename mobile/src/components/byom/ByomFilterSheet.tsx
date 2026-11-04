@@ -268,7 +268,7 @@ function OddsTab({
           title="Player line"
           detail={locked
             ? 'Custom needs exactly one stat'
-            : `The player’s ${betTypeLabel(market)} line at game start`}
+            : `The player’s ${betTypeLabel(market)} line when the bet became official`}
         >
           <View style={styles.chips}>
             <ByomCheckChip
@@ -306,7 +306,7 @@ function OddsTab({
           ) : null}
         </Card>
       )}
-      <Card title="Price" detail="DraftKings price on your side at game start">
+      <Card title="Price" detail="DraftKings price on your side when the bet became official">
         <View style={styles.chips}>
           {PRICE_CHOICES.map((choice) => (
             <ByomCheckChip
