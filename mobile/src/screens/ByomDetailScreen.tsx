@@ -17,7 +17,7 @@ import { useByomSavedModel } from '@/hooks/useByomSavedModel';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
-import { deleteByomModel } from '@/lib/byom';
+import { byomBetsAvailable, deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
 import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport } from '@/lib/byomRecord';
 import { propFilterSummary } from '@/lib/byomPropFilters';
@@ -129,6 +129,10 @@ export function ByomDetailScreen() {
             onRetry={() => void preview.reload()}
             showsUnits={showsUnits(model.filters)}
             emptyLabel={graded && model ? byomEmptyLabel(sport, facts.status, model.filters) : '—'}
+            closeRecord={graded ? preview.closeRecord : null}
+            onShowBets={graded && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
+              ? () => navigation.navigate('ByomBets', { filters: model.filters, sport, title: model.name })
+              : undefined}
           />
           <ByomUnitsNote />
           <Pressable

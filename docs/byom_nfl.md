@@ -222,7 +222,45 @@ function is in `RPC_ANON_CALLABLE`. It reads the facts tables, not
 `picks`.
 
 
+## Official pick and the bet list
+
+Matt, 2026-11-04. A builder bet becomes official at the first DraftKings
+quote at or before kickoff where the leg fits the model's rules and the
+side has an American price. That line and price are the bet of record. A
+later move does not change it. The closing line above is still graded
+beside it. Only the role (favorite, underdog, pick'em) can change with the
+line. It is read from the DraftKings home spread in force at that
+snapshot, so each leg has one official row per role a model can ask for:
+`any`, `favorite`, `underdog`, `pickem`. A total has only `any`. A role
+with no spread in force yet matches only `any`. Props are the same at the
+player line, using the role of the player's team. The code is
+`byom/official.py`. The rows are `byom_official_legs`, written by the
+game and prop builders in the same transaction as the facts. NFL only.
+
+Staking is the main models' `stake_for`: 1u to win, risk capped at 3u
+(`byom_risk_units`, `byom_win_units`). A -400 win is +0.75u. A -400 loss
+is -3u. This applies to both timings and to `byom_backtest`.
+
+The RPCs are in `data/migrations/byom_official_legs_2026_11_04.sql`, which
+is in `ACTIVE_MIGRATIONS`:
+
+| RPC | Returns |
+|---|---|
+| `byom_record(season, filters)` | timing (official or close), market, bets, wins, losses, pushes, ties, units, risked, skipped |
+| `byom_bets(season, filters, timing)` | the counted bets, newest first, with `byom_leg_label`; 500 per call, and `total_bets` |
+| `byom_backtest(season, filters)` | unchanged columns; the closing rows of `byom_record` |
+
+Line, price, spread, and total band filters are checked against the
+locked quote's line and price, or against the closing game line. They do
+not move the lock. The app leads with the official record, shows the
+closing line under it, and lists the bets on `ByomBetsScreen`.
+
 ## Refresh
+
+Since 2026-11-04 the scheduler queues `byom_refresh` with apply true every
+day at 10:41 ET (`scheduler.run_byom_nfl_refresh`), after
+`nfl_player_game_log` has landed (about 6am ET). The declared
+`byom-nfl-refresh` is on, as a one-time catch-up.
 
 `byom/refresh.py` reports freshness without reading odds. The due set
 is the current season only: games dated from yesterday through seven

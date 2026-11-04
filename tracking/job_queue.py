@@ -2488,6 +2488,11 @@ def _job_byom_prop_facts(**kw):
 
     conn = get_connection()
     try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations, and the build writes byom_official_legs
+        # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
+        from data.view_migrations import apply_view_migrations
+        apply_view_migrations(conn)
         return build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
             sport=str(kw.get("sport") or "NFL").strip().upper())
@@ -2518,6 +2523,11 @@ def _job_byom_refresh(**kw):
 
     conn = get_connection()
     try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations, and the build writes byom_official_legs
+        # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
+        from data.view_migrations import apply_view_migrations
+        apply_view_migrations(conn)
         return refresh(conn, apply=bool(kw.get("apply")))
     finally:
         conn.close()
@@ -2530,6 +2540,11 @@ def _job_byom_game_facts(**kw):
 
     conn = get_connection()
     try:
+        # A declared job can be claimed before the deploy's first pass has
+        # applied its migrations, and the build writes byom_official_legs
+        # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
+        from data.view_migrations import apply_view_migrations
+        apply_view_migrations(conn)
         return build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
             sport=str(kw.get("sport") or "NFL").strip().upper())

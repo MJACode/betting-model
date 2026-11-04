@@ -1071,11 +1071,33 @@
     "key": "byom-nfl-refresh",
     "job_type": "byom_refresh",
     "requested_by": "owner",
-    "enabled": false,
-    "note": "OFF. enabled is false, so sync_declared_jobs does not enqueue this. This is not a schedule: a declared job is enqueued once, and only after the owner sets enabled true. apply false reports freshness and does not read odds and does not write. apply true rebuilds the current season's games from yesterday through 7 days ahead, plus a past game with no fact row, a past fact row still missing a score, and a past game that has facts but no prop facts and has not been scanned yet. A prop pass with no rows stamps the game so it is not due again. A null line is not unfinished. A game the builder will not write is not scheduled. Does not write picks.",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: turn it on. The builder showed a frozen record: byom_game_facts was last built 2026-10-24, and 27 played games had no score in it. enabled and apply are true, so sync_declared_jobs enqueues this catch-up once. A declared job is not a schedule: scheduler.run_byom_nfl_refresh queues the same job every day at 10:41am ET with a dated dedupe key. apply true rebuilds the current season's games from yesterday through 7 days ahead, plus a past game with no fact row, a past fact row still missing a score, and a past game that has facts but no prop facts and has not been scanned yet. Writes byom_game_facts, byom_prop_facts and byom_official_legs. Does not write picks.",
     "args": {
       "sport": "NFL",
-      "apply": false
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-game-facts-official-2026-11-04",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: the official pick (first match) beside the closing line. Rebuilds every NFL season from 2020 and writes byom_official_legs in the same transaction (byom/official.py). The job applies data/migrations/byom_official_legs_2026_11_04.sql first. Closing facts are rebuilt from the same quotes, so a game's close does not change unless its quotes did. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-prop-facts-official-2026-11-04",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: official prop legs. Rebuilds every NFL prop season from 2023-09-01 and writes each prop's first-match over and under to byom_official_legs. The role at the lock reads the game's DraftKings spread history. The 2026-10-28 run of byom-nfl-prop-facts took 5m29s; this one also reads each game's spreads. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
     }
   },
   {

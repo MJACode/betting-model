@@ -25,7 +25,8 @@ from byom.constants import (
     NBA_DK_HISTORY_START_SEASON,
     SPORT,
 )
-from byom.game_facts import assemble_game, parse_date, parse_game_id
+from byom.game_facts import _pre_start, assemble_game, parse_date, parse_game_id
+from byom.official import OFFICIAL_COLUMNS, game_official_legs
 
 # One game at a time. A season of nfl_odds_history is millions of rows
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
@@ -224,8 +225,41 @@ def facts_for_season(conn, season: int,
         quotes = _dk_quotes(conn, game["game_id"], sport)
         fact = assemble_game(game, quotes, played)
         if fact is not None:
+            if sport == SPORT:
+                # Not a column. The official (first-match) legs, written
+                # to byom_official_legs in the same transaction. NFL only.
+                fact["_official"] = game_official_legs(
+                    fact,
+                    _pre_start(quotes, "h2h"),
+                    _pre_start(quotes, "spreads"),
+                    _pre_start(quotes, "totals"),
+                )
             facts.append(fact)
     return facts
+
+
+def write_official_legs(conn, keys: list[str], legs: list[dict],
+                        props: bool) -> int:
+    """Replace these games' official legs. Same transaction as the facts.
+
+    `props` False touches only game legs (player_key ''), True only
+    prop legs, so the two builders never delete each other's rows.
+    """
+    keys = list(dict.fromkeys(keys))
+    if keys:
+        conn.execute(
+            "DELETE FROM byom_official_legs WHERE canonical_key = ANY(%s) "
+            + ("AND player_key <> ''" if props else "AND player_key = ''"),
+            (keys,))
+    if not legs:
+        return 0
+    cols = ", ".join(OFFICIAL_COLUMNS)
+    placeholders = ", ".join(["%s"] * len(OFFICIAL_COLUMNS))
+    conn.executemany(
+        f"INSERT INTO byom_official_legs ({cols}, built_at) "
+        f"VALUES ({placeholders}, now())",
+        [tuple(leg[col] for col in OFFICIAL_COLUMNS) for leg in legs])
+    return len(legs)
 
 
 def _upsert(conn, facts: list[dict]) -> int:
@@ -289,10 +323,16 @@ def build_season(conn, season: int, apply: bool = False,
             **empty_counts,
         }
     facts = facts_for_season(conn, season, game_ids=game_ids, sport=sport)
+    legs = [leg for fact in facts for leg in fact.get("_official") or ()]
     written = _upsert(conn, facts) if apply else 0
+    official = 0
+    if apply and sport == SPORT:
+        official = write_official_legs(
+            conn, [fact["canonical_key"] for fact in facts], legs, props=False)
     return {
         "season": season, "sport": sport,
         "facts": len(facts), "written": written,
+        "official_legs": len(legs), "official_written": official,
         **price_fallback_counts(facts),
     }
 

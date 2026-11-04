@@ -1,6 +1,7 @@
 /**
- * The signed-in user's NFL models, each graded by byom_backtest and
- * ranked by units. An empty filter is not graded. A slower response
+ * The signed-in user's models, each graded by byom_record and ranked by
+ * units at the headline timing: the official pick on NFL, the close on NBA.
+ * The same number the model's own card leads with. An empty filter is not graded. A slower response
  * does not replace a newer one. Signed-out does not call the list RPC.
  */
 
@@ -10,7 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchByomModels,
-  fetchByomScopedBacktest,
+  fetchByomScopedRecord,
   pool,
   type ByomFilters,
   type ByomModel,
@@ -70,13 +71,14 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
           return { model, record: null as ByomRecord | null, ungraded: true, failed: false };
         }
         try {
-          const backtest = await fetchByomScopedBacktest(
+          const timed = await fetchByomScopedRecord(
             scope,
             model.filters,
             new Date(),
             model.sport === 'NBA' ? 'NBA' : 'NFL',
           );
-          return { model, record: recordFromRows(backtest), ungraded: false, failed: false };
+          const rows = timed.headline === 'official' ? timed.official : timed.close;
+          return { model, record: recordFromRows(rows), ungraded: false, failed: false };
         } catch (e: unknown) {
           if (isAbortError(e)) throw e;
           return { model, record: null as ByomRecord | null, ungraded: false, failed: true };
