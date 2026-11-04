@@ -232,8 +232,11 @@ def test_ev_is_priced_at_each_books_own_line():
                          "market": "player_points_q1"})
     c = Q.priced(Q.long_offers(rows, props))
     from scipy.stats import poisson
+    quoted = {"hardrockbet": 3.5, "fanduel": 4.5}
+    assert len(c) == 4
     for _, r in c.iterrows():
-        po = poisson.sf(np.floor(r.line), 4.0)
+        assert r.line == quoted[r.book], "an offer keeps its own book's line"
+        po = poisson.sf(np.floor(quoted[r.book]), 4.0)
         p = po if r.side == "over" else 1 - po
         assert np.isclose(r.p_win, p) and np.isclose(r.ev, p * H.dec(r.price) - 1)
 
