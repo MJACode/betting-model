@@ -20,6 +20,7 @@ from byom.official import (
 ROOT = Path(__file__).resolve().parents[1]
 SQL_NAME = "byom_official_legs_2026_11_04.sql"
 BAND_SQL = "byom_official_lock_bands_2026_11_04.sql"
+LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -224,6 +225,22 @@ def test_the_file_is_registered_and_guards_on_what_it_builds():
     assert "byom_official_legs_v1" in bands.split("CREATE OR REPLACE FUNCTION public.byom_legs", 1)[1]
 
 
+def test_the_lock_read_index_is_registered_and_guarded():
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert LOCK_READ_SQL in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(LOCK_READ_SQL) == ACTIVE_MIGRATIONS.index(BAND_SQL) + 1
+    text = (ROOT / "data/migrations" / LOCK_READ_SQL).read_text(encoding="utf-8")
+    assert text.count("DO $mig$") == 1
+    assert "to_regclass('public.idx_byom_official_legs_lock_read') IS NULL" in text
+    assert (
+        "CREATE INDEX IF NOT EXISTS idx_byom_official_legs_lock_read\n"
+        "      ON public.byom_official_legs\n"
+        "      (sport, season, match_role, canonical_key, market, leg_side, player_key, locked_at);"
+    ) in text
+    assert "CREATE OR REPLACE FUNCTION" not in text
+    assert "ALTER TABLE" not in text
+
+
 @pytest.fixture
 def scratch():
     psycopg2 = pytest.importorskip("psycopg2")
@@ -249,7 +266,8 @@ def scratch():
                      "byom_prop_facts_dk_prices_2026_10_28.sql",
                      "byom_saved_models_2026_10_16.sql",
                      "byom_prop_phase_a_filters_2026_10_29.sql",
-                     SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL):
+                     SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
+                     LOCK_READ_SQL, LOCK_READ_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
