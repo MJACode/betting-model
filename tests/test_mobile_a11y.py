@@ -152,7 +152,8 @@ def test_audited_targets():
     """M10 stake chip, M18 tooltip icon, M25 disabled Add bet, M26 chips."""
     perf = _read(SRC / "screens" / "PerformanceScreen.tsx")
     assert "hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}" in perf
-    assert "accessibilityLabel={`Edit stake, ${unitsSpeech(formatFlatStake(row.stake))}`}" in perf
+    # The label says whose stake it is ("as posted" or "your stake").
+    assert "accessibilityLabel={`Edit stake, ${unitsSpeech(stakeChipText(row))}`}" in perf
     assert "hitSlop={6}" not in perf
     assert "hitSlop={12}" in _read(SRC / "components" / "InfoTooltip.tsx")
     manual = _read(SRC / "components" / "ManualBetModal.tsx")

@@ -7,6 +7,8 @@
  * used profit_flat / 100 (1u RISKED) instead, so a −200 loss was −1u on a
  * model page and −2u on the Record tab. These pin every one of them on the
  * Record's basis, through postedPickUnits and the view's units / risked.
+ * Tracked picks on the Performance tab book the same stake by default
+ * (#1138 Decision 1); the member's own stake is an explicit override.
  *
  *   npx tsx scripts/verify_units_one_basis.ts
  */
@@ -21,6 +23,10 @@ import {
 import { postedPickUnits, setServerThresholds } from '../src/lib/thresholds';
 import { playerPickRecord } from '../src/lib/playerDetail';
 import { teamPickRecords } from '../src/lib/teamDetail';
+import { computeTrackedResults } from '../src/lib/trackedPerformance';
+import { computeLiveTrackedResults } from '../src/lib/liveTracked';
+import { trackedStakeFor } from '../src/lib/trackedStake';
+import type { LiveTrackSnapshot } from '../src/hooks/useTrackedBets';
 import type { CustomModel, Pick, SettledPick } from '../src/types';
 
 let failures = 0;
@@ -132,6 +138,74 @@ const tr = teamPickRecords([
 ] as SettledPick[], [tg], 'BOS');
 const teamUnits = [tr.on, tr.against, tr.over, tr.under].reduce((a, r) => a + (r.units ?? 0), 0);
 check('team record: a −200 loss is −2u on the published stake', near(teamUnits, -2), String(teamUnits));
+
+// ── Tracked picks on the Performance tab (#1138 Decision 1) ───────────────
+// Stored at the 100-is-1u scale (lib/format FLAT_UNIT), so /100 is units.
+// The tracked graders take full pick rows; the fixtures above are settled rows.
+const asPick = (p: SettledPick): Pick => p as unknown as Pick;
+const TP: Pick[] = SET.map(asPick);
+const ids = TP.map((p) => p.pick_id);
+const asPosted = trackedStakeFor('posted', {});
+const tp = computeTrackedResults(ids, TP, asPosted);
+check('tracked, as posted: net is the Record tab\'s −3u', near(tp.summary.net / 100, -3, 1e-6),
+  String(tp.summary.net / 100));
+check('tracked, as posted: staked is the Record tab\'s 8u risked', near(tp.summary.staked / 100, 8, 1e-6),
+  String(tp.summary.staked / 100));
+check('tracked, as posted: return = units / risked, as on the Record tab',
+  tp.summary.roi != null && near(tp.summary.roi, -3 / 8, 1e-6), String(tp.summary.roi));
+check('tracked, as posted: every row is postedPickUnits',
+  tp.rows.every((r) => near(r.profit / 100, postedPickUnits(r.pick).units, 1e-6)));
+check('tracked, as posted: no row is marked as the member\'s own stake', tp.rows.every((r) => !r.customStake));
+const rowOf = (res: typeof tp, p: Pick) => res.rows.find((r) => r.pick.pick_id === p.pick_id)!;
+check('tracked, as posted: a −200 win is +1.00u (1u risked read +0.50u)',
+  near(rowOf(tp, TP[0]).profit, 100, 1e-6), String(rowOf(tp, TP[0]).profit));
+check('tracked, as posted: a −200 loss is −2.00u', near(rowOf(tp, TP[1]).profit, -200, 1e-6));
+check('tracked, as posted: a win with no price is +1.00u, never profit_flat\'s invented −110 (+0.91u)',
+  near(rowOf(tp, TP[2]).profit, 100, 1e-6), String(rowOf(tp, TP[2]).profit));
+check('tracked, as posted: the 3u cap binds on a −400 loss', near(rowOf(tp, TP[3]).profit, -300, 1e-6));
+const dog = asPick(mk({ dk_odds: 150, result: 'LOSS', profit_flat: -100 }));
+const tDog = computeTrackedResults([dog.pick_id], [dog], asPosted);
+check('tracked, as posted: a +150 loss is −0.67u (1u risked read −1.00u)',
+  near(tDog.summary.net / 100, -1 / 1.5, 1e-4), String(tDog.summary.net / 100));
+const decided = asPick(mk({ dk_odds: -110, decision_odds: 120, result: 'WIN', profit_flat: 120 }));
+const tDec = computeTrackedResults([decided.pick_id], [decided], asPosted);
+check('tracked, as posted: staked at the decided price, not DraftKings (+120 risks 0.83u to win 1u)',
+  near(tDec.summary.net, 100, 1e-6) && near(tDec.summary.staked / 100, 1 / 1.2, 1e-6),
+  `${tDec.summary.net} on ${tDec.summary.staked}`);
+const openPick = asPick(mk({ dk_odds: -150, result: null, profit_flat: null, settled_at: null }));
+const tOpen = computeTrackedResults([openPick.pick_id], [openPick], asPosted);
+check('tracked, as posted: an open pick shows the stake it lays (1.5u at −150) and counts nothing',
+  near(tOpen.rows[0].stake, 150, 1e-6) && tOpen.summary.net === 0 && tOpen.summary.staked === 0,
+  `${tOpen.rows[0].stake}`);
+
+// The member's own stake: an override where one is set, the posted stake elsewhere.
+const mine = trackedStakeFor('custom', { [String(TP[0].pick_id)]: 300, [String(TP[2].pick_id)]: 200 });
+const tm = computeTrackedResults(ids, TP, mine);
+check('my stakes: a 3u stake on a −200 win pays +1.50u at the decided price',
+  near(rowOf(tm, TP[0]).profit, 150, 1e-6) && rowOf(tm, TP[0]).customStake,
+  String(rowOf(tm, TP[0]).profit));
+check('my stakes: a 2u stake on a win with no price is +2.00u at even money, as the posted stake counts it',
+  near(rowOf(tm, TP[2]).profit, 200, 1e-6), String(rowOf(tm, TP[2]).profit));
+check('my stakes: bets left alone stay as posted',
+  [TP[1], TP[3], TP[4]].every((p) => near(rowOf(tm, p).profit, rowOf(tp, p).profit, 1e-6)
+    && !rowOf(tm, p).customStake));
+check('my stakes: a stake set to the posted risk gives the posted result',
+  near(computeTrackedResults([TP[1].pick_id], TP, trackedStakeFor('custom', { [String(TP[1].pick_id)]: 200 })).summary.net,
+    rowOf(tp, TP[1]).profit, 1e-6));
+const ignored = computeTrackedResults(ids, TP, trackedStakeFor('posted', { [String(TP[0].pick_id)]: 300 }));
+check('as posted ignores a stake the member saved under My stakes', near(ignored.summary.net / 100, -3, 1e-6));
+
+// A tracked live (in-play) pick books the same stake.
+const liveWin = asPick(mk({ is_live: true, dk_odds: -200, result: 'WIN', profit_flat: 50 }));
+const snapshot: LiveTrackSnapshot = {
+  key: `${liveWin.game_id}|${liveWin.model_id}|${liveWin.pick_side}`, game_id: liveWin.game_id,
+  model_id: liveWin.model_id, pick_side: liveWin.pick_side, pick_label: liveWin.pick_label,
+  sport: liveWin.sport, game_date: liveWin.game_date, dk_odds: -200, scored_line: null,
+  tracked_at: '2026-11-01T20:00:00Z',
+};
+const lt = computeLiveTrackedResults([snapshot], [liveWin], () => true, asPosted);
+check('tracked live, as posted: a −200 win is +1.00u on 2u risked',
+  near(lt.summary.net, 100, 1e-6) && near(lt.summary.staked, 200, 1e-6), `${lt.summary.net} on ${lt.summary.staked}`);
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -410,8 +410,10 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
   3,201 bets", never "-$20,670 at $100 flat" — the dollar figure invents a stake
   size nobody chose, changes meaning the moment the bankroll does, and cannot be
   compared against any other number in this repo. This governs EVERY surface:
-  replies, docs, commit messages, the dashboard, Discord, the app. `profit_flat`
-  is stored as dollars-per-$100 stake, so divide by 100 to report it.
+  replies, docs, commit messages, the dashboard, Discord, the app. Report units
+  on the posted stake (§2: `stake_for` at `COALESCE(decision_odds, dk_odds)`,
+  `published_pick_unit_profit`). `profit_flat` / 100 is 1u risked; no surface
+  shows it.
 - Edge: always expressed as decimal (0.05 = 5%), not percentage
 - `home_win = 1` means home team won the full game
 - `home_win_reg = 1` means home team won in regulation (NHL only)

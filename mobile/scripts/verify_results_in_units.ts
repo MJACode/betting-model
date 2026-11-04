@@ -2,8 +2,9 @@
  * Every result in the app is in units, never dollars (mike, 2026-11-03:
  * "everything must be units"; CLAUDE.md §4). One unit is one flat bet.
  *
- * `profit_flat` is stored per 100 staked (a −110 win is 90.91), and so are
+ * Amounts are stored per 100 (a −110 win at 1u risked is 90.91), and so are
  * the Performance tab's stakes, so a screen divides by 100 and prints "u".
+ * Tracked picks book the posted stake by default (verify_units_one_basis).
  * The 2026-11-02 UX review found the model page's history rows printing
  * "+$90.91"; these pin the formatter that replaced it, its tone, the betslip
  * bar's 1u payout, and the one record-price statement every model shares.
@@ -24,6 +25,7 @@ import { formatUnits } from '../src/lib/thresholds';
 import { BETSLIP_BAR_STAKE, betslipSummary } from '../src/lib/parlay';
 import { recordNoteFor, recordNoteShortFor } from '../src/lib/myBooks';
 import { computeTrackedResults } from '../src/lib/trackedPerformance';
+import { customTrackedStake, trackedStakeFor } from '../src/lib/trackedStake';
 import { settledProfit } from '../src/hooks/useManualBets';
 import type { Pick } from '../src/types';
 
@@ -64,13 +66,13 @@ check('VoiceOver: "1u stake" is "1 unit stake", not "1 units"', unitsSpeech('1u 
 check('VoiceOver: a percent passes through', unitsSpeech('+12.5%') === '+12.5%');
 check('formatFlatStake and formatUnits share one rounding', formatFlatStake(115) === formatUnits(1.15) && formatFlatStake(12.5) === formatUnits(0.125));
 
-// ── Tracked picks: units at the default stake ────────────────────────────
+// ── Tracked picks: units at the default stake, as posted ─────────────────
 const win = { pick_id: 1, game_date: '2026-11-01', result: 'WIN', profit_flat: 90.91, dk_odds: -110 } as unknown as Pick;
 const loss = { pick_id: 2, game_date: '2026-11-01', result: 'LOSS', profit_flat: -100, dk_odds: -110 } as unknown as Pick;
-const t = computeTrackedResults([1, 2], [win, loss]);
-check('a tracked win and loss at the 1u default net −0.09u',
-  formatFlatUnits(t.summary.net) === `${MINUS}0.09u`, formatFlatUnits(t.summary.net));
-const half = computeTrackedResults([1], [win], () => 0.5 * FLAT_UNIT);
+const t = computeTrackedResults([1, 2], [win, loss], trackedStakeFor('posted', {}));
+check('a tracked −110 win and loss as posted net −0.10u (+1.00u − 1.10u, the Record tab\'s units)',
+  formatFlatUnits(t.summary.net) === `${MINUS}0.10u`, formatFlatUnits(t.summary.net));
+const half = computeTrackedResults([1], [win], (p) => customTrackedStake(p, 0.5 * FLAT_UNIT));
 check('a tracked win at a 0.5u custom stake is +0.45u',
   formatFlatUnits(half.summary.net) === '+0.45u', formatFlatUnits(half.summary.net));
 
