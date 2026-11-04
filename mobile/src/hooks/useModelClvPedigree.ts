@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect } from 'react';
 
+import { clvBeatRate } from '@/lib/clvBeat';
 import { fetchPublicTrackRecord } from '@/lib/queries';
 import { setModelClv, type ModelClv } from '@/lib/sharpScore';
 import { isModelRetired } from '@/lib/thresholds';
@@ -16,28 +17,31 @@ import type { TrackRecordRow } from '@/types';
  * is optional — when absent, sharpScore() treats every model as "unproven" and
  * leans on the edge + contrarian components.
  */
-// v2 (2026-10-14): the beat rate is same-book raw CLV (standard_v2). A v1
-// cache still holds the old no-vig beat rate.
-const CACHE_KEY = 'modelClvPedigree.v2';
+// v3 (2026-11-04): a 0% close is a push and is out of the beat rate.
+// v2 still holds the rate that counted those closes as non-beats.
+const CACHE_KEY = 'modelClvPedigree.v3';
 
 /** Aggregate the per-(sport, model) rows up to one CLV record per model_id. */
 export function buildModelClvMap(rows: TrackRecordRow[]): Record<string, ModelClv> {
-  const acc: Record<string, { beat: number; settled: number; clvSum: number }> = {};
+  const acc: Record<string, { beat: number; settled: number; push: number; clvSum: number }> = {};
   for (const r of rows) {
     if (isModelRetired(r.model_id)) continue; // never scores a card again
     const settled = Number(r.clv_settled ?? 0);
     if (settled <= 0) continue;
-    const a = (acc[r.model_id] ??= { beat: 0, settled: 0, clvSum: 0 });
+    const a = (acc[r.model_id] ??= { beat: 0, settled: 0, push: 0, clvSum: 0 });
     a.beat += Number(r.clv_beat ?? 0);
     a.settled += settled;
-    a.clvSum += Number(r.avg_clv_pct ?? 0) * settled; // sample-weighted mean
+    a.push += Number(r.clv_push ?? 0);
+    // The average still weights every measured close, including a 0%.
+    a.clvSum += Number(r.avg_clv_pct ?? 0) * settled;
   }
   const out: Record<string, ModelClv> = {};
   for (const [modelId, a] of Object.entries(acc)) {
     out[modelId] = {
-      beatRate: a.settled > 0 ? a.beat / a.settled : null,
+      beatRate: clvBeatRate(a.beat, a.settled, a.push),
       avgClvPct: a.settled > 0 ? a.clvSum / a.settled : null,
       settled: a.settled,
+      push: a.push,
     };
   }
   return out;

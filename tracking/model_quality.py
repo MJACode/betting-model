@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import duplicate_copy_exclusion_sql, record_exclusion_sql, today_et
 from data.db import get_connection
 from data.ddl_guard import schema_is_current
+from tracking.clv_math import clv_outcome
 from tracking.discord_notifier import units_for
 
 OK, FLAGGED, SKIPPED, ERROR = "OK", "FLAGGED", "SKIPPED", "ERROR"
@@ -347,11 +348,13 @@ def detect_clv_degradation(
 
     Only `clv_method` = `standard_v2` and a numeric `clv_pct` (same-book
     percent). Older methods are a different definition and are ignored.
-    Beat-rate uses `clv_beat_close` when present, else `clv_pct > 0`.
+    The mean includes a 0% close as 0. The beat rate does not: a push is
+    left out of the denominator. No beat and no loss → the rate is None.
     """
     def _sample(rows: list[dict]) -> tuple[int, float | None, float | None]:
         clvs: list[float] = []
         beats = 0
+        losses = 0
         for row in rows:
             method = str(row.get("clv_method") or "")
             if method not in CLV_METHODS:
@@ -364,14 +367,16 @@ def detect_clv_degradation(
             except (TypeError, ValueError):
                 continue
             clvs.append(clv)
-            beat = row.get("clv_beat_close")
-            if beat is None:
-                beat = clv > 0
-            if beat:
+            outcome = clv_outcome(clv)
+            if outcome == "beat":
                 beats += 1
+            elif outcome == "loss":
+                losses += 1
         if not clvs:
             return 0, None, None
-        return len(clvs), sum(clvs) / len(clvs), beats / len(clvs)
+        decisive = beats + losses
+        beat_rate = None if decisive == 0 else beats / decisive
+        return len(clvs), sum(clvs) / len(clvs), beat_rate
 
     n_r, mean_r, beat_r = _sample(recent)
     n_b, mean_b, beat_b = _sample(baseline)
@@ -390,13 +395,14 @@ def detect_clv_degradation(
         ),
     }
     drop = metrics["drop_pp"]
+    beat_txt = "n/a" if beat_r is None else f"{beat_r:.0%}"
     if (mean_r is not None and mean_r <= CLV_CRIT_PP
             and beat_r is not None and beat_r < CLV_CRIT_BEAT
             and n_r >= MIN_CLV_CRIT_N):
         return {
             "status": FLAGGED, "severity": CRIT,
             "detail": (
-                f"recent same-book CLV {mean_r:+.2f}% / beat {beat_r:.0%} "
+                f"recent same-book CLV {mean_r:+.2f}% / beat {beat_txt} "
                 f"on {n_r} settled BET(s)"
             ),
             "metrics": metrics,
@@ -414,7 +420,7 @@ def detect_clv_degradation(
     return {
         "status": OK, "severity": WARN,
         "detail": (
-            f"recent same-book CLV {mean_r:+.2f}% / beat {beat_r:.0%} "
+            f"recent same-book CLV {mean_r:+.2f}% / beat {beat_txt} "
             f"on {n_r} settled BET(s)"
         ),
         "metrics": metrics,

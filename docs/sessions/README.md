@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a 0% same-book close is a CLV push: beat rate is beats / (beats + losses), pushes shown beside it, the average still includes 0; no stake or record change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NCAAB first-half CLV uses the bet book's newest pre-tip row after the pick was created; a null close is not stamped measured; NBA close rows unchanged; recompute script is dry-run and was not run |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a byom_legs body stored as `p_filters %s` is rebuilt even when the lock-bands skip matches; the replacement uses jsonb_exists; the skip stays to_regprocedure; no UI from #1161; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM preview 400s: the DB adapter turned the jsonb `?` inside a function body into `%s`; dollar quotes are now skipped; props lose favorite/underdog, team spread and game total |

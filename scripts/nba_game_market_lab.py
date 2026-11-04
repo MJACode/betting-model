@@ -64,6 +64,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import config  # noqa: E402
+from tracking.clv_math import CLV_EXACT_PUSH_EPS, clv_beat_rate  # noqa: E402
 
 CACHE = ROOT / "data" / "local" / "nba"
 OUT = Path(os.environ.get("NBA_REBUILD_RESULTS",
@@ -810,7 +811,8 @@ def cell_row(b: pd.DataFrame, seasons=GRADED) -> dict:
     if "clv_ev" in gb and len(gb):
         row["clv_med%"] = 100 * float(np.nanmedian(gb["clv_ev"]))
         cv = gb["clv_ev"].dropna()
-        row["beat_close%"] = 100 * float((cv > 0).mean()) if len(cv) else np.nan
+        rate = clv_beat_rate(cv, eps=CLV_EXACT_PUSH_EPS) if len(cv) else None
+        row["beat_close%"] = np.nan if rate is None else 100 * rate
         row["clv_n"] = len(cv)
     return row
 
@@ -1631,7 +1633,9 @@ def section_candidate(o: pd.DataFrame, close: pd.DataFrame) -> str:
                          "risked": z["risk"].sum(),
                          "clv_med% (proportional close)": 100 * z["clv_ev"].median(),
                          "clv_med% (power close)": 100 * z["clv_pow"].median(),
-                         "beat close% (power)": 100 * (z["clv_pow"].dropna() > 0).mean()})
+                         "beat close% (power)": (
+                             (lambda rate: np.nan if rate is None else 100 * rate)(
+                                 clv_beat_rate(z["clv_pow"].dropna(), eps=CLV_EXACT_PUSH_EPS)))})
         t.append("\nBy season (2020-21 was never used to choose anything and is not a graded "
                  "season; it is shown as a sixth read):\n")
         t.append(md_table(pd.DataFrame(rows)))

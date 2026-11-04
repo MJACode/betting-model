@@ -2682,10 +2682,20 @@ const TRACK_RECORD_SELECT =
   'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
   'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
   'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
-  'market_clv_settled, market_clv_beat, avg_market_clv_pct';
+  'market_clv_settled, market_clv_beat, avg_market_clv_pct, ' +
+  'clv_push, clv_game_push, clv_prop_push';
 
-/** The select from before units and risked existed. An OTA can ship first. */
-const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, risked', '');
+/** The select from before CLV pushes were counted. An OTA can ship first. */
+const TRACK_RECORD_SELECT_WITHOUT_CLV_PUSH = TRACK_RECORD_SELECT.replace(
+  ', clv_push, clv_game_push, clv_prop_push',
+  '',
+);
+
+/** Units, and no push columns. The oldest select this fetch still retries. */
+const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT_WITHOUT_CLV_PUSH.replace(
+  ', units, risked',
+  '',
+);
 
 /**
  * The units columns are not on the view until the migration runs.
@@ -2694,6 +2704,22 @@ const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, 
  * `PGRST204` when the schema cache has no such column. The message names
  * the column. Any other error still throws.
  */
+/** PostgREST names the missing column. Only a missing-column error retries. */
+export function clvPushColumnsMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message.includes('clv_push') && !message.includes('clv_game_push') && !message.includes('clv_prop_push')) {
+    return false;
+  }
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === '42703' || code === 'PGRST204'
+    || message.includes('does not exist')
+    || message.includes('schema cache');
+}
+
 export function postedStakeColumnsMissing(error: {
   code?: string | null;
   message?: string | null;
@@ -2709,15 +2735,25 @@ export function postedStakeColumnsMissing(error: {
 
 export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
   const first = await supabase.from('v_public_track_record').select(TRACK_RECORD_SELECT);
-  if (postedStakeColumnsMissing(first.error)) {
-    const second = await supabase
+  // Pushes shipped after units. A view can have one pair and not the other.
+  let select = TRACK_RECORD_SELECT;
+  let error = first.error;
+  let data = first.data;
+  if (clvPushColumnsMissing(error)) {
+    select = TRACK_RECORD_SELECT_WITHOUT_CLV_PUSH;
+    const second = await supabase.from('v_public_track_record').select(select);
+    error = second.error;
+    data = second.data;
+  }
+  if (postedStakeColumnsMissing(error)) {
+    const third = await supabase
       .from('v_public_track_record')
       .select(TRACK_RECORD_SELECT_WITHOUT_UNITS);
-    if (second.error) throw second.error;
-    return (second.data ?? []) as unknown as TrackRecordRow[];
+    if (third.error) throw third.error;
+    return (third.data ?? []) as unknown as TrackRecordRow[];
   }
-  if (first.error) throw first.error;
-  return (first.data ?? []) as TrackRecordRow[];
+  if (error) throw error;
+  return (data ?? []) as unknown as TrackRecordRow[];
 }
 
 /**
@@ -2787,14 +2823,19 @@ export async function fetchParlayTrackRecord(): Promise<ParlayTrackRow[]> {
  * pick (v_opening_vs_live). Two rows: track = 'opening' | 'live'.
  */
 export async function fetchOpeningVsLive(): Promise<OpeningVsLiveRow[]> {
-  const { data, error } = await supabase
-    .from('v_opening_vs_live')
-    .select(
-      'track, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct',
-    );
-  if (error) throw error;
-  return (data ?? []) as OpeningVsLiveRow[];
+  const withPush =
+    'track, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
+    'clv_settled, clv_beat, avg_clv_pct, clv_push';
+  const first = await supabase.from('v_opening_vs_live').select(withPush);
+  if (clvPushColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_opening_vs_live')
+      .select(withPush.replace(', clv_push', ''));
+    if (second.error) throw second.error;
+    return (second.data ?? []) as OpeningVsLiveRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as OpeningVsLiveRow[];
 }
 
 /** Opening track sliced by line move after lock + public side (v_opening_signal_slices). */

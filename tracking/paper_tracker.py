@@ -44,6 +44,7 @@ from tracking.clv_math import (
     CLV_METHOD_STANDARD,
     DEFAULT_SHARP_CLOSE_BOOKS,
     close_book_candidates,
+    clv_outcome,
     market_edge_clv,
     other_side_prices,
     same_book_clv,
@@ -2061,9 +2062,11 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
       - clv_method      : standard_v2
       - clv_close_book  : the bet book, when its close was found
       - line_clv_pts    : points the line moved toward our side
-      - clv_beat_close  : clv_pct > 0. NULL when the primary is NULL
-                          (a moved line, or no same-book close). Line CLV
-                          stays in line_clv_pts and does not enter the beat.
+      - clv_beat_close  : True when clv_pct is a beat. False when it is a
+                          loss or a push (the close equals the price taken).
+                          NULL when the primary is NULL (a moved line, or no
+                          same-book close). Line CLV stays in line_clv_pts
+                          and does not enter the beat.
 
     THE CLOSE IS RECORDED EVEN WHEN THE LINE MOVED (2026-08-30, matt). It did
     not used to be: a moved line failed the same-line guard and the pick was
@@ -2338,7 +2341,9 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         if not _real_close(measured_price, closing_line, line_clv, market_pct, pin_price):
             updated += _stamp_empty(market=market)
             continue
-        beat_close = (clv_pct > 0) if clv_pct is not None else None
+        # A 0% close is a push, so the boolean is false. It is not a beat.
+        outcome = clv_outcome(clv_pct)
+        beat_close = None if outcome is None else outcome == "beat"
 
         conn.execute("""
             UPDATE picks
