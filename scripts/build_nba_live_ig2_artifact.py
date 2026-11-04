@@ -311,18 +311,25 @@ def parity_live27(wait_s: float = WAIT_S) -> dict:
         first_full = G.decision_quotes(el_full).drop_duplicates("game_id").set_index("game_id")["fetch_at"] \
             if len(el_full) else pd.Series(dtype=object)
         same_fetch = sum(1 for g, fa in live_dec.items() if g in first_full.index and first_full[g] == fa)
+        only_live = sorted(set(live_dec) - set(first_full.index))
+        only_full = sorted(set(first_full.index) - set(live_dec))
         a = full[r.model_id]
         bk = live_bets[key] if len(live_bets) else pd.DataFrame(columns=key)
         j = bk.merge(a[key], on=key, how="outer", indicator=True)
         res[f"{r.model_id}_live_view_vs_all_plays"] = {
             "decisions_live_view": len(live_dec), "decisions_all_plays": int(len(first_full)),
             "decided_at_same_fetch": int(same_fetch),
+            "games_decided_only_live_view": only_live, "games_decided_only_all_plays": only_full,
             "bets_live_view": int(len(bk)), "bets_all_plays": int(len(a)),
             "same_bet": int((j["_merge"] == "both").sum()),
             "only_live_view": int((j["_merge"] == "left_only").sum()),
             "only_all_plays": int((j["_merge"] == "right_only").sum())}
         print(r.model_id, "live view:", res[f"{r.model_id}_live_view_vs_all_plays"], flush=True)
     res["fetches_replayed"] = n_fetch
+    res["games_left_out_by_rule_6_all_plays"] = sorted(L.jump_games(pbp.drop(columns="_wc")))
+    res["games_left_out_by_rule_5_all_plays"] = sorted(notes.get("games_first_play_before_listed_tip") or {})
+    print("rule 6 games (all plays):", res["games_left_out_by_rule_6_all_plays"],
+          "rule 5 games:", res["games_left_out_by_rule_5_all_plays"])
     res["wait_s"] = wait_s
     print(f"done in {time.time() - t0:.0f}s")
     return res
