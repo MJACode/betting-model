@@ -259,6 +259,7 @@ def footer(year: int) -> str:
       <nav class="footer-nav" aria-label="Footer">
         <a href="/terms">Terms and Conditions</a>
         <a href="/privacy">Privacy Policy</a>
+        <a href="/support">Support</a>
         <a href="mailto:{EMAIL}">{EMAIL}</a>
       </nav>
     </div>
@@ -317,6 +318,7 @@ def legal_page(name: str, h1: str, description: str, when: str, year: int) -> st
         .replace("{{BODY}}", body)
         .replace("{{PRIVACY_CURRENT}}", current if name == "privacy" else "")
         .replace("{{TERMS_CURRENT}}", current if name == "terms" else "")
+        .replace("{{SUPPORT_CURRENT}}", current if name == "support" else "")
     )
     title = f"{h1} — Signal Base"
     return shell(title, description, html, year, script=False)
@@ -353,10 +355,19 @@ def build(out: Path, when_iso: str | None) -> str:
         when,
         year,
     )
+    support = legal_page(
+        "support",
+        "Support",
+        "How to contact Signal Base and how to delete your account.",
+        when,
+        year,
+    )
     (out / "terms").mkdir()
     (out / "privacy").mkdir()
+    (out / "support").mkdir()
     (out / "terms" / "index.html").write_text(terms, encoding="utf-8")
     (out / "privacy" / "index.html").write_text(privacy, encoding="utf-8")
+    (out / "support" / "index.html").write_text(support, encoding="utf-8")
     for name in ("site.css", "mark.png", "favicon.png"):
         shutil.copyfile(STATIC / name, out / name)
     (out / "record.js").write_text(record_js(), encoding="utf-8")

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, Support page at /support for App Store Review; same build as Terms and Privacy; contact address already on those pages; no model change |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, NBA: the searches and the postseason prop rule merged; first-quarter props and first-quarter and first-half team totals bought for 2024-25 and 2025-26; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA: first-quarter player props and first-quarter and first-half team totals searched, 0 of 44 pass; no model change |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, every Odds API call is written to `api_call_log` however the process started: config.py switches the call logger on in every process (the NBA first-quarter purchase, run through a runpy launcher, spent about 112,813 credits with almost nothing logged); seven callers that skip config switch it on themselves; rows named for the module a run executed; failed writes retried, not dropped; test runs write nothing and refuse the Odds API host; plumbing, not a model update |
