@@ -723,7 +723,7 @@ export function PicksHomeScreen() {
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
             <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => selectView('today')} onLayout={onSegmentLayout('today')} />
-            <SubTabBtn label="Signals" count={signalsLocked || todayUnknown ? null : live.length} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -732,7 +732,7 @@ export function PicksHomeScreen() {
                 dot the sport chips and the LIVE pill on a card use. */}
             <SubTabBtn
               label="Live Signals"
-              count={signalsLocked || liveUnknown ? null : liveData.length}
+              count={liveUnknown ? null : liveData.length}
               hideCount={signalsLocked}
               locked={signalsLocked}
               lockedLabel="Live Signals, Premium"
