@@ -19,14 +19,14 @@ from byom.constants import (
     PROP_HISTORY_START_SEASON,
     SPORT,
 )
-from byom.game_facts import parse_date, parse_game_id
+from byom.game_facts import _rank, parse_date, parse_game_id
 from byom.prop_facts import (
     MARKET_COLUMNS,
     NBA_MARKET_COLUMNS,
     _pre_start as _prop_pre_start,
     facts_for_game,
 )
-from byom.official import RoleClock, prop_official_legs
+from byom.official import PointClock, RoleClock, prop_lock_candidates
 
 # Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
 # and the cast then aborts the game. A value that fails this pattern is
@@ -207,8 +207,9 @@ def _attach_official(conn, game: dict, quotes: list[dict],
     from byom.game_facts import _pre_start as _game_pre_start
     from byom.load import _dk_quotes
 
-    clock = RoleClock(_game_pre_start(_dk_quotes(conn, game["game_id"], "NFL"),
-                                      "spreads"))
+    dk = _dk_quotes(conn, game["game_id"], "NFL")
+    clock = RoleClock(_game_pre_start(dk, "spreads"))
+    total_clock = PointClock(_game_pre_start(dk, "totals"), _rank)
     pools: dict[tuple, list[dict]] = {}
     for quote in quotes:
         row = _prop_pre_start(quote)
@@ -216,9 +217,9 @@ def _attach_official(conn, game: dict, quotes: list[dict],
             continue
         pools.setdefault((row["player_key"], row["market"]), []).append(row)
     for fact in game_facts:
-        fact["_official"] = prop_official_legs(
+        fact["_official"] = prop_lock_candidates(
             fact, pools.get((fact["player_key"], fact["market"]), []), clock,
-            game.get("home_team"), game.get("away_team"))
+            game.get("home_team"), game.get("away_team"), total_clock)
 
 
 def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:

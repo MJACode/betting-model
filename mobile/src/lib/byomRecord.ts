@@ -26,6 +26,21 @@ export const BYOM_NBA_FIRST_SEASON = 2023;
 
 export type ByomSport = 'NFL' | 'NBA';
 
+/**
+ * The card headline. `preferred` is official on NFL once the server has
+ * the RPC. An empty official count beside a closing count leads with
+ * the close (rebuild not finished, or a season with no official rows).
+ */
+export function headlineFromCounts(
+  preferred: 'official' | 'close',
+  officialBets: number,
+  closeBets: number,
+): 'official' | 'close' {
+  if (preferred !== 'official') return 'close';
+  if (officialBets === 0 && closeBets > 0) return 'close';
+  return 'official';
+}
+
 /** Same cap as byom_save_model: 'byom model cap is 25'. */
 export const BYOM_MODEL_CAP = 25;
 

@@ -1101,6 +1101,28 @@
     }
   },
   {
+    "key": "byom-nfl-game-facts-official-lock-bands-2026-11-04",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: the official lock is the first DraftKings quote that fits the role and the line, price, spread and total bands. Rebuilds every NFL season from 2020 and rewrites byom_official_legs as one candidate per snapshot (context_at_lock). The earlier official rebuild stored one row per role, and a band could not move that lock. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
+    "key": "byom-nfl-prop-facts-official-lock-bands-2026-11-04",
+    "job_type": "byom_prop_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-04: official prop candidates, so a line, price, spread or total band is part of the lock search. Rebuilds every NFL prop season from 2023-09-01. Does not write picks.",
+    "args": {
+      "sport": "NFL",
+      "apply": true
+    }
+  },
+  {
     "key": "byom-nba-game-facts",
     "job_type": "byom_game_facts",
     "requested_by": "owner",

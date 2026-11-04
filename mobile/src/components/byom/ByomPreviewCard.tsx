@@ -21,6 +21,7 @@ export function ByomPreviewCard({
   emptyLabel = 'No games match',
   closeRecord = null,
   onShowBets,
+  closingHeadline = false,
 }: {
   record: ByomRecord | null;
   loading: boolean;
@@ -36,6 +37,11 @@ export function ByomPreviewCard({
   closeRecord?: ByomRecord | null;
   /** Opens the list of the bets this record counts. */
   onShowBets?: () => void;
+  /**
+   * NFL, and the official rows are empty, so `record` is the close.
+   * Names that basis. The secondary close row stays off.
+   */
+  closingHeadline?: boolean;
 }) {
   if (loading) {
     return (
@@ -77,6 +83,7 @@ export function ByomPreviewCard({
     `${record.bets} bet${record.bets === 1 ? '' : 's'}`,
   ].filter(Boolean).join(', ');
   const official = closeRecord != null;
+  const closingLead = !official && closingHeadline;
   const closeUnits = closeRecord != null && showsUnits && closeRecord.units != null
     ? formatSignedUnits(closeRecord.units)
     : null;
@@ -89,8 +96,13 @@ export function ByomPreviewCard({
   return (
     <View style={styles.card}>
       <View accessible accessibilityRole="summary"
-        accessibilityLabel={official ? `At the official line: ${label}` : label}>
+        accessibilityLabel={
+          official ? `At the official line: ${label}`
+            : closingLead ? `At the closing line: ${label}`
+              : label
+        }>
       {official ? <Text style={styles.kicker}>At the official line</Text> : null}
+      {closingLead ? <Text style={styles.kicker}>At the closing line</Text> : null}
       {unitsText != null ? (
         <Text style={[styles.units, { color: unitsColor }]}>{unitsText}</Text>
       ) : null}

@@ -8,25 +8,28 @@ price are the bet of record. A later move does not change it. The
 closing-line result stays in byom_game_facts and byom_prop_facts beside
 it.
 
-Which rules can change with the line? Only the role: favorite, underdog
-or pick'em, read off the DraftKings HOME spread in force at that moment.
-Side, week, rest, primetime, market and over/under do not move, so a
-leg needs one official row for each role a model can ask for:
+The rules that can change with the quote are the role (favorite,
+underdog, pick'em, from the DraftKings HOME spread in force) and the
+line, price, team-spread, and game-total bands. The builder stores one
+candidate per pre-kickoff snapshot where those numbers changed
+(`game_lock_candidates`, `prop_lock_candidates`, `match_role` 'any',
+`context_at_lock` true). The lock is the earliest candidate that fits
+the role and the bands together (`first_fit`, and the same search in
+`byom_legs`). A band is not applied to a quote that was already locked.
 
-    any       the first priced quote for this leg, whatever the role
-    favorite  the first priced quote while this leg's team is favored
-    underdog  the first priced quote while this leg's team is the dog
-    pickem    the first priced quote while the spread is 0
-
-A leg that never fits a role has no row for it, so a model that asks
-for that role has no bet on that game. A total has no role, so it has
-only `any`. A role with no spread yet in force is unknown and matches
-only `any`.
+Side, week, rest, primetime, market and over/under do not move, so they
+stay filters on the locked row. A total has no role. A role with no
+spread yet in force is unknown and matches only a model that asks for
+any role.
 
 `point` is the HOME spread on a spread leg, the same sign convention as
 `byom_game_facts.dk_spread_home` (CLAUDE.md §4). The label the app shows
 is built in SQL by `byom_leg_label`, one place, so no screen rebuilds a
 number.
+
+`game_official_legs` and `prop_official_legs` are the no-band case: one
+row per role, the first candidate that fits that role. The builders do
+not write those rows. They write the candidates.
 """
 from __future__ import annotations
 
@@ -59,16 +62,20 @@ GAME_LEGS = (
 OFFICIAL_COLUMNS = (
     "canonical_key", "sport", "season", "market", "leg_side",
     "player_key", "match_role", "leg_role", "team", "locked_at",
-    "point", "price", "result",
+    "point", "price", "result", "team_spread", "game_total",
+    "context_at_lock",
 )
+
+_STATE = ("point", "price", "leg_role", "team_spread", "game_total")
 
 
 class RoleClock:
-    """The home role in force at any moment, from DraftKings spreads.
+    """The home role and home spread in force at any moment.
 
     At each snapshot the spread is the best-ranked quote with a point,
     the same rank the closing line uses. Between snapshots the last one
-    holds. Before the first spread the role is unknown (None).
+    holds. Before the first spread the role and the point are unknown
+    (None).
     """
 
     def __init__(self, spreads: list[dict]):
@@ -83,12 +90,44 @@ class RoleClock:
                 best[snap] = quote
         self._times = sorted(best)
         self._home = [roles(best[t]["point"])[0] for t in self._times]
+        self._points = [_num(best[t]["point"]) for t in self._times]
 
     def home_role(self, at):
         i = bisect_right(self._times, at)
         if i == 0:
             return None
         return self._home[i - 1]
+
+    def home_point(self, at):
+        i = bisect_right(self._times, at)
+        if i == 0:
+            return None
+        return self._points[i - 1]
+
+
+class PointClock:
+    """A market's point in force at a time. None before the first point.
+
+    Totals use this so a game-total band reads the total at the quote,
+    not the closing total. `rank` is the quote rank for that market.
+    """
+
+    def __init__(self, quotes: list[dict], rank):
+        best: dict = {}
+        for quote in quotes:
+            if quote.get("lead_hours", 0) < 0 or not _has_point(quote):
+                continue
+            snap = quote["snapshot_at"]
+            if snap not in best or rank(quote) > rank(best[snap]):
+                best[snap] = quote
+        self._times = sorted(best)
+        self._points = [_num(best[t].get("point")) for t in self._times]
+
+    def point_at(self, at):
+        i = bisect_right(self._times, at)
+        if i == 0:
+            return None
+        return self._points[i - 1]
 
 
 _FLIP = {"favorite": "underdog", "underdog": "favorite", "pickem": "pickem"}
@@ -105,12 +144,68 @@ def side_role(home_role, side: str | None):
     return None
 
 
+def _team_spread(home_point, side: str | None):
+    """This side's spread. Positive is an underdog. None when unknown."""
+    if home_point is None or side not in ("home", "away"):
+        return None
+    return home_point if side == "home" else -home_point
+
+
 def _fits(match_role: str, leg_role) -> bool:
     return match_role == "any" or leg_role == match_role
 
 
+def _in_band(value, lo, hi) -> bool:
+    """Inclusive. A missing number is outside a band that was set."""
+    if lo is None and hi is None:
+        return True
+    if value is None:
+        return False
+    number = value if isinstance(value, Decimal) else Decimal(str(value))
+    if lo is not None and number < Decimal(str(lo)):
+        return False
+    if hi is not None and number > Decimal(str(hi)):
+        return False
+    return True
+
+
+def first_fit(candidates, *, role=None, min_line=None, max_line=None,
+              min_price=None, max_price=None, min_spread=None, max_spread=None,
+              min_total=None, max_total=None):
+    """The earliest candidate that fits the role and the four bands.
+
+    `role` None is any role. A line band is the prop line (`player_key`
+    set). A game leg has no prop line, so a line band does not fit it.
+    Team spread and game total are the numbers in force at that quote.
+    """
+    for row in sorted(candidates, key=lambda item: item["locked_at"]):
+        if role is not None and row.get("leg_role") != role:
+            continue
+        if not _in_band(row.get("price"), min_price, max_price):
+            continue
+        if min_line is not None or max_line is not None:
+            if not row.get("player_key"):
+                continue
+            if not _in_band(row.get("point"), min_line, max_line):
+                continue
+        if not _in_band(row.get("team_spread"), min_spread, max_spread):
+            continue
+        if not _in_band(row.get("game_total"), min_total, max_total):
+            continue
+        return row
+    return None
+
+
 def _first(quotes, accept, rank):
     """The earliest snapshot with an accepted quote, and its best-ranked one."""
+    chosen = _best_by_snapshot(quotes, accept, rank)
+    if not chosen:
+        return None
+    return chosen[0]
+
+
+def _best_by_snapshot(quotes, accept, rank) -> list[dict]:
+    """Best-ranked accepted quote at each snapshot, earliest snapshot first."""
     by_snap: dict = {}
     for quote in quotes:
         if not accept(quote):
@@ -118,9 +213,7 @@ def _first(quotes, accept, rank):
         snap = quote["snapshot_at"]
         if snap not in by_snap or rank(quote) > rank(by_snap[snap]):
             by_snap[snap] = quote
-    if not by_snap:
-        return None
-    return by_snap[min(by_snap)]
+    return [by_snap[snap] for snap in sorted(by_snap)]
 
 
 def _has_point(quote) -> bool:
@@ -131,6 +224,23 @@ def _num(value):
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def _keep_changes(rows: list[dict]) -> list[dict]:
+    """Drop a snapshot that repeats the previous candidate's lock state.
+
+    The earliest quote that enters a band is unchanged: a later quote
+    with the same point, price, role, team spread and game total cannot
+    be the first one that fits.
+    """
+    kept = []
+    prev = None
+    for row in rows:
+        if prev is not None and all(prev[key] == row[key] for key in _STATE):
+            continue
+        kept.append(row)
+        prev = row
+    return kept
 
 
 def _game_result(market, side, home_score, away_score, point):
@@ -145,72 +255,115 @@ def _game_result(market, side, home_score, away_score, point):
     return pair[0] if side in ("home", "over") else pair[1]
 
 
-def game_official_legs(fact: dict, moneylines: list[dict],
-                       spreads: list[dict], totals: list[dict]) -> list[dict]:
-    """Official rows for one game's six legs.
+def _candidate(fact, market, side, team, quote, point, price, leg_role,
+               team_spread, game_total, result, player_key=""):
+    return {
+        "canonical_key": fact["canonical_key"],
+        "sport": fact["sport"],
+        "season": fact["season"],
+        "market": market,
+        "leg_side": side,
+        "player_key": player_key,
+        "match_role": "any",
+        "leg_role": leg_role,
+        "team": team,
+        "locked_at": quote["snapshot_at"],
+        "point": point,
+        "price": price,
+        "result": result,
+        "team_spread": team_spread,
+        "game_total": game_total,
+        "context_at_lock": True,
+    }
 
-    `fact` is the assembled byom_game_facts dict (identity and scores).
-    The quote lists are DraftKings pre-start quotes from
-    `game_facts._pre_start`: `snapshot_at` parsed, `lead_hours` set. A
-    quote after kickoff is never official.
+
+def game_lock_candidates(fact: dict, moneylines: list[dict],
+                         spreads: list[dict], totals: list[dict]) -> list[dict]:
+    """Every pre-kickoff candidate for one game's six legs.
+
+    One row per snapshot where the lock state changed, best-ranked quote
+    at that snapshot. `match_role` is 'any'. `leg_role`, `team_spread`
+    and `game_total` are the numbers in force then, so a later read can
+    pick the first row that fits a model's bands. A quote after kickoff
+    is not a candidate.
     """
     clock = RoleClock(spreads)
+    total_clock = PointClock(totals, _rank)
     pools = {"h2h": moneylines, "spreads": spreads, "totals": totals}
     home_score, away_score = fact.get("home_score"), fact.get("away_score")
     out = []
     for market, side, field in GAME_LEGS:
-        pool = pools[market]
-        wanted = ("any",) if market == "totals" else MATCH_ROLES
         team = {"home": fact.get("home_team"),
                 "away": fact.get("away_team")}.get(side)
-        for match_role in wanted:
-            def accept(q, match_role=match_role, market=market, side=side,
-                       field=field):
-                if q.get("lead_hours", -1) < 0:
-                    return False
-                if american_odds(q.get(field)) is None:
-                    return False
-                if market != "h2h" and not _has_point(q):
-                    return False
-                if market == "totals":
-                    return True
-                role = side_role(clock.home_role(q["snapshot_at"]), side)
-                return _fits(match_role, role)
 
-            quote = _first(pool, accept, _rank)
-            if quote is None:
-                continue
+        def accept(q, market=market, field=field):
+            if q.get("lead_hours", -1) < 0:
+                return False
+            if american_odds(q.get(field)) is None:
+                return False
+            if market != "h2h" and not _has_point(q):
+                return False
+            return True
+
+        rows = []
+        for quote in _best_by_snapshot(pools[market], accept, _rank):
             point = None if market == "h2h" else _num(quote.get("point"))
-            leg_role = (None if market == "totals"
-                        else side_role(clock.home_role(quote["snapshot_at"]), side))
-            out.append({
-                "canonical_key": fact["canonical_key"],
-                "sport": fact["sport"],
-                "season": fact["season"],
-                "market": market,
-                "leg_side": side,
-                "player_key": "",
-                "match_role": match_role,
-                "leg_role": leg_role,
-                "team": team,
-                "locked_at": quote["snapshot_at"],
-                "point": point,
-                "price": american_odds(quote.get(field)),
-                "result": _game_result(market, side, home_score, away_score, point),
-            })
+            if market == "spreads":
+                home_point = point
+            else:
+                home_point = clock.home_point(quote["snapshot_at"])
+            leg_role = None if market == "totals" else side_role(
+                clock.home_role(quote["snapshot_at"]), side)
+            game_total = point if market == "totals" else total_clock.point_at(
+                quote["snapshot_at"])
+            rows.append(_candidate(
+                fact, market, side, team, quote, point,
+                american_odds(quote.get(field)), leg_role,
+                None if market == "totals" else _team_spread(home_point, side),
+                game_total,
+                _game_result(market, side, home_score, away_score, point),
+            ))
+        out.extend(_keep_changes(rows))
     return out
 
 
-def prop_official_legs(fact: dict, pool: list[dict], clock: RoleClock,
-                       home_team: str | None, away_team: str | None) -> list[dict]:
-    """Official rows for one prop fact's over and under.
+def game_official_legs(fact: dict, moneylines: list[dict],
+                       spreads: list[dict], totals: list[dict]) -> list[dict]:
+    """One row per role: the first candidate that fits that role. No bands.
 
-    `fact` is the closing prop fact (who, which market, the actual stat).
-    `pool` is that player's DraftKings pre-start quotes for the market,
-    from `prop_facts._pre_start`. The role is the player's team's role
-    at the quote's snapshot. A player with no team has no role, so only
-    `any` can match. Graded at the official line with the same actual
-    the closing fact used. A player who did not play stays ungraded.
+    The builders write `game_lock_candidates` instead. This is the
+    role-only lock, so a reader that does not pass bands agrees with
+    `first_fit`.
+    """
+    grouped: dict = {}
+    for row in game_lock_candidates(fact, moneylines, spreads, totals):
+        grouped.setdefault((row["market"], row["leg_side"]), []).append(row)
+    out = []
+    for market, side, _field in GAME_LEGS:
+        wanted = ("any",) if market == "totals" else MATCH_ROLES
+        for match_role in wanted:
+            chosen = first_fit(
+                grouped.get((market, side), []),
+                role=None if match_role == "any" else match_role)
+            if chosen is None:
+                continue
+            locked = dict(chosen)
+            locked["match_role"] = match_role
+            out.append(locked)
+    return out
+
+
+def prop_lock_candidates(fact: dict, pool: list[dict], clock: RoleClock,
+                         home_team: str | None, away_team: str | None,
+                         total_clock: PointClock | None = None) -> list[dict]:
+    """Every pre-kickoff candidate for one prop's over and under.
+
+    The role and the team spread are the player's team at the quote.
+    A player with no team has no role and no team spread, so only a
+    model that asks for any role and no spread band can match. The
+    line band reads this quote's point. Graded at that point with the
+    same actual the closing fact used. A player who did not play stays
+    ungraded.
     """
     team = fact.get("team")
     if team and team == home_team:
@@ -222,34 +375,48 @@ def prop_official_legs(fact: dict, pool: list[dict], clock: RoleClock,
     actual = fact.get("actual") if fact.get("log_status") == "logged" else None
     out = []
     for side, field in (("over", "over_price"), ("under", "under_price")):
-        for match_role in MATCH_ROLES:
-            def accept(q, match_role=match_role, field=field):
-                if q.get("lead_hours", -1) < 0 or not _has_point(q):
-                    return False
-                if american_odds(q.get(field)) is None:
-                    return False
-                role = side_role(clock.home_role(q["snapshot_at"]), team_side)
-                return _fits(match_role, role)
+        def accept(q, field=field):
+            if q.get("lead_hours", -1) < 0 or not _has_point(q):
+                return False
+            return american_odds(q.get(field)) is not None
 
-            quote = _first(pool, accept, _capture_rank)
-            if quote is None:
-                continue
+        rows = []
+        for quote in _best_by_snapshot(pool, accept, _capture_rank):
             point = _num(quote.get("point"))
             graded = grade_ou(actual, point) if actual is not None else None
-            out.append({
-                "canonical_key": fact["canonical_key"],
-                "sport": fact["sport"],
-                "season": fact["season"],
-                "market": fact["market"],
-                "leg_side": side,
-                "player_key": fact["player_key"],
-                "match_role": match_role,
-                "leg_role": side_role(clock.home_role(quote["snapshot_at"]), team_side),
-                "team": team,
-                "locked_at": quote["snapshot_at"],
-                "point": point,
-                "price": american_odds(quote.get(field)),
-                "result": None if graded is None else (
+            home_point = clock.home_point(quote["snapshot_at"])
+            rows.append(_candidate(
+                fact, fact["market"], side, team, quote, point,
+                american_odds(quote.get(field)),
+                side_role(clock.home_role(quote["snapshot_at"]), team_side),
+                _team_spread(home_point, team_side),
+                None if total_clock is None else total_clock.point_at(
+                    quote["snapshot_at"]),
+                None if graded is None else (
                     graded[0] if side == "over" else graded[1]),
-            })
+                player_key=fact["player_key"],
+            ))
+        out.extend(_keep_changes(rows))
+    return out
+
+
+def prop_official_legs(fact: dict, pool: list[dict], clock: RoleClock,
+                       home_team: str | None, away_team: str | None,
+                       total_clock: PointClock | None = None) -> list[dict]:
+    """One row per role: the first candidate that fits that role. No bands."""
+    grouped: dict = {}
+    for row in prop_lock_candidates(
+            fact, pool, clock, home_team, away_team, total_clock):
+        grouped.setdefault(row["leg_side"], []).append(row)
+    out = []
+    for side in ("over", "under"):
+        for match_role in MATCH_ROLES:
+            chosen = first_fit(
+                grouped.get(side, []),
+                role=None if match_role == "any" else match_role)
+            if chosen is None:
+                continue
+            locked = dict(chosen)
+            locked["match_role"] = match_role
+            out.append(locked)
     return out

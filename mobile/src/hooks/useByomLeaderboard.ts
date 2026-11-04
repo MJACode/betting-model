@@ -35,6 +35,8 @@ export interface ByomLeaderboardRow {
   ungraded: boolean;
   /** This model's backtest failed. The other rows stay. */
   failed: boolean;
+  /** official or close, whichever number this row shows. */
+  timing: 'official' | 'close';
 }
 
 export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
@@ -68,7 +70,9 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
       if (seq.current !== id) return;
       const graded = await pool(models, 3, async (model) => {
         if (isWholeSeason(model.filters)) {
-          return { model, record: null as ByomRecord | null, ungraded: true, failed: false };
+          return {
+            model, record: null as ByomRecord | null, ungraded: true, failed: false, timing: 'close' as const,
+          };
         }
         try {
           const timed = await fetchByomScopedRecord(
@@ -78,10 +82,18 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
             model.sport === 'NBA' ? 'NBA' : 'NFL',
           );
           const rows = timed.headline === 'official' ? timed.official : timed.close;
-          return { model, record: recordFromRows(rows), ungraded: false, failed: false };
+          return {
+            model,
+            record: recordFromRows(rows),
+            ungraded: false,
+            failed: false,
+            timing: timed.headline,
+          };
         } catch (e: unknown) {
           if (isAbortError(e)) throw e;
-          return { model, record: null as ByomRecord | null, ungraded: false, failed: true };
+          return {
+            model, record: null as ByomRecord | null, ungraded: false, failed: true, timing: 'close' as const,
+          };
         }
       });
       if (seq.current !== id) return;
@@ -93,6 +105,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         showsUnits: item.record != null && showsUnits(item.model.filters),
         ungraded: item.ungraded,
         failed: item.failed,
+        timing: item.timing,
         model: item.model,
         record: item.record,
       })));
@@ -103,6 +116,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         rank: item.rank,
         ungraded: item.ungraded,
         failed: item.failed,
+        timing: item.timing,
       })));
     } catch (e: unknown) {
       if (seq.current !== id) return;
