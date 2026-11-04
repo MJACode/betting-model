@@ -34,6 +34,7 @@ import pandas as pd  # noqa: E402
 import config  # noqa: E402
 import models.nhl_props as np_  # noqa: E402
 import scripts.nhl_prop_backtest as bt  # noqa: E402
+from tracking.clv_math import CLV_EXACT_PUSH_EPS, clv_beat_rate  # noqa: E402
 
 pd.set_option("display.width", 320)
 pd.set_option("display.max_columns", 40)
@@ -270,7 +271,10 @@ def live_season() -> None:
                          "same book+line at close": int(has_close.sum()),
                          "two-way close": int(has_clv.sum()),
                          "mean CLV pp vs that close (no-vig)": round(float(b.clv_pp[has_clv].mean()), 2),
-                         "share CLV > 0": round(float((b.clv_pp[has_clv] > 0).mean()), 2),
+                         "share CLV > 0": (
+                             None if (rate := clv_beat_rate(
+                                 b.clv_pp[has_clv], eps=CLV_EXACT_PUSH_EPS)) is None
+                             else round(float(rate), 2)),
                          "units if taken at the close price": round(float(b.profit_close[has_close].sum()), 1),
                          "units at its own price, same bets": round(float(b.profit[has_close].sum()), 1)})
     show("Every candidate the card's rule finds, decided at the OPEN vs at the CLOSE (unders, live books, floor -200)",

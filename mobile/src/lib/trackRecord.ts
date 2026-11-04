@@ -6,6 +6,7 @@
  * per-model rows up to overall and per-sport summaries for display.
  */
 
+import { clvBeatRate } from '@/lib/clvBeat';
 import { isModelRetired } from '@/lib/thresholds';
 import type { ParlayTrackRow, TrackRecordRow } from '@/types';
 
@@ -25,12 +26,16 @@ export interface TrackRecordSummary {
   winRate: number; // wins / (wins + losses)
   clvSettled: number;
   clvBeat: number;
-  clvBeatRate: number | null; // clvBeat / clvSettled, same-book price
+  /** 0% same-book closes. Not in clvBeatRate. */
+  clvPush: number;
+  clvBeatRate: number | null; // clvBeat / (clvSettled - clvPush)
   clvGameSettled: number;
   clvGameBeat: number;
+  clvGamePush: number;
   clvGameBeatRate: number | null;
   clvPropSettled: number;
   clvPropBeat: number;
+  clvPropPush: number;
   clvPropBeatRate: number | null;
   marketClvSettled: number;
   marketClvBeat: number;
@@ -50,12 +55,15 @@ export const EMPTY_SUMMARY: TrackRecordSummary = {
   winRate: 0,
   clvSettled: 0,
   clvBeat: 0,
+  clvPush: 0,
   clvBeatRate: null,
   clvGameSettled: 0,
   clvGameBeat: 0,
+  clvGamePush: 0,
   clvGameBeatRate: null,
   clvPropSettled: 0,
   clvPropBeat: 0,
+  clvPropPush: 0,
   clvPropBeatRate: null,
   marketClvSettled: 0,
   marketClvBeat: 0,
@@ -72,10 +80,13 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   let risked = 0;
   let clvSettled = 0;
   let clvBeat = 0;
+  let clvPush = 0;
   let clvGameSettled = 0;
   let clvGameBeat = 0;
+  let clvGamePush = 0;
   let clvPropSettled = 0;
   let clvPropBeat = 0;
+  let clvPropPush = 0;
   let marketClvSettled = 0;
   let marketClvBeat = 0;
 
@@ -95,10 +106,13 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     risked += Number(r.risked ?? 0);
     clvSettled += Number(r.clv_settled ?? 0);
     clvBeat += Number(r.clv_beat ?? 0);
+    clvPush += Number(r.clv_push ?? 0);
     clvGameSettled += Number(r.clv_game_settled ?? 0);
     clvGameBeat += Number(r.clv_game_beat ?? 0);
+    clvGamePush += Number(r.clv_game_push ?? 0);
     clvPropSettled += Number(r.clv_prop_settled ?? 0);
     clvPropBeat += Number(r.clv_prop_beat ?? 0);
+    clvPropPush += Number(r.clv_prop_push ?? 0);
     marketClvSettled += Number(r.market_clv_settled ?? 0);
     marketClvBeat += Number(r.market_clv_beat ?? 0);
   }
@@ -117,13 +131,16 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
     winRate: decided > 0 ? wins / decided : 0,
     clvSettled,
     clvBeat,
-    clvBeatRate: clvSettled > 0 ? clvBeat / clvSettled : null,
+    clvPush,
+    clvBeatRate: clvBeatRate(clvBeat, clvSettled, clvPush),
     clvGameSettled,
     clvGameBeat,
-    clvGameBeatRate: clvGameSettled > 0 ? clvGameBeat / clvGameSettled : null,
+    clvGamePush,
+    clvGameBeatRate: clvBeatRate(clvGameBeat, clvGameSettled, clvGamePush),
     clvPropSettled,
     clvPropBeat,
-    clvPropBeatRate: clvPropSettled > 0 ? clvPropBeat / clvPropSettled : null,
+    clvPropPush,
+    clvPropBeatRate: clvBeatRate(clvPropBeat, clvPropSettled, clvPropPush),
     marketClvSettled,
     marketClvBeat,
     marketClvBeatRate: marketClvSettled > 0 ? marketClvBeat / marketClvSettled : null,

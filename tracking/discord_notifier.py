@@ -66,6 +66,7 @@ from tracking.publish_keys import (
 from tracking.publish_keys import key_partition_sql, lock_key_sql, posted_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
+from tracking.clv_math import clv_outcome
 from tracking.pick_integrity import refuse_mismatched
 
 ET = ZoneInfo("America/New_York")
@@ -2628,7 +2629,7 @@ def _tally(rows: list[tuple]) -> dict:
     was never on the board.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0,
-         "clv_n": 0, "clv_beat": 0, "live": 0}
+         "clv_n": 0, "clv_beat": 0, "clv_push": 0, "live": 0}
     for row in rows:
         _sport, _model_id, result, kelly, price, clv = row[:6]
         # is_live is optional so a caller passing the older 6-tuple still works.
@@ -2643,10 +2644,19 @@ def _tally(rows: list[tuple]) -> dict:
         # guard -- but a figure this easy to misread deserves both.
         # Column 6 is already NULL unless clv_method is standard_v2. Columns
         # 8 and 9 are the posted-stake units and risked.
+        # A same-book close that equals the price taken (0% at the stored
+        # grain) is a push. It is not a beat and it is not a loss, so it
+        # stays out of clv_n. The average, where one is taken, still
+        # includes it as 0. In-play rows stay out of all three counts.
         if clv is not None and not is_live:
-            t["clv_n"] += 1
-            if float(clv) > 0:
+            outcome = clv_outcome(clv)
+            if outcome == "push":
+                t["clv_push"] += 1
+            elif outcome == "beat":
+                t["clv_n"] += 1
                 t["clv_beat"] += 1
+            elif outcome == "loss":
+                t["clv_n"] += 1
         if result == "WIN":
             t["w"] += 1
         elif result == "LOSS":
@@ -2676,16 +2686,29 @@ def _tally(rows: list[tuple]) -> dict:
 
 
 def clv_line(t: dict) -> str:
-    """Share of graded bets that beat the closing line, with its DENOMINATOR.
+    """Headline beat rate, with its denominator.
 
-    The denominator is not decoration: CLV is only captured for game-level picks
-    that have a closing DK price, which today is a minority of settled bets
-    (props price in a different table). Publishing a bare percentage would imply
+    Beat rate is beats / (beats + losses). ``clv_n`` is that denominator.
+    A 0% close is a push (``clv_push``) and is not in it. The push count is
+    inside the parentheses when it is not zero: ``50% beat close (1/2, 7 push)``.
+    An all-push slate has no rate to divide, so the line is ``0 measured, N push``.
+    Nothing measured and no pushes → empty, and the caller omits the clause.
+
+    The denominator is not decoration: CLV is only captured where the same
+    book closed on the same line. Publishing a bare percentage would imply
     it covers every bet in the record beside it."""
-    if not t.get("clv_n"):
+    beats = int(t.get("clv_beat") or 0)
+    pushes = int(t.get("clv_push") or 0)
+    decisive = int(t.get("clv_n") or 0)
+    if decisive <= 0 and pushes <= 0:
         return ""
-    pct = t["clv_beat"] / t["clv_n"] * 100
-    return f"{pct:.0f}% beat close ({t['clv_beat']}/{t['clv_n']})"
+    if decisive <= 0:
+        return f"0 measured, {pushes} push"
+    pct = beats / decisive * 100
+    line = f"{pct:.0f}% beat close ({beats}/{decisive}"
+    if pushes:
+        line += f", {pushes} push"
+    return line + ")"
 
 
 def _tally_line(t: dict, with_clv: bool = False) -> str:
@@ -2716,6 +2739,8 @@ def snapshot_rows(game_date: str, published_at: str,
 
     def add(scope, sport, t, settled):
         roi = (t["units"] / t["risked"] * 100) if t["risked"] > 0 else None
+        # clv_n is beats + losses. A 0% close is clv_push and is not in
+        # this rate. No decisive row stores NULL, including an all-push slate.
         clv = (t["clv_beat"] / t["clv_n"] * 100) if t.get("clv_n") else None
         out.append((game_date, scope, sport, t["w"], t["l"], t["p"], settled,
                     round(t["units"], 4),

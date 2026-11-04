@@ -539,6 +539,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # touches no view, pick or existing function. Returns on a catalog read
     # once it exists. plpgsql, so it may sit before the posted-stake pair.
     "custom_model_backtest_posted_2026_11_03.sql",
+    # 2026-11-04 (mike): a 0% same-book close is a CLV push. The record
+    # view gains clv_push, clv_game_push and clv_prop_push. The average
+    # is unchanged. Does not rewrite picks, snapshots, units, or the
+    # win-loss record. Sits before the posted-stake pair, which stays
+    # last and only inserts units when they are absent.
+    "clv_push_beat_rate_2026_11_04.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

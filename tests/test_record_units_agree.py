@@ -380,6 +380,10 @@ def test_the_share_text_drops_a_zero_from_before_the_migration():
             (mobile / "src" / "lib" / "format.ts").read_text(encoding="utf-8"),
             encoding="utf-8",
         )
+        (folder / "clvBeat.ts").write_text(
+            (mobile / "src" / "lib" / "clvBeat.ts").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
         (folder / "package.json").write_text('{"type": "module"}\n', encoding="utf-8")
         proc = subprocess.run(
             [NODE, "--experimental-strip-types", "verify_share_record.ts"],

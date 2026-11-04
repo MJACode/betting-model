@@ -30,6 +30,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from tracking.clv_math import CLV_EXACT_PUSH_EPS, clv_beat_rate  # noqa: E402
+
 BREAKEVEN = 0.5238            # -110
 AMERICAN = -110
 LEAK_SUSPICION_WR = 0.55
@@ -159,9 +161,10 @@ def clv_report(picked_home: np.ndarray, close_spread: np.ndarray,
         return {"n": 0, "beat_close_pct": np.nan, "avg_move_captured": np.nan}
     move = open_spread[ok] - close_spread[ok]          # +ve = home side gained
     signed = np.where(picked_home[ok], move, -move)
+    rate = clv_beat_rate(signed, eps=CLV_EXACT_PUSH_EPS)
     return {
         "n": int(ok.sum()),
-        "beat_close_pct": float((signed > 0).mean()),
+        "beat_close_pct": np.nan if rate is None else float(rate),
         "avg_move_captured": float(signed.mean()),
     }
 

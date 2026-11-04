@@ -47,6 +47,7 @@ from data import local_store
 from data.ingestors.nfl_props_data_ingestor import norm_player_name
 from features.feature_engine import _parse_iso_ts
 from models.market_relative import devig, implied
+from tracking.clv_math import CLV_EXACT_PUSH_EPS, clv_beat_rate
 
 
 def main() -> None:
@@ -159,8 +160,10 @@ def main() -> None:
           f"against {100*(pts < 0).mean():.1f}%  |  "
           f"unchanged {100*(pts == 0).mean():.1f}%")
     if len(same):
+        rate = clv_beat_rate(same, eps=CLV_EXACT_PUSH_EPS)
+        beat = "n/a" if rate is None else f"{100 * rate:.1f}%"
         print(f"  where the line held ({len(same)} bets): price CLV "
-              f"{100*same.mean():+.2f}pp, beat close {100*(same > 0).mean():.1f}%")
+              f"{100*same.mean():+.2f}pp, beat close {beat}")
     print("\n  Positive = the market moved TOWARD us after we bet.\n")
 
     print(f"{'season':>8} {'bets':>6} {'mean pts':>10} {'our way':>10}")
