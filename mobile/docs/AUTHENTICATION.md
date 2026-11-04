@@ -20,7 +20,8 @@ dead end.
 | Session state | `src/hooks/useAuth.ts` | Module store, one Supabase subscription, AppState-driven refresh |
 | Sign-in screen | `src/screens/SignInScreen.tsx` | Required on cold open once `AUTH_ENABLED` is on. No skip. |
 | Settings entry | `src/screens/SettingsScreen.tsx` | Account card renders **only** when `AUTH_ENABLED` |
-| Verification | `scripts/verify_auth.ts` | 54 assertions — `npx tsx scripts/verify_auth.ts` |
+| Verification | `scripts/verify_auth.ts` | `npx tsx scripts/verify_auth.ts` |
+| App Review code | `scripts/verify_app_review_sign_in.ts` | One demo email. The fixed code is a Supabase secret |
 
 When `AUTH_ENABLED` is on, SignIn is the first screen. There is no guest path
 and no "Signing in is optional" line. Terms and Privacy open
@@ -180,6 +181,42 @@ JS-only, so: **Actions → Mobile OTA update (production) → Run workflow**.
   but confirm it on a device before shipping.
 
 ---
+
+## App Review demo account
+
+Apple's reviewer signs in as `review@signalbase-ai.com` with the six-digit
+code in `APP_STORE_METADATA.md` (User name, Password, and the review notes).
+The app has no password field. That code is not in the binary.
+
+The address is `APP_REVIEW_DEMO_EMAIL` in `src/lib/appReview.ts`. For that
+address only, Email me a code does not call `signInWithOtp`, and the code
+step calls the `app-review-sign-in` edge function. Continue with Apple and
+Continue with Google do the same when that email is already in the field.
+An empty field still starts Apple or Google.
+
+The function accepts the code only when both secrets are set:
+
+```
+APP_REVIEW_DEMO_EMAIL=review@signalbase-ai.com
+APP_REVIEW_DEMO_OTP=<the six-digit code in APP_STORE_METADATA.md>
+```
+
+`APP_REVIEW_DEMO_EMAIL` has to be that exact address. A different secret
+never receives a call from this app. Deploy:
+
+```
+supabase functions deploy app-review-sign-in --no-verify-jwt
+```
+
+Then apply `data/migrations/app_review_sign_in_attempts_2026_11_04.sql` in
+the SQL editor. It is not in `ACTIVE_MIGRATIONS`, so the worker will not
+apply it. Until that table exists, the function refuses every code,
+including the right one. The function creates the auth user on the first
+success. No mailbox is required.
+
+Wrong codes are capped at 8 per 15 minutes. The right code is not capped.
+Deleting the review account still asks for this code, because reauth uses
+the same verify path.
 
 ## App Store note (guideline 4.8)
 

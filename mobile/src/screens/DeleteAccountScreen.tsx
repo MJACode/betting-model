@@ -31,6 +31,7 @@ import {
   signInWithProvider,
   verifyEmailCode,
 } from '@/lib/auth';
+import { isAppReviewDemoEmail } from '@/lib/appReview';
 import { AUTH_ENABLED, EMAIL_OTP_LENGTH } from '@/lib/authConfig';
 import { openManageSubscription } from '@/lib/billing';
 import { isEntitled } from '@/lib/billingHelpers';
@@ -218,6 +219,9 @@ export function DeleteAccountScreen() {
 
   useEffect(() => {
     if (!reauth || method !== 'email' || !email) return;
+    // This address has no emailed code. Skip the send so the sheet does not
+    // say one is on the way.
+    if (isAppReviewDemoEmail(email)) return;
     if (sentFor.current === email) {
       setCodeSent(true);
       return;
@@ -337,8 +341,10 @@ export function DeleteAccountScreen() {
     : phase === 'error' || phase === 'local'
       ? 'Try again'
       : 'Continue';
-  const emailBody =
-    reauthBusy && !codeSent
+  const reviewAccount = isAppReviewDemoEmail(email ?? '');
+  const emailBody = reviewAccount
+    ? reauthEmailBody(email ?? '')
+    : reauthBusy && !codeSent
       ? 'Sending a 6-digit code…'
       : codeSent
         ? reauthEmailBody(email ?? 'your email')
@@ -520,21 +526,23 @@ export function DeleteAccountScreen() {
               <View style={styles.sheetActions}>
                 {method === 'email' ? (
                   <View style={styles.sheetRow}>
-                    <Pressable
-                      onPress={() => {
-                        sentFor.current = null;
-                        void sendCode();
-                      }}
-                      disabled={reauthBusy}
-                      accessibilityRole="button"
-                      accessibilityLabel="Send a new code"
-                      accessibilityState={{ disabled: reauthBusy }}
-                      style={({ pressed }) => [styles.sheetSide, pressed && styles.pressed]}
-                    >
-                      <Text style={[styles.sheetSideText, reauthBusy && styles.textBtnOff]}>
-                        Send a new code
-                      </Text>
-                    </Pressable>
+                    {reviewAccount ? null : (
+                      <Pressable
+                        onPress={() => {
+                          sentFor.current = null;
+                          void sendCode();
+                        }}
+                        disabled={reauthBusy}
+                        accessibilityRole="button"
+                        accessibilityLabel="Send a new code"
+                        accessibilityState={{ disabled: reauthBusy }}
+                        style={({ pressed }) => [styles.sheetSide, pressed && styles.pressed]}
+                      >
+                        <Text style={[styles.sheetSideText, reauthBusy && styles.textBtnOff]}>
+                          Send a new code
+                        </Text>
+                      </Pressable>
+                    )}
                     <Pressable
                       onPress={() => void onConfirmCode()}
                       disabled={reauthBusy || !isCompleteOtp(code)}

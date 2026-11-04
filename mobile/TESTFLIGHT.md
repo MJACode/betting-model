@@ -86,6 +86,12 @@ with status "Processing" (15–30 min) → "Ready to Submit" → fill out:
   - **Email:** matt.alksninis@gmail.com
   - **Privacy Policy URL:** https://signalbase-ai.com/privacy
   - **What to Test:** see `APP_STORE_METADATA.md`
+  - **App Review sign-in** is not a TestFlight tester account. The demo
+    email and fixed code are in `APP_STORE_METADATA.md`. They work only
+    after `APP_REVIEW_DEMO_EMAIL` and `APP_REVIEW_DEMO_OTP` are set on the
+    `app-review-sign-in` edge function and
+    `data/migrations/app_review_sign_in_attempts_2026_11_04.sql` has been
+    applied by hand. See `mobile/docs/AUTHENTICATION.md`.
 - **Export Compliance:** "Does your app use encryption?" → **No** (we set
   `ITSAppUsesNonExemptEncryption: false` in `app.json` so this should auto-fill).
 
