@@ -228,14 +228,22 @@ Matt, 2026-11-04. A builder bet becomes official at the first DraftKings
 quote at or before kickoff where the leg fits the model's rules and the
 side has an American price. That line and price are the bet of record. A
 later move does not change it. The closing line above is still graded
-beside it. Only the role (favorite, underdog, pick'em) can change with the
-line. It is read from the DraftKings home spread in force at that
-snapshot, so each leg has one official row per role a model can ask for:
-`any`, `favorite`, `underdog`, `pickem`. A total has only `any`. A role
-with no spread in force yet matches only `any`. Props are the same at the
-player line, using the role of the player's team. The code is
-`byom/official.py`. The rows are `byom_official_legs`, written by the
-game and prop builders in the same transaction as the facts. NFL only.
+beside it. The rules that move with the quote are the role (favorite,
+underdog, pick'em, from the DraftKings home spread in force) and the
+line, price, team-spread and game-total bands. The builder stores one
+candidate per pre-kickoff snapshot where those numbers changed
+(`context_at_lock`, `team_spread`, `game_total` on `byom_official_legs`).
+`byom_legs` locks the earliest candidate that fits the role and the bands
+together. A line band is the prop line. A team spread of +3 to +7 is
+`min_team_spread` / `max_team_spread`. A price band is that quote's
+American price. A total has no role. A role with no spread in force yet
+matches only a model that asks for any role. Props use the role of the
+player's team. The code is `byom/official.py`. NFL only.
+
+Rows stored before `byom_official_lock_bands_2026_11_04.sql` have
+`context_at_lock` false. A band on those rows still reads the closing
+line, so the lock does not move until the official rebuild rewrites the
+candidates. The closing timing's bands are still the closing line.
 
 Staking is the main models' `stake_for`: 1u to win, risk capped at 3u
 (`byom_risk_units`, `byom_win_units`). A -400 win is +0.75u. A -400 loss
@@ -250,10 +258,13 @@ is in `ACTIVE_MIGRATIONS`:
 | `byom_bets(season, filters, timing)` | the counted bets, newest first, with `byom_leg_label`; 500 per call, and `total_bets` |
 | `byom_backtest(season, filters)` | unchanged columns; the closing rows of `byom_record` |
 
-Line, price, spread, and total band filters are checked against the
-locked quote's line and price, or against the closing game line. They do
-not move the lock. The app leads with the official record, shows the
-closing line under it, and lists the bets on `ByomBetsScreen`.
+Line, price, spread, and total bands are part of the official lock
+search (`data/migrations/byom_official_lock_bands_2026_11_04.sql`). The
+app leads with the official record when that record has a bet. An empty
+official record beside a closing record leads with the close, so the
+card is not 0-0 while the rebuild is unfinished or for a season the
+official build does not cover. The closing line stays under the official
+headline. The bets are on `ByomBetsScreen`.
 
 ## Refresh
 

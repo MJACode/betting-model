@@ -506,6 +506,8 @@ export type RootStackParamList = {
     filters: import('@/lib/byomFilters').ByomFilters;
     sport: 'NFL' | 'NBA';
     title?: string;
+    /** The card's headline. Omitted starts on official for NFL. */
+    timing?: 'official' | 'close';
   };
   // playerType is MLB-only (it picks batter vs pitcher chips); every other
   // sport's chips come from the sport alone.

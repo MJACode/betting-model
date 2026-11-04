@@ -21,6 +21,7 @@ export function ByomBetCount({
   blocked = null,
   closeRecord = null,
   onShowBets,
+  closingHeadline = false,
 }: {
   record: ByomRecord | null;
   loading: boolean;
@@ -34,6 +35,8 @@ export function ByomBetCount({
   closeRecord?: ByomRecord | null;
   /** Opens the list of the bets this count is made of. */
   onShowBets?: () => void;
+  /** NFL fallback: this count is the close because official rows are empty. */
+  closingHeadline?: boolean;
 }) {
   if (blocked) {
     return (
@@ -77,6 +80,7 @@ export function ByomBetCount({
   const closeUnits = closeRecord != null && showsUnits && closeRecord.units != null
     ? formatSignedUnits(closeRecord.units)
     : null;
+  const closingLead = closeRecord == null && closingHeadline;
   const closeText = closeRecord == null
     ? null
     : closeRecord.bets === 0
@@ -85,13 +89,21 @@ export function ByomBetCount({
   return (
     <View style={styles.wrap}>
     <View style={styles.bar} accessible accessibilityRole="summary"
-      accessibilityLabel={closeRecord != null ? `At the official line: ${label}` : label}>
+      accessibilityLabel={
+        closeRecord != null ? `At the official line: ${label}`
+          : closingLead ? `At the closing line: ${label}`
+            : label
+      }>
       <View>
         <Text style={styles.kicker}>Bets that match</Text>
         <Text style={styles.count}>{record.bets}</Text>
       </View>
       <View style={styles.right}>
-        <Text style={styles.kickerRight}>{closeRecord != null ? 'official line · units · record' : 'units · record'}</Text>
+        <Text style={styles.kickerRight}>{
+          closeRecord != null ? 'official line · units · record'
+            : closingLead ? 'closing line · units · record'
+              : 'units · record'
+        }</Text>
         <Text style={styles.recordLine}>
           {unitsText != null ? (
             <Text style={[styles.units, { color: unitsColor }]}>{unitsText} </Text>

@@ -109,10 +109,11 @@ function BetRow({ bet, timing, first, last }: {
 
 export function ByomBetsScreen() {
   const navigation = useNavigation<Nav>();
-  const { filters: rawFilters, sport, title } = useRoute<Route>().params;
+  const { filters: rawFilters, sport, title, timing: openedAt } = useRoute<Route>().params;
   const { scope } = useByomSeason();
   const offersOfficial = headlineTiming(sport) === 'official';
-  const [timing, setTiming] = useState<ByomTiming>(offersOfficial ? 'official' : 'close');
+  const [timing, setTiming] = useState<ByomTiming>(
+    openedAt ?? (offersOfficial ? 'official' : 'close'));
   const [list, setList] = useState<LoadedList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

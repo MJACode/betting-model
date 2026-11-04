@@ -83,6 +83,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           ungraded={item.ungraded}
           failed={item.failed}
           emptyLabel={byomEmptyLabel(sport === 'NBA' ? 'NBA' : 'NFL', facts.status, item.model.filters)}
+          closingHeadline={sport === 'NFL' && item.timing === 'close'}
           onPress={() => navigation.navigate('ByomDetail', { modelId: item.model.model_id })}
         />
       )}

@@ -460,6 +460,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # DDL once the table, grants, policy and five marked functions exist.
     # Does not touch picks or the record views.
     "byom_official_legs_2026_11_04.sql",
+    # 2026-11-04 (Matt): the official lock search includes line, price,
+    # team-spread and game-total bands. Replaces byom_legs. Adds
+    # team_spread, game_total and context_at_lock, and the snapshot to
+    # the primary key. Keeps byom_official_legs_v1 in the function so the
+    # file above still skips. Does not write picks.
+    "byom_official_lock_bands_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

@@ -8,10 +8,18 @@ from pathlib import Path
 
 import pytest
 
-from byom.official import RoleClock, game_official_legs, prop_official_legs
+from byom.official import (
+    RoleClock,
+    first_fit,
+    game_lock_candidates,
+    game_official_legs,
+    prop_lock_candidates,
+    prop_official_legs,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL_NAME = "byom_official_legs_2026_11_04.sql"
+BAND_SQL = "byom_official_lock_bands_2026_11_04.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -109,6 +117,68 @@ def test_the_role_clock_holds_the_last_spread():
     assert clock.home_role(KICK) == "underdog"
 
 
+def test_underdog_spread_band_locks_the_first_quote_inside_it_not_the_open():
+    # Ex A. Home opens +2.5, then +3.5. Underdogs +3 to +7 lock +3.5.
+    spreads = [_q("spreads", 300, 2.5, -110, -110),
+               _q("spreads", 100, 3.5, -110, -110)]
+    home = [row for row in game_lock_candidates(FACT, [], spreads, [])
+            if (row["market"], row["leg_side"]) == ("spreads", "home")]
+    locked = first_fit(home, role="underdog", min_spread=3, max_spread=7)
+    assert locked["point"] == Decimal("3.5")
+    assert locked["team_spread"] == Decimal("3.5")
+    assert locked["locked_at"] == KICK - timedelta(hours=100)
+    # The open is a candidate, and it is the role-only lock.
+    assert first_fit(home, role="underdog")["point"] == Decimal("2.5")
+
+
+def test_moneyline_price_band_locks_the_first_quote_inside_it():
+    # Ex B. ML dogs +150 to +250. Opens +260, then +200. Lock +200.
+    spreads = [_q("spreads", 300, 3.5, -110, -110)]
+    h2h = [_q("h2h", 280, None, 260, -320),
+           _q("h2h", 100, None, 200, -240)]
+    home = [row for row in game_lock_candidates(FACT, h2h, spreads, [])
+            if (row["market"], row["leg_side"]) == ("h2h", "home")]
+    locked = first_fit(home, role="underdog", min_price=150, max_price=250)
+    assert locked["price"] == Decimal("200")
+    assert locked["locked_at"] == KICK - timedelta(hours=100)
+    assert first_fit(home, role="underdog")["price"] == Decimal("260")
+
+
+def test_a_total_band_and_a_prop_line_band_lock_the_first_quote_inside_them():
+    spreads = [_q("spreads", 300, 3.0, -110, -110)]
+    totals = [_q("totals", 200, 51.0, -110, -110),
+              _q("totals", 50, 45.5, -110, -110)]
+    over = [row for row in game_lock_candidates(FACT, [], spreads, totals)
+            if (row["market"], row["leg_side"]) == ("totals", "over")]
+    locked = first_fit(over, min_total=44, max_total=48)
+    assert locked["point"] == Decimal("45.5")
+    assert locked["game_total"] == Decimal("45.5")
+    # A spread bet reads the total in force at its own quote.
+    home_spread = [row for row in game_lock_candidates(FACT, [], spreads, totals)
+                   if (row["market"], row["leg_side"]) == ("spreads", "home")]
+    # The only spread quote is 300h before the 45.5 total, so the total
+    # in force is the 51 that opened at 200h? 300h is earlier than 200h.
+    # At 300 hours before kickoff no total has posted yet.
+    assert home_spread[0]["game_total"] is None
+    clock = RoleClock(spreads)
+    fact = {"canonical_key": "k", "sport": "NFL", "season": 2026,
+            "market": "player_pass_yds", "player_key": "jalen hurts",
+            "team": "PHI", "actual": Decimal("231"), "log_status": "logged"}
+    pool = [
+        {"snapshot_at": KICK - timedelta(hours=200), "lead_hours": 200.0,
+         "point": Decimal("180.5"), "over_price": -110, "under_price": -110,
+         "captured_at": None, "prop_id": 1},
+        {"snapshot_at": KICK - timedelta(hours=50), "lead_hours": 50.0,
+         "point": Decimal("220.5"), "over_price": -115, "under_price": -105,
+         "captured_at": None, "prop_id": 2},
+    ]
+    overs = [row for row in prop_lock_candidates(fact, pool, clock, "PHI", "DAL")
+             if row["leg_side"] == "over"]
+    line = first_fit(overs, min_line=200, max_line=240)
+    assert line["point"] == Decimal("220.5")
+    assert line["result"] == "win"
+
+
 def test_a_prop_locks_on_the_first_priced_line_and_grades_on_that_line():
     clock = RoleClock([_q("spreads", 300, 3.5, -110, -110)])
     fact = {"canonical_key": "k", "sport": "NFL", "season": 2026,
@@ -141,11 +211,17 @@ def test_a_prop_locks_on_the_first_priced_line_and_grades_on_that_line():
 def test_the_file_is_registered_and_guards_on_what_it_builds():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert SQL_NAME in ACTIVE_MIGRATIONS
+    assert BAND_SQL in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(BAND_SQL) == ACTIVE_MIGRATIONS.index(SQL_NAME) + 1
     text = (ROOT / "data/migrations" / SQL_NAME).read_text(encoding="utf-8")
     assert "byom_official_legs_v1" in text
     # The guard never casts a table that may not exist.
     guard = text.split("RAISE NOTICE 'byom official legs already present")[0]
     assert "'public.byom_official_legs'::regclass" not in guard
+    bands = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    assert "byom_official_lock_bands_v1" in bands
+    # The previous file's guard still sees its marker in the replaced body.
+    assert "byom_official_legs_v1" in bands.split("CREATE OR REPLACE FUNCTION public.byom_legs", 1)[1]
 
 
 @pytest.fixture
@@ -173,7 +249,7 @@ def scratch():
                      "byom_prop_facts_dk_prices_2026_10_28.sql",
                      "byom_saved_models_2026_10_16.sql",
                      "byom_prop_phase_a_filters_2026_10_29.sql",
-                     SQL_NAME, SQL_NAME):
+                     SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -291,6 +367,138 @@ def test_anon_reads_and_cannot_write(scratch):
             cur.execute("DELETE FROM byom_official_legs")
     finally:
         cur.execute("RESET ROLE")
+
+
+def test_spread_and_price_bands_move_the_official_lock(scratch):
+    """Ex A and Ex B, in the RPC. The close stays outside the band."""
+    _pg, cur = scratch
+    cur.execute("""
+        INSERT INTO byom_game_facts (
+          canonical_key, sport, season, week, away_team, home_team,
+          game_date, commence_time, line_basis, home_score, away_score,
+          dk_spread_home, dk_total, home_rest_days, away_rest_days,
+          home_role, away_role, is_primetime,
+          ml_home_result, ml_away_result, dk_ml_home_price, dk_ml_away_price,
+          ats_home_result, ats_away_result,
+          dk_spread_home_price, dk_spread_away_price,
+          ou_over_result, ou_under_result,
+          dk_total_over_price, dk_total_under_price)
+        VALUES
+          ('2026_08_BUF_KC', 'NFL', 2026, 8, 'BUF', 'KC', '2026-11-02',
+           '2026-11-03 00:20:00+00', 'DraftKings line at game start', 24, 20,
+           8.0, 51.0, 7, 7, 'underdog', 'favorite', false,
+           'loss', 'win', 260, -320, 'loss', 'win', -110, -110,
+           'loss', 'win', -110, -110);
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result,
+          team_spread, game_total, context_at_lock)
+        VALUES
+          ('2026_08_BUF_KC', 'NFL', 2026, 'spreads', 'home', '', 'any',
+           'underdog', 'KC', '2026-10-20 00:00+00', 2.5, -110, 'loss',
+           2.5, 51.0, true),
+          ('2026_08_BUF_KC', 'NFL', 2026, 'spreads', 'home', '', 'any',
+           'underdog', 'KC', '2026-10-28 00:00+00', 3.5, -110, 'win',
+           3.5, 47.0, true),
+          ('2026_08_BUF_KC', 'NFL', 2026, 'h2h', 'home', '', 'any',
+           'underdog', 'KC', '2026-10-20 00:00+00', NULL, 260, 'loss',
+           2.5, 51.0, true),
+          ('2026_08_BUF_KC', 'NFL', 2026, 'h2h', 'home', '', 'any',
+           'underdog', 'KC', '2026-10-28 00:00+00', NULL, 200, 'win',
+           3.5, 47.0, true);
+    """)
+    cur.execute("""
+        SELECT point, price FROM byom_bets(
+          2026,
+          '{"markets":["spreads"],"side":"home","role":"underdog",
+            "weeks":[8],"min_team_spread":3,"max_team_spread":7}',
+          'official')
+    """)
+    assert cur.fetchall() == [(Decimal("3.5"), Decimal("-110"))]
+    cur.execute("""
+        SELECT price FROM byom_bets(
+          2026,
+          '{"markets":["h2h"],"side":"home","role":"underdog",
+            "weeks":[8],"min_price":150,"max_price":250}',
+          'official')
+    """)
+    assert cur.fetchall() == [(Decimal("200"),)]
+    # The closing spread is +8 and the closing price is +260. Neither band
+    # keeps the close. The official lock is not dropped because of that.
+    cur.execute("""
+        SELECT timing, bets FROM byom_record(
+          2026,
+          '{"markets":["spreads"],"side":"home","role":"underdog",
+            "weeks":[8],"min_team_spread":3,"max_team_spread":7}')
+         ORDER BY timing
+    """)
+    assert cur.fetchall() == [("official", 1)]
+
+
+def test_an_old_role_row_still_reads_the_closing_spread(scratch):
+    """Before the rebuild, context_at_lock is false and the band uses the close."""
+    _pg, cur = scratch
+    cur.execute("""
+        INSERT INTO byom_game_facts (
+          canonical_key, sport, season, week, away_team, home_team,
+          game_date, commence_time, line_basis, home_score, away_score,
+          dk_spread_home, dk_total, home_rest_days, away_rest_days,
+          home_role, away_role, is_primetime,
+          ml_home_result, ml_away_result, dk_ml_home_price, dk_ml_away_price,
+          ats_home_result, ats_away_result,
+          dk_spread_home_price, dk_spread_away_price,
+          ou_over_result, ou_under_result,
+          dk_total_over_price, dk_total_under_price)
+        VALUES
+          ('2026_09_NYJ_NE', 'NFL', 2026, 9, 'NYJ', 'NE', '2026-11-08',
+           '2026-11-09 00:20:00+00', 'DraftKings line at game start', 17, 20,
+           4.0, 44.0, 7, 7, 'underdog', 'favorite', false,
+           'loss', 'win', 160, -190, 'win', 'loss', -110, -110,
+           'loss', 'win', -110, -110);
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result)
+        VALUES
+          ('2026_09_NYJ_NE', 'NFL', 2026, 'spreads', 'home', '', 'underdog',
+           'underdog', 'NE', '2026-11-01 00:00+00', 2.5, -110, 'win');
+    """)
+    cur.execute("""
+        SELECT point, price FROM byom_bets(
+          2026,
+          '{"markets":["spreads"],"side":"home","role":"underdog",
+            "weeks":[9],"min_team_spread":3,"max_team_spread":7}',
+          'official')
+    """)
+    # The stored point is +2.5. The close is +4, which is inside +3 to +7,
+    # so the pre-rebuild row is kept. The lock does not move to a quote
+    # that was never stored.
+    assert cur.fetchall() == [(Decimal("2.5"), Decimal("-110"))]
+
+
+def test_a_missing_official_table_skips_the_write_and_logs(caplog):
+    import logging
+
+    from byom.load import write_official_legs
+
+    class Conn:
+        def __init__(self):
+            self.writes = []
+
+        def execute(self, sql, params=None):
+            self.writes.append(sql)
+            class Result:
+                def fetchone(_self):
+                    return (False,)
+            return Result()
+
+        def executemany(self, sql, rows):
+            raise AssertionError("official write ran")
+
+    conn = Conn()
+    with caplog.at_level(logging.ERROR, logger="byom.load"):
+        assert write_official_legs(conn, ["2026_08_BUF_KC"], [{"canonical_key": "x"}], False) == 0
+    assert any("official-leg write skipped" in rec.message for rec in caplog.records)
+    assert all("DELETE" not in sql and "INSERT" not in sql for sql in conn.writes)
 
 
 def test_unknown_keys_and_timing_still_raise(scratch):
