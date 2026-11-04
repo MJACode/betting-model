@@ -259,17 +259,33 @@ def test_the_periods_share_reads_only_earlier_seasons():
     assert Q.period_share(gp, "q1", 2025) == pytest.approx(56.0 / 224.0)
 
 
-def test_family_b_bets_exactly_the_games_the_live_rule_would(ran):
-    prep = ran["prep"]
-    sig = prep["signal"].set_index("game_id")["strength"]
+@pytest.fixture(scope="module")
+def ran_live():
+    """A synthetic world read the live decision function's way: player-shaped box
+    rows, the lab's ratings built from the same rows, and an artifact of the
+    world's own full-game team-total residuals (it only prices the offer)."""
+    from scripts import nba_game2_market as M2
+    from scripts import nba_game5 as G5
+    w = G5.synthetic_world()
+    box = Q.synthetic_box(w)
+    raw = Q.synthetic_tt(w)
+    prep = Q.build(w["games"], w["games_p"], w["close"], w["pe"], raw, tl.team_box(box, w["games"]),
+                   say=lambda *_: None)
+    res = M2.team_total_resid(w["close"], w["games"])
+    art = {"kind": tt.ARTIFACT_KIND, "built_at": "synthetic test world",
+           "tt_resid": [(int(s), float(r)) for s, r in zip(res["season"], res["resid"])]}
+    return {"prep": prep, "raw": raw, "box": box, "art": art, "games": w["games"]}
+
+
+def test_family_b_bets_exactly_the_games_the_live_decision_function_bets(ran_live):
+    prep, games = ran_live["prep"], ran_live["games"]
+    season = games.set_index("game_id")["season"]
     for p in Q.PERIODS:
-        cand = prep["periods"][p]["cand_b"]
-        b = Q._picks(cand, Q.B_SIDE, Q.B_CUT, "strength")
-        assert len(b) and (sig.reindex(b["game_id"]) <= -Q.B_CUT).all()
-        nb = prep["periods"][p]["neutral_b"]
-        ok = nb[(nb["side"] == "under") & nb["book"].isin(H.BETTABLE) & (nb["price"] >= H.PRICE_FLOOR)]
-        want = set(ok["game_id"]) & set(sig[sig <= -Q.B_CUT].index)
-        assert set(b["game_id"]) == want
+        live = Q.live_rule_games(games, ran_live["raw"], ran_live["box"], ran_live["art"], prep["times"], p)
+        b = Q._picks(prep["periods"][p]["cand_b"], Q.B_SIDE, Q.B_CUT, "strength")
+        for s in Q.GRADED:
+            mine = {g for g in b["game_id"] if season[g] == s}
+            assert mine and mine == live[s], (p, s, sorted(mine ^ live[s])[:5])
 
 
 # ── the placebo ─────────────────────────────────────────────────────────────

@@ -570,6 +570,30 @@ def b_signal(proj: pd.DataFrame) -> pd.DataFrame:
     return s[np.isfinite(s["strength"].to_numpy(float))].reset_index(drop=True)
 
 
+def live_rule_games(games: pd.DataFrame, tt_raw: pd.DataFrame, box: pd.DataFrame, art: dict,
+                    times: pd.DataFrame, period: str, seasons=GRADED, min_games: int = B_MIN_GAMES) -> dict:
+    """{season: game ids} the LIVE decision function, models.nba_team_total_luck.decide,
+    bets when it is handed one period's home team-total quotes in place of the
+    full-game ones, at the lab's decision instants, with the live games rule.
+    The check that family B is the live rule and not a copy of it. decide reads
+    no result of a game it decides; `art` only prices the offer (bucket_uplift 0)."""
+    rows = tt_raw[tt_raw["market"] == RAW_TT[(period, "home")]].copy()
+    rows["market"] = tt.MARKET
+    rows["created_at"] = rows["snapshot_at"]
+    out = {}
+    for s in seasons:
+        g = games[games["season"] == s]
+        t = times[times["game_id"].isin(set(g["game_id"]))]
+        targets = g[g["game_id"].isin(set(t["game_id"]))][["game_id", "season", "game_date", "home_team", "away_team"]]
+        final = g[g["home_score"].notna()][["game_id", "season", "game_date", "home_team", "away_team",
+                                            "home_score", "away_score"]]
+        sched = g[["game_id", "game_date", "home_team", "away_team"]]
+        bets, _, _ = tt.decide(targets, tt.quote_frame(rows, g), box[box["game_id"].isin(set(final["game_id"]))],
+                               final, t, art, scheduled=sched, bucket_uplift=0.0, min_games=min_games)
+        out[int(s)] = {b.game_id for b in bets}
+    return out
+
+
 def period_share(games_p: pd.DataFrame, period: str, season: int) -> float:
     """The period's share of full-game points (both teams, final scores with
     overtime), over trusted games of seasons SHAPE_FIRST .. season-1."""
@@ -871,6 +895,19 @@ def synthetic_tt(world: dict, seed: int = 5, graded=GRADED, noise: float = 1.2) 
                     rows.append({**base, "bookmaker": "hardrockbet", "total_line": main + k,
                                  "over_price": float(po), "under_price": float(pu)})
     return pd.DataFrame(rows)[TT_COLS]
+
+
+def synthetic_box(world: dict) -> pd.DataFrame:
+    """Player-log-shaped rows (one per team-game) from G5.synthetic_world's team
+    sums, so the live decision function, which builds its ratings from player
+    rows (models.nba_total_luck.team_box), can read the world: offensive
+    rebounds and turnovers 0, field-goal attempts set so a team's possessions
+    estimate is its own `poss`."""
+    tb = world["tb"]
+    return pd.DataFrame({"game_id": tb["game_id"], "team": tb["team"], "points": tb["pts"],
+                         "fg_att": tb["poss"] - tl.FTA_POSS * tb["fta"], "fg3_made": tb["fg3m"],
+                         "fg3_att": tb["fg3a"], "ft_made": tb["ftm"], "ft_att": tb["fta"],
+                         "offensive_reb": 0.0, "turnovers": 0.0})
 
 
 def synthetic_prep(world: dict | None = None, say=lambda *_: None) -> dict:
