@@ -92,6 +92,11 @@ REF_LEAD_MIN = 60                         # decision time of a game with no prop
 STATUS_FIRST = 2022                       # 2021-22: the first season the report covers every game
 FIT_STATUSES = ("Doubtful", "Questionable", "Probable", "Available")
 K_GRID = (25.0, 50.0, 100.0, 200.0, 400.0, 800.0, 1600.0)
+# doc section 14 (2026-11-03, before any grade): points price through a per-line logistic in log(mean)
+POINTS_LINES = tuple(float(x) for x in np.arange(0.5, 16.0, 1.0))
+MAP_STATS = ("points",)
+MAP_MIN_EVENTS = 30                       # a line needs this many overs and unders to be fitted
+R_BANDS = ((0.0, 1.1), (1.1, 1.3), (1.3, np.inf))
 THIN = 5
 LOW_SHARE = 0.5
 FAMILY = "Q1P"
@@ -595,6 +600,62 @@ def fit_k(ri: pd.DataFrame, y: pd.DataFrame, minutes: np.ndarray) -> dict:
     return out
 
 
+def fit_line_map(y: np.ndarray, mu: np.ndarray, lines=POINTS_LINES) -> dict:
+    """Doc section 14: for each line L, P(over L) = sigmoid(a_L + b_L * log mean), by
+    models.nba_props.fit_platt on p = mean / (1 + mean) (whose logit is log mean). A line with fewer than
+    MAP_MIN_EVENTS overs or unders is left out, and prices through the negative binomial."""
+    y, mu = np.asarray(y, float), np.asarray(mu, float)
+    ok = np.isfinite(y) & np.isfinite(mu) & (mu > 0)
+    y, mu = y[ok], mu[ok]
+    keep, a, b = [], [], []
+    for L in lines:
+        over = (y > L).astype(float)
+        if over.sum() < MAP_MIN_EVENTS or (1 - over).sum() < MAP_MIN_EVENTS:
+            continue
+        ai, bi = nb.fit_platt(mu / (1.0 + mu), over)
+        keep.append(float(L))
+        a.append(ai)
+        b.append(bi)
+    return {"lines": np.array(keep), "a": np.array(a), "b": np.array(b)}
+
+
+def map_p_over(m: dict, mu: np.ndarray, line: np.ndarray) -> np.ndarray:
+    """P(over line) from a line map; NaN where the line is not one of its fitted lines. Non-increasing
+    across lines for one mean (the smaller value carried forward)."""
+    mu, line = np.asarray(mu, float), np.asarray(line, float)
+    out = np.full(len(mu), np.nan)
+    if not len(m["lines"]) or not len(mu):
+        return out
+    z = m["a"][None, :] + m["b"][None, :] * np.log(np.clip(mu, 1e-6, None))[:, None]
+    P = np.minimum.accumulate(1.0 / (1.0 + np.exp(-z)), axis=1)
+    j = np.searchsorted(m["lines"], line)
+    hit = (j < len(m["lines"])) & np.isclose(m["lines"][np.minimum(j, len(m["lines"]) - 1)], line)
+    out[hit] = P[np.nonzero(hit)[0], j[hit]]
+    return out
+
+
+def walk_forward(y: np.ndarray, raw: np.ndarray, season: np.ndarray, ok: np.ndarray, stat: str
+                 ) -> tuple[dict, dict, dict, np.ndarray]:
+    """Doc 5.4 and section 14, one stat. Per season S present: the factor = sum y / sum raw over the `ok`
+    rows of 2023-24 .. S-1 (2023-24 itself for S = 2023-24); for each later S, alpha and (points) the line
+    map on the same earlier rows, each carrying its own season's factor. A season's own rows never reach
+    its own fits. -> ({S: factor}, {S: alpha}, {S: line map}, the mean of every row)."""
+    seasons = sorted(int(x) for x in set(season))
+    factor, alpha, maps = {}, {}, {}
+    for S in seasons:
+        fit = ok & (season >= HISTORY) & ((season < S) | ((season == HISTORY) & (S == HISTORY)))
+        factor[S] = float(np.nansum(y[fit]) / np.nansum(raw[fit]))
+    mu = raw * np.array([factor[int(x)] for x in season], float)
+    for S in seasons:
+        if S == HISTORY:
+            continue
+        fit = ok & (season >= HISTORY) & (season < S)
+        alpha[S] = float(nb.fit_alpha(y[fit], mu[fit]))
+        if stat in MAP_STATS:
+            maps[S] = fit_line_map(y[fit], mu[fit])
+    return factor, alpha, maps, mu
+
+
 @dataclass
 class Projection:
     table: pd.DataFrame           # per (game_id, player_id): season, has_number, why, mu_min, raw_<stat>
@@ -603,6 +664,7 @@ class Projection:
     factor: dict                  # (stat, season) -> first-quarter factor
     alpha: dict                   # (stat, season) -> negative-binomial alpha (graded seasons)
     notes: dict
+    maps: dict = None             # (stat, season) -> line map (doc section 14; points only)
 
 
 def project(data: dict, settled: Settled, targets: pd.DataFrame) -> Projection:
@@ -662,27 +724,34 @@ def project(data: dict, settled: Settled, targets: pd.DataFrame) -> Projection:
     # the first-quarter factor and alpha, walk-forward
     q1 = tg[["game_id", "player_id"]].merge(settled.q1, on=["game_id", "player_id"], how="left")
     tg["q1_sec_actual"] = q1.q1_sec.fillna(0.0).to_numpy()
-    factor, alpha = {}, {}
+    factor, alpha, maps, checks = {}, {}, {}, {}
     for s, m in zip(STATS, Q1_MARKETS):
         y = q1[s].to_numpy(float)
         ok = (tg.has_number & (tg.q1_sec_actual > 0) & tg.game_id.isin(settled.valid[m])).to_numpy() & np.isfinite(y)
-        for S in sorted(set(tg.season)):
-            fit = ok & ((tg.season < S) | ((tg.season == HISTORY) & (S == HISTORY))).to_numpy() \
-                & (tg.season >= HISTORY).to_numpy()
-            factor[(s, int(S))] = float(np.nansum(y[fit]) / np.nansum(tg[f"raw_{s}"].to_numpy(float)[fit]))
-        for S in sorted(set(tg.season)):
-            if S == HISTORY:
-                continue
-            fit = ok & (tg.season < S).to_numpy() & (tg.season >= HISTORY).to_numpy()
-            mu = tg[f"raw_{s}"].to_numpy(float)[fit] * tg.season[fit].map(lambda x: factor[(s, int(x))]).to_numpy(float)
-            alpha[(s, int(S))] = float(nb.fit_alpha(y[fit], mu))
-        tg[f"mu_{s}"] = tg[f"raw_{s}"] * tg.season.map(lambda x: factor[(s, int(x))]).to_numpy(float)
+        f_s, a_s, m_s, mu_all = walk_forward(y, tg[f"raw_{s}"].to_numpy(float), tg.season.to_numpy(int), ok, s)
+        factor.update({(s, S): v for S, v in f_s.items()})
+        alpha.update({(s, S): v for S, v in a_s.items()})
+        maps.update({(s, S): v for S, v in m_s.items()})
+        tg[f"mu_{s}"] = mu_all
+        if s in MAP_STATS:
+            h = ok & (tg.season == HISTORY).to_numpy()
+            dates = np.sort(tg.date[h].unique())
+            first = h & (tg.date < dates[len(dates) // 2]).to_numpy()
+            second = h & ~first
+            mh = fit_line_map(y[first], mu_all[first])
+            a_h = float(nb.fit_alpha(y[first], mu_all[first]))
+            n2 = int(second.sum())
+            checks[s] = [{"line": L, "games": n2, "actual": float((y[second] > L).mean()),
+                          "line_map": float(np.nanmean(map_p_over(mh, mu_all[second], np.full(n2, L)))),
+                          "negative_binomial": float(np.mean(nb.p_over(mu_all[second], np.full(n2, L), a_h)))}
+                         for L in (1.5, 2.5, 3.5, 4.5, 5.5, 6.5)]
     notes = {"seconds": round(time.time() - t0, 1), "targets": int(len(tg)), "with_number": int(tg.has_number.sum()),
              "why_no_number": tg.loc[~tg.has_number, "why"].value_counts().to_dict(),
-             "report_covered_share": float(tg.drop_duplicates("game_id").report_covered.mean())}
+             "report_covered_share": float(tg.drop_duplicates("game_id").report_covered.mean()),
+             "line_map_check_2023_24": checks}
     keep = ["game_id", "player_id", "season", "date", "T", "team", "status", "m", "n_q1", "E", "r", "mu_min", "has_number",
             "why", "report_covered", *[f"rate_{s}" for s in STATS], *[f"raw_{s}" for s in STATS], *[f"mu_{s}" for s in STATS]]
-    return Projection(tg[keep], k, status, factor, alpha, notes)
+    return Projection(tg[keep], k, status, factor, alpha, notes, maps)
 
 
 # ── offers, pricing and the placebo ─────────────────────────────────────────
@@ -715,7 +784,7 @@ def with_props(co: pd.DataFrame, one: pd.DataFrame, settled: Settled) -> tuple[p
 
 def attach_means(props: pd.DataFrame, proj: Projection) -> pd.DataFrame:
     t = props[["game_id", "player_id"]].merge(
-        proj.table[["game_id", "player_id", "has_number", "why", *[f"mu_{s}" for s in STATS]]],
+        proj.table[["game_id", "player_id", "has_number", "why", "r", *[f"mu_{s}" for s in STATS]]],
         on=["game_id", "player_id"], how="left")
     out = props.copy()
     out["has_number"] = t.has_number.fillna(False).astype(bool).to_numpy()
@@ -726,6 +795,8 @@ def attach_means(props: pd.DataFrame, proj: Projection) -> pd.DataFrame:
         mu[sel] = t[f"mu_{s}"].to_numpy(float)[sel]
     out["mu"] = np.where(out.has_number, mu, np.nan)
     out["alpha"] = [proj.alpha.get((STAT_OF[m], int(se)), np.nan) for m, se in zip(out.market, out.season)]
+    out["map_key"] = [f"{STAT_OF[m]}|{int(se)}" if STAT_OF[m] in MAP_STATS else "" for m, se in zip(out.market, out.season)]
+    out["r"] = t.r.to_numpy(float)
     return out
 
 
@@ -742,7 +813,10 @@ def long_offers(rows: pd.DataFrame, props: pd.DataFrame, sides=("over", "under")
             "season": rows.season.astype(int).to_numpy(), "game_date": rows.game_date.astype(str).to_numpy(dtype=object),
             "T": rows["T"].values, "prop_market": rows.market.to_numpy(dtype=object),
             "mu_prop": pm.mu.reindex(pid).to_numpy(float), "alpha": pm.alpha.reindex(pid).to_numpy(float),
-            "main_line": pm.main_line.reindex(pid).to_numpy(float), "nv_over": nv}
+            "main_line": pm.main_line.reindex(pid).to_numpy(float), "nv_over": nv,
+            "map_key": (pm.map_key.reindex(pid).fillna("").to_numpy(dtype=object) if "map_key" in pm
+                        else np.full(len(rows), "", dtype=object)),
+            "r_team": pm.r.reindex(pid).to_numpy(float) if "r" in pm else np.full(len(rows), np.nan)}
     parts = []
     if "over" in sides:
         parts.append(pd.DataFrame({**base, "side": "over", "price": rows.over_price.to_numpy(float)}))
@@ -753,18 +827,40 @@ def long_offers(rows: pd.DataFrame, props: pd.DataFrame, sides=("over", "under")
     return out
 
 
-def model_p_over(mu: np.ndarray, line: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+def model_p_over(mu: np.ndarray, line: np.ndarray, alpha: np.ndarray, keys=None, maps: dict | None = None) -> np.ndarray:
+    """P(over) per offer: through its line map where `keys` names one in `maps` and the line is fitted
+    (doc section 14), else the negative binomial with its alpha (0 = Poisson)."""
     out = np.full(len(mu), np.nan)
-    ok = np.isfinite(mu) & np.isfinite(alpha)
+    if keys is not None and maps:
+        keys = np.asarray(keys, dtype=object)
+        for k in set(keys) - {""}:
+            st, se = k.split("|")
+            m = maps.get((st, int(se)))
+            if m is None:
+                continue
+            s = keys == k
+            out[s] = map_p_over(m, mu[s], line[s])
+    ok = np.isfinite(mu) & np.isfinite(alpha) & ~np.isfinite(out)
     for a in np.unique(alpha[ok]):
         s = ok & (alpha == a)
         out[s] = nb.p_over(mu[s], line[s], float(a))
     return out
 
 
-def priced(off: pd.DataFrame) -> pd.DataFrame:
+def map_fallbacks(off: pd.DataFrame, maps: dict) -> int:
+    """Offers whose market has a line map and whose line it does not hold: priced by the negative binomial."""
+    if not maps or not len(off):
+        return 0
+    keyed = off.map_key.to_numpy(dtype=object) != ""
+    po = model_p_over(off.mu_prop.to_numpy(float), off.line.to_numpy(float), np.full(len(off), np.nan),
+                      off.map_key.to_numpy(dtype=object), maps)
+    return int((keyed & ~np.isfinite(po) & np.isfinite(off.mu_prop.to_numpy(float))).sum())
+
+
+def priced(off: pd.DataFrame, maps: dict | None = None) -> pd.DataFrame:
     """The model's chance and EV on every offer (the cells' candidates)."""
-    po = model_p_over(off.mu_prop.to_numpy(float), off.line.to_numpy(float), off.alpha.to_numpy(float))
+    po = model_p_over(off.mu_prop.to_numpy(float), off.line.to_numpy(float), off.alpha.to_numpy(float),
+                      off.map_key.to_numpy(dtype=object) if "map_key" in off else None, maps)
     p = np.where(off.side.to_numpy() == "over", po, 1.0 - po)
     o = off.assign(p_win=p)
     o = o[np.isfinite(p)]
@@ -803,8 +899,11 @@ class Pricer:
     another proposition of the same placebo group, times its own main line, and its offers are
     re-priced at their own lines through its alpha. perm None is the real pricing."""
 
-    def __init__(self, cand: pd.DataFrame):
+    def __init__(self, cand: pd.DataFrame, maps: dict | None = None):
         self.offers = cand.reset_index(drop=True)
+        self.maps = maps or {}
+        self.keys_map = (self.offers.map_key.to_numpy(dtype=object) if "map_key" in self.offers
+                         else np.full(len(self.offers), "", dtype=object))
         ids, self.kid = np.unique(self.offers.game_id.to_numpy(np.int64), return_inverse=True)
         first = pd.Series(np.arange(len(self.offers))).groupby(self.kid).first().to_numpy()
         k = self.offers.iloc[first]
@@ -827,7 +926,7 @@ class Pricer:
     def ev(self, seed: int | None) -> np.ndarray:
         if seed not in self.cache:
             mu = (self.ratio[self.perm(seed)] * self.main)[self.kid]
-            po = model_p_over(mu, self.line, self.alpha)
+            po = model_p_over(mu, self.line, self.alpha, self.keys_map, self.maps)
             p = np.where(self.over, po, 1.0 - po)
             self.cache[seed] = (p * self.dec - 1.0).astype(np.float32)
         return self.cache[seed].astype(float)
@@ -863,14 +962,15 @@ class Group:
         return f"{self.family}_{self.market}_{self.side}_{self.book}_{self.quotes}"
 
 
-def build_groups(co_off: pd.DataFrame, one_off: pd.DataFrame) -> list[Group]:
-    """The 18 registered cells' groups (market x side, 3 cuts each), then the controls."""
+def build_groups(co_off: pd.DataFrame, one_off: pd.DataFrame, maps: dict | None = None) -> list[Group]:
+    """The 18 registered cells' groups (market x side, 3 cuts each), then the controls. `maps`: the points
+    line maps (doc section 14); empty prices every market through its negative binomial."""
     groups = []
     for m in Q1_MARKETS:
         o = co_off[co_off.prop_market == m]
-        cand = priced(o)
+        cand = priced(o, maps)
         neu = neutral_of(o)
-        pr = Pricer(cand)
+        pr = Pricer(cand, maps)
         for side in ("over", "under"):
             c = cand[cand.side == side].reset_index(drop=True)
             groups.append(Group(FAMILY, m, side, "best", "two_sided", EV_CUTS, c, neu, pr,
@@ -889,7 +989,7 @@ def build_groups(co_off: pd.DataFrame, one_off: pd.DataFrame) -> list[Group]:
                                 bands=False))
         oo = one_off[one_off.prop_market == m]
         if len(oo):
-            oc = priced(oo)
+            oc = priced(oo, maps)
             groups.append(Group(CTL_ONE, m, "over", "best", "one_sided", EV_CUTS, oc.reset_index(drop=True),
                                 oc.assign(p_win=1.0 / nb.decimal(oc.price.to_numpy()), ev=0.0), None,
                                 "control: the over cells on one-sided Hard Rock quotes", bands=False))
@@ -1027,6 +1127,10 @@ def beside_rows(g: Group, games: pd.DataFrame, props: pd.DataFrame, live: dict) 
         ld = b.game_id.map(lead).to_numpy(float)
         rows.append(_line(g, cut, "lead 50-60", b[(ld >= 50) & (ld < 60)]))
         rows.append(_line(g, cut, "lead 60-70", b[(ld >= 60) & (ld <= 70)]))
+        if "r_team" in b:
+            r = b.r_team.to_numpy(float)
+            for lo, hi in R_BANDS:
+                rows.append(_line(g, cut, f"reallocation r {lo}-{hi}", b[(r >= lo) & (r < hi)]))
         q = np.percentile(b.price.to_numpy(float), [0, 5, 50, 95, 100])
         rows.append({**_line(g, cut, "prices laid", b), "price_min": q[0], "price_p5": q[1], "price_median": q[2],
                      "price_p95": q[3], "price_max": q[4], **overlap(b, props, live)})
@@ -1298,8 +1402,18 @@ def smoke_report(prep: Prep) -> dict:
                                       under_min=("under_price", "min"), under_max=("under_price", "max")).to_string())
         print(r.groupby(["season", "market", "bookmaker"]).size().unstack(-1).fillna(0).astype(int).to_string())
     live = live_keys()
-    groups = build_groups(prep.co_off, prep.one_off)
+    maps = prep.proj.maps or {}
+    groups = build_groups(prep.co_off, prep.one_off, maps)
     registered(groups)
+    print("\nPOINTS LINE MAP (doc section 14): its check on 2023-24 alone, fitted on the first half of dates, read on "
+          "the second half:")
+    print(pd.DataFrame(pj_.notes["line_map_check_2023_24"].get("points", [])).round(3).to_string(index=False))
+    print("  lines fitted by priced season:", {f"{k[0]} {k[1]}": v["lines"].tolist() for k, v in maps.items()})
+    print("  offers priced by the negative binomial because their line is outside the map: coherent",
+          map_fallbacks(prep.co_off, maps), "; one-sided", map_fallbacks(prep.one_off, maps))
+    print("\nTwo-sided propositions with a number, by season and book:")
+    tw = prep.co_off.drop_duplicates(["game_id", "book"])
+    print(tw.groupby(["season", "prop_market", "book"]).size().unstack(-1).fillna(0).astype(int).to_string())
     print("\nHighest-EV offers per registered group (no result read):")
     meta = p.set_index("prop_id")
     for g in groups:
@@ -1335,6 +1449,15 @@ def smoke_report(prep: Prep) -> dict:
                 b = H.choose(g.cand, cut, sides=[g.side])
                 ov.append({"market": g.market, "side": g.side, "cut": cut, "bets": len(b), **overlap(b, p, live)})
     print(pd.DataFrame(ov).round(3).to_string(index=False))
+    print("\nBets at the lowest cut by reallocation band r (counts only):")
+    rb = []
+    for g in groups:
+        if g.family == FAMILY:
+            b = H.choose(g.cand, g.cuts[0], sides=[g.side])
+            r = b.r_team.to_numpy(float)
+            rb.append({"market": g.market, "side": g.side, **{f"r {lo}-{hi}": int(((r >= lo) & (r < hi)).sum())
+                                                             for lo, hi in R_BANDS}})
+    print(pd.DataFrame(rb).to_string(index=False))
     print("\nPRICES each registered cell would lay (no result read):")
     pr = []
     for g in groups:
@@ -1408,10 +1531,12 @@ def full(cache: Path = H.CACHE) -> None:
     (out / "fits.json").write_text(json.dumps({"k": prep.proj.k, "status": prep.proj.status,
                                                "factor": {f"{a}|{b}": v for (a, b), v in prep.proj.factor.items()},
                                                "alpha": {f"{a}|{b}": v for (a, b), v in prep.proj.alpha.items()},
+                                               "line_maps": {f"{a}|{b}": {k2: v2.tolist() for k2, v2 in m.items()}
+                                                             for (a, b), m in (prep.proj.maps or {}).items()},
                                                "settlement": prep.settled.notes, "rows": prep.notes},
                                               indent=1, default=str), encoding="utf-8")
     live = live_keys()
-    groups = build_groups(prep.co_off, prep.one_off)
+    groups = build_groups(prep.co_off, prep.one_off, prep.proj.maps or {})
     registered(groups)
     games, times = games_table(prep.props, prep.props.stat.to_numpy()), times_table(prep.props)
     t_cells, done = time.time(), 0

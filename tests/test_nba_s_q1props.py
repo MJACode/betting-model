@@ -298,3 +298,65 @@ def test_the_strict_season_bar_needs_both_seasons_positive(monkeypatch):
     monkeypatch.setattr(Q.V, "house_verdict_bands", lambda c: c)
     v = Q.strict_verdict(cells)
     assert v.passes_strict.tolist() == [True, False]
+
+
+# ── section 14: the points line map ─────────────────────────────────────────
+
+def lumpy_points(rng, mu):
+    """Points in twos and threes, few ones: the shape that broke the negative binomial on 2023-24."""
+    twos, threes, ones = rng.poisson(mu * 0.30), rng.poisson(mu * 0.10), rng.poisson(mu * 0.03)
+    return 2 * twos + 3 * threes + ones
+
+
+def test_the_line_map_follows_a_lumpy_count_and_is_monotone_across_lines():
+    rng = np.random.default_rng(5)
+    mu = rng.gamma(3.0, 1.2, 40000)
+    y = lumpy_points(rng, mu)
+    m = Q.fit_line_map(y, mu)
+    assert m["lines"][0] == 0.5 and len(m["lines"]) >= 10
+    test_mu = np.full(5000, 3.5)
+    yt = lumpy_points(rng, test_mu)
+    for L in (1.5, 2.5, 3.5, 4.5):
+        p = Q.map_p_over(m, test_mu, np.full(5000, L))
+        assert abs(p.mean() - (yt > L).mean()) < 0.03, (L, p.mean(), (yt > L).mean())
+    grid = np.array(m["lines"])
+    pm = Q.map_p_over(m, np.full(len(grid), 2.0), grid)
+    assert (np.diff(pm) <= 1e-12).all()
+    crossing = {"lines": np.array([0.5, 1.5]), "a": np.array([0.0, 1.0]), "b": np.array([0.0, 0.0])}
+    assert np.allclose(Q.map_p_over(crossing, np.array([2.0, 2.0]), np.array([0.5, 1.5])), [0.5, 0.5]), \
+        "a fit whose higher line reads higher is carried down to the lower line's chance"
+    assert np.isnan(Q.map_p_over(m, np.array([3.0]), np.array([40.5]))[0])
+
+
+def test_points_price_through_the_map_and_a_line_outside_it_falls_back_and_is_counted():
+    rng = np.random.default_rng(6)
+    mu = rng.gamma(3.0, 1.2, 20000)
+    m = Q.fit_line_map(lumpy_points(rng, mu), mu)
+    maps = {("points", 2025): m}
+    off = pd.DataFrame({"mu_prop": [3.0, 3.0, 3.0], "line": [2.5, 2.5, 30.5], "alpha": [0.6, 0.6, 0.6],
+                        "map_key": ["points|2025", "", "points|2025"]})
+    po = Q.model_p_over(off.mu_prop.to_numpy(), off.line.to_numpy(), off.alpha.to_numpy(), off.map_key.to_numpy(), maps)
+    assert np.isclose(po[0], Q.map_p_over(m, np.array([3.0]), np.array([2.5]))[0])
+    import models.nba_props as nbm
+    assert np.isclose(po[1], nbm.p_over(np.array([3.0]), np.array([2.5]), 0.6)[0])
+    assert np.isclose(po[2], nbm.p_over(np.array([3.0]), np.array([30.5]), 0.6)[0])
+    assert Q.map_fallbacks(off, maps) == 1
+
+
+def test_walk_forward_never_lets_a_season_reach_its_own_fits():
+    rng = np.random.default_rng(8)
+    season = np.repeat([2024, 2025, 2026], 6000)
+    raw = rng.gamma(3.0, 1.2, len(season))
+    y = lumpy_points(rng, raw * 0.9).astype(float)
+    ok = np.ones(len(season), bool)
+    f, a, m, mu = Q.walk_forward(y, raw, season, ok, "points")
+    y2 = y.copy()
+    y2[season == 2026] *= 3                                  # 2025-26's own results
+    f2, a2, m2, _ = Q.walk_forward(y2, raw, season, ok, "points")
+    assert f2[2026] == f[2026] and a2[2026] == a[2026] and np.allclose(m2[2026]["a"], m[2026]["a"])
+    y3 = y.copy()
+    y3[season == 2025] *= 3                                  # 2024-25's results reach 2025-26 only
+    f3, a3, m3, _ = Q.walk_forward(y3, raw, season, ok, "points")
+    assert f3[2025] == f[2025] and a3[2025] == a[2025] and f3[2026] != f[2026]
+    assert f[2024] == f[2025], "2024-25 is priced with 2023-24's factor"
+    assert np.allclose(mu[season == 2025], raw[season == 2025] * f[2025])
