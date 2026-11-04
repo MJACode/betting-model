@@ -279,7 +279,11 @@ def test_every_all_books_read_names_a_main_market():
     fn = text[text.index("export async function fetchGameLineRows"):]
     fn = fn[:fn.index("\nexport ")]
     assert "pregameLadderVisible" in fn
-    assert fn.index("pregameLadderVisible") < fn.index(".from('alt_game_lines')")
+    assert "ladderHidden" in fn
+    # After kickoff the ladder is still read, so a slip leg on an alternate
+    # rung can be held. The sheet hides it (ladderHidden), it does not skip
+    # the read.
+    assert fn.index(".from('alt_game_lines')") < fn.index("pregameLadderVisible")
 
 
 # ── scratch Postgres ─────────────────────────────────────────────────────────

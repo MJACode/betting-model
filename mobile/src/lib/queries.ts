@@ -1117,16 +1117,19 @@ export async function fetchPropLineRows(
  * re-prices from each time the betslip resolves (lib/lineLegs.ts
  * gameLineLegFromRows). ~13 rows, bounded by game_id; no paging needed.
  *
- * Spreads and totals also carry the day's ALTERNATE ladder (alt_game_lines,
- * fetched once a day since 2026-10-29), folded into the main market's name by
- * lib/lineLegs.foldAltGameRows. That read is bounded by one game and one
- * market: books x rungs, a few hundred rows at most. If it fails (the table
- * not yet created, a timeout) the main lines still come back, and the cause is
- * logged rather than thrown, so a missing ladder never empties the slip.
+ * Spreads and totals also carry the ALTERNATE ladder (alt_game_lines),
+ * folded into the main market's name by lib/lineLegs.foldAltGameRows. That
+ * read is bounded by one game and one market: books x rungs, a few hundred
+ * rows at most. If it fails (the table not yet created, a timeout) the main
+ * lines still come back, and the cause is logged rather than thrown, so a
+ * missing ladder never empties the slip.
  *
- * The ladder is a morning pre-game price. Once commence_time has passed it is
- * not read: an in-play leg must not be offered or priced off it. A missing
- * start still loads the ladder. A failed start-time read hides it.
+ * The ladder is a pre-game price, refreshed every odds pass for games inside
+ * 24 hours. Once commence_time has passed the edit sheet does not list it
+ * (ladderHidden). The rows are still returned, so a slip leg the user already
+ * moved to an alternate rung can be held and marked stale instead of deleted.
+ * A missing start still loads the ladder as current. A failed start-time read
+ * hides it.
  */
 export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
   const altMarket = ALT_GAME_MARKET[market as GameLineMarket];
@@ -1152,11 +1155,6 @@ export async function fetchGameLineRows(gameId: string, market: string): Promise
     console.warn('[gameLines] start time unavailable; ladder hidden', gameRes.error);
     return main;
   }
-  if (!pregameLadderVisible(start)) {
-    const hidden = main.slice() as OddsByBookRow[] & { ladderHidden?: 'started' };
-    hidden.ladderHidden = 'started';
-    return hidden;
-  }
   const altRes = await supabase
     .from('alt_game_lines')
     .select(ODDS_BY_BOOK_COLUMNS)
@@ -1164,11 +1162,23 @@ export async function fetchGameLineRows(gameId: string, market: string): Promise
     .eq('market', altMarket)
     .order('bookmaker')
     .order('point');
+  const started = !pregameLadderVisible(start);
   if (altRes.error) {
     console.warn('[gameLines] alternate ladder unavailable', altRes.error);
-    return main;
+    if (!started) return main;
+    // Do not return main-only. The slip would treat a missing alt rung as
+    // "nothing posts this number" and remove the leg. ladderFailed tells it
+    // to hold the leg instead.
+    const hidden = main.slice() as OddsByBookRow[] & { ladderHidden?: 'started'; ladderFailed?: true };
+    hidden.ladderHidden = 'started';
+    hidden.ladderFailed = true;
+    return hidden;
   }
-  return foldAltGameRows(market, main, (altRes.data ?? []) as unknown as OddsByBookRow[]);
+  const folded = foldAltGameRows(market, main, (altRes.data ?? []) as unknown as OddsByBookRow[]);
+  if (!started) return folded;
+  const hidden = folded as OddsByBookRow[] & { ladderHidden?: 'started' };
+  hidden.ladderHidden = 'started';
+  return hidden;
 }
 
 /** One game row, for a line leg's matchup and start time. */
