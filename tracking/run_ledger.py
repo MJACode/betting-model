@@ -224,11 +224,13 @@ def abort_prior_refresh_orphans(
     and is left unfinished — a second sweep must not abort it. An empty
     cutoff aborts nothing.
 
-    ``stale_before`` also closes a row of those kinds started before that
-    timestamp, including one this process opened. The caller passes it only
-    when this process is not inside the daily: a live run past the max stays
-    open so the health check can see the hang, and a dead one is stamped
-    aborted instead of looking in progress.
+    ``stale_before`` closes a ``daily`` started before that timestamp,
+    including one this process opened. It does not close hourly or evening.
+    Those stay unfinished so ``refresh_pass_completion`` can still see a
+    hang past two hours. The caller passes it only when this process is not
+    inside the daily: a live daily past the max stays open so the health
+    check can see the hang, and a dead one is stamped aborted instead of
+    looking in progress.
 
     Same stamp as ``_abort_orphans``: ``finished_at`` now, ``ok`` false,
     ``failed_steps`` ``aborted``. Commits. Never raises.
@@ -242,7 +244,13 @@ def abort_prior_refresh_orphans(
     if not kinds:
         return 0
     if stale_before:
-        age_sql = "(started_at < ? OR started_at < ?)"
+        # 75 minutes is the daily max. Applying it to every kind hid a
+        # hung hourly: with the daily lock free, a refresh this process
+        # opened past that cutoff was stamped aborted and
+        # refresh_pass_completion never saw the >2h hang.
+        age_sql = (
+            "(started_at < ? OR (run_kind = 'daily' AND started_at < ?))"
+        )
         age_params: tuple = (started_before, stale_before)
     else:
         age_sql = "started_at < ?"

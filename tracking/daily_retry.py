@@ -23,10 +23,12 @@ assumed to be "until tomorrow" — which is exactly what happened, and is too
 long for tables that only get written once a day.
 
 This module is the decision. Scheduler boot and `run_pipeline_watch` both call
-it; the 6am cron is unchanged. A dead run is retried again the same
+it; the 6am cron is unchanged. A killed run (`failed_steps` contains
+`aborted`, or the row is still unfinished) is started again the same
 America/New_York day until one daily finishes the MLB freshness steps, a
 daily is actually running in this process, or the crash-loop ceiling is hit.
-Kill switch: `RUN_DAILY_RETRY=0`.
+A daily that finishes and fails before those steps for any other reason gets
+one retry, then stops. Kill switch: `RUN_DAILY_RETRY=0`.
 
 2026-11-04: the 6:00am ET daily (run 3d3685c194b949d69243f13a1d3c52e7) was
 aborted at 11:13:34Z by the deploy of 1934d8b. The catch-up started
@@ -59,13 +61,22 @@ DAILY_MINUTE = 0
 # A row still open past this is not a live pass of that shape.
 MAX_DAILY_RUN = timedelta(minutes=75)
 
-# Crash-loop ceiling, not the double-run guard. The in-process lock is what
-# stops two dailies in one process. This stops a container that dies inside
-# the daily and boots again all day. 2 was the 2026-11-04 hole: the 6:00am
-# start and its one automatic retry were both killed by deploys, and every
-# later boot saw two ledgered starts and refused another while the retry's
-# row was still unfinished.
-MAX_DAILY_STARTS_PER_ET_DAY = 8
+# Crash-loop ceiling for killed starts, not the double-run guard. The
+# in-process lock stops two dailies in one process. This stops a container
+# that dies inside the daily and boots again all day. 2 was the 2026-11-04
+# hole: the 6:00am start and its one automatic retry were both killed by
+# deploys, and every later boot saw two ledgered starts and refused another
+# while the retry's row was still unfinished. 8 relaunched a full daily,
+# and bought odds again, on every boot of a busy merge morning. 4 covers
+# that morning (the scheduled start plus the retries those deploys killed)
+# and stops a container that restarts all day.
+MAX_DAILY_STARTS_PER_ET_DAY = 4
+
+# Finished failures that are not `aborted`. The scheduled daily plus one
+# retry — the cap from before 2026-11-04, kept for this class only. An
+# upstream outage before the MLB freshness steps must not relaunch on every
+# boot and at the 7:15 watch. Aborted starts do not count here.
+MAX_NON_ABORTED_FAILURES = 2
 
 # Steps that write the daily-only MLB freshness tables (health-check names
 # `mlb_bullpen_workload` / `mlb_team_stats` / `mlb_player_game_log` /
@@ -137,6 +148,10 @@ def daily_run_from_row(row) -> DailyRun:
     )
 
 
+def _failed_steps(run: DailyRun) -> set[str]:
+    return {s.strip() for s in (run.failed_steps or "").split(",") if s.strip()}
+
+
 def completed_mlb_freshness(run: DailyRun) -> bool:
     """True when this daily finished AND wrote the once-daily MLB tables.
 
@@ -149,10 +164,22 @@ def completed_mlb_freshness(run: DailyRun) -> bool:
         return False
     if _truthy_ok(run.ok):
         return True
-    failed = {s.strip() for s in (run.failed_steps or "").split(",") if s.strip()}
+    failed = _failed_steps(run)
     if not failed or "aborted" in failed:
         return False
     return failed.isdisjoint(MLB_FRESHNESS_STEPS)
+
+
+def _non_aborted_failure(run: DailyRun) -> bool:
+    """Finished without the MLB freshness steps, and the worker was not killed.
+
+    `aborted` is a deploy or a crash. A named step is the pipeline running
+    and failing. Those get one retry. Aborted starts relaunch until the
+    ceiling.
+    """
+    if run.finished_at is None or completed_mlb_freshness(run):
+        return False
+    return "aborted" not in _failed_steps(run)
 
 
 def decide_daily_retry(
@@ -201,6 +228,15 @@ def decide_daily_retry(
             "skip",
             f"already started {len(todays)} dailies today "
             f"(cap {MAX_DAILY_STARTS_PER_ET_DAY}; not starting another)",
+        )
+
+    real_failures = sum(1 for r in todays if _non_aborted_failure(r))
+    if real_failures >= MAX_NON_ABORTED_FAILURES:
+        return Decision(
+            "skip",
+            f"already finished {real_failures} dailies today that failed "
+            f"before MLB freshness for a reason other than aborted "
+            f"(one retry; not starting another)",
         )
 
     if not todays:
@@ -259,12 +295,27 @@ def load_today_dailies(conn, now: datetime) -> list[DailyRun] | None:
     return out
 
 
-def announce_daily_retry(reason: str, *, source: str) -> bool:
-    """Ops-channel note. Failure to post must not block the retry itself."""
+def announce_daily_retry(
+    reason: str, *, source: str, start_number: int | None = None,
+) -> bool:
+    """Ops-channel note. Failure to post must not block the retry itself.
+
+    ``start_number`` is which ledgered start this attempt will be (1-based),
+    so a boot loop is visible in the channel before it hits the ceiling.
+    """
     from tracking.watch_util import post_ops_alert
 
+    if start_number is None:
+        start_line = (
+            f"**Start:** not recorded (ceiling {MAX_DAILY_STARTS_PER_ET_DAY})"
+        )
+    else:
+        start_line = (
+            f"**Start:** {start_number} of {MAX_DAILY_STARTS_PER_ET_DAY} today"
+        )
     detail = (
         f"**Source:** `{source}`\n"
+        f"{start_line}\n"
         f"**Reason:** {reason}\n\n"
         "The 6:00am ET daily is the only writer of `mlb_bullpen_workload` / "
         "`mlb_team_stats`. After a mid-run deploy APScheduler's next fire is "
@@ -274,9 +325,10 @@ def announce_daily_retry(reason: str, *, source: str) -> bool:
         "kills the retry starts it again (2026-11-04, runs "
         "`3d3685c194b949d69243f13a1d3c52e7` and "
         "`8a44ef65d4364828af08e025aa292a51`). The in-process lock stops a "
-        "second daily in this process; the crash-loop ceiling stops a "
-        f"container that restarts all day ({MAX_DAILY_STARTS_PER_ET_DAY} "
-        "starts)."
+        "second daily in this process. Aborted starts relaunch until "
+        f"{MAX_DAILY_STARTS_PER_ET_DAY} ledgered starts today. A daily that "
+        "finishes and fails before the MLB freshness steps, for a reason "
+        "other than aborted, gets one retry."
     )
     try:
         return post_ops_alert(
