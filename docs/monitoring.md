@@ -286,6 +286,42 @@ pybaseball, cloudscraper. `curl_cffi` is patched separately because it is a
 different HTTP stack (browser TLS fingerprint) that a requests patch cannot
 reach. A new ingestor is covered the day it is written.
 
+**Every process installs it, however it was started** (fixed 2026-11-03).
+`config.py` installs the probe as its last statement, and every Odds API
+caller in the repo imports config. The few that read the key from the
+environment instead (the NFL subproject's clients, the NFL and college live
+odds feeds, two probe scripts) install it themselves. So a paid call is logged
+whether it came from the worker, `python -m <module>`, a launcher that calls
+`runpy`, or a one-off script.
+
+- **What it cost.** Until then only entrypoints installed it: the scheduler,
+  the pipeline and a list of scripts. On 2026-11-03 the NBA first-quarter
+  history purchase was run on mike's PC through a launcher that called
+  `runpy.run_module("data.ingestors.nba_odds_history")`. No entrypoint was
+  involved, so between 18:06 and 22:30 UTC about 112,813 credits went out with
+  almost nothing in `api_call_log`. The run's own logs added up the spend
+  instead: 160 + 26,671 + 30,671 for the props, 160 + 24,763 + 21,193 for the
+  team totals, and 5,774 and 3,421 in the first runs, which were stopped.
+- **The row's name.** An entrypoint still names its rows (`install("pipeline")`)
+  and keeps the names the dashboard already shows. A process no entrypoint
+  started is named for the module it ran (`data.ingestors.nba_odds_history`),
+  or for its script file. An entrypoint that installs after config did only
+  renames the rows: the probe checks the live `Session.request` for its own
+  wrapper, so nothing is wrapped twice and no call is logged twice.
+- **No thread without a call.** The writer starts on the first recorded call,
+  so the many processes that import config and make no HTTP call start none.
+- **The test suite writes nothing.** `tests/conftest.py` installs the probe
+  with no writer before anything imports config, so a pytest run on a machine
+  whose `.env` names production keeps its calls in memory. It also refuses the
+  Odds API host at the transport, so a test that forgets to mock fails instead
+  of billing credits.
+- **The tests.** `tests/test_odds_call_log_everywhere.py` runs the purchase's
+  own request code (`nba_odds_history.Meter.get`) in a child process with the
+  network and the database stood in for: a `-m` run and a `runpy` run each
+  write one row, the worker's order writes one, and a database that never
+  answers costs the row, not the call. It also imports every module that
+  builds an Odds API request in a fresh process and checks the probe is on.
+
 **It goes through the database on purpose.** The scheduler shells out for every
 pass, so the process making the calls is never the process serving the
 dashboard. The database is the only place they meet — and it is also what makes
@@ -314,9 +350,18 @@ interpreter stopped the writer (a daemon thread) with the rows in hand.
   140, with no duplicates. On Python 3.12, the worker's version, a shorter run
   lost 29 of 60 before the fix and 0 of 60 after it.
 - **The fix.** The exit hook sets a stop flag and waits for the writer, which
-  finishes the batch it holds, drains the rest and stops. A failed last batch
-  is dropped, never retried. A process whose calls were already stored exits
-  at once; one with an unwritten row waits one connect and insert (~0.4 s).
+  finishes the batch it holds, drains the rest and stops. A process whose calls
+  were already stored exits at once; one with an unwritten row waits one
+  connect and insert (~0.4 s).
+- **A failed write is retried, not dropped** (2026-11-03). While the process
+  lives, a batch the database refused is kept and written on a later tick,
+  over a fresh connection, after a pause that doubles up to
+  `API_LOG_RETRY_MAX_SEC` (30 s). At most `API_LOG_QUEUE` rows are held; past
+  that the oldest unmetered calls go first and the Odds API's go last. At exit
+  the writer makes one more attempt. What it still cannot write is lost, and
+  the process's own log says how many calls and how many Odds API credits that
+  was. A failed write never touches the call itself: the call has returned
+  before its row is written.
 - **When the writer is stuck.** The writer keeps one connection open. If that
   connection hangs inside an insert (a socket that died without a reset), the
   writer cannot reach the calls still on the queue. So when the wait for the
@@ -510,27 +555,31 @@ TTL rather than behind the meta tick.
 | `API_LOG_RETENTION_DAYS` | Prune horizon, default 7. |
 | `API_LOG_FLUSH_SEC` | Writer flush interval, default 0.75. |
 | `API_LOG_EXIT_WAIT_SEC` | Longest each of the exit's two waits lasts (for the writer, then for the fresh-connection write when the writer is stuck), default 3. |
+| `API_LOG_RETRY_MAX_SEC` | Longest pause between retries of a failed write, default 30. |
 | `MONITOR_POLL_SEC` | Stream poll interval, default 1.0. |
 | `DISCORD_BOT_TOKEN` | Enables the Discord member/online tiles (with the guild id). |
 | `DISCORD_GUILD_ID` | The server id. Both are needed; neither is used for posting. |
 
 Nothing here can break the pipeline: the probe swallows its own exceptions, the
-writer drops a batch rather than retrying into a backlog, and the server is
-started inside a `try` that logs and moves on.
+writer retries a failed batch from a bounded backlog off the request path, and
+the server is started inside a `try` that logs and moves on.
 
 ## Known gap
 
-A call made by a process that never imports `monitoring` is invisible. The four
-entrypoints are wired (`scheduler.py`, `run_pipeline.py`, the live orchestrator,
-both live gameday loops); a one-off script run by hand is not, unless it goes
-through `run_pipeline.py`.
-
-One scheduled job is in that state today: `nfl-schedule-refresh`
+Closed for anything in the repo on 2026-11-03: config.py installs the probe in
+every process that imports it (above). Until then, a call made by a process no
+entrypoint started was invisible. `nfl-schedule-refresh`
 (`python -m data.ingestors.nfl_props_data_ingestor --schedule-only`, every 15
-minutes) fetches the nflverse schedule and never installs the probe. It ran 24
-times from 05:22 to 11:22Z on 2026-10-31 and has no rows. The tripwire in
-`tests/test_monitoring.py` only checks the `scripts.*` modules the scheduler
-runs, so a `data.ingestors.*` entrypoint passes it.
+minutes) was one: it ran 24 times from 05:22 to 11:22Z on 2026-10-31 and left no
+rows. It imports config, so it now logs as
+`data.ingestors.nfl_props_data_ingestor`. So does the college prop pass
+(`python -m data.ingestors.ncaaf_prop_odds_ingestor`, scheduled only when
+`RUN_NCAAF_PROP_ODDS=1`), the one paid Odds API job the scheduler started
+with no probe of its own.
+
+What is still invisible: code that imports neither config nor `monitoring`,
+such as a `python -c` typed by hand around a bare `requests.get`, and a
+process run with `PIPELINE_TELEMETRY=0`.
 
 
 ---
@@ -559,9 +608,9 @@ wraps `requests.sessions.Session.request` once, which catches every ingestor
 cloudscraper — the last is a Session subclass whose `request` calls `super()`,
 so it counts once). `curl_cffi` is patched separately: it is a different HTTP
 stack (browser TLS fingerprint) that a requests patch cannot reach, and the DK
-freshness collector uses it. Installed at four entrypoints — `scheduler.py`,
-`run_pipeline.py`, `live_trigger_orchestrator.py`, both live gameday loops. A
-script run by hand outside those is invisible.
+freshness collector uses it. Installed by `config.py` in every process that
+imports it (since 2026-11-03), and by name at the entrypoints, which only
+rename their rows.
 
 **It rendezvouses through the database on purpose.** The scheduler shells out
 for every pass, so the process making the calls is never the process serving the
