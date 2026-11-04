@@ -102,9 +102,22 @@ by 13:29Z and the day was skipped. Deploy-kills relaunch until 12
 fails before the MLB freshness steps for a reason other than aborted gets one
 retry, then stops, so an upstream outage does not buy odds on every boot. The
 in-process lock is the double-run guard. A successful daily already today is a
-no-op. Kill switch: `RUN_DAILY_RETRY=0`. A `worker_jobs` row with
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. A fresh `worker_jobs` row with
 `job_type = 'daily_pipeline'` (no args) runs the full daily once under that
-same lock; it is not in `jobs/declared_jobs.json`. See `tracking/daily_retry.py`.
+same lock; it is not in `jobs/declared_jobs.json`. The runner holds the queue
+lock for that whole daily, so other `worker_jobs` ticks wait until it
+finishes. A row left `running` by a deploy is reclaimed only when the
+catch-up would start one (`RUN_DAILY_RETRY`, the 12 deploy-kill cap, the
+22:00 ET cutoff). The first claim of a pending row is still the kick after
+those bounds.
+
+A relaunched daily and a refresh (boot catch-up at 60s, and the :17 cron)
+do not score at the same time. Both delete and rewrite pick rows across the
+look-ahead window; the unique index only drops a second insert. The refresh
+waits while the daily lock is held, and the daily waits while a refresh is
+already scoring. A second refresh still skips. Past the wait (the daily max,
+or 30 minutes the other way) the waiting pass scores anyway, so a stuck lock
+cannot silence the rest of the day. See `tracking/daily_retry.py`.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`
