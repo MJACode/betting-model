@@ -35,8 +35,6 @@ export interface ByomPropFilterState {
   lineBand: ByomBand | null;
   priceBand: ByomPriceBand | null;
   priceCustom: ByomBand | null;
-  spreadBand: ByomBand | null;
-  totalBand: ByomBand | null;
   months: number[];
   weekdays: number[];
   kickSlots: ByomKickSlot[];
@@ -50,8 +48,6 @@ export const EMPTY_PROP_FILTERS: ByomPropFilterState = {
   lineBand: null,
   priceBand: null,
   priceCustom: null,
-  spreadBand: null,
-  totalBand: null,
   months: [],
   weekdays: [],
   kickSlots: [],
@@ -104,17 +100,6 @@ export function openBand(scale: LineScale): ByomBand {
   return { min: scale.openFrom, max: scale.openTo };
 }
 
-export const SPREAD_SCALE: LineScale = {
-  step: 0.5, min: -14, max: 14, unit: '', openFrom: -7, openTo: 7,
-};
-
-export function totalScale(sport: ByomSportId): LineScale {
-  if (sport === 'NBA') {
-    return { step: 0.5, min: 195.5, max: 255.5, unit: '', openFrom: 220.5, openTo: 234.5 };
-  }
-  return { step: 0.5, min: 30.5, max: 65.5, unit: '', openFrom: 44.5, openTo: 51.5 };
-}
-
 const PRICE_STEP = 5;
 const PRICE_MIN = -500;
 const PRICE_MAX = 500;
@@ -126,13 +111,6 @@ export function openPriceBand(): ByomBand {
 export function formatLineNumber(value: number): string {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-}
-
-export function formatSpread(value: number): string {
-  const text = formatLineNumber(value);
-  if (value > 0) return `+${text}`;
-  if (value < 0) return `${MINUS}${text.slice(1)}`;
-  return text;
 }
 
 export function formatAmericanBand(price: number): string {
@@ -314,14 +292,6 @@ export function oddsSummary(state: ByomPropFilterState): FilterSummary {
     const text = `${formatAmericanBand(state.priceCustom.min)} to ${formatAmericanBand(state.priceCustom.max)}`;
     bits.push({ detail: text, pill: text });
   }
-  if (state.spreadBand) {
-    const text = `Spread ${formatSpread(state.spreadBand.min)} to ${formatSpread(state.spreadBand.max)}`;
-    bits.push({ detail: text, pill: text });
-  }
-  if (state.totalBand) {
-    const text = `Total ${formatLineNumber(state.totalBand.min)}\u2013${formatLineNumber(state.totalBand.max)}`;
-    bits.push({ detail: text, pill: text });
-  }
   if (bits.length === 0) return ANY;
   return { detail: bits.map((bit) => bit.detail).join(' · '), pills: bits.map((bit) => bit.pill) };
 }
@@ -382,8 +352,6 @@ export function propFilterSummary(
   ].filter((detail) => detail !== 'Any');
   if (state.shortWeek) parts.push('Short week');
   if (state.offBye) parts.push('Off a bye');
-  if (filters.role === 'favorite') parts.push('Favorite');
-  else if (filters.role === 'underdog') parts.push('Underdog');
   if (market == null && parts.length === 0) return null;
   if (parts.length === 0) return null;
   return parts.join(' · ');
@@ -424,10 +392,6 @@ export function propStateFromFilters(filters: ByomFilters): ByomPropFilterState 
   const maxLine = num(filters.max_line);
   const minPrice = num(filters.min_price);
   const maxPrice = num(filters.max_price);
-  const minSpread = num(filters.min_team_spread);
-  const maxSpread = num(filters.max_team_spread);
-  const minTotal = num(filters.min_game_total);
-  const maxTotal = num(filters.max_game_total);
   let priceBand: ByomPriceBand | null = null;
   let priceCustom: ByomBand | null = null;
   if (minPrice === 101 && maxPrice == null) priceBand = 'plus';
@@ -449,8 +413,6 @@ export function propStateFromFilters(filters: ByomFilters): ByomPropFilterState 
     lineBand: minLine != null && maxLine != null ? { min: minLine, max: maxLine } : null,
     priceBand,
     priceCustom,
-    spreadBand: minSpread != null && maxSpread != null ? { min: minSpread, max: maxSpread } : null,
-    totalBand: minTotal != null && maxTotal != null ? { min: minTotal, max: maxTotal } : null,
     months: numList(filters.months),
     weekdays: numList(filters.weekdays),
     kickSlots: slots,
@@ -461,6 +423,8 @@ export function propStateFromFilters(filters: ByomFilters): ByomPropFilterState 
   };
 }
 
+// The team spread and game total keys stay listed so clearPhaseA removes
+// any stored on a prop. No prop writes them (Matt, 2026-11-04).
 const PHASE_A_KEYS: (keyof ByomFilters)[] = [
   'min_line',
   'max_line',
@@ -518,8 +482,8 @@ export function applyPropFilterKeys(
     next.max_price = -100;
   } else if (state.priceBand === 'heavy') next.max_price = -131;
   else if (state.priceBand === 'custom') putBand(next, 'min_price', 'max_price', state.priceCustom);
-  putBand(next, 'min_team_spread', 'max_team_spread', state.spreadBand);
-  putBand(next, 'min_game_total', 'max_game_total', state.totalBand);
+  // No team spread or game total on a prop (Matt, 2026-11-04): those are
+  // team bets. clearPhaseA above already removed any stored ones.
   if (state.months.length > 0) next.months = [...state.months];
   if (state.weekdays.length > 0) next.weekdays = [...state.weekdays];
   if (state.opponents.length > 0) next.opponents = [...state.opponents];

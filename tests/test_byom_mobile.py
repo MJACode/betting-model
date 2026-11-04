@@ -305,7 +305,8 @@ const propKept = filtersForDraft(
   { market: 'player_pass_yds', side: 'away', role: 'favorite', primetime: true, propSide: 'over' },
   { weeks: [4], prop_side: 'under', role: 'underdog' },
 );
-if (propKept.prop_side !== 'over' || propKept.side !== 'away' || propKept.role !== 'favorite' || propKept.primetime !== true) {
+// A prop drops favorite/underdog, even one already stored (Matt, 2026-11-04).
+if (propKept.prop_side !== 'over' || propKept.side !== 'away' || propKept.role != null || propKept.primetime !== true) {
   throw new Error('prop kept ' + JSON.stringify(propKept));
 }
 if (JSON.stringify(propKept.weeks) !== '[4]' || JSON.stringify(propKept.markets) !== '["player_pass_yds"]') {
@@ -318,7 +319,7 @@ if (atdUnder.prop_side !== 'over' || atdUnder.side !== 'home') throw new Error('
 const atdYes = filtersForDraft(
   { market: 'player_anytime_td', side: null, role: 'favorite', primetime: false, propSide: 'over' },
 );
-if (atdYes.prop_side !== 'over' || atdYes.side || atdYes.role !== 'favorite' || atdYes.primetime !== false) {
+if (atdYes.prop_side !== 'over' || atdYes.side || atdYes.role != null || atdYes.primetime !== false) {
   throw new Error('atd yes ' + JSON.stringify(atdYes));
 }
 const gameDropsProp = filtersForDraft(
@@ -698,8 +699,6 @@ const receptions = filtersForDraft({
     lineBand: { min: 3.5, max: 5.5 },
     priceBand: 'plus',
     priceCustom: null,
-    spreadBand: null,
-    totalBand: { min: 44.5, max: 51.5 },
     months: [],
     weekdays: [0, 1],
     kickSlots: ['late'],
@@ -711,30 +710,37 @@ const receptions = filtersForDraft({
 });
 if (receptions.min_line !== 3.5 || receptions.max_line !== 5.5) throw new Error('line ' + JSON.stringify(receptions));
 if (receptions.min_price !== 100 || receptions.max_price != null) throw new Error('plus ' + JSON.stringify(receptions));
-if (receptions.min_game_total !== 44.5 || receptions.max_game_total !== 51.5) throw new Error('total');
+// Matt, 2026-11-04: no game total, team spread or favorite/underdog on a prop.
+if (receptions.min_game_total != null || receptions.max_game_total != null) throw new Error('total');
 if (JSON.stringify(receptions.weekdays) !== '[0,1]') throw new Error('days');
 if (JSON.stringify(receptions.kick_slots) !== '["late"]' || receptions.primetime) throw new Error('slot ' + JSON.stringify(receptions));
 if (receptions.max_rest_days !== 6 || receptions.min_rest_days != null) throw new Error('short');
-if (receptions.role !== 'favorite' || receptions.side !== 'home') throw new Error('role');
+if (receptions.role != null || receptions.side !== 'home') throw new Error('role ' + JSON.stringify(receptions));
 if (JSON.stringify(receptions.opponents) !== '["PHI","DAL"]') throw new Error('opponents');
 
 const bye = filtersForDraft({
   market: 'player_pass_yds', side: null, role: null, primetime: true, propSide: 'under',
   propFilters: {
-    lineBand: null, priceBand: null, priceCustom: null, spreadBand: { min: -7, max: 7 },
-    totalBand: null, months: [9], weekdays: [], kickSlots: [], opponents: [], player: 'CeeDee Lamb',
+    lineBand: null, priceBand: null, priceCustom: null, months: [9], weekdays: [], kickSlots: [], opponents: [], player: 'CeeDee Lamb',
     shortWeek: false, offBye: true,
   },
 });
 if (bye.primetime !== true || bye.kick_slots) throw new Error('legacy prime ' + JSON.stringify(bye));
 if (bye.min_rest_days !== 12 || bye.max_rest_days != null) throw new Error('bye');
-if (bye.min_team_spread !== -7 || bye.max_team_spread !== 7) throw new Error('spread');
+if (bye.min_team_spread != null || bye.max_team_spread != null) throw new Error('spread');
+const stored = filtersForDraft(
+  { market: 'player_pass_yds', side: null, role: 'underdog', primetime: null, propSide: 'over' },
+  { role: 'underdog', min_team_spread: -7, max_team_spread: 7, min_game_total: 40, max_game_total: 50 },
+);
+if (stored.role || stored.min_team_spread != null || stored.min_game_total != null) {
+  throw new Error('stored team keys kept on a prop ' + JSON.stringify(stored));
+}
 if (bye.player !== 'CeeDee Lamb' || JSON.stringify(bye.months) !== '[9]') throw new Error('player');
 
 const both = filtersForDraft({
   market: 'player_sacks', side: null, role: null, primetime: null, propSide: 'over',
   propFilters: {
-    lineBand: null, priceBand: 'mid', priceCustom: null, spreadBand: null, totalBand: null,
+    lineBand: null, priceBand: 'mid', priceCustom: null,
     months: [], weekdays: [], kickSlots: ['prime'], opponents: [], player: null,
     shortWeek: true, offBye: true,
   },
@@ -747,7 +753,7 @@ const atd = filtersForDraft({
   market: 'player_anytime_td', side: null, role: null, primetime: null, propSide: 'over',
   propFilters: {
     lineBand: { min: 0.5, max: 0.5 }, priceBand: 'heavy', priceCustom: null,
-    spreadBand: null, totalBand: null, months: [], weekdays: [], kickSlots: [],
+    months: [], weekdays: [], kickSlots: [],
     opponents: [], player: null, shortWeek: false, offBye: false,
   },
 });
@@ -757,7 +763,7 @@ if (atd.max_price !== -131 || atd.min_price != null) throw new Error('heavy');
 const nba = filtersForDraft({
   market: 'player_points', side: null, role: null, primetime: true, propSide: 'over', rest: 'b2b',
   propFilters: {
-    lineBand: null, priceBand: null, priceCustom: null, spreadBand: null, totalBand: null,
+    lineBand: null, priceBand: null, priceCustom: null,
     months: [10], weekdays: [1], kickSlots: ['prime'], opponents: [], player: null,
     shortWeek: true, offBye: true,
   },
@@ -776,9 +782,9 @@ const back = draftFromFilters(receptions);
 if (!back || !back.propFilters || back.propFilters.priceBand !== 'plus' || back.propFilters.shortWeek !== true) {
   throw new Error('back ' + JSON.stringify(back));
 }
-if (back.propFilters.lineBand.min !== 3.5 || back.role !== 'favorite') throw new Error('back line');
+if (back.propFilters.lineBand.min !== 3.5 || back.role != null) throw new Error('back line');
 const odds = oddsSummary(back.propFilters);
-if (odds.detail !== 'Line 3.5\u20135.5 · Plus money · Total 44.5\u201351.5') throw new Error('odds ' + odds.detail);
+if (odds.detail !== 'Line 3.5\u20135.5 · Plus money') throw new Error('odds ' + odds.detail);
 if (odds.pills[1] !== '+100 or more') throw new Error('pill ' + odds.pills.join('|'));
 const time = timeSummary(propStateFromFilters(receptions), 'NFL', ['late']);
 if (time.detail !== 'Sun\u2013Mon · Late') throw new Error('time ' + time.detail);

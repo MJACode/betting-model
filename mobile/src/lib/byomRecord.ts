@@ -455,8 +455,9 @@ export function filtersForDraft(
     const team = sideForMarket(draft.market, draft.side);
     if (team === 'home' || team === 'away') next.side = team;
     else delete next.side;
-    if (draft.role === 'favorite' || draft.role === 'underdog') next.role = draft.role;
-    else delete next.role;
+    // Matt, 2026-11-04: favorite or underdog is a team bet, not a player
+    // prop filter. A prop never carries a role.
+    delete next.role;
     const direction = propSideForMarket(draft.market, draft.propSide);
     if (direction) next.prop_side = direction;
     else delete next.prop_side;
@@ -517,11 +518,11 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
     ? parsed.prop_side
     : null;
   const propFilters = propStateFromFilters(parsed);
-  const role = parsed.role === 'favorite' || parsed.role === 'underdog' ? parsed.role : null;
   return {
     market,
     side: sideForMarket(market, parsed.side ?? null),
-    role,
+    // A prop has no favorite or underdog (Matt, 2026-11-04).
+    role: null,
     primetime: parsed.primetime ?? null,
     propSide: propSideForMarket(market, stored),
     rest: restChoice(parsed),
