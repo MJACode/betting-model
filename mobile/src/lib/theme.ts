@@ -35,6 +35,11 @@ export const colors = {
   // Separators
   separator: '#3C3C4349',
   separatorOpaque: '#C6C6C8',
+  // A switch's OFF track. The iOS default (#E9E9EA, white thumb) is 1.2:1 on
+  // bgCard, so an off switch on a white card all but vanished (Matt,
+  // 2026-11-02, Stats > Filters > Playing today). #8E8E93 is 3.26:1 on white
+  // and against the white thumb — over the 3:1 non-text floor (WCAG 1.4.11).
+  switchTrackOff: '#8E8E93',
 
   // Brand — sampled from the @signalbasepicks mark and banner
   // (assets/brand/, fetched 2026-09-03; scripts/render_brand_icons.py).
@@ -217,8 +222,8 @@ export const font = {
  * The tone is taken from the value ROUNDED the way the screen shows it —
  * `digits` decimals of `value × scale` — so a ratio printed as "0.0%" is grey
  * and one printed as "+0.1%" is green. Match the formatter beside it:
- * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatCurrencySigned(v)` →
- * `pnlColor(v, 2)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
+ * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatFlatUnits(v)` →
+ * `pnlColor(v, 2, FLAT_UNIT_TONE_SCALE)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
  *
  * The rule itself lives in `lib/tone.ts` so the verify scripts, which cannot
  * import react-native, can pin it.

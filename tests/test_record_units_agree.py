@@ -235,8 +235,12 @@ def test_the_record_tab_sums_those_columns_and_not_the_flat_book():
     assert "pnlColor(summary.roi, 1, 100)" in card
     assert "summary.units != null" in card
     assert "overall.units == null" in screen
-    assert "Models use a flat $100 bet" in hero
-    assert "Yesterday and Models use a flat $100 bet" not in hero
+    # One unit basis (2026-11-03): the Models tab books this same stake, so
+    # the sheet no longer says its percentages differ.
+    assert "on the Models tab" in hero
+    assert "won\\u2019t match" not in hero
+    assert "Yesterday and Models use a flat" not in hero
+    assert "$100" not in hero
     assert "unpriced, staked at 1u" in screen
     assert "flat $100" not in curve
     assert "colors.positive" not in curve
@@ -349,7 +353,7 @@ def test_the_fallback_rollback_is_only_safe_because_callers_read_first():
     body = src.split("def notify_discord_results", 1)[1].split("\ndef ", 1)[0]
     assert body.index("_settled_rows(") < body.index("INSERT INTO push_sent")
     assert body.index("_settled_rows_since(") < body.index("INSERT INTO push_sent")
-    for name in ("recaps_needing_restatement", "post_missed_recap", "_restate_x_if_behind"):
+    for name in ("recaps_gone_short", "post_missed_recap"):
         other = src.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
         assert "INSERT" not in other
 

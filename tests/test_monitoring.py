@@ -538,7 +538,14 @@ INSTRUMENTED_ENTRYPOINTS = [
     "scripts/ncaab_odds_capture.py",
     "scripts/ncaab_injury_feed.py",
     "scripts/ncaab_injury_probe.py",
+    "scripts/splits_source_probe.py",
     "scripts/ncaab_total_card.py",
+    "scripts/ncaab_spread_card.py",
+    "scripts/ncaab_moneyline_card.py",
+    "scripts/ncaab_moneyline_first_post_card.py",
+    "scripts/ncaab_first_half_window.py",
+    "scripts/ncaab_first_half_spread_card.py",
+    "scripts/ncaab_first_half_total_card.py",
 ]
 
 

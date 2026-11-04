@@ -489,7 +489,7 @@ export function SettingsScreen() {
           <Text style={styles.bookHint}>
             The books you can bet at. Picks and Stats show the best price among them. You get
             the most value by using every book you can. Model records and stats still use the
-            best price across all books.
+            price the model found.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
@@ -613,7 +613,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="Track record"
-          sub="Every settled pick on record — win rate, flat ROI and CLV by sport and model. Nothing cherry-picked."
+          sub="Every settled pick on record — win rate, return on bets and CLV by sport and model. Nothing cherry-picked."
           // Track Record is a bottom tab, and Settings is a stack screen above
           // the tab navigator — navigate() only bubbles UP, so a bare
           // navigate('TrackRecord') here is never handled. Target the tab

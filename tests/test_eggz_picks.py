@@ -1379,6 +1379,7 @@ def _recap_db():
 
 
 def test_restate_posts_corrected_and_keeps_the_sent_row(monkeypatch):
+    monkeypatch.setitem(eg.config.RECORD_RESTATEMENT_APPROVALS, "2026-10-23", "test")
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
     posted = []
     monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
@@ -1407,6 +1408,8 @@ def test_restate_posts_corrected_and_keeps_the_sent_row(monkeypatch):
 
 
 def test_restate_dry_run_and_an_unresolved_leg_post_nothing(monkeypatch):
+    for day in ("2026-10-21", "2026-10-22"):
+        monkeypatch.setitem(eg.config.RECORD_RESTATEMENT_APPROVALS, day, "test")
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
     posted = []
     monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
@@ -1811,3 +1814,284 @@ def test_the_record_script_accepts_parlaymatt_and_still_defaults_to_eggz(monkeyp
     assert seen == ["eggz", "parlaymatt"]
     assert eggz_record.main(["grade", "--capper", "parlaymatt", "--apply"]) == 0
     assert seen == ["eggz", "parlaymatt", "parlaymatt"]
+
+
+# Stored posts, read from capper_messages on 2026-11-03.
+_NOV1 = (
+    "Sunday Nov. 1\n\nNFL\nBAL Ravens +3 (-105) 1U\U0001f5d1\ufe0f\n\n"
+    "<@1408438245594763375>"
+)
+_OCT29 = (
+    "Thursday Oct. 29\n\nNFL\nCAR Panthers/GB Packers U47.5 (-123) 1U\u2705"
+)
+_MOONSHOT = "<@1408438245594763375>  moonshot parlay\U0001f680"
+_TD_MEGA = "TD Mega parlay <@1408438245594763375>"
+_POSTED_NOV1 = datetime(2026, 11, 1, 16, 55, 37, tzinfo=timezone.utc)
+_POSTED_OCT29 = datetime(2026, 10, 29, 15, 21, 15, tzinfo=timezone.utc)
+_POSTED_MOON = datetime(2026, 10, 31, 15, 48, 13, tzinfo=timezone.utc)
+_POSTED_TD = datetime(2026, 11, 1, 17, 29, 16, tzinfo=timezone.utc)
+
+
+def test_a_discord_mention_is_not_a_row_and_does_not_renumber():
+    for line in ("<@1408438245594763375>", "<@!1408438245594763375>",
+                 "<@&1408438245594763375>", "<#1408438245594763375>",
+                 "@everyone", "@here", "@EVERYONE", "@Here"):
+        legs, reviews = eg.parse_message(line)
+        assert legs == [] and reviews == [], line
+    legs, reviews = eg.parse_message(
+        "NYY ML -110\n<@99>\n@everyone\nBOS +3.5 -105")
+    assert reviews == []
+    assert [leg["line_no"] for leg in legs] == [1, 4]
+    assert [leg["market"] for leg in legs] == ["h2h", "spreads"]
+    legs, reviews = eg.parse_message(
+        "<@!1> @everyone NYY ML -120 @here <#9> <@&2>")
+    assert reviews == []
+    assert len(legs) == 1
+    assert legs[0]["market"] == "h2h"
+    assert legs[0]["price"] == -120
+    assert legs[0]["team_text"] == "NYY"
+    legs, reviews = eg.parse_message("here is a note")
+    assert legs == []
+    assert reviews[0]["reason"] == "unparsed"
+    legs, reviews = eg.parse_message("NE Patriots -3 -110")
+    assert reviews == []
+    assert legs[0]["market"] == "spreads"
+    assert "Patriots" in legs[0]["team_text"]
+
+
+def test_the_nov_1_post_keeps_the_ravens_line_and_drops_the_mention():
+    legs, reviews = eg.parse_message(_NOV1, _POSTED_NOV1)
+    assert reviews == []
+    assert len(legs) == 1
+    leg = legs[0]
+    assert leg["line_no"] == 3
+    assert leg["market"] == "spreads"
+    assert leg["line"] == 3
+    assert leg["price"] == -105
+    assert leg["stake_units"] == 1
+    assert leg["team_text"] == "BAL Ravens"
+    assert leg["sport_hint"] == "NFL"
+    assert leg["slate_date"] == "2026-11-01"
+    assert "<@" not in leg["raw"]
+
+
+def test_the_oct_29_panthers_packers_total_parses():
+    legs, reviews = eg.parse_message(_OCT29, _POSTED_OCT29)
+    assert reviews == []
+    assert len(legs) == 1
+    leg = legs[0]
+    assert leg["line_no"] == 3
+    assert leg["market"] == "totals"
+    assert leg["side"] == "under"
+    assert leg["line"] == 47.5
+    assert leg["price"] == -123
+    assert leg["stake_units"] == 1
+    assert leg["away_text"] == "CAR Panthers"
+    assert leg["home_text"] == "GB Packers"
+    assert leg["sport_hint"] == "NFL"
+    assert leg["slate_date"] == "2026-10-29"
+    spaced, spaced_reviews = eg.parse_message(
+        "NFL\nCAR Panthers / GB Packers U 47.5 (-123) 1U", _POSTED_OCT29)
+    assert spaced_reviews == []
+    assert spaced[0]["side"] == "under" and spaced[0]["line"] == 47.5
+    assert spaced[0]["away_text"] == "CAR Panthers"
+    assert spaced[0]["home_text"] == "GB Packers"
+
+
+def test_parlaymatt_moonshot_and_td_mega_stay_unparsed_after_the_mention_is_removed():
+    """The mention is not why these two stay needs_review.
+
+    `moonshot parlay` is a parlay header, and a header with no legs is
+    unparsed. `TD Mega parlay` is two words in front of parlay, and the
+    header takes one tag word, so it is not a header either.
+    """
+    moon_legs, moon_reviews = eg.parse_message(_MOONSHOT, _POSTED_MOON)
+    assert moon_legs == []
+    assert len(moon_reviews) == 1
+    assert moon_reviews[0]["reason"] == "unparsed"
+    assert moon_reviews[0]["raw"] == "moonshot parlay"
+    assert "<@" not in moon_reviews[0]["raw"]
+    assert eg._parlay_header("moonshot parlay", 1.0) is not None
+    assert eg._parlay_header("moonshot parlay", 1.0)["legs"] == []
+
+    td_legs, td_reviews = eg.parse_message(_TD_MEGA, _POSTED_TD)
+    assert td_legs == []
+    assert td_reviews[0]["reason"] == "unparsed"
+    assert td_reviews[0]["raw"] == "TD Mega parlay"
+    assert eg._parlay_header("TD Mega parlay", 1.0) is None
+    mention_legs, mention_reviews = eg.parse_message("<@1408438245594763375>")
+    assert mention_legs == [] and mention_reviews == []
+
+
+def test_grade_pending_reparses_the_stuck_posts_and_grades_the_under(monkeypatch):
+    """The next grade pass re-reads needs_review messages.
+
+    The Nov 1 mention row is deleted. The graded Ravens line stays. The
+    Oct 29 under matches NFL_2026_08_CAR_GB and grades at the posted price.
+    A second pass changes nothing. ParlayMatt's mention-only post clears.
+    moonshot and TD Mega stay needs_review.
+    """
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_OPS", "")
+    monkeypatch.setattr(eg, "_closing_odds", lambda *a, **k: None)
+    db, _Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_messages (
+        message_id TEXT PRIMARY KEY, body TEXT, posted_at TEXT,
+        parse_status TEXT, parse_note TEXT, capper_key TEXT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, message_id TEXT, line_no INTEGER, status TEXT,
+        review_reason TEXT, sport TEXT, game_id TEXT, game_date TEXT,
+        home_team TEXT, away_team TEXT, commence_time TEXT, market TEXT,
+        side TEXT, line REAL, price REAL, stake_units REAL, player_name TEXT,
+        prop_stat TEXT, prop_market TEXT, posted_at TEXT, result TEXT,
+        units REAL, risked REAL, clv_pct REAL, closing_price REAL,
+        clv_beat_close INT, graded_at TEXT, capper_key TEXT,
+        parlay_id INTEGER, UNIQUE (message_id, line_no))""")
+    nov1_at = "2026-11-01T16:55:37.001+00:00"
+    oct29_at = "2026-10-29T15:21:15.420+00:00"
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+        "VALUES (?,?,?,?,?,?)",
+        ("1566495943430242375", _NOV1, nov1_at, "needs_review",
+         "line 4: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, result, "
+        "units, sport, game_id, game_date, home_team, away_team, market, side, "
+        "line, price, stake_units, posted_at, capper_key) VALUES "
+        "(1664,'1566495943430242375',3,'graded','LOSS',-1.05,'NFL',"
+        "'NFL_2026_08_BAL_BUF','2026-11-01','BUF','BAL','spreads','away',"
+        "-3,-105,1,?, 'eggz')", (nov1_at,))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(3251,'1566495943430242375',4,'needs_review',"
+        "'unparsed: <@1408438245594763375>',1,?,'eggz')", (nov1_at,))
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+        "VALUES (?,?,?,?,?,?)",
+        ("1565385033441742909", _OCT29, oct29_at, "needs_review",
+         "line 3: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(3252,'1565385033441742909',3,'needs_review',"
+        "'unparsed: CAR Panthers/GB Packers U47.5 (-123) 1U',1,?,'eggz')",
+        (oct29_at,))
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+        "VALUES (?,?,?,?,?,?)",
+        ("1565454245032103989", "<@1408438245594763375>",
+         "2026-10-29T19:56:16.749+00:00", "needs_review", "line 1: unparsed",
+         "parlaymatt"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(3254,'1565454245032103989',1,'needs_review',"
+        "'unparsed: <@1408438245594763375>',1,"
+        "'2026-10-29T19:56:16.749+00:00','parlaymatt')")
+    for mid, body, posted, note in (
+        ("1566116597980995586", _MOONSHOT, "2026-10-31T15:48:13.998+00:00",
+         "line 1: unparsed"),
+        ("1566504414771023912", _TD_MEGA, "2026-11-01T17:29:16.726+00:00",
+         "line 1: unparsed"),
+    ):
+        db.execute(
+            "INSERT INTO capper_messages "
+            "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+            "VALUES (?,?,?,?,?,?)",
+            (mid, body, posted, "needs_review", note, "parlaymatt"))
+        db.execute(
+            "INSERT INTO capper_picks (message_id, line_no, status, "
+            "review_reason, stake_units, posted_at, capper_key) VALUES "
+            "(?,1,'needs_review',?,1,?, 'parlaymatt')",
+            (mid, f"unparsed: {body[:80]}", posted))
+    car = (
+        "NFL_2026_08_CAR_GB", "NFL", "2026-10-29", "GB", "CAR",
+        "2026-10-30T00:15:00+00:00", 27, 19, 1, 1, 0,
+    )
+    bal = (
+        "NFL_2026_08_BAL_BUF", "NFL", "2026-11-01", "BUF", "BAL",
+        "2026-11-01T18:00:00+00:00", 36, 10, 1, 1, 0,
+    )
+    scores = {
+        "NFL_2026_08_CAR_GB": (
+            27.0, 19.0, 1, None, 0, "2026-10-30T00:15:00+00:00", "2026-10-29"),
+        "NFL_2026_08_BAL_BUF": (
+            36.0, 10.0, 1, None, 0, "2026-11-01T18:00:00+00:00", "2026-11-01"),
+    }
+
+    class _Rows:
+        def __init__(self, rows, one):
+            self._rows, self._one = rows, one
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return self._one
+
+    class Conn:
+        def execute(self, sql, params=None):
+            params = tuple(params or ())
+            if "FROM games" in sql:
+                if "game_id = %s" in sql:
+                    return _Rows([], scores.get(params[0]))
+                if params[:3] == ("NFL", "GB", "CAR"):
+                    return _Rows([car], None)
+                if params[:3] == ("NFL", "BAL", "BAL"):
+                    return _Rows([bal], None)
+                return _Rows([], None)
+            return db.execute(sql.replace("%s", "?"), params)
+
+        def commit(self):
+            db.commit()
+
+    conn = Conn()
+    assert eg.grade_pending(conn) >= 1
+    ravens = db.execute(
+        "SELECT status, result, units, line, game_id FROM capper_picks "
+        "WHERE id = 1664").fetchone()
+    assert ravens == ("graded", "LOSS", -1.05, -3, "NFL_2026_08_BAL_BUF")
+    assert db.execute(
+        "SELECT id FROM capper_picks WHERE id = 3251").fetchone() is None
+    assert db.execute(
+        "SELECT parse_status FROM capper_messages "
+        "WHERE message_id = '1566495943430242375'").fetchone()[0] == "parsed"
+    under = db.execute(
+        "SELECT status, result, units, risked, market, side, line, price, "
+        "stake_units, game_id, game_date, sport FROM capper_picks "
+        "WHERE message_id = '1565385033441742909'").fetchone()
+    assert under[0] == "graded"
+    assert under[1] == "WIN"
+    assert abs(under[2] - 1.0) < 1e-9
+    assert abs(under[3] - 1.23) < 1e-9
+    assert under[4:] == (
+        "totals", "under", 47.5, -123.0, 1.0, "NFL_2026_08_CAR_GB",
+        "2026-10-29", "NFL")
+    assert db.execute(
+        "SELECT COUNT(*) FROM capper_picks "
+        "WHERE message_id = '1565385033441742909' AND status = 'needs_review'"
+    ).fetchone()[0] == 0
+    assert eg.grade_pending(conn) == 0
+    again = db.execute(
+        "SELECT status, result, units FROM capper_picks "
+        "WHERE message_id = '1565385033441742909'").fetchone()
+    assert again[0] == "graded" and again[1] == "WIN"
+    assert abs(again[2] - 1.0) < 1e-9
+
+    assert eg.grade_pending(conn, eg.PARLAYMATT) == 0
+    assert db.execute(
+        "SELECT id FROM capper_picks WHERE id = 3254").fetchone() is None
+    assert db.execute(
+        "SELECT parse_status FROM capper_messages "
+        "WHERE message_id = '1565454245032103989'").fetchone()[0] == "parsed"
+    stuck = db.execute(
+        "SELECT message_id, status FROM capper_picks "
+        "WHERE capper_key = 'parlaymatt' AND status = 'needs_review' "
+        "ORDER BY message_id").fetchall()
+    assert stuck == [
+        ("1566116597980995586", "needs_review"),
+        ("1566504414771023912", "needs_review"),
+    ]

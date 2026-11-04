@@ -12,27 +12,46 @@
  * (condition_status 'VOID', result NO_ACTION as its marker) is 'not_graded':
  * a Discord-published VOID stays trackable (openForAction) but never grades.
  *
- * P&L convention: the server's profit_flat is dollars at a $100 flat stake,
- * so a bet at any stake S grades as profit_flat x S/100 (WIN scales the
- * payout, LOSS -100 becomes -S, PUSH stays 0). The caller chooses the stake
- * per bet via `stakeFor` — $100 flat (default) or a user-entered custom
- * amount (see useStakeSettings).
+ * Units: the caller supplies each bet's stake (`stakeFor`, built by
+ * lib/trackedStake). By default that is the POSTED stake, the one the Record
+ * tab books (postedPickUnits): 1u to win at the price the pick was decided
+ * at, risk capped at 3u, a pick with no price at 1u. A member can set their
+ * own stake per bet instead. This file only applies the result: a win pays
+ * `win`, a loss costs `risk`, and a push, a void or an ungraded pick risks
+ * nothing. It never reads profit_flat, which is 1u risked and invents −110
+ * for a pick with no price.
+ *
+ * Every figure stays at the 100-is-1u scale (lib/format FLAT_UNIT); screens
+ * print it as units with `formatFlatUnits`, never as dollars. No value
+ * imports on purpose: a node test loads this file with type stripping.
  */
 import type { Pick } from '@/types';
+
+/** What one tracked bet risks and what a win pays, at the 100-is-1u scale. */
+export interface TrackedStake {
+  risk: number;
+  win: number;
+  /** True when the member set this stake, false when it is the posted one. */
+  custom: boolean;
+}
+
+export type TrackedStakeFor = (p: Pick) => TrackedStake;
 
 export type TrackedBetStatus = 'open' | 'won' | 'lost' | 'push' | 'no_action' | 'not_graded';
 
 export interface TrackedBetRow {
   pick: Pick;
   status: TrackedBetStatus;
-  /** The stake this bet is scored at (dollars). */
+  /** What this bet risks, at the 100-is-1u scale. */
   stake: number;
-  /** Dollars at `stake`. 0 unless status is won/lost/push. */
+  /** True when the member set the stake; false when it is the posted stake. */
+  customStake: boolean;
+  /** Won or lost at `stake`, same scale. 0 unless status is won/lost. */
   profit: number;
 }
 
 export interface TrackedBetSummary {
-  /** Net dollars across settled bets at their stakes. */
+  /** Net across settled bets at their stakes (100-is-1u scale). */
   net: number;
   wins: number;
   losses: number;
@@ -41,7 +60,7 @@ export interface TrackedBetSummary {
   open: number;
   /** wins + losses + pushes. */
   settled: number;
-  /** Total dollars staked on settled bets. */
+  /** Risked on won and lost bets (a push risks nothing), same scale. */
   staked: number;
   /** Net / staked; null until something settles for a non-zero stake. */
   roi: number | null;
@@ -78,6 +97,26 @@ export function mergeTrackedSummaries(
   };
 }
 
+function finite(n: number): number {
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * One bet's result at its stake. A win pays `win`, a loss costs `risk`; a
+ * push, a void and an open bet risk nothing, as postedPickUnits counts them.
+ */
+export function gradeTrackedBet(
+  status: TrackedBetStatus,
+  stake: TrackedStake,
+): { profit: number; risked: number } {
+  const risk = finite(stake.risk);
+  const win = finite(stake.win);
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  if (status === 'won') return { profit: cents(win), risked: risk };
+  if (status === 'lost') return { profit: -cents(risk), risked: risk };
+  return { profit: 0, risked: 0 };
+}
+
 export function trackedBetStatus(p: Pick): TrackedBetStatus {
   // Before the result switch: a VOID's NO_ACTION is its marker, not a
   // settlement, so "No action" on a fight hours away read as scratched.
@@ -101,12 +140,13 @@ export function trackedBetStatus(p: Pick): TrackedBetStatus {
  * pick_ids; `picks` is whatever those ids resolved to in the picks table.
  * Ids with no matching pick (a pre-lock-era pick that was delete+rescored)
  * are dropped silently. Rows come back open-first (soonest game first), then
- * settled newest-first.
+ * settled newest-first. `stakeFor` has no default on purpose: a hidden
+ * default is how a second unit basis survived here.
  */
 export function computeTrackedResults(
   trackedIds: number[],
   picks: Pick[],
-  stakeFor: (p: Pick) => number = () => 100,
+  stakeFor: TrackedStakeFor,
 ): { rows: TrackedBetRow[]; summary: TrackedBetSummary } {
   const tracked = new Set(trackedIds);
   const rows: TrackedBetRow[] = [];
@@ -122,19 +162,15 @@ export function computeTrackedResults(
     if (!tracked.has(p.pick_id) || seen.has(p.pick_id)) continue;
     seen.add(p.pick_id);
     const status = trackedBetStatus(p);
-    const rawStake = stakeFor(p);
-    const stake = Number.isFinite(rawStake) && rawStake >= 0 ? rawStake : 0;
-    const isSettled = status === 'won' || status === 'lost' || status === 'push';
-    const profit = isSettled
-      ? Math.round(Number(p.profit_flat ?? 0) * stake) / 100
-      : 0;
+    const stake = stakeFor(p);
+    const { profit, risked } = gradeTrackedBet(status, stake);
     if (status === 'won') wins++;
     else if (status === 'lost') losses++;
     else if (status === 'push') pushes++;
     else if (status === 'open') open++;
-    if (isSettled) staked += stake;
+    staked += risked;
     net += profit;
-    rows.push({ pick: p, status, stake, profit });
+    rows.push({ pick: p, status, stake: finite(stake.risk), customStake: stake.custom, profit });
   }
 
   sortTrackedRows(rows);

@@ -35,6 +35,16 @@ export function gameMarketForModel(modelId: string): string | null {
   // it HAS a market -- without this it would fall into the null below.
   if (modelId === 'nfl_live_leader_ml') return 'h2h';
   if (modelId.startsWith('nfl_')) return null; // any future NFL model without snapshots
+  // The NCAAB moneyline model prices each book's moneyline off that book's own
+  // spread, so its id has 'spread' in it; its picks are MONEYLINES. Named
+  // before the substring test below, or every price, movement and line-shop
+  // lookup would read the spreads rows (models/ncaab_moneyline_own_spread.py).
+  if (modelId === 'ncaab_moneyline_own_spread') return 'h2h';
+  // The NCAAB first half's spread (models/ncaab_first_half_spread.py): stored
+  // under its own market, never the game's 'spreads' rows, whose number is
+  // about twice as big. Before the 'spread' substring rule below, which would
+  // read the full-game spread for it.
+  if (modelId === 'ncaab_first_half_spread') return 'spreads_h1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -57,6 +67,9 @@ export function gameMarketForModel(modelId: string): string | null {
   // The NBA first half's total (overs): stored under its own market, never the
   // game's 'totals' rows, whose number is about twice as big.
   if (modelId === 'nba_first_half_total_luck') return 'totals_h1';
+  // The NCAAB first half's total (models/ncaab_first_half_total.py): the same
+  // market, the same trap.
+  if (modelId === 'ncaab_first_half_total') return 'totals_h1';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
@@ -263,6 +276,9 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_team_total_luck') return 'game_total';
   // The first half's points move with the game total too.
   if (modelId === 'nba_first_half_total_luck') return 'game_total';
+  if (modelId === 'ncaab_first_half_total') return 'game_total';
+  // A moneyline, though its id has 'spread' in it (see gameMarketForModel).
+  if (modelId === 'ncaab_moneyline_own_spread') return 'game_ml';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1681,13 +1697,24 @@ export function computeMovement(
  * whenever DraftKings hung the same number. Read as DraftKings' line, a move
  * at the deciding book showed as a price move in the bettor's favour
  * (designer review, 2026-10-20).
+ *
+ * The NCAAB spread card (scripts/ncaab_spread_card.py) writes the same row:
+ * the deciding book's own spread, line_book empty when DraftKings hung the
+ * same number (designer review, 2026-11-02).
+ *
+ * The NCAAB first-half spread card (scripts/ncaab_first_half_spread_card.py)
+ * writes the same row shape, and so does the NCAAB first-half total card
+ * (scripts/ncaab_first_half_total_card.py).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
+  'ncaab_first_half_spread',
+  'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
   'nba_team_total_luck',
   'nba_total_luck',
+  'ncaab_spread_market',
   'nfl_prop_market',
   'wnba_prop_market',
 ];
@@ -1905,6 +1932,13 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
  *   - unlocked look-ahead previews (future UFC/golf), which re-price until
  *     game day.
  */
+// The two NCAAB full-game moneyline models: a moneyline has no line, so their
+// Pick Detail note names only the price.
+const NCAAB_MONEYLINE_MODELS: readonly string[] = [
+  'ncaab_moneyline_own_spread',
+  'ncaab_moneyline_first_post',
+];
+
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
   if (pick.signal_type !== 'BET') return null;
@@ -1955,8 +1989,19 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NBA home team-total unders and first-half overs post the same way, in the
   // same hour.
   // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
-  // once, the evening before, and never re-prices: not "the first scoring run
-  // of the day".
+  // once, minutes after DraftKings first posts its total (usually the day
+  // before the game), and never re-prices: not "the first scoring run of the
+  // day". DraftKings' first total often moves within half an hour, so its note
+  // says to check DraftKings' total and price (the card bets only the same
+  // total at the same two prices), as the opening moneyline's says to check
+  // the book's price. The NCAAB spread card (scripts/ncaab_spread_card.py) and
+  // the NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each
+  // game once, at 15:00 UTC on game day, the same way.
+  // The NCAAB first-half spread card decides each game once, about ten
+  // minutes before tip, the same way, and the NCAAB first-half total card
+  // about an hour before tip. The NCAAB opening-moneyline card
+  // (scripts/ncaab_moneyline_first_post_card.py) bets a game at most once,
+  // the moment a book first posts its moneyline, and never re-prices.
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -1965,6 +2010,11 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_team_total_luck' ||
     pick.model_id === 'nba_first_half_total_luck' ||
     pick.model_id === 'ncaab_total_blend' ||
+    pick.model_id === 'ncaab_spread_market' ||
+    pick.model_id === 'ncaab_moneyline_own_spread' ||
+    pick.model_id === 'ncaab_moneyline_first_post' ||
+    pick.model_id === 'ncaab_first_half_spread' ||
+    pick.model_id === 'ncaab_first_half_total' ||
     nbaPosted
   ) {
     return {
@@ -1972,8 +2022,19 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
       verb: 'Posted',
       label: `Posted ${stamp}`,
       note:
-        'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
-        'shown.' +
+        // A moneyline has no line (UX review, 2026-11-03), and an opening
+        // price moves fast: the opening-moneyline model says so where the
+        // member places the bet.
+        (NCAAB_MONEYLINE_MODELS.includes(pick.model_id)
+          ? 'Posted once and never re-priced. This is when the bet posted, at the price shown.'
+          : 'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
+            'shown.') +
+        (pick.model_id === 'ncaab_moneyline_first_post'
+          ? ' An opening price often changes within half an hour: check the book’s price before you bet.'
+          : '') +
+        (pick.model_id === 'ncaab_total_blend'
+          ? ' An opening total often changes within half an hour: check DraftKings’ total and price before you bet.'
+          : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : ''),
     };

@@ -209,6 +209,9 @@ stored. The old version of this rule carried exceptions "worth fixing when
 touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
 laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
 undeclared store on disk, and the fix is an importer, not an allowlist entry.
+**Everything is also carbon-copied to mike's PC** (mike, 2026-11-03): database,
+storage and GitHub, outside the repo, by `scripts/local_mirror*.py`. A backup,
+never a second store: `docs/local_ops.md`.
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
 UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
@@ -255,6 +258,12 @@ which loads on `tracking/**`, `models/**`, `nfl/**`, `ncaaf_live/**`,
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
 `.claude/rules/frontend.md` when a file under `mobile/` is opened.
+
+**NO RESTATED RECORDS, ON ANY SURFACE, WITHOUT MIKE'S APPROVAL IN CHAT.** (mike,
+2026-10-30.) A record that went out is never re-posted, corrected or relabelled,
+by any path. Only `config.RECORD_RESTATEMENT_APPROVALS` opens one. Every record
+holds until each pick it counts is graded. Mechanics:
+`.claude/rules/picks-and-publishing.md`.
 
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
 (Repo-level rule, 2026-08-30.) "Update CLAUDE.md after every commit" grew this
@@ -379,7 +388,10 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 No picks until a team has played >= 10 games; prior-season stats are the
 baseline in that window. Season-to-date rates are noise early — blend toward
 the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
-`docs/sports/nhl.md`).
+`docs/sports/nhl.md`). **NCAAB totals: no hold** (mike, 2026-11-02:
+*"we do not need to wait 10 games, I never approved that"*;
+`docs/sports/ncaab.md`). **NBA shooting-luck totals (full game, home team total,
+first half): no hold** (mike, 2026-11-02; `docs/sports/nba.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -401,8 +413,10 @@ every writer: `models/nhl_goalie_gate.py`, `docs/sports/nhl.md`.
   3,201 bets", never "-$20,670 at $100 flat" — the dollar figure invents a stake
   size nobody chose, changes meaning the moment the bankroll does, and cannot be
   compared against any other number in this repo. This governs EVERY surface:
-  replies, docs, commit messages, the dashboard, Discord, the app. `profit_flat`
-  is stored as dollars-per-$100 stake, so divide by 100 to report it.
+  replies, docs, commit messages, the dashboard, Discord, the app. Report units
+  on the posted stake (§2: `stake_for` at `COALESCE(decision_odds, dk_odds)`,
+  `published_pick_unit_profit`). `profit_flat` / 100 is 1u risked; no surface
+  shows it.
 - Edge: always expressed as decimal (0.05 = 5%), not percentage
 - `home_win = 1` means home team won the full game
 - `home_win_reg = 1` means home team won in regulation (NHL only)
@@ -560,7 +574,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 68 models carry
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB. 73 models carry
   their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no

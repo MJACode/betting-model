@@ -136,7 +136,10 @@ def slate(conn, now: datetime, skipped: list | None = None,
     season by models.nba_total_luck.regular_season, so a game the schedule
     does not list yet (an NBA Cup quarterfinal or semifinal, a game scheduled
     around them) is priced, as the lab priced it, and the Cup final, play-in
-    and playoffs are skipped and named in `skipped`."""
+    and playoffs are skipped and named in `skipped`, including a row of one of
+    those games dated onto a regular-season day, once the schedule lists the real
+    game with its teams (models.nba_total_luck.postseason_twin; docs/followups.md
+    says what happens before that)."""
     horizon = now + timedelta(minutes=horizon_min if horizon_min is not None
                               else tl.DECISION_LEAD_MIN[1] + 5)
     today = now.astimezone(_ET).date()
@@ -153,9 +156,25 @@ def tipped_games(conn, now: datetime, hours: float) -> dict[str, dict]:
                           lambda tip: oldest <= tip <= now)
 
 
-def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) -> dict[str, dict]:
-    """The regular-season games on these ET dates whose tip `wanted` accepts."""
+def _reversed_starts(conn, rows) -> dict[str, str]:
+    """The schedule's start under the id with home and away the other way round, for the rows that
+    have none of their own. At a neutral court the odds feed and ESPN can disagree on who is home, and
+    the feed's start runs up to 20 minutes behind the real tip, so a bet on the feed's row needs
+    ESPN's. A second read, and none at all on a night with no such row. Only the start: the row keeps
+    its own type, or lack of one, so this moves no gate."""
+    ids = sorted({f"NBA_{str(gd)[:10]}_{home}_{away}" for _, home, away, gd, _, _, s_ct, _ in rows if not s_ct})
+    if not ids:
+        return {}
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT game_id, commence_time FROM nba_schedule WHERE game_id = ANY(%s)", (ids,)).fetchall() if r[1]}
+
+
+def _read_games(conn, dates: list[str], wanted, tip_rule=None) -> dict[str, dict]:
+    """Every NBA `games` row on these ET dates whose tip `wanted` accepts, with its
+    schedule type and both starts. It decides nothing: the gate is the caller's.
+    `tip_rule(schedule_start, games_start)` chooses the tip, `tip_of` unless told otherwise."""
     from models.nba_prop_market import tip_of
+    tip_rule = tip_rule or tip_of
     rows = conn.execute("""
         SELECT g.game_id, g.home_team, g.away_team, g.game_date, g.season,
                g.commence_time, s.commence_time, s.game_type
@@ -163,29 +182,117 @@ def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) 
         LEFT JOIN nba_schedule s ON s.game_id = g.game_id
         WHERE g.sport = 'NBA' AND g.game_date = ANY(%s)
     """, (dates,)).fetchall()
+    reversed_start = _reversed_starts(conn, rows)
     cand = {}
     for gid, home, away, gd, season, g_ct, s_ct, game_type in rows:
-        tip = tip_of(s_ct, g_ct)
+        s_ct = s_ct or reversed_start.get(f"NBA_{str(gd)[:10]}_{home}_{away}")
+        tip = tip_rule(s_ct, g_ct)
         if tip is None or not wanted(tip) or gid in cand:
             continue
         cand[gid] = {"home": home, "away": away, "game_date": str(gd)[:10],
                      "season": int(season) if season is not None else None, "tip": tip,
-                     "game_type": game_type}
+                     "game_type": game_type, "schedule_start": s_ct, "games_start": g_ct}
+    return cand
+
+
+def _regular_games(conn, dates: list[str], wanted, skipped: list | None = None) -> dict[str, dict]:
+    """The regular-season games on these ET dates whose tip `wanted` accepts."""
+    cand = _read_games(conn, dates, wanted)
     if not cand:
         return {}
     frame = pd.DataFrame([{"game_id": g, "season": v["season"], "game_date": v["game_date"],
                            "game_type": v["game_type"]} for g, v in cand.items()])
     days = schedule_days(conn, [v["season"] for v in cand.values() if v["season"] is not None])
     keep = set(tl.regular_season(frame, days)["game_id"])
+    # A postseason game the feed dated onto a regular-season day passes the test above, and only the
+    # schedule's own row for it can say so. Read only when an unlisted row exists: no ordinary night has one.
+    twins = {}
+    unlisted = [g for g in keep if cand[g]["game_type"] is None]
+    if unlisted:
+        sched = schedule_rows(conn, [cand[g]["season"] for g in unlisted if cand[g]["season"] is not None])
+        twins = {g: t for g in unlisted
+                 if (t := tl.postseason_twin(cand[g]["game_date"], cand[g]["home"], cand[g]["away"], sched))}
     out = {}
     for gid, v in sorted(cand.items()):
-        game_type = v.pop("game_type")
+        game_type = v["game_type"]
+        if gid in twins:
+            if skipped is not None:
+                skipped.append(f"{gid} (the schedule lists this game as {twins[gid]})")
+            continue
         if gid not in keep:
             if skipped is not None:
                 skipped.append(f"{gid} ({game_type or 'not a regular-season day'})")
             continue
-        out[gid] = v
+        out[gid] = {k: v[k] for k in ("home", "away", "game_date", "season", "tip")}
     return out
+
+
+# ── the play-in, the playoffs and the Cup final: nba_prop_market's only ───────
+# Read only from scripts/nba_prop_market_card.py, and tests/test_nba_postseason_gate.py
+# fails on any other reader. Every other card reads slate() above, which refuses these.
+
+SCHEDULE_ROW_COLS = ["game_id", "season", "game_date", "game_type", "home_team", "away_team",
+                     "in_games", "scored"]
+
+def schedule_rows(conn, seasons) -> pd.DataFrame:
+    """These seasons' nba_schedule rows with their teams, whether each has a `games` row
+    and whether that row has its final: what models.nba_total_luck.graded_postseason reads."""
+    seasons = sorted({int(x) for x in seasons})
+    if not seasons:
+        return pd.DataFrame(columns=SCHEDULE_ROW_COLS)
+    return pd.DataFrame(conn.execute("""
+        SELECT s.game_id, s.season, s.game_date, s.game_type, s.home_team, s.away_team,
+               g.game_id IS NOT NULL AS in_games, g.home_score IS NOT NULL AS scored
+        FROM nba_schedule s
+        LEFT JOIN games g ON g.game_id = s.game_id
+        WHERE s.season = ANY(%s)
+    """, (seasons,)).fetchall(), columns=SCHEDULE_ROW_COLS)
+
+
+def postseason_games(conn, dates: list[str], wanted, refused: dict | None = None) -> dict[str, dict]:
+    """The play-in, playoff and Cup final games on these ET dates whose tip `wanted` accepts.
+
+    Each dict also carries `postseason` (True), `game_type` (None when the schedule does not
+    list it) and where the tip came from: `tip_source` is 'schedule' when the window is measured
+    from the schedule's start and 'feed' when from the odds feed's, because the feed's can run up
+    to 22 minutes late and those bets are reported apart.
+
+    Every one of these schedule rows is ESPN's, and ESPN alone sets its tip, so a schedule start
+    far before the feed's is read as ESPN's error and the window is measured from the feed's
+    (models.nba_prop_market.postseason_tip). Here only: `slate` stays on `tip_of`. The card writes
+    both starts to the game's decision row, and tracking/failure_alerter names the game.
+    `refused`: {game_id: the listed id} for a row models.nba_total_luck.listed_twin turned away."""
+    from models.nba_prop_market import postseason_tip
+    cand = {g: v for g, v in _read_games(conn, dates, wanted,
+                                         tip_rule=lambda s, f: postseason_tip(s, f)[0]).items()
+            if v["game_type"] is None or v["game_type"] in tl.POSTSEASON_TYPES}
+    if not cand:
+        return {}
+    frame = pd.DataFrame([{"game_id": g, "season": v["season"], "game_date": v["game_date"],
+                           "game_type": v["game_type"], "home_team": v["home"],
+                           "away_team": v["away"]} for g, v in cand.items()])
+    sched = schedule_rows(conn, [v["season"] for v in cand.values() if v["season"] is not None])
+    keep = set(tl.graded_postseason(frame, sched)["game_id"])
+    out = {}
+    for gid, v in sorted(cand.items()):
+        if gid not in keep:
+            twin = (tl.listed_twin(gid, v["game_date"], v["home"], v["away"], sched)
+                    if v["game_type"] is None else None)
+            if twin and refused is not None:
+                refused[gid] = twin
+            continue
+        out[gid] = {**v, "postseason": True,
+                    "tip_source": postseason_tip(v["schedule_start"], v["games_start"])[1]}
+        _say_if_starts_disagree(gid, v)
+    return out
+
+
+def _say_if_starts_disagree(gid: str, game: dict) -> None:
+    from models.nba_prop_market import START_GAP_MIN, starts_disagree
+    if starts_disagree(game["schedule_start"], game["games_start"]):
+        logger.warning(f"NBA postseason: {gid} schedule start {game['schedule_start']}, odds feed start "
+                       f"{game['games_start']}, over {START_GAP_MIN} minutes apart; measuring from "
+                       f"{game['tip'].isoformat()}")
 
 
 # The books the rule reads: the deciding books and Pinnacle, whose no-vig line

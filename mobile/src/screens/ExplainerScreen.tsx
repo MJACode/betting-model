@@ -34,18 +34,16 @@ export function ExplainerScreen() {
 
         <Section heading="Which sportsbook the numbers come from">
           <P>
-            <Strong>DraftKings sets the number; you get the best price on it.</Strong>{' '}
-            The model prices the DraftKings line, and the BET call and the
-            stake are then taken at the best price any book you can bet is
-            offering on that same number — the pick names the book. Our
-            record is graded at that price. The one exception runs the other
-            way: a player prop DraftKings does not post at all is scored off
-            the first of those books that does, and the pick says so.
+            <Strong>Every pick names the book and the price the model found.</Strong>{' '}
+            The model prices the line, and the BET call and the stake are
+            taken at the price the model found. Our record is graded at that
+            same price. A player prop DraftKings does not post at all is
+            scored off the first book we price that does, and the pick says
+            so.
           </P>
           <P>
             Every pick lists each of your books' lines, <Strong>best price first</Strong>,
-            so you can place it wherever pays most. The model's own record is
-            always graded at the best price across every book we price.
+            so you can place it wherever pays most.
           </P>
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
@@ -116,8 +114,8 @@ export function ExplainerScreen() {
           <P>
             Every stake we publish is in <Strong>units</Strong>. One unit is one
             flat bet at whatever size you bet, and we never put a dollar figure
-            on a pick, because the same "$50" means something different to every
-            reader. You can add a bankroll in Settings if you like: it's
+            on a pick, because the same dollar amount means something different
+            to every reader. You can add a bankroll in Settings if you like: it's
             optional, it stays on this device, and it only converts your units
             into dollars. It never sizes a bet: every pick is still the same
             1u play for everyone.
@@ -271,14 +269,14 @@ export function ExplainerScreen() {
             The Performance tab is <Strong>your own record</Strong>. Use{' '}
             <Strong>Add a bet</Strong> to log a wager — any book, any sport,
             including DFS. It's stored on your device and counts toward your
-            P&L, so nothing is missing from your record.
+            record, so nothing is missing from it.
           </P>
           <P>
             Below that, <Strong>Tracked picks</Strong> grades the picks you tap
-            Track on. Those score automatically from our settled results at the
-            stake basis you choose ($100 flat or a custom amount), so
-            you can see how the model's calls would have done for you without
-            logging anything.
+            Track on, with nothing to log. They score automatically from our
+            settled results at the stake each pick was posted at, so they match
+            the Record tab. Choose <Strong>My stakes</Strong> to set your own
+            stake on any of them, in units.
           </P>
           <P>
             <Strong>Automatic sportsbook sync is coming soon.</Strong> When it

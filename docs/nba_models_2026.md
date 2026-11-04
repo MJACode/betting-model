@@ -272,6 +272,26 @@ The feed has returned DraftKings, FanDuel, Fanatics, BetParx and BetRivers for 2
 (BetMGM, Caesars and Hard Rock not yet), so the five-book row is the expectation, and
 less than that: the best cell of a 546-cell search runs high.
 
+**How to read this record, dated 2026-11-02.** A separate check reproduced the card to the bet (92,877 of 92,877
+rows) and then measured three things the figures above do not say. No bet and no live price changes.
+
+- **It is one draw of five.** The trainer's fits are not pinned to a thread count, so the same seed on another
+  machine is a different model (`models/nba_props.py:703-704`). Refitted on 2, 3, 4 and 6 threads, the card made
+  +3.95%, +3.65%, +3.82% and +3.81% at eight books, against this record's +4.12%; at five books +3.31%, +3.28%,
+  +3.33% and +3.16% against +3.60%. Read the record as about +3.8% at eight books and +3.3% at five. The capped
+  grade, +9.69% on 1,867 bets, falls to +8.96% if a voided bet keeps its slot, as it does live.
+- **One input read tonight's box.** The returning-teammates input in the graded history counted anyone in the
+  game's own box (`models/nba_props.py:550-561`). The live card counts the pre-game roster and players a book
+  prices, so no live bet read it. Fed what live knows, the card makes +4.09% at eight books and +3.59% at five,
+  against +4.12% and +3.60%. Refitted on it, +3.76% and +3.31%, inside the spread between draws.
+- **A team's first ten games earned nothing.** Eight books: 10,244 bets, +15.1 units, +0.15% (-1.86% to +2.07%),
+  against 73,116 bets, +3,395.0 units, +4.68% after. The gap at 5, 7, 10, 12, 15 and 20 games is +3.22, +3.73,
+  +4.53, +2.92, +3.40 and +2.37 points, so ten is the peak of a range and not a boundary. It is not card-wide:
+  threes lose 92.9 units there, while blocks under and rebounds + assists under make money. This was found after
+  the record, so it is not a rule. Every live bet so far is in this window.
+- **The feed now returns all eight books.** Live decisions have been taken at Hard Rock, BetMGM and Caesars, so the
+  five-book row above is no longer the expectation.
+
 **Prices it lays:** min −200, 5th percentile −166, median +108, 95th +170, max +3000;
 64% plus money, 9% at −150 or shorter. 558 bets are longer than +200 (they lose 4.9
 units); the +1,600..+3,000 tail is threes overs at 0.5 quoted by one book, at stakes of
@@ -1987,7 +2007,8 @@ bets.
 - **F8, the early season: too few games to tell.** The six cells place 112, 65, 43, 37, 18 and
   17 bets over all priced seasons. Full-game overs with last season weighted as 5, 10 or 20
   games: -0.9%, +0.1%, +11.4%; home team-total unders: -2.4%, -15.1%, -21.5%. The 10-game wait
-  stays.
+  stays. (mike removed the wait on 2026-11-02; `docs/sports/nba.md` has the replay on the
+  plain season-to-date number, which is not this blend.)
 
 **Closed for 2026-27: team first-quarter and first-half shares, and an early-season start for
 the two live models.** Nothing here is built.
@@ -2646,10 +2667,8 @@ their answer is "too few games to tell". The full table is in the lab's output.
 
 Run `2026-10-28-eighth`: 64 registered cells and 20 controls (`--full`, then
 `python -m scripts.nba_game2_verdict --house5`). The cells, bets and per-game inputs are on the
-build machine under `%TEMP%/q1trend/results/`. **They are not in Supabase yet.**
-`python -m scripts.nba_game2_store --results <folder> --run 2026-10-28-eighth` failed with
-"password authentication failed for user postgres": the local login has been stale since the
-database password changed on 2026-10-24. Storing the run is the first step once it works.
+build machine under `%TEMP%/q1trend/results/`, and in Supabase (84 rows, read back 2026-11-01, after the login
+that first blocked storing them was fixed).
 
 **0 of the 64 cells pass.** The verdict counts 7 whose 95% interval clears zero, against about
 1.6 expected by chance. Six of those hold a single bet each. One cell with a real sample clears
@@ -2708,3 +2727,37 @@ is 97 overs (+3.6%) and 120 unders (+1.9%).
 **Closed for 2026-27: the first-quarter cover-record and over/under-record method.** Nothing is
 built. The step-with-check cell is recorded, not built: it is too thin to decide and too rare
 to become decidable.
+
+
+## 13. The searches after the eighth (2026-10-30 to 2026-11-02)
+
+mike, 2026-10-30, on the NBA having no spread or moneyline model: *"whatever is missing, find it."* A sweep ranked what
+had not been tried, and these seven were pre-registered and graded. Each doc holds its rules, written before any cell
+was graded, its counts, and its results at the end. All runs are stored in Supabase (`nba_game2_cells`).
+
+| Search | Doc | Run | Cells | Pass | What it says |
+|---|---|---|---|---|---|
+| Favourites shorter than -200 | `docs/nba_search_fav200.md` | `2026-10-31-fav200` | 40 | 0 | The blind favourite does not pay; the model families have too few games to tell |
+| The popular-team tax | `docs/nba_search_popular.md` | `2026-10-31-popular` | 9 | 0 | Betting against the popular team does not clear |
+| Shooting luck from shot location | `docs/nba_search_shotluck.md` | `2026-10-31-shotluck` | 48 | 0 | Nearest miss +3.9%, -0.8% to +8.5%; the live totals models are unchanged |
+| The starters and the first quarter | `docs/nba_search_starters.md` | `2026-11-01-starters` | 32 | 0 | Knowing who starts does not separate from the first-quarter or first-half market |
+| Result shapes by line size | `docs/nba_search_shapes.md` | `2026-11-02-shapes` | 256 | 0 | The earlier moneyline and spread verdicts did not rest on the pricing choice |
+| Props off Pinnacle's line, the consensus, and an anchored prop model | `docs/nba_search_propoffline.md` | `2026-10-31-propoffline` | 36 | 8 | **All unders. An independent check found none is a new model** |
+| The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
+| First-quarter player props (added 2026-11-04) | `docs/nba_search_q1props.md` | `2026-11-04-q1props` | 18 | 0 | Nearest miss assists over, +3.0%, -1.7% to +7.6%; the blind bets lose 5% to 8% |
+| First-quarter and first-half team totals (added 2026-11-04) | `docs/nba_search_q1tt.md` | `2026-11-04-q1tt` | 26 | 0 | Books set them from their own period spread and total; the live home team-total rule carried over makes +3%, too few bets to tell |
+
+**Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
+That is now tested from the projection, the injury report, the shooting-luck gap, the popular team, the favourite and
+the line-size shape. The pre-game cells that have passed bet totals and player props. The one exception is in-play:
+six of section 7's game-state cells on the live moneyline and spread passed, with every warning sign of stale quotes
+written down beforehand, and that needs an NBA in-play loop that does not exist.
+
+**Where this leaves the first quarter.** No first-quarter cell has passed in any search: spreads and totals in the fifth
+search, the eighth (mike's method) and the starters search; player props and team totals after their prices were
+bought on 2026-11-03 (two seasons, 2024-25 and 2025-26; the feed holds none for 2023-24). Pinnacle prices none of the
+first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them.
+
+**The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
+its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
+of its doc has the check.

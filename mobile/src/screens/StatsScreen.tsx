@@ -13,7 +13,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -25,6 +24,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
+import { AppSwitch } from '@/components/AppSwitch';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { AddLineSheet } from '@/components/AddLineSheet';
@@ -109,7 +109,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, boardSeasonET, etDate, formatAmerican, MINUS, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
+import { addDays, boardSeasonET, etDate, formatAmerican, MINUS, monthET, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -180,12 +180,14 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import {
+  boardSegmentsFor,
   chipsForSegment,
   defaultSegmentFor,
   emptiedByPosition,
   matchesPosition,
   positionEmptyText,
   positionFallbackNote,
+  positionSegmentsFor,
   positionsForSegment,
   readCarriesPosition,
   segmentAccessibilityLabel,
@@ -630,9 +632,9 @@ export function StatsScreen() {
   }>({ market: '', rows: [], status: 'ok' });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
-  // The position row's player segment (QB / RB / WR/TE / DEF, Hitters /
-  // Pitchers, or Players). Teams stays `boardMode`, so the Teams board and its
-  // sport-switch rule are untouched; the row shows Teams when that is on.
+  // The player segment (QB / RB / WR/TE / DEF, Hitters / Pitchers, or
+  // Players). Teams stays `boardMode` and lives on the top Players | Teams row;
+  // the pick is kept while Teams is on, so tapping Players comes back to it.
   const [segmentPick, setSegmentPick] = useState<StatSegment>(() => defaultSegmentFor(sport));
   // Read through the sport's own list: for the one render between a sport
   // switch and the reset effect below, the stored pick can belong to the old
@@ -718,9 +720,9 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = etDay;
-    // A sport with no player leaderboard and no Teams board (NCAAB today)
-    // draws only its empty state. Its week of games would be read and thrown
-    // away: 472 NCAAB games for 2026-11-02 to 11-08.
+    // A sport with no player leaderboard and no Teams board draws only its
+    // empty state, so its week of games would be read and thrown away (472
+    // NCAAB games for 2026-11-02 to 11-08, before NCAAB had a board).
     if (!defaultStatFor(sport) && !supportsTeamBoard(sport)) {
       setSlate(EMPTY_SLATE);
       setSlateGames([]);
@@ -1074,7 +1076,7 @@ export function StatsScreen() {
   };
 
   /**
-   * The position row. Teams flips to the Teams board; a player segment keeps
+   * Both header rows call this. Teams flips to the Teams board; a player segment keeps
    * the selected stat when it has one (the same chip, or the same column
    * filed under another group — Anytime TD is Rushing on RB and Receiving on
    * WR/TE) and otherwise lands on its first chip (lib/statSegments.ts).
@@ -2188,10 +2190,11 @@ export function StatsScreen() {
     (timeWindow === 'h2h' && slateChecking) ||
     (touchView === 'loading' && !error);
   const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
+  // A Players board that can never carry a line (NCAAB: no college props,
+  // Matt 2026-11-03) does not name a book whose lines it will not show.
   const showHeaderBookLine =
     (boardMode === 'teams' && supportsTeamBoard(sport)) ||
-    !stat ||
-    (!oddsHeaderSlot && !playersBoardSettling);
+    (sport !== 'NCAAB' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
   // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
   // stack grow by the overhang and pull the same amount back with a negative
   // margin. The typing field reports overhang 0 and the pad matches it.
@@ -2538,6 +2541,13 @@ export function StatsScreen() {
       const missing = nhlEmptyBoardText(hasLines, betLabel || (stat?.label ?? 'lines'));
       if (missing && rows.length === 0) return missing;
     }
+    // Men's college basketball's first weeks: the board is empty because the
+    // season is new, not because a feed broke, and the reader is told when it
+    // fills (UX review, 2026-11-03). November only, on the ET clock.
+    if (sport === 'NCAAB' && rows.length === 0 && monthET() === 11) {
+      const s = boardSeasonET(sport);
+      return `The ${s - 1}\u2013${String(s).slice(2)} season has just tipped off. Player stats appear as each game goes final.`;
+    }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
   }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment, propMarket, propLines, betLabel, rows.length]);
@@ -2560,7 +2570,7 @@ export function StatsScreen() {
           </View>
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
-        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <TeamsBoard
           sport={sport}
           onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
@@ -2598,7 +2608,7 @@ export function StatsScreen() {
           </View>
           {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
         </View>
-        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <EmptyState
           title="No player leaderboard"
           subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
@@ -2804,9 +2814,9 @@ export function StatsScreen() {
         {showHeaderBookLine ? <SportsbookIndicator coverageNote={coverageNote} /> : null}
       </View>
 
-      <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
+      <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
 
-      {/* Stat selector — the primary control, straight under the position row,
+      {/* Stat selector — the primary control, under the header's tab rows,
           and the one row on this screen that is never allowed to cost less: it
           is the board's subject, one tap, directly manipulated.
           ONE row. It was a chip row per group (4 for NFL), then a group tab row
@@ -3198,7 +3208,7 @@ export function StatsScreen() {
                 hitMode={hitMode}
                 sport={sport}
                 colorful={colorful}
-                thinSample={timeWindow === 'h2h'}
+                thinSample
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail && canOpenPlayerDetail(item.player_id)}
@@ -3408,7 +3418,7 @@ export function StatsScreen() {
             <Text style={[styles.ungradedLabel, slateCutDead && styles.rowDisabled]}>
               {hasSlate ? slateLabel : 'Playing today'}
             </Text>
-            <Switch
+            <AppSwitch
               value={tonightActive && !gamesPicked}
               onValueChange={setTonightOnly}
               disabled={slateCutDead}
@@ -3490,7 +3500,7 @@ export function StatsScreen() {
             {minTier ? (
               <View style={styles.ungradedRow}>
                 <Text style={styles.ungradedLabel}>{ATD_COPY.includeUnranked}</Text>
-                <Switch
+                <AppSwitch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
                   accessibilityLabel={ATD_COPY.includeUnranked}
@@ -3550,7 +3560,7 @@ export function StatsScreen() {
             {minGrade ? (
               <View style={styles.ungradedRow}>
                 <Text style={styles.ungradedLabel}>Include matchups we can’t rank</Text>
-                <Switch
+                <AppSwitch
                   value={includeUngraded}
                   onValueChange={setIncludeUngraded}
                   accessibilityLabel="Include matchups we can’t rank"
@@ -4408,36 +4418,51 @@ function LineRuler({
 }
 
 /**
- * The position row (Designer, Option A, Matt 2026-09-25): QB / RB / WR/TE /
- * DEF / Teams on the football boards, Hitters / Pitchers / Teams on MLB, and
- * the old Players | Teams everywhere else. It REPLACES Players | Teams rather
- * than stacking under it, so the header gains no height, and it is the same
- * first-level SegmentTabs (tint underline) the toggle was.
+ * The Stats header's tab rows. Players | Teams on top on every sport, the same
+ * toggle NBA has (Matt, 2026-11-02, reversing the 2026-09-25 single row that
+ * folded Teams into QB / RB / WR/TE / DEF / Teams). Where a sport has
+ * positions — NFL, NCAAF, MLB — they ride a second-level row under Players,
+ * one tap each as before, and the row hides on the Teams board.
  *
- * Width: the row splits the screen evenly. On a 393pt phone the NFL's five
- * segments get 78.6pt each, and the widest label ("WR/TE", "Teams") is about
- * 45pt at font.size.body semibold. `fit` shrinks a label at the largest
- * Dynamic Type sizes rather than truncating it.
+ * Tapping Players returns to the position last picked (`segment`), so a trip
+ * to Teams and back does not reset the board to QB.
  */
 function StatSegmentRow({
   sport,
   active,
+  segment,
   onChange,
 }: {
   sport: Sport;
+  /** 'teams' while the Teams board is on, else the player segment. */
   active: StatSegment;
+  /** The player segment last picked, kept while Teams is on. */
+  segment: StatSegment;
   onChange: (s: StatSegment) => void;
 }) {
+  const positions = positionSegmentsFor(sport);
+  const onTeams = active === 'teams';
   return (
-    <SegmentTabs
-      items={segmentsForSport(sport)}
-      active={active}
-      onChange={onChange}
-      labelFor={segmentLabel}
-      accessibilityLabelFor={segmentAccessibilityLabel}
-      fit
-      tight
-    />
+    <>
+      <SegmentTabs
+        items={boardSegmentsFor(sport)}
+        active={onTeams ? 'teams' : 'players'}
+        onChange={(next) => onChange(next === 'teams' ? 'teams' : positions.length ? segment : 'players')}
+        labelFor={segmentLabel}
+        tight
+      />
+      {!onTeams ? (
+        <SegmentTabs
+          items={positions}
+          active={segment}
+          onChange={onChange}
+          labelFor={segmentLabel}
+          accessibilityLabelFor={segmentAccessibilityLabel}
+          second
+          fit
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -5306,9 +5331,10 @@ function HitRateRow({
   onPress: () => void;
 }) {
   // `games < 3` is the player page's rule (SplitsCard / HeadToHeadCard), and
-  // under H2H the board has to share it or the SAME 1-of-1 is grey on the
-  // detail screen and full green on the board. Scoped to H2H because every
-  // other window has a uniform denominator, where the rule would say nothing.
+  // the board shares it or the SAME 1-of-1 is grey on the detail screen and
+  // full green on the board. Every window, not only H2H: in a season's first
+  // week L3/L5/L10 are 1-of-1 rows too (NCAAB tipped off 2026-11-03; UX
+  // review), so the denominator is not uniform there either.
   const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
   const nameBlock = (
       <View

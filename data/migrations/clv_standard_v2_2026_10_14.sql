@@ -19,12 +19,15 @@
 -- Puck-line rows are not rewritten: the close matches the stored HOME sign.
 -- A team total's close is its 'close' snapshot only: its other rows are the
 -- decision fetch, the price taken (data/ingestors/nba_team_total_odds.py). A
--- first half's total is the same (data/ingestors/nba_first_half_odds.py).
+-- first half's total is the same (data/ingestors/nba_first_half_odds.py), and
+-- so is the NCAAB first half's spread (data/ingestors/ncaab_first_half_odds.py),
+-- which takes no close: it is unmeasured, never 0.0 against its own price. The
+-- NCAAB first half's total comes from the same feed and is the same.
 -- results_snapshots is not touched.
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-nba-first-half-total-luck';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
   work_left boolean;
   def text;
   new_def text;
@@ -209,6 +212,11 @@ BEGIN
         WHEN 'nba_team_total_luck' THEN 'team_totals_home'
         WHEN 'nba_first_half_total_luck' THEN 'totals_h1'
         WHEN 'ncaab_total_blend' THEN 'totals'
+        WHEN 'ncaab_spread_market' THEN 'spreads'
+        WHEN 'ncaab_moneyline_own_spread' THEN 'h2h'
+        WHEN 'ncaab_moneyline_first_post' THEN 'h2h'
+        WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
+        WHEN 'ncaab_first_half_total' THEN 'totals_h1'
         ELSE 'h2h'
       END
     $body$;
@@ -360,7 +368,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-nba-first-half-total-luck';
+      'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
   END IF;
 
   SELECT EXISTS (
@@ -375,6 +383,19 @@ BEGIN
       AND g.commence_time IS NOT NULL
       AND p.created_at::timestamptz <= g.commence_time::timestamptz
       AND g.commence_time::timestamptz <= now()
+      -- An NBA bet whose only start is the odds feed's has no close: that start runs up to 20 minutes
+      -- behind the real tip, and refresh passes store in-play rows typed 'open'. Left to the Python
+      -- capture, which leaves it empty (tracking/paper_tracker._nba_league_tip, the same test).
+      AND (
+        split_part(p.game_id, '_', 1) <> 'NBA'
+        OR EXISTS (
+          SELECT 1 FROM public.nba_schedule ns
+          WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
+            AND ns.commence_time IS NOT NULL
+            AND (ns.game_type NOT IN ('playin', 'playoff', 'cup_final')
+                 OR g.commence_time::timestamptz <= ns.commence_time::timestamptz + interval '30 minutes')
+        )
+      )
   ) INTO work_left;
 
   IF work_left THEN
@@ -389,12 +410,20 @@ BEGIN
         p.scored_line,
         p.clv_method AS old_method,
         g.commence_time::timestamptz AS commence_ts,
-        CASE
-          WHEN p.game_time IS NOT NULL
-           AND p.game_time::timestamptz < g.commence_time::timestamptz
-          THEN p.game_time::timestamptz
-          ELSE g.commence_time::timestamptz
-        END AS close_bound,
+        LEAST(
+          CASE
+            WHEN p.game_time IS NOT NULL
+             AND p.game_time::timestamptz < g.commence_time::timestamptz
+            THEN p.game_time::timestamptz
+            ELSE g.commence_time::timestamptz
+          END,
+          -- The league's tip, when a bet was written before the schedule listed its game.
+          CASE WHEN split_part(p.game_id, '_', 1) = 'NBA' THEN (
+            SELECT min(ns.commence_time::timestamptz) FROM public.nba_schedule ns
+            WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
+              AND ns.commence_time IS NOT NULL
+          ) END
+        ) AS close_bound,
         CASE
           WHEN p.decision_odds IS NOT NULL AND btrim(COALESCE(p.decision_book, '')) <> ''
             THEN p.decision_odds::double precision
@@ -437,6 +466,16 @@ BEGIN
         AND g.commence_time IS NOT NULL
         AND p.created_at::timestamptz <= g.commence_time::timestamptz
         AND g.commence_time::timestamptz <= now()
+        AND (
+          split_part(p.game_id, '_', 1) <> 'NBA'
+          OR EXISTS (
+            SELECT 1 FROM public.nba_schedule ns
+            WHERE ns.game_id IN (p.game_id, 'NBA_' || g.game_date || '_' || g.home_team || '_' || g.away_team)
+              AND ns.commence_time IS NOT NULL
+              AND (ns.game_type NOT IN ('playin', 'playoff', 'cup_final')
+                   OR g.commence_time::timestamptz <= ns.commence_time::timestamptz + interval '30 minutes')
+          )
+        )
     ),
     joined AS (
       SELECT
@@ -478,9 +517,9 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1')
+          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
                 AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1'
+            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
@@ -501,9 +540,9 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = s.bet_book
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1')
+          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
                 AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1'
+            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (
@@ -536,9 +575,9 @@ BEGIN
           AND o.game_id = s.game_id
           AND o.market = s.game_market
           AND o.bookmaker = 'pinnacle'
-          AND (((s.game_market LIKE 'team_totals%' OR s.game_market = 'totals_h1')
+          AND (((s.game_market LIKE 'team_totals%' OR s.game_market IN ('totals_h1', 'spreads_h1'))
                 AND o.snapshot_type = 'close')
-            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market <> 'totals_h1'
+            OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'))
           AND o.snapshot_at::timestamptz <= s.close_bound
           AND (

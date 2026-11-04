@@ -207,8 +207,8 @@ export async function fetchSeasonTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  // No golf leaderboard (v1), and no NCAAB player stats in the app yet.
-  if (sport === 'GOLF' || sport === 'NCAAB') return [];
+  // No golf leaderboard (v1).
+  if (sport === 'GOLF') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -242,13 +242,16 @@ export async function fetchSeasonTotals(
       totalsRowKey,
     );
   }
-  if (sport === 'WNBA' || sport === 'NBA') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
     return fetchAllPages<SeasonTotalsRow>((from, to) => {
-      // Literal, for the same reason as the football pair above.
+      // Literal, for the same reason as the football pair above. NCAAB's view
+      // carries WNBA's columns (add_ncaab_player_game_log_2026_11_03.sql).
       let q =
         sport === 'WNBA'
           ? supabase.from('v_player_season_totals_wnba').select(WNBA_TOTALS_COLUMNS).eq('season', season)
-          : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
+          : sport === 'NCAAB'
+            ? supabase.from('v_player_season_totals_ncaab').select(WNBA_TOTALS_COLUMNS).eq('season', season)
+            : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
       if (hasTeams(teams)) q = q.in('team', teams as string[]);
       return q.order('player_id').range(from, to);
     }, totalsRowKey);
@@ -297,8 +300,8 @@ export async function fetchWindowTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  // No golf leaderboard (v1), and no NCAAB player stats in the app yet.
-  if (sport === 'GOLF' || sport === 'NCAAB') return [];
+  // No golf leaderboard (v1).
+  if (sport === 'GOLF') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -323,8 +326,11 @@ export async function fetchWindowTotals(
       totalsRowKey,
     );
   }
-  if (sport === 'WNBA' || sport === 'NBA') {
-    const fn = sport === 'WNBA' ? 'player_window_totals_wnba' : 'player_window_totals_nba';
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+    const fn =
+      sport === 'WNBA' ? 'player_window_totals_wnba'
+      : sport === 'NCAAB' ? 'player_window_totals_ncaab'
+      : 'player_window_totals_nba';
     return pageRpc<SeasonTotalsRow>(fn, { p_season: season, p_window: window }, teams, totalsRowKey);
   }
   return pageRpc<SeasonTotalsRow>(
@@ -405,8 +411,11 @@ export async function fetchRecentGames(
   // what an app build older than the migration sends.
   const withTeams = (args: Record<string, unknown>) =>
     hasTeams(teams) ? { ...args, p_teams: teams } : args;
-  if (sport === 'WNBA' || sport === 'NBA') {
-    const fn = sport === 'WNBA' ? 'player_recent_games_wnba' : 'player_recent_games_nba';
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+    const fn =
+      sport === 'WNBA' ? 'player_recent_games_wnba'
+      : sport === 'NCAAB' ? 'player_recent_games_ncaab'
+      : 'player_recent_games_nba';
     return pageRpc<RecentGameRow>(
       fn,
       withTeams({ p_season: season, p_window: window }),
@@ -466,8 +475,11 @@ export async function fetchSeasonStatValues(
   // big: 1,798 NFL players on a season stat, 12,204 NCAAF.
   const key = (r: SeasonStatValuesRow) =>
     `${r.player_id}:${(r as { player_type?: string }).player_type ?? ''}`;
-  if (sport === 'WNBA' || sport === 'NBA') {
-    const fn = sport === 'WNBA' ? 'player_season_stat_values_wnba' : 'player_season_stat_values_nba';
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+    const fn =
+      sport === 'WNBA' ? 'player_season_stat_values_wnba'
+      : sport === 'NCAAB' ? 'player_season_stat_values_ncaab'
+      : 'player_season_stat_values_nba';
     return pageRpc<SeasonStatValuesRow>(fn, { p_season: season, p_stat: statKey }, teams, key);
   }
   if (sport === 'MLB') {
@@ -591,6 +603,7 @@ export async function fetchH2HStatValues(
     : sport === 'MLB' ? 'player_h2h_stat_values_mlb'
     : sport === 'NFL' ? 'player_h2h_stat_values_nfl'
     : sport === 'NCAAF' ? 'player_h2h_stat_values_ncaaf'
+    : sport === 'NCAAB' ? 'player_h2h_stat_values_ncaab'
     : null;
   if (!fn) return []; // UFC / NHL / GOLF: no per-game player logs
   const base: Record<string, unknown> = {
@@ -618,7 +631,7 @@ export async function fetchH2HStatValues(
  * `games` is already on the anon read surface.
  */
 export async function fetchSeasonStarted(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB',
   season: number,
 ): Promise<boolean> {
   const { data, error } = await supabase
@@ -984,6 +997,7 @@ const MAIN_GAME_ODDS_MARKETS = [
   'team_totals_home',
   'team_totals_away',
   'totals_h1',
+  'spreads_h1',
 ] as const;
 
 /**
@@ -1714,8 +1728,9 @@ export async function fetchUpcomingNcaafPicks(
 /**
  * Upcoming NCAAB picks AFTER `afterDate` through `throughDate`.
  *
- * The NCAAB totals model is planned to decide the evening before the game, so
- * a same-day board would hide each of its picks until game day. The window is
+ * The NCAAB totals model decides minutes after DraftKings first posts a game's
+ * total, usually the day before the game, so a same-day board would hide each
+ * of its picks until game day. The window is
  * the NHL card's; the reads are not. A college basketball week is far bigger
  * than any other sport's: measured 2026-10-30 (read only), 182 games on
  * 2026-11-02, and over 2025-26 the biggest day held 4,417 main-market rows
@@ -2252,14 +2267,28 @@ export async function fetchCustomModelBacktest(
   rules: CustomModelRule[],
   filters: CustomModelFilters | undefined,
 ): Promise<CustomBacktestSummary> {
-  const { data, error } = await supabase.rpc('custom_model_backtest', {
-    p_rules: rules,
-    // Sanitized so a legacy saved `signals` filter (removed 2026-08-22) never
-    // reaches the RPC while the client matcher ignores it.
-    p_filters: sanitizeFilters(filters),
-  });
+  // Sanitized so a legacy saved `signals` filter (removed 2026-08-22) never
+  // reaches the RPC while the client matcher ignores it.
+  const args = { p_rules: rules, p_filters: sanitizeFilters(filters) };
+  // The same matched picks on the published stake (one unit basis, mike
+  // 2026-11-03). Asked beside the summary, not after it.
+  const [{ data, error }, posted] = await Promise.all([
+    supabase.rpc('custom_model_backtest', args),
+    supabase.rpc('custom_model_backtest_posted', args),
+  ]);
   if (error) throw error;
+  // Until data/migrations/custom_model_backtest_posted_2026_11_03.sql is
+  // applied the function does not exist, and any other failure of this second
+  // figure must not take down a screen the summary can still draw: either way
+  // the summary stands on its 1u-risked units (postedKnown false), and the
+  // screen's caption says so.
+  if (posted.error && !postedFunctionMissing(posted.error)) {
+    console.warn('[customModelBacktest] posted-stake units unavailable', posted.error);
+  }
   const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
+  const prow = posted.error
+    ? null
+    : (posted.data as unknown as { units: number | null; risked: number | null }[] | null)?.[0] ?? null;
   return {
     bets: Number(row?.bets ?? 0),
     wins: Number(row?.wins ?? 0),
@@ -2268,7 +2297,23 @@ export async function fetchCustomModelBacktest(
     priced: Number(row?.priced ?? 0),
     units: Number(row?.units ?? 0),
     roi_pct: row?.roi_pct == null ? null : Number(row.roi_pct),
+    posted_units: prow == null ? null : Number(prow.units ?? 0),
+    posted_risked: prow == null ? null : Number(prow.risked ?? 0),
   };
+}
+
+/**
+ * custom_model_backtest_posted is not deployed yet. PostgREST answers
+ * `PGRST202` ("Could not find the function ... in the schema cache"); Postgres
+ * itself `42883` (undefined function). Nothing else counts as missing.
+ */
+export function postedFunctionMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === 'PGRST202' || code === '42883';
 }
 
 /** The individual graded picks behind a custom-model backtest, newest first. */
@@ -2314,8 +2359,13 @@ export interface FullOutcomeRecord {
   losses: number;
   pushes: number;
   priced_bets: number;
+  /** 1u RISKED per priced pick (profit_flat / 100). Not shown on a screen. */
   units: number;
   roi_pct: number | null;
+  /** The published stake: v_public_track_record's units / risked, the same
+   *  columns the Record tab sums. Absent on an older view. */
+  posted_units?: number | null;
+  posted_risked?: number | null;
 }
 
 export async function fetchModelFullOutcomeRecord(): Promise<Record<string, FullOutcomeRecord>> {
@@ -2344,10 +2394,19 @@ export async function fetchModelFullOutcomeRecord(): Promise<Record<string, Full
  * is 100 x the PRICED picks, and an unpriced pick contributes neither
  * (CLAUDE.md §6: profit_flat fabricates -110 when dk_odds is NULL).
  */
+const PUBLISHED_MODEL_SELECT = 'model_id, picks, wins, losses, pushes, profit_flat, staked_flat, units, risked';
+
 export async function fetchPublishedModelRecord(): Promise<Record<string, FullOutcomeRecord>> {
-  const { data, error } = await supabase
-    .from('v_public_track_record')
-    .select('model_id, picks, wins, losses, pushes, profit_flat, staked_flat');
+  // units / risked are the published stake, the Record tab's basis (one unit
+  // basis everywhere, mike 2026-11-03). The same fallback as
+  // fetchPublicTrackRecord for a view from before those columns.
+  let res = await supabase.from('v_public_track_record').select(PUBLISHED_MODEL_SELECT);
+  if (postedStakeColumnsMissing(res.error)) {
+    res = await supabase
+      .from('v_public_track_record')
+      .select(PUBLISHED_MODEL_SELECT.replace(', units, risked', ''));
+  }
+  const { data, error } = res;
   if (error) throw error;
   const map: Record<string, FullOutcomeRecord> = {};
   for (const r of (data ?? []) as unknown as TrackRecordRow[]) {
@@ -2369,6 +2428,8 @@ export async function fetchPublishedModelRecord(): Promise<Record<string, FullOu
       units: profit / 100,
       // Null rather than 0 when nothing was priced: 0.0% reads as break-even.
       roi_pct: staked > 0 ? (profit / staked) * 100 : null,
+      posted_units: r.units == null ? null : Number(r.units),
+      posted_risked: r.risked == null ? null : Number(r.risked),
     };
   }
   return map;
@@ -2949,9 +3010,12 @@ export async function fetchTeamStats(
   // current label has no rows at all. Measured 2026-09-09 —
   // team_stats_board('NFL', 2026) returned 0 and ('NFL', 2025) returned 32,
   // which is the difference between a graded board and a column of dashes.
+  // Every other league falls back one label too (2026-11-03): NBA and NHL in
+  // the days before their opener, MLB and WNBA over the winter. The season
+  // that answered comes back with the rows, so the header still names it.
   const seasons = sport === 'NFL' || sport === 'NCAAF'
     ? footballSeasonCandidates(season)
-    : [season];
+    : [season, season - 1];
   for (const s of seasons) {
     const { data, error } = await supabase.rpc('team_stats_board', {
       p_sport: sport,

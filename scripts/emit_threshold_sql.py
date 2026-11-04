@@ -14,8 +14,10 @@ Usage
     python -m scripts.emit_threshold_sql --prefix p.  # for the Claude-mobile join
     python -m scripts.emit_threshold_sql --paused     # also list paused models
 
-Paste the output into the Claude-mobile project instructions whenever a
-threshold changes (see docs/mobile_picks_prompt.md).
+The output is for docs/thresholds.md and for reading a cut by eye. The
+Claude-mobile prompt does not carry it: its query joins
+model_action_thresholds, so a threshold change needs no paste
+(docs/mobile_picks_prompt.md).
 """
 from __future__ import annotations
 

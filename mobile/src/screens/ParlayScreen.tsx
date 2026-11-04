@@ -53,7 +53,8 @@ import {
   type LineShop,
   type ParlayLeg,
 } from '@/lib/parlay';
-import { formatStake } from '@/lib/thresholds';
+import { formatStake, formatUnits } from '@/lib/thresholds';
+import { unitsSpeech } from '@/lib/a11y';
 import {
   computeCorrelatedMetrics,
   GRADE_LABEL,
@@ -64,7 +65,6 @@ import { bookLabel, bookName } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
-  formatCurrency,
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
@@ -1040,8 +1040,8 @@ function SlipBody({
         </View>
 
         <View style={styles.stakeRow}>
-          <Stat label="Stake" value={formatStake(stake)} />
-          <Stat label="Potential payout" value={formatCurrency(payout)} />
+          <Stat label="Stake" value={formatStake(stake)} spoken={unitsSpeech(formatStake(stake))} />
+          <Stat label="Potential payout" value={formatUnits(payout)} spoken={unitsSpeech(formatUnits(payout))} />
         </View>
 
         <CorrelatedExtras m={metrics} allDk={allDk} />
@@ -1208,9 +1208,9 @@ export function ParlayScreen() {
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+function Stat({ label, value, color, spoken }: { label: string; value: string; color?: string; spoken?: string }) {
   return (
-    <View style={styles.stat}>
+    <View style={styles.stat} accessible={spoken != null} accessibilityLabel={spoken != null ? `${label}, ${spoken}` : undefined}>
       <Text style={styles.statLabel}>{label}</Text>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
     </View>

@@ -28,7 +28,7 @@ export function expectedValue(
 
 /**
  * "+2.4u" / "−0.5u" — a SIGNED result in units (CLAUDE.md §4: results are
- * always units). Distinct from thresholds.ts's `formatUnits`, which prints an
+ * always units). Distinct from `formatUnits` below, which prints an
  * unsigned stake ("2.4u"). One home for both detail pages (UX review,
  * 2026-09-20), in the formatter module so a player lib never imports from a
  * team lib.
@@ -81,24 +81,65 @@ export function formatPctSigned(value: number | null | undefined, digits = 1): s
   return formatSigned(value * 100, digits, '%');
 }
 
-/** Dollars — 30.5 -> "$30.50", -4 -> "−$4.00" (U+2212, as every signed amount). */
-export function formatCurrency(value: number | null | undefined): string {
-  const n = Number(value);
-  if (value == null || !Number.isFinite(n)) return '—';
-  const abs = Math.abs(n).toFixed(2);
-  // A value that rounds to zero is "$0.00", never "−$0.00".
-  const sign = n < 0 && Number(abs) !== 0 ? MINUS : '';
-  return `${sign}$${abs}`;
+/**
+ * Results are ALWAYS units, never dollars (mike, 2026-11-03: "everything must
+ * be units"; CLAUDE.md §4). One unit is one flat bet.
+ *
+ * `profit_flat` and `staked_flat` are STORED per 100 staked (a −110 win is
+ * 90.91), and the tracked-bet stakes on the Performance tab keep that same
+ * scale, so 100 stored is 1u. Nothing stored changes; screens divide here.
+ */
+export const FLAT_UNIT = 100;
+
+/** A stored per-100 amount as units: 90.91 → 0.9091. Null stays null. */
+export function flatToUnits(perHundred: number | null | undefined): number | null {
+  const n = Number(perHundred);
+  if (perHundred == null || !Number.isFinite(n)) return null;
+  return n / FLAT_UNIT;
 }
 
-/** Signed dollars — -25 -> "−$25.00", +30 -> "+$30.00". */
-export function formatCurrencySigned(value: number | null | undefined): string {
-  const n = Number(value);
-  if (value == null || !Number.isFinite(n)) return '—';
-  // A result that rounds to zero is a push: unsigned, never "+$0.00".
-  if (Number(Math.abs(n).toFixed(2)) === 0) return '$0.00';
-  const sign = n > 0 ? '+' : MINUS;
-  return `${sign}$${Math.abs(n).toFixed(2)}`;
+/**
+ * A signed result from a stored per-100 amount: 90.91 → "+0.91u",
+ * −100 → "−1.00u", 0.3 → "0.00u" (a push, unsigned). Missing → '—'.
+ * Two decimals, as Discord's `{units:+.2f}u` and the Record tab print them.
+ * Its colour is `pnlColor(value, 2, 1 / FLAT_UNIT)`, so the tone follows the
+ * number as printed (lib/tone.ts).
+ */
+export function formatFlatUnits(perHundred: number | null | undefined): string {
+  return formatSigned(flatToUnits(perHundred), 2, 'u');
+}
+
+/** The tone scale that matches formatFlatUnits: two decimals of value / 100. */
+export const FLAT_UNIT_TONE_SCALE = 1 / FLAT_UNIT;
+
+/**
+ * 2 -> "2u", 3.5 -> "3.5u", 1.15 -> "1.15u".
+ *
+ * TWO decimals, trailing zeros trimmed. One decimal used to round the -115
+ * stake (1.15 laid to win 1) to "1.2u", which is a different bet from the one
+ * the model asked for; every negative price divides out exactly at two
+ * decimals, so this is the precision the number actually has.
+ *
+ * Rounds HALF-UP, explicitly. Neither language's default is safe: Python's %.2f
+ * is half-to-EVEN while JS toFixed is half-up (0.125 renders "0.12" there and
+ * "0.13" here), and a float like 2.0250000000000004 is not an integer, so a
+ * naive isInteger check gives "2.00" on one side and "2" on the other. Trimming
+ * splits on the decimal point rather than stripping trailing zeros off the whole
+ * string, which would turn "20.00" into "2". The Python mirror uses the
+ * identical expression; the parity fixture pins that they agree — it caught
+ * exactly these divergences.
+ */
+export function formatUnits(u: number): string {
+  const n = Math.floor(u * 100 + 0.5) / 100;
+  const [whole, frac] = n.toFixed(2).split('.');
+  const trimmed = frac.replace(/0+$/, '');
+  return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
+}
+
+/** An unsigned stake from a stored per-100 amount: 100 → "1u", 50 → "0.5u". */
+export function formatFlatStake(perHundred: number | null | undefined): string {
+  const u = flatToUnits(perHundred);
+  return u == null ? '—' : formatUnits(Math.abs(u));
 }
 
 /** Today in America/New_York as YYYY-MM-DD. */
@@ -141,7 +182,9 @@ export function yearET(): number {
  */
 export function boardSeasonET(sport: string): number {
   const year = yearET();
-  if (sport === 'NBA') return monthET() >= 10 ? year + 1 : year;
+  // NCAAB labels by the ending year too (ncaab_player_game_log.season): the
+  // 2026-27 season is 2027 from its November tip-off.
+  if (sport === 'NBA' || sport === 'NCAAB') return monthET() >= 10 ? year + 1 : year;
   return year;
 }
 

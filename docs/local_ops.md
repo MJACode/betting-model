@@ -107,6 +107,26 @@ goes through `data.view_migrations`.
 ```bash
 ```
 
+**Local purchase runs are logged too** (since 2026-11-03). Every Odds API call
+is written to `api_call_log`, however the run was started: `python -m
+data.ingestors.nba_odds_history ...`, a launcher that calls `runpy`, a script,
+or the worker. A local run's rows are named for the module it ran
+(`data.ingestors.nba_odds_history`), so they read apart from the worker's
+(`scheduler`). What a run spent, from the log:
+
+```sql
+SELECT source, count(*) AS calls, sum(credits) AS credits
+FROM api_call_log
+WHERE api = 'The Odds API' AND ts >= now() - interval '6 hours'
+GROUP BY 1 ORDER BY 3 DESC NULLS LAST;
+```
+
+If the database stops answering mid-run, the calls are held and written once
+it answers again; a call is never slowed or failed by its log. If it is still
+down when the run exits, the run's own log says how many calls and credits were
+not written. `PIPELINE_TELEMETRY=0` turns the log off, so never set it on a
+purchase. Detail: `docs/monitoring.md`.
+
 `nfl_props_setup.yml` existed only because the dev sandbox cannot reach Supabase
 or the Odds API. From your machine, run its steps directly (see
 `docs/nfl_props_model.md`); the `.github/nfl_props_trigger.txt` mechanism is gone.
@@ -226,6 +246,150 @@ no `DATABASE_URL` and no API keys — it runs against fakes and fixtures.
 
 `db_report.yml` ran read-only SQL. Use the Supabase MCP from Claude, the Supabase
 SQL editor, or `psql "$DATABASE_URL"`.
+
+---
+
+## Local carbon copy of Supabase and GitHub (mike, 2026-11-03)
+
+*"supabase is the SOR, but everything should be a carbon copy on my local as a
+backup - everything"*, and *"can you also mirror github on my machine? the full
+setup"*. Supabase stays the system of record. This is a second copy on mike's PC
+that catches up with Supabase every time it runs.
+
+### What is copied, and where
+
+Everything lives under `C:\Users\micha\Documents\betting_local_copies\`, outside
+the repo on purpose: `data/local/` is committed, and
+`tests/test_everything_in_supabase.py` fails on a store inside the repo.
+
+| What | Where |
+|---|---|
+| Every table in every schema that holds app data (`public`, `auth`, `storage`, `realtime`, `vault`, `supabase_migrations`): 227 tables on 2026-11-03 | `supabase_mirror\tables\<schema>.<table>\` — Parquet files plus `manifest.json` |
+| The schema, every run: tables, constraints, indexes, views, functions, triggers, RLS policies, grants, sequences, types, extensions, publications | `supabase_mirror\schema\<run time>\*.sql`, with `all.sql` in order; `LATEST.txt` names the newest |
+| Every storage object (the `social-post-media` bucket: 18 objects, 3.4 MB on 2026-11-03), each checked against its stored size and md5 | `supabase_mirror\storage\<bucket>\` |
+| The exact-count check of the last run, local against Supabase, per table | `supabase_mirror\verify\<run time>.txt` |
+| Each GitHub repo the gh login reaches under `MJACode` and `malkatrazz`, as a full mirror: every branch, tag and pull-request head | `github\<owner>\<repo>.git` |
+| Each repo's issues, pull requests, every comment, review and review comment, labels, milestones, releases and their files, workflows and recent runs, deployments, settings, branches, and the names of Actions secrets and variables | `github\<owner>\<repo>.meta\*.json` |
+| What GitHub refused to show, item by item, with the HTTP status | `github\<owner>\<repo>.meta\_export_report.json` |
+| Run logs | `logs\` |
+
+A table's `manifest.json` holds its row count, key columns, watermark (the
+last key copied), when every range was last confirmed against the server, and
+its bytes on disk. `python local_mirror.py status` prints them all without
+touching the database.
+
+Not covered, and why:
+- **A private storage bucket.** Today's one bucket is public, so its files
+  download over plain HTTPS. A private bucket needs `SUPABASE_SERVICE_ROLE_KEY`,
+  which is not in the local `.env`. The script uses it if it is ever added, and
+  otherwise lists each such object as not covered.
+- **Secret VALUES.** GitHub never returns them, and `vault.secrets` is copied as
+  stored, which is encrypted with a key Supabase keeps outside the database.
+- **The `auth` tables hold password hashes and session tokens.** They are copied,
+  because that is what a full backup is. They are on this disk.
+
+### How a table catches up
+
+A table is split into chunks. Each chunk is one file holding every row whose
+primary key falls between the previous chunk's last key and its own. Each chunk
+remembers its row count and a fingerprint of its rows (a hash Postgres computes
+in the same read that returns them).
+
+- **Tables under 2 million rows**, the 14 tables with no primary key, and
+  `latest_odds` and `latest_prop_odds` (whose rows are almost all replaced
+  between runs) are copied whole every run, then swapped in.
+- **The bigger tables** (`player_prop_odds`, `odds`, `nfl_odds_history`,
+  `picks_log`, `kalshi_game_markets`, `nba_pbp`, `kalshi_prop_ladders` on
+  2026-11-03) are caught up. New rows past the last key are added. Every chunk's
+  row count is compared with Supabase's, which finds rows the odds prune deleted.
+  The fingerprints of the newest 40 chunks (where odds get marked in play) and of
+  the oldest-checked seventh of the rest are compared too, which finds edited
+  rows. A chunk that differs is copied again. Run daily, every chunk's
+  fingerprint is re-checked about once a week.
+- None of those big tables has an `updated_at` column, so the fingerprint is how
+  an edit is found.
+
+### Load on production
+
+There is one database, and it serves live scoring. The copy reads through one
+connection, and every read is its own read-only transaction with a 60-second
+limit. A read is at most 50,000 rows and about 32 MB, taken in primary-key
+order, with a short pause between reads. The copy waits while more than 6
+other queries are running. It does not read at 10:00-10:50 UTC (the 6am ET
+pipeline) or at minutes :15-:27 of each hour from 11:00 to 22:00 UTC (the
+hourly refresh). It never writes to the database. An interrupted run picks up
+where it stopped.
+
+### Running it by hand
+
+```powershell
+# One pass of both (what a schedule would run):
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1
+
+# The database alone, or a few tables:
+python C:\Users\micha\Documents\betting_local_copies\bin\local_mirror.py run
+python C:\Users\micha\Documents\betting_local_copies\bin\local_mirror.py run --only public.picks --skip-schema --skip-storage
+
+python ...\local_mirror.py status    # what is on disk, no database
+python ...\local_mirror.py verify    # exact counts, local against Supabase
+python ...\local_mirror_github.py    # GitHub alone
+```
+
+`DATABASE_URL` is read from this checkout's `.env` when the run starts. It is
+never printed, and errors in the log have database addresses removed. GitHub
+access comes from the `gh` login; the token is never written to a file or a
+remote URL.
+
+The scripts run from `betting_local_copies\bin\`, a copy outside the repo, so
+a worktree being removed cannot break a run. Each wrapper run first replaces
+that copy with `scripts/local_mirror*.py` from `origin/master` of this checkout
+when they exist there, so a merged fix reaches the next run.
+
+### Restoring one table
+
+Restore into a NEW table first and compare, never straight over production.
+
+```powershell
+# 1. The table's rows as a CSV that Postgres reads back exactly:
+python ...\local_mirror.py export-csv --table public.picks --out C:\Temp\picks.csv
+```
+```sql
+-- 2. An empty copy of the table, then load it:
+CREATE TABLE public.picks_restored (LIKE public.picks INCLUDING ALL);
+\copy public.picks_restored FROM 'C:/Temp/picks.csv' WITH (FORMAT csv, HEADER true)
+```
+
+If the table itself is gone, its `CREATE TABLE` is in the newest
+`schema\<run time>\04_tables.sql`, and its constraints and indexes in `05_` and
+`06_`. To read a table in Python without restoring it: `pyarrow.parquet` over
+the files its `manifest.json` lists (`TableDir.read_rows` in the script does
+this). Numbers stored as Postgres `numeric` are kept as exact text, and every
+other type that has no exact Parquet equivalent (json, uuid, arrays) is kept
+as its Postgres text.
+
+### The proposed schedule: NOT registered
+
+mike has not approved a recurring task. Nothing below has been run. The
+proposal is daily at 00:30 local time (05:30 UTC in winter, 04:30 in summer).
+That is after the evening games, with about five hours before the 6am ET
+pipeline window, which the run waits through if it is still going.
+
+```bat
+:: Register (runs as you, only while you are logged on):
+schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
+
+:: View it, and when it last ran:
+schtasks /Query /TN "BettingModel\LocalMirror" /V /FO LIST
+
+:: Run it now:
+schtasks /Run /TN "BettingModel\LocalMirror"
+
+:: Remove it:
+schtasks /Delete /TN "BettingModel\LocalMirror" /F
+```
+
+A run started while another is still going exits at once: one run holds a
+lock file in `supabase_mirror\`, and Windows releases it if the run dies.
 
 ---
 

@@ -571,7 +571,7 @@ def record_miss(conn, game: dict, reason: str, now: datetime) -> None:
 
 def new_totals() -> dict:
     return {"due": 0, "fetched": 0, "games_stored": 0, "box_rows": 0, "period_rows": 0,
-            "refused": 0, "left": 0, "fetch_errors": 0, "stopped": None,
+            "player_rows": 0, "refused": 0, "left": 0, "fetch_errors": 0, "stopped": None,
             "refused_run": 0, "reasons": {}, "failed": []}
 
 
@@ -595,6 +595,22 @@ def _one_game(conn, game: dict, js: dict, totals: dict, now: datetime) -> None:
         return
     nb, np_ = write_game(conn, box, periods)
     conn.commit()
+    # The same payload carries the player box (data/ingestors/ncaab_player_box.py),
+    # so a new final costs no second ESPN call. Its own savepoints and miss
+    # table: a player-box refusal or write error never undoes the team box.
+    try:
+        from data.ingestors.ncaab_player_box import store_from_summary
+        n_players, _reason = store_from_summary(conn, game, js, now)
+        conn.commit()
+        totals["player_rows"] += n_players
+    except ConnectionLost:
+        raise
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning(f"NCAAB box: {game['game_id']} player box not stored: {exc}")
+        try:
+            conn.rollback()
+        except Exception:                                 # noqa: BLE001
+            pass
     totals["games_stored"] += 1
     totals["box_rows"] += nb
     totals["period_rows"] += np_

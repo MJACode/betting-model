@@ -15,8 +15,9 @@ not given a result. A pending or needs_review leg holds that day's recap.
 The Oct 18 and Oct 20 posts are the grammar the tests pin: a sport/date
 header, `All 1U` as the message stake, and `60 Minute ML` as `h2h_3way`.
 A date with no sport (`Friday Oct. 22`) and `Player (TEAM) O5.5 Receptions`
-parse too. A line that still does not parse is needs_review, and the recap
-waits.
+parse too. A Discord mention is not a line. `U47.5` is a total, and `/`
+between two teams is a matchup. A line that still does not parse is
+needs_review, and the recap waits.
 
 A line that is a parlay header (`PARLAY +450 1u`, `3 leg parlay`) is one
 bet at that price and stake. The lines under it are legs. The parlay row
@@ -164,6 +165,14 @@ _PARLAY_HEADER_RE = re.compile(
     re.I)
 _ROUND_ROBIN_RE = re.compile(r"\bround\s*robin\b", re.I)
 _BULLET_RE = re.compile(r"^(?:[-*•]+|\d+[.)])\s+")
+# User, nickname, role, channel, @everyone, @here. A mention is not a pick.
+_MENTION_RE = re.compile(
+    r"<(?:@[!&]?|#)\d+>|@everyone\b|@here\b",
+    re.I)
+# "@", "vs", and "at" need spaces, so a name like Patriots does not split.
+# "/" is the separator on the 2026-10-29 total (`Panthers/GB`), with or
+# without spaces around it.
+_MATCHUP_SEP = r"(?:\s+(?:@|vs\.?|at)\s+|\s*/\s*)"
 
 
 class Capper:
@@ -325,6 +334,11 @@ def _teams_in(text: str) -> list[tuple[str, str, str]]:
 
 def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text or "")
+
+
+def _without_mentions(text: str) -> str:
+    """Drop Discord mentions. A line that is only a mention comes back empty."""
+    return " ".join(_MENTION_RE.sub(" ", text or "").split())
 
 
 def _price_and_stake(text: str, default_stake: float = 1.0
@@ -497,6 +511,10 @@ def parse_message(body: str, posted_at: datetime | None = None
     A parlay header groups the bet lines under it into one bet. Those legs
     carry `parlay_header`. A line with no parlay header is the same bet it
     was before.
+
+    A Discord mention (`<@id>`, `<@!id>`, `<@&id>`, `<#id>`, `@everyone`,
+    `@here`) is removed first. A line that is only a mention creates no
+    row. The other lines keep the numbers they had.
     """
     legs: list[dict] = []
     reviews: list[dict] = []
@@ -509,6 +527,9 @@ def parse_message(body: str, posted_at: datetime | None = None
         reviews.append({"line_no": 1, "raw": body or "", "reason": "empty"})
         return legs, reviews
     for n, raw in enumerate(lines, start=1):
+        raw = _without_mentions(raw)
+        if not raw:
+            continue
         slate = _slate_header(raw, posted_at)
         if slate:
             _finish_parlay(parlay, reviews)
@@ -567,11 +588,21 @@ def parse_message(body: str, posted_at: datetime | None = None
     return legs, reviews
 
 
-def _matchup_header(text: str) -> dict | None:
-    m = re.match(r"^(?P<a>.+?)\s+(?:@|vs\.?|at)\s+(?P<b>.+)$", text, re.I)
+def _split_matchup(text: str) -> tuple[str, str] | None:
+    m = re.match(rf"^(?P<a>.+?){_MATCHUP_SEP}(?P<b>.+)$", (text or "").strip(), re.I)
     if not m:
         return None
     a, b = m.group("a").strip(), m.group("b").strip()
+    if not a or not b:
+        return None
+    return a, b
+
+
+def _matchup_header(text: str) -> dict | None:
+    parts = _split_matchup(text)
+    if not parts:
+        return None
+    a, b = parts
     if _teams_in(a) and _teams_in(b) and not re.search(r"\b(over|under|ml)\b", text, re.I):
         return {"away_text": a, "home_text": b, "raw": text}
     return None
@@ -600,8 +631,9 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
             "team_text": team, "away_text": (context or {}).get("away_text"),
             "home_text": (context or {}).get("home_text"), "raw": raw,
         }
+    # "U47.5" has no space after the side. "Over 8.5" still has one.
     ou = re.match(
-        r"^(?:(?P<pre>.+?)\s+)?(?P<side>over|under|o|u)\s+(?P<line>\d+(?:\.\d+)?)\b\s*(?P<post>.*)$",
+        r"^(?:(?P<pre>.+?)\s+)?(?P<side>over|under|o|u)\s*(?P<line>\d+(?:\.\d+)?)\b\s*(?P<post>.*)$",
         text, re.I)
     if ou:
         side = ou.group("side").lower()
@@ -649,9 +681,9 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
 
 def _split_sides(rest: str, context) -> tuple[str | None, str | None]:
     if rest:
-        m = re.match(r"^(?P<a>.+?)\s+(?:@|vs\.?|at)\s+(?P<b>.+)$", rest, re.I)
-        if m:
-            return m.group("a").strip(), m.group("b").strip()
+        parts = _split_matchup(rest)
+        if parts:
+            return parts
     if context:
         return context.get("away_text"), context.get("home_text")
     return None, None
@@ -1845,6 +1877,10 @@ def _post_window(conn, span: str, start: str, end: str, heading: str,
         return 0
     kind = f"{capper.results_prefix}_{span}"
     if restate_published_at is not None:
+        if not config.record_restatement_approved(start):
+            logger.error(f"{capper.display_name} {start} correction refused: "
+                         f"no approval recorded")
+            return 0
         kind = f"{kind}_restate"
         lock = restate_lock_key(kind, start, restate_published_at)
     else:
@@ -2069,8 +2105,9 @@ def restate_eggz_day(game_date: str, dry_run: bool = False,
     """Post a Corrected recap for a day that already has a sent recap.
 
     The original push_sent row stays. One correction per that row's
-    sent_at. Unresolved legs, an unfinished slate, and a sport in progress
-    return 0 and post nothing. This does not ingest and does not grade.
+    sent_at. Unresolved legs, an unfinished slate, a sport in progress, and a
+    date with no approval in config.RECORD_RESTATEMENT_APPROVALS return 0 and
+    post nothing. This does not ingest and does not grade.
     dry_run returns 1 when a post would go out, and writes nothing.
     """
     if not configured_to_post(capper):

@@ -117,6 +117,23 @@ def step_refresh_outcomes(run_date: str) -> bool:
         return False
 
 
+def step_nba_team_stats_box(run_date: str) -> bool:
+    """NBA season-to-date team stats from the stored ESPN box scores (worker).
+
+    The stats.nba.com writer runs only from a residential machine and wrote no
+    2026-27 row, which left the Teams board's NBA efficiency column blank.
+    Runs before refresh_team_board so the board picks the new row up the same
+    morning. Validation and method: data/ingestors/nba_team_stats_from_box.py."""
+    try:
+        from data.ingestors.nba_team_stats_from_box import run_nba_team_stats_from_box
+        result = run_nba_team_stats_from_box(as_of_date=run_date)
+        logger.success(f"✓ NBA team stats (box): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA team stats (box) failed: {exc}")
+        return False
+
+
 def step_refresh_team_board(run_date: str) -> bool:
     """Refresh team_stats_board_cache — the Teams board the app reads.
 
@@ -666,6 +683,21 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
+def step_nhl_game_logs(run_date: str) -> bool:
+    """Per-game NHL logs from the stats API. Must run BEFORE settlement: a goalie
+    prop grades only on a goalie flagged as the starter, and this is the pull that
+    reliably flags him. Non-fatal; the record holds on anything left ungraded."""
+    try:
+        from data.ingestors.nhl_game_logs import top_up
+        from data.ingestors.nhl_stats_ingestor import LOG_TOPUP_DAYS
+        result = top_up(LOG_TOPUP_DAYS, apply=True, today=run_date)
+        logger.success(f"✓ NHL game logs: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL game logs failed: {exc}")
+        return False
+
+
 def step_weather(run_date: str, max_age_min: int | None = None,
                  ahead_days: int | None = None) -> bool:
     """Fetch and store weather for run_date AND the look-ahead window, from
@@ -1021,12 +1053,21 @@ def step_ncaab_box(run_date: str) -> bool:
     """
     try:
         from data.ingestors.ncaab_espn_box import run_recent
+        from data.ingestors.ncaab_player_box import run_recent as run_recent_players
         t = run_recent(run_date)
         summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
-        if t["failed"]:
-            logger.error(f"✗ NCAAB box scores (ESPN): {summary}")
+        # Player boxes: stored from the team feed's own payload above; this
+        # catches up only finals with none (refused, or stored before the
+        # player table existed). No ESPN call when nothing is due.
+        try:
+            pt = run_recent_players(run_date)
+        except Exception as exc:                          # noqa: BLE001
+            pt = {"failed": [f"player-box: {exc}"]}
+        psum = {k: (len(v) if isinstance(v, list) else v) for k, v in pt.items()}
+        if t["failed"] or pt["failed"]:
+            logger.error(f"✗ NCAAB box scores (ESPN): {summary} players: {psum}")
             return False
-        logger.success(f"✓ NCAAB box scores (ESPN): {summary}")
+        logger.success(f"✓ NCAAB box scores (ESPN): {summary} players: {psum}")
         return True
     except Exception as exc:
         logger.error(f"✗ NCAAB box scores failed: {exc}")
@@ -2091,7 +2132,6 @@ def step_settle(settle_date: str) -> bool:
     #
     # Only on a pass settling today. The 6am run settles yesterday and has
     # just made the ordinary attempt above, so it runs nothing new here.
-    # Before the restatement scan, so a recap posted here is never "late".
     import config
     if settle_date == config.today_et():
         try:
@@ -2103,17 +2143,13 @@ def step_settle(settle_date: str) -> bool:
             logger.error(f"✗ Late results recap failed (settlement "
                          f"unaffected): {exc}")
 
-    # A recap published before one of its picks settled is corrected here, on
-    # every pass, both surfaces (2026-09-10: the 09-09 recap went out MLB-only
-    # and the NFL settled an hour later against a ledgered date). Ledgered per
-    # correction, so a pass that finds nothing new posts nothing.
+    # A published record is never re-posted (CLAUDE.md §1b). A pick graded after
+    # its recap went out reaches ops and the next all-time line, and no channel.
     try:
-        from tracking.discord_notifier import restate_published_recaps
-        n = restate_published_recaps()
-        if n:
-            logger.info(f"Results restated: {n} post(s)")
+        from tracking.discord_notifier import flag_recaps_gone_short
+        flag_recaps_gone_short()
     except Exception as exc:                                  # noqa: BLE001
-        logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
+        logger.error(f"✗ Short-recap check failed (settlement unaffected): {exc}")
 
     # Monday 7:30am ET opens the weekly recap (prior Mon-Sun) and, on the
     # first Monday, the previous calendar month. Later morning passes, through
@@ -2279,6 +2315,15 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nfl_props_data"] = step_nfl_props_data(run_date)
     time.sleep(1)
 
+    # ── Step 0h1: NHL per-game logs (MUST precede settlement) ────────────────
+    # The same pull ran only at Step 4, after settle. The recap posted at 06:03,
+    # the pull flagged the goalie's start at 06:09, and the 07:17 pass graded his
+    # saves prop at 07:24, on 17 mornings between 10-01 and 10-29. Step 4 still
+    # pulls again, which costs nothing and keeps its rates current.
+    logger.info("Step 0h1: NHL per-game logs from the stats API (pre-settle)...")
+    results["nhl_game_logs"] = step_nhl_game_logs(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -2315,6 +2360,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # mv_scored_pick_outcomes before anyone opens the custom-model builder.
     logger.info("Step 0d: Refreshing scored-pick outcomes...")
     results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+    results["nba_team_stats_box"] = step_nba_team_stats_box(run_date)
     results["refresh_team_board"] = step_refresh_team_board(run_date)
     results["live_calibration"] = step_live_calibration(run_date)
     results["calibration_fit"] = step_calibration_fit(run_date)
@@ -2710,7 +2756,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds", "apply-column-migrations",
-                                 "apply-view-migrations", "refresh-outcomes", "refresh-team-board",
+                                 "apply-view-migrations", "refresh-outcomes", "refresh-team-board", "nba-team-stats-box",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "probables-refresh",
@@ -2765,6 +2811,7 @@ Examples:
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "refresh-team-board": lambda: step_refresh_team_board(run_date),
+            "nba-team-stats-box": lambda: step_nba_team_stats_box(run_date),
             "live-calibration": lambda: step_live_calibration(run_date),
             "calibration-fit": lambda: step_calibration_fit(run_date),
             "injuries":     lambda: step_injuries(run_date),

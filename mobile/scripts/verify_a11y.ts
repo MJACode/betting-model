@@ -464,9 +464,21 @@ check(`every close control names what it closes (${bareClose.length} bare "Close
 console.log('\nRule 5: text inputs and switches');
 const unlabelled: string[] = [];
 let inputs = 0;
+const rawSwitches: string[] = [];
 for (const f of files) {
   const src = readUtf8(f);
-  for (const m of src.matchAll(/<(TextInput|Switch)\s/g)) {
+  // AppSwitch is the one place a raw <Switch> lives: it forwards the caller's
+  // label through {...rest}, so the label is checked at each <AppSwitch>.
+  const isWrapper = relPosix(f).endsWith('components/AppSwitch.tsx');
+  // An aliased import (`Switch as RNSwitch`) would dodge the tag match below.
+  if (!isWrapper && /import\s*\{[^}]*\bSwitch\b[^}]*\}\s*from\s*'react-native'/.test(src)) {
+    rawSwitches.push(`${relPosix(f)}: imports Switch from react-native`);
+  }
+  for (const m of src.matchAll(/<(TextInput|Switch|AppSwitch)\s/g)) {
+    if (m[1] === 'Switch') {
+      if (isWrapper) continue;
+      rawSwitches.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
+    }
     inputs++;
     if (!/accessibilityLabel=/.test(openTag(src, m.index!))) {
       unlabelled.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
@@ -474,6 +486,7 @@ for (const f of files) {
   }
 }
 check(`every TextInput / Switch has accessibilityLabel (${inputs} checked)`, unlabelled.length === 0, unlabelled.join('; '));
+check('every switch is an AppSwitch (a raw <Switch> has an invisible OFF track on a white card)', rawSwitches.length === 0, rawSwitches.join('; '));
 
 console.log('\nRule 6: M7 — the betslip bar never covers the last row');
 const app = read('App.tsx');
@@ -656,7 +669,7 @@ console.log('\nM9 / M10 / M18 / M19 / M25 / M26');
 const perf = read('src/screens/PerformanceScreen.tsx');
 check('M10: stake chip 12pt slop (was 6) + role + label', /hitSlop=\{\{ top: 12, bottom: 12, left: 8, right: 8 \}\}\s*accessibilityRole="button"\s*accessibilityLabel=\{`Edit stake, /.test(perf));
 check('M10: stake pills are radios with checked state + 8pt slop', /accessibilityRole="radiogroup"/.test(perf) && /hitSlop=\{\{ top: 8, bottom: 8, left: 2, right: 2 \}\}\s*accessibilityRole="radio"\s*accessibilityState=\{\{ checked: active, selected: active \}\}/.test(perf));
-check('M10: StakeEditModal buttons labelled, 12pt slop, tap outside closes', /accessibilityLabel="Reset to \$100"/.test(perf) && /accessibilityLabel="Save stake"/.test(perf) && /<View style=\{styles\.stakeModalBackdrop\}>\s*\{\/\*[\s\S]*?\*\/\}\s*<Pressable\s*style=\{StyleSheet\.absoluteFill\}\s*onPress=\{onClose\}/.test(perf));
+check('M10: StakeEditModal buttons labelled, 12pt slop, tap outside closes', /accessibilityLabel="Use the posted stake"/.test(perf) && /accessibilityLabel="Save stake"/.test(perf) && /<View style=\{styles\.stakeModalBackdrop\}>\s*\{\/\*[\s\S]*?\*\/\}\s*<Pressable\s*style=\{StyleSheet\.absoluteFill\}\s*onPress=\{onClose\}/.test(perf));
 check('M10: tracked rows offer Untrack / Edit stake as accessibilityActions (Undo toast is PR 5)', /\{ name: 'untrack', label: 'Untrack' \}/.test(perf) && /actionName === 'untrack'\) onRowLongPress\(row\)/.test(perf));
 const tip = read('src/components/InfoTooltip.tsx');
 check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessibilityRole="button"/.test(tip));
@@ -666,7 +679,7 @@ check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLa
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
   /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
-check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in dollars"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
+check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in units"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));

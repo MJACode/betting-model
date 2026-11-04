@@ -291,8 +291,9 @@ export interface BetslipSummary {
   resolved: number;
   /** Combined American odds across the resolved legs; null when none resolve. */
   americanOdds: number | null;
-  /** Total return on a $10 stake (stake included); null when none resolve. */
-  payoutPerTen: number | null;
+  /** Total return, in units, on a 1u stake (stake included); null when none
+   *  resolve. Units, never dollars (mike, 2026-11-03). */
+  payoutPerUnit: number | null;
   /** 2+ resolved legs — the price is a parlay rather than a single bet. */
   isParlay: boolean;
   /** Legs kept on the slip as a pre-game alternate after kickoff. They are
@@ -300,7 +301,8 @@ export interface BetslipSummary {
   held: number;
 }
 
-export const BETSLIP_BAR_STAKE = 10;
+/** The betslip bar's example stake, in units. */
+export const BETSLIP_BAR_STAKE = 1;
 
 /** Legs whose price may go into the parlay, the book row, and a saved slip.
  *  A pre-game alternate held after kickoff stays on the card list and is
@@ -317,7 +319,7 @@ export function betslipSummary(legs: ParlayLeg[], selectionCount: number): Betsl
       count: selectionCount,
       resolved: 0,
       americanOdds: null,
-      payoutPerTen: null,
+      payoutPerUnit: null,
       isParlay: false,
       held,
     };
@@ -327,7 +329,7 @@ export function betslipSummary(legs: ParlayLeg[], selectionCount: number): Betsl
     count: selectionCount,
     resolved: priced.length,
     americanOdds: m.americanOdds,
-    payoutPerTen: BETSLIP_BAR_STAKE * m.decimalPayout,
+    payoutPerUnit: BETSLIP_BAR_STAKE * m.decimalPayout,
     isParlay: priced.length >= 2,
     held,
   };

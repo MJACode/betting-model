@@ -46,7 +46,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { TeamLineCell } from '@/components/TeamsBoard';
 import { FORM_GAMES, RECORD_GAMES, useTeamDetail, type NextGame } from '@/hooks/useTeamDetail';
-import { formatPct, formatSignedUnits, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
+import { formatPct, formatSigned, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookName } from '@/lib/markets';
 import { buildTeamLineIndex, type TeamLineQuote } from '@/lib/statsOdds';
@@ -62,7 +62,7 @@ import {
   type PickRecord,
   type TeamMarket,
 } from '@/lib/teamDetail';
-import { formatTeamStat, TEAM_STAT_CATALOG, type TeamStatDef } from '@/lib/teamStatCatalog';
+import { formatTeamStat, spreadWord, teamSeasonLabel, teamStatFor, type TeamStatDef } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
@@ -101,7 +101,7 @@ export function TeamStatsScreen() {
   }, [d.nextGame, d.books, team]);
 
   const row = d.row;
-  const seasonLabel = d.board.data.season;
+  const seasonLabel = d.board.data.season != null ? teamSeasonLabel(sport, d.board.data.season) : null;
   const form = d.form.slice(0, FORM_GAMES);
   const formSummary = useMemo(() => summarizeForm(form), [form]);
   const last5 = useMemo(() => summarizeForm(form, 5), [form]);
@@ -326,8 +326,8 @@ export function TeamStatsScreen() {
             title: 'Posted bets only',
             body:
               `Posted settled bets in ${team}’s last ${RECORD_GAMES} games, split by side. A pick Discord did not post is left out. ` +
-              'Results are in units: one unit is one flat bet. A pick that carried no price counts in the ' +
-              'record but not the units, so nothing here is priced at an invented −110.',
+              'Results are in units at the stake Discord posts: each pick to win 1 unit, never more than 3 ' +
+              'units laid. A pick that carried no price counts at 1 unit.',
           }}
         />
         {d.picksLoading && d.pickRecords.settled === 0 ? (
@@ -364,8 +364,8 @@ export function TeamStatsScreen() {
             {d.pickRecords.firstHalves > 0 ? (
               <Text style={styles.footnote}>
                 {d.pickRecords.firstHalves === 1
-                  ? '1 of them is a first-half total bet, which the tiles above leave out.'
-                  : `${d.pickRecords.firstHalves} of them are first-half total bets, which the tiles above leave out.`}
+                  ? '1 of them is a first-half bet, which the tiles above leave out.'
+                  : `${d.pickRecords.firstHalves} of them are first-half bets, which the tiles above leave out.`}
               </Text>
             ) : null}
             {d.pickRecords.ledgerUnread ? (
@@ -683,15 +683,16 @@ function asOf(stamps: Array<string | null>): string {
   return t ? ` · as of ${t}` : '';
 }
 
-/** One number per tile: the units, or the record when nothing was priced; the
- *  record and the unpriced count in the caption (UX review). */
+/** One number per tile: the units at the published stake, two decimals as
+ *  the Record tab prints them (the record alone before any pick); the record
+ *  and the unpriced count in the caption (UX review). */
 function RecordTile({ label, record }: { label: string; record: PickRecord }) {
   const units = record.units;
-  const value = units == null ? formatWinLoss(record) : formatSignedUnits(units);
+  const value = units == null ? formatWinLoss(record) : formatSigned(units, 2, 'u');
   const caption =
     units == null
-      ? record.unpriced > 0 ? `${record.unpriced} unpriced` : undefined
-      : `${formatWinLoss(record)}${record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}`;
+      ? undefined
+      : `${formatWinLoss(record)}${record.unpriced > 0 ? ` · ${record.unpriced} unpriced, staked at 1u` : ''}`;
   return <StatTile label={label} value={value} caption={caption} tint={unitsTint(units)} />;
 }
 
@@ -759,40 +760,59 @@ function MeetingRow({ game, team }: { game: FormGame; team: string }) {
 // ── Splits ──────────────────────────────────────────────────────────────────
 
 function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
-  const def = (key: keyof TeamStatsRow): TeamStatDef | null =>
-    TEAM_STAT_CATALOG.find((s) => s.key === key && s.sports.includes(sport)) ?? null;
+  const def = (key: keyof TeamStatsRow): TeamStatDef | null => teamStatFor(sport, key);
+  // "ATS", or the run line / puck line in MLB and NHL.
+  const ats = spreadWord(sport);
+  // Under MIN_SPLIT_SAMPLE a split is never a percentage, the board's rule
+  // (Matt, 2026-11-03): the game count instead, so the board and this page
+  // never print two answers for one number.
+  const games = (n: number) => `${n} game${n === 1 ? '' : 's'}`;
+  const isThin = (key: keyof TeamStatsRow): boolean => {
+    const d = def(key);
+    return d != null && isThinSample(row, d);
+  };
+  const count = (key: keyof TeamStatsRow): number => {
+    const d = def(key);
+    return d ? sampleFor(row, d) : 0;
+  };
   const pct = (key: keyof TeamStatsRow): string => {
+    if (isThin(key)) return games(count(key));
     const v = row[key];
     const n = typeof v === 'string' ? Number(v) : v;
     return n == null || !Number.isFinite(n as number) ? '—' : formatPct(n as number, 0);
   };
-  const thin = (key: keyof TeamStatsRow): string | null => {
+  const sampleCaption = (key: keyof TeamStatsRow): string | undefined => {
     const d = def(key);
-    if (!d || !d.sample) return null;
-    const n = sampleFor(row, d);
-    return isThinSample(row, d) ? `${n} game${n === 1 ? '' : 's'} · thin` : `${n} games`;
+    if (!d || !d.sample) return undefined;
+    return isThin(key) ? 'too few to rate' : games(count(key));
   };
+  const ou = `${row.ou_o}-${row.ou_u}${row.ou_p ? `-${row.ou_p}` : ''}`;
+  const atsRec = `${row.ats_w}-${row.ats_l}${row.ats_p ? `-${row.ats_p}` : ''}`;
   const restful = def('rest_adv_ats_pct') != null;
   return (
     <>
       <View style={styles.tileRow}>
-        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={`ATS ${pct('ats_home_pct')}`} />
-        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={`ATS ${pct('ats_away_pct')}`} />
-        <StatTile label="Over" value={pct('over_pct')} caption={`${row.ou_o}-${row.ou_u}${row.ou_p ? `-${row.ou_p}` : ''}`} />
+        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={isThin('ats_home_pct') ? `${ats}: only ${games(count('ats_home_pct'))}` : `${ats} ${pct('ats_home_pct')}`} />
+        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={isThin('ats_away_pct') ? `${ats}: only ${games(count('ats_away_pct'))}` : `${ats} ${pct('ats_away_pct')}`} />
+        <StatTile
+          label="Over"
+          value={isThin('over_pct') ? `${row.ou_o}o-${row.ou_u}u` : pct('over_pct')}
+          caption={isThin('over_pct') ? games(count('over_pct')) : ou}
+        />
       </View>
       <View style={styles.tileRow}>
-        <StatTile label="ATS as fav" value={pct('fav_ats_pct')} />
-        <StatTile label="ATS as dog" value={pct('dog_ats_pct')} />
+        <StatTile label={`${ats} as fav`} value={pct('fav_ats_pct')} />
+        <StatTile label={`${ats} as dog`} value={pct('dog_ats_pct')} />
         <StatTile
-          label="ATS overall"
-          value={pct('ats_pct')}
-          caption={`${row.ats_w}-${row.ats_l}${row.ats_p ? `-${row.ats_p}` : ''}`}
+          label={`${ats} overall`}
+          value={isThin('ats_pct') ? atsRec : pct('ats_pct')}
+          caption={isThin('ats_pct') ? games(count('ats_pct')) : atsRec}
         />
       </View>
       {restful ? (
         <View style={styles.tileRow}>
-          <StatTile label="ATS rest edge" value={pct('rest_adv_ats_pct')} caption={thin('rest_adv_ats_pct') ?? undefined} />
-          <StatTile label="ATS short rest" value={pct('short_rest_ats_pct')} caption={thin('short_rest_ats_pct') ?? undefined} />
+          <StatTile label={`${ats} rest edge`} value={pct('rest_adv_ats_pct')} caption={sampleCaption('rest_adv_ats_pct')} />
+          <StatTile label={`${ats} short rest`} value={pct('short_rest_ats_pct')} caption={sampleCaption('short_rest_ats_pct')} />
         </View>
       ) : null}
     </>
@@ -850,7 +870,8 @@ function signed(n: number, digits: number): string {
 // 3.6:1 on a card, under AA for a 20pt number (UX review).
 function unitsTint(units: number | null): string | undefined {
   if (units == null) return undefined;
-  const r = Math.round(units * 10) / 10;
+  // Rounded as printed: two decimals.
+  const r = Math.round(units * 100) / 100;
   if (r > 0) return colors.gradeGood;
   if (r < 0) return colors.gradeBad;
   return undefined;

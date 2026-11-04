@@ -125,6 +125,12 @@ ANON_READABLE: tuple[str, ...] = (
     "v_player_season_totals_ncaaf",
     "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
+    # Men's college basketball Stats tab (Matt, 2026-11-03). security_invoker
+    # over ncaab_player_game_log, whose SELECT policy and grant are in
+    # add_ncaab_player_game_log_2026_11_03.sql. The player page reads the log
+    # through playerLog.LOG_TABLE, like the WNBA and NBA logs, so the log is
+    # not a literal .from() and is not listed here.
+    "v_player_season_totals_ncaab",
     # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
     # .from() these yet; tests/test_anon_readable.py keeps them on an
     # explicit ahead-of-the-app list so the stale-entry check stays strict
@@ -383,6 +389,23 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # (scripts/ncaab_total_card.py, which creates it on demand). Read by the
     # card, never by the app.
     "ncaab_total_decisions",
+    # The NCAAB spread card's decisions ledger: one row per game it has
+    # decided at 15:00 UTC, bet or not, with every book's quote, the
+    # consensus and the reason (scripts/ncaab_spread_card.py, which creates it
+    # on demand). Read by the card, never by the app.
+    "ncaab_spread_decisions",
+    # The NCAAB moneyline card's decisions ledger: one row per game it has
+    # decided at 15:00 UTC, bet or not, with every book's moneyline and own
+    # spread and their flags (scripts/ncaab_moneyline_card.py, which creates
+    # it on demand). Read by the card, never by the app.
+    "ncaab_moneyline_decisions",
+    # The NCAAB first-post moneyline card's ledger: one row per (game, book)
+    # first moneyline post it has decided, bet or not, with every book's
+    # moneyline and own spread, and the fill check the capture writes on its
+    # next poll (scripts/ncaab_moneyline_first_post_card.py, which creates it
+    # on demand; scripts/ncaab_first_post_fill.py). Read by the card and the
+    # capture, never by the app.
+    "ncaab_moneyline_first_post_decisions",
     # The NBA home team-total model's two: its decisions ledger, one row per
     # decided game with the home team's part of the gap and the best under
     # offer (scripts/nba_team_total_luck_card.py), and its fetch ledger, one
@@ -396,6 +419,19 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/nba_first_half_odds.py).
     "nba_first_half_total_luck_decisions",
     "nba_first_half_total_fetches",
+    # The NCAAB first-half spread model's three
+    # (scripts/ncaab_first_half_spread_card.py, data/ingestors/ncaab_first_half_odds.py):
+    # its decisions ledger, its fetch ledger (one row per Odds API call with
+    # the credits it billed), and each finished game's halves and closing
+    # consensus lines, the team term's input. Each created on demand by its
+    # writer; read by the card and the window job, never by the app.
+    "ncaab_first_half_spread_decisions",
+    "ncaab_first_half_fetches",
+    "ncaab_first_half_team_games",
+    # The NCAAB first-half total model's decisions ledger
+    # (scripts/ncaab_first_half_total_card.py, created on demand); it reads the
+    # same fetch ledger and team games as the spread model.
+    "ncaab_first_half_total_decisions",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.
@@ -551,11 +587,13 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_recent_games_mlb",
     "player_recent_games_nba",
     "player_recent_games_ncaaf",
+    "player_recent_games_ncaab",
     "player_recent_games_nfl",
     "player_recent_games_wnba",
     "player_season_stat_values_mlb",
     "player_season_stat_values_nba",
     "player_season_stat_values_ncaaf",
+    "player_season_stat_values_ncaab",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
     # NHL hit-rate arrays (per game, last 5, last 10, season). The app does
@@ -567,6 +605,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_h2h_stat_values_mlb",
     "player_h2h_stat_values_nba",
     "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_ncaab",
     "player_h2h_stat_values_nfl",
     "player_h2h_stat_values_wnba",
     # Same-position-vs-opponent card on the player page
@@ -582,6 +621,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
+    "player_window_totals_ncaab",
     "player_window_totals_nfl",
     "player_window_totals_wnba",
     # NHL Players board. Reads nhl_skater_game_log (shots, ending-year
@@ -594,6 +634,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # byom_game_facts and byom_prop_facts, not picks.
     "custom_model_backtest",
     "custom_model_picks",
+    # The same backtest's units on the published stake (2026-11-03,
+    # data/migrations/custom_model_backtest_posted_2026_11_03.sql, which
+    # carries its own GRANT). SECURITY INVOKER over custom_model_picks.
+    "custom_model_backtest_posted",
     "byom_backtest",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",

@@ -1343,9 +1343,13 @@ def run_system_health(run_date: str | None = None) -> dict:
         # The two invariants that would have caught the leak on day one:
         # impossible games_played (row claims games not yet played) and thin
         # snapshot seasons (< MIN_SNAPSHOTS_PER_SEASON distinct as_of_dates).
-        # verify() excuses the current season's opening days — one daily
-        # snapshot until finals span that many days — and does not excuse
-        # any historical season.
+        # verify() excuses two live-season shapes and no historical season:
+        # opening days (one daily snapshot until finals span
+        # MIN_SNAPSHOTS_PER_SEASON days), and a young snapshot series whose
+        # first as_of_date is fewer than that many days before the check
+        # and whose newest row is today or yesterday. A series that has
+        # collapsed or stopped stays thin. An empty games read is not an
+        # excuse.
         # Rebuild landed 2026-09-03; marker set 2026-09-14. This is the ongoing
         # health gate — same checks as `python -m data.team_stats_rebuild
         # --verify-only` / the team_stats_asof_verify worker job. Never rebuilds.

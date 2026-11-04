@@ -56,9 +56,9 @@ const NCAAF_AHEAD_DAYS = 150;
  */
 const NHL_AHEAD_DAYS = 7;
 /**
- * How far ahead the NCAAB board looks. The NCAAB totals model is planned to
- * decide the evening before the game, so a same-day read would hide its picks
- * until game day. 7 is config.GAME_SCORE_AHEAD_DAYS, the outer bound the
+ * How far ahead the NCAAB board looks. The NCAAB totals model decides minutes
+ * after DraftKings first posts a game's total, usually the day before the game,
+ * so a same-day read would hide its picks until game day. 7 is config.GAME_SCORE_AHEAD_DAYS, the outer bound the
  * scorer uses for the other basketball sports. NCAAB is not in
  * GAME_SCORE_AHEAD_SPORTS, so this is a bound, not a mirror: raise it if an
  * NCAAB model ever writes further out. Only the picks' own games are read
@@ -115,7 +115,7 @@ export function useTodayPicks(date?: string) {
       // NCAAF have had one; NHL joined the scorer's 7-day game window
       // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
       // slate dated inside that window never reached the chip or the board.
-      // NCAAB joined with its totals model, which decides the evening before.
+      // NCAAB joined with its totals model, which usually decides the day before.
       // The look-ahead fetches are enrichment — don't fail the whole feed on
       // them, but record each failure in `partial`.
       const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, nhlRows] = await Promise.all([

@@ -80,7 +80,7 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { reachFrame } from '@/lib/a11y';
+import { reachFrame, unitsSpeech } from '@/lib/a11y';
 import { ErrorBanner } from '@/components/ErrorState';
 import { MatchupStrengthBar } from '@/components/MatchupStrengthBar';
 import { friendlyCause } from '@/lib/errors';
@@ -444,11 +444,11 @@ export function PlayerStatsScreen() {
       return (detail.h2hMeetings ?? []).map((m) => ({
         value: m.value,
         date: shortGameDate(m.date),
-        opp: opponentLabel(row, true, ncaafAbbrevs),
+        opp: opponentLabel(row, true, ncaafAbbrevs, sport === 'NCAAB'),
         oppFull: opponentLabel(row, false),
       }));
     }
-    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs);
+    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs, sport === 'NCAAB');
     return range === 'all' ? all : all.slice(0, range);
   }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs]);
   // The values ARE the labelled games' values, so the chart's bars and labels
@@ -1182,6 +1182,7 @@ export function PlayerStatsScreen() {
                 stat={stat}
                 line={selection.line}
                 side={selection.side}
+                currentTeam={games[0]?.team ?? null}
               />
             ))}
           </>
@@ -1262,10 +1263,14 @@ function GameRow({
   stat,
   line,
   side,
+  currentTeam,
 }: {
   row: PlayerLogEntry;
   sport: PlayerLogSport;
   stat: StatDef | null;
+  /** The newest game's team, which the header names: NCAAB prints a row's
+   *  own school only when it differs (gameContextLine). */
+  currentTeam?: string | null;
   /** The book's half-point line, so the dot, the chart and the count all
    *  compare the same number the same way. */
   line: number;
@@ -1289,7 +1294,7 @@ function GameRow({
         {/* The chart's own date idiom ("10/26"), so the bar and the row
             name the game the same way. */}
         <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
-        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row)}</Text>
+        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row, currentTeam)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>
@@ -1515,6 +1520,26 @@ function TonightLineCard({
           lineup.is_confirmed ? ' · lineup confirmed' : ' · projected'
         }`
       : null;
+
+  // College basketball shows no player-prop lines (Matt, 2026-11-03), so the
+  // card is the fixture only: no line copy, no tooltip about prices it can
+  // never show, and no claim that books do not price the stat.
+  if (sport === 'NCAAB') {
+    return (
+      <>
+        <SectionTitle title="Next game" />
+        <View style={styles.card}>
+          <Text style={styles.fixture}>
+            {side}
+            <Text style={styles.fixtureWhen}>  {when}</Text>
+          </Text>
+          <Text style={[styles.muted, styles.gapTop]}>
+            Player props aren’t shown for college basketball.
+          </Text>
+        </View>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1766,8 +1791,8 @@ function PickRecordCard({
         tooltip={{
           title: 'Posted bets only',
           body:
-            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units: one unit is one ` +
-            'flat bet. A pick that carried no price counts in the record and not the units.',
+            `Posted settled bets on ${playerName}, by market. A pick Discord did not post is left out. Results are in units at the stake ` +
+            'Discord posts: each pick to win 1 unit, never more than 3 units laid. A pick that carried no price counts at 1 unit.',
         }}
       />
       {loading && record.settled === 0 ? (
@@ -1788,9 +1813,15 @@ function PickRecordCard({
         <View style={styles.card}>
           <View style={styles.recordTop}>
             <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
-            <Text style={styles.recordCount}>
+            <Text
+              style={styles.recordCount}
+              accessibilityLabel={unitsSpeech(
+                `${record.settled} posted ${record.settled === 1 ? 'bet' : 'bets'}` +
+                  (record.unpriced > 0 ? `, ${record.unpriced} unpriced, staked at 1u` : ''),
+              )}
+            >
               {record.settled} posted {record.settled === 1 ? 'bet' : 'bets'}
-              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
+              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced, staked at 1u` : ''}
             </Text>
             {record.ledgerUnread ? (
               <Text style={styles.muted}>

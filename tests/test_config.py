@@ -215,7 +215,23 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "nba_first_half_total_luck",
          # 2026-10-30 (mike, "Yes to the totals model"): NCAAB totals; its 0.04
          # cut was measured on its own P(win | no push), and it has no record.
-         "ncaab_total_blend"}
+         "ncaab_total_blend",
+         # 2026-11-02 (mike): NCAAB spreads; its 0.03 cut was measured on its
+         # own P(win | no push) at the bet book's line, and it has no record.
+         "ncaab_spread_market",
+         # 2026-11-02 (mike): NCAAB moneylines; its 0.01 cut was measured on its
+         # own P(the side wins) from the bet book's spread, and it has no record.
+         "ncaab_moneyline_own_spread",
+         # 2026-11-03 (mike): NCAAB moneylines at a book's first post; its 0.015
+         # cut was measured on its own P(the side wins) from that book's spread,
+         # and it has no record.
+         "ncaab_moneyline_first_post",
+         # 2026-11-02 (mike): NCAAB first-half spread; its 0.02 cut was measured
+         # on its own P(cover | no push), and it has no record.
+         "ncaab_first_half_spread",
+         # 2026-11-03 (mike): NCAAB first-half total; its 0.02 cut was measured
+         # on its own P(win | no push), and it has no record.
+         "ncaab_first_half_total"}
     )
 
 
@@ -238,6 +254,25 @@ def test_the_nba_home_team_total_floor_does_not_move_with_the_platform_default(m
 
     monkeypatch.setattr(config, "DEFAULT_MIN_ODDS", -1000.0)
     assert config.min_odds_for("nba_team_total_luck") == -200
+
+
+def test_the_ncaab_first_half_spread_floor_does_not_move_with_the_platform_default(monkeypatch):
+    """It laid -140 to +125 on its 1,253 graded bets, so its -200 is pinned in
+    MODEL_MIN_ODDS, like the NBA first half's."""
+    import config
+
+    monkeypatch.setattr(config, "DEFAULT_MIN_ODDS", -1000.0)
+    assert config.min_odds_for("ncaab_first_half_spread") == -200
+
+
+def test_the_ncaab_first_half_total_floor_does_not_move_with_the_platform_default(monkeypatch):
+    """Its research cell laid -240 to +155, and the card sets a side shorter
+    than -200 aside before it picks; the -200 is pinned in MODEL_MIN_ODDS, like
+    the first-half spread's."""
+    import config
+
+    monkeypatch.setattr(config, "DEFAULT_MIN_ODDS", -1000.0)
+    assert config.min_odds_for("ncaab_first_half_total") == -200
 
 
 def test_the_nba_first_half_floor_does_not_move_with_the_platform_default(monkeypatch):
@@ -307,5 +342,10 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nba_team_total_luck",      # market-fair P(under) + the walk-forward uplift
         "nba_first_half_total_luck",  # 2026-10-30 (mike): market-fair P(over) + the walk-forward uplift
         "ncaab_total_blend",        # 2026-10-30 (mike): its blend's P(win, push left out)
+        "ncaab_spread_market",      # 2026-11-02 (mike): the margin table's P(win, push left out)
+        "ncaab_moneyline_own_spread",  # 2026-11-02 (mike): the margin table's P(side wins) at the book's own spread
+        "ncaab_moneyline_first_post",  # 2026-11-03 (mike): the same, at the book's first moneyline post
+        "ncaab_first_half_spread",  # 2026-11-02 (mike): its first-half table's P(cover, push left out)
+        "ncaab_first_half_total",   # 2026-11-03 (mike): its first-half total table's P(win, push left out)
     }
     assert not not_named_here

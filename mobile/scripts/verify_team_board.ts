@@ -116,7 +116,7 @@ eq('value on the lo cut is bottom third', tierFor(3, cuts, 'high'), 'bad');
 }
 {
   // Equal rate: the better-established sample ranks first.
-  const d = { ...def('short_rest_ats_pct', 'high'), sample: 'short_rest_games' } as TeamStatDef;
+  const d = { ...def('short_rest_ats_pct', 'high'), sample: ['short_rest_games'] } as TeamStatDef;
   const many = team({ team: 'A', short_rest_ats_pct: 0.6, short_rest_games: 20 });
   const few = team({ team: 'B', short_rest_ats_pct: 0.6, short_rest_games: 4 });
   check('ties break toward the larger sample', compareTeams(many, few, d) < 0);
@@ -128,7 +128,7 @@ eq('value on the lo cut is bottom third', tierFor(3, cuts, 'high'), 'bad');
   eq('sampleFor falls back to games played', sampleFor(team({ team: 'A' }), plain), 40);
   check('a season-long metric is never "thin"', !isThinSample(team({ team: 'A', games_played: 2 }), plain));
 
-  const split = { ...def('short_rest_ats_pct', 'high'), sample: 'short_rest_games' } as TeamStatDef;
+  const split = { ...def('short_rest_ats_pct', 'high'), sample: ['short_rest_games'] } as TeamStatDef;
   eq('sampleFor uses the split column', sampleFor(team({ team: 'A', short_rest_games: 5 }), split), 5);
   check('under the floor is thin', isThinSample(team({ team: 'A', short_rest_games: MIN_SPLIT_SAMPLE - 1 }), split));
   check('at the floor is not thin', !isThinSample(team({ team: 'A', short_rest_games: MIN_SPLIT_SAMPLE }), split));
@@ -136,7 +136,7 @@ eq('value on the lo cut is bottom third', tierFor(3, cuts, 'high'), 'bad');
 
 // ── rankTeams: thin rows must not distort the league's tertiles ───────────
 {
-  const split = { ...def('short_rest_ats_pct', 'high'), sample: 'short_rest_games' } as TeamStatDef;
+  const split = { ...def('short_rest_ats_pct', 'high'), sample: ['short_rest_games'] } as TeamStatDef;
   const rows = [
     team({ team: 'A', short_rest_ats_pct: 0.50, short_rest_games: 20 }),
     team({ team: 'B', short_rest_ats_pct: 0.52, short_rest_games: 20 }),
