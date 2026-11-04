@@ -864,7 +864,10 @@ def test_a_prop_ignores_team_role_spread_and_total(scratch):
     assert rec(',"role":"underdog"') == plain
     assert rec(',"min_team_spread":5,"max_team_spread":10') == plain
     assert rec(',"min_game_total":60,"max_game_total":70') == plain
-    # A game leg still honours them.
+    # A game leg still honours them: bets without the band, none with it.
+    cur.execute("SELECT count(*) FROM byom_record(2026, "
+                "'{\"markets\":[\"h2h\"]}'::jsonb) WHERE bets > 0")
+    assert cur.fetchone()[0] > 0
     cur.execute("SELECT count(*) FROM byom_record(2026, "
                 "'{\"markets\":[\"h2h\"],\"min_game_total\":60}'::jsonb) WHERE bets > 0")
     assert cur.fetchone()[0] == 0
