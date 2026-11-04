@@ -20,14 +20,17 @@ dead end.
 | Session state | `src/hooks/useAuth.ts` | Module store, one Supabase subscription, AppState-driven refresh |
 | Sign-in screen | `src/screens/SignInScreen.tsx` | Required on cold open once `AUTH_ENABLED` is on. No skip. |
 | Settings entry | `src/screens/SettingsScreen.tsx` | Account card renders **only** when `AUTH_ENABLED` |
-| Verification | `scripts/verify_auth.ts` | 41 assertions — `npx tsx scripts/verify_auth.ts` |
+| Verification | `scripts/verify_auth.ts` | `npx tsx scripts/verify_auth.ts` |
+| App Review code | `scripts/verify_app_review_sign_in.ts` | One demo email. The fixed code is a Supabase secret |
 
 When `AUTH_ENABLED` is on, SignIn is the first screen. There is no guest path
 and no "Signing in is optional" line. Terms and Privacy open
 `signalbase-ai.com`. Models and tracked bets stay on the device. A successful
-sign-in opens the paywall when billing is also on; closing it leaves the free
-shell (Record, with the other tabs locked). A restored session does not show
-the paywall again until a locked tab or Unlock is tapped.
+sign-in opens the paywall when billing is also on and the account is not
+entitled; closing it leaves the free shell (Record and the picks teaser).
+Signals and Live Signals open that same paywall. The other tabs stay locked.
+A restored session does not show the paywall again until a locked tab or
+Unlock is tapped.
 
 Scope is **session only**, by design. Signing in does not yet move any data:
 bankroll, Kelly settings, custom models, saved parlays, tracked bets and manual
@@ -178,6 +181,56 @@ JS-only, so: **Actions → Mobile OTA update (production) → Run workflow**.
   but confirm it on a device before shipping.
 
 ---
+
+## App Review demo account
+
+Apple's reviewer signs in as `review@signalbase-ai.com`. The app has no
+password field. The six-digit code is not in this repo. The repo is public,
+so a code that has been committed is burned. Matt picks a fresh code, pastes
+it only into App Store Connect (the Password field), and sets the secret to
+the same value.
+
+The address is `APP_REVIEW_DEMO_EMAIL` in `src/lib/appReview.ts`. For that
+address only, Email me a code does not call `signInWithOtp`, and the code
+step calls the `app-review-sign-in` edge function. Continue with Apple and
+Continue with Google do the same when that email is already in the field,
+including when someone who is not the reviewer types it. An empty field
+still starts Apple or Google.
+
+The function accepts the code only when both secrets are set:
+
+```
+APP_REVIEW_DEMO_EMAIL=review@signalbase-ai.com
+APP_REVIEW_DEMO_OTP=<fresh six-digit code, App Store Connect only>
+```
+
+`APP_REVIEW_DEMO_EMAIL` has to be that exact address. A different secret
+never receives a call from this app. Deploy only after Matt says the code
+is no longer in git:
+
+```
+supabase functions deploy app-review-sign-in --no-verify-jwt
+```
+
+Then apply `data/migrations/app_review_sign_in_attempts_2026_11_04.sql` in
+the SQL editor. It is not in `ACTIVE_MIGRATIONS`, so the worker will not
+apply it. Until that table exists, the function refuses every code,
+including the right one. The function creates the auth user on the first
+success. No mailbox is required.
+
+Wrong codes are counted per caller and across every caller. The table
+stores a SHA-256 of the edge address (`cf-connecting-ip`, otherwise the
+last `x-forwarded-for` hop), not the address and not the first hop. Eight
+failures in 15 minutes fill that caller's bucket. More than 200 failures
+in an hour, from every caller together, refuse the next request before
+the code is compared. A database error on the count is 503. Deleting the
+review account still asks for this code, because reauth uses the same
+verify path.
+
+After App Review approves the binary, unset `APP_REVIEW_DEMO_OTP`, or replace
+it with a new code that was not the one just submitted. Leaving the secret
+set keeps the demo address open. Do not write the old or the new code into
+the repo.
 
 ## App Store note (guideline 4.8)
 

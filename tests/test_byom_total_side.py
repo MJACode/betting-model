@@ -29,7 +29,13 @@ def test_the_forward_migration_is_not_registered():
     assert "insert into picks" not in lowered
 
 
-def test_scratch_total_legs_match_a_saved_side_and_a_missing_side_is_refused():
+@pytest.mark.parametrize("later", [
+    (),
+    # 2026-11-04: byom_backtest becomes the closing rows of byom_legs.
+    # The same answers must come back.
+    ("byom_prop_facts_dk_prices_2026_10_28.sql", "byom_official_legs_2026_11_04.sql"),
+])
+def test_scratch_total_legs_match_a_saved_side_and_a_missing_side_is_refused(later):
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
 
@@ -67,7 +73,7 @@ def test_scratch_total_legs_match_a_saved_side_and_a_missing_side_is_refused():
             "byom_saved_models_2026_10_16.sql",
             SQL_NAME,
             SQL_NAME,
-        )
+        ) + tuple(later)
         for name in names:
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
@@ -135,7 +141,11 @@ def test_scratch_total_legs_match_a_saved_side_and_a_missing_side_is_refused():
         cur.execute("SELECT prosrc FROM pg_proc WHERE proname = 'byom_backtest'")
         backtest = cur.fetchone()[0]
         assert "byom_backtest_v1" in backtest
-        assert "'over'" in backtest
+        # The re-run of the older files must not undo the newest body.
+        if not later:
+            assert "'over'" in backtest
+        else:
+            assert "byom_official_legs_v1" in backtest
         cur.execute("SELECT prosrc FROM pg_proc WHERE proname = 'byom_save_model'")
         save = cur.fetchone()[0]
         assert "byom_saved_models_v1" in save

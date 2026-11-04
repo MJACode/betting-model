@@ -253,6 +253,8 @@ def refresh(conn, apply: bool = False, today: date | datetime | None = None) -> 
     from byom.load import build_season
     from byom.prop_load import build_season as build_props
 
+    # build_season commits the game facts and byom_official_legs before
+    # it returns. The prop read below is a new transaction.
     game = build_season(
         conn, report["season"], apply=True, game_ids=ids)
     prop = build_props(

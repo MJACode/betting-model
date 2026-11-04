@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ErrorBanner } from '@/components/ErrorState';
 import { Skeleton } from '@/components/Skeleton';
@@ -19,6 +19,9 @@ export function ByomPreviewCard({
   onRetry,
   showsUnits,
   emptyLabel = 'No games match',
+  closeRecord = null,
+  onShowBets,
+  closingHeadline = false,
 }: {
   record: ByomRecord | null;
   loading: boolean;
@@ -27,6 +30,18 @@ export function ByomPreviewCard({
   showsUnits: boolean;
   /** Replaces “No games match” when the row was not graded. */
   emptyLabel?: string;
+  /**
+   * The same bets at the closing line. Set when `record` is the official
+   * pick (NFL). Null when `record` already is the close.
+   */
+  closeRecord?: ByomRecord | null;
+  /** Opens the list of the bets this record counts. */
+  onShowBets?: () => void;
+  /**
+   * NFL, and the official rows are empty, so `record` is the close.
+   * Names that basis. The secondary close row stays off.
+   */
+  closingHeadline?: boolean;
 }) {
   if (loading) {
     return (
@@ -67,9 +82,27 @@ export function ByomPreviewCard({
     roi == null ? null : roiText,
     `${record.bets} bet${record.bets === 1 ? '' : 's'}`,
   ].filter(Boolean).join(', ');
+  const official = closeRecord != null;
+  const closingLead = !official && closingHeadline;
+  const closeUnits = closeRecord != null && showsUnits && closeRecord.units != null
+    ? formatSignedUnits(closeRecord.units)
+    : null;
+  const closeText = closeRecord == null
+    ? null
+    : closeRecord.bets === 0
+      ? 'No bets at the closing line'
+      : [closeUnits, formatByomRecord(closeRecord)].filter(Boolean).join(' · ');
 
   return (
-    <View style={styles.card} accessibilityRole="summary" accessibilityLabel={label}>
+    <View style={styles.card}>
+      <View accessible accessibilityRole="summary"
+        accessibilityLabel={
+          official ? `At the official line: ${label}`
+            : closingLead ? `At the closing line: ${label}`
+              : label
+        }>
+      {official ? <Text style={styles.kicker}>At the official line</Text> : null}
+      {closingLead ? <Text style={styles.kicker}>At the closing line</Text> : null}
       {unitsText != null ? (
         <Text style={[styles.units, { color: unitsColor }]}>{unitsText}</Text>
       ) : null}
@@ -81,6 +114,27 @@ export function ByomPreviewCard({
         {rateText} · {roiText}
       </Text>
       <Text style={styles.meta}>{record.bets} bet{record.bets === 1 ? '' : 's'}</Text>
+      </View>
+      {closeText != null ? (
+        <View style={styles.closeRow} accessible
+          accessibilityLabel={`At the closing line: ${closeText}`}>
+          <Text style={styles.closeLabel}>At the closing line</Text>
+          <Text style={styles.closeValue}>{closeText}</Text>
+        </View>
+      ) : null}
+      {onShowBets ? (
+        <Pressable
+          onPress={onShowBets}
+          accessibilityRole="button"
+          accessibilityLabel={`See the ${record.bets} bet${record.bets === 1 ? '' : 's'}`}
+          style={({ pressed }) => [styles.showBets, pressed && styles.pressed]}
+        >
+          <Text style={styles.showBetsText}>
+            See the {record.bets} bet{record.bets === 1 ? '' : 's'}
+          </Text>
+          <Text style={styles.chevron} accessibilityElementsHidden importantForAccessibility="no">›</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -112,6 +166,50 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
+  },
+  kicker: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  closeRow: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+  },
+  closeLabel: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  closeValue: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  showBets: {
+    minHeight: 44,
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pressed: { opacity: 0.6 },
+  showBetsText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  chevron: {
+    fontSize: font.size.title3,
+    color: colors.textTertiary,
   },
   skel: {
     height: 96,

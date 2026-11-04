@@ -1117,16 +1117,19 @@ export async function fetchPropLineRows(
  * re-prices from each time the betslip resolves (lib/lineLegs.ts
  * gameLineLegFromRows). ~13 rows, bounded by game_id; no paging needed.
  *
- * Spreads and totals also carry the day's ALTERNATE ladder (alt_game_lines,
- * fetched once a day since 2026-10-29), folded into the main market's name by
- * lib/lineLegs.foldAltGameRows. That read is bounded by one game and one
- * market: books x rungs, a few hundred rows at most. If it fails (the table
- * not yet created, a timeout) the main lines still come back, and the cause is
- * logged rather than thrown, so a missing ladder never empties the slip.
+ * Spreads and totals also carry the ALTERNATE ladder (alt_game_lines),
+ * folded into the main market's name by lib/lineLegs.foldAltGameRows. That
+ * read is bounded by one game and one market: books x rungs, a few hundred
+ * rows at most. If it fails (the table not yet created, a timeout) the main
+ * lines still come back, and the cause is logged rather than thrown, so a
+ * missing ladder never empties the slip.
  *
- * The ladder is a morning pre-game price. Once commence_time has passed it is
- * not read: an in-play leg must not be offered or priced off it. A missing
- * start still loads the ladder. A failed start-time read hides it.
+ * The ladder is a pre-game price, refreshed every odds pass for games inside
+ * 24 hours. Once commence_time has passed the edit sheet does not list it
+ * (ladderHidden). The rows are still returned, so a slip leg the user already
+ * moved to an alternate rung can be held and marked stale instead of deleted.
+ * A missing start still loads the ladder as current. A failed start-time read
+ * hides it.
  */
 export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
   const altMarket = ALT_GAME_MARKET[market as GameLineMarket];
@@ -1152,11 +1155,6 @@ export async function fetchGameLineRows(gameId: string, market: string): Promise
     console.warn('[gameLines] start time unavailable; ladder hidden', gameRes.error);
     return main;
   }
-  if (!pregameLadderVisible(start)) {
-    const hidden = main.slice() as OddsByBookRow[] & { ladderHidden?: 'started' };
-    hidden.ladderHidden = 'started';
-    return hidden;
-  }
   const altRes = await supabase
     .from('alt_game_lines')
     .select(ODDS_BY_BOOK_COLUMNS)
@@ -1164,11 +1162,23 @@ export async function fetchGameLineRows(gameId: string, market: string): Promise
     .eq('market', altMarket)
     .order('bookmaker')
     .order('point');
+  const started = !pregameLadderVisible(start);
   if (altRes.error) {
     console.warn('[gameLines] alternate ladder unavailable', altRes.error);
-    return main;
+    if (!started) return main;
+    // Do not return main-only. The slip would treat a missing alt rung as
+    // "nothing posts this number" and remove the leg. ladderFailed tells it
+    // to hold the leg instead.
+    const hidden = main.slice() as OddsByBookRow[] & { ladderHidden?: 'started'; ladderFailed?: true };
+    hidden.ladderHidden = 'started';
+    hidden.ladderFailed = true;
+    return hidden;
   }
-  return foldAltGameRows(market, main, (altRes.data ?? []) as unknown as OddsByBookRow[]);
+  const folded = foldAltGameRows(market, main, (altRes.data ?? []) as unknown as OddsByBookRow[]);
+  if (!started) return folded;
+  const hidden = folded as OddsByBookRow[] & { ladderHidden?: 'started' };
+  hidden.ladderHidden = 'started';
+  return hidden;
 }
 
 /** One game row, for a line leg's matchup and start time. */
@@ -1194,21 +1204,44 @@ export async function fetchPicksForDate(
   date: string,
   onEnrichmentError?: (what: string, error: unknown) => void,
 ): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
-    supabase
+  // TWO READS, both paged past the 1,000-row response cap (fetchAllPages).
+  // The All board is every scored pick (Matt, 2026-11-04), and one day's
+  // pre-game rows pass the cap: 1,432 on 2026-09-19, 1,355 of them NONE.
+  // Unpaged, `.limit(5000)` got the first 1,000 and the rest of the day's NONE
+  // rows never reached All, on whichever sport sorted last.
+  //   * The SIGNALS (everything but NONE): the board's bets. A failure fails
+  //     the board, as it always has. At most 764 rows a day (2026-05-14, the
+  //     busiest; measured 2026-11-04), so one page.
+  //   * The NONE rows: started now, awaited only after the line shop, and
+  //     ENRICHMENT. A page that fails reports a partial board and leaves the
+  //     bets on screen (UX review, 2026-11-04): paged into one read, a timeout
+  //     on a late NONE page would have blanked Signals too.
+  // `.neq('NONE')` rather than a list, so a signal type added later lands in
+  // the read that must succeed. pick_id makes each order total, which range
+  // paging needs so no row repeats or drops at a page seam.
+  const picksPage = (none: boolean) => (from: number, to: number) => {
+    const q = supabase
       .from('picks')
       .select(PICK_COLUMNS)
       .eq('game_date', date)
       // In-play picks live on the Live tab only — they churn with every
       // inning and would otherwise mix into the locked pre-game board.
-      .not('is_live', 'is', true)
-      // Order BET/AVOID before NONE so signals are NEVER dropped by the row cap.
-      // ('AVOID' < 'BET' < 'NONE' alphabetically.) The day's NONE prop rows can
-      // exceed the cap by evening; without this, the morning's locked game
-      // signals (oldest rows) fell off a created_at-only ordering and vanished.
+      .not('is_live', 'is', true);
+    return (none ? q.eq('signal_type', 'NONE') : q.neq('signal_type', 'NONE'))
       .order('signal_type', { ascending: true })
       .order('created_at', { ascending: false })
-      .limit(5000),
+      .order('pick_id', { ascending: true })
+      .range(from, to);
+  };
+  const nonePicksRes = fetchAllPages<Pick>(picksPage(true), (p) => String(p.pick_id)).then(
+    (data) => ({ data, error: null as unknown }),
+    (error: unknown) => ({ data: null, error }),
+  );
+  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
+    fetchAllPages<Pick>(picksPage(false), (p) => String(p.pick_id)).then(
+      (data) => ({ data, error: null as unknown }),
+      (error: unknown) => ({ data: null, error }),
+    ),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     // Paged, on an order the request names, and only the markets a pick reads
@@ -1307,12 +1340,14 @@ export async function fetchPicksForDate(
   ]);
   if (allBooksRes.error) onEnrichmentError?.('the line shop', allBooksRes.error);
   if (propBooksRes.error) onEnrichmentError?.('the prop line shop', propBooksRes.error);
+  const noneRes = await nonePicksRes;
+  if (noneRes.error) onEnrichmentError?.('the rest of today’s scored picks', noneRes.error);
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
   const propBooks = (
     propBooksRes.error ? [] : (propBooksRes.data ?? [])
   ) as unknown as PropOddsByBookRow[];
 
-  const picks = rawPicks;
+  const picks = [...rawPicks, ...((noneRes.data ?? []) as Pick[])];
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
 
@@ -1737,6 +1772,7 @@ export async function fetchUpcomingNcaafPicks(
 export async function fetchUpcomingNcaabPicks(
   afterDate: string,
   throughDate: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
 ): Promise<EnrichedPick[]> {
   const rawPicks = await fetchAllPages<Pick>(
     (from, to) =>
@@ -1761,21 +1797,32 @@ export async function fetchUpcomingNcaabPicks(
   const picks = Array.from(seen.values());
   const gameIds = Array.from(new Set(picks.map((p) => p.game_id)));
   if (gameIds.length === 0) return [];
+  // The lines are read only for the games with a BET or AVOID: only signal
+  // cards draw the line pill and the line shop (fetchPicksForDate's rule).
+  // The NCAAB cards write a NONE row for every game they price and do not bet
+  // (2026-11-04), so the game list is most of the slate and the lines are not.
+  const lineGameIds = Array.from(
+    new Set(picks.filter((p) => p.signal_type !== 'NONE').map((p) => p.game_id)),
+  );
 
-  const chunks: string[][] = [];
-  for (let i = 0; i < gameIds.length; i += 80) chunks.push(gameIds.slice(i, i + 80));
-  const eachChunk = <T,>(read: (chunk: string[]) => Promise<T[]>): Promise<T[]> =>
-    Promise.all(chunks.map(read)).then((parts) => parts.flat());
+  const chunksOf = (ids: string[]): string[][] => {
+    const out: string[][] = [];
+    for (let i = 0; i < ids.length; i += 80) out.push(ids.slice(i, i + 80));
+    return out;
+  };
+  const eachChunk = <T,>(ids: string[], read: (chunk: string[]) => Promise<T[]>): Promise<T[]> =>
+    Promise.all(chunksOf(ids).map(read)).then((parts) => parts.flat());
 
   const [games, latestOdds, allBooks] = await Promise.all([
     // The matchup and the time: a failure here fails the card.
-    eachChunk(async (chunk) => {
+    eachChunk(gameIds, async (chunk) => {
       const { data, error } = await supabase.from('games').select(GAME_COLUMNS).in('game_id', chunk);
       if (error) throw error;
       return (data ?? []) as unknown as GameRow[];
     }),
-    // Enrichment only: a failure shouldn't take down the NCAAB card.
-    eachChunk(async (chunk) => {
+    // Enrichment only: a failure shouldn't take down the NCAAB card, and is
+    // reported (the partial banner), not swallowed.
+    eachChunk(lineGameIds, async (chunk) => {
       const { data, error } = await supabase
         .from('v_latest_dk_odds')
         .select(LATEST_ODDS_COLUMNS)
@@ -1783,8 +1830,11 @@ export async function fetchUpcomingNcaabPicks(
         .in('market', [...MAIN_GAME_ODDS_MARKETS]);
       if (error) throw error;
       return (data ?? []) as unknown as LatestDkOddsRow[];
-    }).catch(() => [] as LatestDkOddsRow[]),
-    eachChunk((chunk) =>
+    }).catch((e: unknown) => {
+      onEnrichmentError?.('the upcoming NCAAB lines', e);
+      return [] as LatestDkOddsRow[];
+    }),
+    eachChunk(lineGameIds, (chunk) =>
       fetchAllPages<OddsByBookRow>(
         (from, to) =>
           supabase
@@ -1798,7 +1848,10 @@ export async function fetchUpcomingNcaabPicks(
             .range(from, to),
         (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
       ),
-    ).catch(() => [] as OddsByBookRow[]),
+    ).catch((e: unknown) => {
+      onEnrichmentError?.('the upcoming NCAAB line shop', e);
+      return [] as OddsByBookRow[];
+    }),
   ]);
 
   const gameById = new Map<string, GameRow>();
@@ -2629,10 +2682,20 @@ const TRACK_RECORD_SELECT =
   'clv_settled, clv_beat, avg_clv_pct, first_date, last_date, ' +
   'clv_game_settled, clv_game_beat, avg_clv_game_pct, ' +
   'clv_prop_settled, clv_prop_beat, avg_clv_prop_pct, ' +
-  'market_clv_settled, market_clv_beat, avg_market_clv_pct';
+  'market_clv_settled, market_clv_beat, avg_market_clv_pct, ' +
+  'clv_push, clv_game_push, clv_prop_push';
 
-/** The select from before units and risked existed. An OTA can ship first. */
-const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, risked', '');
+/** The select from before CLV pushes were counted. An OTA can ship first. */
+const TRACK_RECORD_SELECT_WITHOUT_CLV_PUSH = TRACK_RECORD_SELECT.replace(
+  ', clv_push, clv_game_push, clv_prop_push',
+  '',
+);
+
+/** Units, and no push columns. The oldest select this fetch still retries. */
+const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT_WITHOUT_CLV_PUSH.replace(
+  ', units, risked',
+  '',
+);
 
 /**
  * The units columns are not on the view until the migration runs.
@@ -2641,6 +2704,22 @@ const TRACK_RECORD_SELECT_WITHOUT_UNITS = TRACK_RECORD_SELECT.replace(', units, 
  * `PGRST204` when the schema cache has no such column. The message names
  * the column. Any other error still throws.
  */
+/** PostgREST names the missing column. Only a missing-column error retries. */
+export function clvPushColumnsMissing(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined): boolean {
+  if (error == null) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message.includes('clv_push') && !message.includes('clv_game_push') && !message.includes('clv_prop_push')) {
+    return false;
+  }
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === '42703' || code === 'PGRST204'
+    || message.includes('does not exist')
+    || message.includes('schema cache');
+}
+
 export function postedStakeColumnsMissing(error: {
   code?: string | null;
   message?: string | null;
@@ -2656,15 +2735,25 @@ export function postedStakeColumnsMissing(error: {
 
 export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
   const first = await supabase.from('v_public_track_record').select(TRACK_RECORD_SELECT);
-  if (postedStakeColumnsMissing(first.error)) {
-    const second = await supabase
+  // Pushes shipped after units. A view can have one pair and not the other.
+  let select = TRACK_RECORD_SELECT;
+  let error = first.error;
+  let data = first.data;
+  if (clvPushColumnsMissing(error)) {
+    select = TRACK_RECORD_SELECT_WITHOUT_CLV_PUSH;
+    const second = await supabase.from('v_public_track_record').select(select);
+    error = second.error;
+    data = second.data;
+  }
+  if (postedStakeColumnsMissing(error)) {
+    const third = await supabase
       .from('v_public_track_record')
       .select(TRACK_RECORD_SELECT_WITHOUT_UNITS);
-    if (second.error) throw second.error;
-    return (second.data ?? []) as unknown as TrackRecordRow[];
+    if (third.error) throw third.error;
+    return (third.data ?? []) as unknown as TrackRecordRow[];
   }
-  if (first.error) throw first.error;
-  return (first.data ?? []) as TrackRecordRow[];
+  if (error) throw error;
+  return (data ?? []) as unknown as TrackRecordRow[];
 }
 
 /**
@@ -2734,14 +2823,19 @@ export async function fetchParlayTrackRecord(): Promise<ParlayTrackRow[]> {
  * pick (v_opening_vs_live). Two rows: track = 'opening' | 'live'.
  */
 export async function fetchOpeningVsLive(): Promise<OpeningVsLiveRow[]> {
-  const { data, error } = await supabase
-    .from('v_opening_vs_live')
-    .select(
-      'track, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
-        'clv_settled, clv_beat, avg_clv_pct',
-    );
-  if (error) throw error;
-  return (data ?? []) as OpeningVsLiveRow[];
+  const withPush =
+    'track, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
+    'clv_settled, clv_beat, avg_clv_pct, clv_push';
+  const first = await supabase.from('v_opening_vs_live').select(withPush);
+  if (clvPushColumnsMissing(first.error)) {
+    const second = await supabase
+      .from('v_opening_vs_live')
+      .select(withPush.replace(', clv_push', ''));
+    if (second.error) throw second.error;
+    return (second.data ?? []) as unknown as OpeningVsLiveRow[];
+  }
+  if (first.error) throw first.error;
+  return (first.data ?? []) as unknown as OpeningVsLiveRow[];
 }
 
 /** Opening track sliced by line move after lock + public side (v_opening_signal_slices). */

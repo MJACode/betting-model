@@ -20,12 +20,17 @@ are line_no_price. Moneyline grading is the score only.
 """
 from __future__ import annotations
 
+import logging
+
 from byom.constants import (
     DK_HISTORY_START_SEASON,
     NBA_DK_HISTORY_START_SEASON,
     SPORT,
 )
-from byom.game_facts import assemble_game, parse_date, parse_game_id
+from byom.game_facts import _pre_start, assemble_game, parse_date, parse_game_id
+from byom.official import OFFICIAL_COLUMNS, game_lock_candidates
+
+logger = logging.getLogger(__name__)
 
 # One game at a time. A season of nfl_odds_history is millions of rows
 # (one 2026 game, NFL_2026_05_BAL_ATL, is 12,991 DraftKings rows by itself,
@@ -108,8 +113,20 @@ FACT_COLUMNS = (
 
 
 def _fetch(conn, sql, params):
+    """Read, then end a clean transaction before the caller uses the rows.
+
+    Autocommit is off. A SELECT therefore holds its locks until commit
+    or rollback. The lock search that follows a quote fetch is Python,
+    and Postgres shows that gap as idle in transaction. A connection
+    that already has uncommitted writes is left open: that transaction
+    belongs to the caller, who commits it.
+    """
+    from data.db import release_read
     cur = conn.execute(sql, params)
-    return cur.fetchall()
+    try:
+        return cur.fetchall()
+    finally:
+        release_read(conn)
 
 
 def _dk_history_floor(sport: str) -> int | None:
@@ -224,8 +241,73 @@ def facts_for_season(conn, season: int,
         quotes = _dk_quotes(conn, game["game_id"], sport)
         fact = assemble_game(game, quotes, played)
         if fact is not None:
+            if sport == SPORT:
+                # Not a column. Every pre-kickoff candidate, written to
+                # byom_official_legs in the same transaction. The lock is
+                # chosen when the model is read. NFL only.
+                fact["_official"] = game_lock_candidates(
+                    fact,
+                    _pre_start(quotes, "h2h"),
+                    _pre_start(quotes, "spreads"),
+                    _pre_start(quotes, "totals"),
+                )
             facts.append(fact)
     return facts
+
+
+def official_legs_ready(conn) -> bool:
+    """True when the official-leg write can run.
+
+    A missing table, or a table from before the lock-band columns,
+    would abort the facts transaction. The facts are the record the
+    card can still show. Skip the official write and say so.
+    """
+    row = conn.execute(
+        "SELECT to_regclass('public.byom_official_legs') IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'byom_official_legs' "
+        "AND column_name = 'context_at_lock')"
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def write_official_legs(conn, keys: list[str], legs: list[dict],
+                        props: bool) -> int:
+    """Replace these games' official legs. Same transaction as the facts.
+
+    `props` False touches only game legs (player_key ''), True only
+    prop legs, so the two builders never delete each other's rows.
+
+    When `byom_official_legs` is missing, or it has no `context_at_lock`
+    column, the write is skipped and an error is logged. The facts
+    upsert in this transaction still commits. Failing the job here
+    would roll the facts back, which is the stale-record bug this
+    write was added beside.
+    """
+    if not official_legs_ready(conn):
+        logger.error(
+            "byom_official_legs is missing or has no context_at_lock "
+            "column; official-leg write skipped. Facts in this "
+            "transaction still commit. Apply "
+            "data/migrations/byom_official_legs_2026_11_04.sql and "
+            "data/migrations/byom_official_lock_bands_2026_11_04.sql."
+        )
+        return 0
+    keys = list(dict.fromkeys(keys))
+    if keys:
+        conn.execute(
+            "DELETE FROM byom_official_legs WHERE canonical_key = ANY(%s) "
+            + ("AND player_key <> ''" if props else "AND player_key = ''"),
+            (keys,))
+    if not legs:
+        return 0
+    cols = ", ".join(OFFICIAL_COLUMNS)
+    placeholders = ", ".join(["%s"] * len(OFFICIAL_COLUMNS))
+    conn.executemany(
+        f"INSERT INTO byom_official_legs ({cols}, built_at) "
+        f"VALUES ({placeholders}, now())",
+        [tuple(leg[col] for col in OFFICIAL_COLUMNS) for leg in legs])
+    return len(legs)
 
 
 def _upsert(conn, facts: list[dict]) -> int:
@@ -289,10 +371,21 @@ def build_season(conn, season: int, apply: bool = False,
             **empty_counts,
         }
     facts = facts_for_season(conn, season, game_ids=game_ids, sport=sport)
+    legs = [leg for fact in facts for leg in fact.get("_official") or ()]
     written = _upsert(conn, facts) if apply else 0
+    official = 0
+    if apply and sport == SPORT:
+        official = write_official_legs(
+            conn, [fact["canonical_key"] for fact in facts], legs, props=False)
+    if apply:
+        # The next season, and the prop builder after a game refresh,
+        # read odds on this same connection. An uncommitted DELETE/INSERT
+        # on byom_official_legs holds RowExclusiveLock across that read.
+        conn.commit()
     return {
         "season": season, "sport": sport,
         "facts": len(facts), "written": written,
+        "official_legs": len(legs), "official_written": official,
         **price_fallback_counts(facts),
     }
 

@@ -44,6 +44,7 @@ from tracking.clv_math import (
     CLV_METHOD_STANDARD,
     DEFAULT_SHARP_CLOSE_BOOKS,
     close_book_candidates,
+    clv_outcome,
     market_edge_clv,
     other_side_prices,
     same_book_clv,
@@ -1407,10 +1408,40 @@ _SIDE_PRICE_COL = {
 }
 
 
+_NCAAB_HALF_MARKETS = ("totals_h1", "spreads_h1")
+
+
+def _ncaab_first_half_market(game_id: str, market: str) -> bool:
+    """NCAAB first-half total or spread. The live feed files every pull 'open'."""
+    return str(game_id).split("_", 1)[0] == "NCAAB" and market in _NCAAB_HALF_MARKETS
+
+
+def _close_rows_only(game_id: str, market: str) -> bool:
+    """NBA team totals and NBA first-half markets file a separate 'close' row.
+
+    NCAAB totals_h1 / spreads_h1 do not: data/ingestors/ncaab_first_half_odds.py
+    writes every pull as 'open'.
+    """
+    if market.startswith("team_totals"):
+        return True
+    return market in _NCAAB_HALF_MARKETS and not _ncaab_first_half_market(game_id, market)
+
+
+def _real_close(closing_price, closing_line, line_clv, market_pct, pin_price=None) -> bool:
+    """A pick is measured only when a close was read.
+
+    standard_v2 with every closing field empty is not a measurement. Zero is a
+    real line move (the number did not move); None is the absence of a close.
+    """
+    return any(v is not None for v in (
+        closing_price, closing_line, line_clv, market_pct, pin_price))
+
+
 def _closing_odds(conn: DBConnection, game_id: str, market: str,
                   commence_time: str | None,
                   bookmaker: str = "draftkings",
-                  match_line=None) -> dict | None:
+                  match_line=None,
+                  created_at=None) -> dict | None:
     """Last pre-game snapshot at `bookmaker` at or before first pitch.
 
     No unbounded fallback. The evening refresh writes post-first-pitch rows as
@@ -1433,16 +1464,29 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
     nba_team_total_odds.py): the decision fetch, filed 'open', and the close,
     filed 'close'. The decision fetch is the price taken, so read as the close
     it graded a pick whose close was never stored at exactly 0.0, for good.
-    With no 'close' row the pick is unmeasured. A first-half total is the same
-    shape (data/ingestors/nba_first_half_odds.py).
+    With no 'close' row the pick is unmeasured. An NBA first-half total is the
+    same shape (data/ingestors/nba_first_half_odds.py), and so is an NBA
+    first-half spread.
+
+    AN NCAAB FIRST-HALF CLOSE IS THE BET BOOK'S NEWEST PRE-TIP ROW on the same
+    line, and only a row pulled strictly after the pick was created
+    (data/ingestors/ncaab_first_half_odds.py files every pull 'open'; there is
+    no 'close' row). The decision pull is the price taken, so a row at or
+    before created_at is not a close. No such row leaves the pick unmeasured.
+    `created_at` is required for that market; without it the read returns None
+    rather than grading the pick against its own decision pull.
     """
     if not commence_time:
         return None
-    # A first-half spread is the same shape (data/ingestors/ncaab_first_half_odds.py):
-    # its last pre-tip row is the decision fetch, and no close is taken, so
-    # it is unmeasured rather than graded 0.0 against itself.
-    snapshot_filter = ("snapshot_type = 'close'"
-                       if market.startswith("team_totals") or market in ("totals_h1", "spreads_h1")
+    ncaab_half = _ncaab_first_half_market(game_id, market)
+    after_filter = ""
+    created_bound = None
+    if ncaab_half:
+        created_bound = _as_utc(created_at)
+        if created_bound is None:
+            return None
+        after_filter = "AND snapshot_at::timestamptz > %s::timestamptz"
+    snapshot_filter = ("snapshot_type = 'close'" if _close_rows_only(game_id, market)
                        else "snapshot_type != 'in_play'")
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
@@ -1460,6 +1504,8 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
         # the price comparison uses; this one is the "did the number move"
         # read, still restricted to ±1.5 so an alternate is not the close.
         line_filter = "AND ABS(spread_home) = 1.5"
+    if created_bound is not None:
+        params.append(created_bound.isoformat())
     row = conn.execute(f"""
         SELECT home_price, away_price, draw_price,
                spread_home, total_line, over_price, under_price
@@ -1470,6 +1516,7 @@ def _closing_odds(conn: DBConnection, game_id: str, market: str,
           AND {snapshot_filter}
           AND snapshot_at::timestamptz <= %s::timestamptz
           {line_filter}
+          {after_filter}
         ORDER BY snapshot_at::timestamptz DESC
         LIMIT 1
     """, tuple(params)).fetchone()
@@ -1495,13 +1542,17 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
 
 def _first_game_close(conn: DBConnection, game_id: str, market: str,
                       commence_time: str | None, pick_book: str,
-                      match_line=None) -> tuple[dict | None, str | None]:
-    """That book's pre-game close, or (None, None). No other book is tried."""
+                      match_line=None, created_at=None) -> tuple[dict | None, str | None]:
+    """That book's pre-game close, or (None, None). No other book is tried.
+
+    `created_at` is the pick's creation time. NCAAB first-half markets use it
+    to refuse the decision pull; other markets ignore it.
+    """
     book = (pick_book or "").strip().lower()
     if not book:
         return None, None
     snap = _closing_odds(conn, game_id, market, commence_time, book,
-                         match_line=match_line)
+                         match_line=match_line, created_at=created_at)
     return (snap, book) if snap else (None, None)
 
 
@@ -1807,6 +1858,31 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
           AND g.commence_time IS NOT NULL
           AND p.created_at::timestamptz <= g.commence_time::timestamptz
           AND p.clv_method IS DISTINCT FROM %s
+          -- An NCAAB first-half bet with no post-creation pre-tip row cannot
+          -- be measured, and it is not stamped standard_v2 with an empty close.
+          -- Leaving it in this scan pins the date at the head of the queue.
+          AND NOT (
+            p.model_id IN ('ncaab_first_half_total', 'ncaab_first_half_spread')
+            AND g.commence_time::timestamptz <= now()
+            AND NOT EXISTS (
+              SELECT 1 FROM odds o
+              WHERE o.game_id = p.game_id
+                AND o.market = CASE p.model_id
+                      WHEN 'ncaab_first_half_total' THEN 'totals_h1'
+                      ELSE 'spreads_h1' END
+                AND o.bookmaker = lower(btrim(CASE
+                      WHEN p.decision_odds IS NOT NULL
+                       AND btrim(COALESCE(p.decision_book, '')) <> ''
+                      THEN p.decision_book ELSE 'draftkings' END))
+                AND o.snapshot_type <> 'in_play'
+                AND o.snapshot_at::timestamptz > p.created_at::timestamptz
+                AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+                AND (
+                  (p.model_id = 'ncaab_first_half_total' AND o.total_line = p.scored_line)
+                  OR (p.model_id = 'ncaab_first_half_spread' AND o.spread_home = p.scored_line)
+                )
+            )
+          )
         ORDER BY p.game_date
         LIMIT %s
     """
@@ -1986,9 +2062,11 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
       - clv_method      : standard_v2
       - clv_close_book  : the bet book, when its close was found
       - line_clv_pts    : points the line moved toward our side
-      - clv_beat_close  : clv_pct > 0. NULL when the primary is NULL
-                          (a moved line, or no same-book close). Line CLV
-                          stays in line_clv_pts and does not enter the beat.
+      - clv_beat_close  : True when clv_pct is a beat. False when it is a
+                          loss or a push (the close equals the price taken).
+                          NULL when the primary is NULL (a moved line, or no
+                          same-book close). Line CLV stays in line_clv_pts
+                          and does not enter the beat.
 
     THE CLOSE IS RECORDED EVEN WHEN THE LINE MOVED (2026-08-30, matt). It did
     not used to be: a moved line failed the same-line guard and the pick was
@@ -2117,7 +2195,14 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         revisiting = bool(_row_clv_method)
         sharp = _sharp_close_book()
 
-        def _stamp_empty(pick_id=pick_id, book=bookmaker, revisiting=revisiting):
+        def _stamp_empty(pick_id=pick_id, book=bookmaker, revisiting=revisiting,
+                         market=None):
+            # A null close is not a measurement. NCAAB first half stays
+            # unmeasured when no pull landed after the pick was created,
+            # including a row that already carried an older method: stamping
+            # standard_v2 here would record every closing field empty.
+            if _ncaab_first_half_market(game_id, market or ""):
+                return 0
             if not revisiting:
                 return 0
             conn.execute("""
@@ -2176,14 +2261,16 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             # opposite sign is a different bet; its price is not our close.
             closing, close_book = _first_game_close(
                 conn, game_id, market, close_bound, pick_book=bookmaker,
-                match_line=scored_line if has_line else None)
+                match_line=scored_line if has_line else None,
+                created_at=created)
             moved_snap, _moved_book = _first_game_close(
                 conn, game_id, market, close_bound, pick_book=bookmaker,
-                match_line=None) if has_line else (closing, close_book)
+                match_line=None, created_at=created) if has_line else (closing, close_book)
             pin_snap, _pin_book = (closing, sharp) if bookmaker == sharp else (
                 _first_game_close(
                     conn, game_id, market, close_bound, pick_book=sharp,
-                    match_line=scored_line if has_line else None))
+                    match_line=scored_line if has_line else None,
+                    created_at=created))
             # The number that line-CLV measures is the book's latest main
             # line, which may have left the number we bet.
             if has_line and moved_snap:
@@ -2195,7 +2282,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             closing_for_line = closing
 
         if not closing and not pin_snap and not moved_snap:
-            updated += _stamp_empty()
+            updated += _stamp_empty(market=market)
             continue
 
         price_col = _SIDE_PRICE_COL.get(pick_side)
@@ -2247,12 +2334,16 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
         # Headline beat is the same-book price only. A moved number keeps
         # line_clv_pts and does not count as a beat.
-        if clv_pct is None and line_clv is None and market_pct is None and not revisiting:
+        # Only a real close marks the pick measured. A null close is not
+        # standard_v2, on any market. Clearing an older method, or an NBA bet
+        # whose schedule row is not coming, is _stamp_empty and is not this write.
+        measured_price = closing_price if not line_moved else _px(closing_for_line)
+        if not _real_close(measured_price, closing_line, line_clv, market_pct, pin_price):
+            updated += _stamp_empty(market=market)
             continue
-        if clv_pct is None and line_clv is None and market_pct is None:
-            updated += _stamp_empty()
-            continue
-        beat_close = (clv_pct > 0) if clv_pct is not None else None
+        # A 0% close is a push, so the boolean is false. It is not a beat.
+        outcome = clv_outcome(clv_pct)
+        beat_close = None if outcome is None else outcome == "beat"
 
         conn.execute("""
             UPDATE picks

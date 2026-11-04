@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ErrorBanner } from '@/components/ErrorState';
 import { Skeleton } from '@/components/Skeleton';
@@ -19,6 +19,9 @@ export function ByomBetCount({
   showsUnits,
   emptyLabel = 'No games match',
   blocked = null,
+  closeRecord = null,
+  onShowBets,
+  closingHeadline = false,
 }: {
   record: ByomRecord | null;
   loading: boolean;
@@ -28,6 +31,12 @@ export function ByomBetCount({
   emptyLabel?: string;
   /** A required choice is still missing. This is not an empty result. */
   blocked?: string | null;
+  /** The same bets at the closing line, when the bar shows the official pick. */
+  closeRecord?: ByomRecord | null;
+  /** Opens the list of the bets this count is made of. */
+  onShowBets?: () => void;
+  /** NFL fallback: this count is the close because official rows are empty. */
+  closingHeadline?: boolean;
 }) {
   if (blocked) {
     return (
@@ -68,14 +77,33 @@ export function ByomBetCount({
     unitsText,
     recordText,
   ].filter(Boolean).join(', ');
+  const closeUnits = closeRecord != null && showsUnits && closeRecord.units != null
+    ? formatSignedUnits(closeRecord.units)
+    : null;
+  const closingLead = closeRecord == null && closingHeadline;
+  const closeText = closeRecord == null
+    ? null
+    : closeRecord.bets === 0
+      ? 'No bets at the closing line'
+      : [closeUnits, formatByomRecord(closeRecord)].filter(Boolean).join(' · ');
   return (
-    <View style={styles.bar} accessibilityRole="summary" accessibilityLabel={label}>
+    <View style={styles.wrap}>
+    <View style={styles.bar} accessible accessibilityRole="summary"
+      accessibilityLabel={
+        closeRecord != null ? `At the official line: ${label}`
+          : closingLead ? `At the closing line: ${label}`
+            : label
+      }>
       <View>
         <Text style={styles.kicker}>Bets that match</Text>
         <Text style={styles.count}>{record.bets}</Text>
       </View>
       <View style={styles.right}>
-        <Text style={styles.kickerRight}>units · record</Text>
+        <Text style={styles.kickerRight}>{
+          closeRecord != null ? 'official line · units · record'
+            : closingLead ? 'closing line · units · record'
+              : 'units · record'
+        }</Text>
         <Text style={styles.recordLine}>
           {unitsText != null ? (
             <Text style={[styles.units, { color: unitsColor }]}>{unitsText} </Text>
@@ -84,16 +112,56 @@ export function ByomBetCount({
         </Text>
       </View>
     </View>
+    {closeText != null ? (
+      <Text style={styles.close} accessibilityLabel={`At the closing line: ${closeText}`}>
+        At the closing line: {closeText}
+      </Text>
+    ) : null}
+    {onShowBets ? (
+      <Pressable
+        onPress={onShowBets}
+        accessibilityRole="button"
+        accessibilityLabel={`See the ${record.bets} ${noun}`}
+        style={({ pressed }) => [styles.showBets, pressed && styles.pressed]}
+      >
+        <Text style={styles.showBetsText}>See the {record.bets} {noun}</Text>
+        <Text style={styles.chevron} accessibilityElementsHidden importantForAccessibility="no">›</Text>
+      </Pressable>
+    ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrap: {
+    marginBottom: spacing.md,
+  },
+  close: {
+    marginTop: spacing.sm,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  showBets: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pressed: { opacity: 0.6 },
+  showBetsText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  chevron: {
+    fontSize: font.size.title3,
+    color: colors.textTertiary,
+  },
   bar: {
     backgroundColor: colors.tint,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    marginBottom: spacing.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

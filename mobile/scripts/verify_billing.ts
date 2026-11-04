@@ -220,6 +220,10 @@ check('only free locks the app', contentLocked('free') && !contentLocked('trial'
 const paywallSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'PaywallScreen.tsx'), 'utf8');
 const settingsSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SettingsScreen.tsx'), 'utf8');
 check('paywall has no Whop checkout button', !paywallSrc.includes('WHOP_CHECKOUT_URL') && !paywallSrc.includes('Get access on Discord') && !paywallSrc.includes('whop.com'));
+check(
+  'paywall counts 8 sports',
+  paywallSrc.includes('Every BET signal, all 8 sports') && !paywallSrc.includes('all 7 sports'),
+);
 check('settings has no Whop checkout button', !settingsSrc.includes('WHOP_CHECKOUT_URL') && !settingsSrc.includes('Get access on Discord') && !settingsSrc.includes('whop.com'));
 const discordConfigSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'discordConfig.ts'), 'utf8');
 check('client config has no Whop checkout URL', !discordConfigSrc.includes('WHOP_CHECKOUT_URL') && !discordConfigSrc.includes('whop.com') && !discordConfigSrc.includes('EXPO_PUBLIC_WHOP'));

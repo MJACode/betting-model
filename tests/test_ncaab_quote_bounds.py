@@ -167,7 +167,10 @@ def test_a_minus_335_spread_is_dropped_before_the_consensus(monkeypatch, logs):
     card, got = _wire(monkeypatch, dict(GAMES), rows=rows)
     out = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))
     (d,) = got["decisions"]
-    assert out["bets"] == 0 and got["rows"] == [] and d.status == "below_cut"
+    # No bet; the game priced on the clean books is a NONE row (the All board),
+    # never at the dropped quote's book.
+    assert out["bets"] == 0 and d.status == "below_cut"
+    assert [(r["signal_type"], r["decision_book"]) for r in got["rows"]] == [("NONE", d.best["bookmaker"])]
     assert d.best["bookmaker"] != "hardrockbet" and d.best["cons"] == -10.0
     assert out["diag"]["quotes_dropped"] == 1
     assert {q["book"]: q["flag"] for q in d.quotes}["hardrockbet"] == "out_of_range"
@@ -224,7 +227,9 @@ def test_a_250000_moneyline_is_dropped_and_never_bet(monkeypatch, logs, ml_table
     card, got = _wire(monkeypatch, ml_table, dict(GAMES), ml=ml, sp=sp)
     out = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))
     (d,) = got["decisions"]
-    assert out["bets"] == 0 and got["rows"] == []
+    # No bet; any row is NONE and never at the dropped quote's book.
+    assert out["bets"] == 0
+    assert all(r["signal_type"] == "NONE" and r["decision_book"] != "hardrockbet" for r in got["rows"])
     assert not (d.best and d.best.get("bookmaker") == "hardrockbet")
     assert out["diag"]["quotes_dropped"] == 1
     assert any(q.get("flags") == ["out_of_range"] and q["book"] == "hardrockbet" for q in d.quotes)
@@ -342,7 +347,9 @@ def test_a_first_half_line_beyond_35_is_dropped_and_never_bet(monkeypatch, logs)
     card, got = _fh_wire(monkeypatch, q, TIP - timedelta(minutes=10))
     out = card.run_card(do_publish=True, now=TIP - timedelta(minutes=9, seconds=30))
     (rec,) = got["decided"]
-    assert out["bets"] == 0 and got["rows"] == [] and rec["book"] != "betmgm"
+    # No bet; any row is NONE at the decision's book, never the dropped one.
+    assert out["bets"] == 0 and rec["book"] != "betmgm"
+    assert all(r["signal_type"] == "NONE" and r["decision_book"] == rec["book"] for r in got["rows"])
     assert out["diag"]["quotes_dropped"] == 1
     assert "betmgm -45.5 (line -45.5 outside -35 to 35)" in rec["detail"]
     assert any(f"{GID} betmgm spreads_h1 line -45.5" in x for x in logs)
@@ -423,7 +430,9 @@ def test_a_first_half_total_of_7_5_is_dropped_and_never_bet(monkeypatch, logs):
     card, got = _fh_wire(monkeypatch, q, FHT_AT, total=True)
     out = card.run_card(do_publish=True, now=FHT_NOW)
     (rec,) = got["decided"]
-    assert out["bets"] == 0 and got["rows"] == [] and rec["book"] != "betmgm"
+    # No bet; any row is NONE at the decision's book, never the dropped one.
+    assert out["bets"] == 0 and rec["book"] != "betmgm"
+    assert all(r["signal_type"] == "NONE" and r["decision_book"] == rec["book"] for r in got["rows"])
     assert out["diag"]["quotes_dropped"] == 1
     assert "betmgm 7.5 (line 7.5 outside 40 to 120)" in rec["detail"]
     assert any(f"{GID} betmgm totals_h1 line 7.5" in x for x in logs)

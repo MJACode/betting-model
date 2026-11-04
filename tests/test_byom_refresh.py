@@ -1,7 +1,7 @@
 """Incremental refresh: due games only, freshness reads no odds.
 
-The declared job ships enabled false and apply false. Nothing here
-writes production.
+The declared job is on (Matt, 2026-11-04), and the scheduler queues the
+same job every day. Nothing here writes production.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 AS_OF = date(2026, 10, 16)
 
-def test_the_job_ships_disabled_and_does_not_write_by_default():
+def test_the_job_is_on_daily_and_does_not_write_by_default():
     from tracking.job_queue import JOBS, _validate_byom_refresh
 
     assert "byom_refresh" in JOBS
@@ -29,8 +29,12 @@ def test_the_job_ships_disabled_and_does_not_write_by_default():
     found = [entry for entry in declared if entry["job_type"] == "byom_refresh"]
     assert len(found) == 1
     assert found[0]["key"] == "byom-nfl-refresh"
-    assert found[0]["enabled"] is False
-    assert found[0]["args"]["apply"] is False
+    assert found[0]["enabled"] is True
+    assert found[0]["args"]["apply"] is True
+    sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
+    assert 'id="byom_nfl_refresh"' in sched
+    assert 'dedupe_key=f"byom-nfl-refresh-{today}"' in sched
+    assert '"byom_nfl_refresh"}' in sched  # owned by the pipeline role
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
     for banned in ("min_odds", "spread_size", "price_band", "insert into picks",
@@ -111,6 +115,8 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
             ROOT / "data/migrations" / "byom_prop_facts_dk_prices_2026_10_28.sql"
         ).read_text(encoding="utf-8")
         cur.execute(prop_prices)
+        cur.execute((ROOT / "data/migrations" / "byom_official_legs_2026_11_04.sql").read_text(
+            encoding="utf-8"))
         _load(cur)
         raw.autocommit = False
 

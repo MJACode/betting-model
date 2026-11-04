@@ -1,6 +1,7 @@
 /**
- * The signed-in user's NFL models, each graded by byom_backtest and
- * ranked by units. An empty filter is not graded. A slower response
+ * The signed-in user's models, each graded by byom_record and ranked by
+ * units at the headline timing: the official pick on NFL, the close on NBA.
+ * The same number the model's own card leads with. An empty filter is not graded. A slower response
  * does not replace a newer one. Signed-out does not call the list RPC.
  */
 
@@ -10,7 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchByomModels,
-  fetchByomScopedBacktest,
+  fetchByomScopedRecord,
   pool,
   type ByomFilters,
   type ByomModel,
@@ -34,6 +35,8 @@ export interface ByomLeaderboardRow {
   ungraded: boolean;
   /** This model's backtest failed. The other rows stay. */
   failed: boolean;
+  /** official or close, whichever number this row shows. */
+  timing: 'official' | 'close';
 }
 
 export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
@@ -67,19 +70,30 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
       if (seq.current !== id) return;
       const graded = await pool(models, 3, async (model) => {
         if (isWholeSeason(model.filters)) {
-          return { model, record: null as ByomRecord | null, ungraded: true, failed: false };
+          return {
+            model, record: null as ByomRecord | null, ungraded: true, failed: false, timing: 'close' as const,
+          };
         }
         try {
-          const backtest = await fetchByomScopedBacktest(
+          const timed = await fetchByomScopedRecord(
             scope,
             model.filters,
             new Date(),
             model.sport === 'NBA' ? 'NBA' : 'NFL',
           );
-          return { model, record: recordFromRows(backtest), ungraded: false, failed: false };
+          const rows = timed.headline === 'official' ? timed.official : timed.close;
+          return {
+            model,
+            record: recordFromRows(rows),
+            ungraded: false,
+            failed: false,
+            timing: timed.headline,
+          };
         } catch (e: unknown) {
           if (isAbortError(e)) throw e;
-          return { model, record: null as ByomRecord | null, ungraded: false, failed: true };
+          return {
+            model, record: null as ByomRecord | null, ungraded: false, failed: true, timing: 'close' as const,
+          };
         }
       });
       if (seq.current !== id) return;
@@ -91,6 +105,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         showsUnits: item.record != null && showsUnits(item.model.filters),
         ungraded: item.ungraded,
         failed: item.failed,
+        timing: item.timing,
         model: item.model,
         record: item.record,
       })));
@@ -101,6 +116,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
         rank: item.rank,
         ungraded: item.ungraded,
         failed: item.failed,
+        timing: item.timing,
       })));
     } catch (e: unknown) {
       if (seq.current !== id) return;

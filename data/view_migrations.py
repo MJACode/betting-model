@@ -453,6 +453,27 @@ ACTIVE_MIGRATIONS: list[str] = [
     # No spread, price, or line filter. After master's list. The
     # posted-stake pair stays last and adjacent.
     "byom_backtest_rpc_2026_10_16.sql",
+    # 2026-11-04 (Matt): BYOM official pick (first match) beside the close,
+    # main-model staking (1u to win, risk capped at 3u), and the bet list.
+    # Creates byom_official_legs, byom_legs/record/bets, and replaces
+    # byom_backtest with its closing rows (same columns). Returns before any
+    # DDL once the table, grants, policy and five marked functions exist.
+    # Does not touch picks or the record views.
+    "byom_official_legs_2026_11_04.sql",
+    # 2026-11-04 (Matt): the official lock search includes line, price,
+    # team-spread and game-total bands. Replaces byom_legs. Adds
+    # team_spread, game_total and context_at_lock, and the snapshot to
+    # the primary key. Keeps byom_official_legs_v1 in the function so the
+    # file above still skips. This file's own skip matches
+    # to_regprocedure('public.byom_legs(integer, jsonb, text)') and a body
+    # that does not contain the damaged `p_filters %s` marker. A damaged
+    # body is replaced with jsonb_exists. Does not write picks.
+    "byom_official_lock_bands_2026_11_04.sql",
+    # 2026-11-04: covering index for the official lock read (#1159, CE).
+    # byom_legs filters sport/season/match_role, then DISTINCT ON the leg
+    # key ordered by locked_at. Returns on a catalog read once the index
+    # exists. No function change. Sits before the posted-stake pair.
+    "byom_official_legs_lock_read_idx_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
@@ -518,6 +539,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # touches no view, pick or existing function. Returns on a catalog read
     # once it exists. plpgsql, so it may sit before the posted-stake pair.
     "custom_model_backtest_posted_2026_11_03.sql",
+    # 2026-11-04 (mike): a 0% same-book close is a CLV push. The record
+    # view gains clv_push, clv_game_push and clv_prop_push. The average
+    # is unchanged. Does not rewrite picks, snapshots, units, or the
+    # win-loss record. Sits before the posted-stake pair, which stays
+    # last and only inserts units when they are absent.
+    "clv_push_beat_rate_2026_11_04.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

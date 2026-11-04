@@ -67,14 +67,18 @@ export function parseAccess(raw: unknown): AccessRow {
   if (!row || typeof row !== 'object') return NO_ACCESS;
   const r = row as Record<string, unknown>;
   const bool = (k: string): boolean => r[k] === true;
-  const source = r.source;
+  const rawSource = r.source;
+  const source =
+    rawSource === 'app' || rawSource === 'discord' || rawSource === 'both'
+      ? rawSource
+      : 'none';
+  // source 'discord' is a Whop match and the app stays locked. A stale
+  // my_access() that ORs that match into entitled must not unlock the app.
+  const whopOnly = source === 'discord';
   return {
-    entitled: bool('entitled'),
-    source:
-      source === 'app' || source === 'discord' || source === 'both'
-        ? source
-        : 'none',
-    app_access: bool('app_access'),
+    entitled: bool('entitled') && !whopOnly,
+    source,
+    app_access: bool('app_access') && !whopOnly,
     discord_access: bool('discord_access'),
     discord_linked: bool('discord_linked'),
     discord_username:

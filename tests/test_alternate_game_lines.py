@@ -291,6 +291,65 @@ def test_the_ladder_migration_is_hand_applied():
     assert "_fetch_alternate_game_lines" not in inspect.getsource(oi.fetch_pregame_rows)
 
 
+def test_the_pass_buys_nothing_when_alt_lines_are_disabled(monkeypatch):
+    """ALT_GAME_LINES_ENABLED is the kill switch for the daily buy and for
+    this pass. FETCH_ALT_GAME_LINES stays an extra gate on the pass only."""
+    import data.ingestors.odds_ingestor as oi
+
+    monkeypatch.setenv("ALT_GAME_LINES_ENABLED", "0")
+    monkeypatch.delenv("FETCH_ALT_GAME_LINES", raising=False)
+    seen = []
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    monkeypatch.setattr(
+        oi, "_get_event_odds",
+        lambda sport_key, event_id, markets, bookmakers=None: seen.append(event_id) or None)
+    _fetch_alternate_game_lines("baseball_mlb", "MLB", [_event([])], "open", "t")
+    assert seen == []
+
+
+def test_a_bad_cap_buys_nothing_on_the_pass(monkeypatch):
+    import data.ingestors.odds_ingestor as oi
+
+    monkeypatch.setenv("ALT_GAME_LINES_MAX_GAMES", "no")
+    monkeypatch.delenv("ALT_GAME_LINES_ENABLED", raising=False)
+    seen = []
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    monkeypatch.setattr(
+        oi, "_get_event_odds",
+        lambda sport_key, event_id, markets, bookmakers=None: seen.append(event_id) or None)
+    _fetch_alternate_game_lines("baseball_mlb", "MLB", [_event([])], "open", "t")
+    assert seen == []
+
+
+def test_the_pass_cap_stops_after_one_game_and_is_shared(monkeypatch):
+    """Same cap as the daily run: a non-negative integer, sport order then
+    game id, and the calls left belong to the whole pass, not one sport."""
+    import data.ingestors.odds_ingestor as oi
+    from data.ingestors.alt_game_lines import game_for_event
+
+    monkeypatch.setenv("ALT_GAME_LINES_MAX_GAMES", "1")
+    monkeypatch.delenv("ALT_GAME_LINES_ENABLED", raising=False)
+    monkeypatch.setattr(oi, "REQUEST_SLEEP", 0)
+    seen = []
+    monkeypatch.setattr(
+        oi, "_get_event_odds",
+        lambda sport_key, event_id, markets, bookmakers=None: seen.append(event_id) or None)
+    evs = [
+        dict(_event([]), id="later", home_team="Boston Red Sox", away_team="New York Yankees"),
+        dict(_event([]), id="earlier", home_team="Los Angeles Dodgers", away_team="New York Yankees"),
+    ]
+    first = min(evs, key=lambda ev: (game_for_event("MLB", ev) or ("",))[0])
+    budget: dict = {}
+    _fetch_alternate_game_lines(
+        "baseball_mlb", "MLB", evs, "open", "t", budget=budget)
+    assert seen == [first["id"]]
+    assert budget.get("remaining") == 0
+    seen.clear()
+    _fetch_alternate_game_lines(
+        "icehockey_nhl", "NHL", evs, "open", "t", budget=budget)
+    assert seen == []
+
+
 def test_pr_ci_runs_verify_line_legs():
     """The script exits 1 on a failure. The pytest job does not npm ci, so
     the mobile-tsc job is the gate, same as verify_paused_catalog."""

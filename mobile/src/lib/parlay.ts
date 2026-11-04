@@ -94,6 +94,15 @@ export interface ParlayLeg {
    *  pricedFromLadder. */
   pricedAsOf?: string | null;
   /**
+   * The game has started and this price exists only on the pre-game
+   * alternate ladder. The card stays so the user can remove it. It is not
+   * a live price: parlay odds, the book row, and a saved parlay leave it out.
+   */
+  pregameStale?: boolean;
+  /** Held after kickoff but the ladder read failed, so there is no price
+   *  to show. The card is the label and the note. */
+  pregameUnpriced?: boolean;
+  /**
    * The snapshot this leg was rebuilt from (savedLegToParlayLeg), when it came
    * out of a SavedParlay rather than off today's board.
    *
@@ -287,28 +296,42 @@ export interface BetslipSummary {
   payoutPerUnit: number | null;
   /** 2+ resolved legs — the price is a parlay rather than a single bet. */
   isParlay: boolean;
+  /** Legs kept on the slip as a pre-game alternate after kickoff. They are
+   *  in `count` and not in `resolved`, and they are not in the odds. */
+  held: number;
 }
 
 /** The betslip bar's example stake, in units. */
 export const BETSLIP_BAR_STAKE = 1;
 
+/** Legs whose price may go into the parlay, the book row, and a saved slip.
+ *  A pre-game alternate held after kickoff stays on the card list and is
+ *  left out of the price. */
+export function legsForPricing(legs: readonly ParlayLeg[]): ParlayLeg[] {
+  return legs.filter((l) => !l.pregameStale);
+}
+
 export function betslipSummary(legs: ParlayLeg[], selectionCount: number): BetslipSummary {
-  if (legs.length === 0) {
+  const priced = legsForPricing(legs);
+  const held = legs.length - priced.length;
+  if (priced.length === 0) {
     return {
       count: selectionCount,
       resolved: 0,
       americanOdds: null,
       payoutPerUnit: null,
       isParlay: false,
+      held,
     };
   }
-  const m = computeParlayMetrics(legs);
+  const m = computeParlayMetrics(priced);
   return {
     count: selectionCount,
-    resolved: legs.length,
+    resolved: priced.length,
     americanOdds: m.americanOdds,
     payoutPerUnit: BETSLIP_BAR_STAKE * m.decimalPayout,
-    isParlay: legs.length >= 2,
+    isParlay: priced.length >= 2,
+    held,
   };
 }
 
@@ -343,6 +366,11 @@ export function canPruneSlip(board: {
  */
 export function shouldShowBetslipBar(summary: BetslipSummary, resolving: boolean): boolean {
   if (summary.resolved > 0) return true;
+  // A pre-game alternate held after kickoff is still a selection. The bar
+  // stays so the user can open the slip and remove it. A slip whose
+  // selections are about to be pruned (nothing held, nothing priced) stays
+  // hidden.
+  if (summary.held > 0) return true;
   return resolving && summary.count > 0;
 }
 

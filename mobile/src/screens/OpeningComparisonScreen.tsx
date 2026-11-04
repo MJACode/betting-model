@@ -187,6 +187,13 @@ export function OpeningComparisonScreen() {
   );
 }
 
+function clvBeatLabel(beats: number, decisive: number, pushes: number): string {
+  if (decisive <= 0 && pushes <= 0) return '—';
+  if (decisive <= 0) return `0 measured, ${pushes} push`;
+  const pct = formatPct(beats / decisive, 0);
+  return pushes > 0 ? `${pct}, ${pushes} push` : pct;
+}
+
 function TrackCard({
   label,
   row,
@@ -201,6 +208,8 @@ function TrackCard({
   const winRate = decided > 0 ? Number(row?.wins ?? 0) / decided : 0;
   const clvSettled = Number(row?.clv_settled ?? 0);
   const clvBeat = Number(row?.clv_beat ?? 0);
+  const clvPush = Number(row?.clv_push ?? 0);
+  const clvDecisive = Math.max(0, clvSettled - clvPush);
   return (
     <View style={styles.trackCard}>
       <Text style={styles.trackLabel}>{label}</Text>
@@ -213,10 +222,10 @@ function TrackCard({
             {Number(row?.wins ?? 0)}–{Number(row?.losses ?? 0)}
             {Number(row?.pushes ?? 0) > 0 ? `–${row?.pushes}` : ''}
           </Text>
-          <View style={styles.trackStatsRow}>
+          <View style={styles.trackStats}>
             <Text style={styles.trackStat}>Win {formatPct(winRate, 0)}</Text>
             <Text style={styles.trackStat}>
-              Beat close {clvSettled > 0 ? formatPct(clvBeat / clvSettled, 0) : '—'}
+              Beat close {clvBeatLabel(clvBeat, clvDecisive, clvPush)}
             </Text>
           </View>
         </>
@@ -272,15 +281,15 @@ const styles = StyleSheet.create({
   },
   trackRoi: { fontSize: font.size.title1, fontWeight: font.weight.bold },
   trackRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginTop: 2 },
-  trackStatsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
+  trackStats: {
+    alignSelf: 'stretch',
     marginTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
     paddingTop: spacing.sm,
+    gap: 2,
   },
-  trackStat: { fontSize: font.size.caption, color: colors.textTertiary },
+  trackStat: { fontSize: font.size.caption, color: colors.textTertiary, textAlign: 'center' },
   noteCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,

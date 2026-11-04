@@ -66,7 +66,10 @@ this model used to have (mike removed it 2026-11-02). That row never looked at
 the price, so it is not a decision: a game with one that has not tipped is
 decided now, at its first post if that still stands, and the row is replaced.
 
-BET ROWS ONLY in picks, at DraftKings' own price on DraftKings' own number:
+A game priced below the cut is a NONE row (no stake) in the same
+transaction, so the app's All board shows every scored game (Matt,
+2026-11-04); nothing publishes or settles a NONE row.
+BET ROWS in picks, at DraftKings' own price on DraftKings' own number:
 the evidence priced DraftKings and nothing else, so the line is not shopped.
 dk_* and decision_* are that price; best_* is empty. The label is the
 platform's ("Duke vs Kansas Over 145.5"), checked against the side and line
@@ -397,38 +400,54 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"ON CONFLICT DO NOTHING RETURNING pick_id")
 
 
+def _is_bet(row: dict | None) -> bool:
+    return row is not None and row["signal_type"] == "BET"
+
+
+# Priced, and its better side did not clear the cut: written as a NONE row.
+SCORED_NO_BET = ("below_cut",)
+
+
 def pick_rows(decisions: list[nb.Decision], games: dict[str, dict],
               bankroll: float) -> tuple[list[dict], dict[str, str]]:
-    """Bet decisions -> picks rows, and {game_id: why} for a bet refused here.
-    Pure given its inputs."""
+    """Decisions -> picks rows, and {game_id: why} for a bet refused here.
+    Pure given its inputs.
+
+    A bet is a BET row. A game priced below the cut (SCORED_NO_BET), or a bet
+    the price or EV floor refused, is a NONE row at the same book, side and
+    line with no stake (Matt, 2026-11-04: the All board shows every scored
+    pick, not only the bets). Nothing publishes or settles a NONE row."""
     from models.honest_ev import gate
     from models.scorer import _build_pick_label, _pause_note, quarter_kelly
     pause = _pause_note(MODEL_ID)
     floor = config.min_odds_for(MODEL_ID)
     rows, refused = [], {}
     for d in decisions:
-        if d.status != "bets":
+        is_bet = d.status == "bets"
+        if d.priced is None or d.quote is None or d.status not in ("bets",) + SCORED_NO_BET:
             continue
         pz, q = d.priced, d.quote
         g = games.get(d.game_id, {})
         home, away = g.get("home", ""), g.get("away", "")
-        if floor is not None and pz.price < floor:
+        if is_bet and floor is not None and pz.price < floor:
             refused[d.game_id] = f"below_price_floor:{pz.price:+.0f}"
-            continue
-        ev = gate(MODEL_ID, pz.prob, pz.price)
-        if not ev.clears:
-            logger.info(f"{MODEL_ID}: {ev.reason} - dropped {d.game_id} {pz.side}")
-            refused[d.game_id] = ev.reason or "below_ev_floor"
-            continue
+            is_bet = False
+        if is_bet:
+            ev = gate(MODEL_ID, pz.prob, pz.price)
+            if not ev.clears:
+                logger.info(f"{MODEL_ID}: {ev.reason} - dropped {d.game_id} {pz.side}")
+                refused[d.game_id] = ev.reason or "below_ev_floor"
+                is_bet = False
         label = _build_pick_label(pz.side, home, away, nb.MARKET, float(q.line))
         problems = pick_problems(label, pz.side, float(q.line), MODEL_ID, home, away)
         if problems:
             logger.error(f"{MODEL_ID}: refusing {d.game_id} {label!r}: {'; '.join(problems)}")
-            refused[d.game_id] = "label_mismatch"
+            if d.game_id not in refused and is_bet:
+                refused[d.game_id] = "label_mismatch"
             continue
         imp = implied(pz.price)
         edge = round(pz.prob - imp, 4)
-        kelly_frac, rec_bet = quarter_kelly(pz.prob, imp, bankroll)
+        kelly_frac, rec_bet = quarter_kelly(pz.prob, imp, bankroll) if is_bet else (0.0, 0.0)
         link = q.link_over if pz.side == "over" else q.link_under
         rows.append({
             "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
@@ -443,7 +462,7 @@ def pick_rows(decisions: list[nb.Decision], games: dict[str, dict],
             "dk_bet_link": link, "line_book": None,
             "scored_line": float(q.line),
             "kelly_fraction": kelly_frac, "recommended_bet": rec_bet,
-            "bankroll_at_pick": bankroll, "signal_type": "BET",
+            "bankroll_at_pick": bankroll, "signal_type": "BET" if is_bet else "NONE",
             # MED on every bet, as the other rule cards write: the evidence
             # gives no tier.
             "confidence_tier": "MED",
@@ -458,7 +477,8 @@ def pick_rows(decisions: list[nb.Decision], games: dict[str, dict],
 
 def publish(conn, rows: list[dict], decisions: list[nb.Decision], check_hour: datetime,
             refused: dict[str, str]) -> tuple[int, int]:
-    """Write each decided game once: its decision row and its bet in ONE
+    """Write each decided game once: its decision row and its pick (BET or
+    NONE) in ONE
     transaction, under the model's lock, the ledger and the picks re-read
     inside it. check_hour is the run's instant (the ledger's column name is
     from the hourly rule); decided_at minus quote_at is the lag from the first
@@ -487,12 +507,12 @@ def publish(conn, rows: list[dict], decisions: list[nb.Decision], check_hour: da
             "model_total": None if d.model_total is None else round(d.model_total, 3),
             "edge": None if pz is None else round(pz.edge, 4),
             "side": None if pz is None else pz.side,
-            "n_bets": 1 if row is not None else 0, "detail": detail}).fetchone()
+            "n_bets": 1 if _is_bet(row) else 0, "detail": detail}).fetchone()
         if not got:
             continue
         n_decided += 1
         if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
-            n_bets += 1
+            n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided
 

@@ -279,7 +279,7 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr("byom.load.build_seasons", build_seasons)
-    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
 
     fn, validate = JOBS["byom_game_facts"]
     stored = validate({})
@@ -341,7 +341,8 @@ def test_the_job_defaults_to_not_writing_and_nba_stays_off():
         _validate_byom_game_facts({"sport": "MLB"})
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
-    game = [entry for entry in declared if entry["job_type"] == "byom_game_facts"]
+    game = [entry for entry in declared if entry["job_type"] == "byom_game_facts"
+            and not entry["key"].startswith("byom-nfl-game-facts-official")]
     assert len(game) == 1
     assert game[0]["key"] == "byom-nba-game-facts"
     assert game[0]["enabled"] is False
@@ -446,6 +447,8 @@ def test_build_on_scratch_postgres_grades_the_stored_lines():
             encoding="utf-8")
         cur.execute(price)
         cur.execute(price)
+        cur.execute((ROOT / "data/migrations" / "byom_official_legs_2026_11_04.sql").read_text(
+            encoding="utf-8"))
         _load_fixture(cur)
         raw.autocommit = False
         from byom.load import build_season

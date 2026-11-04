@@ -856,9 +856,11 @@ def step_alt_game_lines(run_date: str) -> bool:
     opening odds so today's games exist.
 
     ALT_GAME_LINES_ENABLED=0 skips the buy (default 1). ALT_GAME_LINES_MAX_GAMES,
-    when set to a whole number, caps event-odds calls for this process. One
-    game's failure is logged and the rest stand; the step fails when every
-    game call failed, or when the cap is not a whole number."""
+    when set to a whole number, caps event-odds calls for this process. The
+    every-pass buy uses the same two flags (data.ingestors.alt_game_lines
+    .buy_allowance) plus its own FETCH_ALT_GAME_LINES gate. One game's
+    failure is logged and the rest stand; the step fails when every game
+    call failed, or when the cap is not a whole number."""
     try:
         from data.ingestors.alt_game_lines import run as alt_run
         from data.ingestors.alt_game_lines import step_succeeded

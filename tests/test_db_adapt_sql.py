@@ -184,3 +184,50 @@ def test_no_sql_statement_in_the_repo_mixes_placeholder_styles():
             if out and "%s" in out and _named(out):
                 offenders.append(f"{f.relative_to(root)}: {_named(out)[:3]}")
     assert not offenders, "mixed placeholder formats:\n  " + "\n  ".join(offenders)
+
+
+# ── dollar-quoted bodies (2026-11-04) ───────────────────────────────────────
+
+def test_a_question_mark_inside_a_dollar_quoted_body_is_not_a_placeholder():
+    """The worker applies ACTIVE_MIGRATIONS through this adapter. The jsonb
+    key operator in a function body became `%s` and every BYOM preview
+    returned 400 (type "s" does not exist)."""
+    from data.db import _adapt_sql
+    sql = ("DO $mig$ BEGIN EXECUTE $fn$ CREATE FUNCTION f(p jsonb) RETURNS bool "
+           "LANGUAGE plpgsql AS $body$ BEGIN RETURN p ? 'primetime'; END $body$; "
+           "$fn$; END $mig$;")
+    assert _adapt_sql(sql) == sql
+    plain = "DO $$ BEGIN PERFORM '{}'::jsonb ? 'k'; END $$"
+    assert _adapt_sql(plain) == plain
+
+
+def test_placeholders_outside_a_dollar_quote_still_convert():
+    from data.db import _adapt_sql
+    assert _adapt_sql("SELECT $$a?b$$, ? , :name") == "SELECT $$a?b$$, %s , %(name)s"
+
+
+def test_every_active_migration_survives_the_adapter_unchanged():
+    """A migration must reach Postgres byte for byte. The one rewrite the
+    adapter still does outside quotes is a bare ? or :name, which no
+    migration file uses as a placeholder."""
+    from pathlib import Path
+
+    from data.db import _adapt_sql
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    root = Path(__file__).resolve().parents[1] / "data" / "migrations"
+    changed = []
+    for name in ACTIVE_MIGRATIONS:
+        text = (root / name).read_text(encoding="utf-8")
+        adapted = _adapt_sql(text)
+        if adapted is None:
+            continue
+        for token in ("%s", "%("):
+            if adapted.count(token) != text.count(token):
+                changed.append(f"{name} ({token})")
+    assert changed == []
+
+
+def test_a_dollar_inside_an_identifier_does_not_open_a_quote():
+    from data.db import _adapt_sql
+    assert _adapt_sql("SELECT a$b$c FROM t WHERE x = ? AND y$b$ = 1") == \
+        "SELECT a$b$c FROM t WHERE x = %s AND y$b$ = 1"
