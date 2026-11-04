@@ -314,3 +314,81 @@ def test_top_player_minutes_are_earlier_games_this_season_else_last_seasons_aver
     assert p[(5, 7)] == 40.0          # a game he did not play does not count
     assert p[(5, 8)] == 0.0           # nothing known
     assert p[(1, 7)] == 0.0
+
+
+# ── the fixes after the independent review (doc 3.2) ─────────────────────────
+
+def _tl_tied():
+    """Four plays, three logged in the same second; rows given in REVERSE play order, as an
+    unstable or wallclock-only sort may leave them."""
+    w0, w1 = T0, T0 + pd.Timedelta(seconds=40)
+    rows = [("G1", w1, 432, 104, 99), ("G1", w1, 431, 103, 99), ("G1", w1, 430, 102, 99),
+            ("G1", w0, 429, 100, 99)]
+    return pd.DataFrame(rows, columns=["game_id", "wc", "play_no", "h_pts", "a_pts"])
+
+
+def test_the_state_at_a_stamp_is_the_last_play_in_play_order_among_plays_in_one_second():
+    tl = _tl_tied()
+    q = pd.DataFrame({"game_id": ["G1", "G1"], "stamp": [T0 + pd.Timedelta(seconds=49), T0 + pd.Timedelta(seconds=10)]})
+    st = S.state_at_stable(q, tl, "stamp", ["h_pts", "a_pts"])
+    assert st["h_pts"].tolist() == [104, 100]
+
+
+def test_restate_reads_the_score_and_the_points_since_the_stamp_from_the_last_play():
+    tl = _tl_tied().assign(period=4, clock_s=300.0, game_s=2580.0, h_tf_period=0, a_tf_period=0)
+    q = pd.DataFrame({"game_id": ["G1"], "stamp": [T0 + pd.Timedelta(seconds=20)],
+                      "served_at": [T0 + pd.Timedelta(seconds=60)], "served_newest": [T0 + pd.Timedelta(seconds=60)],
+                      "h_pts": [0], "pts_since_stamp": [-9]})          # stored values are replaced
+    r = S.restate(q, tl)
+    assert r["h_pts"].iloc[0] == 100 and r["h_pts_served"].iloc[0] == 104
+    assert r["pts_since_stamp"].iloc[0] == 4
+
+
+def test_rules_3_and_4_are_counted_in_decisions_not_rows():
+    f0, f1 = T0, T0 + pd.Timedelta(minutes=10)
+    q_all = pd.DataFrame({"game_id": ["A", "A", "A", "B", "B"], "market": "h2h", "phase_ig2": "Q3",
+                          "fetch_at": [f0, f0, f1, f0, f0], "book": ["dk", "fd", "dk", "dk", "fd"]})
+    q_kept = q_all.drop(index=[0, 1, 3])     # A's first fetch loses both quotes; B keeps one
+    decide = lambda q: q.sort_values("fetch_at").assign(  # noqa: E731
+        first=lambda d: d.groupby(["game_id", "market", "phase_ig2"])["fetch_at"].transform("min")).query(
+        "fetch_at == first")
+    r = S.decisions_changed(q_kept, q_all, decide)
+    assert r == {"decisions_with_rules": 2, "decisions_without_rules": 2, "only_without": 0, "only_with": 0,
+                 "different_fetch": 1}
+
+
+def test_a_clock_jump_of_45_minutes_between_consecutive_plays_drops_the_game():
+    def game(gid, gaps_min):
+        t = [T0]
+        for g in gaps_min:
+            t.append(t[-1] + pd.Timedelta(minutes=g))
+        return pd.DataFrame({"game_id": gid, "play_no": range(1, len(t) + 1), "wallclock": [x.isoformat() for x in t]})
+    pbp = pd.concat([game("ok", [1, 20, 44.9, 1]), game("fwd", [1, 45.0, 1]), game("back", [1, -60, 1]),
+                     game("stall", [1, 138.3, -134.4])], ignore_index=True)
+    # rows shuffled out of play order: the rule reads play order, not file order or wallclock
+    j = S.jump_games(pbp.sample(frac=1.0, random_state=3))
+    assert set(j) == {"fwd", "back", "stall"}
+    assert j["back"] == -60.0 and j["stall"] == 138.3
+
+
+def test_time_since_the_last_logged_play_is_reported_as_median_p90_and_count_over_180():
+    picks = pd.DataFrame({"stamp": [T0 + pd.Timedelta(seconds=s) for s in (10, 20, 30, 181, 600)],
+                          "last_play_at": T0})
+    st = S.stall_stats(picks)
+    assert st["since_last_play_median_s"] == 30.0
+    assert st["since_last_play_over_180"] == 2
+    assert np.isclose(st["since_last_play_p90_s"], 432.4)
+
+
+def test_units_without_outliers_count_only_the_pooled_seasons():
+    cand = pd.DataFrame({"game_id": ["A", "A", "B", "B"], "season": [2021, 2021, 2022, 2022],
+                         "game_date": ["2021-01-01", "2021-01-01", "2022-01-01", "2022-01-01"],
+                         "market": "h2h", "side": "home", "line": np.nan,
+                         "book": ["draftkings", "fanduel", "draftkings", "fanduel"],
+                         "price": [300.0, 100.0, 105.0, 100.0], "p_win": 0.6, "p_push": 0.0,
+                         "side_pick": "home"})
+    cand = H.with_ev(cand)
+    games = pd.DataFrame({"game_id": ["A", "B"], "home_score": [100.0, 90.0], "away_score": [90.0, 100.0]})
+    fr = S.Frames(cand, cand, None, None, cand)
+    r = S.pooled_outliers(fr, {"market": "h2h", "side": "home", "cut": 0.0}, games, (2022,))
+    assert r["share_outlier"] == 0.0 and np.isclose(r["units_without_outliers"], -1 / 1.05)

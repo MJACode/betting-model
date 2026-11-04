@@ -69,7 +69,8 @@ HELD_QUOTES = D.OUT
 TRAIN_HELD = HELD_DIR / "ig2_train_states.parquet"    # 2020-21 .. 2024-25, IG-2's graded run
 TRAIN_2026 = HELD_DIR / "ig2_train_states_2026.parquet"
 PRIOR_HELD = HELD_DIR / "ig2_prior.parquet"
-LATE_TRAIN = SCRATCH / "late_train_states.parquet"
+LATE_TRAIN = SCRATCH / "late_train_states_v2.parquet"      # v2: rule 6 applied (doc 3.2)
+HELD_RESTATED = SCRATCH / "held_h2h_restated.parquet"     # the held quotes, this lab's state join
 PULL_FILES = {"games": "games_2027.parquet", "odds": "odds_2027.parquet",
               "pbp": "pbp_2027.parquet", "box": "pbp_box_2027.parquet"}
 
@@ -86,6 +87,8 @@ LEAD_MIN, LEAD_MAX = 4, 16
 LATE_TRAIN_SECS = (0, 360)
 MAX_SPREAD_GAP, MAX_ML_GAP = 6.0, 0.25
 EARLY_CLOCK_MIN = 15.0
+JUMP_MIN = 45.0
+STALL_S = 180.0
 N_PLACEBO = 200
 PLACEBO_SEEDS = tuple(range(1, N_PLACEBO + 1))
 DIFFER_SEEDS = tuple(range(1, 21))
@@ -252,9 +255,59 @@ def all_box(scratch: Path = SCRATCH) -> pd.DataFrame:
     return pd.concat([hb[cols], lb[cols]], ignore_index=True).drop_duplicates(["espn_game_id", "espn_id"])
 
 
+TL_NOT_STATE = ("game_id", "wc", "play_no", "type_text")
+
+
+def state_at_stable(q: pd.DataFrame, tl: pd.DataFrame, at: str, cols, suffix: str = "") -> pd.DataFrame:
+    """Record 7.1's STATE: for each quote, the timeline row of the LAST play, in play order, with
+    wallclock <= q[at] (same game). nba_ingame_data.state_at re-sorts by wallclock alone with an
+    unstable sort and drops play_no, so among plays logged in the same second it can take one
+    that is not the last (doc 3.2, 2026-11-04). This keeps play_no and sorts by (wallclock,
+    play_no), stable; merge_asof then takes the last of the tied rows."""
+    left = q[["game_id", at]].reset_index().rename(columns={at: "_t"}).dropna(subset=["_t"])
+    left["_t"] = left["_t"].astype("datetime64[ns, UTC]")
+    left = left.sort_values("_t", kind="stable")
+    right = tl[["game_id", "wc", "play_no", *cols]].dropna(subset=["wc"])
+    right = right.assign(wc=right["wc"].astype("datetime64[ns, UTC]")).sort_values(["wc", "play_no"], kind="stable")
+    m = pd.merge_asof(left, right, left_on="_t", right_on="wc", by="game_id", direction="backward",
+                      allow_exact_matches=True)
+    out = m.set_index("index").reindex(q.index)[list(cols)]
+    return out.add_suffix(suffix) if suffix else out
+
+
+def derived_state_cols(tl: pd.DataFrame) -> list[str]:
+    """Every column restate() writes, so a stored table can be re-joined from scratch."""
+    sc = [c for c in tl.columns if c not in TL_NOT_STATE]
+    extra = [f"{x}{suf}" for suf in ("_m60", "_m120", "_served", "_served_newest") for x in ("h_pts", "a_pts")]
+    return sc + ["secs_left", "last_play_at", *extra, "pts_since_stamp", "pts_since_stamp_newest"]
+
+
+def restate(q: pd.DataFrame, tl: pd.DataFrame) -> pd.DataFrame:
+    """The state block of nba_ingame_data.build, through state_at_stable: the game state at the
+    stamp, the time left, the last logged play, the score 60 and 120 s before the stamp and at
+    serving, and the points scored between stamp and serving. A stored table's own state
+    columns are dropped first."""
+    q = q.drop(columns=[c for c in derived_state_cols(tl) if c in q]).reset_index(drop=True)
+    state_cols = [c for c in tl.columns if c not in TL_NOT_STATE]
+    q = pd.concat([q, state_at_stable(q, tl, "stamp", state_cols)], axis=1)
+    reg = q["period"] <= 4
+    q["secs_left"] = np.where(reg, q["clock_s"] + 720 * (4 - q["period"]), q["clock_s"])
+    q["last_play_at"] = state_at_stable(q, tl.assign(lp=tl["wc"]), "stamp", ["lp"])["lp"]
+    for at, suf in (("stamp_m60", "_m60"), ("stamp_m120", "_m120"), ("served_at", "_served"),
+                    ("served_newest", "_served_newest")):
+        if at.startswith("stamp_m"):
+            q[at] = q["stamp"] - pd.Timedelta(seconds=int(at[7:]))
+        q = pd.concat([q, state_at_stable(q, tl, at, ["h_pts", "a_pts"], suf).fillna(0)], axis=1)
+    q = q.drop(columns=["stamp_m60", "stamp_m120"])
+    q["pts_since_stamp"] = (q["h_pts_served"] + q["a_pts_served"]) - (q["h_pts"] + q["a_pts"])
+    q["pts_since_stamp_newest"] = (q["h_pts_served_newest"] + q["a_pts_served_newest"]) - (q["h_pts"] + q["a_pts"])
+    return q
+
+
 def in_play_state(q: pd.DataFrame, plays: pd.DataFrame, top: pd.DataFrame,
                   games: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """nba_ingame_data.build after its quote load, unchanged, plus the listed-tip bound."""
+    """nba_ingame_data.build after its quote load, with this lab's own state join (restate),
+    plus the listed-tip bound."""
     tl = D.timeline(plays, top)
     bounds = D.phase_bounds(plays)
     first = bounds.groupby("game_id")["start"].min().rename("first_play_at")
@@ -265,26 +318,31 @@ def in_play_state(q: pd.DataFrame, plays: pd.DataFrame, top: pd.DataFrame,
     early = q["stamp"] <= q["tip"]
     notes["in_play_by_clock_not_after_listed_tip"] = int(early.sum())
     q = q[~early].reset_index(drop=True)
-    state_cols = [c for c in tl.columns if c not in ("game_id", "wc", "play_no", "type_text")]
-    q = pd.concat([q, D.state_at(q, tl, "stamp", state_cols)], axis=1)
-    reg = q["period"] <= 4
-    q["secs_left"] = np.where(reg, q["clock_s"] + 720 * (4 - q["period"]), q["clock_s"])
+    q = restate(q, tl)
     q["halftime"] = q["phase"] == "halftime"
-    q["last_play_at"] = D.state_at(q, tl.assign(lp=tl["wc"]), "stamp", ["lp"])["lp"]
-    for at, suf in (("stamp_m60", "_m60"), ("stamp_m120", "_m120"), ("served_at", "_served"),
-                    ("served_newest", "_served_newest")):
-        if at.startswith("stamp_m"):
-            q[at] = q["stamp"] - pd.Timedelta(seconds=int(at[7:]))
-        q = pd.concat([q, D.state_at(q, tl, at, ["h_pts", "a_pts"], suf).fillna(0)], axis=1)
-    q = q.drop(columns=["stamp_m60", "stamp_m120"])
-    q["pts_since_stamp"] = (q["h_pts_served"] + q["a_pts_served"]) - (q["h_pts"] + q["a_pts"])
-    q["pts_since_stamp_newest"] = (q["h_pts_served_newest"] + q["a_pts_served_newest"]) - (q["h_pts"] + q["a_pts"])
     q = D.attach_pinnacle(q)
     g = games.set_index("game_id")
     q["final_home"] = q["game_id"].map(g["home_score"])
     q["final_away"] = q["game_id"].map(g["away_score"])
     notes["rows_out"] = int(len(q))
-    return q, tl[["game_id", "wc", "h_pts", "a_pts", "period", "clock_s"]], notes
+    return q, tl, notes
+
+
+def jump_games(pbp: pd.DataFrame, minutes: float = JUMP_MIN) -> dict:
+    """Rule 6 (doc 3.2, 2026-11-04): games with two consecutive plays, in play order, whose ESPN
+    wallclocks are `minutes` or more apart, either way: game -> the largest such jump (minutes,
+    signed). A clock that shifts part of a game, or a feed that stalls and back-fills, shows as
+    such a jump; rule 5 sees only the first play."""
+    p = pbp[["game_id", "play_no", "wallclock"]].copy()
+    p["wc"] = pd.to_datetime(p["wallclock"], utc=True, format="mixed", errors="coerce")
+    p = p.dropna(subset=["wc"]).sort_values(["game_id", "play_no"], kind="stable")
+    d = p.groupby("game_id")["wc"].diff().dt.total_seconds() / 60.0
+    p = p.assign(d=d)
+    big = p[p["d"].abs() >= minutes]
+    if big.empty:
+        return {}
+    idx = big.groupby("game_id")["d"].apply(lambda x: x.abs().idxmax())
+    return {g: round(float(big.loc[i, "d"]), 1) for g, i in idx.items()}
 
 
 def apply_bad_rows(q: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -315,9 +373,16 @@ def load_live(scratch: Path = SCRATCH) -> Live:
     notes.update(n2)
     q, early = drop_early_clocks(q)
     notes["games_first_play_before_listed_tip"] = early
+    jumps = jump_games(p["pbp"][p["pbp"]["game_id"].isin(set(games["game_id"]))])
+    notes["games_wallclock_jump"] = jumps
+    notes["games_wallclock_jump_dropped"] = sorted(set(jumps) & set(q["game_id"]))
+    q = q[~q["game_id"].isin(set(jumps))].reset_index(drop=True)
+    q_all = q
     q, dropped34 = apply_bad_rows(q)
     notes["rule34_dropped"] = int(len(dropped34))
-    return Live(games, q, raw, tl, dropped1, dropped34, notes, sched)
+    lv = Live(games, q, raw, tl[["game_id", "wc", "h_pts", "a_pts", "period", "clock_s"]], dropped1, dropped34, notes, sched)
+    lv.q_all = q_all
+    return lv
 
 
 def drop_early_clocks(q: pd.DataFrame, minutes: float = EARLY_CLOCK_MIN) -> tuple[pd.DataFrame, dict]:
@@ -330,17 +395,22 @@ def drop_early_clocks(q: pd.DataFrame, minutes: float = EARLY_CLOCK_MIN) -> tupl
     return q[~q["game_id"].isin(set(bad.index))].reset_index(drop=True), {k: round(float(v), 1) for k, v in bad.items()}
 
 
-def load_held(path: Path = HELD_QUOTES, markets=("h2h",)) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """The held in-play table (read only), rules 1, 3, 4 and 5 applied; (kept, rule-1, rule-3/4)."""
-    q = pd.read_parquet(path)
+def load_held(markets=("h2h",), refresh: bool = False):
+    """The held in-play table with this lab's own state join (held_restated), rules 1, 3, 4, 5
+    and 6 applied; (kept, rule-1 rows, rule-3/4 rows, the table before rules 3-4, notes)."""
+    q, notes = held_restated(refresh=refresh)
     q = q[q["market"].isin(markets)].copy()
     q, early = drop_early_clocks(q)
     assert not early, f"held games with an early ESPN clock: {early}"
+    jumps = notes["games_wallclock_jump"]
+    notes["games_wallclock_jump_in_table"] = sorted(set(jumps) & set(q["game_id"]))
+    q = q[~q["game_id"].isin(set(jumps))]
     bad1 = impossible_price(q["price_a"]) | impossible_price(q["price_b"])
     d1 = q[bad1].copy()
-    q = q[~bad1]
+    q = q[~bad1].reset_index(drop=True)
+    q_all = q
     q, d34 = apply_bad_rows(q)
-    return q, d1, d34
+    return q, d1, d34, q_all, notes
 
 
 # ── the models ──────────────────────────────────────────────────────────────
@@ -388,25 +458,39 @@ def states_from(tl: pd.DataFrame, ok: set, games: pd.DataFrame, mu: pd.DataFrame
     return G.features(st)[TRAIN_KEEP]
 
 
-def late_states(cache: Path = H.CACHE, seasons=HELD_SEASONS, out: Path = LATE_TRAIN,
-                refresh: bool = False) -> tuple[pd.DataFrame, dict]:
-    """Step 2's training states: IG-2's grid (every 30 s of game time) with 6:00 or less left in
-    regulation, built by IG-2's and nba_ingame_data's own functions from the held nba_pbp pull,
-    written to scratch only. Beside them, IG-2's own window (6:00 to 47:30 left) rebuilt the same
-    way for one season, to compare with IG-2's stored states (`reproduce`)."""
-    if out.exists() and not refresh:
-        return pd.read_parquet(out), json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+def held_build(cache: Path = H.CACHE, seasons=HELD_SEASONS) -> dict:
+    """One pass over the held play-by-play pull, written to scratch only:
+      * step 2's training states: IG-2's grid (every 30 s of game time) with 6:00 or less left in
+        regulation, games with a rule-6 clock jump left out (LATE_TRAIN);
+      * the held quotes' game state re-joined with state_at_stable (HELD_RESTATED, moneylines),
+        and how many held quotes of every market read a different score than the stored table
+        (IG-2's graded run used the stored one);
+      * IG-2's own window (6:00 to 47:30 left) rebuilt for 2024-25 and compared with IG-2's
+        stored states (`reproduce_2025`)."""
     t0 = time.time()
     tls, games = held_timelines(cache, seasons)
+    pbp = pd.read_parquet(SCRATCH / HELD_PULL["pbp"], columns=["game_id", "play_no", "wallclock", "season_type"])
+    jumps = jump_games(pbp[pbp["season_type"] == 2])
     mu = pd.read_parquet(PRIOR_HELD)
-    frames, notes = [], {}
+    held = pd.read_parquet(HELD_QUOTES)
+    frames, qs, notes = [], [], {"games_wallclock_jump": jumps, "late_states": {}, "restate": {}}
     for s in seasons:
         tl, ok, wild = tls[s]
-        st = states_from(tl, ok, games, mu, s, LATE_TRAIN_SECS)
+        st = states_from(tl, ok - set(jumps), games, mu, s, LATE_TRAIN_SECS)
         frames.append(st)
-        notes[str(s)] = {"games_kept": int(st["game_id"].nunique()), "states": int(len(st)),
-                         "games_clock_broken": wild, "games_final_matches": len(ok)}
-        log(f"late training states {s}: {notes[str(s)]}", t0)
+        notes["late_states"][str(s)] = {"games_kept": int(st["game_id"].nunique()), "states": int(len(st)),
+                                        "games_clock_broken": wild, "games_final_matches": len(ok),
+                                        "games_jump_left_out": len((ok & set(jumps)))}
+        hq = held[held["season"] == s]
+        rq = restate(hq, tl)
+        moved = ~((rq["h_pts"].to_numpy() == hq["h_pts"].to_numpy()) & (rq["a_pts"].to_numpy() == hq["a_pts"].to_numpy()))
+        notes["restate"][str(s)] = {"quotes": int(len(hq)), "score_differs": int(moved.sum()),
+                                    "no_state_in_pull": int(rq["h_pts"].isna().sum())}
+        qs.append(rq[rq["market"] == "h2h"])
+        log(f"held season {s}: {notes['late_states'][str(s)]} {notes['restate'][str(s)]}", t0)
+    r = pd.concat([pd.DataFrame(v, index=[k]) for k, v in notes["restate"].items()])
+    notes["restate_all"] = {"quotes": int(r["quotes"].sum()), "score_differs": int(r["score_differs"].sum()),
+                            "share": float(r["score_differs"].sum() / r["quotes"].sum())}
     s = 2025
     mine = states_from(*tls[s][:2], games, mu, s, G.TRAIN_SECS)
     ig2 = pd.read_parquet(TRAIN_HELD)
@@ -416,12 +500,27 @@ def late_states(cache: Path = H.CACHE, seasons=HELD_SEASONS, out: Path = LATE_TR
                                "matched_on_game_time_and_score": int(len(j)),
                                "features_equal_share": {c: float(np.isclose(j[c], j[f"{c}_ig2"]).mean())
                                                         for c in G.FEATURES}}
-    log(f"IG-2's own window rebuilt for 2024-25: {notes['reproduce_2025']}", t0)
-    t = pd.concat(frames, ignore_index=True)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    t.to_parquet(out, index=False)
-    out.with_suffix(".json").write_text(json.dumps(notes, indent=1), encoding="utf-8")
-    return t, notes
+    log(f"held build done: {notes['restate_all']}; reproduce {notes['reproduce_2025']}", t0)
+    LATE_TRAIN.parent.mkdir(parents=True, exist_ok=True)
+    pd.concat(frames, ignore_index=True).to_parquet(LATE_TRAIN, index=False)
+    pd.concat(qs, ignore_index=True).to_parquet(HELD_RESTATED, index=False)
+    for path in (LATE_TRAIN, HELD_RESTATED):
+        path.with_suffix(".json").write_text(json.dumps(notes, indent=1, default=str), encoding="utf-8")
+    return notes
+
+
+def late_states(cache: Path = H.CACHE, refresh: bool = False) -> tuple[pd.DataFrame, dict]:
+    """Step 2's training states (held_build), read from scratch once built."""
+    if refresh or not LATE_TRAIN.exists():
+        held_build(cache)
+    return pd.read_parquet(LATE_TRAIN), json.loads(LATE_TRAIN.with_suffix(".json").read_text(encoding="utf-8"))
+
+
+def held_restated(cache: Path = H.CACHE, refresh: bool = False) -> tuple[pd.DataFrame, dict]:
+    """The held moneyline quotes with this lab's state join (held_build), read from scratch."""
+    if refresh or not HELD_RESTATED.exists():
+        held_build(cache)
+    return pd.read_parquet(HELD_RESTATED), json.loads(HELD_RESTATED.with_suffix(".json").read_text(encoding="utf-8"))
 
 
 def live_prior(cache: Path, live: Live) -> pd.DataFrame:
@@ -599,6 +698,51 @@ def still_offered(bets: pd.DataFrame, raw: pd.DataFrame) -> pd.DataFrame:
     return out.reindex(bets.index, fill_value=False)
 
 
+# ── reported beside each cell (doc 3.2) ──────────────────────────────────────
+
+def decisions_changed(q_kept: pd.DataFrame, q_all: pd.DataFrame, decide) -> dict:
+    """How many decisions (game x market x phase) rules 3 and 4 change: decided with and without
+    the rules, decided only one way, and decided at a different fetch."""
+    keys = ["game_id", "market", "phase_ig2"]
+    a = decide(q_kept).drop_duplicates(keys)[keys + ["fetch_at"]]
+    b = decide(q_all).drop_duplicates(keys)[keys + ["fetch_at"]]
+    m = a.merge(b, on=keys, how="outer", suffixes=("_with", "_without"), indicator=True)
+    both = m["_merge"] == "both"
+    return {"decisions_with_rules": int(len(a)), "decisions_without_rules": int(len(b)),
+            "only_without": int((m["_merge"] == "right_only").sum()),
+            "only_with": int((m["_merge"] == "left_only").sum()),
+            "different_fetch": int((both & (m["fetch_at_with"] != m["fetch_at_without"])).sum())}
+
+
+def step1_decide(q: pd.DataFrame) -> pd.DataFrame:
+    return G.decision_quotes(G.eligible(step1_table(q)))
+
+
+def step2_decide(q: pd.DataFrame) -> pd.DataFrame:
+    return late_decisions(late_table(q))
+
+
+def stall_stats(picks: pd.DataFrame) -> dict:
+    """Seconds from the last play ESPN logged to the decision quote's stamp: median, 90th
+    percentile, and how many are over STALL_S. A quote priced during a logging stall passes the
+    freshness rule against a frozen state. Reported, never judged."""
+    if not len(picks):
+        return {"since_last_play_median_s": np.nan, "since_last_play_p90_s": np.nan,
+                "since_last_play_over_180": 0}
+    gap = (picks["stamp"] - picks["last_play_at"]).dt.total_seconds()
+    return {"since_last_play_median_s": float(gap.median()), "since_last_play_p90_s": float(gap.quantile(0.9)),
+            "since_last_play_over_180": int((gap > STALL_S).sum())}
+
+
+def outlier_columns(bets: pd.DataFrame, cand: pd.DataFrame) -> dict:
+    """Units without outlier prices and the outlier share, on the bets given (the cell's pooled
+    seasons only: a reported-only season never enters)."""
+    if not len(bets):
+        return {"units_without_outliers": 0.0, "share_outlier": np.nan}
+    out = H.outlier_flag(bets, cand).to_numpy()
+    return {"units_without_outliers": float(bets.loc[~out, "units"].sum()), "share_outlier": float(out.mean())}
+
+
 # ── one family through the harness ──────────────────────────────────────────
 
 def emit(data: H.Data, family: str, point: str, fr: Frames, sides: dict, seeds, choose_seasons,
@@ -611,6 +755,9 @@ def emit(data: H.Data, family: str, point: str, fr: Frames, sides: dict, seeds, 
         cm = fr.cand[fr.cand["market"] == r["market"]]
         r.update(G5.band_columns(cm, r["side"], "ev", G5.band_bounds(CUTS, int(r["cut_index"]), lowest=LOWEST),
                                  data.games, pool_seasons))
+        r.update(pooled_outliers(fr, r, data.games, pool_seasons))
+        picks = H.choose(cm, r["cut"], sides=[r["side"]])
+        r.update(stall_stats(picks[picks["season"].isin(pool_seasons)] if len(picks) else picks))
         for c in ("clv_median", "clv_share_positive", "pool_clv_median"):
             r[c] = np.nan
         r["clv_n"] = 0
@@ -624,6 +771,12 @@ def cell_bets(fr: Frames, row: dict, games: pd.DataFrame, pool_seasons) -> pd.Da
     cm = fr.cand[fr.cand["market"] == row["market"]]
     b = H.grade(H.choose(cm, row["cut"], sides=[row["side"]]), games)
     return b[b["season"].isin(pool_seasons)].reset_index(drop=True) if len(b) else b
+
+
+def pooled_outliers(fr: Frames, row: dict, games: pd.DataFrame, pool_seasons) -> dict:
+    """Units without outliers and the outlier share on the cell's pooled seasons only (doc 3.2:
+    run_cells counts every season, 2020-21 included, which step 2 reports only)."""
+    return outlier_columns(cell_bets(fr, row, games, pool_seasons), fr.cand[fr.cand["market"] == row["market"]])
 
 
 def beside(fr: Frames, row: dict, games: pd.DataFrame, pool_seasons, raw: pd.DataFrame | None) -> dict:
@@ -1003,6 +1156,11 @@ def smoke(cache: Path = H.CACHE) -> dict:
     if len(live.dropped34):
         print(live.dropped34[["game_id", "market", "book", "stamp", "line", "pin_line", "price_a", "price_b", "fa",
                               "pin_fa", "pts_since_stamp"]].head(60).to_string(index=False))
+    print("\nRULE 6 (a clock jump of 45 minutes or more between consecutive plays), 2026-27:",
+          json.dumps(live.notes["games_wallclock_jump"]), "; dropped from the table:",
+          live.notes["games_wallclock_jump_dropped"])
+    print("RULES 3-4, decisions they change, step 1 (2026-27):", json.dumps(decisions_changed(live.q, live.q_all, step1_decide)))
+    print("RULES 3-4, decisions they change, step 2 (2026-27):", json.dumps(decisions_changed(live.q, live.q_all, step2_decide)))
     print("\n" + extremes(live.q, "EXTREMES, 2026-27 in-play rows kept"))
     print("gap to the paired Pinnacle quote, 2026-27 deciding rows kept:", json.dumps(gap_report(live.q)))
     t1 = time.time()
@@ -1031,9 +1189,14 @@ def smoke(cache: Path = H.CACHE) -> dict:
 
     # held step-2 table ---------------------------------------------------------
     t1 = time.time()
-    held, h1, h34 = load_held()
+    held, h1, h34, held_all, hnotes = load_held()
     T["load_held"] = time.time() - t1
     print(f"\nHELD h2h quotes: {len(held):,} kept; rule 1 dropped {len(h1)}; rules 3-4 dropped {len(h34)}")
+    print("held quotes re-joined with this lab's state join, score differs from the stored table:",
+          json.dumps(hnotes["restate_all"]), json.dumps(hnotes["restate"]))
+    print("RULE 6, held pull:", json.dumps(hnotes["games_wallclock_jump"]))
+    print("RULE 6, held games dropped from the moneyline table:", hnotes["games_wallclock_jump_in_table"])
+    print("RULES 3-4, decisions they change, step 2 (held):", json.dumps(decisions_changed(held, held_all, step2_decide)))
     if len(h1):
         print(h1[["game_id", "book", "stamp", "price_a", "price_b"]].head(20).to_string(index=False))
     if len(h34):
@@ -1114,16 +1277,26 @@ def smoke(cache: Path = H.CACHE) -> dict:
             T["s2_live_3_cells_1_placebo"] = time.perf_counter() - t1
         else:
             print("step 2 on 2026-27: no decision yet")
-        # still offered at the next fetch, on the picks (prices only, no result)
+        # still offered at the next fetch, and the time since the last logged play, on the picks
+        # (prices and clocks only, no result)
         so = []
         for ph in G.PHASES:
             for mk in G.MARKETS:
                 for cut in CUTS:
                     b = G5._pick(fr1[ph].cand[fr1[ph].cand["market"] == mk], cut, "model", "ev")
                     s = still_offered(b, live.raw)
-                    so.append({"point": ph, "market": mk, "cut": cut, "bets": int(len(b)),
+                    so.append({"family": FAM_S1, "point": ph, "market": mk, "cut": cut, "bets": int(len(b)),
                                "share_still_offered": float(s["still"].mean()) if len(b) else np.nan,
-                               "share_identical": float(s["identical"].mean()) if len(b) else np.nan})
+                               "share_identical": float(s["identical"].mean()) if len(b) else np.nan,
+                               **stall_stats(b)})
+        for fam, frx, seasons in ((FAM_S2H, frh, HELD_GRADED), (FAM_S2L, frl, (LIVE,))):
+            if frx is None:
+                continue
+            for cut in CUTS:
+                b = G5._pick(frx.cand, cut, LEADER, "ev")
+                b = b[b["season"].isin(seasons)] if len(b) else b
+                so.append({"family": fam, "point": PT_LATE, "market": "h2h", "cut": cut, "bets": int(len(b)),
+                           **stall_stats(b)})
         res["still_offered"] = so
 
     for t in tops:
@@ -1143,7 +1316,7 @@ def smoke(cache: Path = H.CACHE) -> dict:
     print(f"\nWHEN EACH 2026-27 CELL REACHES {TARGET_BETS} BETS (schedule after {last}; "
           f"{int(sched['game_date'].gt(last).sum())} games left; last scheduled {sched['game_date'].max()}):")
     print(pd.DataFrame(proj).round(3).to_string(index=False))
-    print("\nSTILL OFFERED AT THE NEXT FETCH, step 1 picks on 2026-27 (prices only):")
+    print("\nSTILL OFFERED AT THE NEXT FETCH (step 1, 2026-27) AND SECONDS SINCE THE LAST LOGGED PLAY (prices and clocks only):")
     print(pd.DataFrame(res["still_offered"]).round(3).to_string(index=False))
     d = pd.DataFrame(differs)
     print(f"\nPLACEBO: share of placebo bets on a game the cell does not bet ({len(DIFFER_SEEDS)} seeds), "
@@ -1240,7 +1413,7 @@ def full(cache: Path = H.CACHE) -> None:
     m1 = G.models_by_season(step1_train(), G.FEATURES, seasons=(LIVE,))
     late, _ = late_states(cache)
     m2 = G.models_by_season(late, G.FEATURES, seasons=HELD_SEASONS + (LIVE,))
-    held, _, _ = load_held()
+    held = load_held()[0]
     prior_h = pd.read_parquet(PRIOR_HELD)
     games_h = H.load_games(cache)
     rows, side = {FAM_S1: [], FAM_S2H: [], FAM_S2L: []}, []
