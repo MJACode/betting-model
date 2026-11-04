@@ -107,6 +107,26 @@ goes through `data.view_migrations`.
 ```bash
 ```
 
+**Local purchase runs are logged too** (since 2026-11-03). Every Odds API call
+is written to `api_call_log`, however the run was started: `python -m
+data.ingestors.nba_odds_history ...`, a launcher that calls `runpy`, a script,
+or the worker. A local run's rows are named for the module it ran
+(`data.ingestors.nba_odds_history`), so they read apart from the worker's
+(`scheduler`). What a run spent, from the log:
+
+```sql
+SELECT source, count(*) AS calls, sum(credits) AS credits
+FROM api_call_log
+WHERE api = 'The Odds API' AND ts >= now() - interval '6 hours'
+GROUP BY 1 ORDER BY 3 DESC NULLS LAST;
+```
+
+If the database stops answering mid-run, the calls are held and written once
+it answers again; a call is never slowed or failed by its log. If it is still
+down when the run exits, the run's own log says how many calls and credits were
+not written. `PIPELINE_TELEMETRY=0` turns the log off, so never set it on a
+purchase. Detail: `docs/monitoring.md`.
+
 `nfl_props_setup.yml` existed only because the dev sandbox cannot reach Supabase
 or the Odds API. From your machine, run its steps directly (see
 `docs/nfl_props_model.md`); the `.github/nfl_props_trigger.txt` mechanism is gone.
