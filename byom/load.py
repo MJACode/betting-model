@@ -113,8 +113,20 @@ FACT_COLUMNS = (
 
 
 def _fetch(conn, sql, params):
+    """Read, then end a clean transaction before the caller uses the rows.
+
+    Autocommit is off. A SELECT therefore holds its locks until commit
+    or rollback. The lock search that follows a quote fetch is Python,
+    and Postgres shows that gap as idle in transaction. A connection
+    that already has uncommitted writes is left open: that transaction
+    belongs to the caller, who commits it.
+    """
+    from data.db import release_read
     cur = conn.execute(sql, params)
-    return cur.fetchall()
+    try:
+        return cur.fetchall()
+    finally:
+        release_read(conn)
 
 
 def _dk_history_floor(sport: str) -> int | None:
@@ -365,6 +377,11 @@ def build_season(conn, season: int, apply: bool = False,
     if apply and sport == SPORT:
         official = write_official_legs(
             conn, [fact["canonical_key"] for fact in facts], legs, props=False)
+    if apply:
+        # The next season, and the prop builder after a game refresh,
+        # read odds on this same connection. An uncommitted DELETE/INSERT
+        # on byom_official_legs holds RowExclusiveLock across that read.
+        conn.commit()
     return {
         "season": season, "sport": sport,
         "facts": len(facts), "written": written,

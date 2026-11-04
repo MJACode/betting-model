@@ -83,8 +83,13 @@ def _log_table(sport: str) -> tuple[str, tuple[str, ...]]:
 
 
 def _fetch(conn, sql, params):
+    """Read, then end a clean transaction. See byom.load._fetch."""
+    from data.db import release_read
     cur = conn.execute(sql, params)
-    return cur.fetchall()
+    try:
+        return cur.fetchall()
+    finally:
+        release_read(conn)
 
 
 def _games(conn, season: int, sport: str = SPORT) -> list[dict]:
@@ -272,6 +277,10 @@ def build_season(conn, season: int, apply: bool = False,
     if apply and sport == "NFL":
         from byom.load import write_official_legs
         official = write_official_legs(conn, keys, legs, props=True)
+    if apply:
+        # Same boundary as byom.load.build_season: the next season's
+        # odds read must not sit inside this official-leg write.
+        conn.commit()
     return {
         "season": season, "sport": sport, "facts": len(facts), "written": written,
         "official_legs": len(legs), "official_written": official,

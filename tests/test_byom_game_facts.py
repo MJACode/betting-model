@@ -279,7 +279,7 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr("byom.load.build_seasons", build_seasons)
-    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
 
     fn, validate = JOBS["byom_game_facts"]
     stored = validate({})
