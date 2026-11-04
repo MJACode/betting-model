@@ -1,12 +1,12 @@
 # Signal Base marketing site
 
-Static site for signalbase-ai.com. Three pages: `/`, `/terms`, `/privacy`.
+Static site for signalbase-ai.com. Four pages: `/`, `/terms`, `/privacy`, `/support`.
 
 The record row on the landing page is not a stored number. The browser reads the same public view as the app's Record tab, `v_public_track_record`, with the public Supabase anon key, and rolls the rows up the same way `mobile/src/lib/trackRecord.ts` does (retired models left out, picks = wins + losses + pushes, posted-stake `units`). If that request fails or comes back empty, the row stays hidden.
 
 `web/src/public-config.json` holds that anon key. It is the public key already shipped in the app (`EXPO_PUBLIC_SUPABASE_ANON_KEY` for project `vvprgnrmzeekokzkrkfu`). It is not a service-role key. The build refuses any key whose JWT role is not `anon`.
 
-Terms and Privacy are rendered at build time from `content/terms.md` and `content/privacy.md`. Those files stay as drafted. The build strips the DRAFT banner, removes bracketed `[ATTORNEY NOTE: …]` notes, fills `[DATE]` with the build date in America/New_York, and drops the “filled in at publish” clause so the line is “Effective date:” plus that date. The build fails if a `[` still appears in any generated HTML page.
+Terms, Privacy, and Support are rendered at build time from `content/terms.md`, `content/privacy.md`, and `content/support.md`. The legal files stay as drafted. The build strips the DRAFT banner, removes bracketed `[ATTORNEY NOTE: …]` notes, fills `[DATE]` with the build date in America/New_York, and drops the “filled in at publish” clause so the line is “Effective date:” plus that date. The build fails if a `[` still appears in any generated HTML page. Support uses the same renderer and the same contact address as Terms and Privacy (`Signalbaseskinny@gmail.com`). `support@signalbase-ai.com` is not a mailbox named anywhere in this repo.
 
 No cookies, analytics, third-party scripts, or hosted fonts. Type is the system font stack.
 
@@ -18,7 +18,7 @@ From `web/`:
 python3 build.py --serve
 ```
 
-Then open http://127.0.0.1:8765/ , http://127.0.0.1:8765/terms , and http://127.0.0.1:8765/privacy .
+Then open http://127.0.0.1:8765/ , http://127.0.0.1:8765/terms , http://127.0.0.1:8765/privacy , and http://127.0.0.1:8765/support .
 
 `python3 build.py` alone writes `web/dist/` and does not serve it. `dist/` is gitignored.
 
