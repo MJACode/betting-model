@@ -598,7 +598,7 @@ to be known BEFORE deciding which file to open.
 | **The durable follow-up backlog** | `docs/followups.md` |
 | Session-by-session history (192 entries — grep it) | `docs/sessions/README.md` |
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |
-| Claude-mobile picks prompt + the generated SQL | `docs/mobile_picks_prompt.md` |
+| Open picks in any Claude chat: the `open_picks` view, nothing to paste | `docs/mobile_picks_prompt.md` |
 | Discord routing, producers, delivery post-mortems | `docs/discord.md` |
 | Auth, billing, Discord membership (one membership, two surfaces) | `mobile/docs/{AUTHENTICATION,BILLING,DISCORD_LINKING}.md` |
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |

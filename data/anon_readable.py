@@ -147,6 +147,13 @@ ANON_READABLE: tuple[str, ...] = (
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
     "alt_game_lines",
+    # Every open pre-game BET, for any Claude chat with the Supabase
+    # connector (mike, 2026-11-04: no pasting anywhere). security_invoker
+    # over picks, games, model_action_thresholds and v_discord_published,
+    # all already readable here (data/migrations/open_picks_view_2026_11_04.sql).
+    # No mobile `.from()` reads it; tests/test_anon_readable.py lists it as
+    # ahead of the app.
+    "open_picks",
     "v_public_track_record",
     "v_public_track_record_daily",
 )

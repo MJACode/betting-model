@@ -615,8 +615,7 @@ moneyline, overtime included (`games.home_win`).
 
 **The id has "spread" in it, and the pick is a moneyline.** Several places
 read a pick's market from its model id by looking for the word "spread". Each
-one now names this id first: the app (`mobile/src/lib/markets.ts`), the
-Claude-mobile prompt (`docs/mobile_picks_prompt.md`), the closing-line
+one now names this id first: the app (`mobile/src/lib/markets.ts`), the closing-line
 function, settlement and the line-movement check; `tests/test_ncaab_moneyline_own_spread.py`
 and `tests/test_rule_model_markets_everywhere.py` pin them. One was left
 alone: the production view `v_model_full_record`, which nothing in the repo
