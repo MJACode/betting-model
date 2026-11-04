@@ -706,3 +706,27 @@ which rows `project` hands the fit, and the rates table in 16.2 is its measureme
 0.94 in the next, on a machine shared with other jobs. The projected `--full` is 7.3 to 11.6 minutes of cells plus 1.9
 minutes of loading; peak memory 2.1 to 2.2 GB. The projection takes about a minute now, against 21
 seconds before, because the rate fit builds pools for every team-game of 2021-22 to 2024-25.
+
+
+## 17. Results (graded 2026-11-04)
+
+Run `2026-11-04-q1props`, stored in Supabase. 18 cells and 39 controls. The grade took 412 seconds.
+
+**0 of the 18 cells pass. First-quarter player props stay closed.** The median return is -2.0%, and 3 of 18 are
+positive, all assists overs.
+
+| Market, side | EV 0.02 | EV 0.04 | EV 0.06 |
+|---|---|---|---|
+| Points, over | 3,731 bets, -3.5% | 3,065, -2.1% | 2,446, -2.0% |
+| Points, under | 6,625, -3.4% | 5,703, -3.2% | 4,909, -2.4% |
+| Rebounds, over | 1,963, -1.4% | 1,625, -1.9% | 1,290, -1.9% |
+| Rebounds, under | 3,017, -4.4% | 2,517, -3.4% | 2,072, -1.1% |
+| Assists, over | 2,869, +1.2% | 2,438, +3.0% | 2,084, +2.5% |
+| Assists, under | 2,356, -0.9% | 1,954, -2.5% | 1,626, -2.0% |
+
+- **The nearest miss is assists over at EV 0.04:** 2,438 bets, +59.01 units, +3.0%, interval -1.7% to +7.6%, +3.3% in
+  2024-25 and +1.9% in 2025-26. It fails the interval and the bands, since EV 0.06 returns less than 0.04.
+- **The blind bets lose 4.8% to 8.3%** on every market and side. These books take a wide margin on first-quarter
+  props, and the projection's choice beats the blind bet by 3 to 6 points without beating the price.
+- **Points unders lose with an interval below zero** at EV 0.02 and 0.04 (-3.4%, -5.5% to -1.3%), so the projection
+  leans the wrong way on first-quarter points.
