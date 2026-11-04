@@ -130,7 +130,7 @@ export function ByomDetailScreen() {
             showsUnits={showsUnits(model.filters)}
             emptyLabel={graded && model ? byomEmptyLabel(sport, facts.status, model.filters) : '—'}
             closeRecord={graded ? preview.closeRecord : null}
-            closingHeadline={sport === 'NFL' && preview.timing === 'close'}
+            closingHeadline={preview.timing === 'close'}
             onShowBets={graded && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
               ? () => navigation.navigate('ByomBets', {
                 filters: model.filters, sport, title: model.name, timing: preview.timing,

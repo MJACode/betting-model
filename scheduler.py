@@ -696,16 +696,24 @@ def run_byom_nfl_refresh() -> None:
         today = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
         conn = get_connection()
         try:
-            job_id = enqueue(
-                conn, "byom_refresh", {"sport": "NFL", "apply": True},
-                requested_by="scheduler",
-                note="Daily BYOM NFL refresh (Matt, 2026-11-04).",
-                dedupe_key=f"byom-nfl-refresh-{today}")
+            # NBA too (Matt, 2026-11-04: the same updates on the other
+            # builder). nba_player_game_log lands by about 1:30am ET
+            # (measured 2026-11-04), so this hour covers both. One sport's
+            # failure does not skip the other.
+            for sport in ("NFL", "NBA"):
+                try:
+                    job_id = enqueue(
+                        conn, "byom_refresh", {"sport": sport, "apply": True},
+                        requested_by="scheduler",
+                        note=f"Daily BYOM {sport} refresh (Matt, 2026-11-04).",
+                        dedupe_key=f"byom-{sport.lower()}-refresh-{today}")
+                    log.info("BYOM %s refresh: queued %s", sport, job_id)
+                except Exception:  # noqa: BLE001
+                    log.exception("ERROR BYOM %s refresh enqueue failed", sport)
         finally:
             conn.close()
-        log.info("BYOM NFL refresh: queued %s", job_id)
     except Exception:  # noqa: BLE001 - must never kill the scheduler
-        log.exception("ERROR BYOM NFL refresh enqueue crashed")
+        log.exception("ERROR BYOM refresh enqueue crashed")
 
 
 def run_model_quality_job() -> None:
@@ -2431,7 +2439,7 @@ def build_scheduler() -> BlockingScheduler:
         run_byom_nfl_refresh,
         CronTrigger(hour=10, minute=41, timezone=TIMEZONE),
         id="byom_nfl_refresh",
-        name="BYOM NFL refresh (queued daily 10:41am ET)",
+        name="BYOM NFL and NBA refresh (queued daily 10:41am ET)",
     )
 
     # Heartbeat watchdog — every 15 minutes, around the clock.

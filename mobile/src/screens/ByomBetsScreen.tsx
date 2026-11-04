@@ -7,9 +7,9 @@
  * rebuilds a spread's number (CLAUDE.md §00). Units are the main models'
  * staking, 1u to win with risk capped at 3u.
  *
- * NFL has two timings. Official is the first DraftKings line where the bet
- * fit the model's rules, which is when it became a pick. Closing is the
- * last line before kickoff. NBA is graded at the close only.
+ * Two timings, NFL and NBA alike. Official is the first DraftKings line
+ * where the bet fit the model's rules, which is when it became a pick.
+ * Closing is the last line before the game starts.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -111,7 +111,11 @@ export function ByomBetsScreen() {
   const navigation = useNavigation<Nav>();
   const { filters: rawFilters, sport, title, timing: openedAt } = useRoute<Route>().params;
   const { scope } = useByomSeason();
-  const offersOfficial = headlineTiming(sport) === 'official';
+  // A card that fell back to the close (no official rows yet, e.g. while
+  // the NBA backfill runs) opens here without the Official toggle, so the
+  // list never reads empty for a model whose bets exist (UX review).
+  const offersOfficial = headlineTiming(sport) === 'official' && openedAt !== 'close';
+  const start = sport === 'NBA' ? 'tipoff' : 'kickoff';
   const [timing, setTiming] = useState<ByomTiming>(
     openedAt ?? (offersOfficial ? 'official' : 'close'));
   const [list, setList] = useState<LoadedList | null>(null);
@@ -158,7 +162,7 @@ export function ByomBetsScreen() {
       <Text style={styles.explain}>
         {timing === 'official'
           ? 'The first DraftKings line where the bet fit your rules. That line and price are the bet, even if the line moved later.'
-          : 'The last DraftKings line before kickoff.'}
+          : `The last DraftKings line before ${start}.`}
       </Text>
       {shown != null && shown.cappedSeasons > 0 ? (
         <Text style={styles.explain}>
@@ -200,7 +204,7 @@ export function ByomBetsScreen() {
               title="No bets match"
               subtitle={shown.timing === 'official'
                 ? 'No bet fit your rules at a DraftKings line.'
-                : 'None of these bets had a DraftKings line at kickoff.'}
+                : `None of these bets had a DraftKings line at ${start}.`}
             />
           }
           ListFooterComponent={<BetslipBarSpacer />}

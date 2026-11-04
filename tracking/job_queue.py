@@ -2516,9 +2516,9 @@ def _job_byom_prop_facts(**kw):
 def _validate_byom_refresh(args: dict) -> dict:
     """Current-season refresh. apply defaults false, so a queued job
     reports freshness and writes nothing until someone asks."""
-    sport = str(args.get("sport") or "NFL")
-    if sport != "NFL":
-        raise ValueError(f"byom_refresh builds NFL only, got {sport!r}")
+    sport = str(args.get("sport") or "NFL").strip().upper()
+    if sport not in ("NFL", "NBA"):
+        raise ValueError(f"byom_refresh builds NFL or NBA, got {sport!r}")
     apply = args.get("apply", False)
     if not isinstance(apply, bool):
         raise ValueError(f"apply must be true or false, got {apply!r}")
@@ -2540,7 +2540,8 @@ def _job_byom_refresh(**kw):
         # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
         from data.view_migrations import apply_view_migrations
         apply_view_migrations(conn)
-        return refresh(conn, apply=bool(kw.get("apply")))
+        return refresh(conn, apply=bool(kw.get("apply")),
+                       sport=str(kw.get("sport") or "NFL").strip().upper())
     finally:
         conn.close()
 

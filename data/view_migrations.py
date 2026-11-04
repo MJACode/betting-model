@@ -474,6 +474,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # key ordered by locked_at. Returns on a catalog read once the index
     # exists. No function change. Sits before the posted-stake pair.
     "byom_official_legs_lock_read_idx_2026_11_04.sql",
+    # 2026-11-04 (Matt, NBA builder parity): byom_legs filters market and
+    # side inside the official lock search (the existing season index
+    # serves it). Same answers; one market's candidates, not the season's. Keeps
+    # the two earlier markers. Skips once its own marker is in the body.
+    "byom_official_market_pushdown_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

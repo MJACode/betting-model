@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SQL_NAME = "byom_official_legs_2026_11_04.sql"
 BAND_SQL = "byom_official_lock_bands_2026_11_04.sql"
 LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
+PUSHDOWN_SQL = "byom_official_market_pushdown_2026_11_04.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -303,7 +304,7 @@ def scratch():
                      "byom_saved_models_2026_10_16.sql",
                      "byom_prop_phase_a_filters_2026_10_29.sql",
                      SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
-                     LOCK_READ_SQL, LOCK_READ_SQL):
+                     LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -752,3 +753,121 @@ def test_a_damaged_body_is_rebuilt_once(scratch):
     assert cur.fetchone()[0] == first
     cur.execute("SELECT count(*) FROM byom_record(2026, '{\"primetime\":true}')")
     assert cur.fetchone()[0] >= 0
+
+
+def test_market_pushdown_returns_the_same_answers(scratch):
+    """2026-11-04: byom_legs filters market and side inside the lock
+    search. Every filter must return what the previous body returned."""
+    _pg, cur = scratch
+    filters = [
+        '{}', '{"markets":["h2h"]}', '{"markets":["h2h"],"side":"home"}',
+        '{"markets":["h2h"],"side":"home","role":"underdog","primetime":true}',
+        '{"markets":["spreads"],"side":"away"}', '{"markets":["totals"],"side":"over"}',
+        '{"markets":["h2h","spreads"],"role":"favorite"}',
+        '{"markets":["h2h"],"min_price":100}',
+    ]
+
+    def snapshot():
+        out = {}
+        for f in filters:
+            cur.execute("SELECT timing, market, bets, wins, losses, pushes, ties, "
+                        "round(units, 6), skipped FROM byom_record(2026, %s::jsonb) "
+                        "ORDER BY 1, 2", (f,))
+            out[f] = cur.fetchall()
+            cur.execute("SELECT label, price, result, round(units, 6) FROM byom_bets("
+                        "2026, %s::jsonb, 'official')", (f,))
+            out[f + "|bets"] = cur.fetchall()
+        return out
+
+    # Props too (review L1): two players, two markets, both sides, a line
+    # that moves, so the one-market search has other markets to skip.
+    cur.execute("""
+        INSERT INTO byom_prop_facts (
+          prop_key, canonical_key, sport, season, week, player_name, player_key,
+          team, market, line, line_basis, log_status, actual,
+          over_result, under_result, over_price, under_price)
+        VALUES
+          ('hurts', '2026_07_DAL_PHI', 'NFL', 2026, 7, 'Jalen Hurts', 'jalen hurts',
+           'PHI', 'player_pass_yds', 230.5, 'DraftKings line at game start', 'logged',
+           240, 'win', 'loss', -110, -110),
+          ('dak', '2026_07_DAL_PHI', 'NFL', 2026, 7, 'Dak Prescott', 'dak prescott',
+           'DAL', 'player_rush_yds', 12.5, 'DraftKings line at game start', 'logged',
+           10, 'loss', 'win', -115, -105);
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result,
+          team_spread, game_total, context_at_lock)
+        VALUES
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_pass_yds', 'over', 'jalen hurts',
+           'any', 'favorite', 'PHI', '2026-10-15 00:00+00', 224.5, -115, 'win', -2.5, 46.5, true),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_pass_yds', 'over', 'jalen hurts',
+           'any', 'underdog', 'PHI', '2026-10-22 00:00+00', 235.5, 105, 'win', 3.0, 47.5, true),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_pass_yds', 'under', 'jalen hurts',
+           'any', 'favorite', 'PHI', '2026-10-15 00:00+00', 224.5, -105, 'loss', -2.5, 46.5, true),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_rush_yds', 'over', 'dak prescott',
+           'any', 'underdog', 'DAL', '2026-10-16 00:00+00', 14.5, -110, 'loss', 2.5, 46.5, true),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'player_rush_yds', 'under', 'dak prescott',
+           'any', 'underdog', 'DAL', '2026-10-16 00:00+00', 14.5, -110, 'win', 2.5, 46.5, true);
+    """)
+    filters.extend([
+        '{"markets":["player_pass_yds"],"prop_side":"over"}',
+        '{"markets":["player_pass_yds"],"prop_side":"under"}',
+        '{"markets":["player_rush_yds"],"prop_side":"over","side":"away"}',
+        '{"markets":["player_pass_yds"],"prop_side":"over","min_line":230,"max_line":240}',
+        '{"markets":["player_pass_yds"],"prop_side":"over","min_price":100}',
+        '{"markets":["player_pass_yds"],"prop_side":"over","player":"Jalen Hurts"}',
+    ])
+    cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0 "
+                "FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is True
+    after = snapshot()
+    band = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    block = band[band.index("EXECUTE $fn$"):band.index("$fn$;") + len("$fn$;")]
+    cur.execute("DO $x$ BEGIN " + block + " END $x$")
+    cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0 "
+                "FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is False
+    before = snapshot()
+    assert after == before
+    assert any(rows for rows in after.values())
+
+
+
+def test_a_prop_ignores_team_role_spread_and_total(scratch):
+    """Review M1 on #1169: props are filtered on their own line and price
+    only. A role or team-band filter on a prop changes nothing."""
+    _pg, cur = scratch
+    cur.execute("""
+        INSERT INTO byom_prop_facts (
+          prop_key, canonical_key, sport, season, week, player_name, player_key,
+          team, market, line, line_basis, log_status, actual,
+          over_result, under_result, over_price, under_price)
+        VALUES ('hurts', '2026_07_DAL_PHI', 'NFL', 2026, 7, 'Jalen Hurts', 'jalen hurts',
+                'PHI', 'player_pass_yds', 230.5, 'DraftKings line at game start', 'logged',
+                240, 'win', 'loss', -110, -110);
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result,
+          team_spread, game_total, context_at_lock)
+        VALUES ('2026_07_DAL_PHI', 'NFL', 2026, 'player_pass_yds', 'over', 'jalen hurts',
+                'any', 'favorite', 'PHI', '2026-10-15 00:00+00', 224.5, -115, 'win', -2.5, 46.5, true);
+    """)
+    base = '{"markets":["player_pass_yds"],"prop_side":"over"'
+
+    def rec(extra):
+        cur.execute("SELECT timing, bets, wins FROM byom_record(2026, %s::jsonb) ORDER BY 1",
+                    (base + extra + "}",))
+        return cur.fetchall()
+
+    plain = rec("")
+    assert plain == [("close", 1, 1), ("official", 1, 1)]
+    assert rec(',"role":"underdog"') == plain
+    assert rec(',"min_team_spread":5,"max_team_spread":10') == plain
+    assert rec(',"min_game_total":60,"max_game_total":70') == plain
+    # A game leg still honours them: bets without the band, none with it.
+    cur.execute("SELECT count(*) FROM byom_record(2026, "
+                "'{\"markets\":[\"h2h\"]}'::jsonb) WHERE bets > 0")
+    assert cur.fetchone()[0] > 0
+    cur.execute("SELECT count(*) FROM byom_record(2026, "
+                "'{\"markets\":[\"h2h\"],\"min_game_total\":60}'::jsonb) WHERE bets > 0")
+    assert cur.fetchone()[0] == 0

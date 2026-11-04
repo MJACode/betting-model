@@ -11,8 +11,8 @@
  * Two timings (Matt, 2026-11-04). `official` is the first DraftKings
  * quote where the bet fit the model's rules: the line and price it
  * became a pick at. `close` is the last DraftKings quote before kickoff.
- * byom_record returns both, byom_bets lists one. NFL only has official
- * rows; an NBA model is graded at the close.
+ * byom_record returns both, byom_bets lists one. NFL and NBA both have
+ * official rows (Matt, 2026-11-04).
  *
  * LINE_BASIS is the label stored on each fact row. The backtest RPC
  * returns season totals, not that label per game. A screen shows this
@@ -232,7 +232,7 @@ export async function fetchByomBacktest(
 export type ByomTiming = 'official' | 'close';
 
 export interface ByomTimedRows {
-  /** The timing the screen leads with: official on NFL, close otherwise. */
+  /** The timing the screen leads with: official, or the close when official is empty. */
   headline: ByomTiming;
   official: ByomBacktestRow[];
   close: ByomBacktestRow[];
@@ -284,9 +284,13 @@ export function byomBetsAvailable(): boolean {
   return !recordMissing;
 }
 
-/** Official leads on NFL once the server has it. Everything else is the close. */
-export function headlineTiming(sport: ByomSport): ByomTiming {
-  return sport === 'NFL' && !recordMissing ? 'official' : 'close';
+/**
+ * Official leads once the server has it, on NFL and NBA alike (Matt,
+ * 2026-11-04: "do the same as what I said for nfl"). `sport` stays in
+ * the signature so a later sport can opt in or out.
+ */
+export function headlineTiming(_sport: ByomSport): ByomTiming {
+  return recordMissing ? 'close' : 'official';
 }
 
 function countedBets(rows: readonly ByomBacktestRow[]): number {
@@ -294,7 +298,7 @@ function countedBets(rows: readonly ByomBacktestRow[]): number {
 }
 
 /**
- * The card's headline. NFL leads with the official record once the server
+ * The card's headline. It leads with the official record once the server
  * has it. An empty official record beside a closing record (the rebuild
  * has not finished, or the season has no official rows) leads with the
  * close, so the card is not stuck at 0-0.
