@@ -2533,6 +2533,61 @@ def _job_byom_refresh(**kw):
         conn.close()
 
 
+def _validate_daily_pipeline(args: dict) -> dict:
+    """No arguments. A stake, a threshold, or a model id is not a way in."""
+    if args:
+        raise ValueError(
+            "daily_pipeline takes no arguments; it runs the full daily once"
+        )
+    return {}
+
+
+def _job_daily_pipeline(**kw):
+    """Run the full daily once, in this process, under the daily lock.
+
+    The boot catch-up stops after the deploy-kill bound or 22:00 ET. A row
+    in worker_jobs is the manual kick, and it is not declared, so a merge
+    does not enqueue one. It does not change a threshold, a stake, or a
+    pause. If this process is already inside a daily, the result is
+    skipped and a second pipeline is not started. That result is not a
+    failure: raising would retry the job, up to MAX_ATTEMPTS, and could
+    start the daily again after the first one ends.
+    """
+    import scheduler
+    from zoneinfo import ZoneInfo
+    start_number = None
+    deploy_kills = None
+    real_failures = None
+    try:
+        from data.db import get_connection
+        from tracking.daily_retry import load_today_dailies, today_counts
+        now = datetime.now(ZoneInfo("America/New_York"))
+        conn = get_connection()
+        try:
+            runs = load_today_dailies(conn, now)
+        finally:
+            conn.close()
+        if runs is not None:
+            start_number = len(runs) + 1
+            deploy_kills, real_failures = today_counts(runs)
+    except Exception:  # noqa: BLE001 — the kick still runs; the note lacks a number
+        logger.exception("daily_pipeline job: could not count today's starts")
+    status = scheduler.run_daily_pipeline(
+        retry_reason="manual worker_jobs daily_pipeline",
+        retry_source="worker_jobs",
+        retry_start_number=start_number,
+        retry_kind="manual",
+        deploy_kills=deploy_kills,
+        real_failures=real_failures,
+    )
+    if status == "skipped":
+        return {
+            "status": "skipped",
+            "reason": "daily already running in this process",
+        }
+    return {"status": status or "unknown", "start_number": start_number}
+
+
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
     from data.db import get_connection
@@ -2574,6 +2629,10 @@ JOBS = {
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
+    # Full daily, once, under the in-process daily lock. Not declared:
+    # inserting a worker_jobs row is the manual kick when the catch-up
+    # has stopped. See _job_daily_pipeline.
+    "daily_pipeline":  (_job_daily_pipeline,   _validate_daily_pipeline),
     # Read-mostly: writes only model_quality_checks. Report only — never
     # pauses. Same invoke path as health_check (CLI / --step / worker_jobs).
     "model_quality":   (_job_model_quality,    _validate_model_quality),

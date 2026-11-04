@@ -272,12 +272,14 @@ logging.basicConfig(
 log = logging.getLogger("scheduler")
 
 # Serialises the daily full pipeline inside THIS process. The 6am cron, the
-# boot catch-up and pipeline_watch's same-day retry all call the same
-# entrypoint; without this, two of them deciding "run" in the same second
-# would shell out twice. A new container does not see this lock — Railway
-# has already replaced the process — so an unfinished daily from before
-# this process is aborted and may be started again. The crash-loop ceiling
-# is tracking.daily_retry.MAX_DAILY_STARTS_PER_ET_DAY.
+# boot catch-up, the manual worker_jobs daily_pipeline job and
+# pipeline_watch's same-day retry all call the same entrypoint; without
+# this, two of them deciding "run" in the same second would shell out
+# twice. A new container does not see this lock — Railway has already
+# replaced the process — so an unfinished daily from before this process
+# is aborted and may be started again. Deploy-kills do not consume the
+# one-retry failure cap. The loop bound is
+# tracking.daily_retry.MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY.
 _DAILY_LOCK = threading.Lock()
 
 
@@ -338,21 +340,26 @@ def _publish_new_signals(label: str) -> None:
 
 def run_daily_pipeline(*, retry_reason: str | None = None,
                        retry_source: str | None = None,
-                       retry_start_number: int | None = None) -> None:
+                       retry_start_number: int | None = None,
+                       retry_kind: str | None = None,
+                       deploy_kills: int | None = None,
+                       real_failures: int | None = None) -> str:
     # Bare invocation == run_pipeline.run_daily_pipeline() (settle, ingest, score,
     # game log, prop scoring, health check).
     #
     # retry_reason is set by the same-day catch-up (boot / pipeline_watch)
-    # after a mid-run deploy aborted the 6am daily. The 6am cron passes
+    # and by the manual worker_jobs daily_pipeline job. The 6am cron passes
     # nothing. The lock is acquired before the ops note so a lost race with
-    # the cron cannot post "retrying" and then skip.
+    # the cron cannot post "retrying" and then skip. Returns "skipped" when
+    # this process is already inside a daily, otherwise the _run status.
     if not _DAILY_LOCK.acquire(blocking=False):
         log.info("daily-pipeline already running in this process — skip")
-        return
+        return "skipped"
     try:
         if retry_reason:
-            log.info("daily-pipeline retry (%s) start %s: %s",
+            log.info("daily-pipeline retry (%s/%s) start %s: %s",
                      retry_source or "catch-up",
+                     retry_kind or "unspecified",
                      retry_start_number if retry_start_number is not None
                      else "?",
                      retry_reason)
@@ -362,11 +369,14 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
                     retry_reason,
                     source=retry_source or "catch-up",
                     start_number=retry_start_number,
+                    relaunch_kind=retry_kind or "unspecified",
+                    deploy_kills=deploy_kills,
+                    real_failures=real_failures,
                 )
             except Exception:  # noqa: BLE001 — the retry is the point
                 log.exception("daily-pipeline retry: ops note failed")
         _wait_for_nhl_window("daily-pipeline")
-        _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
+        return _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
     finally:
         _DAILY_LOCK.release()
 
@@ -2147,15 +2157,19 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
     stayed STALE until the next calendar day. Hourlies never write those
     tables.
 
-    Same moment as the weekly catch-up (boot), plus pipeline_watch at 7:15am
-    ET so a worker that was down all morning still retries the same ET day.
-    Decision lives in tracking.daily_retry so the guards are unit-tested
-    without starting a scheduler: aborted or unfinished with this process
-    not running it → run, until the ceiling; a finished non-aborted failure
-    gets one retry, then skip; successful → skip; in-process → skip. The
-    open row is stamped aborted first, or a killed retry looks in progress
-    and the ceiling never sees that it is dead (2026-11-04). The ops note
-    names which start this attempt is.
+    Scheduled as a one-off job a few seconds after the scheduler starts, plus
+    pipeline_watch at 7:15am ET so a worker that was down all morning still
+    retries the same ET day. It is not called on the main thread before
+    sched.start(): on 2026-11-04 the 13:01Z boot did that, the daily held
+    the thread until the 13:19Z deploy, and the 13:17Z hourly never
+    ledgered (last hourly 12:17Z). Decision lives in tracking.daily_retry
+    so the guards are unit-tested without starting a scheduler: a
+    deploy-kill (aborted or unfinished, this process not running it) →
+    run, until the deploy-kill bound or 22:00 ET; a finished non-aborted
+    failure gets one retry, then skip; successful → skip; in-process →
+    skip. Deploy-kills do not consume the one-retry cap. The open row is
+    stamped aborted first, or a killed retry looks in progress. The ops
+    note names which start this attempt is and why it relaunched.
 
     Best-effort: raising here must not stop the scheduler starting, and must
     not sink the pipeline watch's Discord post (the caller wraps this).
@@ -2168,7 +2182,8 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
     try:
         from data.db import get_connection
         from tracking.daily_retry import (
-            decide_daily_retry, load_today_dailies,
+            classify_relaunch, decide_daily_retry, load_today_dailies,
+            today_counts,
         )
         from zoneinfo import ZoneInfo
         # Before the read. An unfinished daily from the previous container
@@ -2193,12 +2208,17 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
             log.info("daily catch-up [%s]: skip — %s", source, decision.reason)
             return {"status": "skipped", "reason": decision.reason}
         start_number = len(runs) + 1
-        log.info("daily catch-up [%s]: run start %s — %s",
-                 source, start_number, decision.reason)
+        deploy_kills, real_failures = today_counts(runs)
+        kind = classify_relaunch(runs)
+        log.info("daily catch-up [%s]: run start %s (%s) — %s",
+                 source, start_number, kind, decision.reason)
         run_daily_pipeline(
             retry_reason=decision.reason,
             retry_source=source,
             retry_start_number=start_number,
+            retry_kind=kind,
+            deploy_kills=deploy_kills,
+            real_failures=real_failures,
         )
         return {"status": "run", "reason": decision.reason}
     except Exception:  # noqa: BLE001 — never block startup / the watch
@@ -3026,16 +3046,29 @@ def main() -> None:
     # Savant silently skipped every other weekly catch-up too, and adding a
     # second weekly job is exactly when that stops being a no-op.
     catch_up_weekly_jobs()
-    # Same-day daily retry. A CronTrigger whose 6:00am fire has passed does
-    # not misfire on a fresh scheduler — that is how 2026-09-18's aborted
-    # daily waited until tomorrow, and why this cannot live only in the cron.
-    catch_up_daily_pipeline(source="boot")
 
     now = datetime.now(sched.timezone)
-    # The refresh pass a deploy killed. A one-off JOB a minute after start, not
-    # a call here: a pass takes 12-15 minutes and everything below -- the live
-    # loops, the NFL polls -- would wait behind it.
+    # Both catch-ups are one-off jobs, not calls here. A pass takes minutes
+    # (the daily, about 40) and everything else — the :17 hourly, the
+    # evening pass, the live loops, the NFL polls — would wait behind it,
+    # because none of them exist until sched.start(). 2026-11-04: the
+    # 13:01Z boot ran the daily on this thread, the 13:17Z hourly (8:17am
+    # ET) never ledgered, and the 13:19Z boot did it again. The daily
+    # catch-up is a few seconds after start so this deploy still relaunches
+    # a day whose daily never finished. A CronTrigger whose 6:00am fire has
+    # passed does not misfire on a fresh scheduler — that is how
+    # 2026-09-18's aborted daily waited until tomorrow, and why the catch-up
+    # cannot live only in the cron.
     from datetime import timedelta as _td
+    sched.add_job(
+        catch_up_daily_pipeline,
+        "date",
+        run_date=now + _td(seconds=5),
+        kwargs={"source": "boot"},
+        id="daily_catch_up",
+        name="Daily catch-up (once, 5s after boot)",
+        misfire_grace_time=300,
+    )
     sched.add_job(
         catch_up_refresh_pass,
         "date",
