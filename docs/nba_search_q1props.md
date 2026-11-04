@@ -550,3 +550,159 @@ The smoke run took 3.0 minutes.
         PYTHONPATH=. PYTHONIOENCODING=utf-8 python -W ignore -m scripts.nba_s_q1props --full
     PYTHONPATH=. python -m scripts.nba_game2_verdict --results C:/Users/micha/AppData/Local/Temp/nba_s/q1props/results --house5
     PYTHONPATH=. python -m scripts.nba_s_q1props --verdict C:/Users/micha/AppData/Local/Temp/nba_s/q1props/results
+
+## 16. Changes after an independent review, before any cell was graded (2026-11-03)
+
+An independent review of the lab and sections 1 to 15 came back on 2026-11-03 (its scripts:
+`%TEMP%/nba_s/q1props_review/`). **No cell had been graded when these changed, and none has been since.** No cell, cut,
+side, band, bar, season, book or price rule changes. Three changes move which bets the cells would place; two make the
+lab refuse or report more; four lines document choices sections 3 to 15 left unsaid.
+
+### 16.1 A player's own status no longer moves his own minutes
+
+**What was wrong.** Section 5 prices a bet given that the player plays. But the lab's team total E counted the priced
+player's own term at his status rate: a Questionable player entered his own team's E at about 0.5 of his minutes, so his
+own r rose and his own minutes rose with it.
+
+**The change.** For the priced player only, his own status counts 1: his E is E − a × s × m + s × m, from his own pool
+row. His teammates' rows keep the plain E, so a Questionable teammate still frees minutes for them.
+
+### 16.2 The chance a listed player plays is fitted on pool players only
+
+**What was wrong.** The rates were fitted on every player listed on the report and applied only to pool players, who
+have recent first-quarter court time. A pool player listed Available plays far more often than a listed player in
+general: the review measured 0.906 on 2023-24's pools against the fitted 0.72 to 0.76.
+
+**The change.** For each priced season S, every team-game of 2021-22 through S − 1 gets its pool at tip minus 60
+minutes, by the same rule as a priced game (section 5.2, with 16.3's roster). Each pool player listed on the report as
+known then counts once: did he play? The share by status is the rate. Out is still 0.
+
+| Status | Fitted on every listed player (sections 13 and 15) | Fitted on pool players (now) |
+|---|---|---|
+| Doubtful | 0.02 | 0.02 |
+| Questionable | 0.49 to 0.51 | 0.52 to 0.54 |
+| Probable | 0.92 | 0.93 to 0.94 |
+| Available | 0.72 to 0.76 | 0.84 to 0.88 |
+
+(2023-24 / 2024-25 / 2025-26 rows of the fit: 2,698 / 4,053 / 5,519 Questionable; 946 / 1,645 / 2,420 Available.)
+
+### 16.3 A player who has left the team leaves its pool once anything known says so
+
+**What was wrong.** "His latest team" read only box-score lines. A player traded away stayed in his old team's pool
+until he played for his new one. The review counted 1,231 of 25,190 priced player-games whose team total held more than
+3 minutes of such players, mostly in October 2025 and around the February trade deadlines.
+
+**The change: an as-of roster built from the cache.** A player's team as of the decision is the team of the latest of:
+
+- his box-score lines and his **inactive listings** (`nba_game_inactives`) in games dated before today;
+- **a report listing** (any of the report's five statuses) whose printed time plus 30 minutes is at or before the
+  decision. It wins when its game is on or after the latest box or inactive date.
+
+Every piece is known before the decision: earlier games' lines and inactive lists, and reports already printed. The rule
+applies to the pool (section 5.2) and to the priced player's own team ("his team tonight" in 5.2 now reads it).
+
+**What it removed, by the review's own measure.** The measure reads later box lines to say who left; it is a diagnostic
+only, never an input. Priced player-games whose team total holds more than 3 minutes of players who had left:
+
+| | Box lines only (sections 13 and 15) | As-of roster (now) |
+|---|---:|---:|
+| All months | 1,231 of 25,201 | 689 of 25,187 |
+| February 2025 | 177 | 47 |
+| February 2026 | 222 | 22 |
+| October 2025 | 491 | 378 |
+| November 2025 | 129 | 74 |
+
+Priced players whose latest team is neither side of the game fell from 277 to 192, mostly traded players now placed on
+their new team.
+
+**The limit that stays.** A player who left in the summer is still counted in his old team's pool in October 2025 unless
+his new team listed him inactive or on its report before the decision; nothing else in the cache says where he went
+before he plays. That is the 378. **So each cell's bets in October and in February are reported beside it,** in the beside
+table and in `--smoke`, never judged.
+
+### 16.4 `--full` refuses any other books or floor
+
+`refuse_full` now checks `config.BEST_LINE_BOOKMAKERS` and the harness's deciding books against the eight this doc
+registers (draftkings, fanduel, betmgm, williamhill_us, fanatics, betrivers, hardrockbet, betparx), and
+`config.DEFAULT_MIN_ODDS` and the harness's floor against −200. A checkout whose `.env` or environment overrides either
+refuses to run.
+
+### 16.5 Four choices, stated
+
+- **Section 14's check now fits its factor on 2023-24's first half too.** It had used the factor fitted on all of 2023-24.
+  The first-half factor is 0.857 (the whole season's: 0.8665). On the second half the map reads 0.666 / 0.486 / 0.374 /
+  0.285 / 0.210 / 0.145 at lines 1.5 to 6.5 against actual 0.680 / 0.498 / 0.384 / 0.287 / 0.208 / 0.146. That is within
+  0.014 at every line. The negative binomial reads 0.583 / 0.432 / 0.321 / 0.240 / 0.181 / 0.138.
+- **A points line with fewer than 30 overs or fewer than 30 unders in the fit has no map,** and prices through the negative
+  binomial. Every priced season's map holds all 16 lines, 0.5 to 15.5, so no offer falls back (0 counted).
+- **An ESPN id that `nba_player_id_map` lacks takes the NBA id paired with it in the lineup segments,** when one ESPN id
+  always sits beside one NBA id there. Measured: all 799 ESPN ids with an event in these three seasons are in the map, so
+  the fallback resolves none.
+- **Rows used only for the fits** (2023-24 and 2024-25 player-games with no proposition: the factor, alpha and the points
+  map) are decided at tip minus 60 minutes, as the starters search's fits were. A proposition is decided at its snapshot.
+
+### 16.6 Counts before grading, under sections 14 and 16
+
+Counted by `python -m scripts.nba_s_q1props --smoke` on the changed lab, before any cell was graded, on the terms of
+section 13. Settlement, the row ledger and the books are unchanged.
+
+**Bets each cell would place** (2024-25 + 2025-26 = pooled; no result read):
+
+| Market | Side | EV ≥ 0.02 | EV ≥ 0.04 | EV ≥ 0.06 |
+|---|---|---|---|---|
+| points | over | 2,055 + 1,676 = 3,731 | 1,703 + 1,362 = 3,065 | 1,386 + 1,060 = 2,446 |
+| points | under | 3,365 + 3,260 = 6,625 | 2,885 + 2,818 = 5,703 | 2,487 + 2,422 = 4,909 |
+| rebounds | over | 1,496 + 467 = 1,963 | 1,230 + 395 = 1,625 | 972 + 318 = 1,290 |
+| rebounds | under | 2,295 + 722 = 3,017 | 1,914 + 603 = 2,517 | 1,575 + 497 = 2,072 |
+| assists | over | 2,282 + 587 = 2,869 | 1,938 + 500 = 2,438 | 1,656 + 428 = 2,084 |
+| assists | under | 1,793 + 563 = 2,356 | 1,489 + 465 = 1,954 | 1,244 + 382 = 1,626 |
+
+Every cell has 200 or more pooled bets and 30 or more in each season.
+
+**What each change moved.** Each change was switched off in turn, the other two kept, and the bets compared. The number is
+the bets placed by one version and not the other (a proposition and book), per cell, lowest to highest:
+
+| Change | Bets moved per cell |
+|---|---|
+| 16.1 own status | 52 to 201 |
+| 16.2 pool-only rates | 62 to 263 |
+| 16.3 as-of roster | 53 to 290 |
+
+With all three switched off, the lab gives section 15's counts within 2 bets in every cell. The as-of roster's box events
+also count box lines of 0 minutes, which the old rule skipped.
+
+**The fits moved slightly.** First-quarter factor, 2024-25 / 2025-26: points 0.866 / 0.866, rebounds 0.897 / 0.889, assists
+0.956 / 0.939 (section 13: 0.864 / 0.862, 0.894 / 0.885, 0.953 / 0.935). alpha: points 0.594 / 0.613, rebounds 0.062 /
+0.062, assists 0.024 / 0.022. No number: the team pool under 30 minutes 477, the latest team neither side 192, fewer than 3
+earlier first-quarter games 549, listed Out 1 (of 60,190 targets, fit rows included).
+
+**Bets in October and in February** (lowest cut; beside, never judged). 2024-25 has no October prop. Rebounds and assists
+have no two-sided quote in February 2026, because BetMGM quotes from March:
+
+| Cell | October of 2025-26 | February of 2024-25 | February of 2025-26 |
+|---|---:|---:|---:|
+| points over | 167 | 417 | 213 |
+| points under | 132 | 605 | 312 |
+| rebounds over | 0 | 304 | 0 |
+| rebounds under | 0 | 340 | 0 |
+| assists over | 0 | 436 | 0 |
+| assists under | 0 | 339 | 0 |
+
+**The placebo on the real data.** The identity permutation returned the real bets in every group; no proposition is alone.
+Share of a run's bets that are not real bets, three runs: points over 0.74 to 0.82, points under 0.56 to 0.66, rebounds
+0.70 to 0.85, assists 0.67 to 0.79. No cell is under 0.5.
+
+**Each change watched failing.** Seven tests (the changed own-status test and six new ones) were run on the lab as committed
+at `ef414f4f`, and all seven failed. Four of them call functions the old lab did not have (`pool_status_rates`,
+`team_as_of`, `pool_frame`, `map_check`), so their failure there is the function's absence. For those, and for every other
+rule here, the rule was also broken inside the new lab, one at a time (scratch `explore/mutate16.py`): 11 breaks, and its
+test failed every time. Two of the 11 break `roster_events`, whose test was added after the run on the old lab.
+`tests/test_nba_s_q1props.py` now holds 31 tests, all passing.
+
+**What no test pins:** that the rates are fitted on pool players rather than every listed player. That is a choice of
+which rows `project` hands the fit, and the rates table in 16.2 is its measurement.
+
+**Time and memory.** One placebo run across a group's three cuts took 0.25 to 0.39 seconds in one smoke run and 0.28 to
+0.94 in the next, on a machine shared with other jobs. The projected `--full` is 7.3 to 11.6 minutes of cells plus 1.9
+minutes of loading; peak memory 2.1 to 2.2 GB. The projection takes about a minute now, against 21
+seconds before, because the rate fit builds pools for every team-game of 2021-22 to 2024-25.
