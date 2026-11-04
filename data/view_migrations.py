@@ -464,9 +464,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # team-spread and game-total bands. Replaces byom_legs. Adds
     # team_spread, game_total and context_at_lock, and the snapshot to
     # the primary key. Keeps byom_official_legs_v1 in the function so the
-    # file above still skips. This file's own skip matches the named
-    # identity arguments (they include the parameter names). Does not
-    # write picks.
+    # file above still skips. This file's own skip matches
+    # to_regprocedure('public.byom_legs(integer, jsonb, text)') and a body
+    # that does not contain the damaged `p_filters %s` marker. A damaged
+    # body is replaced with jsonb_exists. Does not write picks.
     "byom_official_lock_bands_2026_11_04.sql",
     # 2026-11-04: covering index for the official lock read (#1159, CE).
     # byom_legs filters sport/season/match_role, then DISTINCT ON the leg
