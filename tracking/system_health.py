@@ -1195,6 +1195,36 @@ def pick_unique_index_problems(rows) -> list[str]:
     return problems
 
 
+def _record_daily_pipeline_completion(conn, r) -> None:
+    """Flag a killed or missing 6:00am ET daily.
+
+    ``refresh_pass_completion`` waits 2 hours and then only speaks when the
+    latest finished pass is still inside 90 minutes. On 2026-11-04 the daily
+    retry had been unfinished for 81 minutes while the 12:17Z hourly finished
+    clean, so that check stayed on its OK branch.
+    """
+    from tracking.daily_retry import assess_daily_completion, daily_run_from_row
+
+    try:
+        rows = conn.execute(
+            "SELECT started_at, finished_at, ok, failed_steps "
+            "FROM pipeline_runs WHERE run_kind = 'daily' "
+            "AND (finished_at IS NULL OR started_at >= ?)",
+            ((datetime.now(timezone.utc) - timedelta(hours=36)).isoformat(),),
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — one check must not sink the rest
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        r.add("daily_pipeline_completion", ERROR, "CRIT",
+              f"cannot read pipeline_runs: {exc}")
+        return
+    runs = [daily_run_from_row(row) for row in rows or []]
+    status, detail = assess_daily_completion(datetime.now(timezone.utc), runs)
+    r.add("daily_pipeline_completion", status, "CRIT", detail)
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -1884,10 +1914,12 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # A run that started long ago and never finished = hang / OOM / killed
         # worker. Absence of finished_at is the only way that becomes visible.
-        # Deploy-killed hourly/evening rows are stamped aborted at pipeline
-        # boot (run_ledger.abort_prior_refresh_orphans), so a row still open
-        # past 2h is a pass this process may still be inside. A daily is not
-        # closed by that sweep.
+        # Deploy-killed hourly/evening/daily rows are stamped aborted at
+        # pipeline boot (run_ledger.abort_prior_refresh_orphans), so a row
+        # still open past 2h is a pass this process may still be inside.
+        # A daily killed and left unfinished under 2h is
+        # daily_pipeline_completion, not this check: hourlies keep finishing,
+        # so the 90-minute branch stays green (2026-11-04).
         stuck = 0
         if ledger_readable:
             stuck = _scalar(conn, """
@@ -1979,6 +2011,8 @@ def run_system_health(run_date: str | None = None) -> dict:
             else:
                 r.add("refresh_pass_steps", OK, "CRIT",
                       "no step failures in the last 3 refresh passes")
+
+        _record_daily_pipeline_completion(conn, r)
 
         # ── Signal delivery (picks -> Discord ledger) ────────────────────────
         # The notifier reads `picks`, not `opening_signals` (2026-09-05, Matt:

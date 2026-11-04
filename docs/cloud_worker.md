@@ -89,11 +89,17 @@ did not re-queue.
 
 `scheduler.py::catch_up_daily_pipeline` runs on boot and again after the 7:15am ET
 pipeline watch. If today's daily is missing, unfinished, aborted, or failed before
-the MLB freshness steps, it invokes `python run_pipeline.py` once the same
-America/New_York calendar day, posts an ops Discord note, and caps at one automatic
-retry (two ledgered `run_kind='daily'` starts). In-process lock plus a successful
-daily already today both no-op. Kill switch: `RUN_DAILY_RETRY=0`. See
-`tracking/daily_retry.py`.
+the MLB freshness steps, and this process is not already inside a daily, it
+invokes `python run_pipeline.py` again the same America/New_York calendar day
+and posts an ops Discord note. A deploy that kills that retry starts another
+one: on 2026-11-04 the 11:13Z retry stayed `finished_at` NULL and the old
+two-start cap refused every later boot. The in-process lock is the double-run
+guard. Aborted starts relaunch until 4 ledgered starts
+(`MAX_DAILY_STARTS_PER_ET_DAY`). A daily that finishes and fails before the
+MLB freshness steps for a reason other than aborted gets one retry, then
+stops, so an upstream outage does not buy odds on every boot. The ops note
+names which start this attempt is. A successful daily already today is a
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. See `tracking/daily_retry.py`.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`
@@ -113,11 +119,16 @@ unfinished `pipeline_runs` row later that morning: later hourlies finished,
 and the next evening `start_run` is the next evening, so
 `refresh_pass_completion` stayed on its stuck branch.
 `scheduler.abort_orphaned_refresh_runs` runs once before the scheduler
-starts, on the service that owns `hourly_refresh`, and stamps unfinished
-`hourly` and `evening` rows that started before this process
-(`finished_at`, `ok=false`, `failed_steps='aborted'`). It does not touch
-`daily`. The cutoff freezes on the first call, so a second call cannot
-abort a pass this process has opened. The one-off
+starts, on the service that owns `hourly_refresh` or `daily_pipeline`, and
+again before the daily catch-up decides. It stamps unfinished `hourly`,
+`evening` and `daily` rows that started before this process (`finished_at`,
+`ok=false`, `failed_steps='aborted'`). It does not touch `manual`. A daily
+this process opened is stamped the same way only when it is older than 75
+minutes and the daily lock is free — a slow run still inside the subprocess
+stays open. That 75-minute cutoff is daily only. An hourly or evening this
+process opened stays unfinished, so `refresh_pass_completion` can still see
+a hang past 2 hours. The previous-process cutoff freezes on the first call, so a
+second call cannot abort a pass this process has just opened. The one-off
 `abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
 view-migration pass if boot has not already. This sweep does not re-run
 the pass.

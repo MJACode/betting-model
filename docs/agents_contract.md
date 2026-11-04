@@ -128,9 +128,15 @@ stale features until the next calendar day.
 again from `run_pipeline_watch` (after the report, so a 20-minute retry does
 not delay the morning post). Decision: `tracking/daily_retry.py`. Guards: a
 successful daily today is left alone; an in-process daily is not started
-twice; at most one automatic retry per ET calendar day (two ledgered starts
-total); a daily that finished with only later-step failures (typically
-`health_check`) is treated as complete for MLB freshness. Kill switch:
+twice; a daily that finished with only later-step failures (typically
+`health_check`) is treated as complete for MLB freshness. A deploy that kills
+the retry starts it again the same ET day (2026-11-04: the 11:13Z retry was
+left unfinished and the old two-start cap never relaunched it). Boot stamps
+that unfinished row `aborted` first. Aborted starts relaunch until
+`MAX_DAILY_STARTS_PER_ET_DAY` (4). A daily that finishes and fails before the
+MLB freshness steps for any other reason gets one retry
+(`MAX_NON_ABORTED_FAILURES`, 2), then stops, so an upstream outage does not
+buy odds on every boot. The ops note names which start this is. Kill switch:
 `RUN_DAILY_RETRY=0`. No model, threshold, pause or calibration change.
 
 ---

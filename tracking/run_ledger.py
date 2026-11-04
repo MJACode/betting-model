@@ -198,20 +198,39 @@ def _abort_orphans(conn, run_kind: str) -> int:
         return 0
 
 
-def abort_prior_refresh_orphans(conn, *, started_before: str | None = None) -> int:
-    """Close unfinished hourly/evening rows a previous process left open.
+def abort_prior_refresh_orphans(
+    conn,
+    *,
+    started_before: str | None = None,
+    stale_before: str | None = None,
+    kinds=None,
+) -> int:
+    """Close unfinished rows a previous process, or a dead stale run, left open.
 
-    Called once from scheduler boot, before this process starts a pass.
-    Railway replaces the container; the process that owned the open row is
-    gone. ``_abort_orphans`` cannot do this, because it only runs for the
-    kind that is starting and an evening does not start again until the
-    next evening window.
+    Called from scheduler boot, before this process starts a pass, and again
+    before the daily catch-up decides. Railway replaces the container; the
+    process that owned the open row is gone. ``_abort_orphans`` cannot do
+    this, because it only runs for the kind that is starting and an evening
+    does not start again until the next evening window. A daily does not
+    start again until tomorrow, so a killed daily stayed unfinished through
+    every later hourly (2026-11-04, run 8a44ef65d4364828af08e025aa292a51).
+
+    ``kinds`` defaults to ``REFRESH_RUN_KINDS`` (hourly, evening). The boot
+    sweep passes ``daily`` as well. ``manual`` is never a default. Same-kind
+    ``start_run`` still does not abort a daily.
 
     ``started_before`` defaults to the first call's timestamp and stays
     there. A pass this process opens afterwards has a later ``started_at``
     and is left unfinished — a second sweep must not abort it. An empty
-    cutoff aborts nothing. ``daily`` and ``manual`` are not in
-    ``REFRESH_RUN_KINDS`` and are not updated.
+    cutoff aborts nothing.
+
+    ``stale_before`` closes a ``daily`` started before that timestamp,
+    including one this process opened. It does not close hourly or evening.
+    Those stay unfinished so ``refresh_pass_completion`` can still see a
+    hang past two hours. The caller passes it only when this process is not
+    inside the daily: a live daily past the max stays open so the health
+    check can see the hang, and a dead one is stamped aborted instead of
+    looking in progress.
 
     Same stamp as ``_abort_orphans``: ``finished_at`` now, ``ok`` false,
     ``failed_steps`` ``aborted``. Commits. Never raises.
@@ -220,7 +239,23 @@ def abort_prior_refresh_orphans(conn, *, started_before: str | None = None) -> i
         started_before = _boot_cutoff()
     elif not started_before:
         return 0
-    placeholders = ", ".join("?" for _ in REFRESH_RUN_KINDS)
+    if kinds is None:
+        kinds = REFRESH_RUN_KINDS
+    if not kinds:
+        return 0
+    if stale_before:
+        # 75 minutes is the daily max. Applying it to every kind hid a
+        # hung hourly: with the daily lock free, a refresh this process
+        # opened past that cutoff was stamped aborted and
+        # refresh_pass_completion never saw the >2h hang.
+        age_sql = (
+            "(started_at < ? OR (run_kind = 'daily' AND started_at < ?))"
+        )
+        age_params: tuple = (started_before, stale_before)
+    else:
+        age_sql = "started_at < ?"
+        age_params = (started_before,)
+    placeholders = ", ".join("?" for _ in kinds)
     try:
         cur = conn.execute(
             f"""
@@ -230,9 +265,9 @@ def abort_prior_refresh_orphans(conn, *, started_before: str | None = None) -> i
                    failed_steps = 'aborted'
              WHERE finished_at IS NULL
                AND run_kind IN ({placeholders})
-               AND started_at < ?
+               AND {age_sql}
             """,
-            (_now(), *REFRESH_RUN_KINDS, started_before),
+            (_now(), *kinds, *age_params),
         )
         n = getattr(cur, "rowcount", 0) or 0
         if n < 0:
@@ -240,9 +275,9 @@ def abort_prior_refresh_orphans(conn, *, started_before: str | None = None) -> i
         conn.commit()
         if n:
             logger.warning(
-                f"run_ledger: closed {n} prior refresh run(s) as aborted — "
-                f"started before this process "
-                f"({', '.join(REFRESH_RUN_KINDS)})"
+                f"run_ledger: closed {n} prior run(s) as aborted — "
+                f"started before this process or past the stale cutoff "
+                f"({', '.join(kinds)})"
             )
         return n
     except Exception as exc:

@@ -274,8 +274,10 @@ log = logging.getLogger("scheduler")
 # Serialises the daily full pipeline inside THIS process. The 6am cron, the
 # boot catch-up and pipeline_watch's same-day retry all call the same
 # entrypoint; without this, two of them deciding "run" in the same second
-# would shell out twice. Cross-process double-starts are capped by
-# tracking.daily_retry.MAX_DAILY_STARTS_PER_ET_DAY (ledgered starts today).
+# would shell out twice. A new container does not see this lock — Railway
+# has already replaced the process — so an unfinished daily from before
+# this process is aborted and may be started again. The crash-loop ceiling
+# is tracking.daily_retry.MAX_DAILY_STARTS_PER_ET_DAY.
 _DAILY_LOCK = threading.Lock()
 
 
@@ -335,7 +337,8 @@ def _publish_new_signals(label: str) -> None:
 
 
 def run_daily_pipeline(*, retry_reason: str | None = None,
-                       retry_source: str | None = None) -> None:
+                       retry_source: str | None = None,
+                       retry_start_number: int | None = None) -> None:
     # Bare invocation == run_pipeline.run_daily_pipeline() (settle, ingest, score,
     # game log, prop scoring, health check).
     #
@@ -348,12 +351,18 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         return
     try:
         if retry_reason:
-            log.info("daily-pipeline retry (%s): %s",
-                     retry_source or "catch-up", retry_reason)
+            log.info("daily-pipeline retry (%s) start %s: %s",
+                     retry_source or "catch-up",
+                     retry_start_number if retry_start_number is not None
+                     else "?",
+                     retry_reason)
             try:
                 from tracking.daily_retry import announce_daily_retry
                 announce_daily_retry(
-                    retry_reason, source=retry_source or "catch-up")
+                    retry_reason,
+                    source=retry_source or "catch-up",
+                    start_number=retry_start_number,
+                )
             except Exception:  # noqa: BLE001 — the retry is the point
                 log.exception("daily-pipeline retry: ops note failed")
         _wait_for_nhl_window("daily-pipeline")
@@ -2140,9 +2149,13 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
 
     Same moment as the weekly catch-up (boot), plus pipeline_watch at 7:15am
     ET so a worker that was down all morning still retries the same ET day.
-    Decision lives in tracking.daily_retry so the four guards are unit-tested
-    without starting a scheduler: aborted → run; successful → skip;
-    in-process → skip; already two starts today → skip.
+    Decision lives in tracking.daily_retry so the guards are unit-tested
+    without starting a scheduler: aborted or unfinished with this process
+    not running it → run, until the ceiling; a finished non-aborted failure
+    gets one retry, then skip; successful → skip; in-process → skip. The
+    open row is stamped aborted first, or a killed retry looks in progress
+    and the ceiling never sees that it is dead (2026-11-04). The ops note
+    names which start this attempt is.
 
     Best-effort: raising here must not stop the scheduler starting, and must
     not sink the pipeline watch's Discord post (the caller wraps this).
@@ -2158,6 +2171,9 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
             decide_daily_retry, load_today_dailies,
         )
         from zoneinfo import ZoneInfo
+        # Before the read. An unfinished daily from the previous container
+        # would otherwise count as a start that is still in progress.
+        abort_orphaned_refresh_runs()
         now = datetime.now(ZoneInfo("America/New_York"))
         conn = get_connection()
         try:
@@ -2176,8 +2192,14 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         if decision.action != "run":
             log.info("daily catch-up [%s]: skip — %s", source, decision.reason)
             return {"status": "skipped", "reason": decision.reason}
-        log.info("daily catch-up [%s]: run — %s", source, decision.reason)
-        run_daily_pipeline(retry_reason=decision.reason, retry_source=source)
+        start_number = len(runs) + 1
+        log.info("daily catch-up [%s]: run start %s — %s",
+                 source, start_number, decision.reason)
+        run_daily_pipeline(
+            retry_reason=decision.reason,
+            retry_source=source,
+            retry_start_number=start_number,
+        )
         return {"status": "run", "reason": decision.reason}
     except Exception:  # noqa: BLE001 — never block startup / the watch
         log.exception("daily catch-up [%s] failed (scheduler continues)", source)
@@ -2185,7 +2207,7 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
 
 
 def abort_orphaned_refresh_runs() -> int:
-    """Close refresh ledger rows the previous container left unfinished.
+    """Close ledger rows the previous container, or a dead stale run, left open.
 
     2026-10-16: evening run 06b9db72a43c4323ad5ed84abf00b591 was still open
     at 11:25Z. The 04:17Z deploy killed it, later hourlies finished, and
@@ -2193,26 +2215,48 @@ def abort_orphaned_refresh_runs() -> int:
     stayed unfinished until the next evening and `refresh_pass_completion`
     counted it as stuck.
 
-    Once, before this process starts a pass. Only the service that owns the
-    refresh jobs: a poller restart must not stamp a pass the pipeline
-    service is still running. The cutoff freezes on the first call, so a
-    second call cannot abort a pass this process has since opened. Does not
-    touch `daily`. Best-effort: a ledger failure must not stop the scheduler.
+    2026-11-04: daily run 8a44ef65d4364828af08e025aa292a51 was the same shape.
+    Nothing started another daily, so the row stayed unfinished and the
+    catch-up treated two ledgered starts as enough. ``daily`` is closed here
+    when this service owns it. ``manual`` is not.
+
+    Before this process starts a pass, and again before the daily catch-up
+    decides. A poller restart must not stamp a pass the pipeline service is
+    still running. The previous-process cutoff freezes on the first call, so
+    a second call cannot abort a pass this process has since opened. A daily
+    this process opened is closed only when it is older than the max run and
+    this process is not inside the daily (the lock is free). That cutoff is
+    daily only: an hourly or evening this process opened stays unfinished
+    so the 2-hour refresh check can still see a hang. Best-effort: a
+    ledger failure must not stop the scheduler.
     """
-    if not owns("hourly_refresh"):
-        log.info("refresh orphan sweep: SERVICE_ROLE=%s does not own hourly_refresh",
-                 SERVICE_ROLE)
+    from tracking.run_ledger import REFRESH_RUN_KINDS
+    kinds: list[str] = []
+    if owns("hourly_refresh"):
+        kinds.extend(REFRESH_RUN_KINDS)
+    if owns("daily_pipeline"):
+        kinds.append("daily")
+    if not kinds:
+        log.info("orphan sweep: SERVICE_ROLE=%s owns neither hourly_refresh "
+                 "nor daily_pipeline", SERVICE_ROLE)
         return 0
+    stale_before = None
+    if "daily" in kinds and not _DAILY_LOCK.locked():
+        from datetime import datetime, timezone
+        from tracking.daily_retry import MAX_DAILY_RUN
+        stale_before = (datetime.now(timezone.utc) - MAX_DAILY_RUN).isoformat()
     try:
         from data.db import get_connection
         from tracking.run_ledger import abort_prior_refresh_orphans
         conn = get_connection()
         try:
-            return abort_prior_refresh_orphans(conn)
+            return abort_prior_refresh_orphans(
+                conn, kinds=tuple(kinds), stale_before=stale_before,
+            )
         finally:
             conn.close()
     except Exception:  # noqa: BLE001 — never block startup
-        log.exception("refresh orphan sweep failed (scheduler continues)")
+        log.exception("orphan sweep failed (scheduler continues)")
         return 0
 
 
