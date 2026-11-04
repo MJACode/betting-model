@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a byom_legs body stored as `p_filters %s` is rebuilt even when the lock-bands skip matches; the replacement uses jsonb_exists; no UI from #1161; no model change |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a byom_legs body stored as `p_filters %s` is rebuilt even when the lock-bands skip matches; the replacement uses jsonb_exists; the skip stays to_regprocedure; no UI from #1161; no model change |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM preview 400s: the DB adapter turned the jsonb `?` inside a function body into `%s`; dollar quotes are now skipped; props lose favorite/underdog, team spread and game total |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, an applied BYOM lock-bands migration returns on named identity arguments; the types-only comparison re-ran ALTER TABLE every pass and timed out behind readers; the same guard in the position-defense migration; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, CFBD 429 uses Retry-After and a capped backoff; BYOM commits each season's official legs before the next odds read |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, the results recap waits on a game that carries a published or counted pick; an unbet unscored game no longer holds the day; X dedupe unchanged; no model change |

@@ -242,22 +242,24 @@ def test_the_lock_read_index_is_registered_and_guarded():
 
 
 def test_lock_bands_skip_matches_named_identity_arguments():
-    """pg_get_function_identity_arguments includes the parameter names.
-    The types-only literal never matches the function this file creates,
-    so the ALTER ran on every pass."""
+    """The skip is one to_regprocedure match. A types-only identity
+    comparison never matches, so the ALTER ran on every pass. A body
+    stored as `p_filters %s` is not skipped, and the replacement calls
+    jsonb_exists."""
     bands = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
     code = "\n".join(ln.split("--", 1)[0] for ln in bands.splitlines())
-    named = "p_season integer, p_filters jsonb, p_timing text"
-    assert f"pg_get_function_identity_arguments(p.oid) = '{named}'" in code
-    assert "pg_get_function_identity_arguments(p.oid) = 'integer, jsonb, text'" not in code
+    # One skip: to_regprocedure of the exact signature, and a body the
+    # adapter stored as `p_filters %s` is rebuilt. Not a second copy.
+    sig = "to_regprocedure('public.byom_legs(integer, jsonb, text)')"
+    predicate = "position('p_filters %s' in p.prosrc) = 0"
+    assert code.count(f"p.oid = {sig}") == 1
+    assert "pg_get_function_identity_arguments" not in code
+    assert code.count(predicate) == 1
     head = code.split("ALTER TABLE", 1)[0]
     assert "byom official lock bands already present" in head
     assert "RETURN;" in head
     assert "CREATE OR REPLACE" not in head
-    # #1161: a body stored as `p_filters %s` still has the bands marker,
-    # so the named-identity skip would leave it in place. The check is
-    # in the same EXISTS, before ALTER and CREATE OR REPLACE.
-    assert "position('p_filters %s' in p.prosrc) = 0" in head
+    assert predicate in head
     # A fresh database still has the DDL after the skip. The version
     # marker is a comment inside the function, so it is read from the
     # file rather than from the comment-stripped guard.
@@ -554,7 +556,7 @@ def test_a_missing_official_table_skips_the_write_and_logs(caplog):
 
 
 def test_a_healthy_lock_bands_body_skips_the_rebuild(scratch):
-    """The named-identity skip still returns when prosrc has no
+    """The to_regprocedure skip still returns when prosrc has no
     `p_filters %s`. Run through the adapter, the way the worker runs it."""
     _pg, cur = scratch
     from data.db import _adapt_sql
@@ -581,9 +583,10 @@ def test_a_healthy_lock_bands_body_skips_the_rebuild(scratch):
 
 
 def test_a_damaged_byom_legs_body_rebuilds_despite_the_skip_guard(scratch):
-    """#1165's skip matches once the bands marker and the named identity
-    are present. A body the adapter stored as `p_filters %s` (#1161) must
-    still be replaced, once, with jsonb_exists and no bare `?`."""
+    """The to_regprocedure skip matches once the bands marker is present
+    and prosrc has no `p_filters %s`. A body the adapter stored as
+    `p_filters %s` must still be replaced, once, with jsonb_exists and
+    no bare `?`."""
     _pg, cur = scratch
     from data.db import _adapt_sql
 
@@ -609,7 +612,8 @@ def test_a_damaged_byom_legs_body_rebuilds_despite_the_skip_guard(scratch):
     assert identity == "p_season integer, p_filters jsonb, p_timing text"
     band = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
     adapted = _adapt_sql(band)
-    assert "position('p_filters %s' in p.prosrc) = 0" in adapted
+    assert adapted.count("to_regprocedure('public.byom_legs(integer, jsonb, text)')") == 1
+    assert adapted.count("position('p_filters %s' in p.prosrc) = 0") == 1
     assert "jsonb_exists(p_filters, 'primetime')" in adapted
     assert "p_filters ?" not in adapted
     cur.execute(adapted)
@@ -686,3 +690,65 @@ def test_unknown_keys_and_timing_still_raise(scratch):
         cur.execute("SELECT * FROM byom_record(2026, '{\"stake\":1}')")
     with pytest.raises(psycopg2.errors.RaiseException, match="timing"):
         cur.execute("SELECT * FROM byom_bets(2026, '{}', 'open')")
+
+
+def test_a_second_pass_leaves_byom_legs_alone(scratch):
+    """2026-11-04: the lock-bands guard compared identity arguments without
+    their names, never matched, and re-created byom_legs on every worker
+    pass, each time through data.db's adapter. A re-run must not touch the
+    function. Run through the adapter, the way the worker runs it."""
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    before = cur.fetchone()[0]
+    for name in (SQL_NAME, BAND_SQL, LOCK_READ_SQL):
+        text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
+        cur.execute(_adapt_sql(text))
+    cur.execute("SELECT xmin::text, position('%s' in prosrc) FROM pg_proc WHERE proname = 'byom_legs'")
+    after, pct = cur.fetchone()
+    assert after == before
+    assert pct == 0
+
+
+def test_no_active_migration_guards_on_unnamed_identity_arguments():
+    """pg_get_function_identity_arguments returns 'p_season integer, ...'.
+    A guard that compares it to 'integer, ...' never matches, so the file
+    re-runs its DDL on every pass. Use to_regprocedure instead."""
+    import re
+
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    pattern = re.compile(r"pg_get_function_identity_arguments\([^)]*\)\s*=\s*'")
+    hits = [name for name in ACTIVE_MIGRATIONS
+            if pattern.search((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))]
+    assert hits == []
+
+
+def test_a_damaged_body_is_rebuilt_once(scratch):
+    """Production at 15:00 UTC held byom_legs with `p_filters %s`. The next
+    pass after the fix must re-create it, then leave it alone. The shipped
+    body calls jsonb_exists, so that is the call this damages."""
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("""
+        DO $$ DECLARE src text; BEGIN
+          SELECT pg_get_functiondef('public.byom_legs(integer, jsonb, text)'::regprocedure)
+            INTO src;
+          EXECUTE replace(src,
+            'jsonb_exists(p_filters, ''primetime'')',
+            'p_filters %s ''primetime''');
+        END $$
+    """)
+    cur.execute("SELECT position('p_filters %s' in prosrc) > 0 FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is True
+    band = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    cur.execute(_adapt_sql(band))
+    cur.execute("SELECT position('%s' in prosrc), xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    pct, first = cur.fetchone()
+    assert pct == 0
+    cur.execute(_adapt_sql(band))
+    cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] == first
+    cur.execute("SELECT count(*) FROM byom_record(2026, '{\"primetime\":true}')")
+    assert cur.fetchone()[0] >= 0

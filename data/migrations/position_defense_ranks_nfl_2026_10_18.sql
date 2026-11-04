@@ -170,7 +170,10 @@ BEGIN
                      JOIN pg_namespace n ON n.oid = p.pronamespace
                     WHERE n.nspname = 'public'
                       AND p.proname = 'player_season_stat_values_nfl'
-                      AND pg_get_function_identity_arguments(p.oid) = 'p_season integer, p_stat text'
+                      -- 2026-11-04: identity arguments include the names, so
+                      -- the old text comparison never matched and this
+                      -- dropped and recreated the function on every pass.
+                      AND p.oid = to_regprocedure('public.player_season_stat_values_nfl(integer, text)')
                       AND pg_get_function_result(p.oid) ILIKE '%pos text%') THEN
         EXECUTE 'DROP FUNCTION IF EXISTS public.player_season_stat_values_nfl(integer, text)';
         EXECUTE $ddl$
@@ -234,7 +237,10 @@ BEGIN
                      JOIN pg_namespace n ON n.oid = p.pronamespace
                     WHERE n.nspname = 'public'
                       AND p.proname = 'player_h2h_stat_values_nfl'
-                      AND pg_get_function_identity_arguments(p.oid) = 'p_seasons integer[], p_stat text, p_teams text[], p_opponents text[]'
+                      -- 2026-11-04: identity arguments include the names, so
+                      -- the old text comparison never matched and this
+                      -- dropped and recreated the function on every pass.
+                      AND p.oid = to_regprocedure('public.player_h2h_stat_values_nfl(integer[], text, text[], text[])')
                       AND pg_get_function_result(p.oid) ILIKE '%pos text%') THEN
         EXECUTE 'DROP FUNCTION IF EXISTS public.player_h2h_stat_values_nfl(integer[], text, text[], text[])';
         EXECUTE $ddl$

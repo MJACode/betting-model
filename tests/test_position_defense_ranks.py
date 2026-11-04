@@ -112,7 +112,9 @@ def test_the_role_and_stat_cuts_match_the_player_card():
     assert "pos text" in new
     # Re-run skips the drop once pos is already on the result type.
     assert "already returns pos — skipping" in new
-    assert "pg_get_function_identity_arguments" in new
+    # Guarded on the exact signature (2026-11-04: to_regprocedure; the
+    # identity-arguments text includes the names and never matched).
+    assert "to_regprocedure('public.player_season_stat_values_nfl(integer, text)')" in new
     assert "position_defense_ranks_nfl already present — skipping" in new
     assert "per qualifying player-game" in new
 

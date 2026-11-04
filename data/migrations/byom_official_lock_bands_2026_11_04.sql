@@ -40,16 +40,18 @@ BEGIN
   -- 'p_season integer, p_filters jsonb, p_timing text'. A types-only
   -- comparison never matches, so the ALTER below ran on every pass
   -- and took AccessExclusiveLock whenever a reader held the table.
-  -- A body the adapter damaged still carries the marker above: the
-  -- jsonb key test was stored as `p_filters %s` (#1161). That body
-  -- must be replaced. The replacement calls jsonb_exists, which has
-  -- no `?` for the adapter to rewrite.
   IF EXISTS (
+    -- to_regprocedure, not pg_get_function_identity_arguments: that one
+    -- returns the argument NAMES too ('p_season integer, ...'), so the old
+    -- comparison never matched and this file re-ran on every worker pass
+    -- (2026-11-04), each time through data.db's adapter, which stored the
+    -- jsonb key operator as %s and broke every BYOM preview.
     SELECT 1 FROM pg_proc p
-     WHERE p.pronamespace = 'public'::regnamespace
-       AND p.proname = 'byom_legs'
-       AND pg_get_function_identity_arguments(p.oid) = 'p_season integer, p_filters jsonb, p_timing text'
+     WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_official_lock_bands_v1' in p.prosrc) > 0
+       -- A body the adapter damaged (`p_filters %s`) is not present:
+       -- re-create it once. The replacement calls jsonb_exists, which
+       -- has no bare key operator for the adapter to rewrite.
        AND position('p_filters %s' in p.prosrc) = 0
   ) THEN
     RAISE NOTICE 'byom official lock bands already present - skipping';

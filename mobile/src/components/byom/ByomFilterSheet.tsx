@@ -28,13 +28,11 @@ import {
 import {
   KICK_SLOTS,
   PRICE_CHOICES,
-  SPREAD_SCALE,
   canMoveBand,
   canMovePrice,
   daysFor,
   formatAmericanBand,
   formatLineNumber,
-  formatSpread,
   lineScale,
   lineStepNote,
   monthsFor,
@@ -45,7 +43,6 @@ import {
   resetSheetFilters,
   shownKickSlots,
   toggleMember,
-  totalScale,
   withKickSlots,
   type ByomBand,
   type ByomPriceBand,
@@ -253,8 +250,6 @@ function OddsTab({
   const scale = lineScale(market);
   const hidden = isYesOnlyProp(market);
   const locked = !hidden && scale == null;
-  const spread = SPREAD_SCALE;
-  const total = totalScale(sport);
   const setPrice = (band: ByomPriceBand | 'any') => {
     if (band === 'any') {
       onPropFilters({ ...propFilters, priceBand: null, priceCustom: null });
@@ -330,61 +325,6 @@ function OddsTab({
             price
             formatValue={formatAmericanBand}
             onChange={(priceCustom) => onPropFilters({ ...propFilters, priceCustom })}
-          />
-        ) : null}
-      </Card>
-      <Card title="Game spread" detail="Player’s team spread at game start">
-        <View style={styles.chips}>
-          <ByomCheckChip
-            label="Any"
-            exclusive
-            selected={propFilters.spreadBand == null}
-            onPress={() => onPropFilters({ ...propFilters, spreadBand: null })}
-          />
-          <ByomCheckChip
-            label="Custom"
-            exclusive
-            selected={propFilters.spreadBand != null}
-            onPress={() => onPropFilters({
-              ...propFilters,
-              spreadBand: propFilters.spreadBand ?? openBand(spread),
-            })}
-          />
-        </View>
-        {propFilters.spreadBand ? (
-          <BandStepper
-            band={propFilters.spreadBand}
-            scale={spread}
-            formatValue={formatSpread}
-            onChange={(spreadBand) => onPropFilters({ ...propFilters, spreadBand })}
-          />
-        ) : null}
-        <Text style={styles.note}>Team spread from −14 to +14 in 0.5 steps.</Text>
-      </Card>
-      <Card title="Game total" detail="Game over/under at game start">
-        <View style={styles.chips}>
-          <ByomCheckChip
-            label="Any"
-            exclusive
-            selected={propFilters.totalBand == null}
-            onPress={() => onPropFilters({ ...propFilters, totalBand: null })}
-          />
-          <ByomCheckChip
-            label="Custom"
-            exclusive
-            selected={propFilters.totalBand != null}
-            onPress={() => onPropFilters({
-              ...propFilters,
-              totalBand: propFilters.totalBand ?? openBand(total),
-            })}
-          />
-        </View>
-        {propFilters.totalBand ? (
-          <BandStepper
-            band={propFilters.totalBand}
-            scale={total}
-            formatValue={formatLineNumber}
-            onChange={(totalBand) => onPropFilters({ ...propFilters, totalBand })}
           />
         ) : null}
       </Card>

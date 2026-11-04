@@ -273,13 +273,11 @@ export function ByomBuilderScreen() {
           <ByomPropSideFields
             market={market}
             propSide={propSide}
-            role={role}
             primetime={primetime}
             sport={sport}
             rest={rest}
             propFilters={propFilters}
             onPropSide={setPropSide}
-            onRole={setRole}
             onPrimetime={setPrimetime}
             onRest={setRest}
             onPropFilters={setPropFilters}

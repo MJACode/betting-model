@@ -75,7 +75,15 @@ _NAMED_PARAM_RE = re.compile(r"(?<!:):([A-Za-z_]\w*)")
 _SQL_SKIP_RE = re.compile(
     r"'(?:[^']|'')*'"      # string literal
     r"|--[^\n]*"           # line comment
-    r"|/\*.*?\*/",          # block comment
+    r"|/\*.*?\*/"           # block comment
+    # A dollar-quoted body, $$...$$ or $tag$...$tag$. Everything inside is a
+    # function or DO-block body, never a placeholder. On 2026-11-04 the jsonb
+    # key operator in `p_filters ? 'primetime'` became `p_filters %s
+    # 'primetime'` when the worker applied byom_official_legs_2026_11_04.sql,
+    # and every Build Your Own Model preview returned 400 until the body was
+    # replaced. The outer tag wins, so a $fn$ nested in a $mig$ is one region.
+    # The lookbehind keeps a $ inside an identifier (a$b$c) from opening one.
+    r"|(?<![A-Za-z0-9_$])\$([A-Za-z_][A-Za-z_0-9]*|)\$.*?\$\1\$",
     re.S,
 )
 
