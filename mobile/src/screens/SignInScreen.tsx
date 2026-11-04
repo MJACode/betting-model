@@ -15,6 +15,10 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import {
+  appReviewCodePrompt,
+  isAppReviewDemoEmail,
+} from '@/lib/appReview';
+import {
   authErrorMessage,
   isCompleteOtp,
   isValidEmail,
@@ -61,24 +65,7 @@ export function SignInScreen() {
     navigation.reset({ index: routes.length - 1, routes });
   }, [navigation]);
 
-  const onProvider = useCallback(
-    async (provider: AuthProvider) => {
-      setError(null);
-      setBusy(provider);
-      try {
-        const session = await signInWithProvider(provider);
-        // null = the user dismissed the browser. Not an error; stay put.
-        if (session) finish();
-      } catch (e) {
-        setError(authErrorMessage(e));
-      } finally {
-        setBusy(null);
-      }
-    },
-    [finish],
-  );
-
-  const onSendCode = useCallback(async () => {
+  const startEmailCode = useCallback(async () => {
     setError(null);
     if (!isValidEmail(email)) {
       setError('Enter a valid email address.');
@@ -95,6 +82,33 @@ export function SignInScreen() {
       setBusy(null);
     }
   }, [email]);
+
+  const onProvider = useCallback(
+    async (provider: AuthProvider) => {
+      // The demo address takes the code step from these buttons, for the
+      // reviewer and for anyone else who types that address. An empty field
+      // still starts Apple or Google. The labels stay Apple and Google
+      // because the review notes tell the reviewer to tap them.
+      if (isAppReviewDemoEmail(email)) {
+        await startEmailCode();
+        return;
+      }
+      setError(null);
+      setBusy(provider);
+      try {
+        const session = await signInWithProvider(provider);
+        // null = the user dismissed the browser. Not an error; stay put.
+        if (session) finish();
+      } catch (e) {
+        setError(authErrorMessage(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [email, finish, startEmailCode],
+  );
+
+  const onSendCode = startEmailCode;
 
   const onVerify = useCallback(async () => {
     setError(null);
@@ -224,10 +238,17 @@ export function SignInScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.kicker}>Check your email</Text>
-                <Text style={styles.body}>
-                  We sent a {EMAIL_OTP_LENGTH}-digit code to {email.trim()}.
+                <Text style={styles.kicker}>
+                  {isAppReviewDemoEmail(email) ? 'Enter your code' : 'Check your email'}
                 </Text>
+                <Text style={styles.body}>
+                  {isAppReviewDemoEmail(email)
+                    ? appReviewCodePrompt(EMAIL_OTP_LENGTH)
+                    : `We sent a ${EMAIL_OTP_LENGTH}-digit code to ${email.trim()}.`}
+                </Text>
+                {isAppReviewDemoEmail(email) ? (
+                  <Text style={styles.body}>{email.trim()}</Text>
+                ) : null}
                 <TextInput
                   accessibilityLabel={`${EMAIL_OTP_LENGTH}-digit sign-in code`}
                   style={[styles.input, styles.codeInput]}
@@ -266,15 +287,17 @@ export function SignInScreen() {
                   )}
                 </Pressable>
 
-                <Pressable
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Send a new code"
-                  onPress={onSendCode}
-                  disabled={busy != null}
-                >
-                  <Text style={styles.linkText}>Send a new code</Text>
-                </Pressable>
+                {isAppReviewDemoEmail(email) ? null : (
+                  <Pressable
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send a new code"
+                    onPress={onSendCode}
+                    disabled={busy != null}
+                  >
+                    <Text style={styles.linkText}>Send a new code</Text>
+                  </Pressable>
+                )}
                 <Pressable
                   hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                   accessibilityRole="button"
