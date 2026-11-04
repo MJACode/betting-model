@@ -117,6 +117,7 @@ def test_my_models_screens_do_not_mention_a_left_out_count_or_a_price_estimate()
         ROOT / "mobile/src/screens/ByomBuilderScreen.tsx",
         ROOT / "mobile/src/screens/ByomEditScreen.tsx",
         ROOT / "mobile/src/screens/ByomDetailScreen.tsx",
+        ROOT / "mobile/src/screens/ByomBetsScreen.tsx",
         ROOT / "mobile/src/screens/ModelsScreen.tsx",
     ]
     files.extend((ROOT / "mobile/src/components/byom").glob("*.tsx"))
@@ -136,7 +137,9 @@ def test_my_models_screens_do_not_mention_a_left_out_count_or_a_price_estimate()
     note = (ROOT / "mobile/src/components/byom/ByomUnitsNote.tsx").read_text(encoding="utf-8")
     record = (ROOT / "mobile/src/lib/byomRecord.ts").read_text(encoding="utf-8")
     assert "BYOM_UNITS_COPY" in note
-    assert "u = units. Each bet is 1u to win at the DraftKings price at game start" in record
+    # Matt, 2026-11-04: the main models' staking, and the official line.
+    assert "u = units. Each bet is 1u to win, risking no more than 3u" in record
+    assert "official line" in record
     models = (ROOT / "mobile/src/screens/ModelsScreen.tsx").read_text(encoding="utf-8")
     assert "My models" in models
     assert "ByomModelList" in models

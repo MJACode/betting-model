@@ -453,6 +453,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # No spread, price, or line filter. After master's list. The
     # posted-stake pair stays last and adjacent.
     "byom_backtest_rpc_2026_10_16.sql",
+    # 2026-11-04 (Matt): BYOM official pick (first match) beside the close,
+    # main-model staking (1u to win, risk capped at 3u), and the bet list.
+    # Creates byom_official_legs, byom_legs/record/bets, and replaces
+    # byom_backtest with its closing rows (same columns). Returns before any
+    # DDL once the table, grants, policy and five marked functions exist.
+    # Does not touch picks or the record views.
+    "byom_official_legs_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

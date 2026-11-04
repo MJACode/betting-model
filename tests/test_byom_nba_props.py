@@ -188,7 +188,13 @@ def test_a_counting_market_with_no_line_is_not_a_fact():
     assert facts == []
 
 
-def test_scratch_nba_backtest_is_its_own_sport_and_save_stores_it():
+@pytest.mark.parametrize("later", [
+    (),
+    # 2026-11-04: byom_backtest becomes the closing rows of byom_legs.
+    # The same answers must come back.
+    ("byom_official_legs_2026_11_04.sql",),
+])
+def test_scratch_nba_backtest_is_its_own_sport_and_save_stores_it(later):
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
 
@@ -227,7 +233,7 @@ def test_scratch_nba_backtest_is_its_own_sport_and_save_stores_it():
             "byom_saved_models_2026_10_16.sql",
             "byom_prop_side_2026_10_28.sql",
             SQL_NAME,
-        )
+        ) + tuple(later)
         for name in names:
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""

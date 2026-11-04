@@ -639,6 +639,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # carries its own GRANT). SECURITY INVOKER over custom_model_picks.
     "custom_model_backtest_posted",
     "byom_backtest",
+    # BYOM official pick beside the close, and the bet list (Matt, 2026-11-04;
+    # data/migrations/byom_official_legs_2026_11_04.sql, in ACTIVE_MIGRATIONS,
+    # carries its own GRANT). SECURITY INVOKER over the BYOM facts tables.
+    "byom_record",
+    "byom_bets",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",
     "feedback_messages_for_thread",

@@ -32,7 +32,7 @@ import { useByomRecord } from '@/hooks/useByomRecord';
 import { useByomSeason } from '@/hooks/useByomSeason';
 import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
-import { fetchByomModels, saveByomModel } from '@/lib/byom';
+import { fetchByomModels, saveByomModel, byomBetsAvailable } from '@/lib/byom';
 import { friendlyCause, errorText, isAbortError } from '@/lib/errors';
 import {
   betTypeLabel,
@@ -339,6 +339,10 @@ export function ByomBuilderScreen() {
               error={preview.error}
               onRetry={() => void preview.reload()}
               showsUnits={showsUnits(filters)}
+              closeRecord={preview.closeRecord}
+              onShowBets={byomBetsAvailable() && preview.record != null && preview.record.bets > 0
+                ? () => navigation.navigate('ByomBets', { filters, sport, title: 'Bets that match' })
+                : undefined}
             />
           ) : (
             <ByomPreviewCard
@@ -348,6 +352,10 @@ export function ByomBuilderScreen() {
               onRetry={() => void preview.reload()}
               showsUnits={showsUnits(filters)}
               emptyLabel={byomEmptyLabel(sport, facts.status, filters)}
+              closeRecord={preview.closeRecord}
+              onShowBets={byomBetsAvailable() && preview.record != null && preview.record.bets > 0
+                ? () => navigation.navigate('ByomBets', { filters, sport, title: 'Bets that match' })
+                : undefined}
             />
           )}
           <ByomUnitsNote />

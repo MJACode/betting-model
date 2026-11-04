@@ -501,6 +501,12 @@ export type RootStackParamList = {
   ByomBuilder: { sport?: 'NFL' | 'NBA' } | undefined;
   ByomEdit: { modelId: string };
   ByomDetail: { modelId: string };
+  /** The bets one BYOM record counts. Filters are the model's, unsaved or saved. */
+  ByomBets: {
+    filters: import('@/lib/byomFilters').ByomFilters;
+    sport: 'NFL' | 'NBA';
+    title?: string;
+  };
   // playerType is MLB-only (it picks batter vs pitcher chips); every other
   // sport's chips come from the sport alone.
   PlayerStats: {

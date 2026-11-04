@@ -20,7 +20,13 @@ from byom.constants import (
     SPORT,
 )
 from byom.game_facts import parse_date, parse_game_id
-from byom.prop_facts import MARKET_COLUMNS, NBA_MARKET_COLUMNS, facts_for_game
+from byom.prop_facts import (
+    MARKET_COLUMNS,
+    NBA_MARKET_COLUMNS,
+    _pre_start as _prop_pre_start,
+    facts_for_game,
+)
+from byom.official import RoleClock, prop_official_legs
 
 # Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
 # and the cast then aborts the game. A value that fails this pattern is
@@ -184,8 +190,35 @@ def facts_for_season(conn, season: int,
             keys.append(str(game["game_id"]))
         quotes = _quotes_for_game(conn, game["game_id"], sport)
         log_rows = _log_for_game(conn, game["game_id"], sport)
-        facts.extend(facts_for_game(game, quotes, log_rows))
+        game_facts = facts_for_game(game, quotes, log_rows)
+        if sport == "NFL" and game_facts:
+            _attach_official(conn, game, quotes, game_facts)
+        facts.extend(game_facts)
     return facts, keys
+
+
+def _attach_official(conn, game: dict, quotes: list[dict],
+                     game_facts: list[dict]) -> None:
+    """Official (first-match) legs on each fact, under `_official`.
+
+    The role clock is the game's DraftKings spread history, read with
+    the same query the game builder uses. Not a column.
+    """
+    from byom.game_facts import _pre_start as _game_pre_start
+    from byom.load import _dk_quotes
+
+    clock = RoleClock(_game_pre_start(_dk_quotes(conn, game["game_id"], "NFL"),
+                                      "spreads"))
+    pools: dict[tuple, list[dict]] = {}
+    for quote in quotes:
+        row = _prop_pre_start(quote)
+        if row is None or row.get("point") is None:
+            continue
+        pools.setdefault((row["player_key"], row["market"]), []).append(row)
+    for fact in game_facts:
+        fact["_official"] = prop_official_legs(
+            fact, pools.get((fact["player_key"], fact["market"]), []), clock,
+            game.get("home_team"), game.get("away_team"))
 
 
 def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:
@@ -232,9 +265,15 @@ def build_season(conn, season: int, apply: bool = False,
             "skipped": "before player_prop_odds history",
         }
     facts, keys = facts_for_season(conn, season, game_ids=game_ids, sport=sport)
+    legs = [leg for fact in facts for leg in fact.get("_official") or ()]
     written = _upsert(conn, facts, keys) if apply else 0
+    official = 0
+    if apply and sport == "NFL":
+        from byom.load import write_official_legs
+        official = write_official_legs(conn, keys, legs, props=True)
     return {
         "season": season, "sport": sport, "facts": len(facts), "written": written,
+        "official_legs": len(legs), "official_written": official,
         "canonical_keys": keys,
     }
 

@@ -25,6 +25,7 @@ import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
 import { BuiltInModelDetailScreen } from '@/screens/BuiltInModelDetailScreen';
 import { ByomBuilderScreen } from '@/screens/ByomBuilderScreen';
 import { ByomEditScreen } from '@/screens/ByomEditScreen';
+import { ByomBetsScreen } from '@/screens/ByomBetsScreen';
 import { ByomDetailScreen } from '@/screens/ByomDetailScreen';
 import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
@@ -143,6 +144,7 @@ const GatedBuiltInModel = withPremiumGate(BuiltInModelDetailScreen, 'Model', fal
 const GatedByomBuilder = withPremiumGate(ByomBuilderScreen, 'Model', false);
 const GatedByomEdit = withPremiumGate(ByomEditScreen, 'Model', false);
 const GatedByomDetail = withPremiumGate(ByomDetailScreen, 'Model', false);
+const GatedByomBets = withPremiumGate(ByomBetsScreen, 'Model', false);
 const GatedPlayerStats = withPremiumGate(PlayerStatsScreen, 'Stats', false);
 const GatedTeamStats = withPremiumGate(TeamStatsScreen, 'Stats', false);
 const GatedSavedParlays = withPremiumGate(SavedParlaysScreen, 'Parlays', false);
@@ -381,6 +383,11 @@ export default function App() {
             name="ByomDetail"
             component={GatedByomDetail}
             options={{ title: 'Model', headerBackTitle: 'My models' }}
+          />
+          <Stack.Screen
+            name="ByomBets"
+            component={GatedByomBets}
+            options={{ title: 'Bets', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="PlayerStats"

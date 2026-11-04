@@ -1,7 +1,8 @@
 /**
  * Pure BYOM record math. No network. Screens rank and preview from this.
  *
- * Units are the backtest's 1u-to-win profit. ROI needs the amount risked.
+ * Units are 1u to win, risk capped at 3u (the main models' stake_for).
+ * ROI needs the amount risked, which byom_record returns.
  * This file does not estimate a price, and it does not read a count of
  * bets the backtest left out.
  */
@@ -29,7 +30,7 @@ export type ByomSport = 'NFL' | 'NBA';
 export const BYOM_MODEL_CAP = 25;
 
 export const BYOM_UNITS_COPY =
-  'u = units. Each bet is 1u to win at the DraftKings price at game start (or the closest DraftKings price). A push returns the stake. Win/loss only, no line locks.';
+  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. NFL bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before kickoff. A push returns the stake.';
 
 export type ByomSeasonScope = 'all' | 'current';
 

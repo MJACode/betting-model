@@ -649,6 +649,39 @@ def run_job_queue() -> None:
         log.exception("ERROR job-queue crashed")
 
 
+def run_byom_nfl_refresh() -> None:
+    """Queue today's Build Your Own Model NFL refresh (byom_refresh, apply true).
+
+    Matt, 2026-11-04: the builder showed a frozen record because nothing
+    rebuilt byom_game_facts after 2026-10-24. The job queue runs it on its
+    next tick, in-process, so the build holds the queue's one-job lock and a
+    long rebuild never overlaps another job. One row per ET day: the dedupe
+    key carries the date, so a restart or a second tick queues nothing.
+    10:41am ET because nfl_player_game_log lands about 6am ET the morning
+    after a game (measured 2026-11-04: first rows 06:02 and 06:24 ET), and
+    the refresh window reaches back one day, so yesterday's props grade on
+    the log, not as missing_log. Writes only the BYOM fact tables. Never picks.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        from data.db import get_connection
+        from tracking.job_queue import enqueue
+        today = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
+        conn = get_connection()
+        try:
+            job_id = enqueue(
+                conn, "byom_refresh", {"sport": "NFL", "apply": True},
+                requested_by="scheduler",
+                note="Daily BYOM NFL refresh (Matt, 2026-11-04).",
+                dedupe_key=f"byom-nfl-refresh-{today}")
+        finally:
+            conn.close()
+        log.info("BYOM NFL refresh: queued %s", job_id)
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR BYOM NFL refresh enqueue crashed")
+
+
 def run_model_quality_job() -> None:
     """Betting-quality monitor, in-process like the threshold review.
 
@@ -806,7 +839,10 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "ncaab_moneyline_first_post",
                   # Writes NCAAB first-half spread and total picks through
                   # their own cards, on its own first-half fetches.
-                  "ncaab_first_half_window"}
+                  "ncaab_first_half_window",
+                  # Queues the daily BYOM NFL refresh onto job_queue, which
+                  # is also a pipeline job.
+                  "byom_nfl_refresh"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -2291,6 +2327,15 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=6, minute=0, timezone=TIMEZONE),
         id="daily_pipeline",
         name="Daily full pipeline (6:00am ET)",
+    )
+
+    # Build Your Own Model NFL refresh — queued daily at 10:41am ET
+    # (run_byom_nfl_refresh). Matt, 2026-11-04: "turn it on".
+    sched.add_job(
+        run_byom_nfl_refresh,
+        CronTrigger(hour=10, minute=41, timezone=TIMEZONE),
+        id="byom_nfl_refresh",
+        name="BYOM NFL refresh (queued daily 10:41am ET)",
     )
 
     # Heartbeat watchdog — every 15 minutes, around the clock.

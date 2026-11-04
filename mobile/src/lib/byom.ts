@@ -4,8 +4,15 @@
  * byom_backtest reads the facts tables. The saved-model RPCs need a
  * signed-in session. This file does not turn sign-in on and it does not
  * render a screen. A result is a win, a loss, a push, or a tie. Units
- * are 1u to win at the stored DraftKings price. There is no recommended
- * stake. A count of bets the function left out is not parsed.
+ * are the main models' staking: 1u to win, risk capped at 3u. There is
+ * no recommended stake. A count of bets the function left out is not
+ * parsed.
+ *
+ * Two timings (Matt, 2026-11-04). `official` is the first DraftKings
+ * quote where the bet fit the model's rules: the line and price it
+ * became a pick at. `close` is the last DraftKings quote before kickoff.
+ * byom_record returns both, byom_bets lists one. NFL only has official
+ * rows; an NBA model is graded at the close.
  *
  * LINE_BASIS is the label stored on each fact row. The backtest RPC
  * returns season totals, not that label per game. A screen shows this
@@ -219,6 +226,163 @@ export async function fetchByomBacktest(
   });
   if (error) throw error;
   return asRows(data).map(parseBacktestRow);
+}
+
+export type ByomTiming = 'official' | 'close';
+
+export interface ByomTimedRows {
+  /** The timing the screen leads with: official on NFL, close otherwise. */
+  headline: ByomTiming;
+  official: ByomBacktestRow[];
+  close: ByomBacktestRow[];
+}
+
+function isMissingFunction(error: { code?: unknown; message?: unknown }): boolean {
+  const code = typeof error.code === 'string' ? error.code : '';
+  const message = typeof error.message === 'string' ? error.message : '';
+  return code === 'PGRST202' || /could not find the function/i.test(message);
+}
+
+/** True once byom_record answered "no such function" in this process. */
+let recordMissing = false;
+
+/**
+ * One season, both timings. A database without byom_record (the
+ * migration has not landed yet) falls back to byom_backtest, which is
+ * the close only, so an over-the-air build never shows an error for it.
+ */
+export async function fetchByomRecord(
+  season: number | null,
+  filters?: ByomFilters,
+  sport: ByomSport = 'NFL',
+): Promise<{ official: ByomBacktestRow[]; close: ByomBacktestRow[] }> {
+  if (!recordMissing) {
+    const { data, error } = await supabase.rpc('byom_record', {
+      p_season: season,
+      p_filters: rpcFilters(filters, sport),
+    });
+    if (!error) {
+      const official: ByomBacktestRow[] = [];
+      const close: ByomBacktestRow[] = [];
+      for (const row of asRows(data)) {
+        (text(row.timing) === 'official' ? official : close).push(parseBacktestRow(row));
+      }
+      return { official, close };
+    }
+    if (!isMissingFunction(error)) throw error;
+    recordMissing = true;
+  }
+  return { official: [], close: await fetchByomBacktest(season, filters, sport) };
+}
+
+/**
+ * byom_bets ships in the same migration as byom_record. Until the server
+ * has it, no screen offers the bet list (UX review, 2026-11-04).
+ */
+export function byomBetsAvailable(): boolean {
+  return !recordMissing;
+}
+
+/** Official leads on NFL once the server has it. Everything else is the close. */
+export function headlineTiming(sport: ByomSport): ByomTiming {
+  return sport === 'NFL' && !recordMissing ? 'official' : 'close';
+}
+
+/** `fetchByomScopedBacktest`'s seasons, both timings. */
+export async function fetchByomScopedRecord(
+  scope: ByomSeasonScope,
+  filters?: ByomFilters,
+  now: Date = new Date(),
+  sport: ByomSport = 'NFL',
+): Promise<ByomTimedRows> {
+  const parsed = byomFilters(filters);
+  const seasons: (number | null)[] = scope === 'current'
+    ? [null]
+    : sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+  const groups = await pool(seasons, 4, (season) => fetchByomRecord(season, parsed, sport));
+  return {
+    headline: headlineTiming(sport),
+    official: groups.flatMap((group) => group.official),
+    close: groups.flatMap((group) => group.close),
+  };
+}
+
+/** One counted bet. `label` is built by the server from the stored fields. */
+export interface ByomBet {
+  key: string;
+  commence_time: string;
+  market: string;
+  leg_side: string;
+  label: string;
+  home_team: string;
+  away_team: string;
+  player_name: string | null;
+  price: number | null;
+  result: 'win' | 'loss' | 'push' | 'tie' | '';
+  units: number | null;
+  /** When the bet became official. Null on a closing-line row. */
+  locked_at: string | null;
+}
+
+export interface ByomBetList {
+  bets: ByomBet[];
+  /** Every counted bet, including ones past a season's 500-row page. */
+  total: number;
+  /** Seasons whose count passed the 500-row page. Each shows its newest 500. */
+  cappedSeasons: number;
+}
+
+export function parseByomBet(value: unknown): ByomBet {
+  const row = asRecord(value) ?? {};
+  const result = text(row.result);
+  return {
+    key: [text(row.canonical_key), text(row.market), text(row.player_name ?? ''),
+      text(row.leg_side)].join('|'),
+    commence_time: text(row.commence_time),
+    market: text(row.market),
+    leg_side: text(row.leg_side),
+    label: text(row.label),
+    home_team: text(row.home_team),
+    away_team: text(row.away_team),
+    player_name: text(row.player_name) || null,
+    price: optionalNum(row, 'price'),
+    result: result === 'win' || result === 'loss' || result === 'push' || result === 'tie'
+      ? result : '',
+    units: optionalNum(row, 'units'),
+    locked_at: text(row.locked_at) || null,
+  };
+}
+
+/** The bets one timing counts, newest first. One call per season in scope. */
+export async function fetchByomScopedBets(
+  scope: ByomSeasonScope,
+  filters: ByomFilters,
+  timing: ByomTiming,
+  now: Date = new Date(),
+  sport: ByomSport = 'NFL',
+): Promise<ByomBetList> {
+  const parsed = byomFilters(filters);
+  const seasons: (number | null)[] = scope === 'current'
+    ? [null]
+    : (sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now)).slice().reverse();
+  const pages = await pool(seasons, 4, async (season) => {
+    const { data, error } = await supabase.rpc('byom_bets', {
+      p_season: season,
+      p_filters: rpcFilters(parsed, sport),
+      p_timing: timing,
+    });
+    if (error) throw error;
+    const rows = asRows(data);
+    const total = rows.length ? num(rows[0].total_bets) : 0;
+    return { bets: rows.map(parseByomBet), total, capped: total > rows.length };
+  });
+  const bets = pages.flatMap((page) => page.bets);
+  bets.sort((a, b) => (a.commence_time < b.commence_time ? 1 : a.commence_time > b.commence_time ? -1 : 0));
+  return {
+    bets,
+    total: pages.reduce((sum, page) => sum + page.total, 0),
+    cappedSeasons: pages.filter((page) => page.capped).length,
+  };
 }
 
 /** Run `fn` over `items` with at most `limit` calls in flight. */

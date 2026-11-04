@@ -55,8 +55,9 @@ def test_the_migration_is_hand_applied_and_the_refresh_stays_off():
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     refresh = next(row for row in declared if row["job_type"] == "byom_refresh")
-    assert refresh["enabled"] is False
-    assert refresh["args"]["apply"] is False
+    # Matt, 2026-11-04: the refresh is on (tests/test_byom_refresh.py).
+    assert refresh["enabled"] is True
+    assert refresh["args"]["apply"] is True
     assert FALLBACK_NAME not in ACTIVE_MIGRATIONS
     assert "byom_dk_price_fallback" in FALLBACK
     assert "CREATE OR REPLACE FUNCTION public.byom_backtest" in FALLBACK
