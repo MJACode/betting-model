@@ -476,3 +476,77 @@ is counted. The placebo re-prices through the same map.
 
 **Not re-checked:** the minutes, the rate and the factor are unchanged. Section 13's counts stand for rebounds and
 assists; section 15 repeats every count under the change.
+
+## 15. Counts before grading, under section 14 (2026-11-03)
+
+Counted by `python -m scripts.nba_s_q1props --smoke` on the lab at `f3181352`, before any cell was graded, under the
+same terms as section 13. Settlement, the row ledger, the books, the propositions, the minutes, the rate, the factor and
+alpha are identical to section 13, and so is every rebounds and assists count below.
+
+**The points line map's check, on 2023-24 alone** (fitted on the season's first half of dates, read on the second half,
+10,704 player-games):
+
+| Line | 1.5 | 2.5 | 3.5 | 4.5 | 5.5 | 6.5 |
+|---|---|---|---|---|---|---|
+| Actual share over | 0.680 | 0.498 | 0.384 | 0.287 | 0.208 | 0.146 |
+| Line map | 0.667 | 0.486 | 0.375 | 0.286 | 0.211 | 0.145 |
+| Negative binomial (fitted on the same first half) | 0.587 | 0.436 | 0.324 | 0.243 | 0.184 | 0.140 |
+
+The map is within 0.013 of actual at every line; the negative binomial is 6 to 9 points low at 1.5 to 3.5. Both priced
+seasons' maps hold all 16 lines (0.5 to 15.5), so no offer falls back to the negative binomial (0 coherent, 0 one-sided).
+
+**Bets each cell would place** (2024-25 + 2025-26 = pooled; no result read). Only the points rows moved:
+
+| Market | Side | EV ≥ 0.02 | EV ≥ 0.04 | EV ≥ 0.06 |
+|---|---|---|---|---|
+| points | over | 2,136 + 1,679 = 3,815 | 1,770 + 1,361 = 3,131 | 1,435 + 1,089 = 2,524 |
+| points | under | 3,289 + 3,305 = 6,594 | 2,833 + 2,878 = 5,711 | 2,428 + 2,489 = 4,917 |
+| rebounds | over | 1,547 + 490 = 2,037 | 1,278 + 415 = 1,693 | 1,019 + 345 = 1,364 |
+| rebounds | under | 2,253 + 709 = 2,962 | 1,864 + 592 = 2,456 | 1,541 + 490 = 2,031 |
+| assists | over | 2,365 + 607 = 2,972 | 2,010 + 524 = 2,534 | 1,714 + 445 = 2,159 |
+| assists | under | 1,749 + 551 = 2,300 | 1,455 + 459 = 1,914 | 1,212 + 379 = 1,591 |
+
+Every cell has 200 or more pooled bets and 30 or more in each season, so none is "too few games to tell" by count.
+Controls at the lowest cut: Hard Rock alone, points 1,968 over and 3,003 under; FanDuel alone, points 1,571 over and
+3,945 under; the one-sided Hard Rock overs, points 3,900, rebounds 2,838, assists 3,890.
+
+**The placebo on the real data.** The identity permutation returned the real bets in every group; no proposition is
+alone. Share of a run's bets that are not real bets, three runs: points over 0.74 to 0.81, **points under 0.57 to 0.66
+(no longer low)**, rebounds 0.71 to 0.85, assists 0.66 to 0.80. No cell is under 0.5.
+
+**Bets at the lowest cut by the reallocation r** (beside each graded cell, never a bar): points over 770 / 1,814 / 1,231
+at r under 1.1 / 1.1 to 1.3 / 1.3 and up; points under 3,445 / 2,479 / 670; rebounds over 276 / 960 / 801, under
+1,712 / 1,040 / 210; assists over 738 / 1,440 / 794, under 1,102 / 897 / 301. The overs sit where teammates are out,
+which is where the proportional reallocation is weakest (5.2's stated limit).
+
+**Overlap with the live full-game prop models** (lowest cut): on a player and game either model bet, 0.81 to 0.95 in
+every cell. Same stat, same side: rebounds under 0.69 to 0.73, points under 0.15 to 0.16, assists under 0.16 to 0.18,
+every over 0.00.
+
+**Prices each cell would lay:** points over −200 to +184 (median −105), points under −199 to +165 (median −112 to
+−110); the rebounds and assists prices are section 13's.
+
+**Each rule watched failing.** `tests/test_nba_s_q1props.py` holds 24 tests. Each of 32 rules was broken once in the
+lab, its test run, and the lab restored (scratch `explore/mutate.py`): period 1 only; an unmapped id never matching;
+the per-stat exclusion; the period-score check; the court-time tolerance; the price limit; the line ceiling; coherence;
+the window; the void; a left-out game dropping; minutes read strictly before the date; the 10-game pool; teammates'
+status moving the team's minutes; a player's own status never scaling his own minutes; the 12-minute cap; the prior
+shrinking to the league; K by least deviance; the 30-minute report lag; each offer at its own book's line; the placebo
+staying in its group; the placebo's identity; thin dates joining; settlement on the stat; the planted edge showing;
+`--full` refusing; the strict season bar; the line map's monotonicity; its own lines only; points priced through it;
+and both walk-forward fits never reading their own season. **31 failed as they should. One passed with its rule broken:**
+the own-line test read each offer's line back from the offer, so a break that moved every line moved the expectation
+too. The test now asserts each book's quoted line, and fails with that break (`9460b9d6`).
+
+**Time and memory.** One placebo run across a group's three cuts took 0.21 to 0.27 seconds. The projected `--full` is
+5.3 minutes of cells plus 1.9 minutes of loading; peak memory 2.1 GB, plus at most 0.04 GB for one market's 200 runs.
+The smoke run took 3.0 minutes.
+
+**The graded run, for the owner:**
+
+    NBA_RESEARCH_CACHE=C:/Users/micha/documents/bm-nba-q1trend/data/local/nba NBA_GAME2_GO=1 \
+        NBA_GAME2_RESULTS=C:/Users/micha/AppData/Local/Temp/nba_s/q1props/results \
+        NBA_GAME2_BETS=C:/Users/micha/AppData/Local/Temp/nba_s/q1props/results/bets \
+        PYTHONPATH=. PYTHONIOENCODING=utf-8 python -W ignore -m scripts.nba_s_q1props --full
+    PYTHONPATH=. python -m scripts.nba_game2_verdict --results C:/Users/micha/AppData/Local/Temp/nba_s/q1props/results --house5
+    PYTHONPATH=. python -m scripts.nba_s_q1props --verdict C:/Users/micha/AppData/Local/Temp/nba_s/q1props/results
