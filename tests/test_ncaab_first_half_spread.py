@@ -309,14 +309,20 @@ def test_the_settler_routes_a_first_half_spread_through_the_first_half():
     assert "first_half_points(conn, game_id, home_score, away_score)" in body
 
 
-def test_a_first_half_spread_close_is_read_from_close_rows_only():
-    """Its last pre-tip row is the decision fetch itself; read as the close it
-    would grade every pick at 0.0, for good."""
+def test_an_ncaab_first_half_close_is_a_later_pre_tip_row():
+    """The feed files every pull 'open'. NBA first half still wants a 'close' row.
+    The decision pull is not the close."""
     src = (ROOT / "tracking" / "paper_tracker.py").read_text(encoding="utf-8")
-    assert 'market in ("totals_h1", "spreads_h1")' in src[src.index("snapshot_filter = ("):][:400]
+    close_only = src[src.index("def _close_rows_only"):src.index("def _real_close")]
+    assert "team_totals" in close_only
+    assert "_ncaab_first_half_market" in close_only
+    assert "snapshot_at::timestamptz >" in src[src.index("def _closing_odds"):src.index("def _sharp_close_book")]
     sql = (ROOT / "data/migrations/clv_standard_v2_2026_10_14.sql").read_text(encoding="utf-8")
-    assert sql.count("s.game_market IN ('totals_h1', 'spreads_h1'))") == 3
-    assert sql.count("s.game_market NOT IN ('totals_h1', 'spreads_h1')") == 3
+    assert sql.count(
+        "s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
+    assert sql.count("o.snapshot_at::timestamptz > s.created_at") == 3
+    assert sql.count(
+        "s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
 
 
 # ── the card's rows ──────────────────────────────────────────────────────────
@@ -360,9 +366,11 @@ def test_a_bet_at_draftkings_has_no_best_book():
 def test_the_price_floor_and_the_ev_floor_refuse_a_bet():
     from scripts.ncaab_first_half_spread_card import pick_rows
     rows, refused = pick_rows([_decision(ap=-250, p=0.75, edge=0.04)], GAMES, 1000.0)
-    assert not rows and refused["g"].startswith("below_price_floor")
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and refused["g"].startswith("below_price_floor")
     rows, refused = pick_rows([_decision(ap=+100, p=0.51, edge=0.01)], GAMES, 1000.0)
-    assert not rows and "g" in refused
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and "g" in refused
 
 
 def test_the_card_bets_only_at_books_config_still_lists(monkeypatch):
@@ -412,3 +420,19 @@ def test_the_scheduler_runs_it_every_minute_on_the_pipeline_service():
     body = src[i:src.index("\ndef ", i + 10)]
     # the bets the card wrote go out before a failed step raises
     assert body.index("_publish_new_signals") < body.index("raise RuntimeError")
+
+
+def test_a_game_priced_below_the_cut_is_a_none_row_and_one_with_no_quote_is_no_row():
+    """The All board shows every scored game (Matt, 2026-11-04): a priced game
+    under the cut is written as NONE at the same book, side and number with no
+    stake. Nothing publishes or settles a NONE row (they select BETs)."""
+    from scripts.ncaab_first_half_spread_card import pick_rows
+    d = _decision(edge=0.01)
+    d.status = "below_cut"
+    (r,), refused = pick_rows([d], GAMES, 1000.0)
+    assert not refused
+    assert (r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) == ("NONE", 0.0, 0.0)
+    assert (r["pick_side"], r["scored_line"], r["decision_book"]) == ("away", -3.5, "fanduel")
+    assert r["pick_label"] == "Duke @ Kansas — First Half Duke +3.5"
+    unpriced = fh.Decision("g", "no_quote", "x")
+    assert pick_rows([unpriced], GAMES, 1000.0) == ([], {})

@@ -333,10 +333,12 @@ def test_a_bet_on_draftkings_line_carries_draftkings_price_as_the_reference():
 def test_a_price_past_the_floor_or_an_ev_under_the_floor_is_refused():
     import scripts.ncaab_spread_card as card
     rows, refused = card.pick_rows([_bet(price=-210.0, prob=0.71)], GAMES, 1000.0)
-    assert not rows and refused["g"].startswith("below_price_floor")
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and refused["g"].startswith("below_price_floor")
     # edge 0.031 at -200: EV = 0.031 x 1.5 = 0.0465, under the 0.05 floor
     rows, refused = card.pick_rows([_bet(price=-200.0, prob=2 / 3 + 0.031)], GAMES, 1000.0)
-    assert not rows and "g" in refused
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and "g" in refused
 
 
 # ── the run ──────────────────────────────────────────────────────────────────

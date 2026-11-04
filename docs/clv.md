@@ -28,8 +28,15 @@ clv_pp = (close − taken) × 100
 clv_pct = (taken_decimal / close_decimal − 1) × 100
 ```
 
-Neither side is de-vigged. A beat is `clv_pct > 0`. Equal prices are 0 and
-are not a beat. `clv_beat_close` is that comparison, and it is NULL when
+Neither side is de-vigged. `clv_pct` is stored at 2 decimal places.
+A beat is above that grain (`clv_pct >= 0.01`). A loss is below it.
+Equal prices are 0.00, and anything that lands inside half a hundredth
+of a percent is that zero: a **push**. A push is not a beat and not a
+loss. The headline beat rate is beats / (beats + losses). Pushes are
+left out of the denominator and shown beside it (`50% beat close (1/2, 7 push)`;
+the push clause is omitted when there are none; an all-push set is
+`0 measured, N push` and is not divided). The average still includes
+them as 0. `clv_beat_close` is true only for a beat, and it is NULL when
 `clv_pct` is NULL.
 
 If that book has no pre-start snapshot on the same line, both are NULL and
@@ -85,6 +92,15 @@ Game rows require `snapshot_type <> 'in_play'` and
 still bounded by the start. A pick with `created_at` after first pitch is
 not measured.
 
+NCAAB first-half totals and spreads (`totals_h1`, `spreads_h1`) are not the
+NBA first-half shape. `data/ingestors/ncaab_first_half_odds.py` files every
+pull as `open`; it does not write a `close` row. The close is that bet book's
+newest pre-tip row on the same line, and only a row pulled strictly after the
+pick was created. The decision pull is the price taken. No such row leaves the
+pick unmeasured (`clv_method` stays unset). NBA first-half markets and team
+totals still read `snapshot_type = 'close'` only. A null close does not mark
+a pick measured.
+
 ## Worked examples
 
 Pinned by `tests/test_clv_standard_v2.py` and `tests/test_clv_math.py`.
@@ -115,10 +131,14 @@ close was better than the price we took, which is the negative market edge.
 ## Where it shows
 
 `v_public_track_record` averages `standard_v2` only. `clv_settled` /
-`clv_beat` / `avg_clv_pct` are the same-book headline. `clv_game_*` and
-`clv_prop_*` split game lines from props. `market_clv_*` is the Pinnacle
-column. The app's beat-the-close figure is the same-book rate. A row is
-shown as a percent only when `clv_method` is `standard_v2`.
+`clv_beat` / `clv_push` / `avg_clv_pct` are the same-book headline.
+`clv_settled` still counts every measured close, including a push, and
+that is the weight on the average. The beat rate is
+`clv_beat / (clv_settled - clv_push)`. `clv_game_*` and `clv_prop_*`
+split game lines from props, pushes included. `market_clv_*` is the
+Pinnacle column and is not the headline rate. The app's beat-the-close
+figure is the same-book rate. A row is shown as a percent only when
+`clv_method` is `standard_v2`.
 
 `opening_signals.clv_pct` stores the same-book raw **probability points**
 (DraftKings only) from this change forward. It is a shadow track. Rows
@@ -129,4 +149,8 @@ and whose method is not yet `standard_v2`. A row with a measurable close or
 line move is stamped and captured. A row that cannot be measured, and whose
 game started more than six hours ago or that already carried an older
 stamp, is stamped `standard_v2` with NULLs so the old number leaves the
-average. A recent never-captured miss is left for the Python backfill.
+average, except an NCAAB first-half total or spread: that row stays
+unmeasured. A recent never-captured miss is left for the Python backfill.
+`scripts/recompute_empty_clv.py` recomputes rows already stamped
+`standard_v2` with every closing field empty. It is a dry run until
+`--apply`.

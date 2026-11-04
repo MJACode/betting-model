@@ -45,20 +45,29 @@ See `docs/social_posts.md`.
 **Alternate spreads and totals (2026-10-29, Matt approved the cost; every
 pass since the same day, option B).** Every refresh pass's odds step buys
 alternates for games starting in the next 24 hours
-(`ALT_GAME_LINES_WINDOW_HOURS`, default 24; `FETCH_ALT_GAME_LINES=0` turns
-it off) and refreshes `alt_game_lines` for them, one ledger row per sport per
-pass (`endpoint = 'pass'`). The daily full pipeline's Step 2-alt (`--step alt-game-lines`,
+(`ALT_GAME_LINES_WINDOW_HOURS`, default 24) and refreshes `alt_game_lines`
+for them, one ledger row per sport per pass (`endpoint = 'pass'`). The
+daily full pipeline's Step 2-alt (`--step alt-game-lines`,
 `data/ingestors/alt_game_lines.py`) makes one per-event call per game starting
 in the next 3 days, for NFL, NCAAF, NBA, NHL, MLB, WNBA and NCAAB, and stores
 every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
 pruner) and the current ladder in `alt_game_lines`, which the betslip's
 game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
 game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
-one row per call. Kill switch: `ALT_GAME_LINES_ENABLED=0` (default `1`) buys
-nothing, including the event lists. `ALT_GAME_LINES_MAX_GAMES`, unset by
-default, caps event-odds calls for that process when set to a whole number;
-anything else buys nothing and fails the step. Neither flag is a credit
-budget. The app hides that ladder once `games.commence_time` has passed.
+one row per call. Both paths call `buy_allowance()`. Kill switch:
+`ALT_GAME_LINES_ENABLED=0` (default `1`) buys nothing on the daily run,
+including the event lists, and nothing on the pass. `ALT_GAME_LINES_MAX_GAMES`,
+unset by default, caps event-odds calls for that process (sport order, then
+game id) when set to a whole number; anything else buys nothing on both
+paths and fails the daily step. The pass logs that and still stores main
+lines. `FETCH_ALT_GAME_LINES=0` is an extra gate on the pass only (default
+`1`); it does not affect the daily run. A pass spends only when that flag
+is `1` and `buy_allowance()` allows it. Neither flag is a credit budget.
+The app hides that ladder from the edit sheet once `games.commence_time`
+has passed. A slip leg the user already moved to an alternate rung stays,
+marked as a pre-game price, until they remove it. `drop_started_ladders`
+runs on the daily step only, so a pass-written ladder for a started game
+stays in the table until the next daily run; the sheet does not list it.
 The measurement query:
 
     SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
@@ -78,13 +87,24 @@ mid-daily (a Railway redeploy after a merge) left the run `failed_steps=aborted`
 aimed the next daily at *tomorrow* 6:00am. `pipeline_watch` reported the abort and
 did not re-queue.
 
-`scheduler.py::catch_up_daily_pipeline` runs on boot and again after the 7:15am ET
-pipeline watch. If today's daily is missing, unfinished, aborted, or failed before
-the MLB freshness steps, it invokes `python run_pipeline.py` once the same
-America/New_York calendar day, posts an ops Discord note, and caps at one automatic
-retry (two ledgered `run_kind='daily'` starts). In-process lock plus a successful
-daily already today both no-op. Kill switch: `RUN_DAILY_RETRY=0`. See
-`tracking/daily_retry.py`.
+`scheduler.py::catch_up_daily_pipeline` is a one-off job five seconds after the
+scheduler starts, and it runs again after the 7:15am ET pipeline watch. It is
+not called before `sched.start()`: on 2026-11-04 the 13:01Z boot ran the daily
+on that thread, and the 13:17Z hourly never ledgered (last hourly 12:17Z). If
+today's daily is missing, unfinished, aborted, or failed before the MLB
+freshness steps, and this process is not already inside a daily, it invokes
+`python run_pipeline.py` again the same America/New_York calendar day and posts
+an ops Discord note that says which start this is and why. A deploy-kill
+(`failed_steps` contains `aborted`, or the row is still unfinished) does not
+consume the failure cap. On 2026-11-04 four aborted starts filled a cap of 4
+by 13:29Z and the day was skipped. Deploy-kills relaunch until 12
+(`MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY`) or 22:00 ET. A daily that finishes and
+fails before the MLB freshness steps for a reason other than aborted gets one
+retry, then stops, so an upstream outage does not buy odds on every boot. The
+in-process lock is the double-run guard. A successful daily already today is a
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. A `worker_jobs` row with
+`job_type = 'daily_pipeline'` (no args) runs the full daily once under that
+same lock; it is not in `jobs/declared_jobs.json`. See `tracking/daily_retry.py`.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`
@@ -104,11 +124,16 @@ unfinished `pipeline_runs` row later that morning: later hourlies finished,
 and the next evening `start_run` is the next evening, so
 `refresh_pass_completion` stayed on its stuck branch.
 `scheduler.abort_orphaned_refresh_runs` runs once before the scheduler
-starts, on the service that owns `hourly_refresh`, and stamps unfinished
-`hourly` and `evening` rows that started before this process
-(`finished_at`, `ok=false`, `failed_steps='aborted'`). It does not touch
-`daily`. The cutoff freezes on the first call, so a second call cannot
-abort a pass this process has opened. The one-off
+starts, on the service that owns `hourly_refresh` or `daily_pipeline`, and
+again before the daily catch-up decides. It stamps unfinished `hourly`,
+`evening` and `daily` rows that started before this process (`finished_at`,
+`ok=false`, `failed_steps='aborted'`). It does not touch `manual`. A daily
+this process opened is stamped the same way only when it is older than 75
+minutes and the daily lock is free — a slow run still inside the subprocess
+stays open. That 75-minute cutoff is daily only. An hourly or evening this
+process opened stays unfinished, so `refresh_pass_completion` can still see
+a hang past 2 hours. The previous-process cutoff freezes on the first call, so a
+second call cannot abort a pass this process has just opened. The one-off
 `abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
 view-migration pass if boot has not already. This sweep does not re-run
 the pass.
@@ -350,9 +375,13 @@ Notes:
    - `ODDS_API_KEY`
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
-   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips the daily
-     alternate spreads/totals fetch. `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL,
-     unset means no cap. A whole number caps that step's event-odds calls.
+   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips alternate
+     spreads/totals on the daily step and on every odds pass.
+     `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL, unset means no cap. A whole
+     number caps event-odds calls for that process (daily step, or one
+     pass). Anything else buys nothing and fails the daily step.
+     `FETCH_ALT_GAME_LINES` — OPTIONAL, default `1`. `0` skips only the
+     every-pass buy; the daily step still runs.
    - `TZ` = `America/New_York`
    - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
      `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put

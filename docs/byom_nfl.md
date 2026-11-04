@@ -222,7 +222,56 @@ function is in `RPC_ANON_CALLABLE`. It reads the facts tables, not
 `picks`.
 
 
+## Official pick and the bet list
+
+Matt, 2026-11-04. A builder bet becomes official at the first DraftKings
+quote at or before kickoff where the leg fits the model's rules and the
+side has an American price. That line and price are the bet of record. A
+later move does not change it. The closing line above is still graded
+beside it. The rules that move with the quote are the role (favorite,
+underdog, pick'em, from the DraftKings home spread in force) and the
+line, price, team-spread and game-total bands. The builder stores one
+candidate per pre-kickoff snapshot where those numbers changed
+(`context_at_lock`, `team_spread`, `game_total` on `byom_official_legs`).
+`byom_legs` locks the earliest candidate that fits the role and the bands
+together. A line band is the prop line. A team spread of +3 to +7 is
+`min_team_spread` / `max_team_spread`. A price band is that quote's
+American price. A total has no role. A role with no spread in force yet
+matches only a model that asks for any role. Props use the role of the
+player's team. The code is `byom/official.py`. NFL only.
+
+Rows stored before `byom_official_lock_bands_2026_11_04.sql` have
+`context_at_lock` false. A band on those rows still reads the closing
+line, so the lock does not move until the official rebuild rewrites the
+candidates. The closing timing's bands are still the closing line.
+
+Staking is the main models' `stake_for`: 1u to win, risk capped at 3u
+(`byom_risk_units`, `byom_win_units`). A -400 win is +0.75u. A -400 loss
+is -3u. This applies to both timings and to `byom_backtest`.
+
+The RPCs are in `data/migrations/byom_official_legs_2026_11_04.sql`, which
+is in `ACTIVE_MIGRATIONS`:
+
+| RPC | Returns |
+|---|---|
+| `byom_record(season, filters)` | timing (official or close), market, bets, wins, losses, pushes, ties, units, risked, skipped |
+| `byom_bets(season, filters, timing)` | the counted bets, newest first, with `byom_leg_label`; 500 per call, and `total_bets` |
+| `byom_backtest(season, filters)` | unchanged columns; the closing rows of `byom_record` |
+
+Line, price, spread, and total bands are part of the official lock
+search (`data/migrations/byom_official_lock_bands_2026_11_04.sql`). The
+app leads with the official record when that record has a bet. An empty
+official record beside a closing record leads with the close, so the
+card is not 0-0 while the rebuild is unfinished or for a season the
+official build does not cover. The closing line stays under the official
+headline. The bets are on `ByomBetsScreen`.
+
 ## Refresh
+
+Since 2026-11-04 the scheduler queues `byom_refresh` with apply true every
+day at 10:41 ET (`scheduler.run_byom_nfl_refresh`), after
+`nfl_player_game_log` has landed (about 6am ET). The declared
+`byom-nfl-refresh` is on, as a one-time catch-up.
 
 `byom/refresh.py` reports freshness without reading odds. The due set
 is the current season only: games dated from yesterday through seven

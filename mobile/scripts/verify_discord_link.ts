@@ -92,12 +92,12 @@ eq(
   null,
 );
 eq(
-  'a full row round-trips',
+  'a Whop-only row cannot unlock the app',
   parseAccess([
     {
       entitled: true,
       source: 'discord',
-      app_access: false,
+      app_access: true,
       discord_access: true,
       discord_linked: true,
       discord_username: 'matt',
@@ -106,7 +106,7 @@ eq(
     },
   ]),
   {
-    entitled: true,
+    entitled: false,
     source: 'discord',
     app_access: false,
     discord_access: true,

@@ -549,7 +549,7 @@ def test_prop_facts_normalizes_sport_the_same_way_as_game_facts(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr("byom.prop_load.build_seasons", build_seasons)
-    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
     fn, validate = JOBS["byom_prop_facts"]
     stored = validate({"sport": " nba ", "apply": False})
     out = fn(**stored)
@@ -654,6 +654,19 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
               game_id text PRIMARY KEY, sport text, season int, week int,
               game_date text, home_team text, away_team text,
               home_score numeric, away_score numeric, commence_time text);
+            CREATE TABLE nfl_odds_history (
+              snapshot_at timestamptz NOT NULL, game_id text NOT NULL,
+              season smallint, week smallint, commence_time timestamptz,
+              bookmaker text NOT NULL, market text NOT NULL,
+              point numeric, price_home numeric, price_away numeric,
+              lead_hours numeric,
+              PRIMARY KEY (snapshot_at, game_id, bookmaker, market));
+            CREATE TABLE odds (
+              odds_id bigserial PRIMARY KEY, game_id text, sport text,
+              market text, bookmaker text, snapshot_type text, snapshot_at text,
+              home_price numeric, away_price numeric, spread_home numeric,
+              total_line numeric, over_price numeric, under_price numeric,
+              created_at text);
             CREATE TABLE player_prop_odds (
               prop_id bigserial PRIMARY KEY, game_id text, game_date text,
               player_name text, team text, market text, bookmaker text,
@@ -676,6 +689,8 @@ def test_scratch_prop_build_grades_the_log_and_skips_a_junk_timestamp():
             encoding="utf-8")
         cur.execute(prices)
         cur.execute(prices)
+        cur.execute((ROOT / "data/migrations" / "byom_official_legs_2026_11_04.sql").read_text(
+            encoding="utf-8"))
         cur.execute("""
             INSERT INTO games VALUES
               ('NFL_2024_01_BAL_KC', 'NFL', 2024, 1, '2024-09-08', 'KC', 'BAL',
@@ -842,6 +857,19 @@ def test_scratch_backfill_starts_on_2023_09_01_and_writes_nothing_when_dry():
               game_id text PRIMARY KEY, sport text, season int, week int,
               game_date text, home_team text, away_team text,
               home_score numeric, away_score numeric, commence_time text);
+            CREATE TABLE nfl_odds_history (
+              snapshot_at timestamptz NOT NULL, game_id text NOT NULL,
+              season smallint, week smallint, commence_time timestamptz,
+              bookmaker text NOT NULL, market text NOT NULL,
+              point numeric, price_home numeric, price_away numeric,
+              lead_hours numeric,
+              PRIMARY KEY (snapshot_at, game_id, bookmaker, market));
+            CREATE TABLE odds (
+              odds_id bigserial PRIMARY KEY, game_id text, sport text,
+              market text, bookmaker text, snapshot_type text, snapshot_at text,
+              home_price numeric, away_price numeric, spread_home numeric,
+              total_line numeric, over_price numeric, under_price numeric,
+              created_at text);
             CREATE TABLE player_prop_odds (
               prop_id bigserial PRIMARY KEY, game_id text, game_date text,
               player_name text, team text, market text, bookmaker text,

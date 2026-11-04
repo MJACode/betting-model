@@ -1,13 +1,15 @@
 /**
- * One scoped byom_backtest read, summed to a record. A null filter
- * does not call: an empty filter is the whole season and is not a
- * model preview. A slower response does not replace a newer one.
+ * One scoped byom_record read, summed to two records: the headline
+ * (official on NFL, the close otherwise) and the closing line beside
+ * it. A null filter does not call: an empty filter is the whole season
+ * and is not a model preview. A slower response does not replace a
+ * newer one.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { errorText, isAbortError } from '@/lib/errors';
-import { fetchByomScopedBacktest, type ByomFilters } from '@/lib/byom';
+import { fetchByomScopedRecord, type ByomFilters, type ByomTiming } from '@/lib/byom';
 import { byomFilters } from '@/lib/byomFilters';
 import {
   recordFromRows,
@@ -22,6 +24,8 @@ export function useByomRecord(
   sport: ByomSport = 'NFL',
 ) {
   const [record, setRecord] = useState<ByomRecord | null>(null);
+  const [closeRecord, setCloseRecord] = useState<ByomRecord | null>(null);
+  const [timing, setTiming] = useState<ByomTiming>('close');
   const [loading, setLoading] = useState(filters != null);
   const [error, setError] = useState<string | null>(null);
   const filterKey = filters == null ? '' : JSON.stringify(byomFilters(filters));
@@ -31,6 +35,7 @@ export function useByomRecord(
     if (filterKey === '') {
       seq.current += 1;
       setRecord(null);
+      setCloseRecord(null);
       setError(null);
       setLoading(false);
       return;
@@ -39,11 +44,20 @@ export function useByomRecord(
     setLoading(true);
     setError(null);
     setRecord(null);
+    setCloseRecord(null);
     try {
       const parsed = JSON.parse(filterKey) as ByomFilters;
-      const rows = await fetchByomScopedBacktest(scope, parsed, new Date(), sport);
+      const rows = await fetchByomScopedRecord(scope, parsed, new Date(), sport);
       if (seq.current !== id) return;
-      setRecord(recordFromRows(rows));
+      const close = recordFromRows(rows.close);
+      if (rows.headline === 'official') {
+        setRecord(recordFromRows(rows.official));
+        setCloseRecord(close);
+      } else {
+        setRecord(close);
+        setCloseRecord(null);
+      }
+      setTiming(rows.headline);
     } catch (e: unknown) {
       if (seq.current !== id) return;
       if (!isAbortError(e)) setError(errorText(e));
@@ -56,5 +70,5 @@ export function useByomRecord(
     void load();
   }, [load]);
 
-  return { record, loading, error, reload: load };
+  return { record, closeRecord, timing, loading, error, reload: load };
 }

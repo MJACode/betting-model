@@ -38,7 +38,13 @@ def test_the_prop_side_migration_is_not_registered():
     assert "mkt not in" not in lowered
 
 
-def test_scratch_prop_side_keeps_one_leg_and_save_requires_it():
+@pytest.mark.parametrize("later", [
+    (),
+    # 2026-11-04: byom_backtest becomes the closing rows of byom_legs.
+    # The same answers must come back.
+    ("byom_official_legs_2026_11_04.sql",),
+])
+def test_scratch_prop_side_keeps_one_leg_and_save_requires_it(later):
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
 
@@ -77,7 +83,7 @@ def test_scratch_prop_side_keeps_one_leg_and_save_requires_it():
             "byom_saved_models_2026_10_16.sql",
             SQL_NAME,
             SQL_NAME,
-        )
+        ) + tuple(later)
         for name in names:
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
@@ -174,7 +180,10 @@ def test_scratch_prop_side_keeps_one_leg_and_save_requires_it():
         body = cur.fetchone()[0]
         assert "byom_backtest_v1" in body
         assert "byom_prop_side" in body
-        assert "p.over_price" in body
+        if not later:
+            assert "p.over_price" in body
+        else:
+            assert "byom_official_legs_v1" in body
     finally:
         if raw is not None:
             raw.close()

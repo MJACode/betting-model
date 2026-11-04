@@ -1,7 +1,8 @@
 /**
  * Pure BYOM record math. No network. Screens rank and preview from this.
  *
- * Units are the backtest's 1u-to-win profit. ROI needs the amount risked.
+ * Units are 1u to win, risk capped at 3u (the main models' stake_for).
+ * ROI needs the amount risked, which byom_record returns.
  * This file does not estimate a price, and it does not read a count of
  * bets the backtest left out.
  */
@@ -25,11 +26,26 @@ export const BYOM_NBA_FIRST_SEASON = 2023;
 
 export type ByomSport = 'NFL' | 'NBA';
 
+/**
+ * The card headline. `preferred` is official on NFL once the server has
+ * the RPC. An empty official count beside a closing count leads with
+ * the close (rebuild not finished, or a season with no official rows).
+ */
+export function headlineFromCounts(
+  preferred: 'official' | 'close',
+  officialBets: number,
+  closeBets: number,
+): 'official' | 'close' {
+  if (preferred !== 'official') return 'close';
+  if (officialBets === 0 && closeBets > 0) return 'close';
+  return 'official';
+}
+
 /** Same cap as byom_save_model: 'byom model cap is 25'. */
 export const BYOM_MODEL_CAP = 25;
 
 export const BYOM_UNITS_COPY =
-  'u = units. Each bet is 1u to win at the DraftKings price at game start (or the closest DraftKings price). A push returns the stake. Win/loss only, no line locks.';
+  'u = units. Each bet is 1u to win, risking no more than 3u, the same as our models. NFL bets are graded at the official line: the first DraftKings line where the bet fit your rules. The closing line is the last DraftKings line before kickoff. A push returns the stake.';
 
 export type ByomSeasonScope = 'all' | 'current';
 
@@ -439,8 +455,9 @@ export function filtersForDraft(
     const team = sideForMarket(draft.market, draft.side);
     if (team === 'home' || team === 'away') next.side = team;
     else delete next.side;
-    if (draft.role === 'favorite' || draft.role === 'underdog') next.role = draft.role;
-    else delete next.role;
+    // Matt, 2026-11-04: favorite or underdog is a team bet, not a player
+    // prop filter. A prop never carries a role.
+    delete next.role;
     const direction = propSideForMarket(draft.market, draft.propSide);
     if (direction) next.prop_side = direction;
     else delete next.prop_side;
@@ -501,11 +518,11 @@ export function draftFromFilters(filters: ByomFilters | null | undefined): ByomD
     ? parsed.prop_side
     : null;
   const propFilters = propStateFromFilters(parsed);
-  const role = parsed.role === 'favorite' || parsed.role === 'underdog' ? parsed.role : null;
   return {
     market,
     side: sideForMarket(market, parsed.side ?? null),
-    role,
+    // A prop has no favorite or underdog (Matt, 2026-11-04).
+    role: null,
     primetime: parsed.primetime ?? null,
     propSide: propSideForMarket(market, stored),
     rest: restChoice(parsed),

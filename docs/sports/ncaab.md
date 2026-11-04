@@ -93,7 +93,8 @@ snapshot (median 31 minutes), 71% within 2 hours.
 The decision, bet or not, goes into `ncaab_total_decisions` with the quote,
 the cutoff and the reason, and the game is never decided again (CLAUDE.md
 §1c). `check_hour` holds the run's instant, so `decided_at` minus `quote_at` is
-the lag from the first post. Only BET rows go into `picks`. Games decided under
+the lag from the first post. A bet goes into `picks` as BET, and a game priced
+below the cut as NONE (no stake; see "Every scored game is a row" below). Games decided under
 the 22:00 / 15:00 UTC rule before 2026-11-03 stay decided.
 
 **The rule it replaced** (2026-10-30 to 2026-11-03): 22:00 UTC the evening
@@ -387,7 +388,8 @@ hourly at five past (UTC), but only the run in the 15:00 hour decides
 anything, and it reads the quotes as of 15:00 UTC even if it runs late in that
 hour. The decision, bet or not, goes into `ncaab_spread_decisions` with every
 book's quote, the consensus and the reason, and the game is never decided
-again (CLAUDE.md §1c). Only BET rows go into `picks`. A game that tips after
+again (CLAUDE.md §1c). A bet goes into `picks` as BET, and a game priced below
+the cut or with too few books as NONE (no stake). A game that tips after
 15:00 UTC but before the run gets to it is recorded as `tipped`, not bet: a
 pick is never announced for a game under way.
 
@@ -984,7 +986,7 @@ graded games.
 | decision fetch | 5 to 10.5 minutes before tip, the tip-minus-10 call or its retries | `scripts/ncaab_first_half_spread_card.DECISION_LEAD_MIN` |
 | decided once | a row in `ncaab_first_half_spread_decisions`, bet or not | the card |
 | settlement | the first half's margin plus the home number (period 1 of `ncaab_period_scores`); pending while the periods are missing or do not add up to the final | `tracking/paper_tracker._ncaab_first_half_points` |
-| closing value | not measured: no fetch after tip minus 10, and the decision fetch is never read as its own close | `tracking/paper_tracker._closing_odds`, the CLV migration |
+| closing value | the bet book's newest pre-tip row on the same line, strictly after the pick was created. The card decides on the tip-minus-10 call, the last fetch, so that pull is the price taken and a spread usually stays unmeasured | `tracking/paper_tracker._closing_odds`, the CLV migration |
 | kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and the card | `scripts/ncaab_first_half_window.enabled` |
 | frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_spread_2027.json` |
 
@@ -1004,8 +1006,9 @@ graded games.
   Hard Rock 43, BetMGM 40, DraftKings 17 and Caesars 4.
 - **It is an away-side card.** 971 of the 1,253 bets are the away team (282
   home); 178 of 243 in 2025-26.
-- **No closing value can be measured.** The research has no quote after tip
-  minus 10, and live takes none.
+- **A spread decided at tip minus 10 usually has no close.** That call is the
+  last fetch, and it is the price taken. A later pre-tip row at the same book
+  and line would be the close; the decision pull is not.
 - **Live inputs are fresher than the evidence's.** The evidence's full-game
   consensus at tip minus 10 came from snapshots bought about an hour before
   tip; live it is the five-minute capture. The closing lines behind the team
@@ -1153,7 +1156,7 @@ difference 4e-16).
 | decision fetch | 55 to 60.5 minutes before tip, the tip-minus-60 call or its retries | `scripts/ncaab_first_half_total_card.DECISION_LEAD_MIN` |
 | decided once | a row in `ncaab_first_half_total_decisions`, bet or not | the card |
 | settlement | the first half's points against the line (period 1 of `ncaab_period_scores`); pending while the periods are missing or do not add up to the final | `tracking/paper_tracker.first_half_points` |
-| closing value | not measured live: no fetch after tip minus 10, and the decision call is never read as its own close | `tracking/paper_tracker._closing_odds`, the CLV migration |
+| closing value | the bet book's newest pre-tip row on the same line pulled after the pick was created. The card decides on the tip-minus-60 call; the later calls through tip minus 10 are the close. The decision pull is not the close | `tracking/paper_tracker._closing_odds`, the CLV migration |
 | kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and both first-half cards | `scripts/ncaab_first_half_window.enabled` |
 | frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_total_2027.json` |
 
@@ -1170,7 +1173,8 @@ difference 4e-16).
 - **It beat the close by nothing.** Re-priced at the ten-minute close, its
   bets were worth -1.95% on average: the market did not move toward them. The
   profit is information the close lacks, not stale lines being corrected. Live,
-  no close is taken, so closing value stays unmeasured.
+  the close is a later pre-tip pull at the same book and line, not the decision
+  call. No such pull leaves the pick unmeasured.
 - **It is an under card.** 1,969 of the 2,529 bets (78%) are unders (+67.84
   units); 560 overs made +57.93.
 - **Hard Rock posts one first-half total a game at skewed prices.** It took
@@ -1188,6 +1192,40 @@ share and the book mix beside the ROI.
 **Before the 2027-28 season** rebuild the frozen numbers: `python -m
 scripts.ncaab_first_half_total_build --cache <copy of the three reads>
 --last-season 2027` fits them; add `--quotes` and `--asof-fg` to replay too.
+
+### Every scored game is a row (2026-11-04, Matt)
+
+*"The all tab should have all picks."* Until 2026-11-04 every NCAAB card wrote
+only its BETs to `picks`, so the app's All board held exactly what Signals held.
+Now five cards also write a **NONE** row for each game they PRICED and did not
+bet, in the same transaction as the decision row, at the same book, side and
+number the decision named, with `kelly_fraction` and `recommended_bet` 0.
+
+| Card | NONE row for |
+|---|---|
+| `ncaab_total_blend` | `below_cut` |
+| `ncaab_spread_market` | `below_cut`, `too_few_books` |
+| `ncaab_moneyline_own_spread` | `below_cut` |
+| `ncaab_first_half_spread` | `below_cut` |
+| `ncaab_first_half_total` | `below_cut` |
+| all five | a bet the price floor or EV floor refused (its reason stays in the ledger) |
+
+No row for a game with nothing to price (`no_quote(s)`, `missed`, `tipped`,
+`no_fg_line`, `below_floor`), a data error (`edge_cap`), a book that is not
+bettable, or a label the integrity check refuses. Never AVOID: a card's
+decision is "no bet", not "bet against".
+
+**`ncaab_moneyline_first_post` writes no NONE rows** (`pick_rows(...,
+scored=False)`). It decides one game once per book's first post, and the picks
+key is one row per (game, model, side): a NONE row from an early post would
+take the key, and a later post's BET on the same side would be swallowed by
+`ON CONFLICT DO NOTHING`, silently.
+
+Nothing else moves. Discord, push, X, settlement and the record all select
+`signal_type = 'BET'`; `games_with_a_bet` / `decided_games` still look for BETs
+and the ledger; each ledger's `n_bets` counts BETs only. The app's day read is
+paged past the 1,000-row cap (`fetchPicksForDate`) so the extra rows cannot
+push another sport's rows off the All board.
 
 ## Identity: ESPN owns the games row
 

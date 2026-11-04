@@ -453,8 +453,12 @@ def test_a_bet_row_is_a_moneyline_at_the_posting_books_price_under_this_model():
     assert row["decision_edge"] == round(0.64 - 0.6, 4) and row["dk_odds"] == -160.0
     # this model's own price floor: -201 refused
     bad = fp.PostDecision("g", "williamhill_us", "bets", "x", best=dict(best, price=-201.0, prob=0.8))
-    rows, refused = mlcard.pick_rows([bad], GAMES, 1000.0, model_id=fp.MODEL_ID)
+    # scored=False, as the first-post card calls it: a refused bet writes no
+    # NONE row, which would hold the unique key a later post's BET needs.
+    rows, refused = mlcard.pick_rows([bad], GAMES, 1000.0, model_id=fp.MODEL_ID, scored=False)
     assert not rows and refused["g"].startswith("below_price_floor")
+    below = fp.PostDecision("g", "williamhill_us", "below_cut", "x", best=best)
+    assert mlcard.pick_rows([below], GAMES, 1000.0, model_id=fp.MODEL_ID, scored=False) == ([], {})
 
 
 # ── one bet a game: the 15:00 UTC card's side ─────────────────────────────────

@@ -54,7 +54,14 @@ export function RecordHeroCard({
   const roi = roiText(summary.roi, risked, quiet || !unitsKnown);
   const record = recordLine(summary.wins, summary.losses, summary.pushes, quiet);
   const win = winRateText(summary.winRate, summary.wins, summary.losses, quiet);
-  const clv = clvText(summary.clvBeatRate, quiet);
+  const clvPct = clvText(summary.clvBeatRate, quiet);
+  const clv = quiet
+    ? clvPct
+    : summary.clvBeatRate == null
+      ? (summary.clvPush > 0 ? `0 measured, ${summary.clvPush} push` : clvPct)
+      : summary.clvPush > 0
+        ? `${clvPct}, ${summary.clvPush} push`
+        : clvPct;
   const heroLabel = heroAccessibilityLabel({
     notLoaded,
     picks: summary.picks,
@@ -68,6 +75,7 @@ export function RecordHeroCard({
     pushes: summary.pushes,
     winRate: summary.winRate,
     clvBeatRate: summary.clvBeatRate,
+    clvPush: summary.clvPush,
   });
   const open = (which: 'roi' | 'clv') => setSheet(which);
   const sheetTitle = sheet === 'clv' ? CLOSING_LINE_TITLE : ROI_SHEET_TITLE;
@@ -129,6 +137,7 @@ export function RecordHeroCard({
               value={clv}
               stacked={stacked}
               labelMinHeight={labelMinHeight}
+              lines={summary.clvPush > 0 ? 2 : 1}
               onInfo={() => open('clv')}
               infoLabel="Beat the closing line details"
             />
@@ -153,6 +162,7 @@ function GridCell({
   labelMinHeight,
   onInfo,
   infoLabel,
+  lines = 1,
 }: {
   label: string;
   value: string;
@@ -161,6 +171,7 @@ function GridCell({
   labelMinHeight: number;
   onInfo?: () => void;
   infoLabel?: string;
+  lines?: number;
 }) {
   return (
     <View style={[styles.cell, stacked && styles.cellStacked]}>
@@ -180,7 +191,7 @@ function GridCell({
       </View>
       <Text
         style={[styles.cellValue, valueColor ? { color: valueColor } : null]}
-        numberOfLines={1}
+        numberOfLines={lines}
         adjustsFontSizeToFit
         minimumFontScale={0.7}
       >

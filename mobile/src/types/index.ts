@@ -501,6 +501,14 @@ export type RootStackParamList = {
   ByomBuilder: { sport?: 'NFL' | 'NBA' } | undefined;
   ByomEdit: { modelId: string };
   ByomDetail: { modelId: string };
+  /** The bets one BYOM record counts. Filters are the model's, unsaved or saved. */
+  ByomBets: {
+    filters: import('@/lib/byomFilters').ByomFilters;
+    sport: 'NFL' | 'NBA';
+    title?: string;
+    /** The card's headline. Omitted starts on official for NFL. */
+    timing?: 'official' | 'close';
+  };
   // playerType is MLB-only (it picks batter vs pitcher chips); every other
   // sport's chips come from the sport alone.
   PlayerStats: {
@@ -630,6 +638,8 @@ export interface OpeningVsLiveRow {
   clv_settled: number;
   clv_beat: number;
   avg_clv_pct: number | null;
+  /** Same-book closes that equal the price taken. Absent until the migration. */
+  clv_push?: number | null;
 }
 
 /** One row from v_opening_signal_slices — opening track sliced by line move / public side. */
@@ -663,8 +673,10 @@ export interface TrackRecordRow {
   units?: number;
   /** Units laid (published_pick_unit_risked). Pushes contribute 0. */
   risked?: number;
-  clv_settled: number;    // settled picks with a same-book price CLV
+  clv_settled: number;    // settled picks with a same-book price CLV, pushes included
   clv_beat: number;       // of those, how many beat that book's close (clv_pct > 0)
+  /** 0% closes. Beat rate is clv_beat / (clv_settled - clv_push). */
+  clv_push?: number | null;
   avg_clv_pct: number | null;
   first_date: string;
   last_date: string;
@@ -676,6 +688,8 @@ export interface TrackRecordRow {
   clv_prop_settled?: number | null;
   clv_prop_beat?: number | null;
   avg_clv_prop_pct?: number | null;
+  clv_game_push?: number | null;
+  clv_prop_push?: number | null;
   market_clv_settled?: number | null;
   market_clv_beat?: number | null;
   avg_market_clv_pct?: number | null;

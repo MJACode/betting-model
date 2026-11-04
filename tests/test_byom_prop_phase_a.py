@@ -26,7 +26,13 @@ def test_phase_a_migration_is_hand_applied():
     assert "thin sample" not in text.lower()
 
 
-def test_scratch_phase_a_filters_narrow_the_same_stake():
+@pytest.mark.parametrize("later", [
+    (),
+    # 2026-11-04: the official-legs file replaces byom_backtest with the
+    # closing rows of byom_legs. Every Phase A answer must stay the same.
+    ("byom_official_legs_2026_11_04.sql",),
+])
+def test_scratch_phase_a_filters_narrow_the_same_stake(later):
     psycopg2 = pytest.importorskip("psycopg2")
     from tests.byom_scratch import ScratchPostgres, pg_bin
 
@@ -64,7 +70,7 @@ def test_scratch_phase_a_filters_narrow_the_same_stake():
             "byom_prop_facts_dk_prices_2026_10_28.sql",
             "byom_saved_models_2026_10_16.sql",
             SQL_NAME,
-        )
+        ) + tuple(later)
         for name in names:
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
