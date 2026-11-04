@@ -364,8 +364,9 @@ a half weeks of 2026-27 played, that is expected for every 2026-27 cell. For eac
 
 ## 10. What the lab writes, and how it runs
 
-- `--pull`: section 1.1's read, once, into the scratch folder. Run through
-  `%TEMP%/q1trend/run_with_db.py`, which supplies only `DATABASE_URL`.
+- `--pull`: section 1.1's read, once, into the scratch folder. `--pull-held`: section 3.1's read
+  of the held seasons' play-by-play. Both run through `%TEMP%/q1trend/run_with_db.py`, which
+  supplies only `DATABASE_URL`; `--full` refuses until both have run.
 - `--smoke`: synthetic checks (each rule watched failing), then counts on the real data: no result
   of any bet. Every grade inside it reads scores replaced by random numbers, and a guard stops the
   run if a grade is handed real scores. It prints the data found, the extremes, the dropped rows,
@@ -380,6 +381,7 @@ a half weeks of 2026-27 played, that is expected for every 2026-27 cell. For eac
 
 ```
 PYTHONPATH=. python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull
+PYTHONPATH=. python C:/Users/micha/AppData/Local/Temp/q1trend/run_with_db.py scripts.nba_s_ingame27 --pull-held
 NBA_RESEARCH_CACHE=<cache> PYTHONPATH=. python -m scripts.nba_s_ingame27 --smoke
 NBA_GAME2_GO=1 NBA_GAME2_RESULTS=<folder> NBA_GAME2_BETS=<folder>/bets NBA_RESEARCH_CACHE=<cache> \
     PYTHONPATH=. python -m scripts.nba_s_ingame27 --full
@@ -390,8 +392,8 @@ PYTHONPATH=. python -m scripts.nba_game2_verdict --results <folder> --house5
 
 ## 11. Counts before grading
 
-Added after `--smoke` ran on the real data, before any cell was graded (2026-11-04, about 04:10
-UTC; log `%TEMP%/nba_s/ingame27/smoke3.txt`). Every number below comes from prices, clocks and
+Added after `--smoke` ran on the real data, before any cell was graded (2026-11-04, 03:12 to 03:15
+UTC, on the committed lab; log `%TEMP%/nba_s/ingame27/smoke3.txt`). Every number below comes from prices, clocks and
 counts. No result of any bet this search would place was computed or read: every grade inside
 `--smoke` read random scores.
 
@@ -537,6 +539,12 @@ same number at a price at least as good:
 - **Projected `--full`: 16.5 minutes** (step 1 7.7, step 2 held 1.7, step 2 2026-27 at most 6.1,
   loads 1.0), peak working set 3.2 GB. The late-window states are read from the scratch folder;
   rebuilding them adds about 3 minutes.
+- **Measured on a dry `--full` with random scores** (every game's score replaced, the no-result
+  guard on): 669 seconds end to end. It wrote all 24 cells with 200 placebo runs and band
+  columns each, the 2026-27 cells carrying their bets in the pooled columns, and
+  `nba_game2_verdict --house5` read the folder (24 cells, no error). Its picks differ slightly
+  from 11.3 because its pre-game prior was built from random scores too (100 of 107 priors
+  moved, by at most 0.39 points). The folder was deleted.
 
 ```
 NBA_GAME2_GO=1 NBA_GAME2_RESULTS=C:/Users/micha/AppData/Local/Temp/nba_s/ingame27/results \
