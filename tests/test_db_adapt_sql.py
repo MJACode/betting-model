@@ -219,6 +219,15 @@ def test_every_active_migration_survives_the_adapter_unchanged():
     for name in ACTIVE_MIGRATIONS:
         text = (root / name).read_text(encoding="utf-8")
         adapted = _adapt_sql(text)
-        if adapted is not None and "%s" in adapted and "%s" not in text:
-            changed.append(name)
+        if adapted is None:
+            continue
+        for token in ("%s", "%("):
+            if adapted.count(token) != text.count(token):
+                changed.append(f"{name} ({token})")
     assert changed == []
+
+
+def test_a_dollar_inside_an_identifier_does_not_open_a_quote():
+    from data.db import _adapt_sql
+    assert _adapt_sql("SELECT a$b$c FROM t WHERE x = ? AND y$b$ = 1") == \
+        "SELECT a$b$c FROM t WHERE x = %s AND y$b$ = 1"

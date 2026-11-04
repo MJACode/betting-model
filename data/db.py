@@ -82,7 +82,8 @@ _SQL_SKIP_RE = re.compile(
     # 'primetime'` when the worker applied byom_official_legs_2026_11_04.sql,
     # and every Build Your Own Model preview returned 400 until the body was
     # replaced. The outer tag wins, so a $fn$ nested in a $mig$ is one region.
-    r"|\$([A-Za-z_][A-Za-z_0-9]*|)\$.*?\$\1\$",
+    # The lookbehind keeps a $ inside an identifier (a$b$c) from opening one.
+    r"|(?<![A-Za-z0-9_$])\$([A-Za-z_][A-Za-z_0-9]*|)\$.*?\$\1\$",
     re.S,
 )
 
