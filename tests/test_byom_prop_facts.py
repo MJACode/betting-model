@@ -549,7 +549,7 @@ def test_prop_facts_normalizes_sport_the_same_way_as_game_facts(monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr("byom.prop_load.build_seasons", build_seasons)
-    monkeypatch.setattr("data.db.get_connection", lambda: Conn())
+    monkeypatch.setattr("data.db.get_connection", lambda *a, **k: Conn())
     fn, validate = JOBS["byom_prop_facts"]
     stored = validate({"sport": " nba ", "apply": False})
     out = fn(**stored)

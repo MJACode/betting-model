@@ -4671,8 +4671,10 @@ NFL_PLAYER_STATS_BACKFILL_SEASONS: int = int(
 # no card). Rate-limited — the backfill is paced and resumable.
 CFBD_API_KEY: str = os.environ.get("CFBD_API_KEY", "")
 CFBD_BASE_URL: str = os.environ.get("CFBD_BASE_URL", "https://api.collegefootballdata.com")
-# Seconds to sleep between CFBD calls during backfill (free-tier politeness).
-CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "0.6"))
+# Seconds to sleep between successful CFBD calls, including each weekly
+# stats pull. 1.0 after the 2026-11-04 daily: /stats/season/advanced
+# returned 429 on week 2 at the old 0.6 default. The env still overrides.
+CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "1.0"))
 
 # Which /lines providers to persist as historical training lines, in PREFERENCE
 # ORDER. We ingest ALL of them rather than picking one, and the feature engine

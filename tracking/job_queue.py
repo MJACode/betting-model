@@ -2481,12 +2481,25 @@ def _validate_byom_prop_facts(args: dict) -> dict:
     return {"sport": sport, "season": season, "apply": apply}
 
 
+def _byom_connection():
+    """A connection whose leaked transaction dies after 60s of idle.
+
+    The builders commit each season, and a quote read rolls back before
+    the lock search. This is the backstop when one of those is missed:
+    Postgres ends the session, which drops RowExclusiveLock, instead of
+    sitting idle in transaction until the process exits. It is set on
+    this connection only. It is not a role or server setting, and a
+    reconnect keeps it.
+    """
+    from data.db import POLLER_IDLE_IN_TRANSACTION_MS, get_connection
+    return get_connection(idle_in_transaction_ms=POLLER_IDLE_IN_TRANSACTION_MS)
+
+
 def _job_byom_prop_facts(**kw):
     """Write byom_prop_facts. Does not touch picks or a live model."""
-    from data.db import get_connection
     from byom.prop_load import build_seasons
 
-    conn = get_connection()
+    conn = _byom_connection()
     try:
         # A declared job can be claimed before the deploy's first pass has
         # applied its migrations, and the build writes byom_official_legs
@@ -2518,10 +2531,9 @@ def _job_byom_refresh(**kw):
     Does not touch picks or a live model. apply false does not read
     odds and does not write.
     """
-    from data.db import get_connection
     from byom.refresh import refresh
 
-    conn = get_connection()
+    conn = _byom_connection()
     try:
         # A declared job can be claimed before the deploy's first pass has
         # applied its migrations, and the build writes byom_official_legs
@@ -2590,10 +2602,9 @@ def _job_daily_pipeline(**kw):
 
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
-    from data.db import get_connection
     from byom.load import build_seasons
 
-    conn = get_connection()
+    conn = _byom_connection()
     try:
         # A declared job can be claimed before the deploy's first pass has
         # applied its migrations, and the build writes byom_official_legs
