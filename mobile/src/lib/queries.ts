@@ -2832,10 +2832,10 @@ export async function fetchOpeningVsLive(): Promise<OpeningVsLiveRow[]> {
       .from('v_opening_vs_live')
       .select(withPush.replace(', clv_push', ''));
     if (second.error) throw second.error;
-    return (second.data ?? []) as OpeningVsLiveRow[];
+    return (second.data ?? []) as unknown as OpeningVsLiveRow[];
   }
   if (first.error) throw first.error;
-  return (first.data ?? []) as OpeningVsLiveRow[];
+  return (first.data ?? []) as unknown as OpeningVsLiveRow[];
 }
 
 /** Opening track sliced by line move after lock + public side (v_opening_signal_slices). */
