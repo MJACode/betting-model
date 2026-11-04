@@ -44,6 +44,9 @@ BEGIN
     SELECT 1 FROM pg_proc p
      WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_official_lock_bands_v1' in p.prosrc) > 0
+       -- A body the adapter damaged (the jsonb ? stored as %s) is not
+       -- present: re-create it once, now that data.db leaves $$ alone.
+       AND position('p_filters %s' in p.prosrc) = 0
   ) THEN
     RAISE NOTICE 'byom official lock bands already present - skipping';
     RETURN;
