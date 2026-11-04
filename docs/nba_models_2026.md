@@ -2746,6 +2746,7 @@ was graded, its counts, and its results at the end. All runs are stored in Supab
 | The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
 | First-quarter player props (added 2026-11-04) | `docs/nba_search_q1props.md` | `2026-11-04-q1props` | 18 | 0 | Nearest miss assists over, +3.0%, -1.7% to +7.6%; the blind bets lose 5% to 8% |
 | First-quarter and first-half team totals (added 2026-11-04) | `docs/nba_search_q1tt.md` | `2026-11-04-q1tt` | 26 | 0 | Books set them from their own period spread and total; the live home team-total rule carried over makes +3%, too few bets to tell |
+| In-play spread and moneyline on 2026-27's live prices, and a late-game leader (added 2026-11-04) | `docs/nba_search_ingame27.md` | `2026-11-04-ingame27` | 24 | 0 | Every cell under 200 bets this season; quarter 3 and 4 spreads read positive, moneylines lose; the leader is closed by the -200 floor |
 
 **Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
 That is now tested from the projection, the injury report, the shooting-luck gap, the popular team, the favourite and
