@@ -178,6 +178,117 @@ written.
    first 2026-27 pull filtered it by `game_id`, which read the whole table twice. The rows it
    returned are the same; every later read goes through the index.
 
+### 3.2 Changes after an independent review, before any cell was graded (2026-11-04)
+
+An independent review of this search and its lab came back on 2026-11-04. **No cell had been
+graded and no result of any bet had been read when these changes were made.** The owner's
+decisions:
+- run the grade after these fixes;
+- leave step 2 as registered, read as too few games to tell.
+
+Every number below comes from prices, clocks and counts. The log is
+`%TEMP%/nba_s/ingame27/smoke4.txt`; each fix's own effect is in `probe_fixes.txt` beside it.
+
+1. **The game state at a quote is now the last play in play order (this one changes results).**
+   - Record 7.1 defines the state at a stamp as everything logged at or before it, ties broken
+     by play order. The shared join, `scripts/nba_ingame_data.state_at`, drops the play number
+     and re-sorts by wallclock alone with an unstable sort. So among plays logged in the same
+     second it can take one that is not the last.
+   - Example: `NBA_2026-10-20_BOS_DET`, DraftKings at 21:15:37 UTC. Plays 429 to 432 all carry
+     21:14:48. The old join read the score as 103-99; the last of those plays gives 104-99.
+   - The fix is this lab's own join (`state_at_stable`): it keeps the play number and sorts by
+     (wallclock, play number), stable. The shared script is not edited, so the record's IG-2
+     run stays reproducible.
+   - **2026-27:** 416 of 26,076 in-play quotes now read a different score. The old join was low
+     every time: by 1 point on 366, 2 on 29, 3 on 21. Points scored between stamp and serving
+     changed on 295 quotes. Step 1 gains 1 decision (513 to 514), and the bets change in 15 of
+     the 18 step-1 cells, by 1 or 2 bets each. Step 2 on 2026-27 does not change.
+   - **Held quotes:** the lab now re-joins them too, from the `nba_pbp` pull of section 3.1.
+     1,121 of 374,827 (0.30%) read a different score than the stored table. IG-2's graded run
+     used that stored table; the reviewer's upper bound was about 0.29%. **So record 7.3 is no
+     longer an exact comparator for step 1.** Step 2's held decisions (175) and bets (4 in the
+     graded seasons) do not change.
+   - IG-2's training states are not affected. They are built on game time, through no state
+     join.
+2. **Rules 3 and 4 are now counted in decisions, not only rows** (game × market × phase, with
+   every fix in place):
+
+   | | Decisions with the rules | Without | Decided only without | Decided at a different fetch |
+   |---|---|---|---|---|
+   | Step 1, 2026-27 | 507 | 510 | 3 | 5 |
+   | Step 2, 2026-27 | 24 | 29 | 5 | 0 |
+   | Step 2, held | 175 | 221 | 46 | 0 |
+
+   Before the other fixes the reviewer measured 513 against 517 for step 1, 9 of them at a
+   different fetch.
+3. **Rule 6: a game with a clock jump of 45 minutes or more is left out whole.**
+   - The jump is measured between consecutive plays in play order, in either direction. Rule 5
+     looks only at the first play, in one direction.
+   - The rule applies to the 2026-27 quotes, the held quotes and step 2's training states.
+   - **2026-27**, each game the reviewer named, checked against the rule:
+     - `NBA_2026-10-20_PHI_NYK`: dropped. +45.3 minutes, from the last play of the first half to
+       the first play of the third quarter. That may be a real 45-minute halftime; the rule
+       drops it either way.
+     - `NBA_2026-10-23_MEM_GSW`: dropped. +138.3 then -134.4 minutes around the end of the first
+       quarter, a stall and back-fill.
+     - `NBA_2026-11-01_BKN_IND`: +62.0; already out under rule 5.
+   - **Held moneyline table:** 12 games dropped. Most moved by about an hour; every number is
+     minutes:
+     - 2021-22: `CLE_DET` 2022-01-30 (+61.2), `UTA_BKN` 2022-03-21 (+61.1), `IND_TOR` 2022-03-26
+       (+70.3);
+     - 2022-23: `BOS_CLE` 2022-11-02 (+60.5), `NYK_PHI` 2022-11-04 (+240.2), `BOS_DAL` 2023-01-05
+       (+61.0);
+     - 2024-25: `WAS_MIL` 2024-12-21 (+65.0), `MIA_BKN` 2025-01-25 (+45.0, at halftime);
+     - 2025-26: `NYK_SAC` 2026-01-14 (+300.4), and on 2026-03-08 `DAL_TOR` (-59.7), `DET_MIA` (-59.0)
+       and `WAS_NOP` (-59.8).
+     - The pull holds 46 jump games in all; the other 34 have no quote in the held moneyline table.
+   - **Step 2's training states:** 12 games left out (0, 3, 3, 0, 2 and 4 from 2020-21 to
+     2025-26).
+   - **What it moved:**
+     - Step 1 loses 7 decisions (514 to 507), and the bets change in 7 of the 18 step-1 cells
+       (each moneyline cell in quarters 3 and 4, and the quarter-4 spread at 0.02), by 1 bet each.
+     - Step 2 on 2026-27 loses 1 decision (25 to 24), and with it its only bet, PHI_NYK. It now
+       has **0 bets**.
+     - Step 2's held decisions do not change.
+   - The next clock change, 2027-03-14, falls inside this season. Rules 5 and 6 are what catch a
+     shifted clock.
+4. **Reported beside every cell, never judged: the seconds from the last play ESPN logged to the
+   decision quote's stamp** (median, 90th percentile, and how many are over 180 seconds).
+   - Why: a quote priced during an ESPN logging stall passes the freshness rule against a frozen
+     state.
+   - The clear case is `NBA_2026-10-23_LAC_LAL`. ESPN logged nothing after 02:20:03 UTC, then wrote
+     74 plays and 41 points of the first quarter (7:03 to 0:00) at 02:35:53-54. A quote stamped
+     inside that gap sees the score from 02:20.
+   - No exclusion rule now. On 2026-27, step 1's cells have medians of 11 to 61 seconds, 90th
+     percentiles of 55 to 164, and 0 to 4 bets over 180 seconds per cell. Step 2 held: median 17,
+     90th percentile 33, none over 180.
+5. **Step 2's "units without outliers" now leaves out 2020-21, which is reported only.** The
+   harness counted every season the cell bet. Every cell now reads the outlier share and the
+   units without outliers on its own pooled seasons.
+6. **Noted, nothing changed:**
+   - The served time uses the newest stamp among the rows this search pulled from that fetch,
+     not every row the fetch wrote. That moves a served time by seconds at most.
+   - Step 2's training states never go below 30 seconds left (the 30-second grid's last point),
+     so a decision with under 30 seconds left is priced outside the range the model was fit on.
+
+**Counts after these fixes** (section 11 holds the counts before them; everything there not
+listed here is unchanged). Step 1 bets on 2026-27, EV ≥ 0.02 / 0.05 / 0.08:
+
+| Phase, market | Bets | Games decided | Reaches 200 bets |
+|---|---|---|---|
+| Quarters 1-2, moneyline | 46 / 18 / 10 | 99 | 2026-12-30 / 2027-04-11 / not this season |
+| Quarters 1-2, spread | 57 / 36 / 14 | 100 | 2026-12-18 / 2027-01-16 / not this season |
+| Quarter 3, moneyline | 32 / 29 / 28 | 86 | 2027-01-26 / 2027-02-04 / 2027-02-07 |
+| Quarter 3, spread | 70 / 51 / 36 | 98 | 2026-12-01 / 2026-12-23 / 2027-01-16 |
+| Quarter 4, moneyline | 23 / 18 / 17 | 52 | 2027-03-07 / 2027-04-11 / not this season |
+| Quarter 4, spread | 55 / 42 / 31 | 72 | 2026-12-20 / 2027-01-05 / 2027-01-28 |
+
+- **Step 2:** held, 175 decisions and 4 bets in the graded seasons (3 in 2020-21, reported only).
+  2026-27: 24 decisions, every one with the leader priced shorter than -200, so 0 bets.
+- **The placebo's differing share:** the same seven cells are under 50% as in section 11.4, now at
+  19% to 48%.
+- **Projected `--full`:** 14.4 minutes.
+
 ---
 
 ## 4. Step 1: IG-2's 18 cells on 2026-27, unchanged
@@ -393,7 +504,8 @@ PYTHONPATH=. python -m scripts.nba_game2_verdict --results <folder> --house5
 ## 11. Counts before grading
 
 Added after `--smoke` ran on the real data, before any cell was graded (2026-11-04, 03:12 to 03:15
-UTC, on the committed lab; log `%TEMP%/nba_s/ingame27/smoke3.txt`). Every number below comes from prices, clocks and
+UTC, on the committed lab; log `%TEMP%/nba_s/ingame27/smoke3.txt`). **These counts predate the
+review fixes of section 3.2, which lists every count they moved.** Every number below comes from prices, clocks and
 counts. No result of any bet this search would place was computed or read: every grade inside
 `--smoke` read random scores.
 
