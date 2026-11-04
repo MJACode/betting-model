@@ -247,9 +247,11 @@ def test_lock_bands_skip_matches_named_identity_arguments():
     so the ALTER ran on every pass."""
     bands = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
     code = "\n".join(ln.split("--", 1)[0] for ln in bands.splitlines())
-    named = "p_season integer, p_filters jsonb, p_timing text"
-    assert f"pg_get_function_identity_arguments(p.oid) = '{named}'" in code
+    # The exact signature, by oid (no identity-argument text to get wrong),
+    # and a body damaged by the adapter (jsonb ? stored as %s) is rebuilt.
+    assert "p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')" in code
     assert "pg_get_function_identity_arguments(p.oid) = 'integer, jsonb, text'" not in code
+    assert "position('p_filters %s' in p.prosrc) = 0" in code
     head = code.split("ALTER TABLE", 1)[0]
     assert "byom official lock bands already present" in head
     assert "RETURN;" in head
@@ -596,3 +598,62 @@ def test_unknown_keys_and_timing_still_raise(scratch):
         cur.execute("SELECT * FROM byom_record(2026, '{\"stake\":1}')")
     with pytest.raises(psycopg2.errors.RaiseException, match="timing"):
         cur.execute("SELECT * FROM byom_bets(2026, '{}', 'open')")
+
+
+def test_a_second_pass_leaves_byom_legs_alone(scratch):
+    """2026-11-04: the lock-bands guard compared identity arguments without
+    their names, never matched, and re-created byom_legs on every worker
+    pass, each time through data.db's adapter. A re-run must not touch the
+    function. Run through the adapter, the way the worker runs it."""
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    before = cur.fetchone()[0]
+    for name in (SQL_NAME, BAND_SQL, LOCK_READ_SQL):
+        text = (ROOT / "data/migrations" / name).read_text(encoding="utf-8")
+        cur.execute(_adapt_sql(text))
+    cur.execute("SELECT xmin::text, position('%s' in prosrc) FROM pg_proc WHERE proname = 'byom_legs'")
+    after, pct = cur.fetchone()
+    assert after == before
+    assert pct == 0
+
+
+def test_no_active_migration_guards_on_unnamed_identity_arguments():
+    """pg_get_function_identity_arguments returns 'p_season integer, ...'.
+    A guard that compares it to 'integer, ...' never matches, so the file
+    re-runs its DDL on every pass. Use to_regprocedure instead."""
+    import re
+
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    pattern = re.compile(r"pg_get_function_identity_arguments\([^)]*\)\s*=\s*'")
+    hits = [name for name in ACTIVE_MIGRATIONS
+            if pattern.search((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))]
+    assert hits == []
+
+
+def test_a_damaged_body_is_rebuilt_once(scratch):
+    """Production at 15:00 UTC held byom_legs with `p_filters %s`. The next
+    pass after the fix must re-create it, then leave it alone."""
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("""
+        DO $$ DECLARE src text; BEGIN
+          SELECT pg_get_functiondef('public.byom_legs(integer, jsonb, text)'::regprocedure)
+            INTO src;
+          EXECUTE replace(src, 'p_filters ? ''primetime''', 'p_filters %s ''primetime''');
+        END $$
+    """)
+    cur.execute("SELECT position('p_filters %s' in prosrc) > 0 FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is True
+    band = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    cur.execute(_adapt_sql(band))
+    cur.execute("SELECT position('%s' in prosrc), xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    pct, first = cur.fetchone()
+    assert pct == 0
+    cur.execute(_adapt_sql(band))
+    cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] == first
+    cur.execute("SELECT count(*) FROM byom_record(2026, '{\"primetime\":true}')")
+    assert cur.fetchone()[0] >= 0

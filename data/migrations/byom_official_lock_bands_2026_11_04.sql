@@ -41,11 +41,17 @@ BEGIN
   -- comparison never matches, so the ALTER below ran on every pass
   -- and took AccessExclusiveLock whenever a reader held the table.
   IF EXISTS (
+    -- to_regprocedure, not pg_get_function_identity_arguments: that one
+    -- returns the argument NAMES too ('p_season integer, ...'), so the old
+    -- comparison never matched and this file re-ran on every worker pass
+    -- (2026-11-04), each time through data.db's adapter, which stored the
+    -- jsonb ? operator as %s and broke every BYOM preview.
     SELECT 1 FROM pg_proc p
-     WHERE p.pronamespace = 'public'::regnamespace
-       AND p.proname = 'byom_legs'
-       AND pg_get_function_identity_arguments(p.oid) = 'p_season integer, p_filters jsonb, p_timing text'
+     WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_official_lock_bands_v1' in p.prosrc) > 0
+       -- A body the adapter damaged (the jsonb ? stored as %s) is not
+       -- present: re-create it once, now that data.db leaves $$ alone.
+       AND position('p_filters %s' in p.prosrc) = 0
   ) THEN
     RAISE NOTICE 'byom official lock bands already present - skipping';
     RETURN;

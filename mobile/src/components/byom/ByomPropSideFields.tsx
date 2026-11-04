@@ -34,26 +34,22 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 export function ByomPropSideFields({
   market,
   propSide,
-  role,
   primetime,
   sport,
   rest,
   propFilters,
   onPropSide,
-  onRole,
   onPrimetime,
   onRest,
   onPropFilters,
 }: {
   market: ByomMarket;
   propSide: ByomPropSide | null;
-  role: 'favorite' | 'underdog' | 'pickem' | null;
   primetime: boolean | null;
   sport: ByomSport;
   rest: 'b2b' | 'rest2' | null;
   propFilters: ByomPropFilterState;
   onPropSide: (side: ByomPropSide | null) => void;
-  onRole: (role: 'favorite' | 'underdog' | 'pickem' | null) => void;
   onPrimetime: (primetime: boolean | null) => void;
   onRest: (rest: 'b2b' | 'rest2' | null) => void;
   onPropFilters: (next: ByomPropFilterState) => void;
@@ -87,20 +83,6 @@ export function ByomPropSideFields({
           />
         </Section>
       )}
-      <Section label="Favorite or underdog">
-        <ByomChoiceGroup
-          marked
-          hideLabel
-          label="Favorite or underdog"
-          value={role === 'favorite' || role === 'underdog' ? role : 'any'}
-          onChange={(value) => onRole(value === 'any' ? null : value)}
-          options={[
-            { value: 'any', label: 'Any' },
-            { value: 'favorite', label: 'Favorite' },
-            { value: 'underdog', label: 'Underdog' },
-          ]}
-        />
-      </Section>
       {sport === 'NBA' ? (
         <Section label="Quick filters">
           <ByomChoiceGroup
