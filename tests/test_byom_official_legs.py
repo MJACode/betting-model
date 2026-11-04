@@ -22,6 +22,7 @@ SQL_NAME = "byom_official_legs_2026_11_04.sql"
 BAND_SQL = "byom_official_lock_bands_2026_11_04.sql"
 LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
 PUSHDOWN_SQL = "byom_official_market_pushdown_2026_11_04.sql"
+PROP_LOOKUP_SQL = "byom_prop_lookup_2026_11_04.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -304,7 +305,8 @@ def scratch():
                      "byom_saved_models_2026_10_16.sql",
                      "byom_prop_phase_a_filters_2026_10_29.sql",
                      SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
-                     LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL):
+                     LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL,
+                     PROP_LOOKUP_SQL, PROP_LOOKUP_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -817,9 +819,13 @@ def test_market_pushdown_returns_the_same_answers(scratch):
         '{"markets":["player_pass_yds"],"prop_side":"over","min_price":100}',
         '{"markets":["player_pass_yds"],"prop_side":"over","player":"Jalen Hurts"}',
     ])
-    cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0 "
+    cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0, "
+                "position('byom_prop_lookup_v1' in prosrc) > 0 "
                 "FROM pg_proc WHERE proname = 'byom_legs'")
-    assert cur.fetchone()[0] is True
+    assert cur.fetchone() == (True, True)
+    cur.execute("SELECT count(*) FROM pg_indexes WHERE indexname IN "
+                "('idx_byom_prop_facts_leg', 'idx_byom_prop_facts_market')")
+    assert cur.fetchone()[0] == 2
     after = snapshot()
     band = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
     block = band[band.index("EXECUTE $fn$"):band.index("$fn$;") + len("$fn$;")]
