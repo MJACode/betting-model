@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SQL_NAME = "byom_official_legs_2026_11_04.sql"
 BAND_SQL = "byom_official_lock_bands_2026_11_04.sql"
 LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
+PUSHDOWN_SQL = "byom_official_market_pushdown_2026_11_04.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -303,7 +304,7 @@ def scratch():
                      "byom_saved_models_2026_10_16.sql",
                      "byom_prop_phase_a_filters_2026_10_29.sql",
                      SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
-                     LOCK_READ_SQL, LOCK_READ_SQL):
+                     LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -752,3 +753,42 @@ def test_a_damaged_body_is_rebuilt_once(scratch):
     assert cur.fetchone()[0] == first
     cur.execute("SELECT count(*) FROM byom_record(2026, '{\"primetime\":true}')")
     assert cur.fetchone()[0] >= 0
+
+
+def test_market_pushdown_returns_the_same_answers(scratch):
+    """2026-11-04: byom_legs filters market and side inside the lock
+    search. Every filter must return what the previous body returned."""
+    _pg, cur = scratch
+    filters = [
+        '{}', '{"markets":["h2h"]}', '{"markets":["h2h"],"side":"home"}',
+        '{"markets":["h2h"],"side":"home","role":"underdog","primetime":true}',
+        '{"markets":["spreads"],"side":"away"}', '{"markets":["totals"],"side":"over"}',
+        '{"markets":["h2h","spreads"],"role":"favorite"}',
+        '{"markets":["h2h"],"min_price":100}',
+    ]
+
+    def snapshot():
+        out = {}
+        for f in filters:
+            cur.execute("SELECT timing, market, bets, wins, losses, pushes, ties, "
+                        "round(units, 6), skipped FROM byom_record(2026, %s::jsonb) "
+                        "ORDER BY 1, 2", (f,))
+            out[f] = cur.fetchall()
+            cur.execute("SELECT label, price, result, round(units, 6) FROM byom_bets("
+                        "2026, %s::jsonb, 'official')", (f,))
+            out[f + "|bets"] = cur.fetchall()
+        return out
+
+    cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0 "
+                "FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is True
+    after = snapshot()
+    band = (ROOT / "data/migrations" / BAND_SQL).read_text(encoding="utf-8")
+    block = band[band.index("EXECUTE $fn$"):band.index("$fn$;") + len("$fn$;")]
+    cur.execute("DO $x$ BEGIN " + block + " END $x$")
+    cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0 "
+                "FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is False
+    before = snapshot()
+    assert after == before
+    assert any(rows for rows in after.values())

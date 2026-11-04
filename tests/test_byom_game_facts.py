@@ -320,7 +320,7 @@ def test_a_job_queued_without_sport_uses_nfl(monkeypatch):
     assert out["sport"] == "NBA"
 
 
-def test_the_job_defaults_to_not_writing_and_nba_stays_off():
+def test_the_job_defaults_to_not_writing_and_nba_is_declared_on():
     from tracking.job_queue import JOBS, _validate_byom_game_facts
 
     assert "byom_game_facts" in JOBS
@@ -345,13 +345,12 @@ def test_the_job_defaults_to_not_writing_and_nba_stays_off():
             and not entry["key"].startswith("byom-nfl-game-facts-official")]
     assert len(game) == 1
     assert game[0]["key"] == "byom-nba-game-facts"
-    assert game[0]["enabled"] is False
+    # Matt, 2026-11-04: the NBA builder gets what NFL got.
+    assert game[0]["enabled"] is True
     assert game[0]["requested_by"] == "owner"
-    assert game[0]["args"] == {"sport": "NBA", "apply": False}
+    assert game[0]["args"] == {"sport": "NBA", "apply": True}
     assert "season" not in game[0]["args"]
-    assert "byom_nba_props_2026_10_29.sql" in game[0]["note"]
-    assert "byom-nba-prop-facts" in game[0]["note"]
-    assert "own change" in game[0]["note"]
+    assert "byom_nba_props_2026_10_29.sql is applied" in game[0]["note"]
     assert "from 2021" in game[0]["note"]
     assert all(entry["key"] != "byom-nfl-game-facts" for entry in declared)
     from data.view_migrations import ACTIVE_MIGRATIONS

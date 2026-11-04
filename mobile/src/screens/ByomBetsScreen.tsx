@@ -7,9 +7,9 @@
  * rebuilds a spread's number (CLAUDE.md §00). Units are the main models'
  * staking, 1u to win with risk capped at 3u.
  *
- * NFL has two timings. Official is the first DraftKings line where the bet
- * fit the model's rules, which is when it became a pick. Closing is the
- * last line before kickoff. NBA is graded at the close only.
+ * Two timings, NFL and NBA alike. Official is the first DraftKings line
+ * where the bet fit the model's rules, which is when it became a pick.
+ * Closing is the last line before kickoff.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
