@@ -2425,12 +2425,17 @@ def sport_in_progress(conn, sports: tuple[str, ...] | None = None,
 
 
 def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None = None) -> bool:
-    """A game on a slate date in the window has no final score.
+    """A game in the window has no final score and carries a pick this recap
+    publishes or counts.
 
-    Slate dates are dates that have a BET in the window. Every game of that
-    sport on that date has to be final. An unfinished game in another sport
-    does not hold the recap. A connection with no execute is not live, so a
-    test double that only ledgers still posts.
+    The pick is on that game (`picks.game_id = games.game_id`), in the same
+    population as `_SETTLED_SQL`: a posted BET, not a paused-model row, not a
+    duplicate copy, not a struck model, graded or still open. An unscored
+    game with no such pick does not hold the day. A game that was never bet
+    does not, including one the score feed will never final. The recap goes
+    out once every game that carries such a pick is final. An unfinished game in
+    another sport does not hold it. A connection with no execute is not live,
+    so a test double that only ledgers still posts.
     """
     execute = getattr(conn, "execute", None)
     if execute is None:
@@ -2439,17 +2444,26 @@ def window_still_live(conn, start: str, end: str, sports: tuple[str, ...] | None
     if not sports:
         return False
     marks = ", ".join(["%s"] * len(sports))
+    # Same pick filters as _SETTLED_SQL, without requiring a grade. A posted
+    # pick that is not graded yet still belongs to its game. A VOID
+    # (result NO_ACTION) does not. The LIKE percents are doubled for
+    # psycopg2, the same way _SETTLED_SQL writes them.
     sql = (
         "SELECT 1 FROM games g "
         f"WHERE g.game_date BETWEEN %s AND %s AND g.sport IN ({marks}) "
         "AND (g.home_score IS NULL OR g.away_score IS NULL) "
         "AND EXISTS (SELECT 1 FROM picks p "
-        "WHERE p.game_date = g.game_date AND p.sport = g.sport "
+        "WHERE p.game_id = g.game_id "
         "AND p.signal_type = 'BET' "
-        "AND p.game_date BETWEEN %s AND %s) "
-        "LIMIT 1"
+        "AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%%\\_live\\_%%') "
+        "AND (p.result IS NULL OR p.result IN ('WIN', 'LOSS', 'PUSH'))"
+        + config.record_exclusion_sql("p")
+        + config.paused_row_exclusion_sql("p")
+        + config.duplicate_copy_exclusion_sql("p")
+        + "\n          AND " + posted_sql("p")
+        + ") LIMIT 1"
     )
-    row = execute(sql, (start, end, *sports, start, end)).fetchone()
+    row = execute(sql, (start, end, *sports)).fetchone()
     return row is not None
 
 

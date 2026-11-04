@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, the results recap waits on a game that carries a published or counted pick; an unbet unscored game no longer holds the day; X dedupe unchanged; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, covering index for the official lock read on byom_official_legs; migration only, not applied; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM official lock includes line/price/spread/total bands; a missing byom_official_legs skips the official write and the facts still commit; an empty official headline falls back to the close |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, deploy-kills do not use the daily failure cap (bound 12, cutoff 22:00 ET); the boot catch-up is a job so the 13:17Z hourly is not stuck behind the daily; worker_jobs daily_pipeline runs one daily under the lock; no model change |
