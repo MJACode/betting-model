@@ -437,7 +437,7 @@ function TodayPickRow({
 }) {
   const { pick, game } = enriched;
   // The day as well as the time for a game that is not today: look-ahead
-  // rows (the NCAAB model decides the evening before) read as tonight with a
+  // rows (the NCAAB totals model usually decides the day before) read as tonight with a
   // clock time alone. A game today keeps the time alone.
   const timeLabel = signalsContextTime(gameDayLabelET(game?.commence_time), formatGameTimeET(game?.commence_time));
   return (

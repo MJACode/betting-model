@@ -1989,10 +1989,14 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // NBA home team-total unders and first-half overs post the same way, in the
   // same hour.
   // The NCAAB totals card (scripts/ncaab_total_card.py) decides each game
-  // once, the evening before, and never re-prices: not "the first scoring run
-  // of the day". The NCAAB spread card (scripts/ncaab_spread_card.py) and the
-  // NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each game
-  // once, on game-day morning, the same way.
+  // once, minutes after DraftKings first posts its total (usually the day
+  // before the game), and never re-prices: not "the first scoring run of the
+  // day". DraftKings' first total often moves within half an hour, so its note
+  // says to check DraftKings' total and price (the card bets only the same
+  // total at the same two prices), as the opening moneyline's says to check
+  // the book's price. The NCAAB spread card (scripts/ncaab_spread_card.py) and
+  // the NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decide each
+  // game once, at 15:00 UTC on game day, the same way.
   // The NCAAB first-half spread card decides each game once, about ten
   // minutes before tip, the same way, and the NCAAB first-half total card
   // about an hour before tip. The NCAAB opening-moneyline card
@@ -2027,6 +2031,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
             'shown.') +
         (pick.model_id === 'ncaab_moneyline_first_post'
           ? ' An opening price often changes within half an hour: check the book’s price before you bet.'
+          : '') +
+        (pick.model_id === 'ncaab_total_blend'
+          ? ' An opening total often changes within half an hour: check DraftKings’ total and price before you bet.'
           : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : ''),
