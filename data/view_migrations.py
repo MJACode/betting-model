@@ -545,6 +545,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # win-loss record. Sits before the posted-stake pair, which stays
     # last and only inserts units when they are absent.
     "clv_push_beat_rate_2026_11_04.sql",
+    # 2026-11-04 (mike): the NBA in-play loop's decision ledger, one row per
+    # game and in-play rule (models/nba_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "nba_live_decisions_2026_11_04.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
