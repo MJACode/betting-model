@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a deploy-killed daily is stamped aborted and the boot catch-up starts today's daily again when none finished and none is running; daily_pipeline_completion flags an unfinished daily at 75 min; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, the All board shows every scored NCAAB game: five NCAAB cards write a NONE row (no stake) for each game priced and not bet, first-post stays BET-only (unique key); the app's day read is two paged reads (signals required, NONE enrichment), the NCAAB look-ahead reads lines for signal games only; UX review applied, betslip-on-NONE left for Matt |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Store flags stay off: signed-out shell returns to SignIn, Signals and Live Signals open the same paywall as a locked pick, a Whop-only access row cannot stay entitled |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Store listing copy for the login and Premium binary: sign-in required Yes, five product ids from billingConfig.ts, Discord only after a paid plan; reviewer credentials left TODO; no app code |
