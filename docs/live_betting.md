@@ -298,9 +298,10 @@ at each grade instant (every hour on the hour, every listed tip)
   the first minute of each quarter, a population never graded.
 - **Its freshness guard is the grade's own** (`docs/nba_models_2026.md` 7.1): no
   point scored between a quote's stamp and the fetch, for the deciding quote and
-  its Pinnacle pair, and Pinnacle within 60 seconds. It reads ESPN after a wait,
-  so the plays logged before the fetch are in the read; ESPN's wallclock is when
-  it logged a play, which is what the grade read.
+  its Pinnacle pair, and Pinnacle within 60 seconds. It reads ESPN 45 seconds
+  after the fetch; ESPN's wallclock is when it logged a play, which is what the
+  grade read, so the live read equals the grade's when ESPN serves a play within
+  that wait. ESPN's NBA publication lag (from a play's wallclock to the summary serving it) is NOT yet measured. A free measurement was started for the 2026-11-04 slate (`%TEMP%/nba_live_build/espn_lag.py`, output `%TEMP%/nba_live_build/lag/espn_lag.json`); set `NBA_LIVE_PBP_WAIT_SEC` to at least its 99th percentile before relying on the default. Every decision stores `play_lag_s`, and `scripts/build_nba_live_ig2_artifact.py --parity-live27 --wait N` replays 2026-27 at any wait.
 - **No BookMoveClock** (the picks rule's corollary for every live loop). The
   clock anchors a book's number between changes in our state and needs a series
   of quotes; this loop sees one quote per book per instant, 30 to 60 minutes
@@ -317,7 +318,8 @@ at each grade instant (every hour on the hour, every listed tip)
   the cut spends the rule, and a pick row exists only for a bet, so without the
   ledger a restart would decide a spent rule again.
 
-**Cost.** About ten instants a night at 2 credits each. The first call of each
+**Cost.** 9 instants a slate at the median on the 2026-27 schedule (20 at
+most), 2 credits each, fetched only while a game has a rule not yet decided. The first call of each
 process logs its `x-requests-last`.
 
 

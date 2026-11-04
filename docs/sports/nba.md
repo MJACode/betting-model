@@ -182,22 +182,28 @@ summary endpoint itself, through the same parsing that wrote the 2026-27 rows
 the search graded. ESPN's play wallclock is when it LOGGED a play (74 plays of
 `NBA_2026-10-23_LAC_LAL` carry 02:35:53-54), and the grade read plays by that
 wallclock. The loop waits 45 seconds after a fetch before reading them
-(`NBA_LIVE_PBP_WAIT_SEC`), so a play logged before the fetch is in the read.
+(`NBA_LIVE_PBP_WAIT_SEC`, a default): a play logged before the fetch is in the
+read only if ESPN serves it within that wait. ESPN's NBA publication lag (from a play's wallclock to the summary serving it) is NOT yet measured. A free measurement was started for the 2026-11-04 slate (`%TEMP%/nba_live_build/espn_lag.py`, output `%TEMP%/nba_live_build/lag/espn_lag.json`); set `NBA_LIVE_PBP_WAIT_SEC` to at least its 99th percentile before relying on the default. Every decision stores `play_lag_s`, and `scripts/build_nba_live_ig2_artifact.py --parity-live27 --wait N` replays 2026-27 at any wait.
 Replayed on 2026-27's live rows with each fetch seeing only the plays logged by
 its served time plus 45 seconds, the loop makes all 86 quarter-3 moneyline and
 all 98 quarter-3 spread decisions at the same fetch as the search, and all 100
 of its quarters 1-2 spread decisions, with every one of the search's 116 bets at
 0.05 and no other. It makes 2 more quarters 1-2 decisions than the search,
-neither a bet. The search left 2 games out whole for a clock jump (doc 3.2); a
-live loop can only apply that rule from the moment it sees the jump.
+neither a bet: `NBA_2026-10-20_PHI_NYK` and `NBA_2026-10-23_MEM_GSW`, the two
+games the search left out whole for a 45-minute clock jump (doc 3.2). The live
+view saw neither jump by its decision fetch; a live loop can only apply that
+rule from the moment it sees the jump.
 
 **Prices, cost, writes.** One bulk Odds API call per instant covers every game:
 h2h and spreads, the eight deciding books and Pinnacle (Pinnacle is what the
 freshness rule pairs with). Nine books stay inside one region group, so the
 feed's markets-times-regions billing gives 2 credits a call (the same NBA call
 with totals bills 3, `api_call_log` 2026-11-02 to 11-04); the loop logs the
-first call's `x-requests-last`. About ten instants a night, so about 20
-credits. Caps: 40 calls and 80 credits a process, and the shared
+first call's `x-requests-last`. The 2026-27 schedule has 9 instants a slate at
+the median (7 to 15 for the middle 80% of dates, 20 at most; every hour from
+the first tip to three hours after the last, plus each distinct listed tip),
+so at most 40 credits a night and usually under 20: the loop fetches at an
+instant only while a game in progress has a rule not yet decided. Caps: 40 calls and 80 credits a process, and the shared
 `LIVE_DAILY_CREDIT_CAP` (`live_credit_telemetry`). The fetched rows go to `odds`
 as `in_play`.
 
@@ -228,6 +234,10 @@ full-game NBA rows (35%) were stamped after the listed tip.
 `odds_ingestor.LIVE_PULL_IN_PLAY_SPORTS` relabels them at write time. Rows
 already stored are left as they are; the repair is
 `odds_ingestor.relabel_in_play('NBA', since)`, a production write, not run.
+What a reader sees change: the pre-game latest-line views exclude `in_play`
+rows, so for an NBA game under way they stop at the last pre-tip quote, and the
+refresh pass's in-play prices move to `v_latest_inplay_odds_all_books`, the view
+the app reads a live pick's price from.
 
 Build and parity: `scripts/build_nba_live_ig2_artifact.py` (`--build`,
 `--parity-held`, `--parity-live27`; after the merge `--store` and

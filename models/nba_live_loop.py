@@ -35,8 +35,10 @@ ONE PASS (every NBA_LIVE_POLL_SEC, default 20 s)
   4. Wait NBA_LIVE_PBP_WAIT_SEC after the fetch, then read each game's ESPN
      summary. The freshness rule asks whether a point was scored between a
      quote's stamp and the fetch's served time, by ESPN's play wallclock; the
-     wait lets ESPN publish every play logged up to the served time before
-     the rule reads them (ESPN's wallclock is when it LOGGED a play: 74 plays
+     wait gives ESPN time to serve every play logged up to the served time
+     before the rule reads them. 45 s is a default: ESPN's NBA publication lag
+     is not yet measured (docs/sports/nba.md, "In play"); set the wait to at
+     least its 99th percentile. (ESPN's wallclock is when it LOGGED a play: 74 plays
      of NBA_2026-10-23_LAC_LAL carry 02:35:53-54, docs/nba_search_ingame27.md
      3.2). The decision's play_lag_s (decision time minus the newest play's
      wallclock) is logged and stored with every decision.
