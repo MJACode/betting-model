@@ -342,7 +342,7 @@ def test_the_job_defaults_to_not_writing_and_nba_stays_off():
     declared = json.loads(
         (ROOT / "jobs" / "declared_jobs.json").read_text(encoding="utf-8"))
     game = [entry for entry in declared if entry["job_type"] == "byom_game_facts"
-            and entry["key"] != "byom-nfl-game-facts-official-2026-11-04"]
+            and not entry["key"].startswith("byom-nfl-game-facts-official")]
     assert len(game) == 1
     assert game[0]["key"] == "byom-nba-game-facts"
     assert game[0]["enabled"] is False

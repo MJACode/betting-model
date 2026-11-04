@@ -341,8 +341,11 @@ export function ByomEditScreen() {
                   onRetry={() => void preview.reload()}
                   showsUnits={unitsVisible}
                   closeRecord={preview.closeRecord}
+                  closingHeadline={sport === 'NFL' && preview.timing === 'close'}
                   onShowBets={previewFilters != null && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
-                    ? () => navigation.navigate('ByomBets', { filters: previewFilters, sport, title: 'Bets that match' })
+                    ? () => navigation.navigate('ByomBets', {
+                      filters: previewFilters, sport, title: 'Bets that match', timing: preview.timing,
+                    })
                     : undefined}
                 />
               ) : (
@@ -354,8 +357,11 @@ export function ByomEditScreen() {
                 showsUnits={unitsVisible}
                 emptyLabel={previewFilters == null ? '—' : byomEmptyLabel(sport, facts.status, previewFilters)}
                 closeRecord={preview.closeRecord}
+                closingHeadline={sport === 'NFL' && preview.timing === 'close'}
                 onShowBets={previewFilters != null && byomBetsAvailable() && preview.record != null && preview.record.bets > 0
-                  ? () => navigation.navigate('ByomBets', { filters: previewFilters, sport, title: 'Bets that match' })
+                  ? () => navigation.navigate('ByomBets', {
+                    filters: previewFilters, sport, title: 'Bets that match', timing: preview.timing,
+                  })
                   : undefined}
               />
               )}

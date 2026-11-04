@@ -23,6 +23,7 @@ export function ByomModelRow({
   ungraded = false,
   failed = false,
   emptyLabel = 'No games match',
+  closingHeadline = false,
   onPress,
 }: {
   rank: number | null;
@@ -35,6 +36,8 @@ export function ByomModelRow({
   failed?: boolean;
   /** Shown when the row has no bets. NBA game facts use “No history yet”. */
   emptyLabel?: string;
+  /** NFL, and this row's number is the close because official rows are empty. */
+  closingHeadline?: boolean;
   onPress: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
@@ -64,6 +67,7 @@ export function ByomModelRow({
       recordText,
       rate == null ? null : rateText,
       roi == null ? null : roiText,
+      closingHeadline ? 'Closing line' : null,
       `${bets} bet${bets === 1 ? '' : 's'}`,
     ].filter(Boolean).join(', ');
 
@@ -81,6 +85,9 @@ export function ByomModelRow({
             <Text style={styles.name} numberOfLines={2}>{name}</Text>
           </View>
           <Text style={styles.sub} numberOfLines={2}>{market}</Text>
+          {closingHeadline && !noGames && !unknown ? (
+            <Text style={styles.sub}>Closing line</Text>
+          ) : null}
           {noGames || unknown ? null : (
             <Text style={styles.sub}>{bets} bet{bets === 1 ? '' : 's'}</Text>
           )}

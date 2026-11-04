@@ -108,6 +108,7 @@ def test_backtest_row_reads_units_and_not_the_left_out_count():
     assert "skipped" not in iface.group(0)
     assert "optionalNum(row, 'units')" in byom
     assert "optionalNum(row, 'risked')" in byom
+    assert "headline: headlineFor(sport, official, close)" in byom
 
 
 def test_my_models_screens_do_not_mention_a_left_out_count_or_a_price_estimate():
@@ -162,7 +163,13 @@ import {
   byomEmptyLabel, filtersNeedGameFacts, nameTakenOnOtherSport, otherSportAlert,
   otherModelWithName, propSideAfterMarketChange, rankByUnits, recordFromRows,
   saveBlockReason, showsUnits, sideBlockFromError, sideForMarket, suggestedName,
+  headlineFromCounts,
 } from './byomRecord.ts';
+
+if (headlineFromCounts('official', 0, 4) !== 'close') throw new Error('empty official');
+if (headlineFromCounts('official', 0, 0) !== 'official') throw new Error('both empty');
+if (headlineFromCounts('official', 2, 4) !== 'official') throw new Error('official has bets');
+if (headlineFromCounts('close', 0, 4) !== 'close') throw new Error('close preferred');
 
 const summed = recordFromRows([
   { bets: 2, wins: 1, losses: 1, pushes: 0, ties: 0, units: 1.5, risked: 4 },

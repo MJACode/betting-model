@@ -22,6 +22,7 @@
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
 import {
   assertByomSide,
+  headlineFromCounts,
   nbaSeasonList,
   nflSeasonList,
   type ByomSeasonScope,
@@ -288,6 +289,24 @@ export function headlineTiming(sport: ByomSport): ByomTiming {
   return sport === 'NFL' && !recordMissing ? 'official' : 'close';
 }
 
+function countedBets(rows: readonly ByomBacktestRow[]): number {
+  return rows.reduce((sum, row) => sum + (Number.isFinite(row.bets) ? row.bets : 0), 0);
+}
+
+/**
+ * The card's headline. NFL leads with the official record once the server
+ * has it. An empty official record beside a closing record (the rebuild
+ * has not finished, or the season has no official rows) leads with the
+ * close, so the card is not stuck at 0-0.
+ */
+export function headlineFor(
+  sport: ByomSport,
+  official: readonly ByomBacktestRow[],
+  close: readonly ByomBacktestRow[],
+): ByomTiming {
+  return headlineFromCounts(headlineTiming(sport), countedBets(official), countedBets(close));
+}
+
 /** `fetchByomScopedBacktest`'s seasons, both timings. */
 export async function fetchByomScopedRecord(
   scope: ByomSeasonScope,
@@ -300,10 +319,12 @@ export async function fetchByomScopedRecord(
     ? [null]
     : sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
   const groups = await pool(seasons, 4, (season) => fetchByomRecord(season, parsed, sport));
+  const official = groups.flatMap((group) => group.official);
+  const close = groups.flatMap((group) => group.close);
   return {
-    headline: headlineTiming(sport),
-    official: groups.flatMap((group) => group.official),
-    close: groups.flatMap((group) => group.close),
+    headline: headlineFor(sport, official, close),
+    official,
+    close,
   };
 }
 
