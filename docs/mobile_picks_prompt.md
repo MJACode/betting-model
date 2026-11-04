@@ -31,7 +31,6 @@ ordered by start time.
 | `risk_units`, `to_win_units` | the same stake as two numbers |
 | `model` | the model's name as the app shows it |
 | `decided_at_et` | when the pick was decided, in Eastern time |
-| `on_discord` | whether Discord has posted it |
 | `pick_id`, `model_id` | for looking a pick up in `picks` |
 
 Every stake and result is in units, never dollars (CLAUDE.md §4). For a record
@@ -49,18 +48,15 @@ Zero rows is a valid answer: no open bets right now.
   started. No date horizon: a pick written days ahead is open now.
 - Not VOID, not the second copy of one bet (`DUPLICATE`), not written while its
   model was paused, and its model is not paused now.
-- It clears its model's own cut in `model_action_thresholds` (the table
-  `data.threshold_sync` writes from `config.py`) at the price it was decided at.
-  **A bet Discord already posted stays in** even if that cut has moved since,
-  the same rule as the app's action filter (mike, 2026-10-15 and 10-16).
+- **Discord has posted it.** The app, Discord and push show the same picks,
+  and the app shows a bet once the channel has it. Discord posts a bet only
+  after it clears its model's own cut in `model_action_thresholds` (the table
+  `data.threshold_sync` writes from `config.py`) at the price it was decided
+  at. A posted bet stays in even if that cut has moved since, the same rule as
+  the app's action filter (mike, 2026-10-15 and 10-16).
 
 ### Where it can differ from the app, and why
 
-- **A bet Discord has not posted yet** (`on_discord = false`). The app's
-  Signals board shows a bet once Discord has it. Such a row is a bet the
-  channel has not sent: later in the same refresh pass, held by the per-pass
-  cap, or refused by the label check. Check its label against the price before
-  betting it.
 - **A VOID that Discord posted.** The app keeps it on the board until its void
   notice posts. This view leaves every VOID out.
 - **A game in progress.** The app's Today board keeps a bet until the game
@@ -69,9 +65,9 @@ Zero rows is a valid answer: no open bets right now.
   and WNBA; 7 days for UFC, NHL and NCAAB; 11 for NFL; 150 for NCAAF). The view
   has no horizon, like Discord.
 
-Measured on 2026-11-04 at 5:18 PM ET: 16 rows (NFL 5, NHL 5, NCAAF 4, NCAAB 2),
-all posted to Discord, and the same 16 picks the app's filter selects, with
-none on one side only.
+Measured on 2026-11-04 at 6:06 PM ET: 23 rows (NBA 6, NFL 5, NHL 5, NCAAF 4,
+NCAAB 3), the same 23 picks the app's filter selects, with none on one side
+only. No bet that cleared its cut was waiting to be posted.
 
 ## Changing it
 

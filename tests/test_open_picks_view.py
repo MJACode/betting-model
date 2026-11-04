@@ -39,7 +39,6 @@ COLUMNS = [
     "to_win_units",
     "model",
     "decided_at_et",
-    "on_discord",
     "pick_id",
     "model_id",
 ]
@@ -242,8 +241,8 @@ def test_every_book_has_its_channel_name():
 # ── Which rows ───────────────────────────────────────────────────────────────
 
 def test_the_lock_key_is_the_publishers():
-    """on_discord joins the ledger on the pre-game key tracking/publish_keys
-    mints. A component added there must be added here."""
+    """The view joins the Discord ledger on the pre-game key
+    tracking/publish_keys mints. A component added there must be added here."""
     from tracking.publish_keys import KEY_PARTS
 
     body = _code(_view_body())
@@ -278,24 +277,36 @@ def test_void_duplicate_and_paused_rows_are_out():
     assert "p.condition_status IS NULL\n" not in body
 
 
-def test_the_cut_is_the_table_and_a_posted_bet_keeps_its_cuts():
-    """passesActionFilter's order: a paused model is out whatever was posted;
-    a posted bet skips only the probability, price and edge cuts."""
+def test_only_bets_discord_posted_and_a_pause_still_removes_them():
+    """The app, Discord and push show the same picks (CLAUDE.md 1b), and the
+    app shows a bet once the channel has it. So a row needs the Discord lock.
+    passesActionFilter's order: a paused model is out whatever was posted,
+    and a posted bet keeps the cuts it was written under, so the view
+    re-applies no cut."""
     body = _code(_view_body())
     assert "JOIN public.model_action_thresholds t ON t.model_id = p.model_id" in body
     where = body[body.index("WHERE p.signal_type"):]
     assert "AND t.paused = FALSE" in where
-    m = re.search(r"AND \(d\.on_discord\n\s+OR \((.*?)\)\)\n", where, re.S)
-    assert m, "no posted-or-cut clause"
-    cuts = m.group(1)
-    for gate in ("p.model_probability >= t.min_prob",
+    assert "AND EXISTS (\n        SELECT 1 FROM public.v_discord_published pub" in where
+    # Not an OR, not an optional column: the lock is required.
+    assert "on_discord" not in body
+    assert " OR EXISTS" not in where
+    for cut in ("t.min_prob", "t.min_edge", "t.min_odds", "t.prob_only"):
+        assert cut not in body, f"a posted bet keeps its cuts; {cut} re-cuts it"
+
+
+def test_the_producer_posts_only_what_clears_the_cut():
+    """The view leans on the producer for the cut: Discord posts a bet only
+    after it clears its model's row in model_action_thresholds, at the
+    decided price. If that stops being true, the view stops matching it."""
+    src = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    body = src[src.index("def _new_signals("):src.index("def _locked_signals(")]
+    for gate in ("JOIN model_action_thresholds t ON t.model_id = p.model_id",
+                 "AND t.paused = FALSE",
+                 "AND p.model_probability >= t.min_prob",
                  "COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
-                 "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds",
-                 "t.prob_only = TRUE"):
-        assert gate in cuts, gate
-    # The posted bypass never reaches the pause or the row exclusions.
-    for outside in ("paused", "VOID", "DUPLICATE", "model paused", "result"):
-        assert outside not in cuts, outside
+                 "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds"):
+        assert gate in body, gate
 
 
 def test_rows_are_ordered_by_start_time():

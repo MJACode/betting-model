@@ -10,12 +10,12 @@
 --   * not graded, pre-game, the game not started, no date horizon;
 --   * not VOID, not the DUPLICATE copy, not written while its model was
 --     paused, and its model not paused now;
---   * the model's own cut from model_action_thresholds at the decided price,
---     except that a bet Discord already posted keeps the cuts it was written
---     under (the app's passesActionFilter).
--- on_discord says whether the channel has it. The app's Signals board shows
--- a bet once Discord has it, so a row with on_discord false is one the app
--- does not show yet.
+--   * Discord has posted it. The app shows a bet once the channel has it, and
+--     the producer posts only a bet that cleared its model's cut in
+--     model_action_thresholds at the decided price. A posted bet keeps the
+--     cuts it was written under (the app's passesActionFilter), so no cut is
+--     re-applied here. A bet that clears its cut but is not posted yet is
+--     not in the view, as it is not in the app.
 --
 -- The columns are fixed: CREATE OR REPLACE VIEW cannot rename, drop or
 -- reorder them. A new column goes on the end. tests/test_open_picks_view.py
@@ -42,7 +42,7 @@ BEGIN
 
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
-         = 'open_picks 028bf9680705'
+         = 'open_picks f42bf39b0a87'
      AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
   THEN
@@ -212,11 +212,6 @@ BEGIN
            -- When the pick was decided: created_at is when the number existed.
            to_char(p.created_at::timestamptz AT TIME ZONE 'America/New_York',
                    'YYYY-MM-DD FMHH12:MI AM') || ' ET' AS decided_at_et,
-           -- Discord has posted it. A row not on Discord yet is a cut-passing
-           -- bet the channel has not sent (later in the same pass, held by
-           -- the per-pass cap, or refused by the label check). The app shows
-           -- it once it posts.
-           d.on_discord AS on_discord,
            p.pick_id AS pick_id,
            p.model_id AS model_id
     FROM public.picks p
@@ -227,17 +222,6 @@ BEGIN
       SELECT COALESCE(NULLIF(p.decision_book, ''),
                       CASE WHEN p.dk_odds IS NOT NULL THEN 'draftkings' END) AS book_key
     ) b
-    CROSS JOIN LATERAL (
-      -- The pre-game lock key, as tracking/publish_keys.lock_key_sql mints it.
-      -- v_discord_published already drops a lock a newer void notice released.
-      SELECT EXISTS (
-        SELECT 1 FROM public.v_discord_published pub
-        WHERE pub.lock_key = p.game_id || ':' || p.model_id
-                 || COALESCE(':' || p.player_id, '')
-                 || COALESCE(':' || p.player_key, '')
-                 || COALESCE(':' || p.prop_market, '')
-      ) AS on_discord
-    ) d
     WHERE p.signal_type = 'BET'
       -- Open: not graded. A VOID is result NO_ACTION, so it is out here too.
       AND p.result IS NULL
@@ -257,20 +241,26 @@ BEGIN
       AND p.condition_status IS DISTINCT FROM 'DUPLICATE'
       AND p.downgrade_reason IS DISTINCT FROM 'model paused'
       -- A paused model is not offered, posted or not (passesActionFilter).
+      -- A retired model has no row in the table, so the join drops it.
       AND t.paused = FALSE
-      -- The model's own cut, from the table config.py syncs to, at the price
-      -- the pick was decided at. A bet Discord already posted keeps the cuts
-      -- it was written under (passesActionFilter, mike 2026-10-15/16).
-      AND (d.on_discord
-           OR (p.model_probability >= t.min_prob
-               AND (t.min_odds IS NULL
-                    OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
-                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-               AND (t.prob_only = TRUE
-                    OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))))
+      -- Discord has posted it: the app, Discord and push show the same picks
+      -- (CLAUDE.md 1b), and the app shows a bet once the channel has it. The
+      -- producer posted it only after it cleared its model's cut in
+      -- model_action_thresholds at the decided price, and a posted bet keeps
+      -- the cuts it was written under (passesActionFilter), so no cut is
+      -- re-applied here. The pre-game lock key, as
+      -- tracking/publish_keys.lock_key_sql mints it. v_discord_published
+      -- already drops a lock that a newer void notice released.
+      AND EXISTS (
+        SELECT 1 FROM public.v_discord_published pub
+        WHERE pub.lock_key = p.game_id || ':' || p.model_id
+                 || COALESCE(':' || p.player_id, '')
+                 || COALESCE(':' || p.player_key, '')
+                 || COALESCE(':' || p.prop_market, '')
+      )
     ORDER BY g.commence_time::timestamptz NULLS LAST, p.created_at, p.pick_id
 $view$;
-  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 028bf9680705'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks f42bf39b0a87'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
   GRANT SELECT ON public.open_picks TO anon, authenticated;
 END $mig$;

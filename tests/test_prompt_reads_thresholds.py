@@ -44,13 +44,19 @@ def test_the_prompt_carries_no_per_model_cut():
 
 
 def test_the_prompt_joins_the_thresholds_table_and_applies_every_gate():
+    """The view shows only bets Discord posted, and the Discord producer
+    posts only what clears the table's cut. So the view joins the table for
+    the pause, and the cut gates live in the producer it reads the ledger of."""
     assert "JOIN public.model_action_thresholds t ON t.model_id = p.model_id" in PROMPT
     for gate in ("t.paused = FALSE",
-                 "p.model_probability >= t.min_prob",
-                 "COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
-                 "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds",
+                 "FROM public.v_discord_published pub",
                  "p.condition_status IS NULL OR p.condition_status <> 'VOID'"):
-        assert gate in PROMPT, f"the prompt lost the gate: {gate}"
+        assert gate in PROMPT, f"the open picks view lost the gate: {gate}"
+    producer = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    for gate in ("p.model_probability >= t.min_prob",
+                 "COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
+                 "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds"):
+        assert gate in producer, f"the Discord producer lost the gate: {gate}"
 
 
 def test_the_sync_mirrors_both_pause_registers():
