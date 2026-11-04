@@ -453,6 +453,31 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA in-play (models/nba_live_ig2.py, 2026-11-04): the game-state model's
+  // win chance and margin against the live line, one bet per game per rule at
+  // the first fresh price. Same chips as the NCAAF and NFL live models; their
+  // picks appear on the Live segment only.
+  nba_live_spread_q12: {
+    shortLabel: 'LIVE Spread',
+    longLabel: 'NBA Live Spread, First Half',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_live_ml_q3: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'NBA Live Moneyline, 3rd Quarter',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_live_spread_q3: {
+    shortLabel: 'LIVE Spread',
+    longLabel: 'NBA Live Spread, 3rd Quarter',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {

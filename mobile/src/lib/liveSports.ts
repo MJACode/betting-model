@@ -19,7 +19,7 @@
  */
 
 /** Sports with at least one in-play model writing `is_live` picks. */
-export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NCAAF', 'NFL']);
+export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NCAAF', 'NFL']);
 
 /** Does this sport have an in-play model at all? */
 export function hasLiveModel(sport: string): boolean {
