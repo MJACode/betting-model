@@ -87,19 +87,24 @@ mid-daily (a Railway redeploy after a merge) left the run `failed_steps=aborted`
 aimed the next daily at *tomorrow* 6:00am. `pipeline_watch` reported the abort and
 did not re-queue.
 
-`scheduler.py::catch_up_daily_pipeline` runs on boot and again after the 7:15am ET
-pipeline watch. If today's daily is missing, unfinished, aborted, or failed before
-the MLB freshness steps, and this process is not already inside a daily, it
-invokes `python run_pipeline.py` again the same America/New_York calendar day
-and posts an ops Discord note. A deploy that kills that retry starts another
-one: on 2026-11-04 the 11:13Z retry stayed `finished_at` NULL and the old
-two-start cap refused every later boot. The in-process lock is the double-run
-guard. Aborted starts relaunch until 4 ledgered starts
-(`MAX_DAILY_STARTS_PER_ET_DAY`). A daily that finishes and fails before the
-MLB freshness steps for a reason other than aborted gets one retry, then
-stops, so an upstream outage does not buy odds on every boot. The ops note
-names which start this attempt is. A successful daily already today is a
-no-op. Kill switch: `RUN_DAILY_RETRY=0`. See `tracking/daily_retry.py`.
+`scheduler.py::catch_up_daily_pipeline` is a one-off job five seconds after the
+scheduler starts, and it runs again after the 7:15am ET pipeline watch. It is
+not called before `sched.start()`: on 2026-11-04 the 13:01Z boot ran the daily
+on that thread, and the 13:17Z hourly never ledgered (last hourly 12:17Z). If
+today's daily is missing, unfinished, aborted, or failed before the MLB
+freshness steps, and this process is not already inside a daily, it invokes
+`python run_pipeline.py` again the same America/New_York calendar day and posts
+an ops Discord note that says which start this is and why. A deploy-kill
+(`failed_steps` contains `aborted`, or the row is still unfinished) does not
+consume the failure cap. On 2026-11-04 four aborted starts filled a cap of 4
+by 13:29Z and the day was skipped. Deploy-kills relaunch until 12
+(`MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY`) or 22:00 ET. A daily that finishes and
+fails before the MLB freshness steps for a reason other than aborted gets one
+retry, then stops, so an upstream outage does not buy odds on every boot. The
+in-process lock is the double-run guard. A successful daily already today is a
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. A `worker_jobs` row with
+`job_type = 'daily_pipeline'` (no args) runs the full daily once under that
+same lock; it is not in `jobs/declared_jobs.json`. See `tracking/daily_retry.py`.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`

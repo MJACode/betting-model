@@ -26,17 +26,26 @@ This module is the decision. Scheduler boot and `run_pipeline_watch` both call
 it; the 6am cron is unchanged. A killed run (`failed_steps` contains
 `aborted`, or the row is still unfinished) is started again the same
 America/New_York day until one daily finishes the MLB freshness steps, a
-daily is actually running in this process, or the crash-loop ceiling is hit.
-A daily that finishes and fails before those steps for any other reason gets
-one retry, then stops. Kill switch: `RUN_DAILY_RETRY=0`.
+daily is actually running in this process, or the deploy-kill bound or the
+evening cutoff is hit. A daily that finishes and fails before those steps
+for any other reason gets one retry, then stops. A deploy-kill does not
+consume that retry. Kill switch: `RUN_DAILY_RETRY=0`.
 
-2026-11-04: the 6:00am ET daily (run 3d3685c194b949d69243f13a1d3c52e7) was
-aborted at 11:13:34Z by the deploy of 1934d8b. The catch-up started
+2026-11-04 morning: the 6:00am ET daily (run 3d3685c194b949d69243f13a1d3c52e7)
+was aborted at 11:13:34Z by the deploy of 1934d8b. The catch-up started
 8a44ef65d4364828af08e025aa292a51 at that same second. Deploys at 11:39Z and
 12:02Z killed that retry and left its row unfinished. The two-start cap then
 treated the open row as the retry already spent, so no later boot relaunched
 it. There is no SIGTERM handler that closes the ledger; a row stays
 unfinished until a later same-kind start or the boot sweep stamps it aborted.
+
+2026-11-04 afternoon: the ceiling was raised to 4 ledgered starts, and four
+deploys (3d3685c1, 8a44ef65, c1869c15, d5a27075) filled it by 13:29Z. Every
+one was `failed_steps=aborted`. The day was then skipped. Those starts are
+deploy-kills. They do not count toward the one-retry cap, which is only for
+a run that finished and named a failed step. The loop bound is
+`MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY`, and automatic catch-up stops at
+22:00 ET.
 """
 
 from __future__ import annotations
@@ -61,22 +70,28 @@ DAILY_MINUTE = 0
 # A row still open past this is not a live pass of that shape.
 MAX_DAILY_RUN = timedelta(minutes=75)
 
-# Crash-loop ceiling for killed starts, not the double-run guard. The
-# in-process lock stops two dailies in one process. This stops a container
-# that dies inside the daily and boots again all day. 2 was the 2026-11-04
-# hole: the 6:00am start and its one automatic retry were both killed by
-# deploys, and every later boot saw two ledgered starts and refused another
-# while the retry's row was still unfinished. 8 relaunched a full daily,
-# and bought odds again, on every boot of a busy merge morning. 4 covers
-# that morning (the scheduled start plus the retries those deploys killed)
-# and stops a container that restarts all day.
-MAX_DAILY_STARTS_PER_ET_DAY = 4
-
 # Finished failures that are not `aborted`. The scheduled daily plus one
-# retry — the cap from before 2026-11-04, kept for this class only. An
-# upstream outage before the MLB freshness steps must not relaunch on every
-# boot and at the 7:15 watch. Aborted starts do not count here.
+# retry. An upstream outage before the MLB freshness steps must not
+# relaunch on every boot and at the 7:15 watch. A deploy-kill (aborted
+# stamp, or a row still unfinished because the process was replaced) does
+# not count here. 2026-11-04 13:29Z: four aborted starts filled a cap of 4
+# and the day's picks were skipped.
 MAX_NON_ABORTED_FAILURES = 2
+
+# Loop bound for deploy-kills only. The in-process lock stops two dailies
+# in one process. This stops a container that dies inside the daily and
+# boots again all day. The 2026-11-04 morning was four kills between
+# 11:00Z and 13:29Z (about one every 40 minutes). 12 covers that rate
+# through the afternoon and stops a restart every few minutes. Each
+# relaunch can buy odds. Deploy-kills do not consume MAX_NON_ABORTED_FAILURES.
+MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY = 12
+
+# Automatic catch-up does not start a daily at or after this ET clock.
+# A crash loop must not run overnight. The 6:00am cron is not this path,
+# and neither is the manual worker_jobs daily_pipeline job. 22:00 still
+# covers a fix that deploys in the evening of the day the daily was killed.
+DAILY_RETRY_CUTOFF_HOUR = 22
+DAILY_RETRY_CUTOFF_MINUTE = 0
 
 # Steps that write the daily-only MLB freshness tables (health-check names
 # `mlb_bullpen_workload` / `mlb_team_stats` / `mlb_player_game_log` /
@@ -174,12 +189,42 @@ def _non_aborted_failure(run: DailyRun) -> bool:
     """Finished without the MLB freshness steps, and the worker was not killed.
 
     `aborted` is a deploy or a crash. A named step is the pipeline running
-    and failing. Those get one retry. Aborted starts relaunch until the
-    ceiling.
+    and failing. Those get one retry. Aborted starts do not count here.
     """
     if run.finished_at is None or completed_mlb_freshness(run):
         return False
     return "aborted" not in _failed_steps(run)
+
+
+def _deploy_killed(run: DailyRun) -> bool:
+    """The process was replaced before the daily finished.
+
+    `failed_steps` contains `aborted` (the boot sweep, or a later same-kind
+    start, stamped a row the worker never closed), or `finished_at` is still
+    NULL because nothing has stamped it yet. A run that finished and named
+    a step is a real failure, not one of these.
+    """
+    if completed_mlb_freshness(run):
+        return False
+    if run.finished_at is None:
+        return True
+    return "aborted" in _failed_steps(run)
+
+
+def today_counts(runs: list[DailyRun]) -> tuple[int, int]:
+    """`(deploy_kills, real_failures)` for a list already limited to today."""
+    kills = sum(1 for run in runs if _deploy_killed(run))
+    failures = sum(1 for run in runs if _non_aborted_failure(run))
+    return kills, failures
+
+
+def classify_relaunch(runs: list[DailyRun]) -> str:
+    """Why the next start would be a relaunch: missing, deploy-kill, or real-failure."""
+    if not runs:
+        return "missing"
+    if _deploy_killed(runs[-1]):
+        return "deploy-kill"
+    return "real-failure"
 
 
 def decide_daily_retry(
@@ -193,8 +238,9 @@ def decide_daily_retry(
 
     `runs` are already `run_kind='daily'` rows; this filters to the ET day of
     `now`. Callers that cannot see the ledger pass `runs=[]`, which after 6am
-    ET is a missing daily and therefore a run — the same default as a worker
-    that was down for the 6am cron.
+    ET and before the cutoff is a missing daily and therefore a run — the
+    same default as a worker that was down for the 6am cron. A deploy-kill
+    does not count as a finished failure.
     """
     if enabled is None:
         enabled = _enabled()
@@ -223,20 +269,35 @@ def decide_daily_retry(
             "today's daily already completed MLB freshness steps",
         )
 
-    if len(todays) >= MAX_DAILY_STARTS_PER_ET_DAY:
-        return Decision(
-            "skip",
-            f"already started {len(todays)} dailies today "
-            f"(cap {MAX_DAILY_STARTS_PER_ET_DAY}; not starting another)",
-        )
-
-    real_failures = sum(1 for r in todays if _non_aborted_failure(r))
+    deploy_kills, real_failures = today_counts(todays)
     if real_failures >= MAX_NON_ABORTED_FAILURES:
         return Decision(
             "skip",
             f"already finished {real_failures} dailies today that failed "
             f"before MLB freshness for a reason other than aborted "
             f"(one retry; not starting another)",
+        )
+
+    if deploy_kills >= MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY:
+        return Decision(
+            "skip",
+            f"already deploy-killed {deploy_kills} dailies today "
+            f"(bound {MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY}; a restart loop "
+            f"is not started again)",
+        )
+
+    cutoff = now_et.replace(
+        hour=DAILY_RETRY_CUTOFF_HOUR,
+        minute=DAILY_RETRY_CUTOFF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if now_et >= cutoff:
+        return Decision(
+            "skip",
+            f"after the {DAILY_RETRY_CUTOFF_HOUR:02d}:"
+            f"{DAILY_RETRY_CUTOFF_MINUTE:02d} ET catch-up cutoff "
+            f"({today.isoformat()})",
         )
 
     if not todays:
@@ -296,39 +357,52 @@ def load_today_dailies(conn, now: datetime) -> list[DailyRun] | None:
 
 
 def announce_daily_retry(
-    reason: str, *, source: str, start_number: int | None = None,
+    reason: str,
+    *,
+    source: str,
+    start_number: int | None = None,
+    relaunch_kind: str = "unspecified",
+    deploy_kills: int | None = None,
+    real_failures: int | None = None,
 ) -> bool:
     """Ops-channel note. Failure to post must not block the retry itself.
 
-    ``start_number`` is which ledgered start this attempt will be (1-based),
-    so a boot loop is visible in the channel before it hits the ceiling.
+    ``start_number`` is which ledgered start this attempt will be (1-based).
+    ``relaunch_kind`` is why: ``deploy-kill``, ``real-failure``, ``missing``,
+    or ``manual``. Deploy-kills are named so a busy merge morning is not
+    read as the one-retry failure cap.
     """
     from tracking.watch_util import post_ops_alert
 
     if start_number is None:
-        start_line = (
-            f"**Start:** not recorded (ceiling {MAX_DAILY_STARTS_PER_ET_DAY})"
-        )
+        start_line = "**Start:** not recorded"
     else:
-        start_line = (
-            f"**Start:** {start_number} of {MAX_DAILY_STARTS_PER_ET_DAY} today"
-        )
+        start_line = f"**Start:** {start_number} today"
+    kills = "?" if deploy_kills is None else str(deploy_kills)
+    fails = "?" if real_failures is None else str(real_failures)
     detail = (
         f"**Source:** `{source}`\n"
         f"{start_line}\n"
-        f"**Reason:** {reason}\n\n"
+        f"**Why:** {relaunch_kind}. {reason}\n"
+        f"**Bounds:** real failures {fails} "
+        f"(one retry, cap {MAX_NON_ABORTED_FAILURES}); "
+        f"deploy-kills {kills} "
+        f"(bound {MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY}; "
+        f"they do not use the failure cap). "
+        f"Automatic catch-up stops at "
+        f"{DAILY_RETRY_CUTOFF_HOUR:02d}:{DAILY_RETRY_CUTOFF_MINUTE:02d} ET.\n\n"
         "The 6:00am ET daily is the only writer of `mlb_bullpen_workload` / "
         "`mlb_team_stats`. After a mid-run deploy APScheduler's next fire is "
         "tomorrow 6:00am, which leaves live MLB models on stale features "
         "until then (2026-09-18, run `b65a709cdf734a15bdf7a5d3c8cf7983`, "
         "failed_steps=`aborted`). This is the same-day retry. A deploy that "
-        "kills the retry starts it again (2026-11-04, runs "
-        "`3d3685c194b949d69243f13a1d3c52e7` and "
-        "`8a44ef65d4364828af08e025aa292a51`). The in-process lock stops a "
-        "second daily in this process. Aborted starts relaunch until "
-        f"{MAX_DAILY_STARTS_PER_ET_DAY} ledgered starts today. A daily that "
-        "finishes and fails before the MLB freshness steps, for a reason "
-        "other than aborted, gets one retry."
+        "kills the retry starts it again. On 2026-11-04 four aborted starts "
+        "(`3d3685c194b949d69243f13a1d3c52e7`, "
+        "`8a44ef65d4364828af08e025aa292a51`, "
+        "`c1869c1532714e769631f99e8b10225d`, "
+        "`d5a270750a284c2e89a684051d73fe2a`) filled a cap of 4 and the day "
+        "was skipped. Deploy-kills do not consume the one-retry cap. The "
+        "in-process lock stops a second daily in this process."
     )
     try:
         return post_ops_alert(
