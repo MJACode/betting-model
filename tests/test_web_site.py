@@ -34,7 +34,7 @@ def test_legal_source_stays_intact_and_the_pages_drop_placeholders(tmp_path):
     assert (WEB / "content" / "privacy.md").read_text(encoding="utf-8") == privacy_src
     assert when == "October 24, 2026"
 
-    for name in ("terms/index.html", "privacy/index.html", "index.html"):
+    for name in ("terms/index.html", "privacy/index.html", "support/index.html", "index.html"):
         text = (tmp_path / name).read_text(encoding="utf-8")
         assert "[" not in text
         assert "ATTORNEY NOTE" not in text
@@ -66,6 +66,21 @@ def test_legal_source_stays_intact_and_the_pages_drop_placeholders(tmp_path):
     ) in privacy
     assert "filled in at publish" in terms_src
     assert "filled in at publish" in privacy_src
+
+    support = (tmp_path / "support" / "index.html").read_text(encoding="utf-8")
+    assert "<h1>Support</h1>" in support
+    assert 'href="/support" aria-current="page"' in support
+    assert 'href="/privacy" aria-current' not in support
+    assert 'href="/terms" aria-current' not in support
+    assert "open <strong>Settings</strong> and choose <strong>Delete account</strong>" in support
+    assert (
+        "When you delete your account in the app, it is removed right away, "
+        "and remaining server data and backups are purged within 30 days."
+    ) in support
+    assert 'href="/support">Support</a>' in terms
+    assert 'href="/support">Support</a>' in privacy
+    home = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert 'href="/support">Support</a>' in home
 
 
 def test_a_leftover_bracket_fails_the_build():

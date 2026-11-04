@@ -153,7 +153,7 @@ export function EditLineLegSheet({
           {ownMissing && spec ? (
             <Text style={styles.ownMissing}>
               {menu?.ladderHidden === 'started'
-                ? `Your line, ${lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t listed. The game has started, so this morning’s alternate lines are off.`
+                ? `Your line, ${lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t listed. The game has started, so pre-game alternate lines are off.`
                 : `Your line, ${lineLegLabel(spec).replace(/-/g, MINUS)}, isn’t posted right now.`}
             </Text>
           ) : null}

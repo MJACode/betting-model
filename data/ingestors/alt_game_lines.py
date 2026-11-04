@@ -42,7 +42,9 @@ COST BOUND. One call per game in the window, nothing else; a game that has
 started is never fetched. There is no credit-count ceiling here on purpose:
 a ceiling not derived from a measurement is decoration (.claude/rules/
 operations.md). The ledger is the measurement. Two operator switches stop
-the spend without a deploy, and neither is a credit budget:
+the spend without a deploy, on this daily run AND on the every-pass buy
+(odds_ingestor._fetch_alternate_game_lines). Neither is a credit budget.
+buy_allowance() is the one check both paths call.
 
   ALT_GAME_LINES_ENABLED    default "1". Any other value buys nothing,
                             including the per-sport event lists.
@@ -51,7 +53,16 @@ the spend without a deploy, and neither is a credit budget:
                             this process, in sport order then game id. A
                             value that is not a whole number buys nothing
                             and fails the daily step, so a typo cannot spend
-                            the uncapped slate.
+                            the uncapped slate. The pass buys nothing too,
+                            and logs the same reason; it does not fail the
+                            odds step, whose job is the main lines.
+
+The pass has one more gate of its own: FETCH_ALT_GAME_LINES=0 (default
+"1") skips only the every-pass buy. It does not affect this daily run.
+Both have to allow the buy before a pass spends. drop_started_ladders
+runs on this daily run only. A ladder the pass wrote for a game that
+then starts stays in the table until the next daily run; the app hides
+it at read time.
 
     python -m data.ingestors.alt_game_lines              # all sports, 3 days
     python -m data.ingestors.alt_game_lines --sport NBA
@@ -327,9 +338,10 @@ def _started(stamp, now: datetime) -> bool:
 
 
 def drop_started_ladders(conn, now: datetime) -> int:
-    """Delete ladders whose game has already started. The morning row is a
-    pre-game price; the app also hides it at read time, and this keeps the
-    table from serving it on the next daily run."""
+    """Delete ladders whose game has already started. The row is a pre-game
+    price; the app also hides it at read time, and this keeps the table
+    from serving it on the next daily run. The every-pass refresh does not
+    call this, so a ladder written on a pass stays until the next daily run."""
     rows = conn.execute(
         f"SELECT a.game_id, g.commence_time FROM {STATE_TABLE} a "
         "JOIN games g ON g.game_id = a.game_id").fetchall()
@@ -361,6 +373,23 @@ def _skip_reason() -> str | None:
     except ValueError as exc:
         return str(exc)
     return None
+
+
+def buy_allowance() -> tuple[str | None, int | None]:
+    """Whether this process may buy alternate spreads and totals, and how
+    many event-odds calls it has.
+
+    One answer for the daily 3-day run and the every-pass buy. A reason
+    means buy nothing: ALT_GAME_LINES_ENABLED is not "1", or
+    ALT_GAME_LINES_MAX_GAMES is not a whole number. The second value is
+    the cap — None when the variable is unset, else that non-negative
+    integer. Callers walk their own sport order, then game id, and stop
+    when the integer is spent. The pass also requires FETCH_ALT_GAME_LINES
+    = "1"; that flag does not affect the daily run."""
+    reason = _skip_reason()
+    if reason:
+        return reason, None
+    return None, _max_games()
 
 
 def _bounded(games: list, remaining: int | None) -> tuple[list, int | None]:
@@ -505,7 +534,7 @@ def run(sports=SPORTS, days: int = LOOKAHEAD_DAYS, conn=None) -> dict:
     credits the feed reported."""
     out: dict = {"sports": {}, "rows": 0, "games": 0, "failed": 0, "credits": 0.0,
                  "credits_unreported": 0, "capped": 0, "capped_sports": 0}
-    reason = _skip_reason()
+    reason, cap = buy_allowance()
     if reason:
         out["skipped"] = reason
         if str(reason).startswith("ALT_GAME_LINES_MAX_GAMES"):
@@ -513,7 +542,6 @@ def run(sports=SPORTS, days: int = LOOKAHEAD_DAYS, conn=None) -> dict:
         else:
             logger.info(f"Alternate game lines skipped: {reason}")
         return out
-    cap = _max_games()
     remaining: int | None = cap
     own = conn is None
     if own:

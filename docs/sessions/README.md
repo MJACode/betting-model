@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Store listing copy for the login and Premium binary: sign-in required Yes, five product ids from billingConfig.ts, Discord only after a paid plan; reviewer credentials left TODO; no app code |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, Support page at /support for App Store Review; same build as Terms and Privacy; contact address already on those pages; no model change |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, NBA: the searches and the postseason prop rule merged; first-quarter props and first-quarter and first-half team totals bought for 2024-25 and 2025-26; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA: first-quarter player props and first-quarter and first-half team totals searched, 0 of 44 pass; no model change |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, every Odds API call is written to `api_call_log` however the process started: config.py switches the call logger on in every process (the NBA first-quarter purchase, run through a runpy launcher, spent about 112,813 credits with almost nothing logged); seven callers that skip config switch it on themselves; rows named for the module a run executed; failed writes retried, not dropped; test runs write nothing and refuse the Odds API host; plumbing, not a model update |
@@ -49,6 +50,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAB first-half and team-total purchase at 15:00 UTC, 18:00 UTC and 60 minutes before the tip, each under its own source, plus a 50-game test buy; the opener grid and every first-half purchase send 6 paid calls at once with the floor still exact; code only, nothing bought |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, switch OFF track made visible (shared `AppSwitch`, systemGray off track); mobile UI only |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, Stats header: Players \| Teams on every sport (as NBA), NFL/NCAAF/MLB positions as a second row; no model change |
+| 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, alt lines: the every-pass buy uses ALT_GAME_LINES_ENABLED and ALT_GAME_LINES_MAX_GAMES; FETCH_ALT_GAME_LINES stays a pass-only gate. At kickoff an alt betslip leg is held and marked pre-game, not removed. A started main-number leg is priced from main rows only. Draft. |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, stale Stats-screen position check fixed (third `matchesPosition` call from #1033 is the matchup-group lookup); test-only |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NCAAF Stats QB tab gets the Anytime TD chip too (shared football QB list); no model change |
 | 2026-11-02 | [2026-11](./2026-11.md) | 2026-11-02, NFL Stats QB tab gets the Anytime TD chip (QBs run TDs in); NFL only, NCAAF unchanged; no model change |
