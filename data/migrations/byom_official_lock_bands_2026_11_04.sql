@@ -36,9 +36,13 @@ BEGIN
   END IF;
 
   IF EXISTS (
+    -- to_regprocedure, not pg_get_function_identity_arguments: that one
+    -- returns the argument NAMES too ('p_season integer, ...'), so the old
+    -- comparison never matched and this file re-ran on every worker pass
+    -- (2026-11-04), each time through data.db's adapter, which stored the
+    -- jsonb ? operator as %s and broke every BYOM preview.
     SELECT 1 FROM pg_proc p
-     WHERE p.proname = 'byom_legs'
-       AND pg_get_function_identity_arguments(p.oid) = 'integer, jsonb, text'
+     WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_official_lock_bands_v1' in p.prosrc) > 0
   ) THEN
     RAISE NOTICE 'byom official lock bands already present - skipping';

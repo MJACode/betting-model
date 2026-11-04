@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM preview 400s: the DB adapter turned the jsonb `?` inside a function body into `%s`; dollar quotes are now skipped; props lose favorite/underdog, team spread and game total |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, covering index for the official lock read on byom_official_legs; migration only, not applied; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM official lock includes line/price/spread/total bands; a missing byom_official_legs skips the official write and the facts still commit; an empty official headline falls back to the close |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, deploy-kills do not use the daily failure cap (bound 12, cutoff 22:00 ET); the boot catch-up is a job so the 13:17Z hourly is not stuck behind the daily; worker_jobs daily_pipeline runs one daily under the lock; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NFL: official pick (first match) beside the close, main-model staking (risk cap 3u), the bet list, daily refresh at 10:41 ET; stale facts since 10-24 were the 7-0 |
