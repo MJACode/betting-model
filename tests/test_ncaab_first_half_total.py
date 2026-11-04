@@ -337,9 +337,11 @@ def test_a_bet_at_draftkings_has_no_best_book():
 def test_the_price_floor_and_the_ev_floor_refuse_a_bet():
     from scripts.ncaab_first_half_total_card import pick_rows
     rows, refused = pick_rows([_decision(up=-250, p=0.75, edge=0.04)], GAMES, 1000.0)
-    assert not rows and refused["g"].startswith("below_price_floor")
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and refused["g"].startswith("below_price_floor")
     rows, refused = pick_rows([_decision(up=+100, p=0.51, edge=0.01)], GAMES, 1000.0)
-    assert not rows and "g" in refused
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and "g" in refused
 
 
 def test_the_card_passes_the_floor_into_the_decision():
@@ -466,3 +468,20 @@ def test_its_ledger_is_worker_only_and_its_rows_are_kept_by_the_prune():
 
 def test_the_model_s_books_are_bettable_today():
     assert set(ft.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
+
+
+def test_a_game_priced_below_the_cut_is_a_none_row_and_one_with_no_quote_is_no_row():
+    """The All board shows every scored game (Matt, 2026-11-04): a priced game
+    under the cut is written as NONE at the same book, side and number with no
+    stake. Nothing publishes or settles a NONE row (they select BETs)."""
+    from scripts.ncaab_first_half_total_card import pick_rows
+    d = _decision(edge=0.01)
+    d.status = "below_cut"
+    (r,), refused = pick_rows([d], GAMES, 1000.0)
+    assert not refused
+    assert (r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) == ("NONE", 0.0, 0.0)
+    assert (r["pick_side"], r["scored_line"], r["decision_book"], r["decision_odds"]) == (
+        "under", 70.5, "fanduel", 100)
+    assert r["pick_label"] == "Duke @ Kansas — First Half Under 70.5"
+    unpriced = ft.Decision("g", "no_quote", "x")
+    assert pick_rows([unpriced], GAMES, 1000.0) == ([], {})

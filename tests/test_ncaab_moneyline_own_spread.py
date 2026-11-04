@@ -227,7 +227,8 @@ def test_a_game_whose_best_side_is_too_short_is_bet_at_its_next_best_side(table)
     import scripts.ncaab_moneyline_card as card
     bad = om.Decision("g", "bets", "x", best=dict(d.best, price=-201.0, prob=0.8))
     rows, refused = card.pick_rows([bad], GAMES, 1000.0)
-    assert not rows and refused["g"].startswith("below_price_floor")
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and refused["g"].startswith("below_price_floor")
 
 
 def test_the_largest_edge_wins_and_a_tie_goes_to_the_book_name(table):
@@ -324,7 +325,8 @@ def test_an_ev_under_the_floor_is_refused():
     floor = config.MODEL_OWN_EV_FLOOR[om.MODEL_ID]
     prob = (1 + floor - 0.002) / float(om.dec(-200))       # EV just under the floor at -200
     rows, refused = card.pick_rows([_bet(price=-200.0, prob=prob)], GAMES, 1000.0)
-    assert not rows and "g" in refused
+    # A refused bet is still a scored game: a NONE row, no stake.
+    assert [(r["signal_type"], r["kelly_fraction"], r["recommended_bet"]) for r in rows] == [("NONE", 0.0, 0.0)] and "g" in refused
 
 
 # ── the id has 'spread' in it, and the pick is a moneyline everywhere ────────

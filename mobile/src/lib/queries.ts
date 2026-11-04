@@ -1204,21 +1204,44 @@ export async function fetchPicksForDate(
   date: string,
   onEnrichmentError?: (what: string, error: unknown) => void,
 ): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
-    supabase
+  // TWO READS, both paged past the 1,000-row response cap (fetchAllPages).
+  // The All board is every scored pick (Matt, 2026-11-04), and one day's
+  // pre-game rows pass the cap: 1,432 on 2026-09-19, 1,355 of them NONE.
+  // Unpaged, `.limit(5000)` got the first 1,000 and the rest of the day's NONE
+  // rows never reached All, on whichever sport sorted last.
+  //   * The SIGNALS (everything but NONE): the board's bets. A failure fails
+  //     the board, as it always has. At most 764 rows a day (2026-05-14, the
+  //     busiest; measured 2026-11-04), so one page.
+  //   * The NONE rows: started now, awaited only after the line shop, and
+  //     ENRICHMENT. A page that fails reports a partial board and leaves the
+  //     bets on screen (UX review, 2026-11-04): paged into one read, a timeout
+  //     on a late NONE page would have blanked Signals too.
+  // `.neq('NONE')` rather than a list, so a signal type added later lands in
+  // the read that must succeed. pick_id makes each order total, which range
+  // paging needs so no row repeats or drops at a page seam.
+  const picksPage = (none: boolean) => (from: number, to: number) => {
+    const q = supabase
       .from('picks')
       .select(PICK_COLUMNS)
       .eq('game_date', date)
       // In-play picks live on the Live tab only — they churn with every
       // inning and would otherwise mix into the locked pre-game board.
-      .not('is_live', 'is', true)
-      // Order BET/AVOID before NONE so signals are NEVER dropped by the row cap.
-      // ('AVOID' < 'BET' < 'NONE' alphabetically.) The day's NONE prop rows can
-      // exceed the cap by evening; without this, the morning's locked game
-      // signals (oldest rows) fell off a created_at-only ordering and vanished.
+      .not('is_live', 'is', true);
+    return (none ? q.eq('signal_type', 'NONE') : q.neq('signal_type', 'NONE'))
       .order('signal_type', { ascending: true })
       .order('created_at', { ascending: false })
-      .limit(5000),
+      .order('pick_id', { ascending: true })
+      .range(from, to);
+  };
+  const nonePicksRes = fetchAllPages<Pick>(picksPage(true), (p) => String(p.pick_id)).then(
+    (data) => ({ data, error: null as unknown }),
+    (error: unknown) => ({ data: null, error }),
+  );
+  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
+    fetchAllPages<Pick>(picksPage(false), (p) => String(p.pick_id)).then(
+      (data) => ({ data, error: null as unknown }),
+      (error: unknown) => ({ data: null, error }),
+    ),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     // Paged, on an order the request names, and only the markets a pick reads
@@ -1317,12 +1340,14 @@ export async function fetchPicksForDate(
   ]);
   if (allBooksRes.error) onEnrichmentError?.('the line shop', allBooksRes.error);
   if (propBooksRes.error) onEnrichmentError?.('the prop line shop', propBooksRes.error);
+  const noneRes = await nonePicksRes;
+  if (noneRes.error) onEnrichmentError?.('the rest of today’s scored picks', noneRes.error);
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
   const propBooks = (
     propBooksRes.error ? [] : (propBooksRes.data ?? [])
   ) as unknown as PropOddsByBookRow[];
 
-  const picks = rawPicks;
+  const picks = [...rawPicks, ...((noneRes.data ?? []) as Pick[])];
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
 
@@ -1747,6 +1772,7 @@ export async function fetchUpcomingNcaafPicks(
 export async function fetchUpcomingNcaabPicks(
   afterDate: string,
   throughDate: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
 ): Promise<EnrichedPick[]> {
   const rawPicks = await fetchAllPages<Pick>(
     (from, to) =>
@@ -1771,21 +1797,32 @@ export async function fetchUpcomingNcaabPicks(
   const picks = Array.from(seen.values());
   const gameIds = Array.from(new Set(picks.map((p) => p.game_id)));
   if (gameIds.length === 0) return [];
+  // The lines are read only for the games with a BET or AVOID: only signal
+  // cards draw the line pill and the line shop (fetchPicksForDate's rule).
+  // The NCAAB cards write a NONE row for every game they price and do not bet
+  // (2026-11-04), so the game list is most of the slate and the lines are not.
+  const lineGameIds = Array.from(
+    new Set(picks.filter((p) => p.signal_type !== 'NONE').map((p) => p.game_id)),
+  );
 
-  const chunks: string[][] = [];
-  for (let i = 0; i < gameIds.length; i += 80) chunks.push(gameIds.slice(i, i + 80));
-  const eachChunk = <T,>(read: (chunk: string[]) => Promise<T[]>): Promise<T[]> =>
-    Promise.all(chunks.map(read)).then((parts) => parts.flat());
+  const chunksOf = (ids: string[]): string[][] => {
+    const out: string[][] = [];
+    for (let i = 0; i < ids.length; i += 80) out.push(ids.slice(i, i + 80));
+    return out;
+  };
+  const eachChunk = <T,>(ids: string[], read: (chunk: string[]) => Promise<T[]>): Promise<T[]> =>
+    Promise.all(chunksOf(ids).map(read)).then((parts) => parts.flat());
 
   const [games, latestOdds, allBooks] = await Promise.all([
     // The matchup and the time: a failure here fails the card.
-    eachChunk(async (chunk) => {
+    eachChunk(gameIds, async (chunk) => {
       const { data, error } = await supabase.from('games').select(GAME_COLUMNS).in('game_id', chunk);
       if (error) throw error;
       return (data ?? []) as unknown as GameRow[];
     }),
-    // Enrichment only: a failure shouldn't take down the NCAAB card.
-    eachChunk(async (chunk) => {
+    // Enrichment only: a failure shouldn't take down the NCAAB card, and is
+    // reported (the partial banner), not swallowed.
+    eachChunk(lineGameIds, async (chunk) => {
       const { data, error } = await supabase
         .from('v_latest_dk_odds')
         .select(LATEST_ODDS_COLUMNS)
@@ -1793,8 +1830,11 @@ export async function fetchUpcomingNcaabPicks(
         .in('market', [...MAIN_GAME_ODDS_MARKETS]);
       if (error) throw error;
       return (data ?? []) as unknown as LatestDkOddsRow[];
-    }).catch(() => [] as LatestDkOddsRow[]),
-    eachChunk((chunk) =>
+    }).catch((e: unknown) => {
+      onEnrichmentError?.('the upcoming NCAAB lines', e);
+      return [] as LatestDkOddsRow[];
+    }),
+    eachChunk(lineGameIds, (chunk) =>
       fetchAllPages<OddsByBookRow>(
         (from, to) =>
           supabase
@@ -1808,7 +1848,10 @@ export async function fetchUpcomingNcaabPicks(
             .range(from, to),
         (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
       ),
-    ).catch(() => [] as OddsByBookRow[]),
+    ).catch((e: unknown) => {
+      onEnrichmentError?.('the upcoming NCAAB line shop', e);
+      return [] as OddsByBookRow[];
+    }),
   ]);
 
   const gameById = new Map<string, GameRow>();

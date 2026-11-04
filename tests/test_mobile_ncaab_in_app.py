@@ -292,7 +292,7 @@ def test_the_today_board_fetches_ncaab_ahead():
     # The scorer's outer bound for the basketball sports. The planned card
     # writes the evening before, so 7 covers it with room for an earlier one.
     assert int(days.group(1)) == config.GAME_SCORE_AHEAD_DAYS
-    assert "fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS))" in src
+    assert "fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS), (what, e) =>" in src
     assert "swallow('the upcoming NCAAB card')" in src
     start = src.index("const merged = [")
     merged = src[start:src.index("\n", start)]
