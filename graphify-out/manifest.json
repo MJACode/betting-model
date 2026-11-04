@@ -8634,9 +8634,9 @@
     "semantic_hash": ""
   },
   "docs/nba_models_2026.md": {
-    "mtime": 1793821768.49094,
-    "seen": 1793822261.9616187,
-    "ast_hash": "dc78bd9e93d8b16af1b55388b170f5dc",
+    "mtime": 1793823939.4881883,
+    "seen": 1793824332.1784968,
+    "ast_hash": "d6e36b310ead6e849944163a8775ea19",
     "semantic_hash": ""
   },
   "docs/nhl_moneyline_rebuild.md": {
@@ -11973,6 +11973,24 @@
     "mtime": 1793821769.365849,
     "seen": 1793822261.962125,
     "ast_hash": "715b8cd8ae8c03eea95f77a359026860",
+    "semantic_hash": ""
+  },
+  "scripts/nba_s_ingame27.py": {
+    "mtime": 1793823940.0562718,
+    "seen": 1793824332.172637,
+    "ast_hash": "c23bd4221cc5ed3ea9491ab0c0f4fe07",
+    "semantic_hash": ""
+  },
+  "tests/test_nba_s_ingame27.py": {
+    "mtime": 1793823940.0572734,
+    "seen": 1793824332.175873,
+    "ast_hash": "09ff19de5f14cdd98086a5ef951f12e2",
+    "semantic_hash": ""
+  },
+  "docs/nba_search_ingame27.md": {
+    "mtime": 1793823939.4891896,
+    "seen": 1793824332.1785214,
+    "ast_hash": "61a30afd433fac3dd53d51db3ba40a82",
     "semantic_hash": ""
   }
 }
