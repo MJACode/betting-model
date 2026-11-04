@@ -691,20 +691,22 @@ def run_byom_nfl_refresh() -> None:
         try:
             # NBA too (Matt, 2026-11-04: the same updates on the other
             # builder). nba_player_game_log lands by about 1:30am ET
-            # (measured 2026-11-04), so this hour covers both.
-            queued = {
-                sport: enqueue(
-                    conn, "byom_refresh", {"sport": sport, "apply": True},
-                    requested_by="scheduler",
-                    note=f"Daily BYOM {sport} refresh (Matt, 2026-11-04).",
-                    dedupe_key=f"byom-{sport.lower()}-refresh-{today}")
-                for sport in ("NFL", "NBA")
-            }
+            # (measured 2026-11-04), so this hour covers both. One sport's
+            # failure does not skip the other.
+            for sport in ("NFL", "NBA"):
+                try:
+                    job_id = enqueue(
+                        conn, "byom_refresh", {"sport": sport, "apply": True},
+                        requested_by="scheduler",
+                        note=f"Daily BYOM {sport} refresh (Matt, 2026-11-04).",
+                        dedupe_key=f"byom-{sport.lower()}-refresh-{today}")
+                    log.info("BYOM %s refresh: queued %s", sport, job_id)
+                except Exception:  # noqa: BLE001
+                    log.exception("ERROR BYOM %s refresh enqueue failed", sport)
         finally:
             conn.close()
-        log.info("BYOM refresh: queued %s", queued)
     except Exception:  # noqa: BLE001 - must never kill the scheduler
-        log.exception("ERROR BYOM NFL refresh enqueue crashed")
+        log.exception("ERROR BYOM refresh enqueue crashed")
 
 
 def run_model_quality_job() -> None:

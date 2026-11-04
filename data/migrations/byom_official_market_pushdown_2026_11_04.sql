@@ -16,6 +16,12 @@
 -- were already applied to the locked rows, and a leg's market and side
 -- never change between its candidates.
 --
+-- Props are not filtered on team role, team spread or game total, on
+-- either timing (Matt, 2026-11-04: those are team bets). The app stopped
+-- sending them; this file makes the server agree, because prop
+-- candidates are now stored only on the prop's own line or price change
+-- and would read a stale team context. byom_models held no rows that day.
+--
 -- Keeps byom_official_legs_v1 and byom_official_lock_bands_v1 in the
 -- body so the earlier files' guards still skip. Guarded with
 -- to_regprocedure on the exact signature, and a body the adapter
@@ -281,8 +287,11 @@ BEGIN
              AND (v_side IS NULL OR o.player_key <> '' OR o.leg_side = v_side)
              AND (v_prop_side IS NULL OR o.player_key = '' OR o.leg_side = v_prop_side)
              AND (
-               (v_role IS NULL AND o.match_role = 'any')
-               OR (v_role IS NOT NULL AND (
+               -- A prop is not filtered on its team's role (Matt,
+               -- 2026-11-04), so its lock is the first 'any' candidate.
+               (o.player_key <> '' AND o.match_role = 'any')
+               OR (o.player_key = '' AND v_role IS NULL AND o.match_role = 'any')
+               OR (o.player_key = '' AND v_role IS NOT NULL AND (
                     o.match_role = v_role
                     OR (o.match_role = 'any' AND o.leg_role = v_role)))
              )
@@ -291,10 +300,13 @@ BEGIN
          AND (v_max_price IS NULL OR q.price <= v_max_price)
          AND (v_min_line IS NULL OR (q.player_key <> '' AND q.point >= v_min_line))
          AND (v_max_line IS NULL OR (q.player_key <> '' AND q.point <= v_max_line))
-         AND (v_min_spread IS NULL OR q.spread_used >= v_min_spread)
-         AND (v_max_spread IS NULL OR q.spread_used <= v_max_spread)
-         AND (v_min_total IS NULL OR q.total_used >= v_min_total)
-         AND (v_max_total IS NULL OR q.total_used <= v_max_total)
+         -- Team spread and game total are team-bet filters. A prop is
+         -- not filtered on them, so its candidates (stored on its own
+         -- line or price change) are never read for them.
+         AND (v_min_spread IS NULL OR q.player_key <> '' OR q.spread_used >= v_min_spread)
+         AND (v_max_spread IS NULL OR q.player_key <> '' OR q.spread_used <= v_max_spread)
+         AND (v_min_total IS NULL OR q.player_key <> '' OR q.total_used >= v_min_total)
+         AND (v_max_total IS NULL OR q.player_key <> '' OR q.total_used <= v_max_total)
        ORDER BY canonical_key, market, leg_side, player_key, locked_at
     ),
     raw AS (
@@ -392,7 +404,7 @@ BEGIN
          AND p.player_key = o.player_key
         LEFT JOIN g ON g.canonical_key = o.canonical_key
        WHERE p_timing IS DISTINCT FROM 'close'
-         AND o.player_key <> '' 
+         AND o.player_key <> ''
     ),
     kept AS (
       SELECT r.*,
@@ -406,7 +418,9 @@ BEGIN
               OR (r.mkt IN ('h2h', 'spreads', 'totals') AND r.side = v_side)
               OR (r.mkt NOT IN ('h2h', 'spreads', 'totals') AND r.team_side = v_side))
          -- Close reads the closing role. Official already searched for it.
-         AND (v_role IS NULL OR r.tmg = 'official' OR r.role = v_role)
+         -- The same rule on the closing timing: role, team spread and
+         -- game total filter game legs only.
+         AND (v_role IS NULL OR r.tmg = 'official' OR r.mkt NOT IN ('h2h', 'spreads', 'totals') OR r.role = v_role)
          AND (v_min_rest IS NULL OR r.rest >= v_min_rest)
          AND (v_max_rest IS NULL OR r.rest <= v_max_rest)
          AND (v_primetime IS NULL OR r.prime = v_primetime)
@@ -415,10 +429,10 @@ BEGIN
          AND (v_max_line IS NULL OR r.prop_line <= v_max_line)
          AND (v_min_price IS NULL OR r.px >= v_min_price)
          AND (v_max_price IS NULL OR r.px <= v_max_price)
-         AND (v_min_spread IS NULL OR r.team_spread >= v_min_spread)
-         AND (v_max_spread IS NULL OR r.team_spread <= v_max_spread)
-         AND (v_min_total IS NULL OR r.game_total >= v_min_total)
-         AND (v_max_total IS NULL OR r.game_total <= v_max_total)
+         AND (v_min_spread IS NULL OR r.mkt NOT IN ('h2h', 'spreads', 'totals') OR r.team_spread >= v_min_spread)
+         AND (v_max_spread IS NULL OR r.mkt NOT IN ('h2h', 'spreads', 'totals') OR r.team_spread <= v_max_spread)
+         AND (v_min_total IS NULL OR r.mkt NOT IN ('h2h', 'spreads', 'totals') OR r.game_total >= v_min_total)
+         AND (v_max_total IS NULL OR r.mkt NOT IN ('h2h', 'spreads', 'totals') OR r.game_total <= v_max_total)
          AND (v_months IS NULL OR r.kick_month = ANY (v_months))
          AND (v_weekdays IS NULL OR r.kick_dow = ANY (v_weekdays))
          AND (v_slots IS NULL

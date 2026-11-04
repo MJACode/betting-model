@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from byom.constants import DK_HISTORY_START_SEASON, NBA_DK_HISTORY_START_SEASON, SPORT
+from byom.constants import DK_HISTORY_START_SEASON, SPORT
 from byom.game_facts import parse_date, parse_game_id
 from byom.load import _fetch, _games
 from byom.season import current_nba_season, current_nfl_season
@@ -116,11 +116,6 @@ def _incomplete(row: tuple | None) -> bool:
     if row is None:
         return False
     return row[0] is None or row[1] is None
-
-
-def _buildable(parsed: tuple) -> bool:
-    """Same refusal as assemble_game. An unbuildable id is not due."""
-    return parsed[1] >= DK_HISTORY_START_SEASON
 
 
 def _props_recorded(stored: tuple | None) -> bool:
@@ -236,7 +231,7 @@ def freshness(conn, today: date | datetime | None = None,
     }
 
 
-def _mark_props_scanned(conn, keys: list[str]) -> None:
+def _mark_props_scanned(conn, keys: list[str], sport: str = SPORT) -> None:
     """Record the prop pass on each game fact it read.
 
     A game with no DraftKings prop still gets the stamp, so the next
@@ -247,8 +242,8 @@ def _mark_props_scanned(conn, keys: list[str]) -> None:
     conn.execute(
         """UPDATE byom_game_facts
               SET props_scanned_at = now()
-            WHERE canonical_key = ANY(%s)""",
-        (list(dict.fromkeys(keys)),))
+            WHERE sport = %s AND canonical_key = ANY(%s)""",
+        (sport, list(dict.fromkeys(keys))))
 
 
 def refresh(conn, apply: bool = False, today: date | datetime | None = None,
@@ -280,7 +275,7 @@ def refresh(conn, apply: bool = False, today: date | datetime | None = None,
         conn, report["season"], apply=True, game_ids=ids, sport=sport)
     prop = build_props(
         conn, report["season"], apply=True, game_ids=ids, sport=sport)
-    _mark_props_scanned(conn, prop.get("canonical_keys") or [])
+    _mark_props_scanned(conn, prop.get("canonical_keys") or [], sport)
     conn.commit()
     report["written_game_facts"] = game["written"]
     report["written_prop_facts"] = prop["written"]
