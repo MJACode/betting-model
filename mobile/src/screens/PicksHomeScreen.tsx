@@ -146,6 +146,7 @@ import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
 import { useScoreboard } from '@/hooks/useScoreboard';
 import { useAuth } from '@/hooks/useAuth';
+import { freeSegmentOpensPaywall } from '@/lib/authShell';
 import { restorePurchases } from '@/lib/billing';
 import { type ScoreboardSport } from '@/lib/scoreboard';
 
@@ -337,10 +338,11 @@ export function PicksHomeScreen() {
   // switch tabs and land on whatever segment was already showing. The param is
   // cleared after use so a second tap works and a back-navigation does not
   // re-trigger it.
-  // A free member can use the Record tab (Matt, 2026-10-27). Today, Signals
-  // and Live lock. Scoreboard stays visible and soft-locks its content.
-  // `contentLocked` is false while billing is dark, and while the
-  // subscription row is still loading, so a subscriber does not flash the lock.
+  // A free member keeps Record and this teaser (Matt, 2026-10-27). Signals
+  // and Live Signals open the same paywall as a locked pick. Scoreboard stays
+  // visible and soft-locks its content. `contentLocked` is false while
+  // billing is dark, and while the subscription row is still loading, so a
+  // subscriber does not flash the lock.
   const { contentLocked: signalsLocked, hold: picksHold } = useMembership();
   const { user } = useAuth();
   const board = useScoreboard(
@@ -353,13 +355,22 @@ export function PicksHomeScreen() {
     navigation.navigate('Paywall');
   }, [navigation]);
   const selectView = useCallback((next: PicksView) => {
+    if (signalsLocked && freeSegmentOpensPaywall(next)) {
+      openPaywall();
+      return;
+    }
     setView(next);
-  }, []);
+  }, [openPaywall, signalsLocked]);
+
+  useEffect(() => {
+    if (signalsLocked && freeSegmentOpensPaywall(view)) setView('today');
+  }, [signalsLocked, view]);
 
   useEffect(() => {
     if (!requestedView || picksHold) return;
     const next = (requestedView as string) === 'lines' ? 'scoreboard' : requestedView;
-    if (signalsLocked && next !== 'scoreboard') openPaywall();
+    if (signalsLocked && freeSegmentOpensPaywall(next)) openPaywall();
+    else if (signalsLocked) setView(next === 'scoreboard' ? 'scoreboard' : 'today');
     else setView(next);
     navigation.setParams({ view: undefined } as never);
   }, [requestedView, navigation, signalsLocked, picksHold, openPaywall]);
@@ -651,11 +662,13 @@ export function PicksHomeScreen() {
           <InfoTooltip
             title="These boards"
             body={
-              // The live sports are INTERPOLATED, not typed out: this sentence
-              // and the empty state are the two places a reader is told which
-              // sports have an in-play model, and a hand-written list here would
-              // be the one that goes stale when a lane ships (lib/liveSports.ts).
-              `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nScoreboard = today’s games, with the score and DraftKings’ spread, total and moneyline. It is every game, not our picks. Live Signals stays the in-play picks. NFL, NCAAF and MLB can show a live score when one is stored. NBA and NHL stay on Upcoming until a live feed exists. Tap a game for the line. There is no bet button on this board.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
+              signalsLocked
+                ? 'Signals and Live Signals are Premium. Their counts and the live dot appear after you subscribe.'
+                : // The live sports are INTERPOLATED, not typed out: this sentence
+                  // and the empty state are the two places a reader is told which
+                  // sports have an in-play model, and a hand-written list here would
+                  // be the one that goes stale when a lane ships (lib/liveSports.ts).
+                  `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nScoreboard = today’s games, with the score and DraftKings’ spread, total and moneyline. It is every game, not our picks. Live Signals stays the in-play picks. NFL, NCAAF and MLB can show a live score when one is stored. NBA and NHL stay on Upcoming until a live feed exists. Tap a game for the line. There is no bet button on this board.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
             accessibilityLabel="About these boards"
           />
@@ -710,7 +723,7 @@ export function PicksHomeScreen() {
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
             <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => selectView('today')} onLayout={onSegmentLayout('today')} />
-            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} hideCount={signalsLocked} locked={signalsLocked} lockedLabel="Signals, Premium" active={view === 'signals'} onPress={() => selectView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -720,10 +733,13 @@ export function PicksHomeScreen() {
             <SubTabBtn
               label="Live Signals"
               count={liveUnknown ? null : liveData.length}
+              hideCount={signalsLocked}
+              locked={signalsLocked}
+              lockedLabel="Live Signals, Premium"
               active={view === 'live'}
               onPress={() => selectView('live')}
               live
-              dot={liveData.length > 0}
+              dot={!signalsLocked && liveData.length > 0}
               onLayout={onSegmentLayout('live')}
             />
             <SubTabBtn
@@ -1118,6 +1134,8 @@ function SubTabBtn({
   label,
   count = null,
   hideCount = false,
+  locked = false,
+  lockedLabel,
   active,
   onPress,
   live = false,
@@ -1127,8 +1145,11 @@ function SubTabBtn({
   label: string;
   /** null = never loaded (a failed first load): shown as "—", not 0. */
   count?: number | null;
-  /** Scoreboard is not a pick count. */
+  /** Scoreboard is not a pick count. Locked Signals hide the count too. */
   hideCount?: boolean;
+  /** Opens the paywall. A lock icon, not an empty tab. */
+  locked?: boolean;
+  lockedLabel?: string;
   active: boolean;
   onPress: () => void;
   /** Reports where this segment sits, so the selected one can be scrolled to. */
@@ -1144,7 +1165,13 @@ function SubTabBtn({
   dot?: boolean;
 }) {
   const noun = label === 'All' ? 'picks' : label === 'Scoreboard' ? 'games' : live ? 'picks in play' : 'signals';
-  const spoken = hideCount ? label : count == null ? `${label}, count not available` : `${label}, ${count} ${noun}`;
+  const spoken = locked
+    ? (lockedLabel ?? `${label}, Premium`)
+    : hideCount
+      ? label
+      : count == null
+        ? `${label}, count not available`
+        : `${label}, ${count} ${noun}`;
   return (
     <Pressable
       onPress={onPress}
@@ -1154,13 +1181,17 @@ function SubTabBtn({
       // row: 6 above (its half of the gap to the sport chips) and 2 + 6 below
       // (subTabsReach) → ~46pt (audit H9/M8).
       hitSlop={{ top: SUBTAB_REACH_ABOVE, bottom: 2 + SUBTAB_REACH_BELOW }}
-      accessibilityRole="tab"
+      accessibilityRole={locked ? 'button' : 'tab'}
       accessibilityState={{ selected: active }}
       accessibilityLabel={spoken}
+      accessibilityHint={locked ? 'Opens the subscription screen' : undefined}
       style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}
     >
       <View style={styles.subTabInner}>
         {dot ? <LiveDot /> : null}
+        {locked ? (
+          <Ionicons name="lock-closed" size={12} color={colors.tint} />
+        ) : null}
         <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
           {hideCount ? label : `${label} (${count ?? '—'})`}
         </Text>

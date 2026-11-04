@@ -20,14 +20,16 @@ dead end.
 | Session state | `src/hooks/useAuth.ts` | Module store, one Supabase subscription, AppState-driven refresh |
 | Sign-in screen | `src/screens/SignInScreen.tsx` | Required on cold open once `AUTH_ENABLED` is on. No skip. |
 | Settings entry | `src/screens/SettingsScreen.tsx` | Account card renders **only** when `AUTH_ENABLED` |
-| Verification | `scripts/verify_auth.ts` | 41 assertions — `npx tsx scripts/verify_auth.ts` |
+| Verification | `scripts/verify_auth.ts` | 54 assertions — `npx tsx scripts/verify_auth.ts` |
 
 When `AUTH_ENABLED` is on, SignIn is the first screen. There is no guest path
 and no "Signing in is optional" line. Terms and Privacy open
 `signalbase-ai.com`. Models and tracked bets stay on the device. A successful
-sign-in opens the paywall when billing is also on; closing it leaves the free
-shell (Record, with the other tabs locked). A restored session does not show
-the paywall again until a locked tab or Unlock is tapped.
+sign-in opens the paywall when billing is also on and the account is not
+entitled; closing it leaves the free shell (Record and the picks teaser).
+Signals and Live Signals open that same paywall. The other tabs stay locked.
+A restored session does not show the paywall again until a locked tab or
+Unlock is tapped.
 
 Scope is **session only**, by design. Signing in does not yet move any data:
 bankroll, Kelly settings, custom models, saved parlays, tracked bets and manual

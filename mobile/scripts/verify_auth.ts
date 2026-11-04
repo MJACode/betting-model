@@ -24,6 +24,8 @@ import {
   visibleProviders,
 } from '../src/lib/authHelpers';
 import { AUTH_ENABLED, AUTH_REDIRECT_URL } from '../src/lib/authConfig';
+import { BILLING_ENABLED } from '../src/lib/billingConfig';
+import { freeSegmentOpensPaywall, signedOutRouteIsShell } from '../src/lib/authShell';
 
 let passed = 0;
 const failures: string[] = [];
@@ -45,6 +47,36 @@ function eq<T>(label: string, actual: T, expected: T) {
 // The whole point of this change: auth ships dark. If this ever flips to true
 // without a deliberate decision, this is the tripwire.
 check('AUTH_ENABLED defaults to false', AUTH_ENABLED === false);
+check('BILLING_ENABLED defaults to false', BILLING_ENABLED === false);
+check('signed-out SignIn is not the shell', !signedOutRouteIsShell('SignIn'));
+check('signed-out Tabs is the shell', signedOutRouteIsShell('Tabs'));
+check('signed-out PickDetail is the shell', signedOutRouteIsShell('PickDetail'));
+check('an unknown route is not the shell', !signedOutRouteIsShell(undefined));
+check('Signals opens the paywall for a free member', freeSegmentOpensPaywall('signals'));
+check('Live Signals opens the paywall for a free member', freeSegmentOpensPaywall('live'));
+check('All stays the teaser', !freeSegmentOpensPaywall('today'));
+check('Scoreboard stays its own lock', !freeSegmentOpensPaywall('scoreboard'));
+
+const appSrc = readFileSync(join(__dirname, '..', 'App.tsx'), 'utf8');
+check(
+  'a signed-out navigation returns to SignIn from the module status',
+  appSrc.includes('readAuthStatus()') && appSrc.includes('signedOutRouteIsShell'),
+);
+check(
+  'the Picks tab is the teaser, not a paywall listener',
+  /<Tab\.Screen name="Picks" component=\{PicksHomeScreen\} \/>/.test(appSrc) &&
+    !/<Tab\.Screen name="Picks"[^>]*listeners=\{lockedTab\}/.test(appSrc),
+);
+const picksSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'PicksHomeScreen.tsx'), 'utf8');
+check(
+  'Signals and Live Signals call the paywall when locked',
+  picksSrc.includes('freeSegmentOpensPaywall') && picksSrc.includes('openPaywall()'),
+);
+const pushSrc = readFileSync(join(__dirname, '..', 'src', 'hooks', 'usePushDeepLink.ts'), 'utf8');
+check(
+  'a signed-out push does not open the shell',
+  pushSrc.includes("readAuthStatus() === 'signedOut'"),
+);
 check('redirect URL uses the app scheme', AUTH_REDIRECT_URL.startsWith('signalbase://'));
 
 // --- disabled guard ---------------------------------------------------------

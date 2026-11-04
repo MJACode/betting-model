@@ -575,7 +575,7 @@ check('TrackRecord sport tabs: tablist + tab + selected + label', /accessibility
 check('TrackRecord sport tabs: ROW_SLOP_PAD slop inside a framed horizontal ScrollView (L13: one row, no wrap)',
   /hitSlop=\{\{ top: ROW_SLOP_PAD, bottom: ROW_SLOP_PAD/.test(record) && /marginTop: -ROW_SLOP_PAD/.test(record) && /paddingVertical: ROW_SLOP_PAD/.test(record) && !/sportTabs: \{[^}]*flexWrap/.test(record));
 const home = read('src/screens/PicksHomeScreen.tsx');
-check('PicksHome sub-tabs: tablist + tab + selected', /<View style=\{styles\.subTabs\} accessibilityRole="tablist">/.test(home) && /hitSlop=\{\{ top: SUBTAB_REACH_ABOVE, bottom: 2 \+ SUBTAB_REACH_BELOW \}\}\s*accessibilityRole="tab"\s*accessibilityState=\{\{ selected: active \}\}/.test(home));
+check('PicksHome sub-tabs: tablist + tab or locked button + selected', /<View style=\{styles\.subTabs\} accessibilityRole="tablist">/.test(home) && /hitSlop=\{\{ top: SUBTAB_REACH_ABOVE, bottom: 2 \+ SUBTAB_REACH_BELOW \}\}\s*accessibilityRole=\{locked \? 'button' : 'tab'\}\s*accessibilityState=\{\{ selected: active \}\}/.test(home) && /lockedLabel="Signals, Premium"/.test(home) && /lockedLabel="Live Signals, Premium"/.test(home));
 const models = read('src/screens/ModelsScreen.tsx');
 check('Models segment: tablist + tab + 9pt slop on a ~27pt pill', /<View style=\{styles\.segmentRow\} accessibilityRole="tablist">/.test(models) && /hitSlop=\{\{ top: 9, bottom: 9/.test(models) && /accessibilityRole="tab"/.test(models));
 const groupTabs = read('src/components/GroupTabs.tsx');

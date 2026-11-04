@@ -23,9 +23,11 @@ Monthly has no badge. The paywall subtitle follows the selected plan, so Weekly
 does not say "7-day free trial". Weekly's button is Subscribe; Monthly and
 Annual say Start 7-day free trial. Neither the paywall nor Settings shows a Whop checkout button. Discord unlock is the Apple plan.
 
-When billing is on, a free member keeps Record and the other tabs soft-lock
-behind Unlock with Premium. A trial unlocks the app and not Discord. Discord's
-invite is shown only after the subscriptions row is `active`, not `trialing`.
+When billing is on, a free member keeps Record and the picks teaser. Signals
+and Live Signals open the same paywall as a locked pick. The other tabs
+soft-lock behind Unlock with Premium. A trial unlocks the app and not Discord.
+Discord's invite is shown only after the subscriptions row is `active`, not
+`trialing`.
 The paywall opens right after the first sign-in, and again from Unlock or a
 locked tab. Closing it returns to that free shell.
 
