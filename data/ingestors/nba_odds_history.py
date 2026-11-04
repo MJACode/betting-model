@@ -44,6 +44,16 @@ WHAT IS BOUGHT (cost MEASURED on 2026-10-15 from x-requests-last):
            `nba_postseason_prop_odds`, which nothing live reads. A game holding
            player_points rows there is skipped, so a re-run buys nothing twice.
 
+  --q1-props / --period-team-totals  (2026-11-03, mike: "Buy 1Q data".) The per-event endpoint
+           at tip minus `--lead-min`, 2023-24 to 2025-26. --q1-props asks for first-quarter points,
+           rebounds and assists and stores them in `player_prop_odds` beside the full-game props
+           (a game holding any of the three is skipped). --period-team-totals asks for the
+           first-quarter and first-half team totals and stores them in `odds` with source
+           'odds_api_nba_period_team_total_history', filed as team_totals_q1_home and so on.
+           MEASURED on one 2026-01-15 game (--probe-q1): 10 credits a market, 50 for all five.
+           Pinnacle prices none of the five; the first-quarter props came from FanDuel and Hard
+           Rock (rebounds and assists Hard Rock alone), the team totals from five books.
+
   --extra-hours / --fill-gaps  (2026-10-17, the second game-market search,
            docs/nba_models_2026.md §6.5.) More hours on every game date, and
            tip-relative fetches -- tip - 60 and tip - 240, the 5-minute snapshot
@@ -107,6 +117,13 @@ DERIV_SOURCE = "odds_api_nba_derivative_history"
 # one 2025-01-15 call (x-requests-last). The feed holds these from 2023-05-03, like props.
 ALT_MARKETS = ["alternate_spreads", "alternate_totals", "alternate_team_totals"]
 ALT_SOURCE = "odds_api_nba_alt_history"
+# The first quarter (2026-11-03, mike: "Buy 1Q data"). Three first-quarter player markets, which
+# land in `player_prop_odds` beside the full-game props, and the first-quarter and first-half team
+# totals the derivative purchase never asked for. Priced beforehand at 10 credits a market a game,
+# about 110,700 and 73,800 for 3,690 games; --probe-q1 reads the real figure on one game first.
+Q1_PROP_MARKETS = ["player_points_q1", "player_rebounds_q1", "player_assists_q1"]
+PERIOD_TT_MARKETS = ["team_totals_q1", "team_totals_h1"]
+PERIOD_TT_SOURCE = "odds_api_nba_period_team_total_history"
 # The marker a re-run reads back. Game lines resume on odds_history_pulls and
 # props on the game's stored player_points rows (player_prop_odds has no source
 # column); the derivative rows carry this.
@@ -506,22 +523,25 @@ def buy_instants(conn, meter: Meter, first_season: int, last_season: int,
 
 # ── player props ────────────────────────────────────────────────────────────
 
-def _props_done(conn, game_ids: list[str]) -> set[str]:
-    """Asked BY GAME ID: player_prop_odds is ~60M rows indexed on game_id first."""
+def _props_done(conn, game_ids: list[str], markets=("player_points",)) -> set[str]:
+    """Asked BY GAME ID: player_prop_odds is ~60M rows indexed on game_id first. A game holding
+    any row in `markets` is stored."""
     have: set[str] = set()
     for i in range(0, len(game_ids), 500):
         have |= {r[0] for r in conn.execute(
             "SELECT DISTINCT game_id FROM player_prop_odds "
-            "WHERE game_id = ANY(%s) AND market = 'player_points'",
-            (game_ids[i:i + 500],)).fetchall()}
+            "WHERE game_id = ANY(%s) AND market = ANY(%s)",
+            (game_ids[i:i + 500], list(markets))).fetchall()}
     return have
 
 
 def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
                    lead_min: int, apply: bool = True, limit: int | None = None,
-                   write=_insert_prop_odds, stamp_games: bool = True) -> dict:
+                   write=_insert_prop_odds, stamp_games: bool = True,
+                   markets: list[str] = PROP_MARKETS) -> dict:
     """One date's props. `write` stores the rows; `stamp_games` fills games.commence_time,
-    which a postseason game (not in `games`) has no row to take."""
+    which a postseason game (not in `games`) has no row to take. `markets` is what is asked
+    for and kept (the 14 full-game markets unless told otherwise)."""
     stats = {"date": game_date, "events": 0, "prop_rows": 0, "markets": defaultdict(set)}
     # The event list at noon Eastern lists the whole slate with its starts.
     noon = datetime.fromisoformat(f"{game_date}T12:00:00").replace(tzinfo=ET)
@@ -544,7 +564,7 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
             continue
         if limit is not None and stats["events"] >= limit:
             break
-        why = meter.stop_reason(10 * len(PROP_MARKETS))
+        why = meter.stop_reason(10 * len(markets))
         if why:
             stats["stopped"] = why
             break
@@ -554,7 +574,7 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
                          (start.astimezone(timezone.utc).isoformat(), g["game_id"]))
         snap = (start - timedelta(minutes=lead_min)).strftime("%Y-%m-%dT%H:%M:%SZ")
         resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
-            "date": snap, "markets": ",".join(PROP_MARKETS), "bookmakers": BOOKS,
+            "date": snap, "markets": ",".join(markets), "bookmakers": BOOKS,
             "oddsFormat": "american"})
         if resp is None or resp.status_code != 200:
             logger.warning(f"  {g['game_id']}: HTTP {getattr(resp, 'status_code', 'network')}")
@@ -565,7 +585,7 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
         rows = []
         for book in (body.get("data") or {}).get("bookmakers", []):
             bk = book.get("key", "")
-            mkts = [m for m in book.get("markets", []) if m.get("key") in PROP_MARKETS]
+            mkts = [m for m in book.get("markets", []) if m.get("key") in markets]
             # A triple-double is Yes/No with no number, like the double-double
             # the shared parser already defaults; without a line it is dropped.
             for m in mkts:
@@ -574,7 +594,7 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
                         o.setdefault("point", 0.5)
             got = _parse_prop_markets(mkts, game_id=g["game_id"], game_date=game_date,
                                       snapshot_type="open", snapshot_at=stamp,
-                                      allowed_markets=PROP_MARKETS, bookmaker=bk)
+                                      allowed_markets=markets, bookmaker=bk)
             rows += got
             for row in got:
                 stats["markets"][row["market"]].add(bk)
@@ -592,10 +612,12 @@ def buy_props_date(conn, meter: Meter, game_date: str, games: list[dict],
     return stats
 
 
-def buy_props(conn, meter: Meter, first_season: int, last_season: int, lead_min: int) -> dict:
+def buy_props(conn, meter: Meter, first_season: int, last_season: int, lead_min: int,
+              markets: list[str] = PROP_MARKETS, done_markets=("player_points",),
+              what: str = "props") -> dict:
     games = _known_games(conn, first_season, last_season)
     games = {k: v for k, v in games.items() if v["game_date"] >= FIRST_PROPS_DATE}
-    done = _props_done(conn, list(games))
+    done = _props_done(conn, list(games), done_markets)
     for gid in done:
         games[gid]["done"] = True
     by_date: dict[str, list[dict]] = defaultdict(list)
@@ -604,21 +626,21 @@ def buy_props(conn, meter: Meter, first_season: int, last_season: int, lead_min:
     todo = sorted((d for d, gs in by_date.items() if not all(g.get("done") for g in gs)),
                   reverse=True)
     n = sum(1 for d in todo for g in by_date[d] if not g.get("done"))
-    logger.info(f"props: {len(games)} games since {FIRST_PROPS_DATE}, {len(done)} stored, "
-                f"{n} to buy on {len(todo)} dates (~{130 * n:,} credits)")
+    logger.info(f"{what}: {len(games)} games since {FIRST_PROPS_DATE}, {len(done)} stored, "
+                f"{n} to buy on {len(todo)} dates (~{10 * len(markets) * n:,} credits)")
     totals = defaultdict(int)
     for d in todo:
-        s = buy_props_date(conn, meter, d, by_date[d], lead_min)
+        s = buy_props_date(conn, meter, d, by_date[d], lead_min, markets=markets)
         totals["events"] += s["events"]
         totals["prop_rows"] += s["prop_rows"]
         if s.get("unmatched"):
             totals["unmatched"] += len(s["unmatched"])
             logger.warning(f"{d}: unmatched events {s['unmatched']}")
-        logger.info(f"props {d}: {s['events']} games, {s['prop_rows']} rows | "
+        logger.info(f"{what} {d}: {s['events']} games, {s['prop_rows']} rows | "
                     f"spent {meter.spent:,}, balance {meter.remaining}")
         if s.get("stopped"):
             totals["stopped"] = s["stopped"]
-            logger.warning(f"props stopping at {d}: {s['stopped']}")
+            logger.warning(f"{what} stopping at {d}: {s['stopped']}")
             break
     return dict(totals)
 
@@ -723,23 +745,36 @@ def parse_derivatives(book_markets: list[dict], home_name: str, home: str, away:
             if p.get("total_line") is not None:
                 rows.append({"market": key, **p})
         elif key == "team_totals":
-            slots: dict[tuple, dict] = {}
-            for o in outs:
-                name, desc = (o.get("name") or ""), (o.get("description") or "")
-                side, team = (name, desc) if name.lower() in ("over", "under") else (desc, name)
-                if side.lower() not in ("over", "under") or o.get("point") is None:
-                    continue
-                ab = _nba_abbrev(team)
-                stored = ("team_totals_home" if ab == home else
-                          "team_totals_away" if ab == away else None)
-                if stored is None:
-                    continue
-                slot = slots.setdefault((stored, float(o["point"])), {})
-                slot[side.lower() + "_price"] = o.get("price")
-            for (stored, pt), slot in slots.items():
-                rows.append({"market": stored, "total_line": pt,
-                             "over_price": slot.get("over_price"),
-                             "under_price": slot.get("under_price")})
+            rows += _team_total_rows(outs, home, away, "team_totals")
+    return rows
+
+
+def _team_total_rows(outs: list[dict], home: str, away: str, market: str) -> list[dict]:
+    """One team-total market's outcomes, filed as <market>_home / <market>_away by team; a team
+    that is not in the game is never filed under either side."""
+    slots: dict[tuple, dict] = {}
+    for o in outs:
+        name, desc = (o.get("name") or ""), (o.get("description") or "")
+        side, team = (name, desc) if name.lower() in ("over", "under") else (desc, name)
+        if side.lower() not in ("over", "under") or o.get("point") is None:
+            continue
+        ab = _nba_abbrev(team)
+        stored = (f"{market}_home" if ab == home else f"{market}_away" if ab == away else None)
+        if stored is None:
+            continue
+        slot = slots.setdefault((stored, float(o["point"])), {})
+        slot[side.lower() + "_price"] = o.get("price")
+    return [{"market": stored, "total_line": pt, "over_price": slot.get("over_price"),
+             "under_price": slot.get("under_price")} for (stored, pt), slot in slots.items()]
+
+
+def parse_period_team_totals(book_markets: list[dict], home_name: str, home: str,
+                             away: str) -> list[dict]:
+    """team_totals_q1 and team_totals_h1 for one book, filed as team_totals_q1_home and so on."""
+    rows = []
+    for m in book_markets:
+        if m.get("key") in PERIOD_TT_MARKETS:
+            rows += _team_total_rows(m.get("outcomes") or [], home, away, m["key"])
     return rows
 
 
@@ -809,6 +844,15 @@ def _alt_done(conn, game_ids: list[str]) -> set[str]:
     return have
 
 
+def _period_tt_done(conn, game_ids: list[str]) -> set[str]:
+    have: set[str] = set()
+    for i in range(0, len(game_ids), 500):
+        have |= {r[0] for r in conn.execute(
+            "SELECT DISTINCT game_id FROM odds WHERE game_id = ANY(%s) AND source = %s",
+            (game_ids[i:i + 500], PERIOD_TT_SOURCE)).fetchall()}
+    return have
+
+
 def _deriv_done(conn, game_ids: list[str]) -> set[str]:
     have: set[str] = set()
     for i in range(0, len(game_ids), 500):
@@ -829,6 +873,50 @@ def buy_derivatives(conn, meter: Meter, first_season: int, last_season: int,
                     lead_min: int) -> dict:
     return _buy_per_event(conn, meter, first_season, last_season, lead_min,
                           DERIV_MARKETS, DERIV_SOURCE, parse_derivatives, _deriv_done, "derivatives")
+
+
+def buy_period_team_totals(conn, meter: Meter, first_season: int, last_season: int,
+                           lead_min: int) -> dict:
+    """First-quarter and first-half team totals, one purchase per game `lead_min` before tip."""
+    return _buy_per_event(conn, meter, first_season, last_season, lead_min, PERIOD_TT_MARKETS,
+                          PERIOD_TT_SOURCE, parse_period_team_totals, _period_tt_done,
+                          "period team totals")
+
+
+def probe_first_quarter(conn, meter: Meter, game_date: str) -> dict:
+    """One game on `game_date`, every first-quarter market asked for in one call: which books
+    quote each, and what it cost. Writes nothing."""
+    season = int(game_date[:4]) + (1 if int(game_date[5:7]) >= 9 else 0)
+    games = [g for g in _known_games(conn, season, season).values() if g["game_date"] == game_date]
+    by_teams = {(g["away"], g["home"]): g for g in games}
+    noon = datetime.fromisoformat(f"{game_date}T12:00:00").replace(tzinfo=ET)
+    r = meter.get(f"{BASE}/events", {"date": noon.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    if r is None or r.status_code != 200:
+        return {"error": getattr(r, "status_code", "network")}
+    for ev in (r.json().get("data") or []):
+        start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+        g = by_teams.get((_normalize_team(ev.get("away_team", ""), "NBA"),
+                          _normalize_team(ev.get("home_team", ""), "NBA")))
+        if g is None or start.astimezone(ET).date().isoformat() != game_date:
+            continue
+        snap = (start - timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        before = meter.spent
+        resp = meter.get(f"{BASE}/events/{ev['id']}/odds", {
+            "date": snap, "markets": ",".join(Q1_PROP_MARKETS + PERIOD_TT_MARKETS),
+            "bookmakers": BOOKS, "oddsFormat": "american"})
+        if resp is None or resp.status_code != 200:
+            return {"game_id": g["game_id"], "error": getattr(resp, "status_code", "network")}
+        books: dict[str, list[str]] = defaultdict(list)
+        players: dict[str, set] = defaultdict(set)
+        for book in (resp.json().get("data") or {}).get("bookmakers", []):
+            for m in book.get("markets", []):
+                books[m.get("key")].append(book.get("key"))
+                for o in m.get("outcomes", []):
+                    players[m.get("key")].add(o.get("description") or o.get("name"))
+        return {"game_id": g["game_id"], "credits": meter.spent - before,
+                "books": {k: sorted(v) for k, v in books.items()},
+                "names_per_market": {k: len(v) for k, v in players.items()}}
+    return {"error": "no game matched"}
 
 
 def buy_alternates(conn, meter: Meter, first_season: int, last_season: int,
@@ -962,6 +1050,12 @@ def main() -> None:
                     help="buy the whole slate at every instant the plan file names "
                          "(scripts/nba_news_window_plan.py)")
     ap.add_argument("--why", default="news_window", help="instants: the ledger's why")
+    ap.add_argument("--q1-props", action="store_true",
+                    help="first-quarter points, rebounds and assists props, into player_prop_odds")
+    ap.add_argument("--period-team-totals", action="store_true",
+                    help="first-quarter and first-half team totals, into odds")
+    ap.add_argument("--probe-q1", metavar="DATE",
+                    help="one game on DATE, every first-quarter market: books and cost; writes nothing")
     ap.add_argument("--probe-props", metavar="DATE", help="2 games on DATE, writes nothing")
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"))
     ap.add_argument("--lead-min", type=int, default=60)
@@ -989,8 +1083,14 @@ def main() -> None:
             print(s)
             print(f"MEASURED {meter.spent} credits for {s['events']} games; balance {meter.remaining}")
             return
+        if a.probe_q1:
+            meter = Meter(ceiling=200, floor=a.floor)
+            print(probe_first_quarter(conn, meter, a.probe_q1))
+            print(f"MEASURED {meter.spent} credits; balance {meter.remaining}")
+            return
         if not a.seasons or not (a.lines or a.props or a.derivatives or a.alternates or a.fill_gaps
-                                 or a.instants or a.postseason_props):
+                                 or a.instants or a.postseason_props or a.q1_props
+                                 or a.period_team_totals):
             ap.error("give --lines, --fill-gaps, --props, --derivatives or --alternates "
                      "with --seasons FIRST LAST")
         if not a.apply:
@@ -1009,6 +1109,13 @@ def main() -> None:
             print("props:", buy_props(conn, meter, *a.seasons, a.lead_min))
         if a.postseason_props:
             print("postseason props:", buy_postseason_props(conn, meter, *a.seasons, a.lead_min))
+        if a.q1_props:
+            print("first-quarter props:", buy_props(conn, meter, *a.seasons, a.lead_min,
+                                                    markets=Q1_PROP_MARKETS,
+                                                    done_markets=Q1_PROP_MARKETS,
+                                                    what="first-quarter props"))
+        if a.period_team_totals:
+            print("period team totals:", buy_period_team_totals(conn, meter, *a.seasons, a.lead_min))
         if a.derivatives:
             print("derivatives:", buy_derivatives(conn, meter, *a.seasons, a.lead_min))
         if a.alternates:
