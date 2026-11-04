@@ -68,9 +68,10 @@ import {
   useTabBarHeight,
 } from '@/hooks/useTabBarHeight';
 import { FeatureGate } from '@/components/FeatureGate';
-import { useAuth } from '@/hooks/useAuth';
+import { readAuthStatus, useAuth } from '@/hooks/useAuth';
 import { useMembership } from '@/hooks/useMembership';
 import { AUTH_ENABLED } from '@/lib/authConfig';
+import { signedOutRouteIsShell } from '@/lib/authShell';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -179,7 +180,9 @@ function TabsRoot() {
         </View>
       )}
     >
-      <Tab.Screen name="Picks" component={PicksHomeScreen} listeners={lockedTab} />
+      {/* Picks stays on the free shell: the teaser, not the paywall. Signals
+          and Live Signals open the paywall from inside that screen. */}
+      <Tab.Screen name="Picks" component={PicksHomeScreen} />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
@@ -302,11 +305,16 @@ export default function App() {
   // daily recap are modals, so they would cover it. Hold both until Close.
   const holdIntro = routeName === 'Paywall' || routeName === 'SignIn';
 
+  // Auth on: the shell is unreachable signed out. Read the module status, not
+  // the React copy — a sign-in updates the module before this render, and a
+  // reset here would throw that sign-in back to SignIn. routeName re-runs
+  // this after a push deep link or any other navigation off SignIn.
   useEffect(() => {
-    if (!signedOut || !navReady) return;
-    if (navRef.getCurrentRoute()?.name === 'SignIn') return;
+    if (!AUTH_ENABLED || !navReady) return;
+    if (readAuthStatus() !== 'signedOut') return;
+    if (!signedOutRouteIsShell(navRef.getCurrentRoute()?.name)) return;
     navRef.reset({ index: 0, routes: [{ name: 'SignIn' }] });
-  }, [signedOut, navReady, navRef]);
+  }, [signedOut, navReady, navRef, routeName]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

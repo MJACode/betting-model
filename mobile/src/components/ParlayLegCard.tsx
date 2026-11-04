@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatAmerican, formatPct, formatStampET } from '@/lib/format';
 import { bookLabel } from '@/lib/markets';
-import { isLineLeg } from '@/lib/lineLegs';
+import { isLineLeg, PREGAME_ALT_NOTE } from '@/lib/lineLegs';
 import { modelShort } from '@/lib/modelMeta';
 import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -38,11 +38,13 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
           <View style={styles.modelChip}>
             <Text style={styles.modelChipText}>{modelShort(leg.modelId)}</Text>
           </View>
-          <View style={[styles.tag, leg.isFavorite ? styles.favTag : styles.dogTag]}>
-            <Text style={[styles.tagText, leg.isFavorite ? styles.favText : styles.dogText]}>
-              {leg.isFavorite ? 'FAV' : 'DOG'}
-            </Text>
-          </View>
+          {leg.pregameUnpriced ? null : (
+            <View style={[styles.tag, leg.isFavorite ? styles.favTag : styles.dogTag]}>
+              <Text style={[styles.tagText, leg.isFavorite ? styles.favText : styles.dogText]}>
+                {leg.isFavorite ? 'FAV' : 'DOG'}
+              </Text>
+            </View>
+          )}
           {/* An in-play leg is a different kind of bet from the pre-game ones
               beside it — its price is a ~45s-old snapshot of a number that is
               still moving — and this card is on the screen the bet is actually
@@ -55,16 +57,20 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
           ) : null}
           {/* A Stats line leg has no model: its probability is the odds-implied
               one, and it says so rather than reading as a model call. */}
-          <Text style={styles.stat}>
-            {isLineLeg(leg) ? `implied ${formatPct(leg.modelProb)}` : formatPct(leg.modelProb)}
-          </Text>
-          <Text style={styles.stat}>
-            {formatAmerican(leg.americanOdds)}
-            {leg.dkPriced === false && leg.pricedAt ? ` · ${bookLabel(leg.pricedAt)}` : ''}
-          </Text>
-          {/* A price from the once-a-day alternate ladder says how old it is,
-              so it is not read as this hour's number (UX review, 2026-10-29). */}
-          {leg.pricedFromLadder ? (
+          {leg.pregameUnpriced ? null : (
+            <>
+              <Text style={[styles.stat, leg.pregameStale && styles.struck]}>
+                {isLineLeg(leg) ? `implied ${formatPct(leg.modelProb)}` : formatPct(leg.modelProb)}
+              </Text>
+              <Text style={[styles.stat, leg.pregameStale && styles.struck]}>
+                {formatAmerican(leg.americanOdds)}
+                {leg.dkPriced === false && leg.pricedAt ? ` · ${bookLabel(leg.pricedAt)}` : ''}
+              </Text>
+            </>
+          )}
+          {/* A price from the alternate ladder says how old it is, so it is
+              not read as this hour's number (UX review, 2026-10-29). */}
+          {leg.pricedFromLadder && !leg.pregameStale ? (
             <Text style={styles.ladderAge}>
               alt price {formatStampET(leg.pricedAsOf) || 'today'}
             </Text>
@@ -75,6 +81,11 @@ export function ParlayLegCard({ leg, onRemove, onSwap, onEdit }: Props) {
             </Text>
           ) : null}
         </View>
+        {/* After kickoff an alternate the user already took stays on the
+            slip. Its own line, so the sentence can wrap. */}
+        {leg.pregameStale ? (
+          <Text style={styles.pregameNote}>{PREGAME_ALT_NOTE}</Text>
+        ) : null}
       </View>
       {onSwap || onRemove || onEdit ? (
         <View style={styles.controls}>
@@ -186,6 +197,16 @@ const styles = StyleSheet.create({
   },
   ladderAge: {
     fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  pregameNote: {
+    fontSize: font.size.footnote,
+    color: colors.medInk,
+    fontWeight: font.weight.medium,
+    marginTop: spacing.xs,
+  },
+  struck: {
+    textDecorationLine: 'line-through',
     color: colors.textSecondary,
   },
   bestBook: {

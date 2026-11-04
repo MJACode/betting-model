@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, pregameLadderVisible, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { canSaveEdit, editScrollTarget, foldAltGameRows, gameEditMenu, gameLineHold, initialEditSegment, gameLineLegFromRows, isLineLeg, lineLegsAfterReplace, lineOptionsFromRows, PREGAME_ALT_NOTE, pregameLadderVisible, slipLegCanEdit, withLine, type PropLineLegSpec, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
 import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
 import { lineLegsAfterEdit } from '../src/lib/betslipGuard';
 import { EMPTY_INJURY_INDEX } from '../src/lib/injuryStatus';
@@ -148,7 +148,7 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const meta = read('src/lib/modelMeta.ts');
   check('the model chip never shows the raw stats_line id', meta.includes("if (modelId === 'stats_line') return 'Your line';"));
   const screen = read('src/screens/ParlayScreen.tsx');
-  check('the slip attributes its price to DraftKings only when every leg is DK\'s', screen.includes('const allDk = legs.every((l) => l.dkPriced !== false);') && screen.includes("allDk ? 'DK imp.' : 'Implied'"));
+  check('the slip attributes its price to DraftKings only when every leg is DK\'s', screen.includes('const allDk = pricedLegs.every((l) => l.dkPriced !== false);') && screen.includes("allDk ? 'DK imp.' : 'Implied'"));
   check('the hold note names the exception', screen.includes('Priced at DraftKings, except ${exception}'));
   check('the header count includes line legs', screen.includes('{slipCount}'));
   check('stale line legs clear through their own store', screen.includes("key.startsWith('line:') ? lineLegs.remove(key) : slip.remove(key)"));
@@ -252,7 +252,7 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const sheet = read('src/components/AddLineSheet.tsx');
   check('the sheet takes the shared input and builds no prop spec of its own', sheet.includes('input: LineSheetInput | null') && !sheet.includes('player_name: quote.playerName'));
   const resolved = read('src/hooks/useResolvedSlip.ts');
-  check('the slip re-prices a game leg from its market\'s latest lines', resolved.includes('fetchGameLineRows(spec.game_id, spec.market)') && resolved.includes('gameLineLegFromRows('));
+  check('the slip re-prices a game leg from its market\'s latest lines', resolved.includes('fetchGameLineRows(spec.game_id, spec.market)') && resolved.includes('gameLineHold('));
   const queries = read('src/lib/queries.ts');
   check('that read asks for the alternate ladder and folds it onto the main market',
     queries.includes("from('alt_game_lines')") && queries.includes('foldAltGameRows'));
@@ -494,12 +494,71 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
       && /parseStamp\(commenceTime\)/.test(read('src/lib/lineLegs.ts')));
   const startedRows = Object.assign(spreadRows.slice(), { ladderHidden: 'started' as const });
   const startedMenu = gameEditMenu(kc, startedRows);
-  check('a started game says the morning alternates are off',
+  check('a started game says the pre-game alternates are off',
     startedMenu.ladderHidden === 'started'
       && startedMenu.subtitle.includes('The game has started')
+      && startedMenu.subtitle.includes('pre-game alternate lines')
+      && !startedMenu.subtitle.includes('this morning')
       && !startedMenu.subtitle.includes('hanging right now'));
   check('the sheet says why a missing line is gone after kickoff',
-    read('src/components/EditLineLegSheet.tsx').includes('this morning’s alternate lines are off'));
+    read('src/components/EditLineLegSheet.tsx').includes('pre-game alternate lines are off')
+      && !read('src/components/EditLineLegSheet.tsx').includes('this morning'));
+  const startedWithAlt = Object.assign(ladder.slice(), { ladderHidden: 'started' as const });
+  const startedAltMenu = gameEditMenu(kc, startedWithAlt);
+  check('a started game does not list an alternate rung',
+    !startedAltMenu.choices.some((c) => Math.abs((c.spec as GameLineLegSpec).line ?? 0) === 6.5)
+      && startedAltMenu.subtitle.includes('pre-game alternate lines'));
+  const heldAlt = gameLineHold(kc65.spec as GameLineLegSpec, startedWithAlt, null);
+  check('an alt rung after kickoff is held, not dropped and not a live price',
+    heldAlt.hold === 'pregame' && heldAlt.leg != null && heldAlt.leg.pricedFromLadder === true
+      && heldAlt.leg.label.includes('6.5'));
+  const heldMain = gameLineHold(kc, startedWithAlt, null);
+  check('the main number still prices after kickoff',
+    heldMain.hold === null && heldMain.leg != null && heldMain.leg.pricedFromLadder === false);
+  // CE review of #1115: after kickoff, DraftKings hangs BUF -6 as the main
+  // number. FanDuel's main is -5.5, and its pre-game alt rung is -6. That
+  // rung must not enter the live leg's book prices, DraftKings credit, or
+  // handoff. Before kickoff the same rung is still a price for that book.
+  const dkAt6 = g('draftkings', 'spreads', { spread_home: -6, home_price: -110, away_price: -110, home_link: 'https://dk/main' });
+  const fdMain = g('fanduel', 'spreads', { spread_home: -5.5, home_price: -105, away_price: -115 });
+  const fdAlt6 = g('fanduel', 'alternate_spreads', { spread_home: -6, home_price: 140, away_price: -160, home_link: 'https://fd/alt' });
+  const dkAlt6 = g('draftkings', 'alternate_spreads', { spread_home: -6, home_price: -150, away_price: 130, home_link: 'https://dk/alt' });
+  const leakRows = foldAltGameRows('spreads', [dkAt6, fdMain], [fdAlt6, dkAlt6]);
+  const buf6: GameLineLegSpec = { kind: 'game', game_id: 'KC@BUF', sport: 'NFL', market: 'spreads', team: 'BUF', opponent: 'KC', isHome: true, line: -6, side: null };
+  const beforeKick = gameLineHold(buf6, leakRows, null);
+  const afterKick = gameLineHold(buf6, Object.assign(leakRows.slice(), { ladderHidden: 'started' as const }), null);
+  check('before kickoff another book\'s alt rung at the main number is still a price',
+    beforeKick.hold === null && beforeKick.leg != null
+      && beforeKick.leg.bookPrices.some((b) => b.bookmaker === 'fanduel' && b.link === 'https://fd/alt'));
+  check('after kickoff a main-number leg does not pick up pre-game alt rungs',
+    afterKick.hold === null
+      && afterKick.leg != null
+      && afterKick.leg.pricedFromLadder === false
+      && afterKick.leg.dkPriced === true
+      && afterKick.leg.dkLink === 'https://dk/main'
+      && afterKick.leg.americanOdds === -110
+      && afterKick.leg.bookPrices.every((b) => b.bookmaker !== 'fanduel'));
+  check('before kickoff the same alt rung is a normal priced leg',
+    gameLineHold(kc65.spec as GameLineLegSpec, ladder, null).hold === null);
+  const failedRows = Object.assign(spreadRows.slice(), { ladderHidden: 'started' as const, ladderFailed: true as const });
+  check('a failed ladder read after kickoff holds the alt instead of pruning it',
+    gameLineHold(kc65.spec as GameLineLegSpec, failedRows, null).hold === 'pregame'
+      && gameLineHold(kc65.spec as GameLineLegSpec, failedRows, null).leg == null);
+  check('a main number still prices when that ladder read failed',
+    gameLineHold(kc, failedRows, null).hold === null
+      && gameLineHold(kc, failedRows, null).leg != null);
+  check('the slip builds an unpriced card when the ladder read failed',
+    read('src/hooks/useResolvedSlip.ts').includes('pregameUnpricedLeg('));
+  const slipHook = read('src/hooks/useResolvedSlip.ts');
+  check('the slip marks a held alt stale and does not treat that as a prune',
+    slipHook.includes('gameLineHold(') && slipHook.includes('pregameStale: true')
+      && slipHook.includes('priced.get(lineLegKey(s)) === null'));
+  const card = read('src/components/ParlayLegCard.tsx');
+  check('the leg card says the held price is pre-game',
+    card.includes('PREGAME_ALT_NOTE') && PREGAME_ALT_NOTE === 'Pre-game price — the game has started');
+  const slipScreen = read('src/screens/ParlayScreen.tsx');
+  check('a held alt is left out of the parlay price and the book row',
+    slipScreen.includes('legsForPricing(') && slipScreen.includes('pricedLegs'));
   const queries = read('src/lib/queries.ts');
   check('board and pick reads ask for main markets, not the alternate ladder',
     (queries.match(/\.in\('market', \[\.\.\.MAIN_GAME_ODDS_MARKETS\]\)/g) ?? []).length >= 6
@@ -507,9 +566,10 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   {
     const fnStart = queries.indexOf('export async function fetchGameLineRows');
     const fn = queries.slice(fnStart, queries.indexOf('\nexport async function', fnStart + 10));
-    check('the ladder read checks the start before it asks for alt rungs',
-      fn.indexOf('pregameLadderVisible') >= 0
-        && fn.indexOf('pregameLadderVisible') < fn.indexOf(".from('alt_game_lines')"));
+    check('after kickoff the ladder is still read and then marked hidden',
+      fn.indexOf(".from('alt_game_lines')") >= 0
+        && fn.indexOf(".from('alt_game_lines')") < fn.indexOf('pregameLadderVisible')
+        && fn.includes("ladderHidden = 'started'"));
   }
   {
     const needle = ".from('v_latest_odds_all_books')";

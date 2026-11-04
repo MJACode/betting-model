@@ -34,7 +34,9 @@
  * betslip re-reads that player's -- or that game market's -- latest lines
  * each time (queries.ts fetchPropLineRows / fetchGameLineRows). A spec whose
  * line no book posts any more -- game started, market pulled -- resolves to
- * nothing and is pruned like a dead pick key.
+ * nothing and is pruned like a dead pick key. An alternate spread or total
+ * the user already took is the exception: once the game has started that
+ * rung is a pre-game price, the leg stays, and the user removes it.
  *
  * A GAME LINE LEG IS A GAME LINE. `isGameLine` is true for it, so the slip's
  * correlation guard (parlay.ts isValidCombo: one game-line leg per game) sees
@@ -515,8 +517,8 @@ export function lineLegsAfterReplace(
 // leg's own rule — so the price picked is the price the slip shows.
 //
 // Game lines offer what the books POST: the main number each book hangs,
-// plus the alternate ladder fetched once a day (Matt approved the cost
-// 2026-10-29), folded in by foldAltGameRows.
+// plus the alternate ladder (Matt approved the cost 2026-10-29; the pass
+// refreshes games inside 24 hours), folded in by foldAltGameRows.
 
 /** One bet the sheet can switch the leg to. */
 export interface EditChoice {
@@ -538,21 +540,24 @@ export interface EditMenu {
   choices: EditChoice[];
   /** The line under the sheet's title, per market. */
   subtitle: string;
-  /** Set when the morning ladder was hidden because the game has started. */
+  /** Set when the pre-game ladder was hidden because the game has started. */
   ladderHidden?: 'started';
 }
 
 const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
 const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
-// Alternate spreads and totals are fetched once a day (Matt, 2026-10-29;
-// data/ingestors/alt_game_lines.py), the main numbers every refresh pass.
+// Alternate spreads and totals refresh every odds pass for games inside
+// 24 hours, and once a day for the 3-day look-ahead (Matt, 2026-10-29;
+// data/ingestors/alt_game_lines.py). The main numbers refresh every pass.
 const GAME_LINE_SUBTITLE = 'Every number a sportsbook posts, including alternate lines.';
 // No ladder reached the sheet (not fetched yet for this game, or the read
 // failed): do not claim alternates the user cannot see.
 const MAIN_ONLY_SUBTITLE = 'Every number a sportsbook is hanging right now.';
 // The ladder was loaded and then hidden: the game has started. Do not reuse
 // the "hanging right now" sentence, which describes a ladder that never arrived.
-const STARTED_SUBTITLE = 'The game has started, so this morning’s alternate lines aren’t listed.';
+const STARTED_SUBTITLE = 'The game has started, so pre-game alternate lines aren’t listed.';
+/** On a slip leg whose only price is that hidden ladder. */
+export const PREGAME_ALT_NOTE = 'Pre-game price — the game has started';
 /** The whole game is off the board. */
 export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
 
@@ -653,15 +658,19 @@ function asTeam(spec: GameLineLegSpec, team: string, line: number | null): GameL
  * not change — a spread stays a spread.
  */
 export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]): EditMenu {
+  const ladderHidden = (rows as { ladderHidden?: 'started' }).ladderHidden === 'started' ? 'started' as const : undefined;
+  // After kickoff the ladder rows are still on the array so the slip can
+  // hold an alt the user already took. They are not choices: the sheet
+  // lists the main numbers only.
   const at = rows.filter(
-    (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker),
+    (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker)
+      && !(ladderHidden === 'started' && r.fromLadder),
   );
   const choices: EditChoice[] = [];
   // Whether any alternate rung reached this menu: it decides the subtitle
   // and whether main rows are labelled (a menu of only main rows needs no
   // "Main line" on every row).
   const hasLadder = at.some((r) => r.fromLadder);
-  const ladderHidden = (rows as { ladderHidden?: 'started' }).ladderHidden === 'started' ? 'started' as const : undefined;
   const quietSubtitle = ladderHidden === 'started' ? STARTED_SUBTITLE : MAIN_ONLY_SUBTITLE;
   const push = (segment: string, next: GameLineLegSpec, list: GameLineRow[], title = lineLegLabel(next)) => {
     const side = gameLegSide(next);
@@ -708,9 +717,9 @@ export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]
   return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : quietSubtitle, ladderHidden });
 }
 
-// ── Alternate game lines (Matt, 2026-10-29: "yes", fetched once a day) ──────
+// ── Alternate game lines (Matt, 2026-10-29: "yes") ───────────────────────────
 
-/** A game odds row, tagged when it came from the once-a-day alternate ladder. */
+/** A game odds row, tagged when it came from the alternate ladder. */
 export type GameLineRow = OddsByBookRow & { fromLadder?: boolean };
 
 /** The alternate market a game market's ladder is stored under. */
@@ -720,12 +729,14 @@ export const ALT_GAME_MARKET: Partial<Record<GameLineMarket, string>> = {
 };
 
 /**
- * The once-a-day ladder is a pre-game price. Hide it once the game has
- * started: those numbers drift, and the main row is already the last
- * pre-game price. A missing or unparseable start stays visible — we have
- * not seen a kickoff. parseStamp, not Date.parse: Hermes rejects the
- * space-separated timestamps the pipeline stores, and Date.parse then
- * returns NaN, which would leave the morning ladder up.
+ * The alternate ladder is a pre-game price. Hide it from the edit sheet
+ * once the game has started: those numbers drift, and the main row is
+ * already the last pre-game price. The rows stay available to the slip so
+ * an alt the user already took is held and marked stale, not deleted. A
+ * missing or unparseable start stays visible — we have not seen a kickoff.
+ * parseStamp, not Date.parse: Hermes rejects the space-separated timestamps
+ * the pipeline stores, and Date.parse then returns NaN, which would leave
+ * the ladder up.
  */
 export function pregameLadderVisible(
   commenceTime: string | null | undefined,
@@ -742,8 +753,69 @@ export function pregameLadderVisible(
  * one list in the MAIN market's name, so the edit menu and the slip's
  * re-pricing (gameEditMenu, gameLineLegFromRows) see every number a book
  * hangs. Where a book's alternate rung repeats its main number, the main row
- * wins: it is refreshed every pass, the ladder once a day.
+ * wins: it is refreshed every pass, and the ladder for a game inside 24
+ * hours is too.
  */
+
+/**
+ * What the slip does with a game spec after reading its rows.
+ * `hold: 'pregame'` — the only price is an alternate rung and the game has
+ * started. Keep the leg, mark it stale, do not price the parlay off it,
+ * and do not remove it. Otherwise `leg` is the priced leg, or null when
+ * nothing posts the number (the caller prunes that).
+ */
+export function gameLineHold(
+  spec: GameLineLegSpec,
+  rows: readonly GameLineRow[],
+  game: GameRow | null,
+): { leg: ParlayLeg | null; hold: 'pregame' | null } {
+  const marked = rows as { ladderHidden?: 'started'; ladderFailed?: boolean };
+  const hidden = marked.ladderHidden === 'started';
+  if (!hidden) return { leg: gameLineLegFromRows(spec, rows, game), hold: null };
+  // After kickoff a live main-number leg is priced from main rows only.
+  // buildLeg copies every row at the number into bookPrices and credits
+  // DraftKings from any of them, so a pre-game alt rung at the same number
+  // would otherwise leak into the handoff. The ladder is consulted only
+  // when no main row prices the leg, and then only to hold the alt.
+  const live = gameLineLegFromRows(spec, rows.filter((r) => !r.fromLadder), game);
+  if (live) return { leg: live, hold: null };
+  // The game has started and the ladder read failed. A number that is not
+  // on the main rows may be the alt the user took. Hold it. Do not prune.
+  if (marked.ladderFailed && spec.market !== 'h2h' && spec.line != null) {
+    return { leg: null, hold: 'pregame' };
+  }
+  const fromLadder = gameLineLegFromRows(spec, rows, game);
+  if (fromLadder?.pricedFromLadder) return { leg: fromLadder, hold: 'pregame' };
+  return { leg: fromLadder, hold: null };
+}
+
+/** A held alt whose ladder could not be read. No price: the card shows the
+ *  label and the pre-game note, and the parlay does not count it. */
+export function pregameUnpricedLeg(spec: GameLineLegSpec, game: GameRow | null): ParlayLeg {
+  const key = lineLegKey(spec);
+  return {
+    pickId: lineLegPickId(key),
+    slipKey: key,
+    gameId: spec.game_id,
+    isLive: false,
+    modelId: LINE_LEG_MODEL_ID,
+    isGameLine: true,
+    isFavorite: false,
+    label: lineLegLabel(spec),
+    modelProb: 0,
+    decimalOdds: 1,
+    americanOdds: 0,
+    legEdge: 0,
+    bestBook: null,
+    bookPrices: [],
+    pick: null,
+    game,
+    dkPriced: false,
+    pregameStale: true,
+    pregameUnpriced: true,
+  };
+}
+
 export function foldAltGameRows(
   market: string,
   main: readonly OddsByBookRow[],

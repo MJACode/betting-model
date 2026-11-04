@@ -4,6 +4,8 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 
 import { routeForPush, type PushRoute } from '@/lib/pushRoute';
 import { setSportForVisit } from '@/hooks/useSportFilter';
+import { readAuthStatus, useAuth } from '@/hooks/useAuth';
+import { AUTH_ENABLED } from '@/lib/authConfig';
 import type { RootStackParamList } from '@/types';
 
 type NavRef = NavigationContainerRef<RootStackParamList>;
@@ -37,15 +39,27 @@ function clearNativeLastResponse(): void {
   );
 }
 
+/**
+ * False while auth is on and the session is signed out. The caller keeps the
+ * route and tries again after sign-in. Pick detail stays behind the premium
+ * gate, so a free member still does not see the pick.
+ */
+function shellOpen(): boolean {
+  if (!AUTH_ENABLED) return true;
+  const status = readAuthStatus();
+  return status === 'signedIn' || status === 'disabled';
+}
+
 /** Perform a resolved route. One place, so the two callers cannot drift. */
-function navigateTo(navRef: NavRef, route: PushRoute): void {
+function navigateTo(navRef: NavRef, route: PushRoute): boolean {
+  if (AUTH_ENABLED && readAuthStatus() === 'signedOut') return false;
   switch (route.kind) {
     case 'pick':
       navRef.navigate('PickDetail', { pickId: route.pickId });
-      return;
+      return true;
     case 'feedbackThread':
       navRef.navigate('FeedbackThread', { threadId: route.threadId });
-      return;
+      return true;
     case 'board':
       // Sport FIRST: the board is sport-scoped, so navigating before the switch
       // lands shows the wrong sport's picks for a frame and then swaps under
@@ -53,7 +67,7 @@ function navigateTo(navRef: NavRef, route: PushRoute): void {
       // user's own selection is left alone — picking one would hide the rest.
       if (route.sport) setSportForVisit(route.sport);
       navRef.navigate('Tabs', { screen: 'Picks', params: { view: route.view } });
-      return;
+      return true;
   }
 }
 
@@ -85,6 +99,7 @@ function navigateTo(navRef: NavRef, route: PushRoute): void {
  * that lands early is held and replayed once `ready` flips.
  */
 export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
+  const { status } = useAuth();
   const pendingRef = useRef<PushRoute | null>(null);
   // `ready` in a ref, read at dispatch time. It must NOT be an effect
   // dependency: `ready` always goes false -> true on launch (onReady fires
@@ -101,8 +116,8 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
 
   useEffect(() => {
     const dispatch = (route: PushRoute) => {
-      if (readyRef.current && navRef.isReady()) navigateTo(navRef, route);
-      else pendingRef.current = route;
+      if (readyRef.current && navRef.isReady() && navigateTo(navRef, route)) return;
+      pendingRef.current = route;
     };
 
     const handle = (response: Notifications.NotificationResponse | null) => {
@@ -145,12 +160,14 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Replay whatever arrived before the navigator could take it.
+  // Replay whatever arrived before the navigator could take it, and a tap
+  // that landed while signed out, once the session is in.
   useEffect(() => {
     if (!ready || !navRef.isReady()) return;
+    if (!shellOpen()) return;
     const route = pendingRef.current;
     if (!route) return;
     pendingRef.current = null;
     navigateTo(navRef, route);
-  }, [navRef, ready]);
+  }, [navRef, ready, status]);
 }

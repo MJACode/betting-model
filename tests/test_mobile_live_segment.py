@@ -153,9 +153,10 @@ def test_the_live_dot_on_the_segment_is_conditional():
     src = _read(PICKS)
     m = re.search(r'<SubTabBtn\s+label="Live Signals"(.*?)/>', src, re.S)
     assert m, "the Live Signals segment is gone, or was renamed"
-    assert re.search(r"dot=\{liveData\.length > 0\}", m.group(1)), (
-        "the live dot is not gated on there being live picks -- a dot that is "
-        "always lit has stopped meaning anything"
+    assert re.search(r"dot=\{!signalsLocked && liveData\.length > 0\}", m.group(1)), (
+        "the live dot is not gated on there being live picks, and it stays on "
+        "while Signals is locked -- a free member must not be told a live pick "
+        "is waiting, and a dot that is always lit has stopped meaning anything"
     )
     # and the dot the button draws must be the gated prop, not "this is the live
     # board" -- which `live` now is, on every render of the live segment.

@@ -5203,3 +5203,23 @@ PLAYER_NEWS_MAX_TEAM_FETCHES: int = int(
 # sheet shows the most recent few and the table is a cache we can always re-read.
 PLAYER_NEWS_RETENTION_DAYS: int = int(
     os.environ.get("PLAYER_NEWS_RETENTION_DAYS", 21))
+
+# ── every paid call is logged, however the process was started ──────────────
+# Last in this file on purpose: every constant above exists before anything is
+# imported here. Every Odds API caller in the repo imports this module, so
+# installing the call logger here is what makes api_call_log hold a call made
+# by a plain module run, a runpy launcher or a one-off script -- not only by
+# the scheduler, the pipeline and the entrypoints that install it themselves.
+# On 2026-11-03 the NBA first-quarter history purchase ran on mike's PC as a
+# module run (runpy.run_module("data.ingestors.nba_odds_history")) and about
+# 112,813 credits went out with almost nothing in the log. An entrypoint that
+# calls install("pipeline") afterwards only renames its rows; nothing is
+# wrapped twice. The writer thread starts on the first recorded call, so a
+# process that makes none starts no thread. PIPELINE_TELEMETRY=0 still turns it
+# off. Best-effort: importing config must never fail because of telemetry.
+# monitoring/probe.py, tests/test_odds_call_log_everywhere.py.
+try:
+    from monitoring.probe import install as _install_api_call_log
+    _install_api_call_log()
+except Exception:  # noqa: BLE001
+    pass

@@ -141,8 +141,11 @@ MARKETS = ["h2h", "spreads", "totals"]
 # One row per rung, under these keys, so the main spreads/totals row the
 # models read stays the one number. The edit sheet reads the ladder from
 # alt_game_lines: the 6am run fills it for the next 3 days, and this pass
-# (FETCH_ALT_GAME_LINES, default on) refreshes it every pass for games in the
-# next ALT_GAME_LINES_WINDOW_HOURS. UFC is absent: its bulk feed is h2h.
+# refreshes it every pass for games in the next ALT_GAME_LINES_WINDOW_HOURS.
+# The pass buys only when FETCH_ALT_GAME_LINES is "1" (its own extra gate,
+# default on) AND alt_game_lines.buy_allowance allows it — the same
+# ALT_GAME_LINES_ENABLED kill switch and ALT_GAME_LINES_MAX_GAMES cap as
+# the daily run. UFC is absent: its bulk feed is h2h.
 ALT_GAME_LINE_MARKETS = ["alternate_spreads", "alternate_totals"]
 # Matt, 2026-10-29: option B, every pass, for games starting in the next 24
 # hours (the 6am alt_game_lines run keeps the 3-day look-ahead). Unbounded,
@@ -996,7 +999,8 @@ def _within_alt_window(ev: dict, now: datetime, hours: float) -> bool:
 def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
                                 snapshot_type: str, snapshot_at: str,
                                 resolve_game_id=None, meter: dict | None = None,
-                                now: datetime | None = None) -> list[dict]:
+                                now: datetime | None = None,
+                                budget: dict | None = None) -> list[dict]:
     """Alternate spreads and totals for the events the bulk call already
     listed. Those are the upcoming games this pass is storing main lines
     for. The events endpoint lists a whole future season and is not used
@@ -1007,14 +1011,38 @@ def _fetch_alternate_game_lines(sport_key: str, sport: str, events: list[dict],
     that event. Not the 30-second poller, and not the historical endpoint
     (that one bills 10x). A 422 on one event is skipped; the main lines
     already stored for the slate stay.
+
+    `budget` is the pass's shared allowance (alt_game_lines.buy_allowance):
+    skipped set, or remaining 0, buys nothing. Unset remaining means no cap.
+    Calls taken are subtracted so the next sport in this pass sees what is
+    left. Eligible events are taken in game-id order, the same rule as the
+    daily run's sport-then-game-id cap.
     """
+    from data.ingestors.alt_game_lines import _bounded, buy_allowance, game_for_event
+    if budget is None:
+        budget = {}
+    if "remaining" not in budget and "skipped" not in budget:
+        reason, remaining = buy_allowance()
+        budget["skipped"] = reason
+        budget["remaining"] = remaining
+    if budget.get("skipped") or budget.get("remaining") == 0:
+        return []
+
     event_responses = []
     now = now or datetime.now(timezone.utc)
     hours = _alt_window_hours()
-    for ev in events:
+    eligible = [
+        ev for ev in events
+        if ev.get("id") and not _commence_passed(ev, now)
+        and _within_alt_window(ev, now, hours)
+    ]
+    eligible.sort(key=lambda ev: (
+        (game_for_event(sport, ev, resolve_game_id) or ("",))[0],
+        str(ev.get("id") or ""),
+    ))
+    take, budget["remaining"] = _bounded(eligible, budget.get("remaining"))
+    for ev in take:
         event_id = ev.get("id")
-        if not event_id or _commence_passed(ev, now) or not _within_alt_window(ev, now, hours):
-            continue
         # The feed's own x-requests-last for this call, summed for the pass
         # ledger (alt_game_line_fetches): the cost is measured, not assumed.
         from data.ingestors import odds_quota as _oq
@@ -1485,6 +1513,20 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     total_games = 0
     total_odds  = 0
 
+    # The pass's alternate buy uses the same kill switch and cap as the
+    # daily run (buy_allowance). FETCH_ALT_GAME_LINES is an extra gate on
+    # this path only: "0" skips the pass and leaves the daily run alone.
+    # One budget for the whole pass, so the cap is not per sport.
+    fetch_alt = os.environ.get("FETCH_ALT_GAME_LINES", "1") == "1"
+    alt_budget: dict = {"skipped": "FETCH_ALT_GAME_LINES=0", "remaining": None}
+    if fetch_alt:
+        from data.ingestors.alt_game_lines import buy_allowance
+        reason, remaining = buy_allowance()
+        alt_budget = {"skipped": reason, "remaining": remaining}
+        if reason:
+            log = logger.error if str(reason).startswith("ALT_GAME_LINES_MAX_GAMES") else logger.info
+            log(f"Alternate game lines on this pass: {reason}")
+
     conn = get_connection()
 
     try:
@@ -1562,26 +1604,32 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             )
 
             # Alternate spreads and totals — per-event additional markets.
-            # FETCH_ALT_GAME_LINES=0 turns this off (default on: Matt accepted
-            # the cost). Started games are skipped inside the fetch: the
-            # latest view drops in-play rows, so buying them spends credits
-            # for a ladder the sheet will not show. Billing is the per-event
-            # rule measured on F5: one credit per market returned, two when
-            # both ladders come back, once per unstarted event per pass.
-            # The odds step runs on each refresh (scheduler.py: :17 for hours
-            # 0-5 and 7-17 ET, every 10 minutes for hours 18-23 ET) plus the
-            # 6am daily pipeline. Only games starting inside
-            # ALT_GAME_LINES_WINDOW_HOURS (24) are bought (Matt, 2026-10-29,
-            # option B); alt_game_lines.py buys the 3-day window at 6am.
-            if (sp in ALT_GAME_LINE_SPORTS and events
-                    and os.environ.get("FETCH_ALT_GAME_LINES", "1") == "1"):
+            # Two gates, both required. FETCH_ALT_GAME_LINES=0 turns this
+            # pass off (default on: Matt accepted the cost) and does not
+            # affect the daily run. ALT_GAME_LINES_ENABLED and
+            # ALT_GAME_LINES_MAX_GAMES are the same kill switch and cap as
+            # that daily run (buy_allowance); a set cap is shared across
+            # sports in this pass. Started games are skipped inside the
+            # fetch: the latest view drops in-play rows, so buying them
+            # spends credits for a ladder the sheet will not show. Billing
+            # is the per-event rule measured on F5: one credit per market
+            # returned, two when both ladders come back, once per unstarted
+            # event per pass. The odds step runs on each refresh
+            # (scheduler.py: :17 for hours 0-5 and 7-17 ET, every 10 minutes
+            # for hours 18-23 ET) plus the 6am daily pipeline. Only games
+            # starting inside ALT_GAME_LINES_WINDOW_HOURS (24) are bought
+            # (Matt, 2026-10-29, option B); alt_game_lines.py buys the
+            # 3-day window at 6am.
+            if (sp in ALT_GAME_LINE_SPORTS and events and fetch_alt
+                    and not alt_budget.get("skipped")
+                    and alt_budget.get("remaining") != 0):
                 try:
                     meter: dict = {}
                     asked_at = datetime.now(timezone.utc)
                     try:
                         alt_rows = _fetch_alternate_game_lines(
                             sport_key, sp, events, snapshot_type, snapshot_at, resolve,
-                            meter=meter)
+                            meter=meter, budget=alt_budget)
                     except Exception as fetch_exc:
                         # The calls already made were billed: keep the meter
                         # and still ledger them below (review of #1093, L4).

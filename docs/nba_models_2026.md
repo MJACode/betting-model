@@ -2744,6 +2744,8 @@ was graded, its counts, and its results at the end. All runs are stored in Supab
 | Result shapes by line size | `docs/nba_search_shapes.md` | `2026-11-02-shapes` | 256 | 0 | The earlier moneyline and spread verdicts did not rest on the pricing choice |
 | Props off Pinnacle's line, the consensus, and an anchored prop model | `docs/nba_search_propoffline.md` | `2026-10-31-propoffline` | 36 | 8 | **All unders. An independent check found none is a new model** |
 | The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
+| First-quarter player props (added 2026-11-04) | `docs/nba_search_q1props.md` | `2026-11-04-q1props` | 18 | 0 | Nearest miss assists over, +3.0%, -1.7% to +7.6%; the blind bets lose 5% to 8% |
+| First-quarter and first-half team totals (added 2026-11-04) | `docs/nba_search_q1tt.md` | `2026-11-04-q1tt` | 26 | 0 | Books set them from their own period spread and total; the live home team-total rule carried over makes +3%, too few bets to tell |
 
 **Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
 That is now tested from the projection, the injury report, the shooting-luck gap, the popular team, the favourite and
@@ -2751,9 +2753,10 @@ the line-size shape. The pre-game cells that have passed bet totals and player p
 six of section 7's game-state cells on the live moneyline and spread passed, with every warning sign of stale quotes
 written down beforehand, and that needs an NBA in-play loop that does not exist.
 
-**Where this leaves the first quarter.** No first-quarter spread or total cell has passed in the fifth search, the
-eighth (mike's method) or the starters search. First-quarter player props and first-quarter team totals have not been
-graded, because their prices have not been bought.
+**Where this leaves the first quarter.** No first-quarter cell has passed in any search: spreads and totals in the fifth
+search, the eighth (mike's method) and the starters search; player props and team totals after their prices were
+bought on 2026-11-03 (two seasons, 2024-25 and 2025-26; the feed holds none for 2023-24). Pinnacle prices none of the
+first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them.
 
 **The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
 its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
