@@ -78,13 +78,18 @@ class _Conn:
             return _Res([(p["game_id"], p["game_time"], "regular") for p in self.picks
                          if p["game_id"] in params[0]])
         if "FROM odds" in s:
+            params = list(params)
+            created_after = None
+            if "snapshot_at::timestamptz >" in s:
+                created_after = params.pop()
             if "spread_home = %s" in s or "total_line = %s" in s:
                 game_id, market, book, bound, line = params
             else:
                 game_id, market, book, bound = params
                 line = None
             rows = sorted((q for q in self.quotes
-                           if q[0] == book and q[1] == market and _ts(q[2]) <= _ts(bound)),
+                           if q[0] == book and q[1] == market and _ts(q[2]) <= _ts(bound)
+                           and (created_after is None or _ts(q[2]) > _ts(created_after))),
                           key=lambda q: _ts(q[2]), reverse=True)
             if line is not None and "spreads" in market:
                 rows = [q for q in rows if q[3].get("spread_home") == line]
