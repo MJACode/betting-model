@@ -1,17 +1,24 @@
 # App Store Connect — copy/paste metadata
 
-Drop these into App Store Connect when prompted. Lengths respect Apple's
-character limits. Counts under each block are the characters inside the fence,
-including line breaks.
+Drop these into App Store Connect for the launch binary. That binary requires
+sign-in and sells Premium as an App Store subscription. Lengths respect
+Apple's character limits. Counts under each block are the characters inside
+the fence, not counting the newline before the closing fence.
 
 The store name matches the iOS home-screen name in `mobile/app.json`
 (`Signalbase`). The product name on signalbase-ai.com is Signal Base. Both
 refer to this app.
 
-Checked against the app source on 2026-10-27, not against a live TestFlight
-binary or the EAS dashboard. Sport chips, tab names, and the auth flags below
-are what that source does. `EXPO_PUBLIC_*` values set only in the EAS
-dashboard would not show up here.
+This copy is for the binary with sign-in and Premium in-app purchase on.
+`mobile/eas.json` does not set `EXPO_PUBLIC_AUTH_ENABLED`,
+`EXPO_PUBLIC_BILLING_ENABLED`, or `EXPO_PUBLIC_DISCORD_LINK_ENABLED`. Do not
+paste this listing onto a build that leaves those off.
+
+Checked against app source on 2026-11-04: product ids and prices in
+`mobile/src/lib/billingConfig.ts`, sign-in in `SignInScreen.tsx`, the Discord
+invite in `discordHelpers.ts`, the sport list in `useSportFilter.ts`, and the
+Picks boards in `PicksHomeScreen.tsx`. Not checked against a live TestFlight
+binary.
 
 ---
 
@@ -29,54 +36,56 @@ Model signals for major sports
 
 ## Promotional Text (170 char max — editable without a new build)
 ```
-Model output for NFL, MLB, NHL, NBA, NCAAF, WNBA, and UFC. Probability, edge versus the market, and a public record in units. Research only. No wagers are placed in-app.
+MLB, WNBA, NBA, NFL, NCAAF, NCAAB, UFC, and NHL picks. Sign in for Premium in the App Store. Discord opens after a paid plan, not a trial. No wagers are placed in-app.
 ```
-169 / 170
+167 / 170
 
 ## Description (4000 char max)
 ```
-Signal Base is a personal sports analytics app (the home-screen name is Signalbase). It shows statistical model output for the sports in the app — NFL, MLB, NHL, NBA, NCAAF, WNBA, and UFC — plus a public settled record, player and team stats, and bets you choose to track.
+Signalbase is a multi-sport picks and signals app (home-screen name Signalbase; Signal Base on signalbase-ai.com). It shows model output for MLB, WNBA, NBA, NFL, NCAAF, NCAAB, UFC, and NHL, a public settled record, player and team stats, and bets you track.
 
-It is not a sportsbook. You cannot place, accept, or settle a wager in the app. A bet button hands you to that sportsbook's own app or site. Nothing here is betting or financial advice. Past results do not predict future results.
+It is not a sportsbook. You cannot place, accept, or settle a wager in the app. A bet button opens that sportsbook's own app or site. Nothing here is betting or financial advice. Past results do not predict future results.
+
+SIGN IN
+An account is required. The first screen is Sign in to Signalbase. There is no guest mode and no skip. Continue with Apple, continue with Google, or enter an email and the 6-digit code. Delete account is on the account card in Settings.
+
+PREMIUM
+Premium is an auto-renewable subscription bought in the app through the App Store. Weekly is $9.99 with no free trial. Monthly is $24.99 with a 7-day free trial. Annual is $149.99 with a 7-day free trial and is marked Best value. Apple charges, renews, and cancels the plan. The paywall links Terms, the privacy policy, Apple's standard license, and Restore purchases. There is no other way to buy Premium in the app.
+
+A free trial unlocks the app. Closing the paywall without a trial or a paid plan leaves Record available. All, Signals, and Live Signals ask you to subscribe. Scoreboard stays on screen and its games are locked. The parlay builder asks you to subscribe.
+
+DISCORD
+Discord is included only after a paid Premium plan is active. A free trial does not include it. The invite is not shown during a trial or on a free account.
 
 PICKS
-Picks has four boards:
-- All: every pick scored for that day, including paused models, which are marked PAUSED and are not a bet.
-- Signals: pre-game picks that crossed the bet line and are still standing. In-play picks are not on this board.
-- Live Signals: in-play picks, priced at DraftKings while a game is running. The board is on every sport. In-play models run on MLB, NCAAF, and NFL. An empty board means nothing is in play, or that sport has no in-play model.
-- Lines: today's NHL and NBA games, with the best price a bettable book is offering on the spread or puck line, the moneyline, and the total. Every game is listed, not only games with a pick.
+Four boards. All: every pick scored that day, including paused models marked PAUSED, which are not a bet. Signals: pre-game picks that crossed the bet line and are still standing. Live Signals: in-play picks, priced at DraftKings while a game is running, on every sport. In-play models run on MLB, NCAAF, and NFL. An empty board means nothing is in play, or that sport has no in-play model. Scoreboard: today's games for NFL, NCAAF, MLB, NBA, and NHL, with the score when one is stored and DraftKings' spread, total, and moneyline. Every game is listed. There is no bet button on Scoreboard.
 
-All, Signals, and Live Signals show one sport at a time. Lines has its own NHL, NBA, and All control. An empty board is a real result. Some days nothing clears the bar.
+All, Signals, and Live Signals show one sport at a time. An empty board is a real result.
 
-A pick shows the model's probability, the price, and the edge between them. The published stake is a flat 1-unit play: the amount required to win 1 unit, with risk capped at 3 units. Results in the app are in units. Open a pick to see how the DraftKings line has moved since the pick locked.
+A pick shows the model's probability, the price, and the edge. The published stake is a flat 1-unit play: the amount required to win 1 unit, with risk capped at 3 units. Results are in units. Open a pick to see how the DraftKings line has moved since the pick locked.
 
 RECORD
-Record is the published settled record: wins, losses, pushes, and units, with a chart of the running total. You can share it. A paused model's already-settled bets stay on this tab.
+Record is the published settled record: wins, losses, pushes, and units, with a chart you can share. It stays available without Premium. A paused model's already-settled bets stay on this tab.
 
 PERFORMANCE
-Performance is bets you track from a pick, plus bets you log by hand. You can mark one won, lost, or a push. Settings has an optional bankroll that only converts one unit into dollars on this device. It does not change the stake, and it is not sent off the device.
+Performance is bets you track from a pick, plus bets you log by hand. Mark one won, lost, or a push. An optional bankroll in Settings only turns 1 unit into dollars on this device. It does not change the stake and is not sent off the device.
 
 STATS
-Stats is player and team numbers for the sport you select, with a line when one of the sportsbooks you checked posts it. Football uses position groups. Baseball uses hitters and pitchers. The line control is compact: the direction reads as a word, such as "At least," and the book's number sits on a short ruler.
+Stats is player and team numbers for the sport you select, with a line when a checked sportsbook posts one. Football uses position groups. Baseball uses hitters and pitchers. The line reads "At least" (or the other direction) with the book's number on a short ruler.
 
 MODELS
-Models lists the built-in models still shown for the selected sport — paused and retired models are left off this list — and their settled records. My models is Build Your Own Model for NFL games: choose a market and a side, and see how that filter would have done on past games. Saving a model needs a signed-in account.
+Models lists built-in models still shown for that sport. Paused and retired models are left off. My models is Build Your Own Model for NFL. Saving uses the signed-in account.
 
-YOUR SPORTSBOOKS
-The first launch asks which sportsbooks you can use. That list changes which prices you see. It does not change the published record. You can change it in Settings, and you can set your state so BetMGM, BetRivers, and Caesars links open in the right app. That state stays on the device.
+SPORTSBOOKS
+The first launch asks which sportsbooks you can use. That changes which prices you see, not the published record. A state setting, kept on the device, opens BetMGM, BetRivers, and Caesars in the right app. Connected books can link DraftKings or FanDuel. The screen says automatic bet import is coming soon. The app does not take a sportsbook password.
 
-Settings → Connected books opens a link screen for DraftKings and FanDuel. A banner on that screen says automatic, read-only bet sync is not switched on yet. BetMGM and Caesars are listed there as not available yet. The app does not take a sportsbook password.
-
-ACCOUNT
-The current source does not require an account. Sign-in (email code, Apple, or Google), delete account, subscriptions, and Discord account linking are in the app and stay off unless that build turns them on. Notifications are off until you opt in. Feedback is in the app.
-
-If gambling is a problem, Settings links to 1-800-GAMBLER.
+Notifications are off until you opt in. If gambling is a problem, Settings links to 1-800-GAMBLER.
 ```
-3660 / 4000
+3912 / 4000
 
 ## Keywords (100 char max, comma-separated, no spaces)
 ```
-nfl,mlb,nhl,nba,ncaaf,wnba,ufc,picks,props,stats,analytics,record,edge,probability,lines,live,odds
+ncaab,nfl,mlb,nhl,nba,ncaaf,wnba,ufc,picks,premium,discord,props,stats,odds,record,live,edge,lines
 ```
 98 / 100
 
@@ -97,78 +106,149 @@ https://signalbase-ai.com
 https://signalbase-ai.com/privacy
 ```
 
+## Terms URL (opened in the app)
+
+Sign-in and the paywall open Terms at path `/terms`. There is no separate
+Terms field in App Store Connect. The privacy and support URLs above are the
+Connect fields.
+
+```
+https://signalbase-ai.com/terms
+```
+
+The paywall also links Apple's standard EULA:
+`https://www.apple.com/legal/internet-services/itunes/dev/stdeula/`
+
+---
+
+## Subscriptions (App Store Connect)
+
+One auto-renewable subscription group. Premium is bought only in the App Store
+sheet (StoreKit). The prices below are the display prices in
+`mobile/src/lib/billingConfig.ts`. The price in App Store Connect has to match
+them. This repo does not create the products.
+
+| Plan | Product ID | Price | Duration | Introductory offer |
+|---|---|---|---|---|
+| Weekly | `com.mja.bettingpicks.premium.weekly` | $9.99 | 1 week | none |
+| Monthly | `com.mja.bettingpicks.premium.monthly` | $24.99 | 1 month | 7-day free trial |
+| Annual | `com.mja.bettingpicks.premium.annual` | $149.99 | 1 year | 7-day free trial |
+| Monthly, no trial | `com.mja.bettingpicks.premium.monthly.notrial` | $24.99 | 1 month | none |
+| Annual, no trial | `com.mja.bettingpicks.premium.annual.notrial` | $149.99 | 1 year | none |
+
+Put each no-trial product in the same group as its trial sibling, at the same
+level or higher. Level 1 is the highest. A lower level waits until renewal, so
+the trial would keep running. Weekly has no trial and no no-trial sibling.
+
+Suggested display names, for the subscription localization. App Store Connect
+shows its own counter. Apple's subscription reference page does not publish a
+length. These are under 30 characters:
+
+- Premium Weekly
+- Premium Monthly
+- Premium Annual
+- Monthly, no trial
+- Annual, no trial
+
 ---
 
 ## TestFlight — Beta App Description (4000 char max)
 ```
-Signalbase (Signal Base) is a sports analytics app. It shows model output for NFL, MLB, NHL, NBA, NCAAF, WNBA, and UFC, a public settled record in units, player and team stats, and bets you track or log yourself.
+Signalbase (Signal Base) is a multi-sport picks and signals app for MLB, WNBA, NBA, NFL, NCAAF, NCAAB, UFC, and NHL. It shows model output, a public settled record in units, player and team stats, and bets you track or log yourself.
 
-This build does not place wagers. A bet button opens a sportsbook's own app or site. It is not betting or financial advice.
+This build requires sign-in. There is no guest mode. Premium is an auto-renewable subscription bought in the app through the App Store (StoreKit): Weekly $9.99 with no trial, Monthly $24.99 with a 7-day trial, Annual $149.99 with a 7-day trial. Discord opens only after a paid plan is active, not during the trial.
 
-The source this copy was written from does not require an account. Sign-in, delete account, subscriptions, and Discord account linking appear only if the build sets their flags (EXPO_PUBLIC_AUTH_ENABLED, and the billing or Discord flags). Automatic sportsbook bet-history import is marked coming soon on the Connect Sportsbook screen. Notifications are optional.
+This build does not place wagers. A bet button opens a sportsbook's own app or site. It is not betting or financial advice. Settings links to 1-800-GAMBLER.
 
-Golf is not in the sport list. The iPhone layout is the one to test. iPad is not supported.
+Use a Sandbox Apple ID for purchases. The reviewer sign-in account is filled in App Review Information before submission. The app has no password. Golf is not in the sport list. The iPhone layout is the one to test. iPad is not supported.
 ```
-794 / 4000
+946 / 4000
 
 ## TestFlight — What to Test
 ```
-1. First launch. Read the intro or tap Skip. The sportsbook step still appears ("Where do you bet?"). Leave the books you can use checked, then continue. An empty Picks board is a valid result.
+This binary requires sign-in and sells Premium through StoreKit. Purchases use a Sandbox Apple ID. The app has no password. The demo account in App Review Information is filled before submission.
 
-2. Picks. Switch sports (MLB, WNBA, NBA, NFL, NCAAF, UFC, NHL). Golf is not a chip. Open All, Signals, Live Signals, and Lines.
-   - All lists scored picks for the selected sport and day, including paused models marked PAUSED.
-   - Signals lists pre-game picks that crossed the bet line. Empty is valid. A paused-model pick on All should not be on Signals.
-   - Live Signals stays on screen for every sport. It can fill for MLB, NCAAF, and NFL. Other sports should say there is no in-play model, not that a live edge is merely absent.
-   - Lines replaces the sport row with NHL, NBA, and All. It lists today's games and prices, not only games with a pick.
+1. Sign in. The first screen is Sign in to Signalbase. There is no Skip. Continue with Apple, Continue with Google, or enter the reviewer email, tap Email me a code, and enter the 6-digit code. After sign-in the paywall opens.
 
-3. Open a pick. Confirm the label matches the side and the number. Check probability, price, and edge. Track the pick. It should show on Performance and stay tracked after you leave and come back. This is Track, not a "Placed" toggle.
+2. Premium, on the StoreKit sandbox sheet. Weekly is $9.99 and the button says Subscribe (no free trial). Monthly is $24.99 and Annual is $149.99; those buttons say Start 7-day free trial. Annual is selected and marked Best value. Terms, Privacy, and EULA open. Restore purchases is on the screen. There is no checkout outside the App Store sheet. Product ids: com.mja.bettingpicks.premium.weekly, com.mja.bettingpicks.premium.monthly, com.mja.bettingpicks.premium.annual. Ending a trial early uses com.mja.bettingpicks.premium.monthly.notrial or com.mja.bettingpicks.premium.annual.notrial, same group, no introductory offer.
 
-4. Record. The settled record is not MLB-only. Change the sport filter. The chart and the share action should use the same rows.
+3. Close the paywall with no trial and no paid plan. Record stays available. All, Signals, and Live Signals ask for Premium. Scoreboard stays up and its games are locked. The parlay builder asks for Premium.
 
-5. Performance. Tracked picks and hand-logged bets live here. Log a bet, then mark it won, lost, or a push. Settings → Connected books should say automatic import is coming soon. The connect screen's banner says the same. DraftKings and FanDuel have connect buttons. BetMGM and Caesars are listed as not available yet. Do not expect a synced history while that banner is up.
+4. Picks, once a trial or a paid plan is active. Sports: MLB, WNBA, NBA, NFL, NCAAF, NCAAB, UFC, NHL. Golf is not a chip.
+   - All lists scored picks, including paused models marked PAUSED.
+   - Signals lists pre-game picks that crossed the bet line. Empty is valid.
+   - Live Signals stays on every sport. It can fill for MLB, NCAAF, and NFL. Another sport says "No live model for {sport} yet."
+   - Scoreboard lists today's NFL, NCAAF, MLB, NBA, and NHL games, with the score when one is stored and DraftKings' spread, total, and moneyline. Every game, not only games with a pick. No bet button on this board.
 
-6. Models. Built-in lists models for the selected sport that are not paused or retired, with their settled records. My models: on NFL, build a filter and read the historical result. Saving says an account is required unless this build has sign-in on. Any other sport should say to switch to NFL. Do not expect a saved model on a build with sign-in off.
+5. Open a pick. The label matches the side and the number. Check probability, price, and edge. Track it. It should show on Performance after you leave and come back.
 
-7. Stats. Switch sports. Football should show position groups (QB, RB, WR/TE, DEF) and Teams. Baseball should show Hitters, Pitchers, and Teams. The compact line control (Compact B) uses the word "At least" (or the other direction you pick) and a short ruler. The book's number is on that control. A player none of your checked books has priced shows no line.
+6. Record. Change the sport filter. The chart and the share action use the same rows. This tab is available without Premium.
 
-8. Settings. Change sportsbooks and confirm Picks and Stats follow that set. Set your state. It is only for opening BetMGM, BetRivers, and Caesars links, and it stays on the device. The bankroll field is optional and display-only: it turns 1 unit into dollars and does not change the published stake. Leave it blank and confirm no dollar figure appears that you did not type. Turn notifications on only if you want the prompt. Send a feedback note if you can, and confirm the thread opens.
+7. Discord. During a free trial, Settings, Discord for members, does not show Join Discord or an invite. Buy Weekly, or on a trial tap Unlock Discord early. After the plan is paid, not trialing, Join Discord opens https://discord.gg/JWMUzK9Da. A trial alone must not open that link.
 
-9. Account, on a default build (no EXPO_PUBLIC_AUTH_ENABLED). Settings should not show Sign in, Delete account, or Subscription. Community should show "Join our Discord" as an invite link. If this build set the auth flag, Sign in should offer email code, Apple, and Google, and Delete account should be on the account card. Signing in is optional. Subscriptions appear only when billing is also on. Discord account linking replaces that invite only when that flag is on and you are signed in.
+8. Performance. Log a bet, then mark it won, lost, or a push. Connected books says automatic import is coming soon. DraftKings and FanDuel have connect buttons. BetMGM and Caesars are listed as not available yet.
 
-10. Hand-off. From a pick or the bet slip, open a sportsbook you have installed. The app should leave Signalbase for that book. The wager is not placed inside Signalbase. If the state is unset, BetMGM, BetRivers, and Caesars should not open a broken link.
+9. Models. Built-in lists models that are not paused or retired. My models is NFL only. Saving uses the signed-in account.
 
-Known limits of the source this copy describes:
-- iPhone only (ios.supportsTablet is false).
-- Sign-in, delete account, subscriptions, and Discord linking are off unless the build flags say otherwise. eas.json does not set those flags.
-- Automatic bet-history sync is labeled not switched on yet.
-- No in-app age gate. The website terms say 21+.
+10. Stats. Football shows QB, RB, WR/TE, DEF, and Teams. Baseball shows Hitters, Pitchers, and Teams. The line control uses "At least" (or the other direction) and a short ruler.
+
+11. Settings. Sportsbooks change the prices on Picks and Stats, not the record. State is only for BetMGM, BetRivers, and Caesars links, and it stays on the device. Bankroll is optional and display-only. Gambling a problem links to 1-800-GAMBLER (1-800-522-4700). Delete account is on the account card.
+
+12. Hand-off. From a pick, open an installed sportsbook. Signalbase leaves. The wager is not placed inside the app.
+
+Known limits: iPhone only (ios.supportsTablet is false). No in-app age gate. The website terms say 21+. Automatic bet-history sync is labeled not switched on yet.
 ```
-3896 / 4000
+3552 / 4000
 
 ## TestFlight — Test Information
 - **First Name / Last Name:** Matt Alksninis
 - **Email:** matt.alksninis@gmail.com
 - **Phone:** (your number)
-- **Sign-in required:** No
+- **Sign-in required:** Yes
 
-Sign-in required stays No while `AUTH_ENABLED` is off. If a TestFlight build is made with `EXPO_PUBLIC_AUTH_ENABLED=true`, change this to Yes only if you want testers to sign in before they start. The app still treats sign-in as optional: Picks, Record, and Stats do not require it. Saving an NFL model does.
+Sign-in required is Yes for this binary. The first screen is sign-in. There
+is no skip. Picks, other than the locked Scoreboard shell, wait for a trial
+or a paid plan. Record stays available without one.
+
+## Reviewer demo account — TODO for Matt
+
+App Store Connect, App Review Information. **Sign-in required: Yes.**
+
+Do not submit while any line below still says TODO. This file does not
+contain a password or a sandbox Apple ID.
+
+- **User name:** TODO — Matt fills the reviewer email, or the demo Apple ID email.
+- **Password:** TODO — the app has no password field. Matt writes how the reviewer finishes sign-in. Email sign-in is a 6-digit code from Email me a code. Continue with Apple and Continue with Google are on the same screen. Do not invent a password.
+- **Sandbox Apple ID for StoreKit:** TODO — Matt fills the Sandbox tester that completes the purchase sheet, if it is different from the sign-in account. Purchases are StoreKit sandbox, not a production charge.
+
+The review notes tell the reviewer the steps. They do not repeat a password.
 
 ---
 
 ## App Review Notes (Inside App Information → App Review Information)
 ```
-Signalbase (product name Signal Base) is a sports analytics app. It shows model output, a public record in units, stats, and bets the user tracks or logs. It is not a sportsbook.
+Signalbase (product name Signal Base) is a multi-sport picks and signals app for MLB, WNBA, NBA, NFL, NCAAF, NCAAB, UFC, and NHL. It shows model output, a public record in units, stats, and bets the user tracks or logs. It is not a sportsbook and it does not take real-money wagers.
 
-- No wager is placed, accepted, or settled in the app. A bet button opens a third-party sportsbook app or site. The user places any wager there.
-- No account is required in the source configuration. Sign-in, delete account, subscriptions, and Discord account linking are compiled in and hidden unless the build sets EXPO_PUBLIC_AUTH_ENABLED (and, for payments or Discord linking, those flags). eas.json does not set them. If the binary you are reviewing has them on, Settings shows Sign in. Email is a 6-digit code. Apple and Google are also offered. Delete account is on that same card.
-- The anon Supabase key in the app reads model output. Row-level security limits that role. Crash reports, in-app feedback, and the user's sportsbook checklist are written under an app-generated device id. The optional bankroll and the state picker stay on the device.
-- Notifications are off until the user opts in. Opting in stores a push token for that device.
-- Settings → Connected books can start a SharpSports link for DraftKings or FanDuel. The screen says automatic read-only bet sync is not switched on yet. The app does not receive a sportsbook password.
-- The optional bankroll only converts the flat 1-unit stake into dollars for display. It does not size the bet.
+No wager is placed, accepted, or settled in the app. A bet button opens a third-party sportsbook app or site. The user places any wager there. Settings links to 1-800-GAMBLER (1-800-522-4700), 24/7.
 
-To review: open the app, finish or skip the intro, confirm the sportsbook step, then browse Picks, Record, Performance, Models, and Stats. No demo account is required on a build with auth off.
+Sign-in is required. There is no guest mode and no skip. The first screen is Sign in to Signalbase.
+- Continue with Apple, or Continue with Google, or
+- enter the email in the User name field, tap Email me a code, and enter the 6-digit code.
+The app has no password. The Password field is the instruction for that code (or for the demo Apple ID). Those two fields are filled before submission. This note does not contain a password.
+
+Premium is an auto-renewable subscription sold only through StoreKit. Review purchases in the sandbox. Use a Sandbox Apple ID (Settings, App Store, Sandbox Account). Do not use a production card. The paywall has no external checkout.
+- Weekly, $9.99, no free trial, button Subscribe. Product id com.mja.bettingpicks.premium.weekly.
+- Monthly, $24.99, 7-day free trial, button Start 7-day free trial. Product id com.mja.bettingpicks.premium.monthly.
+- Annual, $149.99, 7-day free trial, selected by default, marked Best value. Product id com.mja.bettingpicks.premium.annual.
+All five products are in one subscription group. The other two have no introductory offer and exist so a trial can be ended early: com.mja.bettingpicks.premium.monthly.notrial and com.mja.bettingpicks.premium.annual.notrial. Rank each no-trial product at the same level as its trial sibling, or higher (level 1 is the highest). The paywall links Terms (https://signalbase-ai.com/terms), Privacy (https://signalbase-ai.com/privacy), Apple's standard EULA, and Restore purchases.
+
+A free trial unlocks the app and does not unlock Discord. Closing the paywall with no trial and no paid plan leaves Record available. All, Signals, and Live Signals ask for Premium. Scoreboard stays visible and its games are locked.
+
+Discord: Settings, Discord for members. During a trial the screen does not show an invite and does not show Join Discord. It says the invite waits until the paid plan starts. After Weekly (charged immediately) or after Unlock Discord early on a trial, and only once the subscription status is active, Join Discord opens https://discord.gg/JWMUzK9Da. A trial must not be given that link. Settings can show "Already in Discord via Whop?" That card only links an existing Discord account. It does not sell a subscription. Premium is purchased only in the App Store sheet.
+
+To review: sign in, subscribe or start a trial in the sandbox, then browse Picks (All, Signals, Live Signals, Scoreboard), Record, Performance, Models, and Stats. Confirm a trial does not reveal the Discord invite, and that a paid plan does.
 ```
-1639 / 4000
+3016 / 4000
 
 ## Age rating
 - Frequent/Intense Simulated Gambling: **Yes** → results in 17+
@@ -178,24 +258,31 @@ The in-app copy does not contain an age gate. The website terms describe the ser
 
 ## App Privacy (the questionnaire under App Privacy in App Store Connect)
 
-Answer **Yes, we collect data.** "No" was true of the old read-only build. It is not true of this one.
+Answer **Yes, we collect data.** Not used for tracking. The app does not use
+the data below for advertising or to track the user across other companies'
+apps.
 
-Not used for tracking. The app does not use the data below for advertising or to track the user across other companies' apps.
+This binary has sign-in and subscriptions on. Declare contact and account
+data. Linked to the user. Purpose: App Functionality.
 
-Collect these for the default source configuration, linked to the user through the app-generated device id, purpose App Functionality:
+- **Contact Info — Email Address.** The address used for the email code.
+- **Contact Info — Name.** The name Apple or Google sends with that sign-in.
+- **Identifiers — User ID.** The account id the subscription and Discord link are stored against.
+- **Purchases — Purchase History.** The App Store subscription (Weekly, Monthly, or Annual).
+
+Also collect these, linked to the user through the app-generated device id,
+purpose App Functionality:
 
 - **Identifiers — Device ID.** An install UUID. It is sent with crash reports, load timings, feedback, and the sportsbook checklist, and with push registration if notifications are on.
 - **Diagnostics — Crash Data.** Error text, the screen, and the app version, sent to fix crashes.
-- **Diagnostics — Performance Data.** How long screens and requests take to load, with the screen name and app version, sent to make the app faster (`app_timings`, from the build after 2026-10-31).
+- **Diagnostics — Performance Data.** How long screens and requests take to load, with the screen name and app version, sent to make the app faster (`app_timings`).
 - **User Content — Customer Support.** Only if the user sends feedback.
 - **User Content — Other User Content.** The sportsbooks the user checks, stored with the device id.
 - **Identifiers.** If the user turns notifications on, the Expo push token is stored so those notifications can be sent. Leave this off the label if you ship a build with notifications removed.
 
-Do not declare these for a build that leaves the flags off:
+Do not declare these:
 
-- Contact info (email, name). Declare it only if `EXPO_PUBLIC_AUTH_ENABLED` is on for the binary you submit. Sign-in can collect an email and the name Apple or Google sends.
-- Purchases. Declare them only if billing is on for that binary.
 - Precise location. The state picker is a choice the user types, and it stays on the device. It is not GPS.
-- Financial info from a sportsbook. Declare the read-only bet history only if the SharpSports sync is actually on for that binary. The screen currently says it is not switched on yet.
+- Financial info from a sportsbook. The Connected books screen says automatic read-only bet sync is not switched on yet.
 
 The optional bankroll is on-device storage, not a collection, under Apple's definition (https://developer.apple.com/app-store/app-privacy-details/). The state picker is the same.

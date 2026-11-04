@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, App Store listing copy for the login and Premium binary: sign-in required Yes, five product ids from billingConfig.ts, Discord only after a paid plan; reviewer credentials left TODO; no app code |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, Support page at /support for App Store Review; same build as Terms and Privacy; contact address already on those pages; no model change |
 | 2026-11-03 | [2026-11](./2026-11.md) | 2026-11-03, NBA: the searches and the postseason prop rule merged; first-quarter props and first-quarter and first-half team totals bought for 2024-25 and 2025-26; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA: first-quarter player props and first-quarter and first-half team totals searched, 0 of 44 pass; no model change |
