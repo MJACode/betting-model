@@ -258,11 +258,174 @@ def test_the_output_check_reads_a_game_never_looked_at_and_a_silent_window():
     w = datetime(2026, 11, 5, 0, 55, 36, tzinfo=timezone.utc)
     assert NH.windows_without_calls({"a": tip}, {}, []) == [w]
     assert NH.windows_without_calls({"a": tip}, {}, [w + timedelta(seconds=30)]) == []
+    # The same window opened before the loop's first tick, so the cutoff drops it.
+    # A window after that tick is still missing when nobody called.
+    assert NH.windows_without_calls({"a": tip}, {}, [], go_live=NH.GO_LIVE) == []
+    later = datetime(2026, 11, 6, 0, 10, tzinfo=timezone.utc)
+    later_w = datetime(2026, 11, 6, 0, 55, 36, tzinfo=timezone.utc)
+    assert NH.windows_without_calls({"a": later}, {}, [], go_live=NH.GO_LIVE) == [later_w]
     # every live rule (one: the quarters 1-2 spread) decided before the window:
     # no call was needed. Held-out rules are never decided, so they never count.
     done = {"a": [tip + timedelta(minutes=20)] * len(M.RULES)}
     assert len(M.RULES) == 1
     assert NH.windows_without_calls({"a": tip}, done, []) == []
+
+
+def _nba_live_slate():
+    """The three tables `nba_live_health.check` reads, empty."""
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.executescript("""
+        CREATE TABLE games (
+            game_id TEXT, sport TEXT, game_date TEXT, commence_time TEXT, home_score REAL);
+        CREATE TABLE nba_live_decisions (
+            game_id TEXT, game_date TEXT, outcome TEXT, decided_at TEXT);
+        CREATE TABLE api_call_log (api TEXT, ts TEXT, source TEXT);
+    """)
+    return c
+
+
+def _final_nba(c, game_id, game_date, tip):
+    c.execute("INSERT INTO games VALUES (?, 'NBA', ?, ?, 110)",
+              (game_id, game_date, tip.isoformat()))
+
+
+def test_go_live_is_the_first_supervisor_tick_after_the_deploy():
+    """11:00 America/New_York on 2026-11-05. DST had already ended, so 16:00 UTC.
+    The cron does not run from 3am to 11am ET, and the deploy landed inside that gap."""
+    from datetime import datetime, timezone
+    from tracking import nba_live_health as NH
+    assert NH.GO_LIVE == datetime(2026, 11, 5, 16, 0, tzinfo=timezone.utc)
+    assert NH.GO_LIVE_LABEL == "2026-11-05 11:00 America/New_York"
+
+
+def test_a_slate_that_finished_before_go_live_is_not_stale():
+    """The morning after go-live, yesterday's finals and their overnight
+    fetch windows (00:55Z through 04:55Z) had already ended. No ledger rows
+    and no Odds API calls is expected. It must not read STALE."""
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    c = _nba_live_slate()
+    for hour in range(5):
+        tip = datetime(2026, 11, 5, hour, 10, tzinfo=timezone.utc)
+        assert tip + timedelta(minutes=100) < NH.GO_LIVE
+        windows = NH.windows_between(tip, tip + timedelta(minutes=100))
+        assert windows and all(w < NH.GO_LIVE for w in windows)
+        _final_nba(c, f"NBA_2026-11-04_{hour}", "2026-11-04", tip)
+    status, detail = NH.check(c, "2026-11-04")
+    assert status == "skipped"
+    assert "go-live" in detail and "not scored" in detail
+    assert "nba_live_decisions" not in detail
+    assert "00:55:36Z" not in detail and "04:55:36Z" not in detail
+
+
+def test_a_window_opened_before_go_live_is_not_stale_when_the_game_was_looked_at():
+    """A game whose span reaches go-live can have its only fetch window open
+    earlier. That window is not a missed call. A row means the game was seen."""
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    tip = datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)
+    end = tip + timedelta(minutes=NH.DECISION_SPAN_MIN)
+    assert end >= NH.GO_LIVE
+    windows = NH.windows_between(tip, end)
+    assert windows and all(w < NH.GO_LIVE for w in windows)
+    c = _nba_live_slate()
+    _final_nba(c, "NBA_2026-11-05_EARLY", "2026-11-05", tip)
+    c.execute("INSERT INTO nba_live_decisions VALUES (?, ?, 'skipped', ?)",
+              ("NBA_2026-11-05_EARLY", "2026-11-05", tip.isoformat()))
+    status, detail = NH.check(c, "2026-11-05")
+    assert status == "ok"
+    assert "15:55:36Z" not in detail
+
+
+def test_a_game_still_in_span_at_go_live_with_no_row_is_stale():
+    """The span reached the first tick, so a missing row is still an outage.
+    The fetch window that opened before that tick is not part of the reason."""
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    tip = datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)
+    assert tip + timedelta(minutes=NH.DECISION_SPAN_MIN) >= NH.GO_LIVE
+    c = _nba_live_slate()
+    _final_nba(c, "NBA_2026-11-05_EARLY", "2026-11-05", tip)
+    status, detail = NH.check(c, "2026-11-05")
+    assert status == "stale"
+    assert "NBA_2026-11-05_EARLY" in detail
+    assert "15:55:36Z" not in detail
+
+
+def test_a_post_go_live_slate_missing_a_row_and_a_call_is_stale():
+    """The first live night, and every night after: a final with no ledger row
+    and a fetch window with no nba-live call still reads STALE."""
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    tip = datetime(2026, 11, 6, 0, 10, tzinfo=timezone.utc)  # 19:10 ET, Nov 5
+    assert tip + timedelta(minutes=100) > NH.GO_LIVE
+    windows = NH.windows_between(tip, tip + timedelta(minutes=100))
+    assert len(windows) == 1 and windows[0] >= NH.GO_LIVE
+    c = _nba_live_slate()
+    _final_nba(c, "NBA_2026-11-05_BOS_NYK", "2026-11-05", tip)
+    status, detail = NH.check(c, "2026-11-05")
+    assert status == "stale"
+    assert "NBA_2026-11-05_BOS_NYK" in detail
+    assert "nba_live_decisions" in detail
+    assert "nba-live" in detail
+    assert windows[0].strftime("%H:%M:%SZ") in detail
+
+
+def test_a_post_go_live_window_with_no_call_is_stale_even_when_the_row_exists():
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    tip = datetime(2026, 11, 6, 0, 10, tzinfo=timezone.utc)
+    windows = NH.windows_between(tip, tip + timedelta(minutes=100))
+    assert windows and windows[0] >= NH.GO_LIVE
+    c = _nba_live_slate()
+    gid = "NBA_2026-11-05_BOS_NYK"
+    _final_nba(c, gid, "2026-11-05", tip)
+    c.execute("INSERT INTO nba_live_decisions VALUES (?, ?, 'skipped', ?)",
+              (gid, "2026-11-05", tip.isoformat()))
+    status, detail = NH.check(c, "2026-11-05")
+    assert status == "stale"
+    assert "nba-live" in detail
+    assert windows[0].strftime("%H:%M:%SZ") in detail
+    assert gid not in detail
+
+
+def test_a_covered_slate_with_its_row_and_its_call_is_ok():
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    tip = datetime(2026, 11, 6, 0, 10, tzinfo=timezone.utc)
+    window = NH.windows_between(tip, tip + timedelta(minutes=100))[0]
+    c = _nba_live_slate()
+    gid = "NBA_2026-11-05_BOS_NYK"
+    _final_nba(c, gid, "2026-11-05", tip)
+    c.execute("INSERT INTO nba_live_decisions VALUES (?, ?, 'bet', ?)",
+              (gid, "2026-11-05", (tip + timedelta(minutes=50)).isoformat()))
+    c.execute("INSERT INTO api_call_log VALUES (?, ?, ?)",
+              (NH.ODDS_API, window.isoformat(), NH.LOOP_SOURCE))
+    status, detail = NH.check(c, "2026-11-05")
+    assert status == "ok"
+    assert "each with a row" in detail
+    assert "not scored" not in detail
+
+
+def test_an_earlier_final_does_not_hide_or_excuse_a_covered_miss():
+    """One game finished before go-live, one did not. Only the later game,
+    with no row and no call, is the outage."""
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    early = datetime(2026, 11, 5, 2, 10, tzinfo=timezone.utc)
+    late = datetime(2026, 11, 6, 0, 10, tzinfo=timezone.utc)
+    assert early + timedelta(minutes=100) < NH.GO_LIVE
+    assert late > NH.GO_LIVE
+    c = _nba_live_slate()
+    _final_nba(c, "NBA_2026-11-05_EARLY", "2026-11-05", early)
+    _final_nba(c, "NBA_2026-11-05_LATE", "2026-11-05", late)
+    status, detail = NH.check(c, "2026-11-05")
+    assert status == "stale"
+    assert "NBA_2026-11-05_LATE" in detail
+    assert "NBA_2026-11-05_EARLY" not in detail
+    assert "1 of 1" in detail
+    assert "1 earlier" in detail
 
 
 def test_the_output_check_runs_in_system_health():
