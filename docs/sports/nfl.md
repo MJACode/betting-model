@@ -138,7 +138,8 @@ in-week during the season.
   every surface shows the posted stake, 1u to win at
   `COALESCE(decision_odds, dk_odds)`, risk capped at 3u. Stored labels are not
   rewritten (CLAUDE.md §1c). Discord's pick and free-pick fields, X, push, the
-  `open_picks` view and the app drop that one token on display
+  `open_picks` view and the app (pick rows, results, model pages, betslip,
+  pick detail, VoiceOver) drop that one token on display
   (`tracking/pick_integrity.label_without_stake`, the app's
   `labelWithoutStake`). The bet, the age tag and the old `(Opener …, BOOK)` /
   `(Wind …, BOOK)` annotation stay word for word, and so does the void notice,

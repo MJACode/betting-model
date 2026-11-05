@@ -70,6 +70,10 @@ def test_the_helper_and_the_server_strip_the_same_token():
     m = re.search(r"const LABEL_STAKE_TOKEN = /(.+)/gu;", src)
     assert m, "format.ts defines LABEL_STAKE_TOKEN as a /…/gu literal"
     assert m.group(1) == _STAKE_TOKEN.pattern
+    # The Signals card peels the same token through the helper, not a copy.
+    signals = _read(LIB / "signalsCard.ts")
+    assert "labelWithoutStake(text)" in signals
+    assert r"\d+(?:\.\d+)?u" not in signals, "a second stake pattern"
 
 
 # Every place the app prints a stored pick_label beside a stake, units or a
@@ -82,6 +86,8 @@ SITES = {
     "screens/BuiltInModelDetailScreen.tsx": 2,  # two spoken row labels
     "screens/PerformanceScreen.tsx": 3,        # untrack alert, spoken row, stake editor
     "screens/PickDetailScreen.tsx": 2,         # title and the news sheet subtitle
+    "lib/parlay.ts": 2,                        # a betslip leg, and a saved slip reopened
+    "screens/SavedParlaysScreen.tsx": 2,       # a saved slip's leg row and its hand-off
 }
 
 
