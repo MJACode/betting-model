@@ -199,6 +199,12 @@ class FakeDB:
         if "FROM nba_team_total_luck_decisions" in s:
             return _Cur([(r["game_id"],) for r in self._select(
                 "nba_team_total_luck_decisions", s, params)])
+        if s.startswith("SELECT game_id, min(model_id) FROM picks"):
+            # scripts/nba_game_totals_door.other_bets: each game's other model, grouped
+            got: dict[str, str] = {}
+            for r in self._select("picks", s, params):
+                got[r["game_id"]] = min(got.get(r["game_id"], r["model_id"]), r["model_id"])
+            return _Cur(sorted(got.items()))
         if "FROM picks" in s:
             return _Cur(sorted({(r["game_id"],) for r in self._select("picks", s, params)}))
         if "FROM odds" in s:

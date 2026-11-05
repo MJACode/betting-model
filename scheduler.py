@@ -1401,7 +1401,7 @@ def run_nba_prop_window() -> None:
 
     Otherwise: fetch props for exactly the games to decide, run both NBA prop
     cards on that fetch in one step (one bet a game across both models, at most
-    4 a night: scripts/nba_props_card.py), take any closing snapshot
+    6 a night: scripts/nba_props_card.py), take any closing snapshot
     that is due, and publish what the cards wrote. THEN, for the games about 65
     minutes from tip, pull the ESPN injury list and store their projections (the
     projection card prices them two ticks later, inside the window). A step
@@ -1425,7 +1425,7 @@ def run_nba_prop_window() -> None:
             [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
             "nba-prop-window-fetch", timeout=t["fetch"])
         # BOTH NBA prop cards in ONE step: their candidates meet in one choice
-        # (one bet a game across both models, four a night, strongest first by
+        # (one bet a game across both models, six a night, strongest first by
         # each bet's EV percentile within its own model;
         # scripts/nba_props_card.py), so the order they run in cannot decide
         # which model's bet a game gets.

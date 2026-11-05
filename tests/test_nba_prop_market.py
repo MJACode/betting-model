@@ -398,22 +398,23 @@ def _decision(gid=GID, n_bets=0, n_quotes=2):
 
 def test_the_no_cap_rule_is_replaced_by_one_a_game_and_a_few_a_night():
     """mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL." The 2026-10-16 rule
-    wrote every qualifying proposition; nine over six games of one night, three in one game, are
-    now one a game, the best MAX_NBA_PROP_BETS_PER_NIGHT games, through the shared door."""
+    wrote every qualifying proposition; three in one game and two more games than the night holds
+    are now one a game, the best MAX_NBA_PROP_BETS_PER_NIGHT games, through the shared door."""
     import scripts.nba_props_card as door
-    bets = [_bet(f"G{i}", ev=0.01 * (i + 1)) for i in range(6)]
+    k = door.MAX_NBA_PROP_BETS_PER_NIGHT
+    n = k + 2
+    bets = [_bet(f"G{i}", ev=0.01 * (i + 1)) for i in range(n)]
     bets += [_bet("G0", market="player_rebounds", line=7.5, ev=0.20),
              _bet("G0", market="player_assists", line=6.5),
              _bet("G1", market="player_threes", line=3.5)]
     rows = card.pick_rows(bets, bankroll=1000.0)
-    decisions = [_decision(f"G{i}") for i in range(6)]
+    decisions = [_decision(f"G{i}") for i in range(n)]
     conn = _PublishConn()
     out = door.publish_across_models(conn, rows, decisions, [])
-    assert out["written"] == door.MAX_NBA_PROP_BETS_PER_NIGHT == len(conn.inserted)
-    assert len(conn.decisions) == 6                                   # every game still decided
-    assert sorted((p["game_id"], p["prop_market"]) for p in conn.inserted) == [
-        ("G0", "player_rebounds"), ("G3", "player_points"), ("G4", "player_points"),
-        ("G5", "player_points")]
+    assert out["written"] == k == len(conn.inserted)
+    assert len(conn.decisions) == n                                   # every game still decided
+    assert sorted((p["game_id"], p["prop_market"]) for p in conn.inserted) == (
+        [("G0", "player_rebounds")] + [(f"G{i}", "player_points") for i in range(n - k + 1, n)])
 
 
 # ── each game decided once ───────────────────────────────────────────────────
@@ -967,9 +968,10 @@ def test_a_game_decided_with_no_bet_is_not_decided_again_on_a_better_price(monke
 
 
 def test_postseason_bets_share_the_night_cap(monkeypatch):
-    """Four a night across both NBA prop models. The game is still decided, and the ledger says why
-    it has no bet."""
-    conn = _LookConn([_po_game()], _po_quotes(), night={PO_DAY: 4})
+    """The night cap across both NBA prop models (scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT).
+    The game is still decided, and the ledger says why it has no bet."""
+    import scripts.nba_props_card as door
+    conn = _LookConn([_po_game()], _po_quotes(), night={PO_DAY: door.MAX_NBA_PROP_BETS_PER_NIGHT})
     got, out = _one_look(conn, monkeypatch)
     assert out["written"] == 0 and conn.picks == [] and list(conn.decisions) == [PO_GID]
     assert "cap_night_full" in conn.decisions[PO_GID]["detail"]

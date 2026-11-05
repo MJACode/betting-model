@@ -546,7 +546,7 @@ every bar are in `docs/nba_models_2026.md` 4.3).
 | prob / edge cut | 0.0 / 0.0 — the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
 | EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
-| caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
+| caps | one bet a game across both NBA prop models and at most 6 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`; 4 from 2026-10-20 to 2026-11-04), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule; six from 2026-11-04, "we can go slightly more than 4"). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
 | decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions` (whether or not its bet survived the cap; `detail` names what the cap dropped), never looked at again | `scripts/nba_prop_market_card.py`, `scripts/nba_props_card.py` |
 | looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-62 min from tip | `scheduler.run_nba_prop_window` |
 | stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
@@ -623,7 +623,8 @@ GROUP BY 1, 2;
 NHL").** Opening night wrote 36 NBA prop bets on one game (all VOIDed). The rule
 for BOTH NBA prop models, this one and `nba_prop_projection`:
 
-- one bet a game across the two models, and at most 4 a night;
+- one bet a game across the two models, and at most 4 a night (6 from 2026-11-04,
+  below);
 - the night fills in tip order, as the per-game decision windows produce it;
   inside one look the strongest goes first;
 - "strongest" is the bet's EV percentile within its OWN model's graded EVs,
@@ -669,6 +670,44 @@ Units are one unit to win; seasons are 2023-24 / 2024-25 / 2025-26:
   matched the grade's exact-percentile result to +0.2 units (4 of 1,867 bets
   differ).
 
+**Six a night, 2026-11-04 (mike: "props seems to be coming fro earlier games only
+recently? because we articidially limit to 4 ... we can go slightly more than 4 if we
+need to cause the picks are that good").** Re-graded from the cap grade's own lists
+(exact percentiles, so 4 a night is +153.6 here against +153.8 above):
+
+- **The early-game lean is real.** Live, 2026-10-21..11-04, every night with more than
+  four games took its four props from the first five or six tips (11-02: 15 games,
+  props from tips 1, 2, 3 and 6). In the grade, 20% of the 4-a-night bets came from
+  the later half of a night's tips.
+- **But the early games were where the money was.** On nights of six or more games,
+  the first four tips' bets: 1,730, +118.6 units, +8.0% (+8.7 / +8.1 / +7.4% by
+  season); the rest 1,465, +25.4 units, +2.0% (-1.7 / +2.9 / +4.8%). By Eastern tip
+  time: before 7:30pm +7.4%, 7:30-8:29 +9.2%, 8:30-9:29 +3.5%, 9:30 or later +0.7%
+  on 674 bets. This is in-sample and not used as a rule.
+- **Ranking the whole night by EV is worse.** The best four of each night by
+  percentile (which live cannot know, the later games' props are not priced yet):
+  +102.5 units, +6.65%, against +153.6 in tip order. The highest percentiles return
+  the least: one a game, 0.80-0.90 +10.1%, 0.90-0.95 +8.9%, 0.95-0.98 +5.0%,
+  0.98-1.00 +4.7%. Any "only the top X%" floor graded below tip order at every X from
+  the top 20% to the top 1%.
+- **Six a night is where the units stop.** In tip order: 4 +153.6, 5 +161.9, 6 +183.7
+  (+8.17%, 90% range +4.6 to +11.7, +62.7 / +61.4 / +59.6 by season), 8 +182.8. The
+  5th and 6th bets of a night: 772, +30.0 units, +4.55% (90% range -1.6% to +11.0%;
+  -6.5 / +21.9 / +14.7 by season). The 7th and 8th: 551, -0.8 units. About 5.4 bets a
+  night; three nights in four use all six.
+- **Prices laid at 6 a night:** -194 to +380, 5th percentile -125, median +120, 95th
+  +185, 78% plus money.
+- **Not shipped:** taking each game's best bet below its model's top 2% graded better
+  at 6 a night (+203.3) and 8 (+238.5), but skipping the top 1.5% or the top 2.5%
+  instead did not hold up (+177.4 and +194.9 at 6), so it is a peak, not a plateau
+  (CLAUDE.md section 7), and every paired 90% range includes zero.
+- **The units are in volume, not in the top picks.** In tip order: one a game, no
+  night limit +200.0 units (7.5 a night, +6.4%); two a game, no night limit +357.3
+  (15.0 a night, +5.6%, 90% range +3.5 to +7.7, every season positive); three a game
+  +562.7 (22.5 a night, +5.7%); every proposition +3,174.1 (187 a night, +3.4%). Each
+  game's second-best bet alone: 3,656 bets, +157.3 units, +4.8%. The night limit is a
+  choice of how many picks to send, not a filter that finds better ones.
+
 The figures below are each model's own uncapped population.
 
 Graded on 2023-24..2025-26 at the best bettable price: every proposition
@@ -708,7 +747,7 @@ search and every check are in `docs/nba_models_2026.md` §5).
 | the cells | steals over+under 0.02; rebounds under 0.01; blocks+steals over+under 0.05; blocks under 0.02; rebounds+assists under 0.04; threes over+under 0.04 | `models/nba_prop_projection.CARD` |
 | EV floor | 0.01 (the lowest cell's), each cell's own floor on top; on its own calibrated probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
-| caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
+| caps | one bet a game across both NBA prop models and at most 6 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`; 4 from 2026-10-20 to 2026-11-04), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule; six from 2026-11-04, "we can go slightly more than 4"). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
 | decided once | the first look 45-57 min before tip, in the same look as `nba_prop_market` (or alone from 50 min out); a row in `nba_prop_projection_decisions` (whether or not its bet survived the cap) | `scripts/nba_prop_projection_card.py`, `scripts/nba_props_card.py` |
 | stale quote | refused when its clock is > 10 min behind the freshest book's for the same market in the same fetch | `models/nba_prop_projection.py` |
 | not bet | assists overs (chosen by the search, failed on 2025-26), points and the scoring combos, turnovers, double-doubles | `docs/nba_models_2026.md` §5 |
@@ -1013,6 +1052,8 @@ that passed."
 | Setting | Value | Where |
 |---|---|---|
 | the cut | the full-game gap (`nba_total_luck`'s number, unscaled), at least 2.0 points; overs only. `nba_total_luck`'s own cut of 3.0 is unchanged | `models/nba_first_half_total_luck.GAP_CUT`, `signal` |
+| the ceiling | from 2026-11-04 (mike: "Only select the highest EV one"), the gap must be BELOW `nba_total_luck`'s 3.0: at 3.0 or more that model bets the same game on the same gap, so this bet was its twin. The game is still decided and recorded (`full_game_model_bets`), with no bet. Evidence below, "One bet a game across the NBA game totals" | `models/nba_first_half_total_luck.FULL_GAME_GAP_CUT` |
+| one a game | a game another NBA game-total model has bet gets no bet here, and the reverse; the first model to write a game keeps it, the reason on the decision row (`one_total_a_game:...`) | `scripts/nba_game_totals_door.py` |
 | prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
 | price floor | -200, pinned. It laid -130 to +114 across all books, -118 to +105 at the four books whose rows look like main numbers (`docs/nba_models_2026.md` 8.4) | `config.MODEL_MIN_ODDS` |
 | EV floor | 0.00 on the fair probability plus the walk-forward uplift, a push scored as a loss. It removes 2 of the 595 graded bets, both wins | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
@@ -1045,6 +1086,59 @@ endpoint bills per market returned (`odds_ingestor._get_event_odds`, measured
 **The cost has not been measured on this market:** no live first-half call had been
 made before this model, so the ledger's `credits_last` is the measurement. Closing-line
 value reads the close from `close` rows only, as the team total's does.
+
+**One bet a game across the NBA game totals (2026-11-04, mike: "Betting Game Over
+Under AND individual team totals AND 1H over under seems duplicitiave ... ONly selected
+the highest EV one").** On 2023-24..2025-26, the three NBA game-total models' graded
+bets (this model 595, `nba_total_luck` 323, `nba_team_total_luck` 349) fall on 942
+games:
+
+| Games where | Games | What each returned there |
+|---|---|---|
+| only the home team total under bet | 347 | +62.72 units, +16.2% |
+| only the first-half over bet (gap 2.0-3.0) | 271 | +38.78 units, +13.2% |
+| the full-game over AND the first-half over bet (gap 3.0 or more) | 322 | full game +35.58 units, +10.2%; first half +12.76 units, +3.7% |
+| the team total under and an over both bet | 2 | 1 with both overs, 1 with the first half |
+
+| Rule | Bets | Units | Return | Units by season |
+|---|---|---|---|---|
+| every bet of all three (until 2026-11-04) | 1,267 | +152.79 | +11.05% | +37.6 / +70.3 / +44.9 |
+| one a game, the highest model EV | 942 | +124.40 | +12.07% | +16.5 / +57.3 / +50.6 |
+| one a game, the full-game over first (live) | 942-944 | +139.03 to +139.08 | +13.43% | +26.7 / +61.9 / +50.5 |
+| one a game, the first-half over first | 942 | +114.21 | +11.07% | +30.5 / +46.5 / +37.2 |
+
+- **The pair was one bet twice.** Every first-half bet at a gap of 3.0 or more had a
+  full-game twin (323 of 323), and none below 3.0 did (0 of 272). The two results were
+  correlated 0.5 (both won 138, both lost 100, split 81). The twins: +3.7%, 90% range
+  -5.0% to +12.7% by night. Per game, the pair averaged +0.156 units with a standard
+  deviation of 1.785; the full-game bet alone +0.113 with 1.029.
+- **What it costs:** +13.76 units over the three seasons, about 4.6 a season, if the
+  twins' +3.7% is real; about 107 fewer bets a season.
+- **The highest EV is not the better bet.** Each model's probability is the market-fair
+  price plus one fixed uplift (+0.0659 full game, +0.1022 team total, +0.0572 first
+  half), so its EV on a game is that constant plus the price. Choosing by it graded
+  14.7 units worse than the full game first.
+- **No "exceptionally strong" tier exists to allow both.** The twins by gap: 3.0-3.5
+  +10.0%, 3.5-4.0 -4.6%, 4.0-5.0 +24.1%, 5.0 or more -12.9% (the full-game bet: +17.1%,
+  -1.9%, +26.0%, +0.8%). A bigger gap did not win more.
+- **The uplift is unchanged** (+0.0572, fitted on all 595 bets). The 272 bets kept
+  realised +12.7% against +8.0% for all 595, but refitting on a subset chosen after the
+  grade would raise the stated probability on in-sample evidence. A lower stated
+  probability can only drop a bet at the 0.00 EV floor, never add one.
+- Built 2026-11-04 from the three lab bet files the replays read and the lab's own
+  gaps (`scripts/nba_first_half_total_luck_replay.lab_gaps`); temp folder
+  `nba_game_edge/volume1104`.
+
+**On the live population (no 10-game wait, 2026-11-02),** each model's live `decide` at the lab's
+decision instants (the replay that reproduces `docs/sports/nba.md`'s no-wait table: 450 / 429 /
+745 bets), 1,162 bet games: every full-game bet had a first-half twin (450 of 450, none below a
+gap of 3.0); the twins returned +17.89 units, +3.7% (90% range -3.5% to +10.9%), outcomes
+correlated 0.50. Every bet of all three: 1,624 bets, +156.27 units, +8.82%. The live rule (the
+first-half ceiling, then one a game with the full game first): 1,162 bets, +136.74 units, +10.75%
+(+16.7 / +77.7 / +42.4 by season). The team total under met an over on 12 games here (9 with both
+overs); putting it first would have made +142.95, a +6.2-unit difference on those 9 games, too few
+to build a rule on. The first-half bets by gap: 2.0-3.0 +10.5%, 3.0-3.5 +7.0%, 3.5-4.0 -3.6%,
+4.0-5.0 +26.2%, 5.0 or more -6.1%. Script: `nba_game_edge/volume1104/nowait_overlap.py`.
 
 **The replay** (`tests/test_nba_first_half_total_luck_replay.py`,
 `scripts/nba_first_half_total_luck_replay.py`): the live code, run on the research

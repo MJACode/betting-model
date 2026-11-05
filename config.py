@@ -698,7 +698,10 @@ ACTION_THRESHOLDS: dict = {
     # 2026-10-20 (mike: "Only the strongest picks need to be sent, like NHL")
     # one bet a game across both NBA prop models and four a night, strongest
     # first by each bet's EV percentile within its own model
-    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced.
+    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced. Six a
+    # night from 2026-11-04 (mike: "we can go slightly more than 4 if we need
+    # to"): +183.7 units against +153.6 in tip order, where the units stop
+    # growing (docs/nba_models_2026.md section 14).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -707,8 +710,9 @@ ACTION_THRESHOLDS: dict = {
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
     # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
-    # game across both NBA prop models and four a night, strongest first by each
-    # bet's EV percentile within its own model (models/nba_prop_rank.py).
+    # game across both NBA prop models and four a night (six from 2026-11-04),
+    # strongest first by each bet's EV percentile within its own model
+    # (models/nba_prop_rank.py).
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
     # we have with other sports"): models/nba_total_luck.py, written by
@@ -738,7 +742,13 @@ ACTION_THRESHOLDS: dict = {
     # Q1 + Q2 points. Graded walk-forward at bought prices, 2023-24..2025-26
     # pooled: 595 bets, 333-259-3, +51.49 units on 643.19 risked, +8.0%, interval
     # +0.4% to +15.4%, every season positive. prob / edge are 0.0 for the same
-    # reason as nba_total_luck's.
+    # reason as nba_total_luck's. From 2026-11-04 (mike: "Only select the
+    # highest EV one") the gap must also be BELOW nba_total_luck's 3.0: at 3.0
+    # or more that model bets the same game on the same gap (323 of 323 graded
+    # games), so this bet was its twin (+3.7% on those 323). Kept: gap 2.0-3.0,
+    # 272 bets, +37.73 units, +12.7%. And one bet a game across the three NBA
+    # game-total models (scripts/nba_game_totals_door.py). docs/nba_models_2026.md
+    # section 14.
     "nba_first_half_total_luck": {"min_prob": 0.0, "min_edge": 0.0},
     # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
     # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.

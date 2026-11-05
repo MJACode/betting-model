@@ -2762,3 +2762,42 @@ first-quarter prop or team-total markets, so the sharp-reference rule behind the
 **The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
 its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
 of its doc has the check.
+
+## 14. Pick volume: one game total a game, six props a night (2026-11-04, mike)
+
+mike, 2026-11-04: *"Betting Game Over Under AND individual team totals AND 1H over under seems
+duplicitiave - too many pciks. ONly selected the highest EV one, unless it;s exceptioanlly high"*,
+and on props, *"props seems to be coming fro earlier games only recently? because we articidially
+limit to 4 ... we can go slightly more than 4 if we need to cause the picks are that good or
+less"*. The goal he set: the highest-EV picks, to maximise units won and closing-line value.
+
+The tables are in `docs/thresholds.md` (the `nba_first_half_total_luck` section, "One bet a game
+across the NBA game totals", and the `nba_prop_market` section, "Six a night"). What they say:
+
+**Game totals.** The full-game over (gap >= 3) and the first-half over (gap >= 2) read the same
+gap, so every game the full-game model bet, the first-half model bet too: 323 of 323 graded
+games. The twins returned +3.7% against +10.2% for the full-game bet on the same games. The home
+team total under met an over on 2 of 942 games. So:
+
+- the first-half over bets only below the full-game cut (`FULL_GAME_GAP_CUT`), and
+- one bet a game holds across the three models (`scripts/nba_game_totals_door.py`), the first
+  writer keeping the game.
+
+Graded: +152.79 units on 1,267 bets with every bet, +139.08 on 942 with one a game, the full game
+first. Choosing by the highest model EV instead: +124.40. A bigger gap did not win more, so no
+"exceptionally strong" tier keeps both.
+
+On the population the models bet live (no 10-game wait): every full-game bet had its twin (450 of
+450), the twins +3.7%; every bet +156.27 units on 1,624, the live rule +136.74 on 1,162.
+
+**Props.** The early-game lean is real and comes from the night filling in tip order. It is also
+where the money was: on nights of six or more games, the first four tips' bets returned +8.0%, the
+rest +2.0%. Each model's EV percentile does not rank quality at its top (0.80-0.90 +10.1%,
+0.98-1.00 +4.7%), so filling the night by EV graded worse (+102.5 units for the best four of a
+night against +153.6 in tip order). Six a night in tip order is where the units stop growing:
++183.7 units, +8.17%; the 7th and 8th bets of a night earned -0.8.
+
+**What did not ship.** Taking each game's best bet below its model's top 2% graded +19.6 units
+better at six a night, but the top 1.5% and 2.5% did not hold up: a peak, not a plateau.
+
+Updated-By: mike.

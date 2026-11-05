@@ -160,9 +160,9 @@ step nhl-over-under
 # 65 minutes before tip) IN THE PROP FETCH `par nba-prop-odds` JUST STORED. They
 # decide only games whose tip is 45-57 minutes away, so they run here, minutes
 # after the fetch, rather than in the scoring group. ONE step: the two cards'
-# candidates meet in one choice, one bet a game across both models and at most 4
+# candidates meet in one choice, one bet a game across both models and at most 6
 # a night, ranked by each model's own EV percentile (scripts/nba_props_card.py;
-# mike, 2026-10-20). SEQUENTIAL,
+# mike, 2026-10-20, six from 2026-11-04). SEQUENTIAL,
 # like every writer to picks; each game decided once per model under both
 # models' locks. The five-minute window job (scheduler.run_nba_prop_window)
 # runs this same step for the tip times these passes cannot reach.
