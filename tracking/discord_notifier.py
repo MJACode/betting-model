@@ -67,7 +67,7 @@ from tracking.publish_keys import key_partition_sql, lock_key_sql, posted_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.clv_math import clv_outcome
-from tracking.pick_integrity import refuse_mismatched
+from tracking.pick_integrity import label_without_stake, refuse_mismatched
 
 ET = ZoneInfo("America/New_York")
 
@@ -1171,6 +1171,8 @@ _BOOK_NAMES = {
 # Old labels, still in `picks` and not rewritten:
 #   "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
 #   "... (no bet, FD)"
+# The "· 1.00u" sizing figure is off new NFL labels (mike, 2026-11-04) and is
+# dropped on display (label_without_stake); this book parse is unaffected.
 # A trailing "(FD)" on a prop is not read. Those stored labels still show
 # the book. A new row of the same card does not, so the price line has to.
 _LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
@@ -1322,8 +1324,11 @@ def _signal_field(s: dict) -> dict:
     posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
     if posted:
         line += f" · posted {posted}"
+    # The label beside the posted stake, without the old NFL sizing figure
+    # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
+    # word for word; the stored row is not touched.
     return {
-        "name": s["label"],
+        "name": label_without_stake(s["label"]),
         "value": f"{context}\n{line}" if context else line,
         "inline": False,
     }
@@ -2136,7 +2141,8 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
                   f"Free Pick of the Day — {pretty}"),
         "color": _COLOR_SIGNAL,
         "fields": [{
-            "name": pick["label"],
+            # Beside the posted stake: no old NFL sizing figure (_signal_field).
+            "name": label_without_stake(pick["label"]),
             "value": (f"{context}\n" if context else "") + line,
             "inline": False,
         }],

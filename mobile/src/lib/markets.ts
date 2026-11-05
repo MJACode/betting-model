@@ -9,7 +9,7 @@
  *   - total/spread line moved 0.5+ against the pick    → SKIP
  */
 
-import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, parseStamp } from './format';
+import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, labelWithoutStake, parseStamp } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
@@ -209,10 +209,10 @@ export function matchupLedBet(label: string): string | null {
  * stored. A team total names its team and the row's date places the game; a
  * first half names no team, so pickRowMatchup puts it on its own line. A prop
  * keeps its player name. The row's accessibility label keeps the whole stored
- * label.
+ * label, less the old NFL sizing figure (labelWithoutStake), as this title is.
  */
 export function pickRowTitle(pick: { pick_label: string }): string {
-  const label = pick.pick_label ?? '';
+  const label = labelWithoutStake(pick.pick_label);
   return matchupLedBet(label) ?? label;
 }
 
@@ -222,7 +222,7 @@ export function pickRowTitle(pick: { pick_label: string }): string {
  * label, whose title already says who plays.
  */
 export function pickRowMatchup(pick: { pick_label: string }): string | null {
-  const label = pick.pick_label ?? '';
+  const label = labelWithoutStake(pick.pick_label);
   if (!matchupLedBet(label)?.startsWith('First Half ')) return null;
   return label.slice(0, label.indexOf(' — ')).trim();
 }
@@ -231,7 +231,8 @@ export function splitPickTitle(pick: { pick_label: string }): {
   primary: string;
   secondary: string | null;
 } {
-  const label = pick.pick_label ?? '';
+  // The old NFL sizing figure ("· 0.79u") is not the stake the card shows.
+  const label = labelWithoutStake(pick.pick_label);
   // A team total or a first half: the bold line is the bet (the card's header
   // already shows the matchup).
   const bet = matchupLedBet(label);

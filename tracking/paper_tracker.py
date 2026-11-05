@@ -1681,7 +1681,8 @@ def _book_from_label(pick_label: str | None) -> str:
 # One inverse of that publisher's BOOK_ABBREV, pinned by test. An unmapped book
 # is written raw ("fanatics"), so a raw key is accepted, as for _LABEL_BOOK.
 # New rows carry decision_book and leave the annotation off. The parse stays
-# so a stored label still grades at the book it names.
+# so a stored label still grades at the book it names. New rows also leave
+# off the "· 1.67u" sizing figure (mike, 2026-11-04); this parse never read it.
 _NFL_LABEL_BOOK = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
                    "CZR": "williamhill_us", "ESPN": "espnbet", "BR": "betrivers",
                    "BOV": "bovada", "PIN": "pinnacle"}

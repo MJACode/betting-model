@@ -136,6 +136,35 @@ export function formatUnits(u: number): string {
   return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
 }
 
+/**
+ * The old NFL sizing figure on a stored label: a "·", a number, then "u",
+ * followed by another "·" tag or the end. The pattern is the server's
+ * (tracking/pick_integrity._STAKE_TOKEN and the open_picks view), pinned
+ * together by tests/test_mobile_label_units.py.
+ */
+const LABEL_STAKE_TOKEN = /\s*·\s*\d+(?:\.\d+)?u(?!\s*[^\s·])/gu;
+
+/**
+ * A stored pick label, as the app prints it beside a stake.
+ *
+ * Older NFL wind and opener labels end in the model's own
+ * sizing figure: "DAL @ IND — IND +7.5 · 0.79u · NEW 0m",
+ * "LA @ WAS Under 47.5 · 0.87u". That figure is not the stake anyone books.
+ * The row beside it shows the posted stake or the posted units (1u to win at
+ * the decided price, risk capped at 3u), so one row carried two unit numbers
+ * that disagreed (mike, 2026-11-04: "everything must be units"). Labels
+ * written since carry no unit figure, as no other sport's label does. A stored
+ * label is never rewritten (CLAUDE.md §1c), so the old figure comes off here,
+ * on screen and in VoiceOver only.
+ *
+ * Only that token goes. The bet itself, the age tag ("NEW 0m") and every
+ * parenthetical stay word for word (CLAUDE.md §00). Every other label is
+ * returned as stored.
+ */
+export function labelWithoutStake(label: string | null | undefined): string {
+  return (label ?? '').replace(LABEL_STAKE_TOKEN, '');
+}
+
 /** An unsigned stake from a stored per-100 amount: 100 → "1u", 50 → "0.5u". */
 export function formatFlatStake(perHundred: number | null | undefined): string {
   const u = flatToUnits(perHundred);

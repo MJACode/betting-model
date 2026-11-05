@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, NFL wind and opener labels carry no unit figure (it was the models' Kelly sizing, not the posted stake); 61 stored labels keep it; Discord, X, push, open_picks and the app drop it on display; no model change |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, iOS Sign in with Apple is the system sheet and an identity token; Google stays in the browser; version 1.2.0 so it is not an OTA onto 1.1.0 |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, byom_legs sets plan_cache_mode to force_custom_plan so a pooled connection cannot use a generic plan that skips the prop-facts market index; #1172 Medium, Matt via CE; no index or model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA prop record 3,687 ms (over 3s anon): prop-facts leg index and a closing-branch market filter |

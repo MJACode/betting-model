@@ -24,7 +24,7 @@ ordered by start time.
 | `game_date` | the game's date in Eastern time |
 | `start_time_et` | the start, e.g. `7:40 PM ET` (empty if the start is unknown) |
 | `matchup` | `AWAY @ HOME` (UFC: `A vs B`) |
-| `pick` | the pick's label exactly as stored. Quote it word for word and never rebuild the line (CLAUDE.md §00) |
+| `pick` | the pick's label as stored. Quote it word for word and never rebuild the line (CLAUDE.md §00). Older NFL wind and opener labels end in a sizing figure (`· 0.87u`) that is not the stake; the view leaves that figure off, so `stake` is the only unit number on a row |
 | `price` | the American price the pick was decided at |
 | `book` | the book that price came from |
 | `stake` | the published stake in units, e.g. `1.15u to win 1u`: 1 unit to win at that price, never more than 3 units laid, a bare `1u` when there is no price. The same text Discord posts |
