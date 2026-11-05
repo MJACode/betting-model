@@ -28,7 +28,6 @@ import {
   splitPickTitle,
   storedQuoteBook,
   todayBoardHandoff,
-  MODEL_BOOK,
   type BoardHandoff,
   type HeroAmerican,
   type Movement,
@@ -208,7 +207,8 @@ export function PickCard({
     myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
       ? myBooksView({
           quotes: currentLineQuotes(pick, item.bookRows, modelHero, priceAge),
-          recordBook: pick.is_live === true ? MODEL_BOOK : storedQuoteBook(pick),
+          // Live or not, the record is kept at the book that decided it (§6).
+          recordBook: storedQuoteBook(pick),
           myBooks,
           modelProbability: pick.model_probability,
         })
@@ -344,7 +344,7 @@ export function PickCard({
   const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted && !notAtMyBooks;
   // Until the member's books have loaded, a pre-game card does not name a
   // shop book or open the sheet (the default set is every book, for one
-  // frame). A live pick stays the DraftKings quote.
+  // frame). A live pick never shops: its one book is the one that decided it.
   const handoff = offersBook && cta.handoff && (myBooksReady || pick.is_live === true)
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : null;
@@ -355,7 +355,8 @@ export function PickCard({
   const shopQuotes = handoff
     ? handoffQuotesForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : [];
-  // Live is DraftKings only. A dash on another book would pretend we shopped it.
+  // Live offers only the book that decided it. A dash on another book would
+  // pretend we shopped it.
   const sheetRows = pickSportsbookRows(
     shopQuotes,
     pick.is_live === true || !myBooksReady ? null : myBooks,

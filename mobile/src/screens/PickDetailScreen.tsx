@@ -190,21 +190,20 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // either way (passesRecordFilter).
   const voided = pick.condition_status === 'VOID' && pick.discordPublish !== 'published';
   // One plain-English line saying whose price this screen is showing — always
-  // the book the pick was modeled at. Renders in the header so the provenance
-  // is never implicit.
+  // the book that decided the pick, live or not (an in-play pick is decided
+  // at the best bettable in-play price since 2026-09-10). Renders in the
+  // header so the provenance is never implicit.
   const quoteProvenance =
     quote == null
       ? null
-      : live
-        ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} · live picks are DraftKings only`
-        : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
-            numOrNull(quote.line) != null &&
-            numOrNull(pick.scored_line) != null &&
-            numOrNull(quote.line) !== numOrNull(pick.scored_line)
-              ? // The HOME number for spreads; shown as the pick's side sees it.
-                ` (line ${formatSideLine(quote.line, pick.pick_side, gameMarketForModel(pick.model_id))})`
-              : ''
-          } · the price this pick was decided at`;
+      : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
+          numOrNull(quote.line) != null &&
+          numOrNull(pick.scored_line) != null &&
+          numOrNull(quote.line) !== numOrNull(pick.scored_line)
+            ? // The HOME number for spreads; shown as the pick's side sees it.
+              ` (line ${formatSideLine(quote.line, pick.pick_side, gameMarketForModel(pick.model_id))})`
+            : ''
+        } · the price this ${live ? 'live pick' : 'pick'} was decided at`;
 
   // The best price we found across every book the odds feed carries, recorded
   // on the pick when it was scored. Since 2026-09-09 that price is also the one
@@ -255,7 +254,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
     myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
       ? myBooksView({
           quotes: allLineQuotes,
-          recordBook: live ? MODEL_BOOK : storedQuoteBook(pick),
+          recordBook: storedQuoteBook(pick),
           myBooks,
           modelProbability: pick.model_probability,
         })
@@ -433,11 +432,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         {/* Where to place it, then every book and line — one section, action
             first (UX review): the chips are the bettable same-line subset, the
             table below carries books at a different number and the reference
-            books that cannot be bet. Not for live picks: they are DraftKings
-            only, and the in-play rows are no longer fetched. With no chip left
-            (every book's price too old), no empty card either. A live model
-            whose price we stop reading after the bet (hero.untracked) gets one
-            numberless "Open DK" chip, as on the card. */}
+            books that cannot be bet. A live pick gets one chip, the book that
+            decided it at its locked price (pickLineQuotes); no other book's
+            in-play number is fetched here. With no chip left (every book's
+            price too old), no empty card either. A live model whose price we
+            do not track after the bet (hero.untracked) gets one numberless
+            "Open" chip at that book, as on the card. */}
         {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided && myView?.status !== 'none' ? (
           cta.handoff && (lineQuotes.length > 0 || hero?.untracked) ? (
             <View style={styles.linesCard}>

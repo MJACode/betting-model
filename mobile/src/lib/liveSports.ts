@@ -11,7 +11,7 @@
  * WHY THE APP NEEDS IT. The Live Signals board is always on screen for every
  * sport (matt, 2026-09-12), so an empty board has two completely different
  * meanings and the copy has to tell them apart: for MLB it means no in-play
- * edge right now, and for NBA it means we do not run an in-play model for that
+ * edge right now, and for NHL it means we do not run an in-play model for that
  * sport at all. One empty state for both reads as a broken board on half the
  * sports in the app.
  *
@@ -31,4 +31,26 @@ export function liveModelSportsSentence(): string {
   const s = [...LIVE_MODEL_SPORTS];
   if (s.length <= 1) return s.join('');
   return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
+}
+
+const LIVE_EMPTY_VALID = 'Zero of them is a valid answer, not a board that failed to load.';
+
+/**
+ * The Live board's empty subtitle for a sport that HAS an in-play model: when
+ * the board can fill. NBA says when it checks, because its models do not
+ * watch a game continuously: models/nba_live_loop.py reads the books once an
+ * hour while a game is in progress (the backtest's own timing), and each of
+ * its three models decides a game once (quarters 1-2 for the early spread,
+ * quarter 3 for the late spread and moneyline). No clock minute is named
+ * here, so the copy does not go stale if the loop's minute moves.
+ */
+export function liveEmptySubtitle(sport: string): string {
+  if (sport === 'NBA') {
+    return (
+      'NBA in-play models check games in progress once an hour, through the third quarter, and ' +
+      'bet each game at most once per model. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  return `Live signals appear while a game is in play and the in-play model finds an edge. ${LIVE_EMPTY_VALID}`;
 }
