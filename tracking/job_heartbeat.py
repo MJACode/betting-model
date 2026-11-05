@@ -75,6 +75,9 @@ MAX_SILENCE: dict = {
     # RETURNS, and one launch can run a whole Sunday slate (1pm to ~7:30pm
     # ET, ~6.5h), which 700 also clears.
     "nfl_live_leader": 700,
+    # 11am to 2:50am ET, */10: off 3am-11am, ~8h of legitimate silence; one
+    # launch can run a whole evening slate (~7pm to ~1:30am ET, 6.5h).
+    "nba_live": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -137,6 +140,10 @@ MAX_SILENCE: dict = {
 # reported around 23:40 ET, after the slate it exists for.
 ACTIVE_HOURS_ET: dict = {
     "nhl_goalie_window": (11, 23, 30),
+    # The NBA in-play loop beats every 5 minutes while a slate runs
+    # (models/nba_live_loop.Loop.heartbeat) and on every idle relaunch (every
+    # 10 minutes), so 30 minutes of silence in its hours is a hung loop.
+    "nba_live": (11, 23, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

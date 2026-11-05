@@ -104,7 +104,6 @@ ANON_READABLE: tuple[str, ...] = (
     # after a later pick reholds the shared game:model key.
     "v_discord_void_notice",
     "v_latest_dk_odds",
-    "v_latest_inplay_odds_all_books",
     "v_latest_odds_all_books",
     "v_latest_prop_odds_all_books",
     "v_live_game_state_latest",

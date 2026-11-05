@@ -571,6 +571,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # win-loss record. Sits before the posted-stake pair, which stays
     # last and only inserts units when they are absent.
     "clv_push_beat_rate_2026_11_04.sql",
+    # 2026-11-04 (mike): the NBA in-play loop's decision ledger, one row per
+    # game and in-play rule (models/nba_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "nba_live_decisions_2026_11_04.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

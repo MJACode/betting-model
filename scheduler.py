@@ -234,6 +234,13 @@ RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
 RUN_NFL_LIVE_LEADER = (os.environ.get("RUN_NFL_LIVE_LEADER", "1").strip().lower()
                        not in ("0", "false", "off", "no"))
 
+# NBA in-play loop (models/nba_live_loop.py): the three IG-2 rules, LIVE
+# 2026-11-04 (mike: "everything goes live now"), so ON by default; set
+# RUN_NBA_LIVE=0 to stop it without a code change (a Railway variable takes
+# effect on the redeploy that applying it starts).
+RUN_NBA_LIVE = (os.environ.get("RUN_NBA_LIVE", "1").strip().lower()
+                not in ("0", "false", "off", "no"))
+
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
 # do rather than three days later.
@@ -886,6 +893,9 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 # so it sits with the other live loops -- unlike
                 # nfl_live_worker above.
                 "nfl_live_leader",
+                # The NBA in-play loop: the same shape (free ESPN reads, one
+                # Odds API call per decision instant, writes Supabase only).
+                "nba_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1006,6 +1016,28 @@ def run_nfl_live_leader() -> None:
         # A loop that dies on every launch (a bad import, a missing artifact)
         # must not read as a healthy job: raising makes the heartbeat 'fail'.
         raise RuntimeError(f"nfl-live-leader loop exited {outcome}")
+
+
+def run_nba_live() -> None:
+    # The NBA in-play loop (models/nba_live_loop.py), the run_nfl_live_leader
+    # supervisor shape: the loop reads ESPN's free scoreboard every 20 s and
+    # EXITS after a few idle ticks with no NBA game in progress, so this */10
+    # cron relaunches it and max_instances=1 makes the ticks during a slate
+    # no-ops. Run from the REPO ROOT.
+    #
+    # Odds API credits are spent ONLY at a fetch moment (each hour minus
+    # 264 s, retried to +240 s) while a game in progress has a rule not
+    # yet decided: one bulk h2h + spreads call for every game, 2 credits,
+    # capped per process by NBA_LIVE_CALL_CAP / NBA_LIVE_CREDIT_CAP and by
+    # the shared LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.nba_live_loop"],
+        "nba-live",
+    )
+    if outcome != "ok":
+        # A loop that dies on every launch (a bad import, a missing artifact,
+        # the decision table not yet created) must not read as healthy.
+        raise RuntimeError(f"nba-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -2819,6 +2851,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_LIVE_LEADER=0 — NFL in-play leader loop NOT scheduled.")
+
+    # NBA in-play loop. 11am to 2:50am ET: the earliest regular-season tips
+    # are around noon ET and a 10:30pm ET tip ends after 1am; an idle launch
+    # reads ESPN's scoreboard and exits.
+    if RUN_NBA_LIVE:
+        sched.add_job(
+            run_nba_live,
+            CronTrigger(hour="0-2,11-23", minute="*/10", timezone=TIMEZONE),
+            id="nba_live",
+            name="NBA in-play loop supervisor (11am-2:50am ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NBA_LIVE=0 — NBA in-play loop NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(
