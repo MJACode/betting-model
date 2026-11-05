@@ -28,6 +28,7 @@ import {
 import {
   gameMarketForModel,
   lineShopForPick,
+  liveBookRowsForPick,
   numOrNull,
   playerNameFromPickLabel,
   propMarketForPick,
@@ -1986,7 +1987,7 @@ export async function fetchUpcomingNhlPicks(
 //
 // THE BOOK THAT DECIDED IT. Since 2026-09-10 the in-play models decide at the
 // best bettable in-play price (DraftKings only until then, Matt 2026-09-03),
-// and the NBA models bet the best of eight books, so `decision_book` may not
+// and the NBA in-play model bets the best of eight books, so `decision_book` may not
 // be DraftKings. The lock stays the bet of record (§1c). The card still needs
 // that book's CURRENT number so "Now" and "Locked" cannot be confused, so we
 // read the newest in-play row at the deciding book, plus DraftKings' (the
@@ -2053,13 +2054,14 @@ export async function fetchLivePicks(
     .filter((pick) => discordLedVisible(pick.condition_status, pick.discordPublish))
     .map((pick) => {
       const market = gameMarketForModel(pick.model_id);
-      // This pick's own two books only: DraftKings (the reference row) and the
-      // book that decided it. Another pick's deciding book on the same game
-      // must not become a price on this card or an "Open with" tile in the
-      // slip (parlay.legFromPick reads bookRows).
-      const decided = storedQuoteBook(pick);
-      const rows = (market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : []).filter(
-        (r) => r.bookmaker === MODEL_BOOK || r.bookmaker === decided,
+      // This pick's own two books only (markets.liveBookRowsForPick), and
+      // DraftKings' alone for the NBA in-play model, whose deciding book's
+      // row is up to an hour old. Neither another pick's book nor that row
+      // may become a price on this card or an "Open with" tile in the slip
+      // (parlay.legFromPick reads bookRows).
+      const rows = liveBookRowsForPick(
+        pick,
+        market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [],
       );
       const dk = rows.find((r) => r.bookmaker === MODEL_BOOK);
       return {

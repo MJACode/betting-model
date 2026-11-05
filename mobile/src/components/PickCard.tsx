@@ -44,6 +44,7 @@ import { PickBooksSheet } from './PickBooksSheet';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   foundAtText,
+  liveNotAtMyBooksText,
   myBooksView,
   NOT_AT_MY_BOOKS,
   recordNoteShortFor,
@@ -244,7 +245,9 @@ export function PickCard({
         noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
       }`
     : notAtMyBooks
-      ? NOT_AT_MY_BOOKS
+      ? pick.is_live === true && modelPrice != null
+        ? liveNotAtMyBooksText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))
+        : NOT_AT_MY_BOOKS
       : null;
   // Green only when the edge on screen is one they can take: at their price
   // it may be gone, and off their books there is nothing to take.

@@ -63,7 +63,7 @@ import {
 import { stalePriceNote } from '@/lib/heroPriceText';
 import { teamScoreUnit } from '@/lib/teamForm';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { myBooksView, NOT_AT_MY_BOOKS, recordNoteFor } from '@/lib/myBooks';
+import { liveNotAtMyBooksText, myBooksView, NOT_AT_MY_BOOKS, recordNoteFor } from '@/lib/myBooks';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
@@ -266,7 +266,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
     myView?.status === 'mine' && myView.best && myView.edge != null && myView.ev != null
       ? `At your books: ${bookName(myView.best.bookmaker)} ${formatAmerican(myView.best.price)} · edge ${formatPctSigned(myView.edge)} · return ${formatPctSigned(myView.ev)}`
       : myView?.status === 'none'
-        ? `${NOT_AT_MY_BOOKS}. Change your books in Settings.`
+        ? `${
+            pick.is_live === true && decisionOdds(pick) != null
+              ? liveNotAtMyBooksText(bookName(storedQuoteBook(pick)), formatAmerican(Number(decisionOdds(pick))))
+              : NOT_AT_MY_BOOKS
+          }. Change your books in Settings.`
         : null;
   const myBooksRecordNote = myView?.status === 'mine' ? recordNoteFor(pick.model_id) : null;
   const inSlip = slip.has(slipKeyForPick(pick));

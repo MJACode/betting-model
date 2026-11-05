@@ -98,6 +98,27 @@ eq(bestHandoffForPick(nba, [later], nh).verb, 'Open', 'NBA: Open BetMGM');
 
 
 @node
+def test_the_nba_deciding_books_hourly_row_never_reaches_the_slip(tmp_path):
+    # fetchLivePicks hands each live pick liveBookRowsForPick's rows, and
+    # parlay.legFromPick turns every non-DraftKings row there into an "Open
+    # with" price. The NBA loop's row is up to an hour old: DraftKings' only.
+    _run(tmp_path, MARKETS_FILES + ["myBooks.ts"], LIVE + """
+import { liveBookRowsForPick } from './markets.ts';
+import { liveNotAtMyBooksText, NOT_AT_MY_BOOKS } from './myBooks.ts';
+const MGM = { bookmaker: 'betmgm', home_price: -125, spread_home: -4.5, snapshot_at: '2026-11-04T01:00:00+00:00' };
+const nba = { ...FD_LIVE, model_id: 'nba_live_spread_q12', sport: 'NBA', decision_book: 'betmgm' };
+eq(liveBookRowsForPick(nba, [DK_BOOKROW, MGM, FD_BOOKROW]).map((r) => r.bookmaker), ['draftkings'], 'NBA');
+// Every other in-play pick keeps its own two books, never a third.
+eq(liveBookRowsForPick(FD_LIVE, [DK_BOOKROW, MGM, FD_BOOKROW]).map((r) => r.bookmaker),
+   ['draftkings', 'fanduel'], 'NCAAF at FanDuel');
+// Off the member's books, an in-play card says where it was found: true even
+// when DraftKings had the same number, which "not offered" was not.
+eq(liveNotAtMyBooksText('MGM', '-108'), 'Found at MGM -108 · not one of your books', 'live none');
+eq(NOT_AT_MY_BOOKS, 'Not offered at your books', 'pre-game none unchanged');
+""")
+
+
+@node
 def test_the_lock_row_names_the_period_by_sport(tmp_path):
     _run(tmp_path, MARKETS_FILES, LIVE + """
 import { pickTimingInfo } from './markets.ts';
@@ -117,7 +138,7 @@ import { MODEL_META, modelPageTiming } from './modelMeta.ts';
 import { liveEmptySubtitle } from './liveSports.ts';
 const names = ['nba_live_spread_q12']
   .map((id) => [MODEL_META[id].longLabel, MODEL_META[id].shortLabel]);
-eq(names, [['NBA Early Live Spreads', 'Early Spread']], 'names');
+eq(names, [['NBA Early Live Spreads', 'LIVE Spread']], 'names');
 // The quarter-3 moneyline and spread are held out of the live list
 // (models/nba_live_ig2.HELD_OUT_RULES): no label until they ship.
 eq([MODEL_META['nba_live_spread_q3'], MODEL_META['nba_live_ml_q3']], [undefined, undefined], 'held out');
@@ -136,8 +157,10 @@ const generic = modelPageTiming('ncaaf_live_win_prob');
 eq([generic.title, generic.empty.includes('Live Signals'), /pipeline/.test(generic.body + generic.empty)],
    ['Bets during the game', true, false], 'other in-play models');
 const empty = liveEmptySubtitle('NBA');
-eq([empty.includes('once an hour'), empty.includes('first half'), empty.includes('third quarter'),
-    empty.includes('at most once'), /on the hour|tip off|tip-off/.test(empty)], [true, true, false, true, false], empty);
+// One phrase for the window on both screens (the model page says the same).
+eq([empty.includes('once an hour'), empty.includes('first and second quarters'), empty.includes('third quarter'),
+    empty.includes('at most once'), /on the hour|tip off|tip-off/.test(empty), empty.includes('Zero of them')],
+   [true, true, false, true, false, false], empty);
 eq(liveEmptySubtitle('MLB').includes('DraftKings'), false, 'no DraftKings claim on the other sports');
 """)
 
@@ -163,7 +186,9 @@ def test_fetch_live_picks_reads_the_deciding_books_in_play_row():
     body = body[:body.index("\n}\n")]
     assert ".eq('bookmaker', 'draftkings')" not in body, (
         "the Live board reads DraftKings' in-play rows only, so a FanDuel bet's Now is DraftKings' number")
-    assert "fetchLiveInplayAtBooks(" in body and "storedQuoteBook(pick)" in body
+    # The deciding book's row is chosen by markets.liveBookRowsForPick, pinned
+    # under node above (storedQuoteBook, and DraftKings' only for the NBA).
+    assert "fetchLiveInplayAtBooks(" in body and "liveBookRowsForPick(" in body
     assert "rows.find((r) => r.bookmaker === MODEL_BOOK)" in body, "latestOdds must be DraftKings' row, not rows[0]"
     helper = src[src.index("async function fetchLiveInplayAtBooks("):]
     helper = helper[:helper.index("\n}\n")]

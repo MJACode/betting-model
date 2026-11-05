@@ -130,3 +130,13 @@ export function recordNoteShortFor(_modelId: string): string {
 }
 
 export const NOT_AT_MY_BOOKS = 'Not offered at your books';
+
+/**
+ * 'none' on an IN-PLAY pick. Its only quote is the deciding book's (a live
+ * card carries no other book's price), so 'none' there means that book is not
+ * one of theirs, not that none of their books has the bet: DraftKings may hold
+ * the same side at the same number. Say what is true in every case.
+ */
+export function liveNotAtMyBooksText(bookShort: string, americanText: string): string {
+  return `${foundAtText(bookShort, americanText)} · not one of your books`;
+}

@@ -1,8 +1,8 @@
 /**
  * WHICH SPORTS HAVE AN IN-PLAY MODEL AT ALL.
  *
- * Mirror of the live lanes in the Python registry: `config.LIVE_MODELS` (MLB +
- * NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
+ * Mirror of the in-play models in the Python registry: `config.LIVE_MODELS`
+ * (MLB, NBA and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
  * in `nfl/live_model/config.MODEL_IDS`). PINNED BY
  * tests/test_mobile_live_segment.py, which fails until this set equals those
  * two sources — the same mechanism lib/thresholds.ts uses, for the same reason:
@@ -15,7 +15,7 @@
  * sport at all. One empty state for both reads as a broken board on half the
  * sports in the app.
  *
- * ADD A SPORT HERE WHEN ITS LIVE LANE SHIPS — the test will tell you.
+ * ADD A SPORT HERE WHEN ITS IN-PLAY MODEL SHIPS — the test will tell you.
  */
 
 /** Sports with at least one in-play model writing `is_live` picks. */
@@ -26,14 +26,14 @@ export function hasLiveModel(sport: string): boolean {
   return LIVE_MODEL_SPORTS.has(sport);
 }
 
-/** "MLB, NCAAF and NFL" — for copy that names the live lanes. */
+/** "MLB, NBA, NCAAF and NFL" — for copy that names the sports with an in-play model. */
 export function liveModelSportsSentence(): string {
   const s = [...LIVE_MODEL_SPORTS];
   if (s.length <= 1) return s.join('');
   return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
 }
 
-const LIVE_EMPTY_VALID = 'Zero of them is a valid answer, not a board that failed to load.';
+const LIVE_EMPTY_VALID = 'No live signal is a valid answer, not a board that failed to load.';
 
 /**
  * The Live board's empty subtitle for a sport that HAS an in-play model: when
@@ -47,7 +47,7 @@ const LIVE_EMPTY_VALID = 'Zero of them is a valid answer, not a board that faile
 export function liveEmptySubtitle(sport: string): string {
   if (sport === 'NBA') {
     return (
-      'The NBA in-play model checks games in progress once an hour, through the first half, and ' +
+      'The NBA in-play model checks games in progress once an hour, through the first and second quarters, and ' +
       'bets each game at most once. ' +
       LIVE_EMPTY_VALID
     );

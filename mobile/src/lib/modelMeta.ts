@@ -454,15 +454,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: '',
   },
   // NBA in-play (models/nba_live_ig2.py, 2026-11-04): the game-state model's
-  // win chance and margin against the live line, one bet per game per model
-  // at the first fresh price. The early spread bets during quarters 1-2; the
-  // late spread and the late moneyline bet during quarter 3. Every one of
-  // them SETTLES ON THE FULL GAME, so the names say when the bet is placed,
-  // never a period: "First Half" and "3rd Quarter" in this app name a bet on
-  // that period alone (nba_first_half_total_luck). Their picks appear on the
-  // Live segment only.
+  // margin against the live line, one bet per game at the first fresh price,
+  // during quarters 1-2. The quarter-3 moneyline and spread are held out
+  // (HELD_OUT_RULES) and have no entry until they ship. The bet SETTLES ON THE
+  // FULL GAME, so the long name says when the bet is placed, never a period:
+  // "First Half" in this app names a bet on that period alone
+  // (nba_first_half_total_luck). The chip is LIVE Spread, as every other
+  // in-play chip starts with LIVE ("Early" alone reads as an opening line).
+  // Its picks appear on the Live segment only.
   nba_live_spread_q12: {
-    shortLabel: 'Early Spread',
+    shortLabel: 'LIVE Spread',
     longLabel: 'NBA Early Live Spreads',
     type: 'game',
     statKey: null,

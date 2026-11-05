@@ -1040,6 +1040,23 @@ export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The in-play rows a Live-board pick may carry: DraftKings' (the reference
+ * row) and the book that decided it, never another pick's deciding book on the
+ * same game. A LIVE_PRICE_SLOT_ONLY model keeps DraftKings' row only: its
+ * deciding book's row is up to an hour old, and parlay.legFromPick would turn
+ * it into an "Open with" price in the slip — the number the card itself never
+ * shows. The card's hand-off reads the lock (recordLink), not these rows.
+ */
+export function liveBookRowsForPick<R extends { bookmaker: string }>(
+  pick: Pick,
+  rows: readonly R[],
+): R[] {
+  const decided = storedQuoteBook(pick);
+  const slotOnly = LIVE_PRICE_SLOT_ONLY.has(pick.model_id ?? '');
+  return rows.filter((r) => r.bookmaker === MODEL_BOOK || (!slotOnly && r.bookmaker === decided));
+}
+
+/**
  * Is the deciding book's live price one this app does not hold, so the card
  * must not draw "Now —" (which reads as "still loading") for the whole game?
  *

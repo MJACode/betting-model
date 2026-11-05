@@ -21,7 +21,7 @@
 // board's header and the detail screen's provenance line say so, and the
 // row does not repeat it on every card. A live model whose price we do not
 // track after the bet (hero.untracked: markets.LIVE_PRICE_STOPS_AT_BET, the
-// NBA models in LIVE_PRICE_SLOT_ONLY, or a book whose in-play price is not
+// NBA in-play model in LIVE_PRICE_SLOT_ONLY, or a book whose in-play price is not
 // stored) gets that chip with no number on it, as the card's "Open" does: the
 // lock is not a price still on offer.
 

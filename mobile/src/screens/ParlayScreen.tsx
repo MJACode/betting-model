@@ -1053,8 +1053,8 @@ function SlipBody({
           <View style={styles.liveLegNote}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.liveLegNoteText}>
-              This slip has an in-play leg. Live prices are DraftKings’ and can be up to
-              ~45s old — check the number at DK before you place it.
+              This slip has an in-play leg, priced at the number it locked at. In-play
+              prices move fast — check the number at the book before you place it.
             </Text>
           </View>
         ) : null}

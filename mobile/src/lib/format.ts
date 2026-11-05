@@ -417,7 +417,7 @@ interface GameLike {
 const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   MLB: 6 * 3_600_000,
   NHL: 5 * 3_600_000,
-  // The NBA has in-play models (nba_live_*) and, like football below, no live
+  // The NBA has an in-play model (nba_live_*) and, like football below, no live
   // game feed in the app, and its scores land at the next morning's
   // settlement. So this window is the only thing that takes a finished game
   // off the Live board, and at 5h an in-play pick stayed there, with a
