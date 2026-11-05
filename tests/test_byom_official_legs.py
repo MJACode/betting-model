@@ -24,6 +24,7 @@ LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
 PUSHDOWN_SQL = "byom_official_market_pushdown_2026_11_04.sql"
 PROP_LOOKUP_SQL = "byom_prop_lookup_2026_11_04.sql"
 NHL_SQL = "byom_nhl_2026_11_05.sql"
+UNITS_SQL = "byom_units_inline_2026_11_05.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -322,7 +323,8 @@ def scratch():
                      "byom_prop_phase_a_filters_2026_10_29.sql",
                      SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
                      LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL,
-                     PROP_LOOKUP_SQL, PROP_LOOKUP_SQL, NHL_SQL, NHL_SQL):
+                     PROP_LOOKUP_SQL, PROP_LOOKUP_SQL, NHL_SQL, NHL_SQL,
+                     UNITS_SQL, UNITS_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -780,6 +782,58 @@ def test_every_byom_legs_file_skips_once_nhl_is_applied(scratch):
     assert after == before
     assert nhl is True
     assert plan is True
+
+
+def test_the_staking_functions_inline_and_keep_the_staking(scratch):
+    """2026-11-05: a SET clause stopped the planner inlining the two
+    staking functions, four full calls per row, 2.6s of a 2.7s NBA
+    record. No SET, the same 1u-to-win staking, and the planner inlines
+    them (the plan names no function)."""
+    _pg, cur = scratch
+    cur.execute(
+        "SELECT proname, proconfig FROM pg_proc "
+        "WHERE proname IN ('byom_risk_units', 'byom_win_units') ORDER BY 1")
+    assert cur.fetchall() == [("byom_risk_units", None), ("byom_win_units", None)]
+    cur.execute("""
+        SELECT x, byom_risk_units(x), byom_win_units(x)
+          FROM (VALUES (-110::numeric), (150), (-400), (100), (-105.5), (50),
+                       (NULL::numeric)) v(x)""")
+    def r6(v):
+        return None if v is None else round(float(v), 6)
+
+    got = {r6(row[0]): (r6(row[1]), r6(row[2])) for row in cur.fetchall()}
+    assert got[-110.0] == (1.1, 1.0)
+    assert got[150.0] == (0.666667, 1.0)
+    assert got[-400.0] == (3.0, 0.75)
+    assert got[100.0] == (1.0, 1.0)
+    assert got[-105.5] == (None, None)
+    assert got[50.0] == (None, None)
+    assert got[None] == (None, None)
+    cur.execute(
+        "EXPLAIN (VERBOSE) SELECT sum(byom_win_units(g::numeric)), "
+        "sum(byom_risk_units(g::numeric)) FROM generate_series(-500, 500) g")
+    plan = "\n".join(r[0] for r in cur.fetchall())
+    assert "byom_win_units" not in plan and "byom_risk_units" not in plan, plan
+
+
+def test_a_second_pass_leaves_the_staking_functions_alone(scratch):
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("SELECT string_agg(xmin::text, ',' ORDER BY proname) FROM pg_proc "
+                "WHERE proname IN ('byom_risk_units', 'byom_win_units')")
+    before = cur.fetchone()[0]
+    for name in (SQL_NAME, BAND_SQL, PROP_LOOKUP_SQL, NHL_SQL, UNITS_SQL):
+        cur.execute(_adapt_sql(
+            (ROOT / "data/migrations" / name).read_text(encoding="utf-8")))
+    cur.execute("SELECT string_agg(xmin::text, ',' ORDER BY proname) FROM pg_proc "
+                "WHERE proname IN ('byom_risk_units', 'byom_win_units')")
+    assert cur.fetchone()[0] == before
+
+
+def test_the_units_file_is_registered_after_nhl():
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(UNITS_SQL) > ACTIVE_MIGRATIONS.index(NHL_SQL)
 
 
 def test_no_active_migration_guards_on_unnamed_identity_arguments():

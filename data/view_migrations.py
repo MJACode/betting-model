@@ -491,6 +491,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # byom_save_model accept NHL; a null season is the ending year.
     # Skips once both bodies carry byom_nhl_v1.
     "byom_nhl_2026_11_05.sql",
+    # 2026-11-05: byom_win_units / byom_risk_units without a SET clause,
+    # so the planner inlines them. Four full calls per row took 2.6s of
+    # the 2.7s NBA 2025-26 points record. Same staking. Skips once both
+    # carry byom_units_inline_v1 and no proconfig.
+    "byom_units_inline_2026_11_05.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
