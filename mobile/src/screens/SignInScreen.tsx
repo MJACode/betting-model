@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -9,6 +9,8 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -39,6 +41,38 @@ import type { RootStackParamList } from '@/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
+ * The system Sign in with Apple button. Loaded only on iOS, and only by
+ * `require`, so Android and a binary without the module never evaluate it.
+ */
+interface AppleSignInButtonModule {
+  isAvailableAsync: () => Promise<boolean>;
+  AppleAuthenticationButton: React.ComponentType<{
+    onPress: () => void;
+    buttonType: number;
+    buttonStyle: number;
+    cornerRadius?: number;
+    style?: StyleProp<ViewStyle>;
+    accessibilityState?: { disabled?: boolean };
+    pointerEvents?: 'none' | 'auto';
+  }>;
+  AppleAuthenticationButtonType: { CONTINUE: number };
+  AppleAuthenticationButtonStyle: { WHITE: number };
+}
+
+function loadAppleSignInButton(): AppleSignInButtonModule | null {
+  if (Platform.OS !== 'ios') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('expo-apple-authentication') as AppleSignInButtonModule;
+    if (typeof mod?.AppleAuthenticationButton !== 'function') return null;
+    if (typeof mod.isAvailableAsync !== 'function') return null;
+    return mod;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Sign-in. Required when auth is on — cold open lands here, and there is no
  * skip. Unreachable while `AUTH_ENABLED` is false.
  *
@@ -48,6 +82,27 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function SignInScreen() {
   const navigation = useNavigation<Nav>();
   const providers = useMemo(() => visibleProviders(Platform.OS), []);
+  const appleButton = useMemo(
+    () => (providers.includes('apple') ? loadAppleSignInButton() : null),
+    [providers],
+  );
+  const [appleNativeOk, setAppleNativeOk] = useState(appleButton != null);
+
+  useEffect(() => {
+    if (!appleButton) return;
+    let cancelled = false;
+    appleButton.isAvailableAsync().then(
+      (ok) => {
+        if (!cancelled) setAppleNativeOk(ok);
+      },
+      () => {
+        if (!cancelled) setAppleNativeOk(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [appleButton]);
 
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
@@ -97,7 +152,8 @@ export function SignInScreen() {
       setBusy(provider);
       try {
         const session = await signInWithProvider(provider);
-        // null = the user dismissed the browser. Not an error; stay put.
+        // null = the user dismissed the Apple sheet or the Google browser.
+        // Not an error; stay put.
         if (session) finish();
       } catch (e) {
         setError(authErrorMessage(e));
@@ -148,7 +204,11 @@ export function SignInScreen() {
             </Text>
 
             {error ? (
-              <View style={styles.errorBanner}>
+              <View
+                style={styles.errorBanner}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             ) : null}
@@ -158,6 +218,39 @@ export function SignInScreen() {
                 {providers.map((provider) => {
                   const isApple = provider === 'apple';
                   const pending = busy === provider;
+                  if (isApple && appleButton && appleNativeOk) {
+                    if (pending) {
+                      return (
+                        <View
+                          key={provider}
+                          style={[styles.appleBtn, styles.appleNativeBtn]}
+                          accessibilityRole="progressbar"
+                          accessibilityLabel="Continue with Apple"
+                        >
+                          <ActivityIndicator color={colors.textPrimary} />
+                        </View>
+                      );
+                    }
+                    const AppleButton = appleButton.AppleAuthenticationButton;
+                    return (
+                      <AppleButton
+                        key={provider}
+                        buttonType={appleButton.AppleAuthenticationButtonType.CONTINUE}
+                        buttonStyle={appleButton.AppleAuthenticationButtonStyle.WHITE}
+                        cornerRadius={radii.md}
+                        style={[
+                          styles.appleNativeBtn,
+                          busy != null && busy !== provider && styles.btnDisabled,
+                        ]}
+                        pointerEvents={busy != null ? 'none' : 'auto'}
+                        accessibilityState={busy != null ? { disabled: true } : undefined}
+                        onPress={() => {
+                          if (busy != null) return;
+                          void onProvider('apple');
+                        }}
+                      />
+                    );
+                  }
                   return (
                     <Pressable
                       accessibilityRole="button"
@@ -174,12 +267,12 @@ export function SignInScreen() {
                       ]}
                     >
                       {pending ? (
-                        <ActivityIndicator color={isApple ? colors.brandInk : colors.textInverse} />
+                        <ActivityIndicator color={isApple ? colors.textPrimary : colors.textInverse} />
                       ) : (
                         <Text
                           style={[
                             styles.providerBtnText,
-                            isApple ? styles.appleBtnText : styles.googleBtnText,
+                            isApple ? styles.appleFallbackText : styles.googleBtnText,
                           ]}
                         >
                           {isApple ? 'Continue with Apple' : 'Continue with Google'}
@@ -399,13 +492,20 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
   },
   appleBtn: { backgroundColor: colors.textInverse },
+  appleNativeBtn: {
+    alignSelf: 'stretch',
+    width: '100%',
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   googleBtn: { backgroundColor: colors.textPrimary },
   providerBtnText: {
     fontFamily: font.family,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
-  appleBtnText: { color: colors.brandInk },
+  appleFallbackText: { color: colors.textPrimary },
   googleBtnText: { color: colors.textInverse },
   dividerRow: {
     alignSelf: 'stretch',

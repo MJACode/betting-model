@@ -44,15 +44,16 @@ export const AUTH_ENABLED: boolean =
 export const AUTH_PROVIDERS = {
   /** Email one-time passcode (6-digit). No native module, no deep link needed. */
   email: true,
-  /** Sign in with Apple. Shown on iOS only by default — see `showAppleOn`. */
+  /** Sign in with Apple. iOS uses the native sheet. Shown on iOS only — see `showAppleOn`. */
   apple: true,
   /** Google. Browser-based OAuth, works on both platforms. */
   google: true,
 } as const;
 
 /**
- * Platforms that show the Apple button. Sign in with Apple works on Android via
- * the web flow, but it's an unusual thing to offer there, so it's iOS-only.
+ * Platforms that show the Apple button. Native Sign in with Apple is the iOS
+ * sheet. Android does not show the button. An Apple identity that has to
+ * re-authenticate on Android still uses the browser inside `signInWithProvider`.
  */
 export const showAppleOn: readonly string[] = ['ios'];
 
