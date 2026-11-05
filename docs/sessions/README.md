@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA in-play game-state model LIVE: three rules (spread q1-q2, moneyline and spread q3, EV >= 0.05), their loop at the grade's fetch instants, a decision ledger; parity reproduces every graded bet; quarter-4 spread not built; mobile companion pending |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA in-play game-state model LIVE: three rules (spread q1-q2, moneyline and spread q3, EV >= 0.05), their loop at each hour minus 264 s with two fail-closed ESPN reads, a decision ledger, two reviews' fixes; re-graded on hourly fetches only the q1-q2 spread passes (q3 rules open); quarter-4 spread not built |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA parity: daily refresh, prop backfill (props were empty), official line for games and props; official lock search reads one market (831 ms to a 15 ms search) |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA: in-play spread and moneyline searched on 2026-27 live prices, 0 of 24 pass, every cell too few games this season; no model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, a 0% same-book close is a CLV push: beat rate is beats / (beats + losses), pushes shown beside it, the average still includes 0; no stake or record change |

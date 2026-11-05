@@ -33,7 +33,12 @@ cannot both win.
 decide) over the 2026-27 search's pulled live rows twice: with every play of
 each game (it must equal the search's own decisions and bets), and with each
 fetch seeing only the plays logged up to its served time plus the loop's wait
-(what the live loop sees), and reports every decision the second view moves.
+to its second ESPN read, 230 s (what the live loop sees), at the loop's own
+fetch times (each hour minus 264 s), and reports every decision the second
+view moves. ESPN's publication lag is not in the archive, so the loop's
+fail-closed skip (a play logged before the fetch that appears only on the
+second read) cannot be replayed here; it was measured live instead
+(docs/sports/nba.md, "In play").
 
 Inputs are read-only caches of Supabase rows (CLAUDE.md section 1b): the
 research cache (NBA_RESEARCH_CACHE), the third search's folder
@@ -62,7 +67,10 @@ import models.nba_live_ig2 as M  # noqa: E402
 OUT = ROOT / M.ARTIFACT_PATH
 CUT = 0.05                    # the three rules' graded cut
 FLOOR = -200.0                # config.DEFAULT_MIN_ODDS, the graded floor
-WAIT_S = 45.0                 # the loop's default wait after a fetch (models/nba_live_loop.py)
+# The loop decides on ESPN's second read: PBP_WAIT_SEC (170) after the fetch,
+# then PBP_RECHECK_SEC (60) more (models/nba_live_loop.py). The replay lets a
+# fetch see every play logged by its served time plus those 230 s.
+WAIT_S = 230.0
 
 
 def _sha(path: Path) -> str:
@@ -328,6 +336,16 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
         fetches = loop_fetches(fetches)
     res["view"] = "every worker fetch" if every_fetch else "the loop's fetch times (hour minus 264 s)"
     res["fetches_in_view"] = len(fetches)
+    # (1b) every play known, at the view's fetches only: what separates the
+    # loop's cadence from the search's (1 vs 1b) and the plays the loop can
+    # see from every play (1b vs 2).
+    at_view = pd.to_datetime(odds["created_at"], utc=True, format="mixed").isin(set(fetches))
+    q_v, _d, _n = M.fetch_quotes(odds[at_view], games)
+    qt_v, _nv = M.prepare(q_v, plays_all, pbp.drop(columns="_wc"), top, games, final_games=set(games["game_id"]))
+    full_v = {}
+    for r in M.RULES:
+        el = M.eligible_for(qt_v, r).merge(prior[["game_id", "mu_pre"]], on="game_id", how="inner")
+        full_v[r.model_id] = (el, M.decide_first_fetch(el, art.models, CUT, FLOOR))
     seen: set = set()
     decided: dict = {}
     n_fetch = 0
@@ -357,13 +375,18 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
         live_bets = pd.DataFrame([{**d.pick, "fetch_at": fa} for (gid, mid), (fa, d) in decided.items()
                                   if mid == r.model_id and d.bet])
         live_dec = {gid: fa for (gid, mid), (fa, d) in decided.items() if mid == r.model_id}
-        el_full = M.eligible_for(qt, r).merge(prior[["game_id", "mu_pre"]], on="game_id", how="inner")
+        el_full, a = full_v[r.model_id]
         first_full = G.decision_quotes(el_full).drop_duplicates("game_id").set_index("game_id")["fetch_at"] \
             if len(el_full) else pd.Series(dtype=object)
         same_fetch = sum(1 for g, fa in live_dec.items() if g in first_full.index and first_full[g] == fa)
         only_live = sorted(set(live_dec) - set(first_full.index))
         only_full = sorted(set(first_full.index) - set(live_dec))
-        a = full[r.model_id]
+        # the cadence alone: every play known, the view's fetches vs every fetch
+        js = a[key].merge(full[r.model_id][key], on=key, how="outer", indicator=True)
+        res[f"{r.model_id}_cadence_alone"] = {
+            "decisions_view_fetches": int(len(first_full)),
+            "bets_view_fetches": int(len(a)), "bets_every_fetch": int(len(full[r.model_id])),
+            "same_bet": int((js["_merge"] == "both").sum())}
         bk = live_bets[key] if len(live_bets) else pd.DataFrame(columns=key)
         j = bk.merge(a[key], on=key, how="outer", indicator=True)
         jl = bk.merge(lab[r.model_id][key], on=key, how="outer", indicator=True)
@@ -372,16 +395,19 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
             "same_bet": int((jl["_merge"] == "both").sum()),
             "only_live_view": int((jl["_merge"] == "left_only").sum()),
             "only_search": int((jl["_merge"] == "right_only").sum())}
-        res[f"{r.model_id}_live_view_vs_all_plays"] = {
+        res[f"{r.model_id}_live_view_vs_all_plays_same_fetches"] = {
             "decisions_live_view": len(live_dec), "decisions_all_plays": int(len(first_full)),
             "decided_at_same_fetch": int(same_fetch),
             "games_decided_only_live_view": only_live, "games_decided_only_all_plays": only_full,
             "bets_live_view": int(len(bk)), "bets_all_plays": int(len(a)),
             "same_bet": int((j["_merge"] == "both").sum()),
             "only_live_view": int((j["_merge"] == "left_only").sum()),
-            "only_all_plays": int((j["_merge"] == "right_only").sum())}
-        print(r.model_id, "live view:", res[f"{r.model_id}_live_view_vs_all_plays"],
-              "vs the search:", res[f"{r.model_id}_live_view_vs_search_bets"], flush=True)
+            "only_all_plays": int((j["_merge"] == "right_only").sum()),
+            "games_bet_only_live_view": sorted(set(j.loc[j["_merge"] == "left_only", "game_id"])),
+            "games_bet_only_all_plays": sorted(set(j.loc[j["_merge"] == "right_only", "game_id"]))}
+        print(r.model_id, "live view vs every play at the same fetches:",
+              res[f"{r.model_id}_live_view_vs_all_plays_same_fetches"],
+              "| cadence alone:", res[f"{r.model_id}_cadence_alone"], flush=True)
     res["fetches_replayed"] = n_fetch
     res["games_left_out_by_rule_6_all_plays"] = sorted(L.jump_games(pbp.drop(columns="_wc")))
     res["games_left_out_by_rule_5_all_plays"] = sorted(notes.get("games_first_play_before_listed_tip") or {})

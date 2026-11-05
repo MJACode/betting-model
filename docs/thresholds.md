@@ -1346,22 +1346,32 @@ inside the 0.05 ones. The model, the loop and the warning signs:
 | early season | no wait (IG-2 had none: its prior is Pinnacle's pre-game spread) | the loop |
 | decided once | per game and rule, a row in `nba_live_decisions`, bet or not | `models/nba_live_loop.py` |
 
-**Graded 2021-22 to 2025-26** (each cell's 95% whole-day interval):
+**Graded on the loop's own fetch times, 2021-22 to 2025-26** (2026-11-04, after
+the independent review: the archive's hourly purchases only, the shipped rule,
+section 9's house standard; each cell's 95% whole-day interval;
+`scripts/nba_live_ig2_regrade.py`):
 
-| Model | Bets | Units | ROI | interval | Seasons positive | 2025-26 | Prices (min / median / max) |
-|---|---|---|---|---|---|---|---|
-| `nba_live_spread_q12` | 1,475 | +103.6 | +6.2% | +1.4 .. +11.1 | 4 of 5 | +6.0% on 334 | -160 / -114 / +114 |
-| `nba_live_ml_q3` | 651 | +40.1 | +10.0% | +0.1 .. +19.9 | 5 of 5 | +6.7% on 159 | -200 / +210 / +3500 |
-| `nba_live_spread_q3` | 1,055 | +79.6 | +6.7% | +1.2 .. +12.6 | 5 of 5 | +5.5% on 286 | -144 / -113 / +125 |
+| Model | Bets | Units | ROI | interval | Seasons positive | 2025-26 | House standard | Prices (min / median / max) |
+|---|---|---|---|---|---|---|---|---|
+| `nba_live_spread_q12` | 1,348 | +96.6 | +6.4% | +1.4 .. +11.3 | 5 of 5 | +4.5% on 304 | passes | -160 / -114 / +114 |
+| `nba_live_ml_q3` | 503 | +26.2 | +8.3% | -2.7 .. +19.3 | 4 of 5 | +18.8% on 124 | fails: interval, bands | -200 / +200 / +3000 |
+| `nba_live_spread_q3` | 813 | +41.2 | +4.5% | -2.0 .. +11.0 | 4 of 5 | +4.7% on 220 | fails: interval, bands, placebo | -140 / -113 / +125 |
 
-The neighbouring cells: EV >= 0.08 also passed in all three (948 bets +6.5%,
-545 bets +15.8%, 751 bets +9.2%); EV >= 0.02 failed the interval alone in all
-three. The quarter-4 spread failed the placebo bar and is not built.
+The grade that put them forward (record 7.3, every archive purchase, IG-2's own
+state join) read 1,475 bets +6.2%, 651 bets +10.0% and 1,055 bets +6.7%, all
+passing the house standard of section 6.7; under section 9's bands bar all
+three would fail. The neighbours on the loop's fetch times: EV >= 0.08 passes
+for the quarters 1-2 spread (876 bets, +6.6%); the quarter-3 moneyline at 0.08
+(425 bets, +14.4%) fails the bands (the 0.05-0.08 band lost 10.4 units on 78
+bets) and the quarter-3 spread at 0.08 fails the interval. Whether the two
+quarter-3 rules stay in the loop is an open decision (2026-11-04). The
+quarter-4 spread failed the placebo bar and is not built. The comparison in
+full: `docs/sports/nba.md`, "In play".
 
 **Under the one-game rule** (two bets that cannot both win are not both made)
-the graded record loses 66 bets worth +15.98 units: the quarter-3 moneyline is
-619 bets +8.1%, the quarter-3 spread 1,021 bets +6.4%; the quarters 1-2 spread
-is unchanged.
+the hourly re-grade loses 46 bets worth +9.40 units: the quarter-3 moneyline is
+481 bets +7.2%, the quarter-3 spread 789 bets +4.1%; the quarters 1-2 spread is
+unchanged.
 
 **Review at 50 settled bets each** (gate standing, CLAUDE.md §2). Read beside
 the ROI: the share of bets at an outlier price, DraftKings' share, the underdog

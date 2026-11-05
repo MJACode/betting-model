@@ -71,8 +71,9 @@ state join, its impossible-number rules 1, 3, 4 and its clock rules 5, 6).
   STAKE     one unit to win, risk capped at 3 (H.risk_win, stake_for).
 
 The cadence that makes "the first fetch" mean what it meant in the grade lives
-in the loop (models/nba_live_loop.py): fetches only at the grade's purchase
-instants, every hour on the hour and every listed tip time.
+in the loop (models/nba_live_loop.py): fetches only at each hour minus 264 s,
+the archive's hourly purchase (the :30 gap-fill purchases were built from
+listed tips, which the loop cannot rebuild).
 
 EV here is the harness's: p_win x (decimal - 1) - p_lose, a push returning the
 stake. The row's model_probability is P(win | no push), so the platform's EV

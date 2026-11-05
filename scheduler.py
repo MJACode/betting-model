@@ -1024,8 +1024,8 @@ def run_nba_live() -> None:
     # cron relaunches it and max_instances=1 makes the ticks during a slate
     # no-ops. Run from the REPO ROOT.
     #
-    # Odds API credits are spent ONLY at a decision instant (every hour on the
-    # hour and every listed tip time) while a game in progress has a rule not
+    # Odds API credits are spent ONLY at a fetch moment (each hour minus
+    # 264 s, retried to +240 s) while a game in progress has a rule not
     # yet decided: one bulk h2h + spreads call for every game, 2 credits,
     # capped per process by NBA_LIVE_CALL_CAP / NBA_LIVE_CREDIT_CAP and by
     # the shared LIVE_DAILY_CREDIT_CAP.
