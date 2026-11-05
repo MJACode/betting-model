@@ -329,7 +329,12 @@ fires. A pick is announced only while its game is in progress
 reads STALE when a final game has no `nba_live_decisions` row, or when a fetch
 moment that needed a fetch has no Odds API call from the loop in
 `api_call_log`. A moment needed one when a game was in its first 100 minutes
-with a rule not yet decided.
+with a rule not yet decided. A game whose first 100 minutes ended before the
+loop's first supervisor tick, and a fetch moment that opened before that tick,
+are not scored. That tick is 2026-11-05 11:00 ET: #1180 / #1184 reached
+production that morning inside the cron's 3am-11am ET gap, and the 2026-11-04
+finals had already ended. A later slate with a missing row or a missing call
+still reads STALE.
 
 Settled by the generic game path
 (`config.LIVE_MODELS`): the spread against `scored_line`, the HOME number. No

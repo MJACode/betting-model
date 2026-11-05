@@ -1366,9 +1366,11 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # ── NBA in-play loop OUTPUTS (models/nba_live_loop.py) ───────────────
         # Its heartbeat says it ran; this says it did its job on yesterday's
-        # slate: every final game has a row in nba_live_decisions, and every
-        # fetch window that had a game to decide made its Odds API call
-        # (tracking/nba_live_health.py).
+        # slate: every final game the loop could have covered has a row in
+        # nba_live_decisions, and every fetch window at or after go-live that
+        # had a game to decide made its Odds API call. Games and windows that
+        # finished before the first supervisor tick (2026-11-05 11:00 ET) are
+        # not scored (tracking/nba_live_health.py).
         try:
             from tracking.nba_live_health import check as _nba_live_check
             _st, _det = _nba_live_check(conn, yday)

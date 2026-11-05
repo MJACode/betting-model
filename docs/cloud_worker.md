@@ -187,7 +187,9 @@ never scheduled.
 a supervisor (one launch runs a whole slate and exits after 3 idle ticks). The model and
 its evidence: `docs/sports/nba.md`, "In play". It beats `job_heartbeats` itself every 5
 minutes while a slate runs (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and
-`system_health` reads its outputs the next morning (`nba_live_outputs`).
+`system_health` reads its outputs the next morning (`nba_live_outputs`). A game
+or fetch window that finished before the loop's first tick (2026-11-05 11:00 ET)
+is not scored; the check was added in the same deploy as the loop.
 
 | Variable (on `pollers`) | Default | What it does |
 |---|---|---|
