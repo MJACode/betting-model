@@ -770,6 +770,21 @@ search; +1.45% at the second-best book).
 overs at 0.5 from one book. The probability shown is an upper bound (claimed
 0.533, won 0.501 in the band bet).
 
+**Its EV claims about three times what it returns, measured 2026-11-04 (mike;
+`docs/nba_models_2026.md` section 15).** Walk-forward on 2024-25 and 2025-26 (each
+season mapped by a fit on the seasons before it), every eighth of its EV
+over-claims, not only the top: the top eighth claims +23.2% and returned +6.9%,
+the bottom +2.5% and +1.4%. One factor fixes all eight: EV x 0.30 to 0.325 (the
+fit on each fold) lands inside the 90% range of what was returned in every
+eighth, early and late. Because it multiplies every EV by one number it changes
+no bet and no ranking, so nothing was shipped and the stored probability is still
+the uncorrected one. Above about the 80th percentile of its EV the return is flat
+(+5% to +8%), and no map tried (a blend with the price, the blend per market,
+isotonic, banded) ranks that top better. At the door, ranking the night by a
+corrected EV still loses to tip order: best six of the night -29.4 units against
+today (walk-forward -21.8). The rules that won more units did it by betting
+favourites, risking 27-40% more at the same return per unit risked.
+
 ## NBA — `nba_total_luck`, full-game totals, overs (2026-10-17, mike)
 
 A team's points allowed include how well its opponents happened to shoot threes
