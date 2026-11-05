@@ -17,9 +17,11 @@
 --                 (or under). A team's first game has no previous game.
 --   division_game true / false. Both teams in one division that season.
 --
--- A last-game filter is not known until that game is over, so an official
--- lock waits for the first quote at least 4 hours after the later of the
--- two teams' previous starts. Divisions are byom_team_division, a fixed
+-- A last-game filter is not known until that game is over (4 hours after
+-- the bet team's previous start; both teams' for prev_total). An official
+-- lock is then the quote still in force at that moment, made official at
+-- that moment: a candidate is stored only when the quote changes, so a
+-- line that did not move after the previous game is not dropped. Divisions are byom_team_division, a fixed
 -- list (NFL since 2002, NBA since 2004-05, NHL from 2013-14 with the
 -- 2020-21 temporary divisions and the 2021-22 realignment). Team codes
 -- are the ones byom_game_facts holds (measured 2026-11-05).
@@ -496,8 +498,10 @@ BEGIN
              CASE WHEN hp.prev_ou = 'win' AND ap.prev_ou = 'win' THEN 'over'
                   WHEN hp.prev_ou = 'loss' AND ap.prev_ou = 'loss' THEN 'under'
              END AS prev_total,
-             -- The later of the two previous starts. A trend on the last
-             -- game is not known until that game is over (official lock).
+             -- A trend on a last game is not known until that game is
+             -- over (official lock). Each team's previous start, and the
+             -- later of the two for prev_total.
+             hp.prev_at AS home_prev_at, ap.prev_at AS away_prev_at,
              greatest(hp.prev_at, ap.prev_at) AS prev_at,
              (public.byom_team_division(f.sport, f.season, f.home_team)
                 = public.byom_team_division(f.sport, f.season, f.away_team)) AS division_game
@@ -580,7 +584,24 @@ BEGIN
                  -- when the bet became official, never the close.
                  public.byom_line_move(o.market, o.leg_side, op.open_point,
                                        op.open_price, o.point, o.price) AS move,
-                 g.prev_at AS g_prev_at
+                 -- A candidate is the quote in force until the next one
+                 -- (byom/official.py stores a row only on a change).
+                 lead(o.locked_at) OVER (
+                   PARTITION BY o.canonical_key, o.market, o.leg_side,
+                                o.player_key, o.match_role
+                   ORDER BY o.locked_at) AS next_at,
+                 -- When a last-game filter becomes known: 4 hours after the
+                 -- bet team's previous start (both teams' for prev_total).
+                 CASE
+                   WHEN NOT v_needs_prev THEN NULL
+                   WHEN v_prev_total IS NOT NULL THEN g.prev_at
+                   WHEN (o.player_key = '' AND o.leg_side = 'home')
+                     OR (o.player_key <> '' AND o.team = g.home_team) THEN g.home_prev_at
+                   WHEN (o.player_key = '' AND o.leg_side = 'away')
+                     OR (o.player_key <> '' AND o.team = g.away_team) THEN g.away_prev_at
+                   ELSE g.prev_at
+                 END + interval '4 hours' AS wait_at,
+                 g.commence_time AS g_kick
             FROM byom_official_legs o
             LEFT JOIN g ON g.canonical_key = o.canonical_key
             LEFT JOIN opener op
@@ -615,10 +636,14 @@ BEGIN
          AND (v_min_total IS NULL OR q.player_key <> '' OR q.total_used >= v_min_total)
          AND (v_max_total IS NULL OR q.player_key <> '' OR q.total_used <= v_max_total)
          AND (v_line_move IS NULL OR q.move = v_line_move)
-         -- A last-game filter is not known until that game is over: the
-         -- lock is the first quote at least 4 hours after it started.
-         AND (NOT v_needs_prev OR q.g_prev_at IS NULL
-              OR q.locked_at >= q.g_prev_at + interval '4 hours')
+         -- A last-game filter is not known until that game is over. A
+         -- candidate counts if it was still the live quote when the result
+         -- was known (and before kickoff); the bet is then official at
+         -- that moment, at that quote. A line that never changed after
+         -- the previous game is not dropped (CE review, #1187 H1).
+         AND (q.wait_at IS NULL
+              OR ((q.next_at IS NULL OR q.next_at > q.wait_at)
+                  AND q.wait_at < q.g_kick))
        ORDER BY canonical_key, market, leg_side, player_key, locked_at
     ),
     raw AS (
@@ -700,7 +725,7 @@ BEGIN
       -- Official game legs: the first quote that fits the role and the bands.
       SELECT 'official', o.market, o.leg_side, o.canonical_key, g.commence_time,
              g.week, g.home_team, g.away_team, o.team, NULL::text,
-             o.point, o.price, o.result, o.locked_at, o.leg_role,
+             o.point, o.price, o.result, greatest(o.locked_at, o.wait_at), o.leg_role,
              CASE o.leg_side WHEN 'home' THEN g.home_rest_days
                              WHEN 'away' THEN g.away_rest_days END,
              g.is_primetime,
@@ -730,7 +755,7 @@ BEGIN
       -- Official props.
       SELECT 'official', o.market, o.leg_side, o.canonical_key, g.commence_time,
              p.week, g.home_team, g.away_team, o.team, p.player_name,
-             o.point, o.price, o.result, o.locked_at, o.leg_role,
+             o.point, o.price, o.result, greatest(o.locked_at, o.wait_at), o.leg_role,
              CASE WHEN o.team = g.home_team THEN g.home_rest_days
                   WHEN o.team = g.away_team THEN g.away_rest_days END,
              g.is_primetime,

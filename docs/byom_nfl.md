@@ -294,8 +294,15 @@ quote that became the bet, so the lock is the first quote where the move
 fits; the close is never used for an official bet. A last-game filter is not
 known until that game is over, so the official lock waits for the first
 quote at least 4 hours after the later of the two teams' previous starts.
-On the closing line both are known at kickoff. A team's first game of a
-season has no previous game, so a last-game filter leaves it out.
+A stored candidate is the line until the next one (a row is written only
+on a change), so the lock is the quote still in force at that moment, made
+official at that moment; a line that never moved after the previous game is
+not dropped (CE review, #1187). The wait is the bet team's previous start
+for `prev_result` / `prev_ats`, and both teams' for `prev_total`. On the
+closing line both are known at kickoff. A team's first game of a season has
+no previous game, so a last-game filter leaves it out. The opener is the
+first DraftKings quote stored, not necessarily DraftKings' own open; a move
+on a spread, total or prop is the number only, not the price.
 
 **Divisions** are a fixed list in `byom_team_division`: NFL since 2002, NBA
 since 2004-05, NHL from 2013-14 with the 2020-21 temporary divisions and the

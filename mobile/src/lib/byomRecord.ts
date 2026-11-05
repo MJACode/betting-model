@@ -363,12 +363,13 @@ export function nhlSeasonList(now: Date = new Date()): number[] {
   return seasons;
 }
 
-/** Every season in scope for this sport, oldest first. */
 /** The season still being played: the last one seasonListFor reads. */
 export function currentByomSeason(sport: ByomSport, now: Date = new Date()): number {
   const list = seasonListFor(sport, now);
   return list[list.length - 1];
 }
+
+/** Every season in scope for this sport, oldest first. */
 
 export function seasonListFor(sport: ByomSport, now: Date = new Date()): number[] {
   if (sport === 'NBA') return nbaSeasonList(now);

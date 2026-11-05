@@ -104,6 +104,8 @@ export function ByomFilterSheet({
       ? 'Updating…'
       : `Show ${bets} bet${bets === 1 ? '' : 's'}`;
   const prop = isPropMarket(market);
+  // A total has no Matchup tab, so a stale 'matchup' falls back to Odds.
+  const shown = tab === 'matchup' && market === 'totals' ? 'odds' : tab;
   const gameSide = side === 'home' ? 'Home' : side === 'away' ? 'Away'
     : side === 'over' ? 'Over' : side === 'under' ? 'Under' : 'Any';
   const sideLabel = !prop
@@ -158,7 +160,7 @@ export function ByomFilterSheet({
           {(market === 'totals'
             ? (['odds', 'time', 'trends'] as const)
             : (['odds', 'time', 'matchup', 'trends'] as const)).map((item) => {
-            const selected = item === tab;
+            const selected = item === shown;
             const label = item === 'odds' ? 'Odds' : item === 'time' ? 'Time'
               : item === 'matchup' ? 'Matchup' : 'Trends';
             return (
@@ -183,7 +185,7 @@ export function ByomFilterSheet({
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          {tab === 'odds' ? (
+          {shown === 'odds' ? (
             <OddsTab
               sport={sport}
               market={market}
@@ -191,7 +193,7 @@ export function ByomFilterSheet({
               onPropFilters={onPropFilters}
             />
           ) : null}
-          {tab === 'time' ? (
+          {shown === 'time' ? (
             <TimeTab
               sport={sport}
               prop={prop}
@@ -201,7 +203,7 @@ export function ByomFilterSheet({
               onPropFilters={onPropFilters}
             />
           ) : null}
-          {tab === 'matchup' && market !== 'totals' ? (
+          {shown === 'matchup' ? (
             <MatchupTab
               sport={sport}
               market={market}
@@ -212,7 +214,7 @@ export function ByomFilterSheet({
               onPropFilters={onPropFilters}
             />
           ) : null}
-          {tab === 'trends' ? (
+          {shown === 'trends' ? (
             <TrendsTab
               market={market}
               propFilters={propFilters}
@@ -681,7 +683,7 @@ function TrendsTab({
         </View>
       </Card>
       <Text style={styles.note}>
-        A team’s first game of the season has no last game, so a last-game filter leaves it out.
+        A team’s first game of the season has no last game, so a last-game filter leaves it out. The opener is the first DraftKings line we stored. On a spread, total or player line, only the number counts as a move, not the price.
       </Text>
     </View>
   );

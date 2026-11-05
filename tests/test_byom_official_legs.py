@@ -930,9 +930,10 @@ def test_division_game_and_last_game_filters(scratch):
 
 
 def test_a_last_game_filter_waits_for_that_game_on_the_official_line(scratch):
-    """The official lock cannot use a result that is not in yet: DAL's
-    week-6 game started 2026-10-19 00:20 UTC, so a quote on 10-15 is not
-    a candidate for 'off a loss'; the 10-20 quote is."""
+    """The official lock cannot use a result that is not in yet. DAL's
+    week-6 game started 2026-10-19 00:20 UTC, so 'off a loss' is known at
+    04:20. A stored quote is the line until the next one: the quote still
+    live at 04:20 is the bet, made official at 04:20."""
     _pg, cur = scratch
     cur.execute("""
         INSERT INTO byom_official_legs (
@@ -942,13 +943,36 @@ def test_a_last_game_filter_waits_for_that_game_on_the_official_line(scratch):
           ('2026_07_DAL_PHI', 'NFL', 2026, 'h2h', 'away', '', 'any',
            'underdog', 'DAL', '2026-10-15 00:00+00', NULL, 150, 'win'),
           ('2026_07_DAL_PHI', 'NFL', 2026, 'h2h', 'away', '', 'any',
-           'underdog', 'DAL', '2026-10-20 12:00+00', NULL, 170, 'win')""")
-    cur.execute("SELECT price, locked_at::date::text FROM byom_legs(2026, "
-                "'{\"markets\":[\"h2h\"],\"side\":\"away\",\"prev_result\":\"lost\"}', 'official')")
-    assert cur.fetchall() == [(170, "2026-10-20")]
-    cur.execute("SELECT price FROM byom_legs(2026, "
-                "'{\"markets\":[\"h2h\"],\"side\":\"away\"}', 'official')")
-    assert cur.fetchall() == [(150,)]
+           'underdog', 'DAL', '2026-10-18 12:00+00', NULL, 170, 'win'),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'h2h', 'away', '', 'any',
+           'underdog', 'DAL', '2026-10-20 12:00+00', NULL, 190, 'win')""")
+
+    def official(filters):
+        cur.execute("SELECT price, to_char(locked_at AT TIME ZONE 'UTC', 'MM-DD HH24:MI') "
+                    "FROM byom_legs(2026, %s::jsonb, 'official') "
+                    "WHERE canonical_key = '2026_07_DAL_PHI'", (filters,))
+        return [(int(r[0]), r[1]) for r in cur.fetchall()]
+
+    lost = '{"markets":["h2h"],"side":"away","prev_result":"lost"}'
+    assert official(lost) == [(170, "10-19 04:20")]
+    assert official('{"markets":["h2h"],"side":"away"}') == [(150, "10-15 00:00")]
+
+
+def test_a_line_that_never_moved_after_the_last_game_is_not_dropped(scratch):
+    """CE review #1187 H1: +150 posted before the GB game and unchanged to
+    kickoff was bettable after the loss. It must not vanish."""
+    _pg, cur = scratch
+    cur.execute("""
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result)
+        VALUES
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'h2h', 'away', '', 'any',
+           'underdog', 'DAL', '2026-10-15 00:00+00', NULL, 150, 'win')""")
+    cur.execute("SELECT price, to_char(locked_at AT TIME ZONE 'UTC', 'MM-DD HH24:MI') "
+                "FROM byom_legs(2026, '{\"markets\":[\"h2h\"],\"side\":\"away\","
+                "\"prev_result\":\"lost\"}', 'official')")
+    assert [(int(r[0]), r[1]) for r in cur.fetchall()] == [(150, "10-19 04:20")]
 
 
 def test_line_move_uses_the_quote_that_was_bet_never_the_close(scratch):
