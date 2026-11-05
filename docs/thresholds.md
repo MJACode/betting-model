@@ -733,6 +733,22 @@ other), the lead 87% of the graded bets were decided at
 Closing-line value is measured from the first night: each bet game gets a `'close'` prop snapshot 12-25
 minutes before tip (`data/ingestors/nba_prop_close_ingestor.py`).
 
+**Its top 2% by EV returns nothing, measured 2026-11-05 (mike; `docs/nba_models_2026.md`
+section 16).** On its whole list (24,572 bets, 2023-24..2025-26), its claims track its
+returns from the 70th to the 98th percentile of its EV. The top 2% claims +10.5% and returned
+-1.6% (492 bets, 90% range -9.1 to +5.9), against +6.4% for the 90th-98th percentile. The gap
+points the same way in every season and both halves of each season, but every 90% range includes
+zero. That is all of its over-claim at the door: its door bets below the 98th percentile claim
++6.3% and returned +8.2%; at the 98th and up they claim +10.9% and returned -1.8% (277 bets). In
+the 778 door games it wins while the projection model also had a bet, the projection bets it
+displaced returned +6.3% against its +5.2% (-2.6 units, 90% range -61.8 to +59.2). So no way of
+counting its bets for less at the door clears. Lowering its percentile by 0.01 to 0.50 moves -7.3
+to +9.6 units against today's +183.7. Capping it loses at every cap tried (-2.5 to -27.0). Removing
+its top 3% from the door gains +28.4. That is a peak (+4.5 at the top 4%, +8.3 at the top 1%), it
+falls all in the early half, and half of it comes from swaps to its own next-best bet. Walk-forward
+it is +14.0 (-23.5 to +52.0). None of these rules tilts to favourites: those that hand games to
+the projection model risk up to 4.6% less. Nothing changed.
+
 ## NBA — `nba_prop_projection`, the projection model (2026-10-16, mike)
 
 Each player's projected count (minutes × per-minute rate, a negative-binomial
