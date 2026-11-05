@@ -789,6 +789,12 @@ def _live_webhook_for_sport(sport: str) -> str | None:
         return explicit
     if (getattr(config, "DISCORD_CHANNELS_LIVE", None) or {}).get(sport):
         return _live_channel_webhook(sport)
+    if sport in getattr(config, "DISCORD_LIVE_CHANNEL_REQUIRED", ()):
+        # No fallback for these sports: a pick posted to the shared or the
+        # pre-game channel is ledgered as sent to live and never re-posts.
+        logger.error(f"Discord(live): no DISCORD_WEBHOOK_LIVE_{sport} or DISCORD_CHANNEL_LIVE_{sport}; "
+                     f"{sport} live picks are not posted anywhere else and stay unsent")
+        return None
     return config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(sport)
 
 

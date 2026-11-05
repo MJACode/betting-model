@@ -140,6 +140,10 @@ MAX_SILENCE: dict = {
 # reported around 23:40 ET, after the slate it exists for.
 ACTIVE_HOURS_ET: dict = {
     "nhl_goalie_window": (11, 23, 30),
+    # The NBA in-play loop beats every 5 minutes while a slate runs
+    # (models/nba_live_loop.Loop.heartbeat) and on every idle relaunch (every
+    # 10 minutes), so 30 minutes of silence in its hours is a hung loop.
+    "nba_live": (11, 23, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

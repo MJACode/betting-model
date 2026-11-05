@@ -181,6 +181,30 @@ Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cade
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
 
+### The NBA in-play loop (added 2026-11-04)
+
+`models/nba_live_loop.py`, job `nba_live` on `pollers`, every 10 minutes 11am-2:50am ET as
+a supervisor (one launch runs a whole slate and exits after 3 idle ticks). The model and
+its evidence: `docs/sports/nba.md`, "In play". It beats `job_heartbeats` itself every 5
+minutes while a slate runs (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and
+`system_health` reads its outputs the next morning (`nba_live_outputs`).
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NBA_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NBA` or `DISCORD_WEBHOOK_LIVE_NBA` | unset | Where NBA live picks post. **Required**: NBA live picks never fall back to the shared live or the pre-game channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`), and with neither set the loop decides nothing and exits 3 while a game is in progress, so the job reads failed. A channel id resolves through `DISCORD_BOT_TOKEN` (the bot makes a webhook named `nba-live`) |
+| `NBA_LIVE_FETCH_OFFSET_SEC` | `264` | Fetch at each hour minus this (the archive's hourly purchase served the market 264 s before the hour) |
+| `NBA_LIVE_FETCH_WINDOW_SEC` | `240` | How long after that instant an attempt may still start (retries of a skipped game) |
+| `NBA_LIVE_RETRY_GAP_SEC` | `60` | Seconds between attempts inside a window |
+| `NBA_LIVE_PBP_WAIT_SEC` | `170` | Seconds after the fetch before ESPN's summary is read (the scoring plays' measured 99th-percentile publication lag) |
+| `NBA_LIVE_PBP_RECHECK_SEC` | `60` | Seconds to the second read; a play logged before the fetch that appears only then skips the game (fail closed) |
+| `NBA_LIVE_HEADER_RECHECK_SEC` | `20` | ESPN's header score ahead of its play list: re-read after this, refuse if still ahead |
+| `NBA_LIVE_PLAY_LAG_MAX_SEC` | `230` | Refuse when ESPN's newest play is older than this while its clock is running |
+| `NBA_LIVE_CALL_CAP` / `NBA_LIVE_CREDIT_CAP` | `100` / `200` | Per-process ceilings on Odds API calls and credits (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the loop stops fetching under 1,000 credits left or 15% of the plan |
+| `NBA_LIVE_POLL_SEC` / `NBA_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
+
+`--dry-run` makes no Odds API call and writes nothing.
+
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 
 `live_scoreboard` job, `pollers` service, every minute 24x7

@@ -372,6 +372,22 @@ DISCORD_WEBHOOKS_LIVE: dict = {
 # unset.
 DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 
+# Sports whose in-play picks post ONLY to their own live channel
+# (DISCORD_WEBHOOK_LIVE_<SPORT> or DISCORD_CHANNEL_LIVE_<SPORT>), never to the
+# shared live channel or the sport's pre-game channel. With neither set the
+# pick stays unsent and unledgered, so it posts once the channel exists.
+# NBA (2026-11-04, operations review): pollers had no NBA live destination, so
+# the fallback would have posted NBA in-play bets to #nba and ledgered them as
+# sent to live, never to re-post. models/nba_live_loop.py refuses to decide
+# while neither variable is set.
+DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA"})
+
+# Sports whose in-play picks are announced only while the game has no final
+# score in `games` (tracking/publish_filters.live_publishable_sql). Only a
+# sport whose `games` score is written at the final, never during the game,
+# belongs here; NBA's is written by data/ingestors/nba_results_ingestor.
+LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA"})
+
 # Channel for the morning results recap (cross-sport, so it needs its own home).
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
 DISCORD_WEBHOOK_RESULTS: str = os.environ.get("DISCORD_WEBHOOK_RESULTS", "").strip()

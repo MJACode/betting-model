@@ -353,8 +353,10 @@ def fetch_quotes(rows: pd.DataFrame, games: pd.DataFrame,
     Returns (quotes, rule-1 rows, notes)."""
     _G, _H, _D, L = _lab()
     o = rows.copy()
-    if "source" not in o:
-        o["source"] = None
+    # L.live_quotes keeps the source-less rows (the worker's live pulls). The
+    # loop's own rows carry a source marker (nba_live_feed.LIVE_SOURCE) and are
+    # the same kind of row, so they are read as source-less here.
+    o["source"] = None
     q, _raw, dropped, notes = L.live_quotes(o, games)
     if seen is not None and len(q):
         key = list(zip(q["game_id"], q["market"], q["book"], q["stamp"]))
@@ -422,10 +424,23 @@ def priced_offers(dec: pd.DataFrame, models: dict) -> pd.DataFrame:
     return G.with_side_pick(G.priced(off, off["mean"], off["sd"], off["p_home"]))
 
 
+EV_DECIMALS = 12
+
+
 def choose_bets(cand: pd.DataFrame, cut: float, floor: float) -> pd.DataFrame:
     """H.choose on the model's side: one bet per (game, market), best EV at a
-    deciding book, price >= floor, EV >= cut."""
+    deciding book, price >= floor, EV >= cut.
+
+    EV is rounded to EV_DECIMALS first. Two books at the same number and price
+    have the same EV, and H.choose sends a tie to the earlier book in
+    BEST_LINE_BOOKMAKERS; but EV computed in a one-game frame can differ from
+    the same EV computed in the grade's many-game frame by floating-point noise
+    (4e-16), and the noise, not the rule, then chose the book (3 of the 1,753
+    graded quarters 1-2 spread bets, independent review 2026-11-04). Rounding
+    makes a tie a tie in every frame."""
     _G, H, _D, _L = _lab()
+    if "ev" in cand:
+        cand = cand.assign(ev=cand["ev"].round(EV_DECIMALS))
     return H.choose(cand, cut, sides=["model"], floor=floor)
 
 
@@ -549,7 +564,10 @@ def pick_label(rule: Rule, side: str, home_line, home: str, away: str) -> str:
     team = home if side == "home" else away
     if rule.market == "h2h":
         return f"{team} ML (live)"
-    return f"{team} {side_line(rule, side, home_line):+g} (live)"
+    n = side_line(rule, side, home_line)
+    if n == 0:
+        return f"{team} PK (live)"       # pick'em: tracking.pick_integrity reads PK as 0
+    return f"{team} {n:+g} (live)"
 
 
 # ─── one game never carries two bets that cannot both win ──────────────────────

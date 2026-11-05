@@ -377,3 +377,18 @@ def test_two_bets_that_cannot_both_win(a, b, cannot):
     leaves no tie."""
     assert M.cannot_both_win(a, b) is cannot
     assert M.cannot_both_win(b, a) is cannot
+
+
+def test_an_ev_tie_goes_to_the_earlier_book_whatever_the_floating_point_noise():
+    """Two books at the same number and price have the same EV; the tie goes
+    to the earlier book in BEST_LINE_BOOKMAKERS (H.choose). In a one-game frame
+    the later book's EV can come out 4e-16 higher, and the noise then chose the
+    book (3 of 1,753 graded bets, independent review). EV is rounded first."""
+    cand = pd.DataFrame([
+        {"game_id": "g", "market": "spreads", "side": "away", "side_pick": "away", "book": "draftkings",
+         "line": -2.5, "price": -110.0, "p_win": 0.56, "p_push": 0.0, "ev": 0.069090909090909},
+        {"game_id": "g", "market": "spreads", "side": "away", "side_pick": "away", "book": "betrivers",
+         "line": -2.5, "price": -110.0, "p_win": 0.56, "p_push": 0.0, "ev": 0.069090909090909 + 4e-16},
+    ])
+    b = M.choose_bets(cand, 0.05, -200.0)
+    assert list(b["book"]) == ["draftkings"]

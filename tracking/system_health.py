@@ -1364,6 +1364,19 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("odds_api_credits", ERROR, "WARN", f"query failed: {exc}")
 
+        # ── NBA in-play loop OUTPUTS (models/nba_live_loop.py) ───────────────
+        # Its heartbeat says it ran; this says it did its job on yesterday's
+        # slate: every final game has a row in nba_live_decisions, and every
+        # fetch window that had a game to decide made its Odds API call
+        # (tracking/nba_live_health.py).
+        try:
+            from tracking.nba_live_health import check as _nba_live_check
+            _st, _det = _nba_live_check(conn, yday)
+            r.add("nba_live_outputs", {"ok": OK, "stale": STALE, "skipped": SKIPPED}[_st], "WARN", _det)
+        except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
+            r.add("nba_live_outputs", ERROR, "WARN", f"query failed: {type(exc).__name__}: {exc}")
+
         # ── MLB stat feeds (MLB Stats API / Savant / Open-Meteo / ESPN) ─────
         r.date_check(conn, "mlb_team_stats", "CRIT", "mlb_team_stats", "as_of_date",
                      yday if daily_pipeline_pending else run_date,

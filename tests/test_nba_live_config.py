@@ -135,7 +135,8 @@ def test_the_decision_ledger_is_created_on_every_pass():
     assert "ENABLE ROW LEVEL SECURITY" in sql
     assert "REVOKE ALL ON public.nba_live_decisions FROM anon" in sql
     assert "REVOKE ALL ON public.nba_live_decisions FROM authenticated" in sql
-    assert "PRIMARY KEY (game_id, model_id)" in sql
+    assert "WHERE outcome IN ('bet', 'no_bet', 'declined');" in sql
+    assert "CHECK (outcome IN ('bet', 'no_bet', 'declined', 'skipped', 'carried'))" in sql
     assert sql.strip().startswith("--") and sql.count("DO $mig$") == 1      # one statement
 
 
@@ -170,3 +171,82 @@ def test_a_live_pull_stores_an_nba_row_stamped_after_the_tip_as_in_play(monkeypa
     assert labels[("draftkings", "h2h")] == "open" and labels[("draftkings", "spreads")] == "open"
     assert labels[("fanduel", "h2h")] == "in_play" and labels[("fanduel", "spreads")] == "in_play"
     assert "NBA" in oi.LIVE_PULL_IN_PLAY_SPORTS
+
+
+def test_nba_live_picks_never_fall_back_to_another_channel(monkeypatch):
+    """With no NBA live webhook or channel, an NBA live pick goes nowhere (and
+    is not ledgered), never to the shared live channel or the pre-game #nba.
+    Other sports keep their fallback."""
+    from tracking import discord_notifier as dn
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS_LIVE", {})
+    monkeypatch.setattr(config, "DISCORD_CHANNELS_LIVE", {})
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_LIVE", "https://example.invalid/shared-live")
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS", {"NBA": "https://example.invalid/nba",
+                                                     "MLB": "https://example.invalid/mlb"})
+    assert dn._live_webhook_for_sport("NBA") is None
+    assert dn._live_webhook_for_sport("MLB") == "https://example.invalid/shared-live"
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS_LIVE", {"NBA": "https://example.invalid/nba-live"})
+    assert dn._live_webhook_for_sport("NBA") == "https://example.invalid/nba-live"
+
+
+def test_an_nba_live_pick_is_announced_only_while_its_game_is_in_progress():
+    """live_publishable_sql, run: the NBA pick of a game with a final score is
+    not announced; an unfinished one is; another sport is unchanged."""
+    import sqlite3
+    from tracking.publish_filters import live_publishable_sql
+    c = sqlite3.connect(":memory:")
+    c.executescript("""
+        CREATE TABLE picks (game_id TEXT, model_id TEXT, sport TEXT, condition_status TEXT,
+                            downgrade_reason TEXT);
+        CREATE TABLE games (game_id TEXT, home_score REAL);
+        CREATE TABLE model_action_thresholds (model_id TEXT, paused BOOLEAN);
+        INSERT INTO model_action_thresholds VALUES ('nba_live_ml_q3', 0), ('mlb_live_total_runs', 0);
+        INSERT INTO games VALUES ('NBA_done', 110), ('NBA_live', NULL), ('MLB_done', 5);
+        INSERT INTO picks VALUES ('NBA_done', 'nba_live_ml_q3', 'NBA', NULL, NULL),
+                                 ('NBA_live', 'nba_live_ml_q3', 'NBA', NULL, NULL),
+                                 ('MLB_done', 'mlb_live_total_runs', 'MLB', NULL, NULL);
+    """)
+    sql = "SELECT p.game_id FROM picks p WHERE 1 = 1 " + live_publishable_sql("p").replace(
+        "mat_pub.paused = FALSE", "mat_pub.paused = 0")
+    got = {r[0] for r in c.execute(sql).fetchall()}
+    assert got == {"NBA_live", "MLB_done"}
+    assert config.LIVE_ANNOUNCE_WHILE_IN_PROGRESS == frozenset({"NBA"})
+
+
+def test_a_pickem_spread_is_labelled_pk():
+    from tracking.pick_integrity import pick_problems
+    rule = M.RULE_BY_ID[M.SPREAD_Q3]
+    for side in ("home", "away"):
+        label = M.pick_label(rule, side, 0.0, "BOS", "NYK")
+        assert label == f"{'BOS' if side == 'home' else 'NYK'} PK (live)"
+        assert pick_problems(label, side, 0.0, rule.model_id, "BOS", "NYK") == []
+
+
+def test_the_output_check_reads_a_game_never_looked_at_and_a_silent_window():
+    from datetime import datetime, timedelta, timezone
+    from tracking import nba_live_health as NH
+    tip = datetime(2026, 11, 5, 0, 10, tzinfo=timezone.utc)
+    # windows inside tip..tip+100 min: 00:55:36 and 01:55:36 (the 1:50 end stops before 01:55:36)
+    assert NH.windows_between(tip, tip + timedelta(minutes=100)) == [
+        datetime(2026, 11, 5, 0, 55, 36, tzinfo=timezone.utc)]
+    assert NH.games_without_rows(["a", "b"], {"a"}) == ["b"]
+    w = datetime(2026, 11, 5, 0, 55, 36, tzinfo=timezone.utc)
+    assert NH.windows_without_calls({"a": tip}, {}, []) == [w]
+    assert NH.windows_without_calls({"a": tip}, {}, [w + timedelta(seconds=30)]) == []
+    # all three rules decided before the window: no call was needed
+    done = {"a": [tip + timedelta(minutes=20)] * 3}
+    assert NH.windows_without_calls({"a": tip}, done, []) == []
+
+
+def test_the_output_check_runs_in_system_health():
+    src = (config.ROOT / "tracking" / "system_health.py").read_text(encoding="utf-8")
+    assert '"nba_live_outputs"' in src and "nba_live_health import check" in src
+
+
+def test_the_loop_settings_are_documented_for_the_worker():
+    doc = (config.ROOT / "docs" / "cloud_worker.md").read_text(encoding="utf-8")
+    for name in ("RUN_NBA_LIVE", "NBA_LIVE_PBP_WAIT_SEC", "NBA_LIVE_PBP_RECHECK_SEC", "NBA_LIVE_FETCH_OFFSET_SEC",
+                 "NBA_LIVE_FETCH_WINDOW_SEC", "NBA_LIVE_RETRY_GAP_SEC", "NBA_LIVE_PLAY_LAG_MAX_SEC",
+                 "NBA_LIVE_HEADER_RECHECK_SEC", "NBA_LIVE_CALL_CAP", "NBA_LIVE_CREDIT_CAP",
+                 "DISCORD_CHANNEL_LIVE_NBA", "DISCORD_WEBHOOK_LIVE_NBA"):
+        assert name in doc, name

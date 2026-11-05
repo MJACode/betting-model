@@ -83,10 +83,20 @@ def build_plays(periods: int = 4, first: datetime = FIRST, extra: list[dict] | N
             t = t + BREAKS.get(per, timedelta(minutes=2))
     for e in extra or []:
         seq += 1
+        # ESPN's running score at an inserted play: the plays logged before it, plus it
+        w_e = e["wallclock"]
+        before = [p for p in plays if datetime.fromisoformat(p["wallclock"].replace("Z", "+00:00")) <= w_e]
+        bh = max((p["homeScore"] for p in before), default=0)
+        ba = max((p["awayScore"] for p in before), default=0)
+        pts = e.get("points", 0)
+        if e.get("team", "H") == "H":
+            bh += pts
+        else:
+            ba += pts
         plays.append({
             "id": f"{EVENT_ID}x{seq}", "sequenceNumber": str(seq),
             "type": {"id": "1", "text": "Jump Shot" if e.get("points") else "Defensive Rebound"},
-            "text": "extra", "awayScore": 0, "homeScore": 0, "period": {"number": e["period"]},
+            "text": "extra", "awayScore": ba, "homeScore": bh, "period": {"number": e["period"]},
             "clock": {"displayValue": clock_text(e["clock_s"])}, "scoringPlay": bool(e.get("points")),
             "scoreValue": e.get("points", 0),
             "team": {"id": str(HOME_ID if e.get("team", "H") == "H" else AWAY_ID)},
@@ -101,22 +111,33 @@ def build_plays(periods: int = 4, first: datetime = FIRST, extra: list[dict] | N
     return plays
 
 
-def summary(plays: list[dict], known_until: datetime | None = None, final: bool = False) -> dict:
-    """An ESPN summary carrying the plays logged up to `known_until`."""
+def summary(plays: list[dict], known_until: datetime | None = None, final: bool = False,
+            header_score: tuple | None = None) -> dict:
+    """An ESPN summary carrying the plays logged up to `known_until`. The
+    header's score and clock are the newest known play's, as a healthy feed's
+    are; `header_score` (home, away) overrides the score (a play list behind
+    its header)."""
     if known_until is not None:
         plays = [p for p in plays
                  if datetime.fromisoformat(p["wallclock"].replace("Z", "+00:00")) <= known_until]
+    last = max(plays, key=lambda p: (p["period"]["number"], int(p["sequenceNumber"]))) if plays else None
+    hs, as_ = header_score if header_score is not None else (
+        (last["homeScore"], last["awayScore"]) if last else (0, 0))
+    clk = last["clock"]["displayValue"] if last else "12:00"
+    mm, ss = clk.split(":")
+    status = {"type": {"completed": final, "state": "post" if final else "in"},
+              "period": last["period"]["number"] if last else 1, "clock": float(int(mm) * 60 + int(ss))}
     athletes_h = [{"athlete": {"id": str(i), "displayName": f"H{i}"}, "starter": True, "stats": []}
                   for i in HOME_STARTERS]
     athletes_a = [{"athlete": {"id": str(i), "displayName": f"A{i}"}, "starter": True, "stats": []}
                   for i in AWAY_STARTERS]
     return {
         "header": {"competitions": [{
-            "status": {"type": {"completed": final, "state": "post" if final else "in"}},
+            "status": status,
             "competitors": [
-                {"homeAway": "home", "score": "0",
+                {"homeAway": "home", "score": str(hs),
                  "team": {"id": str(HOME_ID), "abbreviation": "BOS", "displayName": HOME_NAME}},
-                {"homeAway": "away", "score": "0",
+                {"homeAway": "away", "score": str(as_),
                  "team": {"id": str(AWAY_ID), "abbreviation": "NY", "displayName": AWAY_NAME}},
             ]}]},
         "plays": plays,

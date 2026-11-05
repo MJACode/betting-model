@@ -225,6 +225,31 @@ def parity_held() -> dict:
                                  "pairs": pairs, "pairs_cannot_both_win": conflicts,
                                  "bets_graded_seasons": int(len(allb))}
     print("two rules on one game:", res["two_rules_one_game"], f"({time.time() - t0:.0f}s)")
+    # The live loop's own path: M.decide on one game's first eligible fetch per
+    # rule (a one-game frame), against the graded bets.
+    dec = G.decision_quotes(el)
+    by_rule = {(r.phase, r.market): r for r in M.RULES}
+    rows = []
+    for (gid, mk, ph), grp in dec.groupby(["game_id", "market", "phase_ig2"], sort=False):
+        r = by_rule.get((ph, mk))
+        if r is None:
+            continue
+        d = M.decide(grp, r, models, float(grp["mu_pre"].iloc[0]), CUT, FLOOR)
+        if d is not None and d.bet:
+            rows.append({**{k: d.pick[k] for k in ("game_id", "market", "side", "book", "price", "line", "ev")},
+                         "model_id": r.model_id})
+    live = pd.DataFrame(rows)
+    for r in M.RULES:
+        g = pd.read_parquet(G.BETS_DIR / GRADED_FILES[r.model_id])
+        g = g[g["cut"].round(2) == CUT]
+        key = ["game_id", "side", "book", "price"]
+        a = live[live["model_id"] == r.model_id][key]
+        j = a.merge(g[key], on=key, how="outer", indicator=True)
+        res[f"{r.model_id}_live_path"] = {"bets_live_path": int(len(a)), "bets_graded": int(len(g)),
+                                          "same_bet": int((j["_merge"] == "both").sum()),
+                                          "only_live_path": int((j["_merge"] == "left_only").sum()),
+                                          "only_graded": int((j["_merge"] == "right_only").sum())}
+        print(r.model_id, "live path (M.decide per game):", res[f"{r.model_id}_live_path"], flush=True)
     return res
 
 
@@ -241,7 +266,26 @@ def _live27_inputs():
     return p, games, pbp, box, top
 
 
-def parity_live27(wait_s: float = WAIT_S) -> dict:
+def loop_fetches(fetches, offset_s: float = 264.0, within_min: float = 10.0) -> list:
+    """The worker fetches the loop's fetch times stand for: for each hour minus
+    `offset_s`, the first worker fetch at or after it within `within_min`
+    minutes (the worker fetched about every 10 minutes; the loop fetches at the
+    instant itself)."""
+    F = pd.DatetimeIndex(sorted(fetches))
+    if len(F) == 0:
+        return []
+    lo = F.min().floor("h")
+    hi = F.max().ceil("h") + pd.Timedelta(hours=1)
+    keep = []
+    for h in pd.date_range(lo, hi, freq="h", tz="UTC"):
+        inst = h - pd.Timedelta(seconds=offset_s)
+        k = F.searchsorted(inst, side="left")
+        if k < len(F) and F[k] - inst < pd.Timedelta(minutes=within_min):
+            keep.append(F[k])
+    return sorted(set(keep))
+
+
+def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
     G, H, D, L = _lab()
     t0 = time.time()
     p, games, pbp, _box, top = _live27_inputs()
@@ -254,7 +298,7 @@ def parity_live27(wait_s: float = WAIT_S) -> dict:
                                      "bets_S1_IG2_live27_Q3_spreads_0004.parquet"))}
     for k in lab:
         lab[k] = lab[k][lab[k]["cut"].round(2) == CUT]
-    odds = p["odds"]
+    odds = p["odds"][p["odds"]["source"].isna()].copy()      # the search's rows: the worker's live pulls
     plays_all, wild = L.live_plays(pbp)
     # (1) every play known: the search's own view
     q_all, _d, _n = M.fetch_quotes(odds, games)
@@ -275,9 +319,15 @@ def parity_live27(wait_s: float = WAIT_S) -> dict:
             "same": int((j["_merge"] == "both").sum()), "only_mine": int((j["_merge"] == "left_only").sum()),
             "only_search": int((j["_merge"] == "right_only").sum())}
         print(r.model_id, "all plays:", res[f"{r.model_id}_all_plays_vs_search"], flush=True)
-    # (2) the live view: each fetch sees the plays logged by served_at + wait
+    # (2) the live view: each fetch the loop would make sees the plays logged
+    # by its served time plus the wait. The loop fetches at each hour minus
+    # 264 s (loop_fetches); --every-fetch replays every worker fetch instead.
     pbp = pbp.assign(_wc=pd.to_datetime(pbp["wallclock"], utc=True, format="mixed"))
-    fetches = sorted(set(pd.to_datetime(odds.loc[odds["source"].isna(), "created_at"], utc=True, format="mixed")))
+    fetches = sorted(set(pd.to_datetime(odds["created_at"], utc=True, format="mixed")))
+    if not every_fetch:
+        fetches = loop_fetches(fetches)
+    res["view"] = "every worker fetch" if every_fetch else "the loop's fetch times (hour minus 264 s)"
+    res["fetches_in_view"] = len(fetches)
     seen: set = set()
     decided: dict = {}
     n_fetch = 0
@@ -316,6 +366,12 @@ def parity_live27(wait_s: float = WAIT_S) -> dict:
         a = full[r.model_id]
         bk = live_bets[key] if len(live_bets) else pd.DataFrame(columns=key)
         j = bk.merge(a[key], on=key, how="outer", indicator=True)
+        jl = bk.merge(lab[r.model_id][key], on=key, how="outer", indicator=True)
+        res[f"{r.model_id}_live_view_vs_search_bets"] = {
+            "bets_live_view": int(len(bk)), "bets_search": int(len(lab[r.model_id])),
+            "same_bet": int((jl["_merge"] == "both").sum()),
+            "only_live_view": int((jl["_merge"] == "left_only").sum()),
+            "only_search": int((jl["_merge"] == "right_only").sum())}
         res[f"{r.model_id}_live_view_vs_all_plays"] = {
             "decisions_live_view": len(live_dec), "decisions_all_plays": int(len(first_full)),
             "decided_at_same_fetch": int(same_fetch),
@@ -324,7 +380,8 @@ def parity_live27(wait_s: float = WAIT_S) -> dict:
             "same_bet": int((j["_merge"] == "both").sum()),
             "only_live_view": int((j["_merge"] == "left_only").sum()),
             "only_all_plays": int((j["_merge"] == "right_only").sum())}
-        print(r.model_id, "live view:", res[f"{r.model_id}_live_view_vs_all_plays"], flush=True)
+        print(r.model_id, "live view:", res[f"{r.model_id}_live_view_vs_all_plays"],
+              "vs the search:", res[f"{r.model_id}_live_view_vs_search_bets"], flush=True)
     res["fetches_replayed"] = n_fetch
     res["games_left_out_by_rule_6_all_plays"] = sorted(L.jump_games(pbp.drop(columns="_wc")))
     res["games_left_out_by_rule_5_all_plays"] = sorted(notes.get("games_first_play_before_listed_tip") or {})
@@ -384,6 +441,8 @@ def main(argv=None) -> None:
     ap.add_argument("--parity-held", action="store_true")
     ap.add_argument("--parity-live27", action="store_true")
     ap.add_argument("--wait", type=float, default=WAIT_S)
+    ap.add_argument("--every-fetch", action="store_true",
+                    help="--parity-live27 over every worker fetch, not the loop's fetch times")
     ap.add_argument("--json-out", type=Path, default=None)
     ap.add_argument("--store", type=Path)
     ap.add_argument("--register", type=Path)
@@ -398,7 +457,7 @@ def main(argv=None) -> None:
     if a.parity_held:
         out["held"] = parity_held()
     if a.parity_live27:
-        out["live27"] = parity_live27(a.wait)
+        out["live27"] = parity_live27(a.wait, a.every_fetch)
     if a.json_out and out:
         a.json_out.write_text(json.dumps(out, indent=1, default=str), encoding="utf-8")
     if a.store:

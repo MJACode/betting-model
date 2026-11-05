@@ -1,7 +1,13 @@
 -- The NBA in-play loop's decision ledger (models/nba_live_loop.py).
 --
--- One row per (game, model): the first decision of each in-play rule on each
--- game, bet or not. The graded rule decides ONCE per game and rule, at the
+-- One DECISION row per (game, model): the first decision of each in-play rule
+-- on each game, bet or not (a partial unique index, below). A fetch the loop
+-- could not decide on (ESPN unreadable or publishing late, starters unknown,
+-- an error, the odds feed or the credit cap) writes a 'skipped' row instead,
+-- as many as happen, so a decision that moved off the grade's fetch says why.
+-- A fetch with no eligible quote writes a 'carried' row (no decision; the next
+-- hour tries again), so every game the loop looked at has rows and a game with
+-- none was never looked at (tracking/nba_live_health.py reads that). The graded rule decides ONCE per game and rule, at the
 -- first fetch holding an eligible quote, and a decision that does not clear
 -- its cut SPENDS the rule (docs/nba_models_2026.md 7.3, G.decision_quotes).
 -- A live pick row exists only for a bet, so without this table a restart in
@@ -42,6 +48,7 @@ BEGIN
   END IF;
 
   CREATE TABLE IF NOT EXISTS public.nba_live_decisions (
+    id                BIGSERIAL PRIMARY KEY,
     game_id           TEXT NOT NULL,
     model_id          TEXT NOT NULL,
     game_date         TEXT,
@@ -69,9 +76,12 @@ BEGIN
     play_lag_s        DOUBLE PRECISION,
     artifact_version  TEXT,
     offers            JSONB,
-    PRIMARY KEY (game_id, model_id),
-    CONSTRAINT nba_live_decisions_outcome CHECK (outcome IN ('bet', 'no_bet', 'declined'))
+    CONSTRAINT nba_live_decisions_outcome
+      CHECK (outcome IN ('bet', 'no_bet', 'declined', 'skipped', 'carried'))
   );
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_nba_live_decisions_one_decision
+    ON public.nba_live_decisions (game_id, model_id)
+    WHERE outcome IN ('bet', 'no_bet', 'declined');
   CREATE INDEX IF NOT EXISTS nba_live_decisions_date_idx ON public.nba_live_decisions (game_date);
 
   ALTER TABLE public.nba_live_decisions ENABLE ROW LEVEL SECURITY;

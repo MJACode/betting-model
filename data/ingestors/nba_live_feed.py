@@ -38,6 +38,10 @@ SPORT_KEY = "basketball_nba"
 ODDS_URL = f"https://api.the-odds-api.com/v4/sports/{SPORT_KEY}/odds"
 MARKETS = ("h2h", "spreads")
 SHARP = "pinnacle"
+# The loop's own in-play rows in `odds` carry this source, so a restarted loop
+# can tell them from the refresh pass's (also in_play for NBA after the tip,
+# also from the bulk endpoint) and seed its earlier-fetch dedupe from them.
+LIVE_SOURCE = "nba_live_loop"
 
 
 def _install_api_call_log() -> None:
@@ -165,6 +169,95 @@ def plays_from_summary(data: dict, event_id: int, game_id: str, season: int, gam
     return rows, swapped
 
 
+def plays_logged_by(data: dict | None, at: datetime) -> set[str]:
+    """Ids of the plays in one ESPN summary whose wallclock is at or before
+    `at`."""
+    out = set()
+    for p in (data or {}).get("plays") or []:
+        w = p.get("wallclock")
+        if not w:
+            continue
+        try:
+            t = datetime.fromisoformat(str(w).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if t <= at:
+            out.add(str(p.get("id")))
+    return out
+
+
+def late_plays(first: dict | None, second: dict | None, served_at: datetime) -> list[str]:
+    """Plays logged at or before the served time that the SECOND read of the
+    summary carries and the first did not: ESPN published them late. When
+    there is one, the first read's picture of the served time was incomplete,
+    so it cannot be trusted that the second is complete either; the loop does
+    not decide on that fetch (fail closed)."""
+    return sorted(plays_logged_by(second, served_at) - plays_logged_by(first, served_at))
+
+
+def header_score(data: dict | None) -> tuple[int, int] | None:
+    """(home, away) as ESPN's summary header states them, ESPN's own sides."""
+    comp = (((data or {}).get("header") or {}).get("competitions") or [{}])[0]
+    sc = {}
+    for c in comp.get("competitors") or []:
+        try:
+            sc[c.get("homeAway")] = int(float(c.get("score")))
+        except (TypeError, ValueError):
+            return None
+    if "home" not in sc or "away" not in sc:
+        return None
+    return sc["home"], sc["away"]
+
+
+def newest_play_score(data: dict | None) -> tuple[int, int] | None:
+    """(home, away) ESPN's play list carries on its newest play (ESPN's own
+    running score and sides), in play order: the last play of the highest
+    period by clock, then sequence."""
+    best, key = None, None
+    for p in (data or {}).get("plays") or []:
+        try:
+            per = int((p.get("period") or {}).get("number") or 0)
+            seq = int(p.get("sequenceNumber") or 0)
+            hs, as_ = int(p.get("homeScore")), int(p.get("awayScore"))
+        except (TypeError, ValueError):
+            continue
+        k = (per, seq)
+        if key is None or k > key:
+            key, best = k, (hs, as_)
+    return best
+
+
+def score_mismatch(data: dict | None) -> str | None:
+    """Why ESPN's play list is behind its own header score, or None when they
+    agree. Measured on 2026-11-04: in 2 of 6 reads the header was ahead (ATL @
+    WSH 8-9 at 9:06 while the plays stopped at 9:24, 8-6), a play list that
+    has stopped while the game has not."""
+    h, p = header_score(data), newest_play_score(data)
+    if h is None or p is None:
+        return None
+    if h != p:
+        return f"ESPN's header score is {h[0]}-{h[1]} but its newest play is {p[0]}-{p[1]} (home-away)"
+    return None
+
+
+def clock_running(first: dict | None, second: dict | None) -> bool:
+    """True when ESPN's header shows the game in progress in both reads and
+    its clock moved between them (period or clock seconds changed)."""
+    def st(d):
+        comp = (((d or {}).get("header") or {}).get("competitions") or [{}])[0]
+        s_ = comp.get("status") or {}
+        t = (s_.get("type") or {})
+        try:
+            clock = float(s_.get("clock")) if s_.get("clock") is not None else None
+        except (TypeError, ValueError):
+            clock = None
+        return t.get("state"), s_.get("period"), clock
+    a, b = st(first), st(second)
+    if a[0] != "in" or b[0] != "in" or a[2] is None or b[2] is None:
+        return False
+    return (a[1], a[2]) != (b[1], b[2])
+
+
 def starters_from_summary(data: dict, espn_home: str | None, swapped: bool) -> pd.DataFrame:
     """(espn_id, side H/A, starter) for every athlete ESPN flags a starter in
     the live box, whatever his minutes so far (nba_espn_box.parse_nba_box
@@ -201,6 +294,21 @@ class Fetch:
     remaining: int | None         # x-requests-remaining
 
 
+# The account balance below which the loop stops fetching: the low-quota line
+# tracking/system_health.py already alerts on (fewer than 1,000 credits, or
+# under 15% of the plan), so the loop goes quiet where the platform starts
+# shouting, and never runs the balance to zero.
+QUOTA_FLOOR_CREDITS = 1000
+QUOTA_FLOOR_SHARE = 0.15
+
+
+def below_floor(remaining: int | None, used: int | None) -> bool:
+    if remaining is None:
+        return False
+    total = (used or 0) + remaining
+    return remaining < QUOTA_FLOOR_CREDITS or (total > 0 and remaining / total < QUOTA_FLOOR_SHARE)
+
+
 class LiveOddsFeed:
     """One bulk call per decision instant. Never returns a cached payload."""
 
@@ -209,9 +317,15 @@ class LiveOddsFeed:
         self.calls = 0
         self.credits_used = 0
         self.first_credits: int | None = None
+        self.remaining: int | None = None
+        self.used: int | None = None
         self._session = session
 
     def fetch(self) -> Fetch | None:
+        if below_floor(self.remaining, self.used):
+            log.error("NBA live odds: %s credits left of %s - under the quota floor, not fetching",
+                      self.remaining, (self.used or 0) + (self.remaining or 0))
+            return None
         if self.calls >= self.call_cap:
             log.error("NBA live odds: call cap %d reached - not fetching", self.call_cap)
             return None
@@ -239,8 +353,11 @@ class LiveOddsFeed:
                 pass
             last = r.headers.get("x-requests-last")
             rem = r.headers.get("x-requests-remaining")
+            used_h = r.headers.get("x-requests-used")
             credits = int(float(last)) if last is not None else None
             remaining = int(float(rem)) if rem is not None else None
+            self.remaining = remaining
+            self.used = int(float(used_h)) if used_h is not None else self.used
             if credits is not None:
                 self.credits_used += credits
                 if self.first_credits is None:
@@ -266,4 +383,7 @@ def rows_from_events(events: list, fetched_at: datetime) -> list[dict]:
     teams and the tip's Eastern date; the caller keeps only its own games."""
     from data.ingestors.odds_ingestor import _process_events
     _games, rows = _process_events(events, "NBA", "in_play", fetched_at.isoformat())
-    return [r for r in rows if r.get("market") in MARKETS]
+    rows = [r for r in rows if r.get("market") in MARKETS]
+    for r in rows:
+        r["source"] = LIVE_SOURCE
+    return rows
