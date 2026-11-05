@@ -783,7 +783,10 @@ the uncorrected one. Above about the 80th percentile of its EV the return is fla
 isotonic, banded) ranks that top better. At the door, ranking the night by a
 corrected EV still loses to tip order: best six of the night -29.4 units against
 today (walk-forward -21.8). The rules that won more units did it by betting
-favourites, risking 27-40% more at the same return per unit risked.
+favourites, risking 27-40% more at the same return per unit risked. Putting more units
+on a higher corrected EV does not beat flat either, at flat's risk (best +180.9
+units against +183.7). The reversed scale's lead halves (+195.9) but does not go
+away, and its 90% range includes zero.
 
 ## NBA — `nba_total_luck`, full-game totals, overs (2026-10-17, mike)
 

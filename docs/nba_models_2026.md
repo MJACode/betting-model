@@ -2960,6 +2960,31 @@ What the door table says:
   them in 2025-26, because the fitted factor drifted from 0.325 to 0.300 between folds. One
   factor for every season leaves every percentile, and so the door, exactly as it is.
 
+**Sizing by a corrected EV.** Section 14 graded 1 to 3 units on today's door: sizing up by the
+model's own EV percentile lost to flat, and the reversed scale won. The question here was whether
+a calibration fix removes that. It cannot. The shrink multiplies the projection model's EV by one
+number, so within the model every third holds the same bets as before. Re-graded on the same
+2,639 bets, each scheme scaled to flat's total risk as in section 14 (flat +183.7 units):
+
+| scheme | units at flat's risk | difference from flat, 90% range |
+|---|---|---|
+| 1/2/3 by own percentile, raw EV (section 14) | +158.5 | -57.7 to +8.9 |
+| 3/2/1 reversed, raw EV (section 14) | +208.1 | -8.0 to +57.5 |
+| 1/2/3 by EV third within each model, raw or shrunk (the same bets) | +165.7 | -51.6 to +15.3 |
+| 1/2/3 by shrunk EV, one scale across the two models | +170.8 | -44.9 to +19.8 |
+| 3/2/1 by shrunk EV, one scale | +195.9 | -19.3 to +43.0 |
+| 1 to 3 shaped like Kelly on the shrunk EV, one scale | +172.1 | -35.6 to +12.1 |
+| 1/2/3 by the blend, one scale | +176.8 | -38.4 to +24.1 |
+| 1/2/3 by isotonic, one scale | +180.9 | -35.5 to +31.1 |
+
+- **Inside the door, EV does not rank either model's bets.** The projection model's lowest-EV
+  third returned +14.1% (616 bets), its middle third +6.2%, its top third +8.9%. The market
+  model's thirds returned +4.1%, +10.4% and +0.1% (about 264 bets each). The door already takes
+  each game's top bet, so its bets sit on the flat top of the range (above).
+- **No corrected EV makes sizing up pay.** Putting both models on one scale halves the reversed
+  scale's lead (+12.2 units against +24.4) but does not remove it. Every 90% range includes zero.
+  Flat stays, as section 14 decided. Script: `sizing_cal.py` in the same temp folder.
+
 **Decision: nothing ships.** The door stays one a game, six a night, first by tip, ranked by each
 model's own percentile of raw EV. The prices it lays are unchanged: -194 to +380, median +120,
 78% plus money.
