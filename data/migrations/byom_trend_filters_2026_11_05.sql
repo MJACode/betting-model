@@ -640,7 +640,10 @@ BEGIN
          -- candidate counts if it was still the live quote when the result
          -- was known (and before kickoff); the bet is then official at
          -- that moment, at that quote. A line that never changed after
-         -- the previous game is not dropped (CE review, #1187 H1).
+         -- the previous game is not dropped (CE review, #1187 H1). A quote
+         -- posted after the wait also passes, on purpose: with another rule
+         -- (say prev + toward) the first fit can come later. ORDER BY
+         -- locked_at below still takes the earliest.
          AND (q.wait_at IS NULL
               OR ((q.next_at IS NULL OR q.next_at > q.wait_at)
                   AND q.wait_at < q.g_kick))

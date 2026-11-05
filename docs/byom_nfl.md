@@ -292,8 +292,7 @@ NFL prop chips use. NBA and NHL keep their back-to-back and 2+ days chips.
 **No lookahead.** On the official line, `line_move` is the move up to the
 quote that became the bet, so the lock is the first quote where the move
 fits; the close is never used for an official bet. A last-game filter is not
-known until that game is over, so the official lock waits for the first
-quote at least 4 hours after the later of the two teams' previous starts.
+known until that game is over: 4 hours after the previous start.
 A stored candidate is the line until the next one (a row is written only
 on a change), so the lock is the quote still in force at that moment, made
 official at that moment; a line that never moved after the previous game is
