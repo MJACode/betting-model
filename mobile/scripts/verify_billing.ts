@@ -45,7 +45,7 @@ import {
   billingReady,
   planFor,
 } from '../src/lib/billingConfig';
-import { contentLocked, membershipTier } from '../src/lib/membership';
+import { contentLocked, isAppPremium, membershipTier } from '../src/lib/membership';
 import {
   REVENUECAT_ENTITLEMENT_ID,
   customerInfoEntitled,
@@ -191,6 +191,11 @@ eq(
   { badge: 'Premium', line: 'Annual · renews Oct 27, 2027' },
 );
 eq('no subscription is Free', planStatusCopy(null, {}, NOW), { badge: 'Free', line: 'Free plan' });
+eq(
+  'a comped grant with no store row is Premium',
+  planStatusCopy(null, { comped: true }, NOW),
+  { badge: 'Premium', line: 'Premium' },
+);
 
 const tierSub = (over: Partial<SubscriptionRow> = {}) => sub(over);
 eq('billing off is open', membershipTier({ billingOn: false, entitled: false, subscription: null, discordPaid: false }), 'open');
@@ -215,7 +220,39 @@ eq(
   membershipTier({ billingOn: true, entitled: true, subscription: null, discordPaid: false, now: NOW }),
   'trial',
 );
+eq(
+  'a comped grant is paid even without a subscription row',
+  membershipTier({ billingOn: true, entitled: true, subscription: null, comped: true, now: NOW }),
+  'paid',
+);
+eq(
+  'a comped grant stays paid during a trial',
+  membershipTier({
+    billingOn: true,
+    entitled: true,
+    subscription: tierSub({ status: 'trialing', trial_end: '2026-11-03T00:00:00Z' }),
+    comped: true,
+    now: NOW,
+  }),
+  'paid',
+);
 check('only free locks the app', contentLocked('free') && !contentLocked('trial') && !contentLocked('paid') && !contentLocked('open'));
+check(
+  'parsed access entitled is premium',
+  isAppPremium({ accessEntitled: true, subscription: null, rcSignals: false, now: NOW }),
+);
+check(
+  'an active subscription row is premium',
+  isAppPremium({ accessEntitled: false, subscription: tierSub(), rcSignals: false, now: NOW }),
+);
+check(
+  'RevenueCat signals with no row yet is premium',
+  isAppPremium({ accessEntitled: false, subscription: null, rcSignals: true, now: NOW }),
+);
+check(
+  'Whop-only parsed access is not premium',
+  !isAppPremium({ accessEntitled: false, subscription: null, rcSignals: false, now: NOW }),
+);
 
 const paywallSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'PaywallScreen.tsx'), 'utf8');
 const settingsSrc = readFileSync(join(__dirname, '..', 'src', 'screens', 'SettingsScreen.tsx'), 'utf8');
@@ -286,7 +323,14 @@ eq(
   'Ends the Annual trial. $149.99 today. No invite is shown until that plan is active.',
 );
 check('monthly convert line does not say weekly', !earlyUnlockLine('monthly').toLowerCase().includes('weekly'));
-check('paid join waits for an active row', settingsSrc.includes("subscription.status === 'active'"));
+const membershipSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'membership.ts'), 'utf8');
+check(
+  'paid join is an active row or a comped grant, not a trial',
+  settingsSrc.includes('const storePaid = discordPaid') &&
+    membershipSrc.includes("if (input.comped) return 'paid'") &&
+    membershipSrc.includes("sub.status === 'trialing') return 'trial'") &&
+    membershipSrc.includes("sub.status === 'active') return 'paid'"),
+);
 check(
   'whop soft copy is Matt\'s line and does not say Discord unlocks the app',
   settingsSrc.includes('Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.') &&
