@@ -598,12 +598,83 @@ PREGAME_SAME_GAME_HOURS: int = 6
 # 6 of 6, 9 of 9, 11 of 11). A sport whose every far game went quiet stays in
 # the share too. A game inside the lead stays in even when no book lists it.
 PREGAME_PULLED_LEAD_HOURS: int = 24
+# A WEEKS-OLD EARLY LINE THE PROVIDER IS NOT LISTING IS NOT A DEAD FETCH
+# (2026-11-05 15:26Z). The stored row was STALE, "NBA 2 of 4" (NCAAB 0 of 44,
+# NCAAF 0 of 7, NHL 0 of 11). The two were PHI@CLE (tip 2026-11-07 00:40Z)
+# and POR@LAL (tip 03:10Z). On odds and on latest_odds, each game's newest
+# h2h, spread or total from any book is 2026-10-23 02:10:42Z or 02:11:27Z.
+# The other seven Nov 6 NBA games have no price from any book, so they are
+# not in the share. MIA@GSW and ORL@PHX have a DraftKings price at
+# 15:17:01Z. The 15:17Z calls to /v4/sports/basketball_nba/events (434 bytes)
+# and /v4/sports/basketball_nba/odds (4,822 bytes) both returned 200: the
+# provider was listing today's two games and not the Nov 6 slate. Nov 5's
+# games first got a DraftKings price at 2026-11-05 05:17:22Z, so a check
+# near 04:58Z does not reach the next evening's slate and this only fires
+# once the 36-hour window does.
+#
+# Left out of the share only when all of these hold: no book has a
+# main-market price inside the bound, the game starts more than
+# PREGAME_PULLED_LEAD_HOURS away, that price is more than
+# PREGAME_UNLISTED_EARLY_LINE_DAYS old, the same sport has a game inside
+# that lead with a fresh DraftKings price, and a successful bulk odds or
+# events-list call for that sport landed inside the bound. A same-day price
+# with no such call is not that: the early-lines pass can stop while today's
+# games stay priced. A price only a few days old is not that either: on
+# 2026-09-30 18:00Z every NHL game's newest price was 2026-09-26 22:59Z,
+# under four days, and that outage stays 11 of 11. Seven days sits between
+# that outage and this 13-day early line. A game inside the lead stays in
+# even when the call succeeded. A sport with no fresh nearer game stays in
+# even when the call succeeded. A per-event prop or alternate call is not
+# the list: it is for a game the bulk call already returned.
+PREGAME_UNLISTED_EARLY_LINE_DAYS: int = 7
 # The newest of the three main markets: DraftKings pulls a lopsided game's
 # moneyline and keeps its spread and total (a moneyline-only read called one
 # 10-09 NCAAF game stale that was not). One LIMIT 1 read per market rides
 # idx_odds_book_snap backwards: 394 ms for 124 games on 2026-10-09, where a
 # MAX(snapshot_at) over every DraftKings row took 11 s.
 _PREGAME_CURRENT_MARKETS = ("h2h", "spreads", "totals")
+
+
+def _slate_list_path(path: str | None) -> bool:
+    """True for the bulk /odds call and the /events list.
+
+    A per-event /events/{id}/odds call is a prop or an alternate line for a
+    game the bulk call already returned. It is not the list of games the
+    provider is offering."""
+    if not path:
+        return False
+    parts = str(path).split("?", 1)[0].strip("/").split("/")
+    return (len(parts) == 4 and parts[0] == "v4" and parts[1] == "sports"
+            and parts[3] in ("odds", "events"))
+
+
+def _sports_with_a_live_slate_call(conn, floor: datetime) -> set:
+    """Sports whose bulk odds or events list succeeded inside the bound.
+
+    Empty when the read fails. No evidence the provider omitted a game, so
+    the game stays in the share: a failed read must not hide an outage and
+    must not turn this check into an error of its own."""
+    try:
+        rows = conn.execute("""
+            SELECT sport, path, status, ok, ts
+            FROM api_call_log
+            WHERE ts >= ? AND path LIKE '/v4/sports/%'
+        """, (floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),)
+        ).fetchall()
+    except Exception:                                          # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        return set()
+    found = set()
+    try:
+        for row in rows:
+            sport, path, status, ok, ts = row[:5]
+            stamp = _parse_ts(ts)
+            if (sport and ok and status == 200 and stamp is not None
+                    and stamp >= floor and _slate_list_path(path)):
+                found.add(sport)
+    except (TypeError, ValueError):
+        return set()
+    return found
 
 
 def _swapped_ufc_id(game_id: str) -> str | None:
@@ -776,15 +847,41 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     # game a book is pricing. Today's games stay fresh through an early-lines
     # outage, so they must not be what lists the sport.
     lead = timedelta(hours=PREGAME_PULLED_LEAD_HOURS)
+    early_line = timedelta(days=PREGAME_UNLISTED_EARLY_LINE_DAYS)
     sport_far_listed = set()
+    sport_near_fresh = set()
     for game_id in window:
         start = info[game_id][1]
-        if start is None or (start - now) <= lead:
+        if start is None:
+            continue
+        if (start - now) <= lead:
+            dk = info[game_id][3]
+            if dk is not None and dk >= floor:
+                sport_near_fresh.add(info[game_id][0])
             continue
         listed = _listed_at(game_id)
         if listed is not None and listed >= floor:
             sport_far_listed.add(info[game_id][0])
+
+    def _weeks_old(stamp) -> bool:
+        return stamp is not None and stamp < (now - early_line)
+
+    wants_call = False
+    for members in groups.values():
+        sport = info[members[0]][0]
+        if sport in sport_far_listed or sport not in sport_near_fresh:
+            continue
+        listed_last = max(_listed_at(g) or info[g][3] for g in members)
+        start = min(info[g][1] for g in members)
+        far = start is not None and (start - now) > lead
+        if listed_last < floor and far and _weeks_old(listed_last):
+            wants_call = True
+            break
+    slate_sports = (_sports_with_a_live_slate_call(conn, floor)
+                    if wants_call else set())
+
     pulled: dict = {}
+    unlisted: dict = {}
     for members in groups.values():
         sport = info[members[0]][0]
         dk_last = max(info[g][3] for g in members)
@@ -794,10 +891,15 @@ def check_pregame_prices_current(conn, r: "HealthReport",
         if listed_last < floor and far and sport in sport_far_listed:
             pulled[sport] = pulled.get(sport, 0) + 1
             continue
+        if (listed_last < floor and far and _weeks_old(listed_last)
+                and sport in sport_near_fresh and sport in slate_sports):
+            unlisted[sport] = unlisted.get(sport, 0) + 1
+            continue
         priced[sport] = priced.get(sport, 0) + 1
         stale.setdefault(sport, []).append(dk_last)
     merged = len(stale_ids) - len(groups)
     pulled_n = sum(pulled.values())
+    unlisted_n = sum(unlisted.values())
 
     def _pulled_note(lead_in: str) -> str:
         if not pulled_n:
@@ -811,10 +913,22 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                 f"{PREGAME_PULLED_LEAD_HOURS} hours out that a book is pricing, "
                 f"so this is a slate the books pulled, not a dead fetch")
 
+    def _unlisted_note(lead_in: str) -> str:
+        if not unlisted_n:
+            return ""
+        who = ", ".join(f"{s} {unlisted[s]}" for s in sorted(unlisted))
+        noun = "game" if unlisted_n == 1 else "games"
+        return (f"{lead_in}{unlisted_n} {noun} more than "
+                f"{PREGAME_PULLED_LEAD_HOURS} hours from start, whose only "
+                f"price is more than {PREGAME_UNLISTED_EARLY_LINE_DAYS} days "
+                f"old, left out ({who}): a nearer game in that sport has a "
+                f"DraftKings price from the last {limit} minutes, and a "
+                f"successful odds-list call in that window did not list them")
+
     hours = PREGAME_CURRENT_WINDOW_HOURS
     n_priced = sum(priced.values())
     n_stale = sum(len(v) for v in stale.values())
-    if n_priced < PREGAME_STALE_MIN_GAMES and not pulled_n:
+    if n_priced < PREGAME_STALE_MIN_GAMES and not pulled_n and not unlisted_n:
         # Too few games for the share to mean anything: is the feed alive?
         # A pulled slate does not take this branch: the same sport still has
         # a far game a book is pricing, which is what `pulled_n` required.
@@ -839,7 +953,7 @@ def check_pregame_prices_current(conn, r: "HealthReport",
                   f"games in the next {hours} hours to judge game by game)",
                   reason=REASON_STALE_DATA, cadence=cadence)
             return
-    if n_priced == 0 and not pulled_n:
+    if n_priced == 0 and not pulled_n and not unlisted_n:
         r.add(check, SKIPPED, "CRIT",
               f"no game DraftKings prices kicks off in the next {hours} hours",
               reason=REASON_GATE_SHUT, cadence=cadence)
@@ -847,7 +961,7 @@ def check_pregame_prices_current(conn, r: "HealthReport",
     if n_priced == 0:
         r.add(check, OK, "CRIT",
               "no game a book is still listing kicks off in the next "
-              f"{hours} hours" + _pulled_note("; "),
+              f"{hours} hours" + _pulled_note("; ") + _unlisted_note("; "),
               reason=REASON_FRESH, cadence=cadence)
         return
 
@@ -868,7 +982,8 @@ def check_pregame_prices_current(conn, r: "HealthReport",
               f"when at least half the priced games (overall or in one sport) "
               f"and at least {PREGAME_STALE_MIN_GAMES} are behind, because a "
               f"cancelled fight or a pulled game is normal."
-              + _pulled_note(" "),
+              + _pulled_note(" ")
+              + _unlisted_note(" "),
               last.isoformat(),
               reason=(f"{late_h:.0f} hours late" if late_h >= 1 else "Just late"),
               cadence=cadence)
@@ -880,6 +995,7 @@ def check_pregame_prices_current(conn, r: "HealthReport",
         detail += (f"; {n_stale} do not ({by_sport}), under the alarm level of "
                    f"half the priced games and at least {PREGAME_STALE_MIN_GAMES}")
     detail += _pulled_note("; ")
+    detail += _unlisted_note("; ")
     if leftovers or merged:
         detail += (f"; {leftovers + merged} extra ids of a game counted under "
                    f"another id were left out")
