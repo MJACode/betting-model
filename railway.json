@@ -20,6 +20,7 @@
   "deploy": {
     "startCommand": "python scheduler.py",
     "restartPolicyType": "ALWAYS",
-    "numReplicas": 1
+    "numReplicas": 1,
+    "drainingSeconds": 600
   }
 }

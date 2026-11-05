@@ -149,24 +149,94 @@ next one, and close `pipeline_runs` with `failed_steps` containing
 the same-day catch-up may start the daily again, and a drained hourly
 is still replaced at boot. SIGKILL cannot be caught. If the platform's
 stop grace ends before the step returns, the row stays unfinished and
-the boot sweep still stamps it `aborted`. This change does not set a
-Railway drain timeout.
+the boot sweep still stamps it `aborted`.
+
+`railway.json` sets `deploy.drainingSeconds` to **600**. Railway's
+schema is a number. Config in the file overrides the service settings
+for that deployment (`docs.railway.com` config-as-code reference). The
+default without it is 0, so SIGKILL follows SIGTERM immediately and the
+handler never runs. A step that is still going at 600 seconds is
+SIGKILLed. The file is included in `watchPatterns`, so the change
+deploys with the worker. On the deployment page, draining seconds shows
+a file icon when it came from `railway.json`.
+
+SIGTERM is sent after the new container is already active, so the two
+processes overlap until the old one exits. `_DAILY_LOCK` is in-process
+(and the #1160 wait between daily and refresh is not on master). The
+cross-process guard is a session advisory lock
+(`tracking/scoring_lease.py`): the daily child holds the daily key
+until it has closed the row, and `refresh_pass.sh` holds the refresh
+key the same way. The boot sweep does not stamp a kind whose key is
+held. The daily catch-up waits for the daily key, on its own thread,
+before it starts another daily. The refresh catch-up waits for the
+refresh key. A leaked lock does not silence the 6am cron: the holder
+gives up after the drain window and runs. The first deploy of this
+lease overlaps a process that is not holding it, so that one boot can
+still sweep the live row.
+
+A refresh on the new container does not wait for the daily key. During
+the drain, that refresh can score while the old daily finishes its
+current step. Live loops are not under the lease either. They start as
+soon as the new scheduler does. #1160's in-process wait, if it lands,
+still does not see the other container.
 
 Merges into master are blocked while a daily is open by the check
-**Daily pipeline gate / daily pipeline not running**
-(`.github/workflows/daily-merge-gate.yml`). It reads `pipeline_runs`
-where `run_kind = 'daily'`, `finished_at` is null, and
-`started_at::timestamptz` is inside the last 75 minutes
-(`MAX_DAILY_RUN`). An older unfinished row is not a live daily. Without
-`DATABASE_URL` the check falls back to 06:00–07:15 America/New_York,
-which misses a catch-up daily outside that window. The check blocks
-merges only after it is a required status on `master` (Settings →
-Rules → Rulesets, or branch protection, required status checks). Add
+**daily pipeline not running**
+(`.github/workflows/daily-merge-gate.yml`; the Actions UI prefixes the
+workflow name). It reads `pipeline_runs` where `run_kind = 'daily'`,
+`finished_at` is null, and `started_at::timestamptz` is inside the last
+75 minutes (`MAX_DAILY_RUN`). An older unfinished row is not a live
+daily. The pull-request job runs from the base branch and checks out
+the base sha. It reads `DATABASE_URL_READONLY` only. Without that
+secret it falls back to 06:00–07:15 America/New_York, which misses a
+catch-up daily outside that window. A result from push time goes
+stale, so a schedule on master re-posts the same check name on every
+open PR head every 10 minutes from 09:00 UTC through 03:59 UTC (an
+hour before 6:00am ET through the 22:00 ET catch-up cutoff, in both
+EST and EDT). That schedule uses `DATABASE_URL`, the table owner, because it
+runs only from the default branch. From 05:45 until 06:20
+America/New_York the check blocks even when `pipeline_runs` has no
+open daily, so a late tick cannot leave a green check across the
+6:00am start. Outside that stretch a merge between ticks can still
+land on a catch-up daily. Re-running the failed pull-request job
+re-evaluates that one PR. The check blocks merges
+only after it is a required status on `master` (Settings → Rules →
+Rulesets, or branch protection, required status checks). Add
 `daily pipeline not running`.
 
+`DATABASE_URL_READONLY` is a new Actions secret. `pipeline_runs` has
+RLS on and no other policy, so the role needs its own SELECT policy or
+the query returns no rows and the pull-request job stays green during
+a daily. The Postgres role name is `daily_gate_reader`. On a Supavisor
+pooler host (`*.pooler.supabase.com`, port 5432 or 6543) the connection
+username is `daily_gate_reader.<project-ref>`, not the bare role. A
+bare user fails to connect, the check treats that as an unread ledger,
+and every PR stays red. This project's ref is `vvprgnrmzeekokzkrkfu`
+(`docs/config_topology.md`). The direct host
+`db.vvprgnrmzeekokzkrkfu.supabase.co` takes the bare role; that host is
+not what the worker or Actions uses.
+
+```text
+postgresql://daily_gate_reader.vvprgnrmzeekokzkrkfu:[password]@aws-1-us-west-2.pooler.supabase.com:6543/postgres
+```
+
+Run this in the Supabase SQL editor. The password goes only in the
+secret. The role name in the SQL stays bare; the suffix is only the
+pooler username.
+
+```sql
+CREATE ROLE daily_gate_reader LOGIN PASSWORD 'choose-a-password';
+GRANT USAGE ON SCHEMA public TO daily_gate_reader;
+GRANT SELECT ON TABLE public.pipeline_runs TO daily_gate_reader;
+CREATE POLICY daily_gate_reader_select ON public.pipeline_runs
+  FOR SELECT TO daily_gate_reader
+  USING (true);
+```
+
 Emergency bypass: label the PR `emergency-merge` (the check re-runs on
-the label), or put `bypass-daily-gate` in the PR body and re-run the
-check. A repo admin can also use GitHub's bypass of branch protections.
+the label), or, as an owner or member, put `bypass-daily-gate` in the
+PR body and re-run the check. A repo admin can also use GitHub's bypass
+of branch protections.
 
 ### NFL polling (changed 2026-08-22)
 
