@@ -11,6 +11,11 @@
 -- markers byom_saved_models_v1, byom_prop_side and byom_nba_props) with
 -- the same two changes. Guarded on to_regprocedure and a body without
 -- the adapter's damage. Does not write picks.
+--
+-- byom_legs keeps plan_cache_mode = force_custom_plan (#1173), and the
+-- skip requires it. Without it, the prop-lookup guard would rebuild
+-- byom_legs without NHL on the next pass, and this file would rebuild
+-- it again, every pass.
 
 DO $mig$
 BEGIN
@@ -19,6 +24,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_nhl_v1' in p.prosrc) > 0
        AND position('p_filters %s' in p.prosrc) = 0
+       AND 'plan_cache_mode=force_custom_plan' = ANY (p.proconfig)
   ) AND EXISTS (
     SELECT 1 FROM pg_proc p
      WHERE p.oid = to_regprocedure('public.byom_save_model(text, jsonb, integer)')
@@ -45,6 +51,7 @@ BEGIN
   STABLE
   SECURITY INVOKER
   SET search_path = public, pg_temp
+  SET plan_cache_mode = force_custom_plan
   AS $body$
   DECLARE
     -- byom_official_legs_v1

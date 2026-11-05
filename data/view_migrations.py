@@ -483,6 +483,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # byom_prop_facts (canonical_key, market, player_key) and (sport,
     # season, market); the closing prop branch filters market and side
     # first. Measured before: 3,687 ms for one NBA market. Same answers.
+    # 2026-11-05 (#1172 Medium, Matt via CE): byom_legs sets
+    # plan_cache_mode = force_custom_plan. The skip requires that
+    # proconfig entry, so an already-applied body still gains it once.
     "byom_prop_lookup_2026_11_04.sql",
     # 2026-11-05 (Matt): NHL game bets on the builder. byom_legs and
     # byom_save_model accept NHL; a null season is the ending year.
