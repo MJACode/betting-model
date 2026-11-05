@@ -2990,8 +2990,19 @@ Examples:
         success = _timed_step(args.step, step_fns[args.step], run_date)
         sys.exit(0 if success else 1)
 
-    # Full pipeline
-    result = run_daily_pipeline(run_date=run_date, dry_run=args.dry_run)
+    # Full pipeline. The lease is taken here, not inside run_daily_pipeline,
+    # so the body of that function stays put. It is released after the
+    # ledger close, including the deploy-cutoff return. A --step run does
+    # not take it: refresh_pass.sh holds the refresh lease for the whole
+    # pass, and a step that also waited on the daily lease would deadlock
+    # behind the shell. A dry run does not take it either.
+    from tracking.scoring_lease import acquire
+    lease = None if args.dry_run else acquire("daily")
+    try:
+        result = run_daily_pipeline(run_date=run_date, dry_run=args.dry_run)
+    finally:
+        if lease is not None:
+            lease.release()
     if result.get("deploy_cutoff"):
         logger.warning("daily pipeline stopped for a deploy (deploy-cutoff)")
         sys.exit(0)

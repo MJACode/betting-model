@@ -8,6 +8,7 @@ still open.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -23,9 +24,11 @@ import pytest
 
 from tracking.daily_merge_gate import (
     BYPASS_MARKER,
+    CHECK_NAME,
     EMERGENCY_LABEL,
     MAX_OPEN_DAILY,
     OPEN_DAILY_SQL,
+    checks_for_pull_requests,
     clock_blocks,
     gate_decision,
 )
@@ -325,3 +328,106 @@ def test_refresh_sigterm_finishes_the_open_group_and_marks_deploy_cutoff(tmp_pat
     assert "--step nhl-over-under" not in text
     assert "deploy-cutoff" in text
     assert "--step odds" in text
+
+
+def test_rewriting_aborted_as_deploy_cutoff_is_still_one_deploy_kill():
+    """The sweep can stamp aborted, then the draining process finish_run
+    overwrites that with deploy-cutoff. Both markers are one deploy-kill.
+    The retry cap does not move."""
+    started = datetime(2026, 11, 5, 11, 0, tzinfo=UTC)
+    finished = datetime(2026, 11, 5, 11, 20, tzinfo=UTC)
+    aborted = DailyRun(started, finished, False, "aborted")
+    cutoff = DailyRun(started, finished, False, "deploy-cutoff")
+    assert today_counts([aborted]) == (1, 0)
+    assert today_counts([cutoff]) == (1, 0)
+
+
+def test_railway_drains_for_ten_minutes():
+    cfg = json.loads((ROOT / "railway.json").read_text(encoding="utf-8"))
+    from tracking.scoring_lease import DRAIN_SECONDS
+    assert cfg["deploy"]["drainingSeconds"] == 600
+    assert isinstance(cfg["deploy"]["drainingSeconds"], int)
+    assert cfg["deploy"]["drainingSeconds"] == DRAIN_SECONDS
+
+
+def test_the_gate_runs_from_the_base_branch_and_refreshes_on_a_schedule():
+    text = (ROOT / ".github" / "workflows" / "daily-merge-gate.yml").read_text(
+        encoding="utf-8",
+    )
+    assert "pull_request_target:" in text
+    assert "\n  pull_request:\n" not in text
+    assert "pull_request.head" not in text
+    assert "github.event.pull_request.base.sha" in text
+    assert "persist-credentials: false" in text
+    assert 'cron: "*/10 9-23,0-3 * * *"' in text
+    gate = text.split("Block the merge while a daily run is open", 1)[1]
+    gate = gate.split("Refresh open pull requests", 1)[0]
+    assert "DATABASE_URL_READONLY" in gate
+    assert "secrets.DATABASE_URL" not in gate.replace(
+        "secrets.DATABASE_URL_READONLY", "",
+    )
+    refresh = text.split("Refresh open pull requests", 1)[1]
+    assert "secrets.DATABASE_URL" in refresh
+    assert "--refresh-open-prs" in refresh
+    assert "github.event_name == 'schedule'" in refresh
+
+
+def test_a_refresh_posts_the_same_check_name_and_keeps_one_prs_bypass():
+    now = datetime(2026, 11, 5, 11, 10, tzinfo=UTC)
+    prs = [
+        {
+            "number": 1,
+            "body": "",
+            "labels": [],
+            "head": {"sha": "aaa111"},
+        },
+        {
+            "number": 2,
+            "body": f"please {BYPASS_MARKER}",
+            "labels": [],
+            "head": {"sha": "bbb222"},
+        },
+        {"number": 3, "body": "", "labels": [], "head": {}},
+    ]
+    checks = checks_for_pull_requests(
+        prs, now=now, db_configured=True, open_run_ids=["run-1"],
+        query_error=None,
+    )
+    assert [c["head_sha"] for c in checks] == ["aaa111", "bbb222"]
+    assert checks[0]["name"] == CHECK_NAME == "daily pipeline not running"
+    assert checks[0]["conclusion"] == "failure"
+    assert checks[1]["conclusion"] == "success"
+    assert BYPASS_MARKER in checks[1]["output"]["summary"]
+
+
+def test_the_daily_child_holds_the_lease_around_the_run_and_a_step_does_not():
+    src = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
+    cli = src.split('if __name__ == "__main__":', 1)[1]
+    step, full = cli.split("# Full pipeline", 1)
+    assert "acquire(" not in step
+    assert 'acquire("daily")' in full
+    assert full.index('acquire("daily")') < full.index("run_daily_pipeline(")
+    assert full.index("run_daily_pipeline(") < full.index("lease.release()")
+
+
+def test_boot_does_not_block_the_scheduler_on_the_lease():
+    src = (ROOT / "scheduler.py").read_text(encoding="utf-8")
+    main = src.split("def main(", 1)[1]
+    assert "wait_for_scoring_lease" not in main
+    assert main.index("\n    abort_orphaned_refresh_runs()\n") < main.index(
+        "\n        sched.start()\n",
+    )
+    catch = src.split("def catch_up_daily_pipeline(", 1)[1].split("\ndef ", 1)[0]
+    assert 'wait_for_scoring_lease("daily")' in catch
+    refresh = src.split("def catch_up_refresh_pass(", 1)[1].split("\ndef ", 1)[0]
+    assert 'wait_for_scoring_lease("refresh")' in refresh
+    sweep = src.split("def abort_orphaned_refresh_runs(", 1)[1].split("\ndef ", 1)[0]
+    assert sweep.index("drop_live_kinds") < sweep.index("get_connection")
+
+
+def test_the_refresh_shell_takes_the_lease_before_the_ledger_start():
+    sh = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
+    assert sh.index("--kind refresh") < sh.index("tracking.run_ledger start")
+    assert "disown" in sh
+    assert "release_scoring_lease" in sh
+    assert sh.index("tracking.run_ledger finish") < sh.index("exit 0")
