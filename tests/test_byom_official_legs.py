@@ -756,6 +756,8 @@ def test_a_byom_legs_without_force_custom_plan_is_rebuilt_once(scratch):
     cur.execute(text)
     cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
     assert cur.fetchone()[0] == first
+
+
 def test_every_byom_legs_file_skips_once_nhl_is_applied(scratch):
     """2026-11-05: the worker runs every file each pass, in order. The
     NHL body must satisfy the prop-lookup skip (force_custom_plan, #1173),
