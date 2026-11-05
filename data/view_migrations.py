@@ -483,6 +483,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # byom_prop_facts (canonical_key, market, player_key) and (sport,
     # season, market); the closing prop branch filters market and side
     # first. Measured before: 3,687 ms for one NBA market. Same answers.
+    # 2026-11-05 (#1172 Medium, Matt via CE): byom_legs sets
+    # plan_cache_mode = force_custom_plan. The skip requires that
+    # proconfig entry, so an already-applied body still gains it once.
     "byom_prop_lookup_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed

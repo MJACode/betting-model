@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, byom_legs sets plan_cache_mode to force_custom_plan so a pooled connection cannot use a generic plan that skips the prop-facts market index; #1172 Medium, Matt via CE; no index or model change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA prop record 3,687 ms (over 3s anon): prop-facts leg index and a closing-branch market filter |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, marketing site contracting party is Signal Base LLC; product name stays Signal Base; copyright footer and contact entity line use the LLC; no App Store Connect change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA parity: daily refresh, prop backfill (props were empty), official line for games and props; official lock search reads one market (831 ms to a 15 ms search) |
