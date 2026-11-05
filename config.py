@@ -1002,25 +1002,22 @@ ACTION_THRESHOLDS: dict = {
     # min_prob 0.0: the rule has no probability floor; the edge is the cut.
     # Go-live gate standing: 0 settled of 50.
     "nfl_live_leader_ml": {"min_prob": 0.0, "min_edge": 0.02},
-    # NBA in-play game-state model, three rules (models/nba_live_ig2.py, run by
-    # models/nba_live_loop.py; LIVE 2026-11-04, mike: "everything goes live
-    # now"). IG-2's six passing cells of docs/nba_models_2026.md section 7.3
-    # are these three rules (the EV >= 0.08 cells sit inside the 0.05 ones).
-    # The cut is EV >= 0.05 at the best of the eight deciding books, -200
-    # floor, at the first fetch in the phase holding a fresh quote, which is
-    # MODEL_OWN_EV_FLOOR below; neither number here can bind beyond it (an EV
-    # >= 0.05 bet has a positive edge). Graded seasons 2021-22 .. 2025-26:
-    #   spread, quarters 1-2: 1,475 bets +103.6u +6.2% (95% +1.4..+11.1)
-    #   moneyline, quarter 3:   651 bets  +40.1u +10.0% (+0.1..+19.9)
-    #   spread, quarter 3:    1,055 bets  +79.6u  +6.7% (+1.2..+12.6)
-    # Every warning sign was present (outlier prices, DraftKings alone lost
-    # in 2025-26 in all six cells) and 2026-27's re-run is too few bets to
-    # read (docs/nba_search_ingame27.md section 12). The quarter-4 spread is
-    # NOT here: it failed the placebo bar; re-graded on the live record.
-    # Go-live gate standing: 0 settled of 50, each.
+    # NBA in-play game-state model, the quarters 1-2 spread (models/nba_live_ig2.py,
+    # run by models/nba_live_loop.py; LIVE 2026-11-04, mike). The cut is EV >=
+    # 0.05 at the best of the eight deciding books, -200 floor, at the first
+    # fetch in the phase holding a fresh quote, which is MODEL_OWN_EV_FLOOR
+    # below; neither number here can bind beyond it (an EV >= 0.05 bet has a
+    # positive edge). Graded on the loop's own fetch times (the archive's
+    # hourly purchases, 2021-22 .. 2025-26, the shipped rule, section 9's house
+    # standard): 1,348 bets +96.6u +6.4% (95% +1.4..+11.3), 5 of 5 seasons,
+    # every bar passed. NOT HERE, held out by the same gate (mike, 2026-11-04:
+    # the backtest is the gate): the quarter-3 moneyline (503 bets +8.3%, 95%
+    # -2.7..+19.3, fails the interval and the bands), the quarter-3 spread (813
+    # bets +4.5%, -2.0..+11.0, fails the interval, the bands and the placebo)
+    # and the quarter-4 spread (failed the placebo bar). Their code stays
+    # (models/nba_live_ig2.HELD_OUT_RULES); each is added the day it passes.
+    # Go-live gate standing: 0 settled of 50.
     "nba_live_spread_q12": {"min_prob": 0.0, "min_edge": 0.0},
-    "nba_live_ml_q3":      {"min_prob": 0.0, "min_edge": 0.0},
-    "nba_live_spread_q3":  {"min_prob": 0.0, "min_edge": 0.0},
     # MLB run-line market-relative rule (models/mlb_game_market). Replaces
     # the paused mlb_runline *publish path* — mlb_runline stays paused
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
@@ -2183,14 +2180,12 @@ MODEL_MIN_ODDS: dict = {
     # longer. A bet shorter than the floor is refused and the game is tried
     # again at its next slot (gameday.platform_gates). docs/thresholds.md.
     "nfl_live_leader_ml":        -140,
-    # The NBA in-play rules (models/nba_live_ig2.py) were graded at the -200
-    # floor (docs/nba_models_2026.md 7.1 and 7.3). Pinned so a Railway
-    # DEFAULT_MIN_ODDS override cannot move them off it. Prices the graded bets
-    # laid (min / median / max): spread q1-q2 -160 / -114 / +114, moneyline q3
-    # -200 / +210 / +3500, spread q3 -144 / -113 / +125.
+    # The NBA in-play quarters 1-2 spread (models/nba_live_ig2.py) was graded
+    # at the -200 floor (docs/nba_models_2026.md 7.1 and 7.3). Pinned so a
+    # Railway DEFAULT_MIN_ODDS override cannot move it off it. Prices its bets
+    # laid on the loop's hourly fetch times (min / median / max): -160 / -114 /
+    # +114.
     "nba_live_spread_q12":       -200,
-    "nba_live_ml_q3":            -200,
-    "nba_live_spread_q3":        -200,
 }
 
 
@@ -2360,15 +2355,13 @@ MODEL_OWN_EV_FLOOR: dict = {
     # (+16.94u; a -500 favourite needs an edge of 0.167 to clear it) -- a
     # population nobody graded. Smallest EV among the 167: 0.0205.
     "nfl_live_leader_ml":        0.02,
-    # The NBA in-play rules (2026-11-04, mike). 0.05 IS each rule's graded cut
-    # (docs/nba_models_2026.md 7.3: EV >= 0.05 at the deciding price, a push
-    # returning the stake). models/nba_live_ig2.rule_cut reads this number for
-    # the rule itself, and the row's probability is P(win | no push), whose
-    # config.expected_value is never below the rule's EV, so this gate cannot
-    # refuse a bet the rule took. No record yet: re-read at 50 settled each.
+    # The NBA in-play quarters 1-2 spread (2026-11-04, mike). 0.05 IS its
+    # graded cut (docs/nba_models_2026.md 7.3: EV >= 0.05 at the deciding
+    # price, a push returning the stake). models/nba_live_ig2.rule_cut reads
+    # this number for the rule itself, and the row's probability is P(win | no
+    # push), whose config.expected_value is never below the rule's EV, so this
+    # gate cannot refuse a bet the rule took. No record yet: re-read at 50.
     "nba_live_spread_q12":       0.05,
-    "nba_live_ml_q3":            0.05,
-    "nba_live_spread_q3":        0.05,
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2615,13 +2608,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # has no graded bet to fit a map on: the pooled offset borrowed from other
     # models would move every probability and with it the population.
     "nfl_live_leader_ml",
-    # 2026-11-04 (mike: "everything goes live now"). The NBA in-play rules'
-    # number is IG-2's own game-state probability (models/nba_live_ig2.py),
-    # the one their EV >= 0.05 cut was graded on. No record, so a promoted map
-    # would be the pooled offset borrowed from other models.
+    # 2026-11-04 (mike). The NBA in-play quarters 1-2 spread's number is
+    # IG-2's own game-state probability (models/nba_live_ig2.py), the one its
+    # EV >= 0.05 cut was graded on. No record, so a promoted map would be the
+    # pooled offset borrowed from other models.
     "nba_live_spread_q12",
-    "nba_live_ml_q3",
-    "nba_live_spread_q3",
     # 2026-10-15 (mike: "use what you've learned in this repo"). The NBA prop
     # rule's probability IS Pinnacle's proportional no-vig under at the same
     # line in the same fetch, which its EV >= 0.00 cut was measured on. It has
@@ -2782,13 +2773,12 @@ SCORING_METHODS: dict = {
     # Trained and registered (scripts/nba_prop_projection_train.py), scored by
     # scripts/nba_prop_projection_card.py, written by scripts/nba_props_card.py.
     "nba_prop_projection": SCORING_ARTIFACT,
-    # The NBA in-play rules: IG-2's state model and its prior distribution in
-    # one JSON artifact (models/saved/nba_live_ig2_2027.json, built by
-    # scripts/build_nba_live_ig2_artifact.py), registered in model_registry
-    # after the merge (--register) and scored by models/nba_live_loop.py.
+    # The NBA in-play quarters 1-2 spread: IG-2's state model and its prior
+    # distribution in one JSON artifact (models/saved/nba_live_ig2_2027.json,
+    # built by scripts/build_nba_live_ig2_artifact.py), registered in
+    # model_registry after the merge (--register) and scored by
+    # models/nba_live_loop.py.
     "nba_live_spread_q12": SCORING_ARTIFACT,
-    "nba_live_ml_q3":      SCORING_ARTIFACT,
-    "nba_live_spread_q3":  SCORING_ARTIFACT,
     # A rule with a parameter artifact committed under models/saved/ (the
     # residual sample and the bucket counts, models/nba_total_luck.py), never
     # registered: the card loads it by its pinned path.
@@ -2920,8 +2910,6 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "nfl_live_leader_ml":          0.02,   # 2026-10-13 mike; the backtest's cut, see ACTION_THRESHOLDS
     "nba_live_spread_q12":         0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
-    "nba_live_ml_q3":              0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
-    "nba_live_spread_q3":          0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3031,8 +3019,6 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_live_leader_ml":          0.0,    # 2026-10-13 mike; edge is the cut, see ACTION_THRESHOLDS
     "nba_live_spread_q12":         0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
-    "nba_live_ml_q3":              0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
-    "nba_live_spread_q3":          0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3310,18 +3296,15 @@ LIVE_MODELS = {
     # are in-sample for it.
     "nfl_live_leader_ml":  ("NFL", "h2h", "engine",
                             "Late 4th-quarter leader (4-16) on the DraftKings live moneyline, per-lead win probability"),
-    # NBA in-play game-state model (models/nba_live_ig2.py, run from the repo
-    # root by scheduler job nba_live; LIVE 2026-11-04, mike). Registered here
-    # for SETTLEMENT: a spread on the full-game margin against scored_line,
-    # the HOME number (CLAUDE.md section 4); a moneyline on home_win, overtime
-    # counted. models/live_scorer.py skips 'engine' entries. Evidence:
-    # docs/nba_models_2026.md section 7.3, docs/nba_search_ingame27.md.
+    # NBA in-play game-state model, the quarters 1-2 spread
+    # (models/nba_live_ig2.py, run from the repo root by scheduler job
+    # nba_live; LIVE 2026-11-04, mike). Registered here for SETTLEMENT: a
+    # spread on the full-game margin against scored_line, the HOME number
+    # (CLAUDE.md section 4). models/live_scorer.py skips 'engine' entries. The
+    # two quarter-3 models are held out (see ACTION_THRESHOLDS). Evidence:
+    # docs/sports/nba.md "In play", docs/nba_models_2026.md section 7.3.
     "nba_live_spread_q12": ("NBA", "spreads", "engine",
                             "Live spread, quarters 1-2: IG-2 game-state model, EV >= 0.05 at the first fresh fetch"),
-    "nba_live_ml_q3":      ("NBA", "h2h", "engine",
-                            "Live moneyline, quarter 3: IG-2 game-state model, EV >= 0.05 at the first fresh fetch"),
-    "nba_live_spread_q3":  ("NBA", "spreads", "engine",
-                            "Live spread, quarter 3: IG-2 game-state model, EV >= 0.05 at the first fresh fetch"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────

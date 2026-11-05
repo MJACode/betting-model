@@ -1,14 +1,12 @@
 {
  "kind": "nba_live_ig2",
  "model_ids": [
-  "nba_live_spread_q12",
-  "nba_live_ml_q3",
-  "nba_live_spread_q3"
+  "nba_live_spread_q12"
  ],
- "version": "2027-20261104",
+ "version": "2027-20261105",
  "identity": {
   "builder": "scripts/build_nba_live_ig2_artifact.py",
-  "built_at": "2026-11-04T20:32:29.740036+00:00",
+  "built_at": "2026-11-05T05:30:55.138659+00:00",
   "evidence": "docs/nba_models_2026.md section 7.3 (IG-2), docs/nba_search_ingame27.md",
   "inputs": {
    "train_states_2021_2025": {
@@ -29,7 +27,9 @@
    "market": "spreads",
    "graded_cut": 0.05,
    "graded_floor": -200.0
-  },
+  }
+ ],
+ "held_out_rules": [
   {
    "model_id": "nba_live_ml_q3",
    "phase": "Q3",

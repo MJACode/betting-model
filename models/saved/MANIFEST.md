@@ -133,7 +133,8 @@ models/saved/wnba_spread_20260719_113238.pkl
 
 - `nba_live_ig2_2027.json` — the NBA in-play game-state model (IG-2) for 2026-27: the state
   model fit on every held season 2020-21 .. 2025-26, the prior's empirical distribution and a
-  golden grid. Read by `models/nba_live_ig2.py` for the three in-play rules; rebuilt by
+  golden grid. Read by `models/nba_live_ig2.py` for the live quarters 1-2 spread (the two
+  quarter-3 rules are graded with it but held out, `held_out_rules`); rebuilt by
   `python -m scripts.build_nba_live_ig2_artifact --build`; registered in `model_registry` and
   copied to `model_artifacts` after the merge (`--register`, `--store`). Tracked like any
   source file.

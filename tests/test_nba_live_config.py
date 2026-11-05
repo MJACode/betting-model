@@ -2,13 +2,16 @@
 migration list) and their settlement.
 
 Pinned here:
-  * every model carries its own thresholds, its own EV floor (0.05, the graded
-    cut, which the rule itself reads) and the graded -200 floor (CLAUDE.md
+  * the live model carries its own thresholds, its own EV floor (0.05, the
+    graded cut, which the rule itself reads) and the graded -200 floor (CLAUDE.md
     section 1b; the floor pinned so a DEFAULT_MIN_ODDS override cannot move it);
-  * each is in LIVE_MODELS with the market it settles on, decides on its own
+  * it is in LIVE_MODELS with the market it settles on, decides on its own
     probability (no borrowed calibration map), and is classified as an
     artifact-backed model;
-  * the quarter-4 spread, which failed the placebo bar, is NOT registered;
+  * only the quarters 1-2 spread is live (mike, 2026-11-04: the backtest is the
+    gate): the two quarter-3 rules, which fail the house standard on the loop's
+    own fetch times, and the quarter-4 spread, which failed the placebo bar, are
+    in no registry and the loop never decides them;
   * settlement: a spread against the HOME number (CLAUDE.md section 4), a
     moneyline on home_win with overtime counted;
   * the scheduler runs the loop on the poller service, on by default, off by
@@ -35,10 +38,8 @@ def test_every_rule_carries_its_own_thresholds_floor_and_ev_floor():
 
 def test_each_rule_settles_on_its_own_market():
     assert config.LIVE_MODELS[M.SPREAD_Q12][:3] == ("NBA", "spreads", "engine")
-    assert config.LIVE_MODELS[M.ML_Q3][:3] == ("NBA", "h2h", "engine")
-    assert config.LIVE_MODELS[M.SPREAD_Q3][:3] == ("NBA", "spreads", "engine")
     from tracking.paper_tracker import _market_for_pick
-    assert [_market_for_pick(m) for m in M.MODEL_IDS] == ["spreads", "h2h", "spreads"]
+    assert [_market_for_pick(m) for m in M.MODEL_IDS] == ["spreads"]
 
 
 def test_each_rule_decides_on_its_own_probability_and_is_artifact_backed():
@@ -48,13 +49,37 @@ def test_each_rule_decides_on_its_own_probability_and_is_artifact_backed():
         assert mid not in config.PAUSED_MODELS
 
 
-def test_the_quarter_4_spread_is_not_registered():
-    """It failed the placebo bar (docs/nba_models_2026.md 7.3); it is added the
-    day it passes on the live record, not before."""
-    names = set(config.ACTION_THRESHOLDS) | set(config.LIVE_MODELS)
+def _registered_names() -> set:
+    names = set(config.ACTION_THRESHOLDS) | set(config.LIVE_MODELS) | set(config.MODEL_MIN_ODDS)
+    names |= set(config.MODEL_OWN_EV_FLOOR) | set(config.MODELS_ON_OWN_PROBABILITY)
+    names |= set(config.MODEL_EDGE_THRESHOLDS) | set(config.MODEL_PROB_THRESHOLDS)
+    names |= set(config.SCORING_METHODS)
+    return names
+
+
+def test_only_the_quarters_1_2_spread_is_live():
+    """mike, 2026-11-04: the backtest is the gate. On the loop's own fetch times
+    only the quarters 1-2 spread passes the house standard, so it is the only
+    rule the loop runs."""
+    assert M.MODEL_IDS == (M.SPREAD_Q12,)
+    assert {(r.phase, r.market) for r in M.RULES} == {("Q1-Q2", "spreads")}
+
+
+def test_the_held_out_rules_are_in_no_registry_and_never_decided():
+    """The quarter-3 moneyline and spread fail the house standard on the hourly
+    fetches; the quarter-4 spread failed the placebo bar (docs/nba_models_2026.md
+    7.3). Their code stays (HELD_OUT_RULES) so they are re-graded, and each is
+    added the day it passes, not before."""
+    names = _registered_names()
     assert not any(n.startswith("nba_live_") and "q4" in n for n in names)
-    assert {r.phase for r in M.RULES} == {"Q1-Q2", "Q3"}
-    assert {(r.phase, r.market) for r in M.RULES} == {("Q1-Q2", "spreads"), ("Q3", "h2h"), ("Q3", "spreads")}
+    held = {r.model_id for r in M.HELD_OUT_RULES}
+    assert held == {M.ML_Q3, M.SPREAD_Q3}
+    assert not held & names
+    assert not held & set(M.MODEL_IDS)
+    assert {(r.phase, r.market) for r in M.GRADED_RULES} == {("Q1-Q2", "spreads"), ("Q3", "h2h"), ("Q3", "spreads")}
+    art = M.load_artifact()
+    assert [r["model_id"] for r in art.raw["rules"]] == [M.SPREAD_Q12]       # --register reads this list
+    assert sorted(r["model_id"] for r in art.raw["held_out_rules"]) == sorted(held)
 
 
 def test_a_spread_settles_against_the_home_number():
@@ -200,10 +225,10 @@ def test_an_nba_live_pick_is_announced_only_while_its_game_is_in_progress():
                             downgrade_reason TEXT);
         CREATE TABLE games (game_id TEXT, home_score REAL);
         CREATE TABLE model_action_thresholds (model_id TEXT, paused BOOLEAN);
-        INSERT INTO model_action_thresholds VALUES ('nba_live_ml_q3', 0), ('mlb_live_total_runs', 0);
+        INSERT INTO model_action_thresholds VALUES ('nba_live_spread_q12', 0), ('mlb_live_total_runs', 0);
         INSERT INTO games VALUES ('NBA_done', 110), ('NBA_live', NULL), ('MLB_done', 5);
-        INSERT INTO picks VALUES ('NBA_done', 'nba_live_ml_q3', 'NBA', NULL, NULL),
-                                 ('NBA_live', 'nba_live_ml_q3', 'NBA', NULL, NULL),
+        INSERT INTO picks VALUES ('NBA_done', 'nba_live_spread_q12', 'NBA', NULL, NULL),
+                                 ('NBA_live', 'nba_live_spread_q12', 'NBA', NULL, NULL),
                                  ('MLB_done', 'mlb_live_total_runs', 'MLB', NULL, NULL);
     """)
     sql = "SELECT p.game_id FROM picks p WHERE 1 = 1 " + live_publishable_sql("p").replace(
@@ -233,8 +258,10 @@ def test_the_output_check_reads_a_game_never_looked_at_and_a_silent_window():
     w = datetime(2026, 11, 5, 0, 55, 36, tzinfo=timezone.utc)
     assert NH.windows_without_calls({"a": tip}, {}, []) == [w]
     assert NH.windows_without_calls({"a": tip}, {}, [w + timedelta(seconds=30)]) == []
-    # all three rules decided before the window: no call was needed
-    done = {"a": [tip + timedelta(minutes=20)] * 3}
+    # every live rule (one: the quarters 1-2 spread) decided before the window:
+    # no call was needed. Held-out rules are never decided, so they never count.
+    done = {"a": [tip + timedelta(minutes=20)] * len(M.RULES)}
+    assert len(M.RULES) == 1
     assert NH.windows_without_calls({"a": tip}, done, []) == []
 
 

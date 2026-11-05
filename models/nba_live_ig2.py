@@ -1,28 +1,32 @@
 """
-NBA in-play game-state model (IG-2), live and real money: three rules.
+NBA in-play game-state model (IG-2), live and real money: one rule.
 
 mike, 2026-11-04: "everything goes live now, that's why we do back testing ...
 and you continually improve models as you get more data." The third NBA search
 (docs/nba_models_2026.md section 7) graded IG-2 on five seasons of in-play
-quotes and 6 of its 18 cells passed the house standard. The EV >= 0.08 cells
-sit inside the EV >= 0.05 ones, so the six cells are three rules, one model id
-each (one id per separately judged rule is the repo's pattern):
+quotes and 6 of its 18 cells passed the house standard: three rules, one model
+id each. Re-graded on the fetches the loop can actually make (the archive's
+hourly purchases, the shipped rule, section 9's house standard with 200
+placebo runs; scripts/nba_live_ig2_regrade.py), 2021-22 .. 2025-26, only one
+passes, and only it is live (mike, 2026-11-04: the backtest is the gate):
 
-  nba_live_spread_q12   live spread, quarters 1-2 phase, EV >= 0.05
-                        backtest 1,475 bets, +103.6 units, +6.2%,
-                        prices -160 / -114 / +114 (min / median / max)
+  nba_live_spread_q12   LIVE. live spread, quarters 1-2 phase, EV >= 0.05
+                        1,348 bets, +96.6 units, +6.4% (95% +1.4 .. +11.3),
+                        5 of 5 seasons, every bar passed; prices -160 / -114 /
+                        +114 (min / median / max)
+
+HELD OUT (HELD_OUT_RULES: their code path is this one, the loop never decides
+them, no config registry names them; each is added the day it passes):
+
   nba_live_ml_q3        live moneyline, quarter 3 phase, EV >= 0.05
-                        backtest 651 bets, +40.1 units, +10.0%,
-                        prices -200 / +210 / +3500
+                        503 bets, +26.2 units, +8.3% (-2.7 .. +19.3), 4 of 5;
+                        fails the interval and the bands
   nba_live_spread_q3    live spread, quarter 3 phase, EV >= 0.05
-                        backtest 1,055 bets, +79.6 units, +6.7%,
-                        prices -144 / -113 / +125
+                        813 bets, +41.2 units, +4.5% (-2.0 .. +11.0), 4 of 5;
+                        fails the interval, the bands and the placebo
 
 NOT BUILT: the quarter-4 spread. It failed the backtest's placebo bar (record
-7.3), so it is re-graded on the live record and added the day it passes. The
-quarters 1-2 and quarter 4 moneylines failed every bar. This season's re-run
-(docs/nba_search_ingame27.md section 12) read the quarter-3 spread positive and
-the quarter-3 moneyline losing, on too few bets to judge; all three ship.
+7.3). The quarters 1-2 and quarter 4 moneylines failed every bar.
 
 THE RULE, EXACTLY AS GRADED. Every function below that decides anything calls
 the graded code: scripts/nba_ingame_ig2 (G: features, the state model, eligible,
@@ -111,13 +115,23 @@ class Rule:
     market: str               # "spreads" | "h2h"
 
 
+# The rules the loop runs, and only these (mike, 2026-11-04: the backtest is
+# the gate). Each is in config's registries and in model_registry.
 RULES: tuple[Rule, ...] = (
     Rule(SPREAD_Q12, "Q1-Q2", "spreads"),
+)
+# Built and graded, NOT live: on the loop's own fetch times (the archive's
+# hourly purchases) neither clears the house standard (module docstring). The
+# loop never decides them and no config registry names them; their code path is
+# this one, and scripts/nba_live_ig2_regrade.py re-grades them. A rule moves to
+# RULES, with its config entries, the day it passes.
+HELD_OUT_RULES: tuple[Rule, ...] = (
     Rule(ML_Q3, "Q3", "h2h"),
     Rule(SPREAD_Q3, "Q3", "spreads"),
 )
+GRADED_RULES: tuple[Rule, ...] = RULES + HELD_OUT_RULES
 MODEL_IDS: tuple[str, ...] = tuple(r.model_id for r in RULES)
-RULE_BY_ID = {r.model_id: r for r in RULES}
+RULE_BY_ID = {r.model_id: r for r in GRADED_RULES}
 
 FAR_FUTURE = pd.Timestamp("2200-01-01", tz="UTC")
 

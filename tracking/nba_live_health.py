@@ -11,8 +11,9 @@ loop's OUTPUTS for a finished slate, and reads STALE when either fails:
   2. Every fetch window that needed a fetch has an Odds API call from the
      loop's source ('nba-live' in api_call_log). A window needed one when some
      game was within its first DECISION_SPAN_MIN minutes after its listed tip
-     (quarters 1-3; the rules decide nothing later) and had not yet had all
-     three rules decided before the window opened.
+     (a quarters 1-2 quote can still sit in a fetch early in quarter 3; the
+     loop fetches for nothing later) and had not yet had every live rule
+     (models/nba_live_ig2.RULES) decided before the window opened.
 
 Pure helpers below; `check` runs them on a connection.
 """
@@ -22,13 +23,15 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
+from models.nba_live_ig2 import RULES as LIVE_RULES
+
 LOOP_SOURCE = "nba-live"
 ODDS_API = "The Odds API"
 FETCH_OFFSET_SEC = 264.0
-DECISION_SPAN_MIN = 100.0         # tip to the end of quarter 3, generously
+DECISION_SPAN_MIN = 100.0         # tip into quarter 3, generously
 CALL_SLACK_SEC = 600.0            # a call this long after the window opened still counts
 DECIDED = ("bet", "no_bet", "declined")
-N_RULES = 3
+N_RULES = len(LIVE_RULES)        # the rules the loop decides; held-out ones never
 
 
 def windows_between(start: datetime, end: datetime, offset_s: float = FETCH_OFFSET_SEC) -> list[datetime]:

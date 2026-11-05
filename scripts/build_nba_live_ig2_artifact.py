@@ -163,6 +163,9 @@ def build(out: Path = OUT) -> dict:
         },
         "rules": [{"model_id": r.model_id, "phase": r.phase, "market": r.market,
                    "graded_cut": CUT, "graded_floor": FLOOR} for r in M.RULES],
+        # graded with the same model, not live, never registered (models/nba_live_ig2.HELD_OUT_RULES)
+        "held_out_rules": [{"model_id": r.model_id, "phase": r.phase, "market": r.market,
+                            "graded_cut": CUT, "graded_floor": FLOOR} for r in M.HELD_OUT_RULES],
         "state_model": {"cols": list(G.FEATURES), "beta": [float(x) for x in m.beta],
                         "s1": float(m.s1), "s0": float(m.s0), "season": int(m.S),
                         "n_train": int(m.n_train), "train_seasons": sorted(int(s) for s in train["season"].unique()),
@@ -199,7 +202,7 @@ def parity_held() -> dict:
     bets = M.decide_first_fetch(el, models, CUT, FLOOR)
     res = {}
     mine_all = []
-    for r in M.RULES:
+    for r in M.GRADED_RULES:
         mine = bets[(bets["market"] == r.market) & (bets["phase_ig2"] == r.phase)].copy()
         mine_all.append(mine.assign(model_id=r.model_id))
         g = pd.read_parquet(G.BETS_DIR / GRADED_FILES[r.model_id])
@@ -236,7 +239,7 @@ def parity_held() -> dict:
     # The live loop's own path: M.decide on one game's first eligible fetch per
     # rule (a one-game frame), against the graded bets.
     dec = G.decision_quotes(el)
-    by_rule = {(r.phase, r.market): r for r in M.RULES}
+    by_rule = {(r.phase, r.market): r for r in M.GRADED_RULES}
     rows = []
     for (gid, mk, ph), grp in dec.groupby(["game_id", "market", "phase_ig2"], sort=False):
         r = by_rule.get((ph, mk))
@@ -247,7 +250,7 @@ def parity_held() -> dict:
             rows.append({**{k: d.pick[k] for k in ("game_id", "market", "side", "book", "price", "line", "ev")},
                          "model_id": r.model_id})
     live = pd.DataFrame(rows)
-    for r in M.RULES:
+    for r in M.GRADED_RULES:
         g = pd.read_parquet(G.BETS_DIR / GRADED_FILES[r.model_id])
         g = g[g["cut"].round(2) == CUT]
         key = ["game_id", "side", "book", "price"]
@@ -301,7 +304,7 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
     prior = L.live_prior(H.CACHE, L.load_live())
     pm = prior.set_index("game_id")["mu_pre"]
     lab = {r.model_id: pd.read_parquet(L.SCRATCH / "results" / "bets" / f)
-           for r, f in zip(M.RULES, ("bets_S1_IG2_live27_Q1-Q2_spreads_0002.parquet",
+           for r, f in zip(M.GRADED_RULES, ("bets_S1_IG2_live27_Q1-Q2_spreads_0002.parquet",
                                      "bets_S1_IG2_live27_Q3_h2h_0003.parquet",
                                      "bets_S1_IG2_live27_Q3_spreads_0004.parquet"))}
     for k in lab:
@@ -312,14 +315,14 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
     q_all, _d, _n = M.fetch_quotes(odds, games)
     qt, notes = M.prepare(q_all, plays_all, pbp, top, games, final_games=set(games["game_id"]))
     full = {}
-    for r in M.RULES:
+    for r in M.GRADED_RULES:
         el = M.eligible_for(qt, r).merge(prior[["game_id", "mu_pre"]], on="game_id", how="inner")
         b = M.decide_first_fetch(el, art.models, CUT, FLOOR)
         full[r.model_id] = b
     res = {"games": int(len(games)), "wild_wallclock_games": wild, "notes": {k: v for k, v in notes.items()
                                                                             if not isinstance(v, dict)}}
     key = ["game_id", "side", "book", "price"]
-    for r in M.RULES:
+    for r in M.GRADED_RULES:
         a, b = full[r.model_id], lab[r.model_id]
         j = a[key].merge(b[key], on=key, how="outer", indicator=True)
         res[f"{r.model_id}_all_plays_vs_search"] = {
@@ -343,7 +346,7 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
     q_v, _d, _n = M.fetch_quotes(odds[at_view], games)
     qt_v, _nv = M.prepare(q_v, plays_all, pbp.drop(columns="_wc"), top, games, final_games=set(games["game_id"]))
     full_v = {}
-    for r in M.RULES:
+    for r in M.GRADED_RULES:
         el = M.eligible_for(qt_v, r).merge(prior[["game_id", "mu_pre"]], on="game_id", how="inner")
         full_v[r.model_id] = (el, M.decide_first_fetch(el, art.models, CUT, FLOOR))
     seen: set = set()
@@ -355,7 +358,7 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
         if q.empty:
             continue
         gids = {g for g in set(q["game_id"])
-                if any((g, r.model_id) not in decided for r in M.RULES)}
+                if any((g, r.model_id) not in decided for r in M.GRADED_RULES)}
         served = q["served_at"].max()
         known = pbp[pbp["game_id"].isin(gids) & (pbp["_wc"] <= served + pd.Timedelta(seconds=wait_s))]
         if known.empty:
@@ -363,7 +366,7 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
         pl, _w = L.live_plays(known.drop(columns="_wc"))
         n_fetch += 1
         qt_f, _nn = M.prepare(q[q["game_id"].isin(gids)], pl, known.drop(columns="_wc"), top, games)
-        for r in M.RULES:
+        for r in M.GRADED_RULES:
             el = M.eligible_for(qt_f, r)
             for gid, grp in el.groupby("game_id"):
                 if (gid, r.model_id) in decided:
@@ -371,7 +374,7 @@ def parity_live27(wait_s: float = WAIT_S, every_fetch: bool = False) -> dict:
                 d = M.decide(grp, r, art.models, pm.get(gid), CUT, FLOOR)
                 if d is not None:
                     decided[(gid, r.model_id)] = (fa, d)
-    for r in M.RULES:
+    for r in M.GRADED_RULES:
         live_bets = pd.DataFrame([{**d.pick, "fetch_at": fa} for (gid, mid), (fa, d) in decided.items()
                                   if mid == r.model_id and d.bet])
         live_dec = {gid: fa for (gid, mid), (fa, d) in decided.items() if mid == r.model_id}
@@ -446,6 +449,8 @@ def register(path: Path) -> None:
     try:
         for r in art["rules"]:
             mid = r["model_id"]
+            if mid not in M.MODEL_IDS:          # only the live rules are registered
+                continue
             conn.execute("UPDATE model_registry SET is_active = 0 WHERE model_id = %s AND is_active = 1", (mid,))
             conn.execute("""
                 INSERT INTO model_registry (model_id, version, trained_on, train_seasons, holdout_season,

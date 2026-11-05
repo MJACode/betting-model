@@ -1329,17 +1329,19 @@ makes 1,143 bets, +74.40 units, +5.90%, [0.71, 11.69]: it now clears the bar it
 missed. No earlier fetch time beats tip minus 10 on the same games (research
 round 5 `h2h.csv`). `docs/sports/ncaab.md` has the seasons.
 
-## NBA — the in-play game-state model, three rules (2026-11-04, mike)
+## NBA — the in-play game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 mike, 2026-11-04: *"everything goes live now, that's why we do back testing ...
 and you continually improve models as you get more data."* IG-2's six passing
 cells (`docs/nba_models_2026.md` 7.3) are three rules; the EV 0.08 cells sit
-inside the 0.05 ones. The model, the loop and the warning signs:
-`docs/sports/nba.md`, "In play".
+inside the 0.05 ones. On the loop's own fetch times only the quarters 1-2
+spread passes, and only it is live (mike, 2026-11-04: the backtest is the
+gate). The model, the loop and the warning signs: `docs/sports/nba.md`, "In
+play".
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | EV >= 0.05 (the harness's EV, a push returning the stake), at the first fresh fetch per game and rule, best of the eight deciding books | `MODEL_OWN_EV_FLOOR` (read by `models/nba_live_ig2.rule_cut`) |
+| the cut | EV >= 0.05 (the harness's EV, a push returning the stake), at the first fresh fetch per game, best of the eight deciding books | `MODEL_OWN_EV_FLOOR` (read by `models/nba_live_ig2.rule_cut`) |
 | prob / edge filter | 0.0 / 0.0: neither can bind beyond the cut, since an EV >= 0.05 bet has a positive edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS`, `MODEL_EDGE_THRESHOLDS` |
 | EV floor | 0.05, on its own probability. The row's probability is P(win given no push), whose `config.expected_value` is never below the rule's EV, so the platform gate cannot refuse a bet the rule took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, as graded, pinned | `MODEL_MIN_ODDS` |
@@ -1351,11 +1353,11 @@ the independent review: the archive's hourly purchases only, the shipped rule,
 section 9's house standard; each cell's 95% whole-day interval;
 `scripts/nba_live_ig2_regrade.py`):
 
-| Model | Bets | Units | ROI | interval | Seasons positive | 2025-26 | House standard | Prices (min / median / max) |
-|---|---|---|---|---|---|---|---|---|
-| `nba_live_spread_q12` | 1,348 | +96.6 | +6.4% | +1.4 .. +11.3 | 5 of 5 | +4.5% on 304 | passes | -160 / -114 / +114 |
-| `nba_live_ml_q3` | 503 | +26.2 | +8.3% | -2.7 .. +19.3 | 4 of 5 | +18.8% on 124 | fails: interval, bands | -200 / +200 / +3000 |
-| `nba_live_spread_q3` | 813 | +41.2 | +4.5% | -2.0 .. +11.0 | 4 of 5 | +4.7% on 220 | fails: interval, bands, placebo | -140 / -113 / +125 |
+| Model | Bets | Units | ROI | interval | Seasons positive | 2025-26 | House standard | Status | Prices (min / median / max) |
+|---|---|---|---|---|---|---|---|---|---|
+| `nba_live_spread_q12` | 1,348 | +96.6 | +6.4% | +1.4 .. +11.3 | 5 of 5 | +4.5% on 304 | passes | **LIVE** | -160 / -114 / +114 |
+| `nba_live_ml_q3` | 503 | +26.2 | +8.3% | -2.7 .. +19.3 | 4 of 5 | +18.8% on 124 | fails: interval, bands | held out | -200 / +200 / +3000 |
+| `nba_live_spread_q3` | 813 | +41.2 | +4.5% | -2.0 .. +11.0 | 4 of 5 | +4.7% on 220 | fails: interval, bands, placebo | held out | -140 / -113 / +125 |
 
 The grade that put them forward (record 7.3, every archive purchase, IG-2's own
 state join) read 1,475 bets +6.2%, 651 bets +10.0% and 1,055 bets +6.7%, all
@@ -1363,15 +1365,16 @@ passing the house standard of section 6.7; under section 9's bands bar all
 three would fail. The neighbours on the loop's fetch times: EV >= 0.08 passes
 for the quarters 1-2 spread (876 bets, +6.6%); the quarter-3 moneyline at 0.08
 (425 bets, +14.4%) fails the bands (the 0.05-0.08 band lost 10.4 units on 78
-bets) and the quarter-3 spread at 0.08 fails the interval. Whether the two
-quarter-3 rules stay in the loop is an open decision (2026-11-04). The
-quarter-4 spread failed the placebo bar and is not built. The comparison in
+bets) and the quarter-3 spread at 0.08 fails the interval. The two quarter-3
+models are held out, like the quarter-4 spread (failed the placebo bar): no
+config entry, not registered, never decided by the loop. Their code stays
+(`models/nba_live_ig2.HELD_OUT_RULES`); each is re-graded as this season's rows
+accumulate and added, with its own config entries, the day it passes. The comparison in
 full: `docs/sports/nba.md`, "In play".
 
 **Under the one-game rule** (two bets that cannot both win are not both made)
-the hourly re-grade loses 46 bets worth +9.40 units: the quarter-3 moneyline is
-481 bets +7.2%, the quarter-3 spread 789 bets +4.1%; the quarters 1-2 spread is
-unchanged.
+nothing changes while one model is live; with all three, the hourly re-grade
+would lose 46 bets worth +9.40 units, all from the quarter-3 models.
 
 **Review at 50 settled bets each** (gate standing, CLAUDE.md §2). Read beside
 the ROI: the share of bets at an outlier price, DraftKings' share, the underdog

@@ -1,5 +1,5 @@
 """
-NBA in-play loop: the three IG-2 rules (models/nba_live_ig2.py), live.
+NBA in-play loop: the live IG-2 rules (models/nba_live_ig2.RULES: the quarters 1-2 spread).
 
     python -m models.nba_live_loop              # the real thing
     python -m models.nba_live_loop --dry-run    # decide and log; write nothing
@@ -18,9 +18,10 @@ the market as it stood 264 s before the hour in 2022-23 .. 2025-26 (553 s in
 archive's :30 purchases were gap fills (53.5% exactly 30 minutes before a
 listed tip, 19.4% at one), not a schedule a loop can follow, and
 games.commence_time in 2026-27 holds the actual start (:10, :40, off-minute
-values), so no fetch time is ever built from a tip. The three rules were
-re-graded on the hourly purchases alone (scripts/nba_live_ig2_regrade.py;
-docs/sports/nba.md, "In play"). A loop polling every few seconds would decide
+values), so no fetch time is ever built from a tip. The three graded rules
+were re-graded on the hourly purchases alone (scripts/nba_live_ig2_regrade.py;
+docs/sports/nba.md, "In play"); only the quarters 1-2 spread passed, and the
+loop decides only M.RULES (the quarter-3 rules are M.HELD_OUT_RULES). A loop polling every few seconds would decide
 every game in the first minute of each phase: a population never graded.
 
 A fetch window is FETCH_WINDOW_SEC long. A game the loop could not decide on
@@ -384,7 +385,7 @@ def platform_gates(model_id: str, prob: float, price: float) -> str | None:
 
 
 def standing_bets(conn, game_id: str) -> list[dict]:
-    """This game's standing live BETs of the three rules, as conflict dicts."""
+    """This game's standing live BETs of the live rules, as conflict dicts."""
     from data.db import release_read
     try:
         rows = conn.execute("""
@@ -464,7 +465,7 @@ def write_bet(conn, pick: dict) -> bool:
 
 
 def unsettled_bet_dates(conn) -> set[str]:
-    """Slate dates holding an unsettled live BET of the three rules: every
+    """Slate dates holding an unsettled live BET of the live rules: every
     launch announces them, so a post that failed is retried until graded."""
     from data.db import release_read
     since = (datetime.now(timezone.utc) - timedelta(days=4)).date().isoformat()
