@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import type { Session } from '@supabase/supabase-js';
 
@@ -21,24 +22,35 @@ import {
  * every network call guards on it first, so an accidental import can't create
  * real accounts in production before we're ready.
  *
- * Three methods, all pure JS so the whole feature ships over OTA with no native
- * module and no EAS rebuild:
- *
  *   - Email  → one-time 6-digit passcode (`signInWithOtp` + `verifyOtp`).
  *              Deliberately NOT a magic link: a code needs no deep-link handler
  *              and can't be broken by an email client that rewrites URLs.
- *   - Apple  → Supabase OAuth in an in-app browser (`expo-web-browser`, already
- *   - Google   a dependency for SharpSports) using the PKCE flow.
- *
- * The Apple button uses the web flow rather than the native sheet. That is a
- * deliberate trade: `expo-apple-authentication` gives a nicer one-tap sheet but
- * is a native module, which means an EAS rebuild and — per the OTA rule in
- * CLAUDE.md — a bundle importing it would crash on any installed binary that
- * predates that rebuild. See docs/AUTHENTICATION.md for the upgrade path.
+ *              Pure JS. The App Review demo address stays on this path.
+ *   - Google → Supabase OAuth in an in-app browser (`expo-web-browser`) using
+ *              the PKCE flow. Same path on iOS and Android.
+ *   - Apple on iOS → the system sheet (`expo-apple-authentication`), then
+ *              `signInWithIdToken`. Not the browser, and not `signInWithOAuth`.
+ *              Native module: a new EAS binary, not an OTA onto a binary that
+ *              predates it. Loaded only inside `loadAppleAuthentication()`.
+ *   - Apple off iOS → the same browser PKCE flow as Google. The sign-in screen
+ *              does not show the button there (`showAppleOn`). Delete-account
+ *              re-auth for an Apple identity on Android still uses it.
  *
  * Pure helpers live in ./authHelpers (kept free of react-native so the verify
  * script can import them) and are re-exported here.
  */
+
+/**
+ * The slice of `expo-apple-authentication` this file calls. Structural so the
+ * package is not imported at module scope — see `loadAppleAuthentication`.
+ */
+interface AppleAuthenticationModule {
+  isAvailableAsync: () => Promise<boolean>;
+  signInAsync: (options: {
+    requestedScopes?: number[];
+  }) => Promise<{ identityToken: string | null }>;
+  AppleAuthenticationScope: { FULL_NAME: number; EMAIL: number };
+}
 
 export { APP_REVIEW_DEMO_EMAIL, isAppReviewDemoEmail } from './appReview';
 
@@ -153,17 +165,87 @@ async function reviewInvokeError(error: unknown): Promise<Error> {
 }
 
 /**
- * Run an OAuth provider in an in-app browser and exchange the returned code for
- * a session.
+ * The user dismissed the Apple sheet. A cancel stays on the sign-in screen.
+ */
+function isAppleCancel(err: unknown): boolean {
+  if (err == null || typeof err !== 'object' || !('code' in err)) return false;
+  return String((err as { code?: unknown }).code ?? '') === 'ERR_REQUEST_CANCELED';
+}
+
+/**
+ * Load Sign in with Apple. The `require` is the only place the package name
+ * is a value, and it runs only after the iOS check. A static import would
+ * evaluate the native module for email, Google, and Android too — an OTA
+ * bundle that does that crashes on launch where the binary lacks the module.
+ */
+function loadAppleAuthentication(): AppleAuthenticationModule {
+  if (Platform.OS !== 'ios') {
+    throw new Error('Sign in with Apple uses the system sheet on iOS only.');
+  }
+  let mod: unknown;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    mod = require('expo-apple-authentication');
+  } catch {
+    throw new Error(
+      'This build does not include Sign in with Apple. Update to the latest app version.',
+    );
+  }
+  const resolved = mod as AppleAuthenticationModule;
+  if (
+    typeof resolved?.signInAsync !== 'function' ||
+    resolved.AppleAuthenticationScope == null
+  ) {
+    throw new Error(
+      'This build does not include Sign in with Apple. Update to the latest app version.',
+    );
+  }
+  return resolved;
+}
+
+/**
+ * iOS Sign in with Apple: system sheet, then the identity token. No browser.
+ * Returns null when the sheet is dismissed.
+ */
+async function signInWithAppleNative(): Promise<Session | null> {
+  const apple = loadAppleAuthentication();
+  if (!(await apple.isAvailableAsync())) {
+    throw new Error('Sign in with Apple is not available on this device.');
+  }
+  let credential: { identityToken: string | null };
+  try {
+    credential = await apple.signInAsync({
+      requestedScopes: [
+        apple.AppleAuthenticationScope.FULL_NAME,
+        apple.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+  } catch (e) {
+    if (isAppleCancel(e)) return null;
+    throw new Error("Couldn't sign in with Apple. Try again.");
+  }
+  const token = credential.identityToken;
+  if (!token) throw new Error("Couldn't sign in with Apple. Try again.");
+  const { data, error } = await supabase.auth.signInWithIdToken({
+    provider: 'apple',
+    token,
+  });
+  if (error || !data.session) {
+    throw new Error("Couldn't sign in with Apple. Try again.");
+  }
+  return data.session;
+}
+
+/**
+ * Run a provider in an in-app browser and exchange the returned code for a
+ * session. Google on both platforms. Apple only when this is not iOS.
  *
  * Returns `null` when the user dismisses the browser — a cancel is a normal
  * outcome, not an error, and the caller should just stay on the sign-in screen.
  */
-export async function signInWithProvider(
+async function signInWithOAuthBrowser(
   provider: AuthProvider,
 ): Promise<Session | null> {
-  assertAuthEnabled(AUTH_ENABLED);
-
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
@@ -191,6 +273,23 @@ export async function signInWithProvider(
     throw new Error('Sign-in did not return a session.');
   }
   return exchanged.data.session;
+}
+
+/**
+ * Sign in with Apple or Google.
+ *
+ * On iOS, Apple is the system sheet and `signInWithIdToken`. Every other
+ * case is the in-app browser. Returns `null` when the user dismisses the
+ * sheet or the browser.
+ */
+export async function signInWithProvider(
+  provider: AuthProvider,
+): Promise<Session | null> {
+  assertAuthEnabled(AUTH_ENABLED);
+  if (provider === 'apple' && Platform.OS === 'ios') {
+    return signInWithAppleNative();
+  }
+  return signInWithOAuthBrowser(provider);
 }
 
 export async function signOut(): Promise<void> {

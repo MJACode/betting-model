@@ -4,7 +4,7 @@
 
 **Effective date:** [DATE] — the date this policy is published on signalbase-ai.com (filled in at publish).
 
-This Privacy Policy explains how Signal Base ("Signal Base," "we," "us") collects, uses, and shares information when you use the Signal Base mobile app, signalbase-ai.com, and related services (the "Service"). The Service is intended only for people 21 and older located in the United States.
+This Privacy Policy explains how Signal Base LLC ("Signal Base LLC," "we," "us") collects, uses, and shares information when you use the Signal Base mobile app, signalbase-ai.com, and related services (the "Service"). The Service is intended only for people 21 and older located in the United States.
 
 ## 1. Information we collect
 
@@ -61,4 +61,4 @@ The Service is offered only in the United States, and your information is proces
 We may update this Policy. We will post the new version with a new effective date and give notice of material changes.
 
 ## 10. Contact
-Signal Base · Email: Signalbaseskinny@gmail.com
+Signal Base LLC · Email: Signalbaseskinny@gmail.com
