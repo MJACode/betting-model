@@ -227,6 +227,21 @@ def test_the_file_is_registered_and_guards_on_what_it_builds():
     assert "byom_official_legs_v1" in bands.split("CREATE OR REPLACE FUNCTION public.byom_legs", 1)[1]
 
 
+def test_byom_legs_forces_a_custom_plan():
+    """#1172 Medium, Matt via CE. A pooled connection must not switch
+    byom_legs to a generic plan that skips idx_byom_prop_facts_market.
+    The skip is that proconfig entry, so a body applied before the SET
+    is replaced once."""
+    text = (ROOT / "data/migrations" / PROP_LOOKUP_SQL).read_text(encoding="utf-8")
+    fn = text.split("CREATE OR REPLACE FUNCTION public.byom_legs", 1)[1]
+    head = fn.split("AS $body$", 1)[0]
+    assert "SET search_path = public, pg_temp" in head
+    assert "SET plan_cache_mode = force_custom_plan" in head
+    guard = text.split("RAISE NOTICE 'byom prop lookup already present", 1)[0]
+    assert "'plan_cache_mode=force_custom_plan' = ANY (p.proconfig)" in guard
+    assert "CREATE OR REPLACE" not in guard
+
+
 def test_the_lock_read_index_is_registered_and_guarded():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert LOCK_READ_SQL in ACTIVE_MIGRATIONS
@@ -714,6 +729,34 @@ def test_a_second_pass_leaves_byom_legs_alone(scratch):
     assert pct == 0
 
 
+def test_a_byom_legs_without_force_custom_plan_is_rebuilt_once(scratch):
+    """Production applied #1172 before plan_cache_mode was set. The next
+    pass must add it, then leave the function alone."""
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute(
+        "ALTER FUNCTION public.byom_legs(integer, jsonb, text) "
+        "RESET plan_cache_mode")
+    cur.execute(
+        "SELECT 'plan_cache_mode=force_custom_plan' = ANY (proconfig) "
+        "FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is not True
+    text = _adapt_sql(
+        (ROOT / "data/migrations" / PROP_LOOKUP_SQL).read_text(encoding="utf-8"))
+    cur.execute(text)
+    cur.execute(
+        "SELECT 'plan_cache_mode=force_custom_plan' = ANY (proconfig), "
+        "'search_path=public, pg_temp' = ANY (proconfig), xmin::text "
+        "FROM pg_proc WHERE proname = 'byom_legs'")
+    has_plan, has_path, first = cur.fetchone()
+    assert has_plan is True
+    assert has_path is True
+    cur.execute(text)
+    cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] == first
+
+
 def test_no_active_migration_guards_on_unnamed_identity_arguments():
     """pg_get_function_identity_arguments returns 'p_season integer, ...'.
     A guard that compares it to 'integer, ...' never matches, so the file
@@ -820,9 +863,10 @@ def test_market_pushdown_returns_the_same_answers(scratch):
         '{"markets":["player_pass_yds"],"prop_side":"over","player":"Jalen Hurts"}',
     ])
     cur.execute("SELECT position('byom_official_market_pushdown_v1' in prosrc) > 0, "
-                "position('byom_prop_lookup_v1' in prosrc) > 0 "
+                "position('byom_prop_lookup_v1' in prosrc) > 0, "
+                "'plan_cache_mode=force_custom_plan' = ANY (proconfig) "
                 "FROM pg_proc WHERE proname = 'byom_legs'")
-    assert cur.fetchone() == (True, True)
+    assert cur.fetchone() == (True, True, True)
     cur.execute("SELECT count(*) FROM pg_indexes WHERE indexname IN "
                 "('idx_byom_prop_facts_leg', 'idx_byom_prop_facts_market')")
     assert cur.fetchone()[0] == 2

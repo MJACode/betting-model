@@ -18,6 +18,14 @@
 -- body the adapter damaged is treated as absent. CREATE INDEX (not
 -- CONCURRENTLY) briefly blocks writes to byom_prop_facts. Does not write
 -- picks.
+--
+-- 2026-11-05 (#1172 Medium, Matt via CE): the function sets
+-- plan_cache_mode to force_custom_plan, beside search_path. PostgREST
+-- reuses a pooled connection. After a few calls, plpgsql can switch a
+-- RETURN QUERY to a generic plan, and a generic plan of
+-- (v_markets IS NULL OR p.market = ANY(v_markets)) does not use
+-- idx_byom_prop_facts_market. The skip requires that setting, so a body
+-- applied before this line is replaced once and then left alone.
 
 DO $mig$
 BEGIN
@@ -39,6 +47,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public.byom_legs(integer, jsonb, text)')
        AND position('byom_prop_lookup_v1' in p.prosrc) > 0
        AND position('p_filters %s' in p.prosrc) = 0
+       AND 'plan_cache_mode=force_custom_plan' = ANY (p.proconfig)
   ) THEN
     RAISE NOTICE 'byom prop lookup already present - skipping';
     RETURN;
@@ -61,6 +70,7 @@ BEGIN
   STABLE
   SECURITY INVOKER
   SET search_path = public, pg_temp
+  SET plan_cache_mode = force_custom_plan
   AS $body$
   DECLARE
     -- byom_official_legs_v1
