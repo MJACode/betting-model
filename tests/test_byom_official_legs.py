@@ -24,6 +24,7 @@ LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
 PUSHDOWN_SQL = "byom_official_market_pushdown_2026_11_04.sql"
 PROP_LOOKUP_SQL = "byom_prop_lookup_2026_11_04.sql"
 NHL_SQL = "byom_nhl_2026_11_05.sql"
+SAVE_SQL = "byom_save_filters_2026_11_05.sql"
 UNITS_SQL = "byom_units_inline_2026_11_05.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
@@ -324,6 +325,7 @@ def scratch():
                      SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
                      LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL,
                      PROP_LOOKUP_SQL, PROP_LOOKUP_SQL, NHL_SQL, NHL_SQL,
+                     SAVE_SQL, SAVE_SQL,
                      UNITS_SQL, UNITS_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
@@ -782,6 +784,70 @@ def test_every_byom_legs_file_skips_once_nhl_is_applied(scratch):
     assert after == before
     assert nhl is True
     assert plan is True
+
+
+def _save(cur, name, filters):
+    cur.execute("SELECT set_config('byom.uid', '11111111-1111-1111-1111-111111111111', false)")
+    cur.execute("SELECT bets, wins FROM byom_save_model(%s, %s::jsonb, 2026)",
+                (name, filters))
+    saved = cur.fetchone()
+    cur.execute("SELECT filters FROM byom_models WHERE name = %s", (name,))
+    return saved, cur.fetchone()[0]
+
+
+def test_a_saved_model_keeps_every_filter_the_preview_grades(scratch):
+    """Matt, 2026-11-05: the live save kept 9 keys and dropped the rest,
+    so a saved model graded different bets than its preview."""
+    _pg, cur = scratch
+    game = ('{"markets":["h2h"],"side":"home","min_price":-450,"max_price":150,'
+            '"months":[10],"weekdays":[0],"kick_slots":["early","prime"],'
+            '"opponents":["DAL","NYJ"],"min_team_spread":-12,"max_team_spread":5,'
+            '"min_game_total":40,"max_game_total":50,"weeks":[5,6,7],'
+            '"min_rest_days":6,"primetime":null}')
+    saved, stored = _save(cur, "every key", game)
+    want = {k: v for k, v in __import__("json").loads(game).items() if v is not None}
+    assert stored == want
+    cur.execute("SELECT coalesce(sum(bets), 0), coalesce(sum(wins), 0) "
+                "FROM byom_backtest(2026, %s::jsonb)", (game,))
+    assert saved[0] >= 1, "the fixture must leave bets to grade"
+    assert tuple(saved) == tuple(cur.fetchone())
+
+    prop = ('{"markets":["player_pass_yds"],"prop_side":"over","min_line":200,'
+            '"max_line":240,"player":"Jalen Hurts"}')
+    _saved, stored = _save(cur, "prop keys", prop)
+    assert stored == __import__("json").loads(prop)
+
+
+def test_the_save_refuses_what_the_preview_refuses(scratch):
+    psycopg2 = pytest.importorskip("psycopg2")
+    _pg, cur = scratch
+    cases = [
+        ('{"markets":["h2h"],"side":"home","spread_size":3}', "unknown filter key: spread_size"),
+        ('{"markets":["h2h"],"side":"home","stake":1}', "stake filters are not accepted"),
+        ('{"markets":["h2h"],"side":"home","Months":[10]}', "filter keys must be lowercase"),
+        ('{"markets":["h2h"],"side":"home","months":[13]}', "unknown filter key: months"),
+        ('{"sport":"NHL","markets":["spreads"],"role":"pickem"}', "Pick'em is not an NHL role"),
+    ]
+    for i, (filters, message) in enumerate(cases):
+        with pytest.raises(psycopg2.errors.RaiseException, match=message):
+            _save(cur, f"bad {i}", filters)
+    cur.execute("SELECT count(*) FROM byom_models WHERE name LIKE 'bad %'")
+    assert cur.fetchone()[0] == 0
+
+
+def test_the_nhl_file_still_skips_after_the_save_file(scratch):
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("SELECT xmin::text FROM pg_proc WHERE proname = 'byom_save_model'")
+    before = cur.fetchone()[0]
+    for name in (NHL_SQL, SAVE_SQL):
+        cur.execute(_adapt_sql(
+            (ROOT / "data/migrations" / name).read_text(encoding="utf-8")))
+    cur.execute("SELECT xmin::text, position('byom_save_filters_v1' in prosrc) > 0 "
+                "FROM pg_proc WHERE proname = 'byom_save_model'")
+    after, marker = cur.fetchone()
+    assert after == before and marker is True
 
 
 def test_the_staking_functions_inline_and_keep_the_staking(scratch):

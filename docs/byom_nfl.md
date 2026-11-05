@@ -305,10 +305,16 @@ user sees their own rows. The cap is 25 models. Saving an existing name
 updates that model and appends a snapshot of `byom_backtest` at that
 moment. The snapshot totals and the per-market summary are that one
 read. The snapshot stores wins, losses, pushes, and ties. A
-stake or kelly filter is rejected. Phase A line and price keys are
-accepted by `byom_prop_phase_a_filters_2026_10_29.sql`. An
-allowlisted key in the wrong case is rejected. There
-is no recommended stake.
+stake or kelly filter is rejected. Since
+`byom_save_filters_2026_11_05.sql` (ACTIVE_MIGRATIONS, 2026-11-05) the
+save keeps all 22 keys the preview grades (`byom_legs`): before it, the
+live save kept 9 and silently dropped the Phase A keys (price, player,
+opponents, months, weekdays, kick slots, team spread, game total) and
+refused `min_line` / `max_line`. An unknown key is refused by name, a
+null value is not stored, and the values are checked by the preview's
+parser, because the save grades through `byom_backtest` before it
+writes. An allowlisted key in the wrong case is rejected. An NHL model
+cannot be a pick'em. There is no recommended stake.
 
 The RPCs are `SECURITY DEFINER`: `byom_save_model`, `byom_list_models`,
 `byom_delete_model`. The user id comes from `auth.uid()`, not from an

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM save keeps all 22 preview keys (was 9; Phase A keys dropped, line refused); unknown key refused by name; NHL pick'em refused |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM staking functions inlined (no SET clause): NBA 2025-26 points record timed out, 2.6s of 2.7s was four function calls per row |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, returning sign-in skips the paywall when premium; access_grants (comped, app_review) OR into my_access; founder grant SQL not applied |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM NHL game bets (moneyline, puck line, totals; official and closing; from 2020-21); save drops Phase A prop filters (flagged) |
