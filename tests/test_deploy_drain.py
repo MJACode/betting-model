@@ -8,6 +8,7 @@ still open.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -23,9 +24,11 @@ import pytest
 
 from tracking.daily_merge_gate import (
     BYPASS_MARKER,
+    CHECK_NAME,
     EMERGENCY_LABEL,
     MAX_OPEN_DAILY,
     OPEN_DAILY_SQL,
+    checks_for_pull_requests,
     clock_blocks,
     gate_decision,
 )
@@ -168,7 +171,7 @@ def _gate(now, **kw):
 
 
 def test_an_open_daily_blocks_the_merge():
-    now = datetime(2026, 11, 5, 11, 10, tzinfo=UTC)
+    now = datetime(2026, 11, 5, 16, 10, tzinfo=UTC)
     block, message = _gate(now, open_run_ids=["abc123"])
     assert block
     assert "abc123" in message
@@ -176,7 +179,7 @@ def test_an_open_daily_blocks_the_merge():
 
 
 def test_no_open_daily_lets_the_merge_through():
-    now = datetime(2026, 11, 5, 11, 10, tzinfo=UTC)
+    now = datetime(2026, 11, 5, 16, 10, tzinfo=UTC)
     block, message = _gate(now)
     assert not block
     assert "no open daily" in message
@@ -190,13 +193,34 @@ def test_a_failed_ledger_read_blocks_the_merge():
 
 
 def test_the_emergency_label_and_the_body_marker_bypass():
-    now = datetime(2026, 11, 5, 11, 10, tzinfo=UTC)
+    now = datetime(2026, 11, 5, 16, 10, tzinfo=UTC)
     block, message = _gate(now, labels=[EMERGENCY_LABEL], open_run_ids=["abc"])
     assert not block and "bypass" in message
     block, message = _gate(
-        now, body=f"ship it\n{BYPASS_MARKER}\n", open_run_ids=["abc"],
+        now,
+        body=f"ship it\n{BYPASS_MARKER}\n",
+        open_run_ids=["abc"],
+        author_association="OWNER",
     )
     assert not block and BYPASS_MARKER in message
+    block, message = _gate(
+        now,
+        body=f"ship it\n{BYPASS_MARKER}\n",
+        open_run_ids=["abc"],
+        author_association="MEMBER",
+    )
+    assert not block and "MEMBER" in message
+    block, message = _gate(
+        now,
+        body=f"ship it\n{BYPASS_MARKER}\n",
+        open_run_ids=["abc"],
+        author_association="CONTRIBUTOR",
+    )
+    assert block
+    block, message = _gate(
+        now, body=f"ship it\n{BYPASS_MARKER}\n", open_run_ids=["abc"],
+    )
+    assert block
 
 
 def test_without_the_database_the_clock_covers_the_morning_window():
@@ -205,7 +229,7 @@ def test_without_the_database_the_clock_covers_the_morning_window():
     block, _ = _gate(inside, db_configured=False)
     assert block
 
-    before = datetime(2026, 11, 5, 5, 59, tzinfo=ET)
+    before = datetime(2026, 11, 5, 5, 44, tzinfo=ET)
     assert not clock_blocks(before)
     block, _ = _gate(before, db_configured=False)
     assert not block
@@ -215,6 +239,42 @@ def test_without_the_database_the_clock_covers_the_morning_window():
     block, message = _gate(after, db_configured=False)
     assert not block
     assert "catch-up" in message
+
+
+def test_the_daily_start_blocks_even_when_the_ledger_is_clear():
+    """05:45–06:20 ET blocks with no open row. 05:44 and 06:20 do not."""
+    clear = dict(db_configured=True, open_run_ids=[], query_error=None)
+    at_start = datetime(2026, 11, 5, 5, 45, tzinfo=ET)
+    block, message = _gate(at_start, **clear)
+    assert block
+    assert "05:45" in message
+
+    just_before_end = datetime(2026, 11, 5, 6, 19, 59, tzinfo=ET)
+    block, _ = _gate(just_before_end, **clear)
+    assert block
+
+    at_end = datetime(2026, 11, 5, 6, 20, tzinfo=ET)
+    block, message = _gate(at_end, **clear)
+    assert not block
+    assert "no open daily" in message
+
+    early = datetime(2026, 11, 5, 5, 44, 59, tzinfo=ET)
+    block, _ = _gate(early, **clear)
+    assert not block
+
+    # The label still opens the window. A body marker from outside the
+    # org does not.
+    block, message = _gate(
+        at_start, **clear, labels=[EMERGENCY_LABEL],
+    )
+    assert not block and "bypass" in message
+    block, _ = _gate(
+        at_start,
+        **clear,
+        body=BYPASS_MARKER,
+        author_association="NONE",
+    )
+    assert block
 
 
 def test_sigterm_is_forwarded_and_the_child_finishes_its_step(tmp_path):
@@ -325,3 +385,107 @@ def test_refresh_sigterm_finishes_the_open_group_and_marks_deploy_cutoff(tmp_pat
     assert "--step nhl-over-under" not in text
     assert "deploy-cutoff" in text
     assert "--step odds" in text
+
+
+def test_rewriting_aborted_as_deploy_cutoff_is_still_one_deploy_kill():
+    """The sweep can stamp aborted, then the draining process finish_run
+    overwrites that with deploy-cutoff. Both markers are one deploy-kill.
+    The retry cap does not move."""
+    started = datetime(2026, 11, 5, 11, 0, tzinfo=UTC)
+    finished = datetime(2026, 11, 5, 11, 20, tzinfo=UTC)
+    aborted = DailyRun(started, finished, False, "aborted")
+    cutoff = DailyRun(started, finished, False, "deploy-cutoff")
+    assert today_counts([aborted]) == (1, 0)
+    assert today_counts([cutoff]) == (1, 0)
+
+
+def test_railway_drains_for_ten_minutes():
+    cfg = json.loads((ROOT / "railway.json").read_text(encoding="utf-8"))
+    from tracking.scoring_lease import DRAIN_SECONDS
+    assert cfg["deploy"]["drainingSeconds"] == 600
+    assert isinstance(cfg["deploy"]["drainingSeconds"], int)
+    assert cfg["deploy"]["drainingSeconds"] == DRAIN_SECONDS
+
+
+def test_the_gate_runs_from_the_base_branch_and_refreshes_on_a_schedule():
+    text = (ROOT / ".github" / "workflows" / "daily-merge-gate.yml").read_text(
+        encoding="utf-8",
+    )
+    assert "pull_request_target:" in text
+    assert "\n  pull_request:\n" not in text
+    assert "pull_request.head" not in text
+    assert "github.event.pull_request.base.sha" in text
+    assert "persist-credentials: false" in text
+    assert 'cron: "*/10 9-23,0-3 * * *"' in text
+    gate = text.split("Block the merge while a daily run is open", 1)[1]
+    gate = gate.split("Refresh open pull requests", 1)[0]
+    assert "DATABASE_URL_READONLY" in gate
+    assert "secrets.DATABASE_URL" not in gate.replace(
+        "secrets.DATABASE_URL_READONLY", "",
+    )
+    refresh = text.split("Refresh open pull requests", 1)[1]
+    assert "secrets.DATABASE_URL" in refresh
+    assert "--refresh-open-prs" in refresh
+    assert "github.event_name == 'schedule'" in refresh
+
+
+def test_a_refresh_posts_the_same_check_name_and_keeps_one_prs_bypass():
+    now = datetime(2026, 11, 5, 16, 10, tzinfo=UTC)
+    prs = [
+        {
+            "number": 1,
+            "body": "",
+            "labels": [],
+            "head": {"sha": "aaa111"},
+        },
+        {
+            "number": 2,
+            "body": f"please {BYPASS_MARKER}",
+            "labels": [],
+            "author_association": "MEMBER",
+            "head": {"sha": "bbb222"},
+        },
+        {"number": 3, "body": "", "labels": [], "head": {}},
+    ]
+    checks = checks_for_pull_requests(
+        prs, now=now, db_configured=True, open_run_ids=["run-1"],
+        query_error=None,
+    )
+    assert [c["head_sha"] for c in checks] == ["aaa111", "bbb222"]
+    assert checks[0]["name"] == CHECK_NAME == "daily pipeline not running"
+    assert checks[0]["conclusion"] == "failure"
+    assert checks[1]["conclusion"] == "success"
+    assert BYPASS_MARKER in checks[1]["output"]["summary"]
+
+
+def test_the_daily_child_holds_the_lease_around_the_run_and_a_step_does_not():
+    src = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
+    cli = src.split('if __name__ == "__main__":', 1)[1]
+    step, full = cli.split("# Full pipeline", 1)
+    assert "acquire(" not in step
+    assert 'acquire("daily")' in full
+    assert full.index('acquire("daily")') < full.index("run_daily_pipeline(")
+    assert full.index("run_daily_pipeline(") < full.index("lease.release()")
+
+
+def test_boot_does_not_block_the_scheduler_on_the_lease():
+    src = (ROOT / "scheduler.py").read_text(encoding="utf-8")
+    main = src.split("def main(", 1)[1]
+    assert "wait_for_scoring_lease" not in main
+    assert main.index("\n    abort_orphaned_refresh_runs()\n") < main.index(
+        "\n        sched.start()\n",
+    )
+    catch = src.split("def catch_up_daily_pipeline(", 1)[1].split("\ndef ", 1)[0]
+    assert 'wait_for_scoring_lease("daily")' in catch
+    refresh = src.split("def catch_up_refresh_pass(", 1)[1].split("\ndef ", 1)[0]
+    assert 'wait_for_scoring_lease("refresh")' in refresh
+    sweep = src.split("def abort_orphaned_refresh_runs(", 1)[1].split("\ndef ", 1)[0]
+    assert sweep.index("drop_live_kinds") < sweep.index("get_connection")
+
+
+def test_the_refresh_shell_takes_the_lease_before_the_ledger_start():
+    sh = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
+    assert sh.index("--kind refresh") < sh.index("tracking.run_ledger start")
+    assert "disown" in sh
+    assert "release_scoring_lease" in sh
+    assert sh.index("tracking.run_ledger finish") < sh.index("exit 0")

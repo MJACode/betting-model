@@ -20,6 +20,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM trend filters (line move, last game, division), More filters on game bets, NFL rest, season breakdown and 50-bet note; no lookahead on the official line |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, daily gate blocks 05:45–06:20 ET even with a clear ledger; pooler user for the readonly secret is daily_gate_reader.vvprgnrmzeekokzkrkfu; body bypass is owner or member only |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, Railway drain is 600s in railway.json; the daily-pipeline check re-posts from master every 10 minutes and the pull-request job no longer runs PR code with the write database URL; a session lease stops the boot sweep from aborting a daily the previous container is still finishing |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, odds_dk_pregame_current leaves out a game more than 24 hours out whose only price is more than 7 days old when that sport's nearer games are fresh and a successful odds-list call did not list it. The 15:26Z NBA 2 of 4 was the unposted Nov 6 slate. Outage replays and the pulled-slate cases stay as they were. |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, SIGTERM drain closes pipeline_runs as deploy-cutoff; GitHub check blocks merges while a daily row is open |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, nba_live_outputs skips a slate whose decision span ended before the loop's first tick (2026-11-05 11:00 ET); a later miss is still STALE |

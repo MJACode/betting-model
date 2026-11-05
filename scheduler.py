@@ -2257,6 +2257,14 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         log.info("daily catch-up: SERVICE_ROLE=%s does not own daily_pipeline",
                  SERVICE_ROLE)
         return {**skipped, "reason": "not this service"}
+    # On the catch-up thread, not the main thread. Waiting here for the
+    # previous container to finish its step must not delay sched.start():
+    # that is how the 2026-11-04 13:17Z hourly never ledgered.
+    from tracking.scoring_lease import wait_for_scoring_lease
+    if not wait_for_scoring_lease("daily"):
+        log.warning("daily catch-up [%s]: skip — the previous deployment "
+                    "still holds the daily scoring lease", source)
+        return {**skipped, "reason": "previous deployment still scoring"}
     try:
         from data.db import get_connection
         from tracking.daily_retry import (
@@ -2338,6 +2346,13 @@ def abort_orphaned_refresh_runs() -> int:
         log.info("orphan sweep: SERVICE_ROLE=%s owns neither hourly_refresh "
                  "nor daily_pipeline", SERVICE_ROLE)
         return 0
+    # A kind whose session lease is held is the previous container, still
+    # inside the step Railway has not SIGKILLed yet. Stamping that row
+    # aborted is what lets the catch-up start a second writer on top of it.
+    from tracking.scoring_lease import drop_live_kinds
+    kinds = drop_live_kinds(kinds)
+    if not kinds:
+        return 0
     stale_before = None
     if "daily" in kinds and not _DAILY_LOCK.locked():
         from datetime import datetime, timezone
@@ -2373,6 +2388,11 @@ def catch_up_refresh_pass(*, source: str = "boot") -> dict:
         log.info("refresh catch-up: SERVICE_ROLE=%s does not own hourly_refresh",
                  SERVICE_ROLE)
         return {"status": "skipped", "reason": "not this service"}
+    from tracking.scoring_lease import wait_for_scoring_lease
+    if not wait_for_scoring_lease("refresh"):
+        log.warning("refresh catch-up [%s]: skip — the previous deployment "
+                    "still holds the refresh scoring lease", source)
+        return {"status": "skipped", "reason": "previous deployment still scoring"}
     try:
         from datetime import timezone as _tz
         from data.db import get_connection
