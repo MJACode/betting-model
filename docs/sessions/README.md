@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA prop record 3,687 ms (over 3s anon): prop-facts leg index and a closing-branch market filter |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, marketing site contracting party is Signal Base LLC; product name stays Signal Base; copyright footer and contact entity line use the LLC; no App Store Connect change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA parity: daily refresh, prop backfill (props were empty), official line for games and props; official lock search reads one market (831 ms to a 15 ms search) |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA: in-play spread and moneyline searched on 2026-27 live prices, 0 of 24 pass, every cell too few games this season; no model change |
