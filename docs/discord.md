@@ -100,7 +100,7 @@ the stop message lists the guild's text channels by name and id.
 
 | Function | Source of truth | Called from |
 |---|---|---|
-| `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
+| `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `open_picks` view (`docs/mobile_picks_prompt.md`). Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
 | `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer` and each `ncaaf_live.gameday` pass (both `pollers` jobs), end of `nfl_live_leader.gameday` (also `pollers`), and `nfl/live_model/pick_writer.announce_live_picks` on `worker` after every NFL live BET the retired in-play worker commits when `RUN_NFL_LIVE=1` (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
