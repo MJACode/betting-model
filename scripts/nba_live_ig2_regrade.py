@@ -4,7 +4,7 @@ only, under the rule the live loop runs, through the house standard of record
 
 WHY (independent review, 2026-11-04). IG-2's graded cells (record 7.3) read
 every archive purchase: the hourly ones (ledger why='hourly', requested on the
-hour, the market as served about 264 s before it; 549 s in 2020-21/2021-22)
+hour, the market as served about 264 s before it; 553 s in 2020-21, 549 s in 2021-22)
 AND the 'gap_fill' purchases at :30 (53.5% exactly 30 minutes before a listed
 tip, 19.4% at one). The live loop can only reproduce the hourly ones: it
 fetches at every hour minus 264 s and never builds a fetch time from a tip

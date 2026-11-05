@@ -176,8 +176,8 @@ own fetch times the same games give 35, 11 and 16 bets (below). Each rule that
 ships is judged on its live record.
 
 **Not built: the quarter-4 spread.** It failed the placebo bar in the grade.
-It is re-graded on the live record (this loop's own decisions, below) and
-added the day it passes. The quarters 1-2 and quarter-4 moneylines failed
+The loop does not decide it; it is added the day a re-grade passes the house
+standard. The quarters 1-2 and quarter-4 moneylines failed
 every bar.
 
 **The rule, as shipped and as re-graded above** (`models/nba_live_ig2.py` calls
@@ -201,8 +201,8 @@ No 10-game wait (the prior is the market's pre-game spread). Regular season only
 
 **The fetches are the archive's hourly purchases, and only those.** The
 archive bought two kinds of in-play fetch. The hourly purchase was requested on
-the hour and served the market as it stood 264 seconds earlier (549 s in
-2020-21 and 2021-22). The gap fill was bought at :30, mostly 30 minutes before
+the hour and served the market as it stood 264 seconds earlier (553 s in
+2020-21, 549 s in 2021-22). The gap fill was bought at :30, mostly 30 minutes before
 a listed tip. The loop can rebuild only the hourly one: in 2026-27
 `games.commence_time` holds the actual start, not the listed tip, so a fetch
 built from a tip would be a population never graded. It fetches at each hour
@@ -241,9 +241,11 @@ minute of each game the poller watched, 153 fetch moments): no scoring play was
 missed by both reads, and none caused a skip. Counting every play, 8 moments
 (5.2%) are skipped. 28 moments (18.3%) still miss a non-scoring play ESPN served
 more than 230 seconds late: 10 of the 629 plays, among them offensive rebounds,
-tip shots, substitutions and one technical foul. The score is never wrong. In 25
-of the 28 the state's own play (the last at or before the quote) is unchanged,
-in 3 it is a play logged in the same second, and 2 miss the technical foul. With
+tip shots, substitutions and one technical foul. The model reads the score,
+the clock and fouls, so the score is never wrong and substitutions do not enter
+it. In 25 of the 28 the state's own play (the last at or before the quote) is
+unchanged, in 3 it is a play logged in the same second, and 2 miss the
+technical foul (a foul count can be one short). With
 the old single read 45 seconds after the fetch, 8 moments (5.2%) missed a
 scoring play. Every decision stores `play_lag_s`.
 

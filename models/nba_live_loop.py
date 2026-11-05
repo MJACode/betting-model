@@ -13,8 +13,8 @@ THE CADENCE IS THE GRADE'S HOURLY PURCHASE. The graded decision is "the first
 fetch in the phase holding an eligible quote" (G.decision_quotes). The loop
 fetches the board at each HOUR MINUS 264 SECONDS and at no other time: the
 archive's hourly purchases (ledger why='hourly', requested on the hour) served
-the market as it stood 264 s before the hour in 2022-23 .. 2025-26 (549 s in
-2020-21/2021-22; scripts/nba_ingame_data.load_quotes' grid offset). The
+the market as it stood 264 s before the hour in 2022-23 .. 2025-26 (553 s in
+2020-21, 549 s in 2021-22; scripts/nba_ingame_data.load_quotes' grid offset). The
 archive's :30 purchases were gap fills (53.5% exactly 30 minutes before a
 listed tip, 19.4% at one), not a schedule a loop can follow, and
 games.commence_time in 2026-27 holds the actual start (:10, :40, off-minute
