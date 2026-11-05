@@ -120,6 +120,117 @@ check(
   ),
 );
 
+// iOS Apple is the system sheet. A static import of the native module would
+// load it for email, Google, and Android the moment this file is evaluated.
+check(
+  'auth.ts has no static value import of expo-apple-authentication',
+  !/^import\s+(?!type\b)[^;]*from\s+'expo-apple-authentication'/m.test(authSrc),
+);
+const appleLoader = authSrc.split('function loadAppleAuthentication')[1]?.split(
+  'async function signInWithAppleNative',
+)[0] ?? '';
+check(
+  'the Apple native module is a dynamic require inside its loader',
+  appleLoader.includes("require('expo-apple-authentication')") &&
+    appleLoader.indexOf("Platform.OS !== 'ios'") <
+      appleLoader.indexOf("require('expo-apple-authentication')"),
+);
+const appleNative = authSrc.split('async function signInWithAppleNative')[1]?.split(
+  'async function signInWithOAuthBrowser',
+)[0] ?? '';
+check(
+  'iOS Apple exchanges the identity token',
+  appleNative.includes("signInWithIdToken") &&
+    appleNative.includes("provider: 'apple'") &&
+    appleNative.includes('identityToken'),
+);
+check(
+  'a failed Apple sign-in is one sentence',
+  appleNative.includes("Couldn't sign in with Apple. Try again."),
+);
+check(
+  'iOS Apple does not open the in-app browser',
+  !appleNative.includes('signInWithOAuth') && !appleNative.includes('openAuthSessionAsync'),
+);
+check(
+  'a dismissed Apple sheet is a cancel',
+  appleNative.includes('isAppleCancel') &&
+    appleNative.includes('return null') &&
+    authSrc.includes("=== 'ERR_REQUEST_CANCELED'"),
+);
+const providerFn = authSrc.split('export async function signInWithProvider')[1]?.split(
+  'export async function signOut',
+)[0] ?? '';
+check(
+  'iOS Apple returns before the browser flow',
+  providerFn.includes("provider === 'apple'") &&
+    providerFn.includes("Platform.OS === 'ios'") &&
+    providerFn.indexOf('signInWithAppleNative') < providerFn.indexOf('signInWithOAuthBrowser'),
+);
+check(
+  'Google still uses the in-app browser',
+  authSrc.includes('signInWithOAuth') && authSrc.includes('openAuthSessionAsync'),
+);
+
+const appJson = JSON.parse(
+  readFileSync(join(__dirname, '..', 'app.json'), 'utf8'),
+) as {
+  expo: {
+    version: string;
+    plugins?: string[];
+    ios?: { bundleIdentifier?: string; usesAppleSignIn?: boolean };
+  };
+};
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as {
+  dependencies?: Record<string, string>;
+};
+check(
+  'bundle id is unchanged',
+  appJson.expo.ios?.bundleIdentifier === 'com.mja.bettingpicks',
+);
+check(
+  'Sign in with Apple capability is on',
+  appJson.expo.ios?.usesAppleSignIn === true,
+);
+check(
+  'expo-apple-authentication plugin is configured',
+  Array.isArray(appJson.expo.plugins) &&
+    appJson.expo.plugins.includes('expo-apple-authentication'),
+);
+check(
+  'expo-apple-authentication is a dependency',
+  typeof pkg.dependencies?.['expo-apple-authentication'] === 'string',
+);
+// 1.1.0 is the last runtime without this native module. runtimeVersion follows
+// appVersion, so an OTA of this bundle must not target that binary.
+check(
+  'app version moved off the pre-native-Apple runtime',
+  appJson.expo.version !== '1.1.0' && appJson.expo.version === '1.2.0',
+);
+
+const signInSrc = readFileSync(
+  join(__dirname, '..', 'src', 'screens', 'SignInScreen.tsx'),
+  'utf8',
+);
+check(
+  'SignInScreen has no static value import of expo-apple-authentication',
+  !/^import\s+(?!type\b)[^;]*from\s+'expo-apple-authentication'/m.test(signInSrc),
+);
+const signInLoader = signInSrc.split('function loadAppleSignInButton')[1]?.split(
+  'export function SignInScreen',
+)[0] ?? '';
+check(
+  'the Apple button require runs only after the iOS check',
+  signInLoader.indexOf("Platform.OS !== 'ios'") !== -1 &&
+    signInLoader.indexOf("Platform.OS !== 'ios'") <
+      signInLoader.indexOf("require('expo-apple-authentication')"),
+);
+check(
+  'iOS uses the system Continue with Apple button',
+  signInSrc.includes('AppleAuthenticationButtonType.CONTINUE') &&
+    signInSrc.includes('AppleAuthenticationButtonStyle.WHITE'),
+);
+
 // --- email validation -------------------------------------------------------
 check('accepts a normal address', isValidEmail('matt@example.com'));
 check('accepts subdomains', isValidEmail('a@mail.example.co.uk'));
