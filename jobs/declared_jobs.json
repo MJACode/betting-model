@@ -1145,6 +1145,17 @@
     }
   },
   {
+    "key": "byom-nhl-game-facts",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-05: NHL game bets on the builder (\"Yes go\"). enabled and apply are true, so sync_declared_jobs enqueues this once. Every NHL season from 2021 (2020-21 is the first with a DraftKings line; measured 2026-11-05: 2019 and 2020 have none). Writes byom_game_facts and the official candidates in byom_official_legs. Moneyline, puck line (spreads) and totals; no props. The job applies ACTIVE_MIGRATIONS first, so byom_nhl_2026_11_05.sql is in place. The daily refresh keeps the current season current. Reads stored odds only: no API credits. Does not write picks.",
+    "args": {
+      "sport": "NHL",
+      "apply": true
+    }
+  },
+  {
     "key": "nba-alt-history-2024-2026",
     "job_type": "nba_odds_history",
     "requested_by": "mike",
@@ -1641,6 +1652,14 @@
     "job_type": "splits_source_probe",
     "requested_by": "matt",
     "note": "Matt 2026-11-03: 'Pull the numbers where we can reliably.' Fetches DK Network's betting-splits page and Action Network's v2 scoreboard (no bookIds filter) plus /web/v1/books, to measure whether DraftKings' own handle/bets % can be pulled and which AN book ids carry splits. Writes nothing, no Odds API credits.",
+    "args": {}
+  },
+  {
+    "key": "byom-analyze-2026-11-05",
+    "job_type": "byom_analyze",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "2026-11-05: the NBA points preview took 6.0s for the current season (anon cuts off at 3s) because 11,075 byom_prop_facts rows were written after the last automatic analyze and the planner counted 1 row for NBA 2027. Runs ANALYZE on byom_game_facts, byom_prop_facts and byom_official_legs once. Reads a sample, changes no row, uses no API credits. The builders analyze after every write from this change on (byom/analyze.py). Does not write picks.",
     "args": {}
   }
 ]

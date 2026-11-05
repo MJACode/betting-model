@@ -63,7 +63,7 @@ def _db() -> _Conn:
     raw.executescript(f"""
         CREATE TABLE picks ({PICKS_COLS});
         CREATE TABLE games (game_id TEXT, home_team TEXT, away_team TEXT,
-                            commence_time TEXT);
+                            commence_time TEXT, home_score REAL, away_score REAL);
         CREATE TABLE push_sent (lock_key TEXT, kind TEXT, sent_at TEXT,
                                 message_id TEXT);
         CREATE TABLE model_action_thresholds (

@@ -23,6 +23,60 @@
 set -uo pipefail
 MODE="${1:-hourly}"
 
+# Railway redeploy sends SIGTERM here. The trap does not run until the
+# foreground step returns, and par_wait loops until a signaled wait has
+# reaped the group, so the step in progress finishes. Later steps do not
+# start. The ledger row is closed as deploy-cutoff instead of left open.
+# SIGKILL cannot be caught; the boot sweep still stamps those as aborted.
+DRAIN=0
+on_deploy_term() {
+  DRAIN=1
+  echo "deploy drain: SIGTERM — finish the current step, then stop" >&2
+}
+trap on_deploy_term TERM
+
+# Cross-process lease. The boot sweep on the new container must not stamp
+# this pass aborted while this shell is still in a step, and the refresh
+# catch-up must not start a second pass until this one has closed the row.
+# The helper blocks until it holds the lock (or the drain window ends).
+# This shell waits for --ready before start_run, so the orphan abort inside
+# start_run cannot land on the pass that is still running. The EXIT trap
+# releases the lock after the ledger finish below. SIGKILL drops the
+# session and the lock with it.
+LEASE_DIR="$(mktemp -d)"
+python -m tracking.scoring_lease --kind refresh \
+  --ready "$LEASE_DIR/ready" --release "$LEASE_DIR/release" &
+LEASE_PID=$!
+# par_wait uses a bare `wait`, which waits for every child still in the
+# shell's job table. The helper stays up until the EXIT trap, so leaving
+# it there deadlocks the first parallel group. disown drops it from that
+# table. `wait $LEASE_PID` can no longer see it; the release file is how
+# the trap asks it to unlock.
+disown "$LEASE_PID" 2>/dev/null || true
+_lease_i=0
+while [ "$_lease_i" -lt 6600 ]; do
+  if [ -f "$LEASE_DIR/ready" ]; then
+    break
+  fi
+  if ! kill -0 "$LEASE_PID" 2>/dev/null; then
+    break
+  fi
+  _lease_i=$((_lease_i + 1))
+  sleep 0.1
+done
+if [ -f "$LEASE_DIR/ready" ] && [ "$(cat "$LEASE_DIR/ready")" = "open" ]; then
+  echo "scoring lease: refresh lock not acquired; this pass still runs" >&2
+fi
+
+release_scoring_lease() {
+  if [ -n "${LEASE_DIR:-}" ]; then
+    : > "$LEASE_DIR/release" 2>/dev/null || true
+  fi
+  # The helper polls the release file. Give it one poll to unlock before
+  # this shell exits. The ledger finish has already run.
+  sleep 0.3
+}
+
 # Record that this pass ran. Until 2026-08-27 nothing did, so a pass that died
 # mid-chain left no trace except missing side-effects. `|| true` throughout:
 # observability must never be able to break the pass it is observing.
@@ -32,6 +86,10 @@ FAILED_STEPS=()
 STEPS_TOTAL=0
 
 step() {
+  if [ "${DRAIN:-0}" = 1 ]; then
+    echo "deploy drain: not starting $1" >&2
+    return 0
+  fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   if ! python run_pipeline.py --step "$1"; then
     echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
@@ -60,9 +118,13 @@ step() {
 # would make a failed step invisible -- the exact blindness the run ledger was
 # built to end.
 PAR_DIR="$(mktemp -d)"
-trap 'rm -rf "$PAR_DIR"' EXIT
+trap 'release_scoring_lease; rm -rf "$PAR_DIR" "$LEASE_DIR"' EXIT
 
 par() {
+  if [ "${DRAIN:-0}" = 1 ]; then
+    echo "deploy drain: not starting $1" >&2
+    return 0
+  fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   (
     if ! python run_pipeline.py --step "$1"; then
@@ -73,7 +135,17 @@ par() {
 }
 
 par_wait() {
-  wait
+  # A SIGTERM trap makes `wait` return immediately (status 128+signal)
+  # while the background steps are still running. Loop until it returns
+  # a child status, which is when the group has actually finished.
+  local rc=0
+  while true; do
+    wait
+    rc=$?
+    if [ "$rc" -lt 128 ]; then
+      break
+    fi
+  done
   # Collect what the subshells could not append themselves.
   for f in "$PAR_DIR"/*.failed; do
     [ -e "$f" ] || continue
@@ -332,8 +404,22 @@ step live-calibration
 
 # Close the ledger row. Runs whatever happened above, so a pass that completes
 # with failures is still recorded as finished-with-failures rather than missing.
+# A drain names deploy-cutoff even when earlier steps failed, so the catch-up
+# treats the pass as a deploy-kill and not as a chain that ran to its end.
+if [ "${DRAIN:-0}" = 1 ]; then
+  if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
+    FAILED_STEPS=("deploy-cutoff")
+  else
+    FAILED_STEPS=("deploy-cutoff" "${FAILED_STEPS[@]}")
+  fi
+fi
 python -m tracking.run_ledger finish --run-id "$RUN_ID" \
     --steps-total "$STEPS_TOTAL" --failed "${FAILED_STEPS[*]:-}" 2>/dev/null || true
+
+if [ "${DRAIN:-0}" = 1 ]; then
+  echo "refresh pass stopped for a deploy (deploy-cutoff)" >&2
+  exit 0
+fi
 
 if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
   echo "refresh pass finished with ${#FAILED_STEPS[@]} failed step(s): ${FAILED_STEPS[*]}" >&2

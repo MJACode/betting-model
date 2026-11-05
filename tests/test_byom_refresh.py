@@ -36,7 +36,7 @@ def test_the_job_is_on_daily_and_does_not_write_by_default():
     sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     assert 'id="byom_nfl_refresh"' in sched
     assert 'dedupe_key=f"byom-{sport.lower()}-refresh-{today}"' in sched
-    assert 'for sport in ("NFL", "NBA")' in sched
+    assert 'for sport in ("NFL", "NBA", "NHL"):' in sched
     assert '"byom_nfl_refresh"}' in sched  # owned by the pipeline role
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
@@ -196,6 +196,11 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         wrote = refresh(conn, apply=True, today=AS_OF)
         assert wrote["written_game_facts"] == 6
         assert wrote["written_prop_facts"] == 1
+        # The planner's row counts follow the write (byom/analyze.py).
+        from byom.analyze import TABLES
+        assert wrote["analyzed"] == list(TABLES)
+        analyzed = [sql for sql, _p in conn.calls if sql.startswith("ANALYZE ")]
+        assert analyzed == [f"ANALYZE public.{t}" for t in TABLES]
         touched = set()
         for _sql, params in conn.calls:
             if not params:

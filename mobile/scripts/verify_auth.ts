@@ -25,7 +25,7 @@ import {
 } from '../src/lib/authHelpers';
 import { AUTH_ENABLED, AUTH_REDIRECT_URL } from '../src/lib/authConfig';
 import { BILLING_ENABLED } from '../src/lib/billingConfig';
-import { freeSegmentOpensPaywall, signedOutRouteIsShell } from '../src/lib/authShell';
+import { freeSegmentOpensPaywall, postSignInRoutes, signedOutRouteIsShell } from '../src/lib/authShell';
 
 let passed = 0;
 const failures: string[] = [];
@@ -230,6 +230,16 @@ check(
   signInSrc.includes('AppleAuthenticationButtonType.CONTINUE') &&
     signInSrc.includes('AppleAuthenticationButtonStyle.WHITE'),
 );
+check(
+  'sign-in asks whether the account is premium before it routes',
+  signInSrc.includes('postSignInRoutes(') && signInSrc.includes('isAppPremium('),
+);
+eq('billing off skips the paywall', postSignInRoutes(false, false), [{ name: 'Tabs' }]);
+eq('a premium sign-in skips the paywall', postSignInRoutes(true, true), [{ name: 'Tabs' }]);
+eq('a free sign-in opens the paywall over the tabs', postSignInRoutes(true, false), [
+  { name: 'Tabs' },
+  { name: 'Paywall', params: { autoCloseIfEntitled: true } },
+]);
 
 // --- email validation -------------------------------------------------------
 check('accepts a normal address', isValidEmail('matt@example.com'));

@@ -498,13 +498,13 @@ export type RootStackParamList = {
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
-  ByomBuilder: { sport?: 'NFL' | 'NBA' } | undefined;
+  ByomBuilder: { sport?: 'NFL' | 'NBA' | 'NHL' } | undefined;
   ByomEdit: { modelId: string };
   ByomDetail: { modelId: string };
   /** The bets one BYOM record counts. Filters are the model's, unsaved or saved. */
   ByomBets: {
     filters: import('@/lib/byomFilters').ByomFilters;
-    sport: 'NFL' | 'NBA';
+    sport: 'NFL' | 'NBA' | 'NHL';
     title?: string;
     /** The card's headline. Omitted starts on official for NFL. */
     timing?: 'official' | 'close';

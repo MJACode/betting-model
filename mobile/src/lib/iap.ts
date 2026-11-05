@@ -107,6 +107,34 @@ async function ensureConfigured(userId: string): Promise<PurchasesSDK> {
   return purchases;
 }
 
+const SIGNALS_READ_MS = 2000;
+
+/**
+ * Whether RevenueCat currently reports the `signals` entitlement.
+ *
+ * Best-effort and capped. An empty store, a missing key, or a slow StoreKit
+ * read returns false so sign-in is not held on the paywall path. The
+ * subscriptions row and my_access() remain the durable check.
+ */
+export async function signalsEntitled(userId: string): Promise<boolean> {
+  if (!billingReady() || !userId) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const purchases = await ensureConfigured(userId);
+    const info = await Promise.race([
+      purchases.getCustomerInfo(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), SIGNALS_READ_MS);
+      }),
+    ]);
+    return customerInfoEntitled(info);
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Localized store prices for the paywall, keyed by plan. Best-effort. */
 export async function fetchLocalizedPrices(
   userId: string,

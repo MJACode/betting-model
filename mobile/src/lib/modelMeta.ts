@@ -6,7 +6,7 @@
  * and is not part of that rename.
  */
 
-import { hasFetchedThresholds, isBundledPaused, isModelPaused, isModelRetired } from './thresholds';
+import { hasFetchedThresholds, isBundledPaused, isLiveModel, isModelPaused, isModelRetired } from './thresholds';
 
 /**
  * The market a model trades. `pitcher_prop` / `batter_prop` are MLB-only cuts;
@@ -449,6 +449,22 @@ export const MODEL_META: Record<string, ModelMeta> = {
     // 1H O/U is the first half's total. The side is already in the pick label.
     shortLabel: '1H O/U',
     longLabel: 'NBA First Half Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // NBA in-play (models/nba_live_ig2.py, 2026-11-04): the game-state model's
+  // margin against the live line, one bet per game at the first fresh price,
+  // during quarters 1-2. The quarter-3 moneyline and spread are held out
+  // (HELD_OUT_RULES) and have no entry until they ship. The bet SETTLES ON THE
+  // FULL GAME, so the long name says when the bet is placed, never a period:
+  // "First Half" in this app names a bet on that period alone
+  // (nba_first_half_total_luck). The chip is LIVE Spread, as every other
+  // in-play chip starts with LIVE ("Early" alone reads as an opening line).
+  // Its picks appear on the Live segment only.
+  nba_live_spread_q12: {
+    shortLabel: 'LIVE Spread',
+    longLabel: 'NBA Early Live Spreads',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -1029,8 +1045,48 @@ export interface ModelPageTiming {
   note: string;
 }
 
+// The NBA in-play model (models/nba_live_ig2.py): when it bets, and
+// what its bet settles on. The loop checks games in progress once an hour
+// (models/nba_live_loop.py); no clock minute is named, so this copy does not
+// go stale if that minute moves. Each bet is on the FULL game.
+const NBA_LIVE_TIMING: Readonly<Record<string, { when: string; settles: string }>> = {
+  nba_live_spread_q12: {
+    when: 'during the first and second quarters',
+    settles: 'The bet is on the full-game spread: it settles on the final score, not on the half.',
+  },
+};
+
+const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
+const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
+
 /** When a model's page fills, said on its own page. */
 export function modelPageTiming(modelId: string): ModelPageTiming {
+  // In-play models bet during the game. "Today's potential picks" on the
+  // model page reads the pre-game board (useTodayPicks excludes is_live), so
+  // their bets are never listed there: the copy says where they are instead
+  // of promising a pipeline refresh that will never fill the list.
+  if (isLiveModel(modelId)) {
+    const nba = NBA_LIVE_TIMING[modelId];
+    if (nba) {
+      return {
+        title: 'Bets during the game',
+        body:
+          `This model checks NBA games in progress once an hour ${nba.when}, and bets each game at most ` +
+          `once, at the sportsbook with the best offer. ${nba.settles} ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty:
+          `This model checks NBA games in progress once an hour ${nba.when}. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
+    return {
+      title: 'Bets during the game',
+      body:
+        `This is an in-play model: it checks games while they are being played and posts a bet when it ` +
+        `finds one. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+      empty: `This model bets while games are being played. ${LIVE_NOT_IN_LIST}`,
+      note: 'In-play bets appear on Live Signals, not in this list.',
+    };
+  }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
     return {
       title: 'Checked once per game',

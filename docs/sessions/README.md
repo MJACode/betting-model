@@ -19,9 +19,21 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM trend filters (line move, last game, division), More filters on game bets, NFL rest, season breakdown and 50-bet note; no lookahead on the official line |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, daily gate blocks 05:45–06:20 ET even with a clear ledger; pooler user for the readonly secret is daily_gate_reader.vvprgnrmzeekokzkrkfu; body bypass is owner or member only |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, Railway drain is 600s in railway.json; the daily-pipeline check re-posts from master every 10 minutes and the pull-request job no longer runs PR code with the write database URL; a session lease stops the boot sweep from aborting a daily the previous container is still finishing |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, odds_dk_pregame_current leaves out a game more than 24 hours out whose only price is more than 7 days old when that sport's nearer games are fresh and a successful odds-list call did not list it. The 15:26Z NBA 2 of 4 was the unposted Nov 6 slate. Outage replays and the pulled-slate cases stay as they were. |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, SIGTERM drain closes pipeline_runs as deploy-cutoff; GitHub check blocks merges while a daily row is open |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, nba_live_outputs skips a slate whose decision span ended before the loop's first tick (2026-11-05 11:00 ET); a later miss is still STALE |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM save keeps all 22 preview keys (was 9; Phase A keys dropped, line refused); unknown key refused by name; NHL pick'em refused |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM staking functions inlined (no SET clause): NBA 2025-26 points record timed out, 2.6s of 2.7s was four function calls per row |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, returning sign-in skips the paywall when premium; access_grants (comped, app_review) OR into my_access; founder grant SQL not applied |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM NHL game bets (moneyline, puck line, totals; official and closing; from 2020-21); save drops Phase A prop filters (flagged) |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM tables ANALYZEd after every write: NBA points preview 6.0s because the planner counted 1 current-season prop row (11,075 real); one-off byom_analyze job |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, NFL wind and opener labels carry no unit figure (it was the models' Kelly sizing, not the posted stake); 61 stored labels keep it; Discord, X, push, open_picks and the app drop it on display; no model change |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, iOS Sign in with Apple is the system sheet and an identity token; Google stays in the browser; version 1.2.0 so it is not an OTA onto 1.1.0 |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, byom_legs sets plan_cache_mode to force_custom_plan so a pooled connection cannot use a generic plan that skips the prop-facts market index; #1172 Medium, Matt via CE; no index or model change |
+| 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, NBA in-play game-state model LIVE: the quarters 1-2 spread (EV >= 0.05; 1,348 bets +6.4% on the loop's hourly fetches), its loop at each hour minus 264 s with two fail-closed ESPN reads, a decision ledger, two reviews' fixes; quarter-3 moneyline and spread held out (fail the house standard on hourly fetches), quarter-4 spread not built |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, BYOM NBA prop record 3,687 ms (over 3s anon): prop-facts leg index and a closing-branch market filter |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, marketing site contracting party is Signal Base LLC; product name stays Signal Base; copyright footer and contact entity line use the LLC; no App Store Connect change |
 | 2026-11-04 | [2026-11](./2026-11.md) | 2026-11-04, open picks are the `open_picks` view any Claude chat with the Supabase connector reads; only bets Discord posted, as the app; nothing is pasted; 23 rows matched the app's picks on production; no model change |

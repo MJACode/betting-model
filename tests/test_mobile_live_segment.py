@@ -31,9 +31,10 @@ Three properties are pinned here, each of which has a silent failure mode:
    delete the leg a second later with no error anywhere. The add would simply
    not work.
 
-3. THE DK-ONLY PRICING CAVEAT IS SCOPED TO THE LIVE VIEW. It is load-bearing
-   (CLAUDE.md §6: the models decide on DraftKings, and the in-play feed is a
-   ~45s cache) and it is wrong on the pre-game board, which is multi-book.
+3. THE LIVE PRICING CAVEAT IS SCOPED TO THE LIVE VIEW. It is load-bearing
+   (CLAUDE.md §6: each in-play pick is decided at the book named on its card,
+   and the in-play feed is a ~45s cache) and it is wrong on the pre-game
+   board, where the price ages are different.
 """
 
 from __future__ import annotations
@@ -492,13 +493,13 @@ def test_pruning_is_held_while_the_live_half_is_unknown():
     assert "livePicks.error" in body, "a failed live fetch can prune a live leg"
 
 
-# ── 4. the DK-only caveat stays where it is true ──────────────────────────────
+# ── 4. the live pricing caveat stays where it is true ─────────────────────────
 
 
 def test_the_live_pricing_caveat_is_scoped_to_the_live_view():
     src = _read(PICKS)
-    assert "priced and placed at DraftKings only" in src, (
-        "the live DK-only / staleness caveat was lost in the merge (CLAUDE.md §6)"
+    assert "priced and placed at the sportsbook named on its card" in src, (
+        "the live pricing / staleness caveat was lost in the merge (CLAUDE.md §6)"
     )
     m = re.search(
         r"\{view === 'live' && liveData\.length > 0 \? \(\s*<View style=\{styles\.liveNoteWrap\}>(.*?)\)\s*:\s*null\}",
@@ -512,7 +513,16 @@ def test_the_live_pricing_caveat_is_scoped_to_the_live_view():
         "2026-09-12) -- and on a sport with no live model it sits above an empty "
         "state saying exactly that."
     )
-    assert "DraftKings only" in m.group(1)
+    note = m.group(1)
+    assert "the book on each card" in note
+    # Since 2026-09-10 the in-play models decide at the best bettable in-play
+    # price, so an in-play pick can be a FanDuel or BetMGM bet. "DraftKings
+    # only" above those cards told the reader to bet a book that never took
+    # the pick (CLAUDE.md §6: the row records which book decided it).
+    assert "DraftKings only" not in note and "at DraftKings only" not in src, (
+        "the live board says in-play picks are DraftKings only again; they are "
+        "decided at decision_book, which is often another book"
+    )
 
 
 def test_the_caveat_does_not_reintroduce_the_your_sportsbook_contradiction():

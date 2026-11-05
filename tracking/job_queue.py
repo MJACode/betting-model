@@ -1589,6 +1589,27 @@ def _discord_channel_name_ok(v: str) -> bool:
     return any(c.isalpha() for c in slug)
 
 
+def _job_nba_live_ig2_artifact(**kw):
+    """The post-merge step of #1180: store the committed NBA in-play artifact
+    in model_artifacts, then register its live rule(s) in model_registry
+    (scripts/build_nba_live_ig2_artifact.py --store / --register). The worker
+    holds DATABASE_URL and the committed file; no laptop needs either. The
+    path is fixed to the committed artifact, never an argument."""
+    path = str(Path(__file__).resolve().parent.parent / "models" / "saved" / "nba_live_ig2_2027.json")
+    argv = ["--store", path] if kw["step"] == "store" else ["--register", path]
+    return _run_script_main("scripts.build_nba_live_ig2_artifact", argv)[-3000:] or f"{kw['step']} done"
+
+
+def _validate_nba_live_ig2_artifact(args: dict) -> dict:
+    extra = sorted(set(args) - {"step"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes step")
+    step = str(args.get("step") or "").strip()
+    if step not in ("store", "register"):
+        raise ValueError("step must be 'store' or 'register'")
+    return {"step": step}
+
+
 def _validate_discord_create_channel(args: dict) -> dict:
     import re
     extra = sorted(set(args) - {"name", "like", "guild", "apply"})
@@ -2436,18 +2457,23 @@ def _validate_byom_game_facts(args: dict) -> dict:
     and uppercased. An NFL season before 2020, and an NBA season before
     2021, are refused. Those seasons have no DraftKings game lines.
     """
-    from byom.constants import DK_HISTORY_START_SEASON, NBA_DK_HISTORY_START_SEASON
+    from byom.constants import (
+        DK_HISTORY_START_SEASON,
+        NBA_DK_HISTORY_START_SEASON,
+        NHL_DK_HISTORY_START_SEASON,
+    )
 
     sport = str(args.get("sport") or "NFL").strip().upper()
-    if sport not in ("NFL", "NBA"):
-        raise ValueError(f"byom_game_facts builds NFL or NBA, got {sport!r}")
+    if sport not in ("NFL", "NBA", "NHL"):
+        raise ValueError(f"byom_game_facts builds NFL, NBA or NHL, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
     else:
         season = int(season)
-        floor = (DK_HISTORY_START_SEASON if sport == "NFL"
-                 else NBA_DK_HISTORY_START_SEASON)
+        floor = {"NFL": DK_HISTORY_START_SEASON,
+                 "NBA": NBA_DK_HISTORY_START_SEASON,
+                 "NHL": NHL_DK_HISTORY_START_SEASON}[sport]
         if season < floor:
             raise ValueError(
                 f"season {season} is before DraftKings history ({floor})")
@@ -2506,9 +2532,14 @@ def _job_byom_prop_facts(**kw):
         # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
         from data.view_migrations import apply_view_migrations
         apply_view_migrations(conn)
-        return build_seasons(
+        result = build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
             sport=str(kw.get("sport") or "NFL").strip().upper())
+        if kw.get("apply"):
+            # The planner's row counts, after a write (byom/analyze.py).
+            from byom.analyze import analyze_tables
+            analyze_tables(conn)
+        return result
     finally:
         conn.close()
 
@@ -2517,8 +2548,8 @@ def _validate_byom_refresh(args: dict) -> dict:
     """Current-season refresh. apply defaults false, so a queued job
     reports freshness and writes nothing until someone asks."""
     sport = str(args.get("sport") or "NFL").strip().upper()
-    if sport not in ("NFL", "NBA"):
-        raise ValueError(f"byom_refresh builds NFL or NBA, got {sport!r}")
+    if sport not in ("NFL", "NBA", "NHL"):
+        raise ValueError(f"byom_refresh builds NFL, NBA or NHL, got {sport!r}")
     apply = args.get("apply", False)
     if not isinstance(apply, bool):
         raise ValueError(f"apply must be true or false, got {apply!r}")
@@ -2601,6 +2632,17 @@ def _job_daily_pipeline(**kw):
     return {"status": status or "unknown", "start_number": start_number}
 
 
+def _job_byom_analyze(**kw):
+    """ANALYZE the BYOM tables. Reads a sample; changes no row."""
+    from byom.analyze import analyze_tables
+
+    conn = _byom_connection()
+    try:
+        return {"analyzed": analyze_tables(conn)}
+    finally:
+        conn.close()
+
+
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
     from byom.load import build_seasons
@@ -2612,9 +2654,14 @@ def _job_byom_game_facts(**kw):
         # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
         from data.view_migrations import apply_view_migrations
         apply_view_migrations(conn)
-        return build_seasons(
+        result = build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
             sport=str(kw.get("sport") or "NFL").strip().upper())
+        if kw.get("apply"):
+            # The planner's row counts, after a write (byom/analyze.py).
+            from byom.analyze import analyze_tables
+            analyze_tables(conn)
+        return result
     finally:
         conn.close()
 
@@ -2695,6 +2742,8 @@ JOBS = {
     # One plain test message to a sport's pick channel, via the pick route.
     # Writes no table; one POST, never retried. See _job_discord_test_post.
     "discord_test_post": (_job_discord_test_post, _validate_discord_test_post),
+    # #1180 post-merge: store, then register, the committed NBA in-play artifact.
+    "nba_live_ig2_artifact": (_job_nba_live_ig2_artifact, _validate_nba_live_ig2_artifact),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
@@ -2757,6 +2806,9 @@ JOBS = {
     # job once. The owner turns it on. apply false is the freshness
     # report and does not read odds.
     "byom_refresh": (_job_byom_refresh, _validate_byom_refresh),
+    # 2026-11-05: the planner's row counts for the BYOM tables
+    # (byom/analyze.py). No arguments, no rows changed.
+    "byom_analyze": (_job_byom_analyze, lambda a: {}),
 }
 
 

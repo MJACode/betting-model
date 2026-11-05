@@ -26,6 +26,8 @@ import {
   type ByomSheetTab,
 } from '@/components/byom/ByomPropSideFields';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
+import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
+import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -56,8 +58,7 @@ import {
   sideBlockFromError,
   showsUnits,
   sideForMarket,
-  type ByomPropSide,
-} from '@/lib/byomRecord';
+  type ByomPropSide, asByomSport, byomUsesRest } from '@/lib/byomRecord';
 import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -97,7 +98,7 @@ export function ByomEditScreen() {
     setSeeded(true);
   }, [model, seeded]);
 
-  const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const sport: ByomSport = asByomSport(model?.sport);
   const facts = useNbaGameFacts(model == null ? null : sport);
   const edited = market == null
     ? null
@@ -108,7 +109,7 @@ export function ByomEditScreen() {
         role,
         primetime,
         propSide,
-        rest: sport === 'NBA' ? rest : null,
+        rest: byomUsesRest(sport) ? rest : null,
         propFilters,
       },
       model?.filters ?? {},
@@ -127,7 +128,7 @@ export function ByomEditScreen() {
       role,
       primetime,
       propSide,
-      rest: sport === 'NBA' ? rest : null,
+      rest: byomUsesRest(sport) ? rest : null,
       propFilters,
     };
   const activeDraft = seeded ? formDraft : loadedDraft;
@@ -277,7 +278,7 @@ export function ByomEditScreen() {
             style={styles.input}
           />
           <Text style={styles.current}>
-            {market != null && edited ? marketLabel(edited) : marketLabel(model.filters)}
+            {market != null && edited ? marketLabel(edited, sport) : marketLabel(model.filters, sport)}
           </Text>
           {market != null && isPropMarket(market) ? (
             <>
@@ -303,21 +304,32 @@ export function ByomEditScreen() {
             </>
           ) : null}
           {market != null && !isPropMarket(market) ? (
-            <ByomSideFields
-              market={market}
-              side={side}
-              role={role}
-              primetime={primetime}
-              propSide={propSide}
-              sport={sport}
-              rest={rest}
-              factsStatus={facts.status}
-              onSide={setSide}
-              onRole={setRole}
-              onPrimetime={setPrimetime}
-              onPropSide={setPropSide}
-              onRest={setRest}
-            />
+            <>
+              <ByomSideFields
+                market={market}
+                side={side}
+                role={role}
+                primetime={primetime}
+                propSide={propSide}
+                sport={sport}
+                rest={rest}
+                factsStatus={facts.status}
+                onSide={setSide}
+                onRole={setRole}
+                onPrimetime={setPrimetime}
+                onPropSide={setPropSide}
+                onRest={setRest}
+              />
+              <ByomMoreFiltersCard
+                sport={sport}
+                side={side}
+                primetime={primetime}
+                propFilters={propFilters}
+                game
+                totals={market === 'totals'}
+                onOpen={setSheet}
+              />
+            </>
           ) : null}
           <ByomMarketField
             market={market}
@@ -363,6 +375,12 @@ export function ByomEditScreen() {
                   : undefined}
               />
               )}
+              <ByomSeasonBreakdown
+                record={preview.record}
+                seasons={preview.seasons}
+                currentSeason={currentByomSeason(sport)}
+                showsUnits={unitsVisible}
+              />
               <ByomUnitsNote />
             </>
           ) : null}
@@ -395,7 +413,7 @@ export function ByomEditScreen() {
     ) : null}
     <BetslipBarSpacer />
     </KeyboardAvoidingView>
-    {market != null && isPropMarket(market) ? (
+    {market != null ? (
       <ByomFilterSheet
         tab={sheet}
         sport={sport}

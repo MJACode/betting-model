@@ -28,9 +28,12 @@ import {
 import {
   gameMarketForModel,
   lineShopForPick,
+  liveBookRowsForPick,
   numOrNull,
   playerNameFromPickLabel,
   propMarketForPick,
+  storedQuoteBook,
+  MODEL_BOOK,
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
@@ -1982,18 +1985,21 @@ export async function fetchUpcomingNhlPicks(
 // not yet settled — so yesterday's finished games drop out on their own and the
 // wider window costs nothing.
 //
-// DraftKings only (Matt, 2026-09-03): the in-play model reads DK's line and
-// the bet is placed there. The lock stays the bet of record (§1c). The card
-// still needs the CURRENT DK number so "Now" and "Locked" cannot be confused
-// while the board strip says the feed is ~45s old — so we re-read the in-play
-// view, DK rows only, for the slate dates. All-books shopping stays off
-// (pickLineQuotes still returns the record chip on live; detail is unchanged).
+// THE BOOK THAT DECIDED IT. Since 2026-09-10 the in-play models decide at the
+// best bettable in-play price (DraftKings only until then, Matt 2026-09-03),
+// and the NBA in-play model bets the best of eight books, so `decision_book` may not
+// be DraftKings. The lock stays the bet of record (§1c). The card still needs
+// that book's CURRENT number so "Now" and "Locked" cannot be confused, so we
+// read the newest in-play row at the deciding book, plus DraftKings' (the
+// reference row, latestOdds), for the games on the board
+// (fetchLiveInplayAtBooks). No other book is shopped: pickLineQuotes returns
+// the record chip alone on a live pick.
 export async function fetchLivePicks(
   dates: string[],
   onEnrichmentError?: (what: string, error: unknown) => void,
 ): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
-  const [picksRes, gamesRes, weatherRes, inplayRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -2014,30 +2020,15 @@ export async function fetchLivePicks(
       .lte('commence_time', nowIso)
       .is('home_score', null),
     supabase.from('game_weather').select(WEATHER_COLUMNS).in('game_date', dates),
-    supabase
-      .from('v_latest_inplay_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .in('game_date', dates)
-      .eq('bookmaker', 'draftkings'),
   ]);
 
   if (picksRes.error) throw picksRes.error;
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
-  // In-play odds are enrichment: a miss leaves Now empty and the card labels
-  // the lock Locked. Do not fail the board for it -- but REPORT it, so the
-  // board can say "Live prices unavailable" instead of silently dropping every
-  // Now price (v_latest_inplay_odds_all_books 500'd repeatedly on 2026-09-25;
-  // usability audit M2). Same contract as fetchPicksForDate.
-  if (inplayRes.error) onEnrichmentError?.('live prices', inplayRes.error);
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
-  const inplay = (
-    inplayRes.error ? [] : (inplayRes.data ?? [])
-  ) as unknown as OddsByBookRow[];
-  const inplayByGameMarket = groupBooksByGameMarket(inplay);
 
   // Restrict picks to games we just confirmed are in-progress.
   const liveGameIds = new Set(games.map((g) => g.game_id));
@@ -2046,15 +2037,33 @@ export async function fetchLivePicks(
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
 
-  const onBoard = await attachDiscordPublish(
-    picks.filter((p) => liveGameIds.has(p.game_id)),
-  );
+  const inProgress = picks.filter((p) => liveGameIds.has(p.game_id));
+  const [onBoard, inplayRes] = await Promise.all([
+    attachDiscordPublish(inProgress),
+    fetchLiveInplayAtBooks(inProgress),
+  ]);
+  // In-play odds are enrichment: a miss leaves Now empty and the card labels
+  // the lock Locked. Do not fail the board for it -- but REPORT it, so the
+  // board can say "Live prices unavailable" instead of silently dropping every
+  // Now price (v_latest_inplay_odds_all_books 500'd repeatedly on 2026-09-25;
+  // usability audit M2). Same contract as fetchPicksForDate.
+  if (inplayRes.error) onEnrichmentError?.('live prices', inplayRes.error);
+  const inplayByGameMarket = groupBooksByGameMarket(inplayRes.rows);
+
   return onBoard
     .filter((pick) => discordLedVisible(pick.condition_status, pick.discordPublish))
     .map((pick) => {
       const market = gameMarketForModel(pick.model_id);
-      const rows = market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
-      const dk = rows[0];
+      // This pick's own two books only (markets.liveBookRowsForPick), and
+      // DraftKings' alone for the NBA in-play model, whose deciding book's
+      // row is up to an hour old. Neither another pick's book nor that row
+      // may become a price on this card or an "Open with" tile in the slip
+      // (parlay.legFromPick reads bookRows).
+      const rows = liveBookRowsForPick(
+        pick,
+        market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [],
+      );
+      const dk = rows.find((r) => r.bookmaker === MODEL_BOOK);
       return {
         pick,
         game: gameById.get(pick.game_id) ?? null,
@@ -2077,6 +2086,81 @@ export async function fetchLivePicks(
         bestOdds: null,
       };
     });
+}
+
+const LIVE_INPLAY_QUOTE =
+  'snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price, ' +
+  'home_link, away_link, over_link, under_link';
+
+/**
+ * The newest in-play row at each book a Live-board pick needs: DraftKings,
+ * and the book that decided each pick (storedQuoteBook). One request per
+ * (market, book) pair and 40 games, each game a LIMIT 1 on idx_odds_book_snap
+ * through the odds_game_id_fkey embed, the scoreboard's in-play read
+ * (fetchDkInplayForGames). Not v_latest_inplay_odds_all_books: that view
+ * distincts the in-play log before it filters, so a date filter timed out
+ * (2026-10-28), and even by game id it scanned 7,645 rows in 1.1 s for five
+ * finished games (measured 2026-11-04). At most one row per game a request,
+ * so no request nears the 1,000-row cap.
+ *
+ * Enrichment: a failed request is reported once and leaves those prices out;
+ * the rest still land.
+ */
+async function fetchLiveInplayAtBooks(
+  picks: Pick[],
+): Promise<{ rows: OddsByBookRow[]; error: unknown }> {
+  const wants = new Map<string, { market: string; book: string; games: Set<string> }>();
+  for (const p of picks) {
+    const market = gameMarketForModel(p.model_id);
+    if (!market) continue;
+    for (const book of new Set([MODEL_BOOK, storedQuoteBook(p)])) {
+      const key = `${market}|${book}`;
+      const want = wants.get(key) ?? { market, book, games: new Set<string>() };
+      want.games.add(p.game_id);
+      wants.set(key, want);
+    }
+  }
+  const size = 40;
+  const requests: Promise<{ rows: OddsByBookRow[]; error: unknown }>[] = [];
+  for (const { market, book, games } of wants.values()) {
+    const ids = [...games].sort();
+    for (let i = 0; i < ids.length; i += size) {
+      const chunk = ids.slice(i, i + size);
+      requests.push(
+        (async () => {
+          try {
+            const { data, error } = await supabase
+              .from('games')
+              .select(`game_id, game_date, odds!odds_game_id_fkey(${LIVE_INPLAY_QUOTE})`)
+              .in('game_id', chunk)
+              .eq('odds.market', market)
+              .eq('odds.bookmaker', book)
+              .eq('odds.snapshot_type', 'in_play')
+              .order('snapshot_at', { foreignTable: 'odds', ascending: false })
+              .limit(1, { foreignTable: 'odds' });
+            if (error) throw error;
+            const found: OddsByBookRow[] = [];
+            for (const g of (data ?? []) as unknown as {
+              game_id: string;
+              game_date: string;
+              odds: Omit<OddsByBookRow, 'game_id' | 'game_date' | 'market' | 'bookmaker'>[] | null;
+            }[]) {
+              const quote = g.odds?.[0];
+              if (quote) found.push({ ...quote, game_id: g.game_id, game_date: g.game_date, market, bookmaker: book });
+            }
+            return { rows: found, error: null };
+          } catch (error) {
+            return { rows: [], error };
+          }
+        })(),
+      );
+    }
+  }
+  const results = await Promise.all(requests);
+  return {
+    rows: results.flatMap((r) => r.rows),
+    error: results.find((r) => r.error != null)?.error ?? null,
+  };
 }
 
 // Every is_live pick row (settled AND unsettled) for a set of games. Used to
@@ -2135,9 +2219,10 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     supabase.from('games').select(GAME_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
     // Per-book prices for the All books card. Game market or prop, never both.
-    // A live pick reads NO per-book rows: it is DraftKings only (Matt,
-    // 2026-09-03), and the pre-game view would happily return that game's
-    // last pre-game prices — a first-pitch number beside a 7th-inning bet.
+    // A live pick reads NO per-book rows: it shops no other book (its one chip
+    // is the book that decided it, pickLineQuotes), and the pre-game view
+    // would happily return that game's last pre-game prices — a first-pitch
+    // number beside a 7th-inning bet.
     pick.is_live === true
       ? Promise.resolve({ data: [], error: null })
       : market

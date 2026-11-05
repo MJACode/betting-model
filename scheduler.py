@@ -132,6 +132,7 @@ import logging
 import functools
 import math
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -234,6 +235,13 @@ RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
 RUN_NFL_LIVE_LEADER = (os.environ.get("RUN_NFL_LIVE_LEADER", "1").strip().lower()
                        not in ("0", "false", "off", "no"))
 
+# NBA in-play loop (models/nba_live_loop.py): the three IG-2 rules, LIVE
+# 2026-11-04 (mike: "everything goes live now"), so ON by default; set
+# RUN_NBA_LIVE=0 to stop it without a code change (a Railway variable takes
+# effect on the redeploy that applying it starts).
+RUN_NBA_LIVE = (os.environ.get("RUN_NBA_LIVE", "1").strip().lower()
+                not in ("0", "false", "off", "no"))
+
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
 # do rather than three days later.
@@ -287,32 +295,68 @@ _DAILY_LOCK = threading.Lock()
 # Jobs — each just runs an existing entrypoint as a subprocess.
 # ---------------------------------------------------------------------------
 
+def _handle_deploy_sigterm(signum, frame):  # noqa: ARG001 — signal handler signature
+    """Forward SIGTERM to the in-flight child, then leave the scheduler.
+
+    The child (the daily process, or refresh_pass.sh) finishes its current
+    step and closes the ledger. This process stays up until that child
+    exits; ``main`` waits. SIGKILL cannot be caught and is Railway's
+    backstop if the step does not return.
+    """
+    log.warning("SIGTERM — drain the in-flight step, then exit")
+    from tracking.deploy_drain import request, signal_children
+    request()
+    signal_children()
+    raise SystemExit(0)
+
+
 def _run(cmd: list[str], label: str, cwd: Path | None = None,
          env: dict[str, str] | None = None, timeout: float | None = None) -> str:
     """Run a pipeline entrypoint, logging start/stop. Never raises — a failed run
     must not tear down the long-lived scheduler process. Returns "ok", "fail",
-    "timeout" or "error"; most callers ignore it.
+    "timeout", "drained" or "error"; most callers ignore it.
 
     `timeout` kills a step that runs past it. A job registered with
     max_instances=1 skips every tick while one run is still going, so a step
     with no bound can silence its job for hours: on 2026-10-11 one publish step
     held the fast NFL poll from 12:20Z for ~5.7 hours. Default None keeps the
-    old unbounded behaviour for steps that are legitimately long."""
+    old unbounded behaviour for steps that are legitimately long.
+
+    On SIGTERM the child is signaled and waited out. It is not killed. The
+    child stops after the step it is in and closes its pipeline_runs row.
+    """
+    from tracking.deploy_drain import requested, track, untrack
+    if requested():
+        log.info("SKIP %s: deploy drain in progress", label)
+        return "drained"
     log.info("START %s: %s", label, " ".join(cmd))
     try:
-        result = subprocess.run(cmd, cwd=cwd or ROOT, env=env or BASE_ENV,
-                                check=False, timeout=timeout)
-        if result.returncode == 0:
-            log.info("DONE  %s (exit 0)", label)
-            return "ok"
-        log.warning("FAIL  %s (exit %s)", label, result.returncode)
-        return "fail"
-    except subprocess.TimeoutExpired:
-        log.warning("TIMEOUT %s killed after %ss", label, timeout)
-        return "timeout"
+        proc = subprocess.Popen(cmd, cwd=cwd or ROOT, env=env or BASE_ENV)
     except Exception:  # noqa: BLE001 - keep the scheduler alive no matter what
         log.exception("ERROR %s crashed", label)
         return "error"
+    track(proc)
+    try:
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=30)
+            log.warning("TIMEOUT %s killed after %ss", label, timeout)
+            return "timeout"
+        if requested():
+            log.warning("DRAIN %s (exit %s) — stopped for a deploy", label, code)
+            return "drained"
+        if code == 0:
+            log.info("DONE  %s (exit 0)", label)
+            return "ok"
+        log.warning("FAIL  %s (exit %s)", label, code)
+        return "fail"
+    except Exception:  # noqa: BLE001 - keep the scheduler alive no matter what
+        log.exception("ERROR %s crashed", label)
+        return "error"
+    finally:
+        untrack(proc)
 
 
 def _publish_new_signals(label: str) -> None:
@@ -693,7 +737,8 @@ def run_byom_nfl_refresh() -> None:
             # builder). nba_player_game_log lands by about 1:30am ET
             # (measured 2026-11-04), so this hour covers both. One sport's
             # failure does not skip the other.
-            for sport in ("NFL", "NBA"):
+            # NHL game bets joined 2026-11-05.
+            for sport in ("NFL", "NBA", "NHL"):
                 try:
                     job_id = enqueue(
                         conn, "byom_refresh", {"sport": sport, "apply": True},
@@ -885,6 +930,9 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 # so it sits with the other live loops -- unlike
                 # nfl_live_worker above.
                 "nfl_live_leader",
+                # The NBA in-play loop: the same shape (free ESPN reads, one
+                # Odds API call per decision instant, writes Supabase only).
+                "nba_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1005,6 +1053,28 @@ def run_nfl_live_leader() -> None:
         # A loop that dies on every launch (a bad import, a missing artifact)
         # must not read as a healthy job: raising makes the heartbeat 'fail'.
         raise RuntimeError(f"nfl-live-leader loop exited {outcome}")
+
+
+def run_nba_live() -> None:
+    # The NBA in-play loop (models/nba_live_loop.py), the run_nfl_live_leader
+    # supervisor shape: the loop reads ESPN's free scoreboard every 20 s and
+    # EXITS after a few idle ticks with no NBA game in progress, so this */10
+    # cron relaunches it and max_instances=1 makes the ticks during a slate
+    # no-ops. Run from the REPO ROOT.
+    #
+    # Odds API credits are spent ONLY at a fetch moment (each hour minus
+    # 264 s, retried to +240 s) while a game in progress has a rule not
+    # yet decided: one bulk h2h + spreads call for every game, 2 credits,
+    # capped per process by NBA_LIVE_CALL_CAP / NBA_LIVE_CREDIT_CAP and by
+    # the shared LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.nba_live_loop"],
+        "nba-live",
+    )
+    if outcome != "ok":
+        # A loop that dies on every launch (a bad import, a missing artifact,
+        # the decision table not yet created) must not read as healthy.
+        raise RuntimeError(f"nba-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -2187,6 +2257,14 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         log.info("daily catch-up: SERVICE_ROLE=%s does not own daily_pipeline",
                  SERVICE_ROLE)
         return {**skipped, "reason": "not this service"}
+    # On the catch-up thread, not the main thread. Waiting here for the
+    # previous container to finish its step must not delay sched.start():
+    # that is how the 2026-11-04 13:17Z hourly never ledgered.
+    from tracking.scoring_lease import wait_for_scoring_lease
+    if not wait_for_scoring_lease("daily"):
+        log.warning("daily catch-up [%s]: skip — the previous deployment "
+                    "still holds the daily scoring lease", source)
+        return {**skipped, "reason": "previous deployment still scoring"}
     try:
         from data.db import get_connection
         from tracking.daily_retry import (
@@ -2268,6 +2346,13 @@ def abort_orphaned_refresh_runs() -> int:
         log.info("orphan sweep: SERVICE_ROLE=%s owns neither hourly_refresh "
                  "nor daily_pipeline", SERVICE_ROLE)
         return 0
+    # A kind whose session lease is held is the previous container, still
+    # inside the step Railway has not SIGKILLed yet. Stamping that row
+    # aborted is what lets the catch-up start a second writer on top of it.
+    from tracking.scoring_lease import drop_live_kinds
+    kinds = drop_live_kinds(kinds)
+    if not kinds:
+        return 0
     stale_before = None
     if "daily" in kinds and not _DAILY_LOCK.locked():
         from datetime import datetime, timezone
@@ -2303,6 +2388,11 @@ def catch_up_refresh_pass(*, source: str = "boot") -> dict:
         log.info("refresh catch-up: SERVICE_ROLE=%s does not own hourly_refresh",
                  SERVICE_ROLE)
         return {"status": "skipped", "reason": "not this service"}
+    from tracking.scoring_lease import wait_for_scoring_lease
+    if not wait_for_scoring_lease("refresh"):
+        log.warning("refresh catch-up [%s]: skip — the previous deployment "
+                    "still holds the refresh scoring lease", source)
+        return {"status": "skipped", "reason": "previous deployment still scoring"}
     try:
         from datetime import timezone as _tz
         from data.db import get_connection
@@ -2407,7 +2497,7 @@ def build_scheduler() -> BlockingScheduler:
         run_byom_nfl_refresh,
         CronTrigger(hour=10, minute=41, timezone=TIMEZONE),
         id="byom_nfl_refresh",
-        name="BYOM NFL and NBA refresh (queued daily 10:41am ET)",
+        name="BYOM NFL, NBA and NHL refresh (queued daily 10:41am ET)",
     )
 
     # Heartbeat watchdog — every 15 minutes, around the clock.
@@ -2819,6 +2909,20 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NFL_LIVE_LEADER=0 — NFL in-play leader loop NOT scheduled.")
 
+    # NBA in-play loop. 11am to 2:50am ET: the earliest regular-season tips
+    # are around noon ET and a 10:30pm ET tip ends after 1am; an idle launch
+    # reads ESPN's scoreboard and exits.
+    if RUN_NBA_LIVE:
+        sched.add_job(
+            run_nba_live,
+            CronTrigger(hour="0-2,11-23", minute="*/10", timezone=TIMEZONE),
+            id="nba_live",
+            name="NBA in-play loop supervisor (11am-2:50am ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NBA_LIVE=0 — NBA in-play loop NOT scheduled.")
+
     if RUN_NFL_PROP_CARD:
         sched.add_job(
             run_nfl_prop_card,
@@ -3094,9 +3198,14 @@ def main() -> None:
             nxt = "?"
         log.info("  - %s [%s] next: %s", job.id, job.name, nxt)
     log.info("Scheduler running. Ctrl-C to stop.")
+    signal.signal(signal.SIGTERM, _handle_deploy_sigterm)
     try:
         sched.start()
     except (KeyboardInterrupt, SystemExit):
+        from tracking.deploy_drain import requested, wait_children
+        if requested():
+            log.info("Scheduler draining in-flight steps after SIGTERM.")
+            wait_children()
         log.info("Scheduler stopped.")
 
 

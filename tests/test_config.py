@@ -231,7 +231,11 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "ncaab_first_half_spread",
          # 2026-11-03 (mike): NCAAB first-half total; its 0.02 cut was measured
          # on its own P(win | no push), and it has no record.
-         "ncaab_first_half_total"}
+         "ncaab_first_half_total",
+         # 2026-11-04 (mike): the NBA in-play quarters 1-2 spread; IG-2's own
+         # game-state probability, which its EV >= 0.05 cut was graded on, and
+         # it has no record. The quarter-3 models are held out.
+         "nba_live_spread_q12"}
     )
 
 
@@ -347,5 +351,7 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaab_moneyline_first_post",  # 2026-11-03 (mike): the same, at the book's first moneyline post
         "ncaab_first_half_spread",  # 2026-11-02 (mike): its first-half table's P(cover, push left out)
         "ncaab_first_half_total",   # 2026-11-03 (mike): its first-half total table's P(win, push left out)
+        # 2026-11-04 (mike): the NBA in-play quarters 1-2 spread; IG-2's own game-state probability.
+        "nba_live_spread_q12",
     }
     assert not not_named_here

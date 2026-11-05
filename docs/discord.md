@@ -73,11 +73,11 @@ reports such a sport as `sport:NCAAB` with the channel id and the bot's
 webhook id and name, read by GET only and never with its token; it creates
 nothing, so before the first post it says there is no bot webhook yet.
 
-**Worker only.** The channel id resolves only on a service that also holds
-`DISCORD_BOT_TOKEN`. That is `worker`, which runs the NCAAB totals card and
-publishes right after it. `pollers` has no bot token (variable names read
-2026-10-30), so a `DISCORD_CHANNEL_NCAAB` there resolves nothing: its
-publish passes log `Discord: no webhook for NCAAB` and skip those picks
+**Worker posts the NCAAB card.** The channel id resolves only on a service
+that also holds `DISCORD_BOT_TOKEN`. `worker` runs the NCAAB totals card and
+publishes right after it. `pollers` holds the token too (variable names read
+2026-11-05; it had none on 2026-10-30) but not `DISCORD_CHANNEL_NCAAB`, so
+its publish passes log `Discord: no webhook for NCAAB` and skip those picks
 without marking them sent, and the worker posts them. If the worker is
 down, NCAAB does not post until it is back.
 
