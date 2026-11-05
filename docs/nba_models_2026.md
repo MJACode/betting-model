@@ -3020,7 +3020,7 @@ only. Each door rule is a family with one setting, so the neighbourhood of setti
 a walk-forward pick: each test season uses the setting that did best on the seasons before it.
 The three "one scale" rows use maps fitted as in section 15: 2024-25 from 2023-24, 2025-26 from
 the two seasons before it, and 2023-24 from the other two (labelled there). "Early" and "late" are the two halves of each season (split in mid-January). Scripts and outputs:
-temp folder `nba_game_edge/mktdoor1105` (`s1_baseline.py` to `s6_top2.py`).
+temp folder `nba_game_edge/mktdoor1105` (`s1_baseline.py` to `s7_drop.py`).
 
 ### 16.1 The market model's EV ranks its bets up to its 98th percentile, then turns over
 
@@ -3099,8 +3099,8 @@ today's risk.
 | market percentile capped at 0.97 | +172.6 | +7.71% | -0.4% | +173.2 | -0.5 (-1.3..+0.3) | -11.1 (-28.6..+6.7) | -19.4 (-34.6..-3.8) |
 | market top 3% loses its game to the projection bet | +190.5 | +8.62% | -1.6% | +193.6 | +0.4 (-1.2..+2.3) | +6.8 (-30.3..+48.6) | -4.9 (-40.9..+30.3) |
 | market top 2% loses its game to the projection bet | +190.7 | +8.57% | -0.9% | +192.5 | +0.4 (-1.1..+2.0) | +7.1 (-26.0..+43.3) | +0.4 (-31.9..+33.2) |
-| market top 3% removed (game goes to its next-best bet, either model) | +212.0 | +9.51% | -0.8% | +213.7 | +1.3 (-0.4..+3.2) | +28.4 (-11.3..+70.7) | +14.0 (-23.5..+52.0) |
-| market top 2% removed (the same) | +204.3 | +9.11% | -0.2% | +204.7 | +0.9 (-0.6..+2.6) | +20.7 (-14.5..+56.7) | +12.9 (-20.7..+46.9) |
+| market top 3% ranked last in its game (its next-best bet, either model, goes first; it is still bet when alone) | +212.0 | +9.51% | -0.8% | +213.7 | +1.3 (-0.4..+3.2) | +28.4 (-11.3..+70.7) | +14.0 (-23.5..+52.0) |
+| market top 2% ranked last in its game (the same) | +204.3 | +9.11% | -0.2% | +204.7 | +0.9 (-0.6..+2.6) | +20.7 (-14.5..+56.7) | +12.9 (-20.7..+46.9) |
 | both models on one return scale: earlier seasons' return in the bet's band | +120.2 | +5.02% | +6.5% | +112.9 | -3.2 (-7.4..+1.1) | -63.4 (-162.7..+36.0) | -45.5 (-123.6..+30.5) |
 | both on one scale: isotonic return on EV | +149.5 | +6.66% | 0.0% | +149.5 | -1.5 (-4.0..+1.0) | -34.2 (-91.1..+21.8) | -39.2 (-89.9..+11.3) |
 | both on one scale: EV x each model's fitted factor | +183.1 | +8.22% | -0.9% | +184.8 | +0.1 (-1.5..+1.8) | -0.6 (-35.9..+37.3) | -8.3 (-35.0..+18.7) |
@@ -3117,7 +3117,7 @@ The neighbourhoods (units against today; walk-forward in brackets):
 - **Market top bets lose their game to the projection bet,** top 10%, 7%, 5%, 4%, 3%, 2% or 1%:
   -2.3, +0.9, -12.1, -14.4, +6.8, +7.1, -3.7 (-1.4, +0.3, -16.5, -22.4, -4.9, +0.4, -9.5).
   Walk-forward pick (the top 3% both times): -4.9 (-40.9..+30.3).
-- **Market top bets removed from the door,** top 5%, 4%, 3%, 2% or 1%: -1.3, +4.5, +28.4, +20.7,
+- **Market top bets ranked last in their game,** top 5%, 4%, 3%, 2% or 1%: -1.3, +4.5, +28.4, +20.7,
   +8.3. Walk-forward pick (the top 3% both times): +14.0 (-23.5..+52.0).
 
 What the table says:
@@ -3127,7 +3127,9 @@ What the table says:
   bet in moves -0.5 units. The market bets it replaces returned about what the projection bets
   would have (16.2).
 - **The one row that looks like a result is a peak, and half of it is not market against
-  projection.** Removing the market model's top 3% gains +28.4 units. Taken apart:
+  projection.** Ranking the market model's top 3% last in its game gains +28.4 units. Not betting
+  those bets at all grades the same to the unit, at every setting from the top 5% to the top 1%:
+  no game in the three seasons had only such bets to choose from. Taken apart:
   - +10.3 from games handed to the projection model;
   - +10.3 from games handed to the market model's own next-best bet;
   - +2.2 from one game only the market model bet;

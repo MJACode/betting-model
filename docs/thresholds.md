@@ -743,8 +743,8 @@ zero. That is all of its over-claim at the door: its door bets below the 98th pe
 the 778 door games it wins while the projection model also had a bet, the projection bets it
 displaced returned +6.3% against its +5.2% (-2.6 units, 90% range -61.8 to +59.2). So no way of
 counting its bets for less at the door clears. Lowering its percentile by 0.01 to 0.50 moves -7.3
-to +9.6 units against today's +183.7. Capping it loses at every cap tried (-2.5 to -27.0). Removing
-its top 3% from the door gains +28.4. That is a peak (+4.5 at the top 4%, +8.3 at the top 1%), it
+to +9.6 units against today's +183.7. Capping it loses at every cap tried (-2.5 to -27.0). Ranking
+its top 3% last in their game gains +28.4. That is a peak (+4.5 at the top 4%, +8.3 at the top 1%), it
 falls all in the early half, and half of it comes from swaps to its own next-best bet. Walk-forward
 it is +14.0 (-23.5 to +52.0). None of these rules tilts to favourites: those that hand games to
 the projection model risk up to 4.6% less. Nothing changed.
