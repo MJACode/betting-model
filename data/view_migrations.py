@@ -491,6 +491,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # byom_save_model accept NHL; a null season is the ending year.
     # Skips once both bodies carry byom_nhl_v1.
     "byom_nhl_2026_11_05.sql",
+    # 2026-11-05 (Matt): a saved model keeps every filter the preview
+    # grades (22 keys); an unknown key is refused by name, not dropped.
+    # Skips once byom_save_model carries byom_save_filters_v1.
+    "byom_save_filters_2026_11_05.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
