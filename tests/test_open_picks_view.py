@@ -185,9 +185,19 @@ def test_the_column_list_is_pinned():
 
 
 def test_the_pick_is_its_label_word_for_word():
-    """CLAUDE.md §00: quote a pick from its label, never rebuild its line."""
+    """CLAUDE.md §00: quote a pick from its label, never rebuild its line.
+
+    One token comes off: the old NFL sizing figure ("· 0.87u") that wind and
+    opener labels carry, which is not the stake (the
+    stake column is). The pattern is pick_integrity's, so the view, Discord
+    and the app drop the same text (tests/test_nfl_label_units.py).
+    """
+    from tracking.pick_integrity import _STAKE_TOKEN
     cols = _select_list(_view_body())
-    assert re.search(r"\bp\.pick_label AS pick\b", cols)
+    want = (f"regexp_replace(p.pick_label, '{_STAKE_TOKEN.pattern}', '', 'g') "
+            "AS pick")
+    assert want in cols
+    assert cols.count("p.pick_label") == 1
     assert "scored_line" not in _code(_view_body())
 
 

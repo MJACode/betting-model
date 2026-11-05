@@ -184,6 +184,34 @@ def _names(text: str, team: str | None) -> bool:
     return bool(team) and (text == team or text.startswith(f"{team} "))
 
 
+# The old NFL sizing figure on a stored label: a "·", a number, then "u",
+# followed by another "·" tag or the end of the label. NFL wind and opener
+# labels written before this change end in it ("LA @ WAS Under 47.5 · 0.87u",
+# "DAL @ IND — IND +7.5 · 0.79u · NEW 0m"): the model's own Kelly sizing,
+# kelly_fraction / 1%. It is not the stake anyone books. Every surface shows
+# the posted stake beside the label -- 1u to win at COALESCE(decision_odds,
+# dk_odds), risk capped at 3u (stake_for, published_pick_stake) -- so one row
+# showed two unit numbers that disagreed (mike, 2026-11-04: "everything must
+# be units"). New labels carry no unit figure, as no other sport's does.
+# The SAME pattern strips it in public.open_picks
+# (data/migrations/open_picks_view_2026_11_04.sql) and in the app
+# (mobile/src/lib/format.ts labelWithoutStake); tests/test_nfl_label_units.py and
+# tests/test_mobile_label_units.py pin the three copies together.
+_STAKE_TOKEN = re.compile(r"\s*·\s*\d+(?:\.\d+)?u(?!\s*[^\s·])")
+
+
+def label_without_stake(label) -> str:
+    """A stored pick_label as a surface shows it beside the posted stake.
+
+    Drops only the old NFL sizing figure (`_STAKE_TOKEN`). The bet -- team,
+    side, line -- the age tag ("NEW 0m") and every parenthetical stay word for
+    word (CLAUDE.md §00), and the stored row is never rewritten (§1c). A label
+    with no such figure, which is every label written since and every other
+    sport's, is returned as stored. None reads as "".
+    """
+    return _STAKE_TOKEN.sub("", str(label or ""))
+
+
 def pick_problems(label, side, line, model_id, home=None, away=None,
                   prop_market=None) -> list[str]:
     """Every way this pick's label disagrees with its side and line. Empty = OK."""
