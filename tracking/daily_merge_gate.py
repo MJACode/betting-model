@@ -13,6 +13,11 @@ fall back to the clock: 06:00 America/New_York plus those same 75
 minutes. A catch-up daily outside that window is visible only to the
 query.
 
+05:45–06:20 America/New_York blocks even when the ledger has no open
+row. The 6:00am start can land between cron ticks, and a ``:00`` tick
+is often late, so a green check from 05:50 would otherwise stay green
+across the start.
+
 The pull-request job runs from the base branch (``pull_request_target``)
 and does not check out the PR head, so the script that reads the
 database is the one on master. ``--refresh-open-prs`` is the scheduled
@@ -24,8 +29,8 @@ Emergency bypass, either one:
 
 * the pull-request label ``emergency-merge`` (the workflow re-runs when
   the label is added)
-* the literal ``bypass-daily-gate`` in the pull-request body, then
-  re-run the failed check
+* the literal ``bypass-daily-gate`` in the pull-request body, when the
+  author association is OWNER or MEMBER, then re-run the failed check
 
 A repository admin can also merge with GitHub's bypass of branch
 protections, once this check is required on ``master``. The workflow
@@ -50,8 +55,19 @@ MAX_OPEN_DAILY = timedelta(minutes=75)
 DAILY_HOUR = 6
 DAILY_MINUTE = 0
 
+# Across the 6:00am ET start. Inclusive of 05:45, exclusive of 06:20.
+# A cron that is late past 06:20 is outside this stretch; an open row
+# still blocks through the database.
+DAILY_START_BLOCK_HOUR = 5
+DAILY_START_BLOCK_MINUTE = 45
+DAILY_START_BLOCK_END_HOUR = 6
+DAILY_START_BLOCK_END_MINUTE = 20
+
 EMERGENCY_LABEL = "emergency-merge"
 BYPASS_MARKER = "bypass-daily-gate"
+# Anyone can edit a PR body on a public repo. The label requires write
+# access. The body marker does not.
+BODY_BYPASS_ASSOCIATIONS = frozenset({"OWNER", "MEMBER"})
 
 # The Actions job name. A check run posted by the scheduled refresh uses
 # the same name, so branch protection sees one check and the latest run.
@@ -59,8 +75,8 @@ CHECK_NAME = "daily pipeline not running"
 
 BYPASS_HELP = (
     "Emergency bypass: add the label emergency-merge "
-    "(this check re-runs when the label is added), or put "
-    "bypass-daily-gate in the PR body and re-run this check. "
+    "(this check re-runs when the label is added), or, as an owner or "
+    "member, put bypass-daily-gate in the PR body and re-run this check. "
     "A repo admin can also merge with GitHub's bypass of branch protections."
 )
 
@@ -76,23 +92,57 @@ ORDER BY started_at
 """
 
 
-def clock_blocks(now: datetime) -> bool:
-    """True during 06:00 ET plus MAX_OPEN_DAILY, when the database is unread."""
+def _as_et(now: datetime) -> datetime:
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-    et = now.astimezone(ET)
+    return now.astimezone(ET)
+
+
+def clock_blocks(now: datetime) -> bool:
+    """True during 06:00 ET plus MAX_OPEN_DAILY, when the database is unread."""
+    et = _as_et(now)
     start = et.replace(
         hour=DAILY_HOUR, minute=DAILY_MINUTE, second=0, microsecond=0,
     )
     return start <= et < start + MAX_OPEN_DAILY
 
 
-def bypass_reason(labels, body: str | None) -> str | None:
+def daily_start_blocks(now: datetime) -> bool:
+    """True from 05:45 ET until 06:20 ET, whatever the ledger says.
+
+    The scheduled daily starts at 06:00. A check posted at 05:50 stays
+    green until the next cron tick, and that tick is often late.
+    """
+    et = _as_et(now)
+    start = et.replace(
+        hour=DAILY_START_BLOCK_HOUR,
+        minute=DAILY_START_BLOCK_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    end = et.replace(
+        hour=DAILY_START_BLOCK_END_HOUR,
+        minute=DAILY_START_BLOCK_END_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    return start <= et < end
+
+
+def bypass_reason(
+    labels,
+    body: str | None,
+    author_association: str | None = None,
+) -> str | None:
     names = list(labels or [])
     if EMERGENCY_LABEL in names:
         return f"label {EMERGENCY_LABEL}"
-    if BYPASS_MARKER in (body or ""):
-        return f"PR body contains {BYPASS_MARKER}"
+    association = (author_association or "").strip().upper()
+    if (
+        BYPASS_MARKER in (body or "")
+        and association in BODY_BYPASS_ASSOCIATIONS
+    ):
+        return f"PR body contains {BYPASS_MARKER} ({association})"
     return None
 
 
@@ -104,11 +154,19 @@ def gate_decision(
     db_configured: bool,
     open_run_ids: list[str],
     query_error: str | None,
+    author_association: str | None = None,
 ) -> tuple[bool, str]:
     """Return ``(block, message)``. ``block`` fails the GitHub check."""
-    why = bypass_reason(labels, body)
+    why = bypass_reason(labels, body, author_association)
     if why:
         return False, f"bypass: {why}"
+    if daily_start_blocks(now):
+        return True, (
+            "Blocking 05:45–06:20 America/New_York, across the 6:00am "
+            "daily start. A check from the previous cron tick stays green "
+            "until the next tick, and that tick is often late. "
+            f"{BYPASS_HELP}"
+        )
     if db_configured:
         if query_error:
             return True, (
@@ -205,6 +263,7 @@ def checks_for_pull_requests(
             db_configured=db_configured,
             open_run_ids=open_run_ids,
             query_error=query_error,
+            author_association=pr.get("author_association"),
         )
         title = message if len(message) <= 80 else message[:77] + "..."
         out.append({
@@ -296,7 +355,7 @@ def refresh_open_prs() -> int:
     return 0
 
 
-def _event_labels_and_body(event: dict) -> tuple[list[str], str]:
+def _event_labels_and_body(event: dict) -> tuple[list[str], str, str]:
     pr = event.get("pull_request") or {}
     labels = []
     for item in pr.get("labels") or []:
@@ -304,7 +363,11 @@ def _event_labels_and_body(event: dict) -> tuple[list[str], str]:
             labels.append(str(item["name"]))
         elif isinstance(item, str):
             labels.append(item)
-    return labels, pr.get("body") or ""
+    return (
+        labels,
+        pr.get("body") or "",
+        str(pr.get("author_association") or ""),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -317,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     if path and os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             event = json.load(fh)
-    labels, body = _event_labels_and_body(event)
+    labels, body, author_association = _event_labels_and_body(event)
     if os.environ.get("DAILY_GATE_BYPASS") in ("1", "true", "True"):
         labels = list(labels) + [EMERGENCY_LABEL]
 
@@ -329,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         db_configured=db_configured,
         open_run_ids=open_ids,
         query_error=query_error,
+        author_association=author_association,
     )
     print(message)
     if block:

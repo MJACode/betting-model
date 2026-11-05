@@ -8,6 +8,7 @@ daily whose lease is held, or if a timed-out wait is treated as free.
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from tracking.job_queue import QUEUE_LOCK_KEY
 from tracking.scoring_lease import (
@@ -50,6 +51,13 @@ class Fake:
 
     def close(self):
         self.closed = True
+
+
+def test_a_dropped_session_logs_the_lease_as_lost():
+    src = (
+        Path(__file__).resolve().parent.parent / "tracking" / "scoring_lease.py"
+    ).read_text(encoding="utf-8")
+    assert src.count("scoring lease: LOST") >= 3
 
 
 def test_the_lease_keys_are_not_the_job_queue_lock():

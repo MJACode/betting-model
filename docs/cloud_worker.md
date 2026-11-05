@@ -194,9 +194,12 @@ stale, so a schedule on master re-posts the same check name on every
 open PR head every 10 minutes from 09:00 UTC through 03:59 UTC (an
 hour before 6:00am ET through the 22:00 ET catch-up cutoff, in both
 EST and EDT). That schedule uses `DATABASE_URL`, the table owner, because it
-runs only from the default branch. GitHub can delay a cron. A merge
-between ticks can still land on an open daily. Re-running the failed
-pull-request job re-evaluates that one PR. The check blocks merges
+runs only from the default branch. From 05:45 until 06:20
+America/New_York the check blocks even when `pipeline_runs` has no
+open daily, so a late tick cannot leave a green check across the
+6:00am start. Outside that stretch a merge between ticks can still
+land on a catch-up daily. Re-running the failed pull-request job
+re-evaluates that one PR. The check blocks merges
 only after it is a required status on `master` (Settings → Rules →
 Rulesets, or branch protection, required status checks). Add
 `daily pipeline not running`.
@@ -204,10 +207,22 @@ Rulesets, or branch protection, required status checks). Add
 `DATABASE_URL_READONLY` is a new Actions secret. `pipeline_runs` has
 RLS on and no other policy, so the role needs its own SELECT policy or
 the query returns no rows and the pull-request job stays green during
-a daily. Run this in the Supabase SQL editor, put the password only in
-the secret, and use the same host and database as `DATABASE_URL` with
-user `daily_gate_reader` (the transaction pooler port is enough for
-this one SELECT):
+a daily. The Postgres role name is `daily_gate_reader`. On a Supavisor
+pooler host (`*.pooler.supabase.com`, port 5432 or 6543) the connection
+username is `daily_gate_reader.<project-ref>`, not the bare role. A
+bare user fails to connect, the check treats that as an unread ledger,
+and every PR stays red. This project's ref is `vvprgnrmzeekokzkrkfu`
+(`docs/config_topology.md`). The direct host
+`db.vvprgnrmzeekokzkrkfu.supabase.co` takes the bare role; that host is
+not what the worker or Actions uses.
+
+```text
+postgresql://daily_gate_reader.vvprgnrmzeekokzkrkfu:[password]@aws-1-us-west-2.pooler.supabase.com:6543/postgres
+```
+
+Run this in the Supabase SQL editor. The password goes only in the
+secret. The role name in the SQL stays bare; the suffix is only the
+pooler username.
 
 ```sql
 CREATE ROLE daily_gate_reader LOGIN PASSWORD 'choose-a-password';
@@ -219,8 +234,9 @@ CREATE POLICY daily_gate_reader_select ON public.pipeline_runs
 ```
 
 Emergency bypass: label the PR `emergency-merge` (the check re-runs on
-the label), or put `bypass-daily-gate` in the PR body and re-run the
-check. A repo admin can also use GitHub's bypass of branch protections.
+the label), or, as an owner or member, put `bypass-daily-gate` in the
+PR body and re-run the check. A repo admin can also use GitHub's bypass
+of branch protections.
 
 ### NFL polling (changed 2026-08-22)
 

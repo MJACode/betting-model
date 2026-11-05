@@ -27,15 +27,18 @@
 # runs from the default branch only, so it may use secrets.DATABASE_URL
 # (the table owner, which bypasses RLS). The window is 09:00 UTC through
 # 03:59 UTC: 5:00am EDT / 4:00am EST through after the 22:00 ET catch-up
-# cutoff in both EST and EDT. GitHub can delay a cron. A merge in the
-# gap between ticks can still land on an open daily. Re-running the
+# cutoff in both EST and EDT. From 05:45 until 06:20 America/New_York
+# the check blocks even when the ledger is clear, so a late tick cannot
+# stay green across the 6:00am start. Outside that stretch a merge in
+# the gap between ticks can still land on a catch-up daily. Re-running the
 # failed pull-request job re-evaluates that one PR immediately.
 #
 # Source of truth: pipeline_runs, run_kind = daily, finished_at IS NULL,
 # started_at::timestamptz within the last 75 minutes.
 #
-# Emergency: label the PR emergency-merge, or put bypass-daily-gate in
-# the PR body and re-run this check. See tracking/daily_merge_gate.py.
+# Emergency: label the PR emergency-merge, or, as an owner or member,
+# put bypass-daily-gate in the PR body and re-run this check.
+# See tracking/daily_merge_gate.py.
 name: Daily pipeline gate
 
 on:

@@ -123,8 +123,8 @@ class ScoringLease:
                 self._conn.execute("SELECT 1")
                 self._conn.commit()
             except Exception as exc:  # noqa: BLE001 — the pass keeps running
-                logger.warning(
-                    f"scoring lease: keepalive lost the session "
+                logger.error(
+                    f"scoring lease: LOST — keepalive session dropped "
                     f"({type(exc).__name__}); taking the lock again"
                 )
                 try:
@@ -139,14 +139,19 @@ class ScoringLease:
                     ).fetchone()
                     self._conn.commit()
                     if not (row and row[0]):
+                        logger.error(
+                            "scoring lease: LOST — reconnect did not get "
+                            "the lock; this pass is running without it"
+                        )
+                    else:
                         logger.warning(
-                            "scoring lease: lock is held by someone else "
-                            "after reconnect"
+                            "scoring lease: reacquired after the session drop"
                         )
                 except Exception as again:  # noqa: BLE001
-                    logger.warning(
-                        f"scoring lease: could not take the lock again "
-                        f"({type(again).__name__})"
+                    logger.error(
+                        f"scoring lease: LOST — could not take the lock "
+                        f"again ({type(again).__name__}); this pass is "
+                        f"running without it"
                     )
 
     def release(self) -> None:
