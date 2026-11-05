@@ -11,7 +11,7 @@
 import { errorText } from './errors';
 
 /** Where a user's access came from, as reported by public.my_access(). */
-export type AccessSource = 'app' | 'discord' | 'both' | 'none';
+export type AccessSource = 'app' | 'discord' | 'both' | 'none' | 'comped' | 'app_review';
 
 /** The row public.my_access() returns. One read, the whole picture. */
 export interface AccessRow {
@@ -69,7 +69,11 @@ export function parseAccess(raw: unknown): AccessRow {
   const bool = (k: string): boolean => r[k] === true;
   const rawSource = r.source;
   const source =
-    rawSource === 'app' || rawSource === 'discord' || rawSource === 'both'
+    rawSource === 'app' ||
+    rawSource === 'discord' ||
+    rawSource === 'both' ||
+    rawSource === 'comped' ||
+    rawSource === 'app_review'
       ? rawSource
       : 'none';
   // source 'discord' is a Whop match and the app stays locked. A stale

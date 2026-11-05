@@ -493,10 +493,10 @@ is scoped to. In one line each, so you know they exist:
   names it. These picks are a NEW population; report them separately.
 - **`picks.profit_flat` fabricates -110 for any pick with no price**, so every
   read of it must be gated on a non-NULL price.
-- **App access is `public.my_access()` / `has_app_access()` from Apple
-  `subscriptions` only** (trialing/active, period open). Whop does not unlock
-  the app. Do not flip AUTH/BILLING/DISCORD until that migration is applied
-  (`fetchAccess` throws). Detail: `mobile/docs/DISCORD_LINKING.md`.
+- **App access is `my_access()` / `has_app_access()`**: RevenueCat
+  `subscriptions` (trialing/active, period open) OR an active `access_grants`
+  row (`comped` or `app_review`). Whop does not unlock the app. Discord invite
+  is active or `comped`, not a trial. Detail: `mobile/docs/DISCORD_LINKING.md`.
 - **Pre-game and in-play prices never mix**, and the evening refresh keeps
   writing `open` rows after first pitch, so bound on
   `snapshot_at <= commence_time`.
