@@ -839,3 +839,84 @@ if (betTypeLabel('spreads', 'NHL') !== 'Puck line') throw new Error('type');
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_game_bets_take_more_filters_and_trends(tmp_path):
+    """Matt, 2026-11-05: "Add 1-3". Game bets get the More filters sheet,
+    NFL rest, the trend filters, and a season breakdown."""
+    for name in ("byomRecord.ts", "byomFilters.ts", "byomPropFilters.ts"):
+        src = (ROOT / "mobile/src/lib" / name).read_text(encoding="utf-8")
+        src = re.sub(r"from '\./(\w+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = r"""
+import {
+  filtersForDraft, draftFromFilters, seasonRows, seasonsUpLine, smallSampleNote,
+  byomSeasonName,
+} from './byomRecord.ts';
+import { EMPTY_PROP_FILTERS, trendsSummary, resetSheetFilters } from './byomPropFilters.ts';
+const sorted = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v;
+const eq = (a, b, what) => { if (JSON.stringify(sorted(a)) !== JSON.stringify(sorted(b))) throw new Error(what + ' ' + JSON.stringify(a)); };
+const pf = {
+  ...EMPTY_PROP_FILTERS, priceBand: 'plus', months: [10], weekdays: [0], opponents: ['DAL'],
+  shortWeek: true, lineMove: 'toward', prevResult: 'lost', prevAts: 'not_covered',
+  prevTotal: 'over', division: true, lineBand: { min: 1, max: 2 }, player: 'Someone',
+};
+const game = filtersForDraft({ market: 'spreads', side: 'away', role: null, primetime: false,
+  propSide: null, rest: null, propFilters: pf }, {}, 'NFL');
+eq(game, { side: 'away', primetime: false, markets: ['spreads'], max_rest_days: 6, min_price: 100,
+  months: [10], weekdays: [0], opponents: ['DAL'], line_move: 'toward', prev_result: 'lost',
+  prev_ats: 'not_covered', prev_total: 'over', division_game: true }, 'nfl game');
+// A total has no team: no opponent and no team's last game.
+const total = filtersForDraft({ market: 'totals', side: 'over', role: null, primetime: null,
+  propSide: null, rest: null, propFilters: pf }, {}, 'NBA');
+if ('opponents' in total || 'prev_result' in total || 'prev_ats' in total) throw new Error('totals ' + JSON.stringify(total));
+if (total.prev_total !== 'over' || total.line_move !== 'toward') throw new Error('totals keep');
+// NBA rest stays the b2b chip's, not the NFL short week.
+const nba = filtersForDraft({ market: 'h2h', side: 'home', role: null, primetime: null,
+  propSide: null, rest: 'b2b', propFilters: pf }, {}, 'NBA');
+if (nba.min_rest_days !== 1 || nba.max_rest_days !== 1) throw new Error('nba rest ' + JSON.stringify(nba));
+// A saved game model reads its trends back.
+const back = draftFromFilters(game);
+eq([back.propFilters.lineMove, back.propFilters.prevResult, back.propFilters.prevAts,
+    back.propFilters.prevTotal, back.propFilters.division, back.propFilters.shortWeek],
+   ['toward', 'lost', 'not_covered', 'over', true, true], 'round trip');
+eq(trendsSummary(EMPTY_PROP_FILTERS).detail, 'Any', 'any');
+if (!trendsSummary(pf).pills.includes('Division game')) throw new Error('pills');
+// Reset on a game bet clears the NFL rest chips; a prop keeps them.
+if (resetSheetFilters(pf, false).shortWeek || !resetSheetFilters(pf, true).shortWeek) throw new Error('reset');
+// Seasons, newest first, empty seasons dropped.
+const row = (bets, wins, units) => ({ market: 'h2h', bets, wins, losses: bets - wins, pushes: 0, ties: 0, units, risked: bets, skipped: 0 });
+const rows = seasonRows('NBA', [
+  { season: 2025, rows: [row(10, 6, 1.5)] }, { season: 2027, rows: [row(4, 1, -2)] },
+  { season: 2026, rows: [row(0, 0, 0)] }, { season: null, rows: [row(3, 3, 3)] },
+]);
+eq(rows.map((r) => r.label), ['2026-27', '2024-25'], 'labels');
+eq(seasonsUpLine(rows), 'Up in 1 of 2 seasons', 'up');
+if (byomSeasonName('NFL', 2026) !== '2026') throw new Error('nfl label');
+if (smallSampleNote({ bets: 49, wins: 30, losses: 19, pushes: 0, ties: 0, units: 1, risked: 49 }) == null) throw new Error('small');
+if (smallSampleNote({ bets: 50, wins: 30, losses: 20, pushes: 0, ties: 0, units: 1, risked: 50 }) != null) throw new Error('fifty');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+def test_the_sheet_opens_for_game_bets_and_has_a_trends_tab():
+    builder = (ROOT / "mobile/src/screens/ByomBuilderScreen.tsx").read_text(encoding="utf-8")
+    edit = (ROOT / "mobile/src/screens/ByomEditScreen.tsx").read_text(encoding="utf-8")
+    sheet = (ROOT / "mobile/src/components/byom/ByomFilterSheet.tsx").read_text(encoding="utf-8")
+    for screen in (builder, edit):
+        assert "{market != null ? (\n      <ByomFilterSheet" in screen
+        assert screen.count("<ByomMoreFiltersCard") == 2
+        assert "<ByomSeasonBreakdown" in screen
+    assert "'trends'" in sheet and "function TrendsTab" in sheet
+    assert "Short week (6 days or fewer)" in sheet
+    # UX review: a total has no team, so no Matchup tab or row.
+    assert "(['odds', 'time', 'trends'] as const)" in sheet
+    for screen in (builder, edit):
+        assert "totals={market === 'totals'}" in screen
+    detail = (ROOT / "mobile/src/screens/ByomDetailScreen.tsx").read_text(encoding="utf-8")
+    assert "filterMarket == null\n    ? null\n    : propFilterSummary" in detail

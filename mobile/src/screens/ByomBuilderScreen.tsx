@@ -26,6 +26,8 @@ import {
   type ByomSheetTab,
 } from '@/components/byom/ByomPropSideFields';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
+import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
+import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { useAuth } from '@/hooks/useAuth';
 import { useByomRecord } from '@/hooks/useByomRecord';
@@ -313,6 +315,15 @@ export function ByomBuilderScreen() {
             onPropSide={setPropSide}
             onRest={setRest}
           />
+          <ByomMoreFiltersCard
+            sport={sport}
+            side={side}
+            primetime={primetime}
+            propFilters={propFilters}
+            game
+            totals={market === 'totals'}
+            onOpen={setSheet}
+          />
         </>
       ) : null}
       {step === 3 ? (
@@ -365,6 +376,12 @@ export function ByomBuilderScreen() {
                 : undefined}
             />
           )}
+          <ByomSeasonBreakdown
+            record={preview.record}
+            seasons={preview.seasons}
+            currentSeason={currentByomSeason(sport)}
+            showsUnits={showsUnits(filters)}
+          />
           <ByomUnitsNote />
         </>
       ) : null}
@@ -415,7 +432,7 @@ export function ByomBuilderScreen() {
       </View>
       <BetslipBarSpacer />
     </KeyboardAvoidingView>
-    {market != null && isPropMarket(market) ? (
+    {market != null ? (
       <ByomFilterSheet
         tab={sheet}
         sport={sport}

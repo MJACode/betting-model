@@ -26,6 +26,8 @@ import {
   type ByomSheetTab,
 } from '@/components/byom/ByomPropSideFields';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
+import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
+import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -302,21 +304,32 @@ export function ByomEditScreen() {
             </>
           ) : null}
           {market != null && !isPropMarket(market) ? (
-            <ByomSideFields
-              market={market}
-              side={side}
-              role={role}
-              primetime={primetime}
-              propSide={propSide}
-              sport={sport}
-              rest={rest}
-              factsStatus={facts.status}
-              onSide={setSide}
-              onRole={setRole}
-              onPrimetime={setPrimetime}
-              onPropSide={setPropSide}
-              onRest={setRest}
-            />
+            <>
+              <ByomSideFields
+                market={market}
+                side={side}
+                role={role}
+                primetime={primetime}
+                propSide={propSide}
+                sport={sport}
+                rest={rest}
+                factsStatus={facts.status}
+                onSide={setSide}
+                onRole={setRole}
+                onPrimetime={setPrimetime}
+                onPropSide={setPropSide}
+                onRest={setRest}
+              />
+              <ByomMoreFiltersCard
+                sport={sport}
+                side={side}
+                primetime={primetime}
+                propFilters={propFilters}
+                game
+                totals={market === 'totals'}
+                onOpen={setSheet}
+              />
+            </>
           ) : null}
           <ByomMarketField
             market={market}
@@ -362,6 +375,12 @@ export function ByomEditScreen() {
                   : undefined}
               />
               )}
+              <ByomSeasonBreakdown
+                record={preview.record}
+                seasons={preview.seasons}
+                currentSeason={currentByomSeason(sport)}
+                showsUnits={unitsVisible}
+              />
               <ByomUnitsNote />
             </>
           ) : null}
@@ -394,7 +413,7 @@ export function ByomEditScreen() {
     ) : null}
     <BetslipBarSpacer />
     </KeyboardAvoidingView>
-    {market != null && isPropMarket(market) ? (
+    {market != null ? (
       <ByomFilterSheet
         tab={sheet}
         sport={sport}

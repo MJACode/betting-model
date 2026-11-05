@@ -8,6 +8,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ByomPreviewCard } from '@/components/byom/ByomPreviewCard';
 import { ByomSeasonToggle } from '@/components/byom/ByomSeasonToggle';
+import { ByomSeasonBreakdown } from '@/components/byom/ByomSeasonBreakdown';
+import { currentByomSeason } from '@/lib/byomRecord';
 import { ByomUnitsNote } from '@/components/byom/ByomUnitsNote';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
@@ -35,7 +37,8 @@ export function ByomDetailScreen() {
   const graded = model != null && !isWholeSeason(model.filters);
   const sport: ByomSport = asByomSport(model?.sport);
   const filterMarket = model?.filters.markets?.[0] ?? null;
-  const filterLine = model == null || !isPropMarket(filterMarket)
+  // Game models show their sheet and trend filters too (UX review, 2026-11-05).
+  const filterLine = model == null || filterMarket == null
     ? null
     : propFilterSummary(model.filters, sport, filterMarket);
   const facts = useNbaGameFacts(model == null ? null : sport);
@@ -136,6 +139,12 @@ export function ByomDetailScreen() {
                 filters: model.filters, sport, title: model.name, timing: preview.timing,
               })
               : undefined}
+          />
+          <ByomSeasonBreakdown
+            record={preview.record}
+            seasons={preview.seasons}
+            currentSeason={currentByomSeason(sport)}
+            showsUnits={showsUnits(model.filters)}
           />
           <ByomUnitsNote />
           <Pressable
