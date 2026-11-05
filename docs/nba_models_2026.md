@@ -2800,6 +2800,42 @@ night against +153.6 in tip order). Six a night in tip order is where the units 
 **What did not ship.** Taking each game's best bet below its model's top 2% graded +19.6 units
 better at six a night, but the top 1.5% and 2.5% did not hold up: a peak, not a plateau.
 
+**Sizing 1 to 3 units instead of flat (mike, 2026-11-04: *"why not explore fewer bets, but 1-3
+unit spreads with 3 on more confident bets?"*).** Units grow with the stake, so 3 units on
+everything is three times the units at three times the risk: that is the size of a unit, a
+bankroll choice. The question a sizing rule answers is where the same risk goes. So each scheme
+below is scaled to the flat rule's total risk (its return times flat's risk), with a 90% range on
+its difference from flat (nights resampled). Signals fixed before grading. Live rules,
+2023-24..2025-26:
+
+| Scheme | Bets | Units at flat's risk | Return | Difference from flat, 90% range |
+|---|---|---|---|---|
+| Props, flat 1 unit (live: one a game, six a night) | 2,639 | +183.7 | +8.17% | |
+| 1/2/3 units by the model's own EV percentile | 2,639 | +158.5 | +7.05% | -57.7 to +8.9 |
+| 1 to 3 units shaped like Kelly (EV over price) | 2,639 | +189.4 | +8.43% | -21.7 to +32.4 |
+| 3 units on each night's top 2, the rest not bet | 968 | +180.5 | +8.03% | -107.8 to +102.7 |
+| 3 units on the top third, the rest not bet | 880 | +103.8 | +4.62% | -198.6 to +36.2 |
+| 3/2/1, reversed (most on the lowest EV) | 2,639 | +208.1 | +9.26% | -8.0 to +57.5 |
+| Game totals, flat 1 unit (live) | 1,162 | +136.7 | +10.75% | |
+| 1/2/3 units by the luck gap, within each model | 1,162 | +135.9 | +10.68% | -24.8 to +23.6 |
+| 3 team total, 2 full game, 1 first half | 1,162 | +141.8 | +11.14% | -17.5 to +27.3 |
+
+- **Sizing up on the model's confidence loses.** It puts the most money on the props the models
+  overstate most (section 14 above), the same pattern that took the 1-3 unit scale off every model
+  on 2026-08-29 (`tracking/discord_notifier.conviction_for`).
+- **Fewer bets at 3 units does not help.** At the same risk, the top two a night earn what six a
+  night earn, with a far wider range; the top third earns less.
+- **The reversed scale is better in all three seasons** (+10.7 / +8.9 / +8.4% against +9.0 / +7.7 /
+  +7.9%), but its range includes zero, and the same inversion was unstable on the 2026-08-29 data.
+  It is the overconfidence again, which the projection model's calibration work addresses, not a
+  sizing rule.
+- **The game totals have no size signal either.** The full-game over's largest-gap third returned
+  +1.6% (the middle third +12.1%). The home team total under by its own number, on its 429 bets:
+  weakest third +7.3%, middle +25.4%, strongest +10.2%; 1/2/3 units gives +71.1 at flat's risk
+  against +68.7.
+- **Verdict: flat stays.** `conviction_for`'s rule holds: re-open when a signal chosen in advance
+  survives a time split. Scripts: `nba_game_edge/volume1104/sizing.py`, `tt_signal.py`.
+
 Updated-By: mike.
 
 ## 15. The projection model's EV claims three times what it returns, and a corrected EV does not rank the night better (2026-11-04, mike)
