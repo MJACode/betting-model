@@ -12018,9 +12018,9 @@
     "semantic_hash": ""
   },
   "data/migrations/open_picks_view_2026_11_04.sql": {
-    "mtime": 1793857842.329639,
-    "seen": 1793858721.1862178,
-    "ast_hash": "1cd7579772681d98f5bd3bcbe98491ab",
+    "mtime": 1793864873.9213858,
+    "seen": 1793865441.5325644,
+    "ast_hash": "748eb8fc69137e56cc6ec834cfc217e8",
     "semantic_hash": ""
   },
   "models/nba_live_ig2.py": {
