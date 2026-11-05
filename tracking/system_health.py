@@ -658,7 +658,7 @@ def _sports_with_a_live_slate_call(conn, floor: datetime) -> set:
         rows = conn.execute("""
             SELECT sport, path, status, ok, ts
             FROM api_call_log
-            WHERE ts >= ? AND path LIKE '/v4/sports/%'
+            WHERE ts >= ? AND path LIKE '/v4/sports/%%'
         """, (floor.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),)
         ).fetchall()
     except Exception:                                          # noqa: BLE001
