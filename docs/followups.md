@@ -21,7 +21,11 @@
 
 ---
 
-## [ ] NBA first quarter: grade what was bought (2026-11-03)
+## [x] NBA first quarter: grade what was bought (2026-11-03) — DONE 2026-11-04
+
+Graded 2026-11-04, nothing built: first-quarter props 0 of 18 pass (run `2026-11-04-q1props`,
+`docs/nba_search_q1props.md` section 17), first-quarter and first-half team totals 0 of 26 pass (run
+`2026-11-04-q1tt`, `docs/nba_search_q1tt.md` section 15). Summary: `docs/nba_models_2026.md` section 13.
 
 mike, 2026-11-03: "Buy 1Q data". Bought the same day, at tip minus 60 minutes, by
 `data/ingestors/nba_odds_history.py --q1-props` and `--period-team-totals`:
