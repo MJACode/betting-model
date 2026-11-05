@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, SIGTERM drain closes pipeline_runs as deploy-cutoff; GitHub check blocks merges while a daily row is open |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, nba_live_outputs skips a slate whose decision span ended before the loop's first tick (2026-11-05 11:00 ET); a later miss is still STALE |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM save keeps all 22 preview keys (was 9; Phase A keys dropped, line refused); unknown key refused by name; NHL pick'em refused |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM staking functions inlined (no SET clause): NBA 2025-26 points record timed out, 2.6s of 2.7s was four function calls per row |

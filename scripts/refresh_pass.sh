@@ -23,6 +23,18 @@
 set -uo pipefail
 MODE="${1:-hourly}"
 
+# Railway redeploy sends SIGTERM here. The trap does not run until the
+# foreground step returns, and par_wait loops until a signaled wait has
+# reaped the group, so the step in progress finishes. Later steps do not
+# start. The ledger row is closed as deploy-cutoff instead of left open.
+# SIGKILL cannot be caught; the boot sweep still stamps those as aborted.
+DRAIN=0
+on_deploy_term() {
+  DRAIN=1
+  echo "deploy drain: SIGTERM — finish the current step, then stop" >&2
+}
+trap on_deploy_term TERM
+
 # Record that this pass ran. Until 2026-08-27 nothing did, so a pass that died
 # mid-chain left no trace except missing side-effects. `|| true` throughout:
 # observability must never be able to break the pass it is observing.
@@ -32,6 +44,10 @@ FAILED_STEPS=()
 STEPS_TOTAL=0
 
 step() {
+  if [ "${DRAIN:-0}" = 1 ]; then
+    echo "deploy drain: not starting $1" >&2
+    return 0
+  fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   if ! python run_pipeline.py --step "$1"; then
     echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
@@ -63,6 +79,10 @@ PAR_DIR="$(mktemp -d)"
 trap 'rm -rf "$PAR_DIR"' EXIT
 
 par() {
+  if [ "${DRAIN:-0}" = 1 ]; then
+    echo "deploy drain: not starting $1" >&2
+    return 0
+  fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   (
     if ! python run_pipeline.py --step "$1"; then
@@ -73,7 +93,17 @@ par() {
 }
 
 par_wait() {
-  wait
+  # A SIGTERM trap makes `wait` return immediately (status 128+signal)
+  # while the background steps are still running. Loop until it returns
+  # a child status, which is when the group has actually finished.
+  local rc=0
+  while true; do
+    wait
+    rc=$?
+    if [ "$rc" -lt 128 ]; then
+      break
+    fi
+  done
   # Collect what the subshells could not append themselves.
   for f in "$PAR_DIR"/*.failed; do
     [ -e "$f" ] || continue
@@ -332,8 +362,22 @@ step live-calibration
 
 # Close the ledger row. Runs whatever happened above, so a pass that completes
 # with failures is still recorded as finished-with-failures rather than missing.
+# A drain names deploy-cutoff even when earlier steps failed, so the catch-up
+# treats the pass as a deploy-kill and not as a chain that ran to its end.
+if [ "${DRAIN:-0}" = 1 ]; then
+  if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
+    FAILED_STEPS=("deploy-cutoff")
+  else
+    FAILED_STEPS=("deploy-cutoff" "${FAILED_STEPS[@]}")
+  fi
+fi
 python -m tracking.run_ledger finish --run-id "$RUN_ID" \
     --steps-total "$STEPS_TOTAL" --failed "${FAILED_STEPS[*]:-}" 2>/dev/null || true
+
+if [ "${DRAIN:-0}" = 1 ]; then
+  echo "refresh pass stopped for a deploy (deploy-cutoff)" >&2
+  exit 0
+fi
 
 if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
   echo "refresh pass finished with ${#FAILED_STEPS[@]} failed step(s): ${FAILED_STEPS[*]}" >&2

@@ -132,6 +132,7 @@ import logging
 import functools
 import math
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -294,32 +295,68 @@ _DAILY_LOCK = threading.Lock()
 # Jobs — each just runs an existing entrypoint as a subprocess.
 # ---------------------------------------------------------------------------
 
+def _handle_deploy_sigterm(signum, frame):  # noqa: ARG001 — signal handler signature
+    """Forward SIGTERM to the in-flight child, then leave the scheduler.
+
+    The child (the daily process, or refresh_pass.sh) finishes its current
+    step and closes the ledger. This process stays up until that child
+    exits; ``main`` waits. SIGKILL cannot be caught and is Railway's
+    backstop if the step does not return.
+    """
+    log.warning("SIGTERM — drain the in-flight step, then exit")
+    from tracking.deploy_drain import request, signal_children
+    request()
+    signal_children()
+    raise SystemExit(0)
+
+
 def _run(cmd: list[str], label: str, cwd: Path | None = None,
          env: dict[str, str] | None = None, timeout: float | None = None) -> str:
     """Run a pipeline entrypoint, logging start/stop. Never raises — a failed run
     must not tear down the long-lived scheduler process. Returns "ok", "fail",
-    "timeout" or "error"; most callers ignore it.
+    "timeout", "drained" or "error"; most callers ignore it.
 
     `timeout` kills a step that runs past it. A job registered with
     max_instances=1 skips every tick while one run is still going, so a step
     with no bound can silence its job for hours: on 2026-10-11 one publish step
     held the fast NFL poll from 12:20Z for ~5.7 hours. Default None keeps the
-    old unbounded behaviour for steps that are legitimately long."""
+    old unbounded behaviour for steps that are legitimately long.
+
+    On SIGTERM the child is signaled and waited out. It is not killed. The
+    child stops after the step it is in and closes its pipeline_runs row.
+    """
+    from tracking.deploy_drain import requested, track, untrack
+    if requested():
+        log.info("SKIP %s: deploy drain in progress", label)
+        return "drained"
     log.info("START %s: %s", label, " ".join(cmd))
     try:
-        result = subprocess.run(cmd, cwd=cwd or ROOT, env=env or BASE_ENV,
-                                check=False, timeout=timeout)
-        if result.returncode == 0:
-            log.info("DONE  %s (exit 0)", label)
-            return "ok"
-        log.warning("FAIL  %s (exit %s)", label, result.returncode)
-        return "fail"
-    except subprocess.TimeoutExpired:
-        log.warning("TIMEOUT %s killed after %ss", label, timeout)
-        return "timeout"
+        proc = subprocess.Popen(cmd, cwd=cwd or ROOT, env=env or BASE_ENV)
     except Exception:  # noqa: BLE001 - keep the scheduler alive no matter what
         log.exception("ERROR %s crashed", label)
         return "error"
+    track(proc)
+    try:
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=30)
+            log.warning("TIMEOUT %s killed after %ss", label, timeout)
+            return "timeout"
+        if requested():
+            log.warning("DRAIN %s (exit %s) — stopped for a deploy", label, code)
+            return "drained"
+        if code == 0:
+            log.info("DONE  %s (exit 0)", label)
+            return "ok"
+        log.warning("FAIL  %s (exit %s)", label, code)
+        return "fail"
+    except Exception:  # noqa: BLE001 - keep the scheduler alive no matter what
+        log.exception("ERROR %s crashed", label)
+        return "error"
+    finally:
+        untrack(proc)
 
 
 def _publish_new_signals(label: str) -> None:
@@ -3141,9 +3178,14 @@ def main() -> None:
             nxt = "?"
         log.info("  - %s [%s] next: %s", job.id, job.name, nxt)
     log.info("Scheduler running. Ctrl-C to stop.")
+    signal.signal(signal.SIGTERM, _handle_deploy_sigterm)
     try:
         sched.start()
     except (KeyboardInterrupt, SystemExit):
+        from tracking.deploy_drain import requested, wait_children
+        if requested():
+            log.info("Scheduler draining in-flight steps after SIGTERM.")
+            wait_children()
         log.info("Scheduler stopped.")
 
 

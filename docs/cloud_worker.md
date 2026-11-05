@@ -138,6 +138,36 @@ second call cannot abort a pass this process has just opened. The one-off
 view-migration pass if boot has not already. This sweep does not re-run
 the pass.
 
+### Drain on redeploy, and the merge gate (2026-11-05)
+
+A merge to master redeploys the worker and Railway sends SIGTERM. The
+scheduler forwards that to the in-flight child and waits. It does not
+kill the child. `python run_pipeline.py` (the daily) and
+`scripts/refresh_pass.sh` finish the step they are in, do not start the
+next one, and close `pipeline_runs` with `failed_steps` containing
+`deploy-cutoff` (`ok` false). That is a deploy-kill, same as `aborted`:
+the same-day catch-up may start the daily again, and a drained hourly
+is still replaced at boot. SIGKILL cannot be caught. If the platform's
+stop grace ends before the step returns, the row stays unfinished and
+the boot sweep still stamps it `aborted`. This change does not set a
+Railway drain timeout.
+
+Merges into master are blocked while a daily is open by the check
+**Daily pipeline gate / daily pipeline not running**
+(`.github/workflows/daily-merge-gate.yml`). It reads `pipeline_runs`
+where `run_kind = 'daily'`, `finished_at` is null, and
+`started_at::timestamptz` is inside the last 75 minutes
+(`MAX_DAILY_RUN`). An older unfinished row is not a live daily. Without
+`DATABASE_URL` the check falls back to 06:00–07:15 America/New_York,
+which misses a catch-up daily outside that window. The check blocks
+merges only after it is a required status on `master` (Settings →
+Rules → Rulesets, or branch protection, required status checks). Add
+`daily pipeline not running`.
+
+Emergency bypass: label the PR `emergency-merge` (the check re-runs on
+the label), or put `bypass-daily-gate` in the PR body and re-run the
+check. A repo admin can also use GitHub's bypass of branch protections.
+
 ### NFL polling (changed 2026-08-22)
 
 The four fixed wind-card slots and the daily opener card were replaced by one poll

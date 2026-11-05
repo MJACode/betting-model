@@ -519,4 +519,8 @@ def test_a_play_by_play_error_fails_the_step_rebuilds_and_reaches_pipeline_log(m
     assert "INSERT INTO pipeline_log" in sql
     assert params[1] == "dispatch:nba-quarters" and "429 from summary" in params[-1]
     import inspect
-    assert '_timed_step(\n        "nba-quarters"' in inspect.getsource(run_pipeline.run_daily_pipeline)
+    src = inspect.getsource(run_pipeline.run_daily_pipeline)
+    window = src[src.index('results["nba_quarters"]'):src.index('results["nba_quarters"]') + 240]
+    assert "_timed_step(" in window and '"nba-quarters"' in window, (
+        "the 6am nba-quarters step must go through _timed_step"
+    )
