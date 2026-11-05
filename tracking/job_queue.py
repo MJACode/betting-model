@@ -1589,6 +1589,27 @@ def _discord_channel_name_ok(v: str) -> bool:
     return any(c.isalpha() for c in slug)
 
 
+def _job_nba_live_ig2_artifact(**kw):
+    """The post-merge step of #1180: store the committed NBA in-play artifact
+    in model_artifacts, then register its live rule(s) in model_registry
+    (scripts/build_nba_live_ig2_artifact.py --store / --register). The worker
+    holds DATABASE_URL and the committed file; no laptop needs either. The
+    path is fixed to the committed artifact, never an argument."""
+    path = str(Path(__file__).resolve().parent.parent / "models" / "saved" / "nba_live_ig2_2027.json")
+    argv = ["--store", path] if kw["step"] == "store" else ["--register", path]
+    return _run_script_main("scripts.build_nba_live_ig2_artifact", argv)[-3000:] or f"{kw['step']} done"
+
+
+def _validate_nba_live_ig2_artifact(args: dict) -> dict:
+    extra = sorted(set(args) - {"step"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes step")
+    step = str(args.get("step") or "").strip()
+    if step not in ("store", "register"):
+        raise ValueError("step must be 'store' or 'register'")
+    return {"step": step}
+
+
 def _validate_discord_create_channel(args: dict) -> dict:
     import re
     extra = sorted(set(args) - {"name", "like", "guild", "apply"})
@@ -2721,6 +2742,8 @@ JOBS = {
     # One plain test message to a sport's pick channel, via the pick route.
     # Writes no table; one POST, never retried. See _job_discord_test_post.
     "discord_test_post": (_job_discord_test_post, _validate_discord_test_post),
+    # #1180 post-merge: store, then register, the committed NBA in-play artifact.
+    "nba_live_ig2_artifact": (_job_nba_live_ig2_artifact, _validate_nba_live_ig2_artifact),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
