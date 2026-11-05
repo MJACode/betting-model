@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM NHL game bets (moneyline, puck line, totals; official and closing; from 2020-21); save drops Phase A prop filters (flagged) |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM tables ANALYZEd after every write: NBA points preview 6.0s because the planner counted 1 current-season prop row (11,075 real); one-off byom_analyze job |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, iOS Sign in with Apple is the system sheet and an identity token; Google stays in the browser; version 1.2.0 so it is not an OTA onto 1.1.0 |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, byom_legs sets plan_cache_mode to force_custom_plan so a pooled connection cannot use a generic plan that skips the prop-facts market index; #1172 Medium, Matt via CE; no index or model change |

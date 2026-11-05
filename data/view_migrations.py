@@ -487,6 +487,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # plan_cache_mode = force_custom_plan. The skip requires that
     # proconfig entry, so an already-applied body still gains it once.
     "byom_prop_lookup_2026_11_04.sql",
+    # 2026-11-05 (Matt): NHL game bets on the builder. byom_legs and
+    # byom_save_model accept NHL; a null season is the ending year.
+    # Skips once both bodies carry byom_nhl_v1.
+    "byom_nhl_2026_11_05.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

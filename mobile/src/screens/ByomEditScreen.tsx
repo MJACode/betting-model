@@ -56,8 +56,7 @@ import {
   sideBlockFromError,
   showsUnits,
   sideForMarket,
-  type ByomPropSide,
-} from '@/lib/byomRecord';
+  type ByomPropSide, asByomSport, byomUsesRest } from '@/lib/byomRecord';
 import { EMPTY_PROP_FILTERS, type ByomPropFilterState } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -97,7 +96,7 @@ export function ByomEditScreen() {
     setSeeded(true);
   }, [model, seeded]);
 
-  const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const sport: ByomSport = asByomSport(model?.sport);
   const facts = useNbaGameFacts(model == null ? null : sport);
   const edited = market == null
     ? null
@@ -108,7 +107,7 @@ export function ByomEditScreen() {
         role,
         primetime,
         propSide,
-        rest: sport === 'NBA' ? rest : null,
+        rest: byomUsesRest(sport) ? rest : null,
         propFilters,
       },
       model?.filters ?? {},
@@ -127,7 +126,7 @@ export function ByomEditScreen() {
       role,
       primetime,
       propSide,
-      rest: sport === 'NBA' ? rest : null,
+      rest: byomUsesRest(sport) ? rest : null,
       propFilters,
     };
   const activeDraft = seeded ? formDraft : loadedDraft;
@@ -277,7 +276,7 @@ export function ByomEditScreen() {
             style={styles.input}
           />
           <Text style={styles.current}>
-            {market != null && edited ? marketLabel(edited) : marketLabel(model.filters)}
+            {market != null && edited ? marketLabel(edited, sport) : marketLabel(model.filters, sport)}
           </Text>
           {market != null && isPropMarket(market) ? (
             <>

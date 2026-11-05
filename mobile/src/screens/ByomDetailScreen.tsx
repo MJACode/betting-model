@@ -19,7 +19,7 @@ import { useNbaGameFacts } from '@/hooks/useNbaGameFacts';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { byomBetsAvailable, deleteByomModel } from '@/lib/byom';
 import { friendlyCause, isAbortError } from '@/lib/errors';
-import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport } from '@/lib/byomRecord';
+import { isPropMarket, isWholeSeason, marketLabel, showsUnits, byomEmptyLabel, type ByomSport, asByomSport } from '@/lib/byomRecord';
 import { propFilterSummary } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -33,7 +33,7 @@ export function ByomDetailScreen() {
   const { scope } = useByomSeason();
   const { model, loading, error, missing, reload, signedIn } = useByomSavedModel(modelId);
   const graded = model != null && !isWholeSeason(model.filters);
-  const sport: ByomSport = model?.sport === 'NBA' ? 'NBA' : 'NFL';
+  const sport: ByomSport = asByomSport(model?.sport);
   const filterMarket = model?.filters.markets?.[0] ?? null;
   const filterLine = model == null || !isPropMarket(filterMarket)
     ? null
@@ -119,7 +119,7 @@ export function ByomDetailScreen() {
               style={styles.banner}
             />
           ) : null}
-          <Text style={styles.market}>{marketLabel(model.filters)}</Text>
+          <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
           <ByomSeasonToggle />
           <ByomPreviewCard

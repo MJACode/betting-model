@@ -34,7 +34,7 @@ import {
   type ByomTiming,
 } from '@/lib/byom';
 import { byomFilters } from '@/lib/byomFilters';
-import { propMarketLabel, type ByomSeasonScope } from '@/lib/byomRecord';
+import { propMarketLabel, type ByomSeasonScope, byomStartWord } from '@/lib/byomRecord';
 import { unitsSpeech } from '@/lib/a11y';
 import { errorText, isAbortError } from '@/lib/errors';
 import { formatAmerican, formatDayTimeET, formatSigned } from '@/lib/format';
@@ -115,7 +115,7 @@ export function ByomBetsScreen() {
   // the NBA backfill runs) opens here without the Official toggle, so the
   // list never reads empty for a model whose bets exist (UX review).
   const offersOfficial = headlineTiming(sport) === 'official' && openedAt !== 'close';
-  const start = sport === 'NBA' ? 'tipoff' : 'kickoff';
+  const start = byomStartWord(sport);
   const [timing, setTiming] = useState<ByomTiming>(
     openedAt ?? (offersOfficial ? 'official' : 'close'));
   const [list, setList] = useState<LoadedList | null>(null);

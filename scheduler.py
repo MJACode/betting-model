@@ -693,7 +693,8 @@ def run_byom_nfl_refresh() -> None:
             # builder). nba_player_game_log lands by about 1:30am ET
             # (measured 2026-11-04), so this hour covers both. One sport's
             # failure does not skip the other.
-            for sport in ("NFL", "NBA"):
+            # NHL game bets joined 2026-11-05.
+            for sport in ("NFL", "NBA", "NHL"):
                 try:
                     job_id = enqueue(
                         conn, "byom_refresh", {"sport": sport, "apply": True},
@@ -2407,7 +2408,7 @@ def build_scheduler() -> BlockingScheduler:
         run_byom_nfl_refresh,
         CronTrigger(hour=10, minute=41, timezone=TIMEZONE),
         id="byom_nfl_refresh",
-        name="BYOM NFL and NBA refresh (queued daily 10:41am ET)",
+        name="BYOM NFL, NBA and NHL refresh (queued daily 10:41am ET)",
     )
 
     # Heartbeat watchdog — every 15 minutes, around the clock.

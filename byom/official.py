@@ -50,7 +50,7 @@ MATCH_ROLES = ("any", "favorite", "underdog", "pickem")
 
 # Sports whose builders write official candidates. NBA joined 2026-11-04
 # (Matt: "do the same as what I said for nfl").
-OFFICIAL_SPORTS = ("NFL", "NBA")
+OFFICIAL_SPORTS = ("NFL", "NBA", "NHL")
 
 # (market, leg_side, price field on the quote). price_home is the over
 # on a total, price_away the under: the same mapping as byom/load.py.

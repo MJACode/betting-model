@@ -2436,18 +2436,23 @@ def _validate_byom_game_facts(args: dict) -> dict:
     and uppercased. An NFL season before 2020, and an NBA season before
     2021, are refused. Those seasons have no DraftKings game lines.
     """
-    from byom.constants import DK_HISTORY_START_SEASON, NBA_DK_HISTORY_START_SEASON
+    from byom.constants import (
+        DK_HISTORY_START_SEASON,
+        NBA_DK_HISTORY_START_SEASON,
+        NHL_DK_HISTORY_START_SEASON,
+    )
 
     sport = str(args.get("sport") or "NFL").strip().upper()
-    if sport not in ("NFL", "NBA"):
-        raise ValueError(f"byom_game_facts builds NFL or NBA, got {sport!r}")
+    if sport not in ("NFL", "NBA", "NHL"):
+        raise ValueError(f"byom_game_facts builds NFL, NBA or NHL, got {sport!r}")
     season = args.get("season")
     if season in (None, ""):
         season = None
     else:
         season = int(season)
-        floor = (DK_HISTORY_START_SEASON if sport == "NFL"
-                 else NBA_DK_HISTORY_START_SEASON)
+        floor = {"NFL": DK_HISTORY_START_SEASON,
+                 "NBA": NBA_DK_HISTORY_START_SEASON,
+                 "NHL": NHL_DK_HISTORY_START_SEASON}[sport]
         if season < floor:
             raise ValueError(
                 f"season {season} is before DraftKings history ({floor})")
@@ -2522,8 +2527,8 @@ def _validate_byom_refresh(args: dict) -> dict:
     """Current-season refresh. apply defaults false, so a queued job
     reports freshness and writes nothing until someone asks."""
     sport = str(args.get("sport") or "NFL").strip().upper()
-    if sport not in ("NFL", "NBA"):
-        raise ValueError(f"byom_refresh builds NFL or NBA, got {sport!r}")
+    if sport not in ("NFL", "NBA", "NHL"):
+        raise ValueError(f"byom_refresh builds NFL, NBA or NHL, got {sport!r}")
     apply = args.get("apply", False)
     if not isinstance(apply, bool):
         raise ValueError(f"apply must be true or false, got {apply!r}")

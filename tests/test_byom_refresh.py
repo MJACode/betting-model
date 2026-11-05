@@ -36,7 +36,7 @@ def test_the_job_is_on_daily_and_does_not_write_by_default():
     sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     assert 'id="byom_nfl_refresh"' in sched
     assert 'dedupe_key=f"byom-{sport.lower()}-refresh-{today}"' in sched
-    assert 'for sport in ("NFL", "NBA")' in sched
+    assert 'for sport in ("NFL", "NBA", "NHL"):' in sched
     assert '"byom_nfl_refresh"}' in sched  # owned by the pipeline role
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
