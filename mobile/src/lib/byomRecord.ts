@@ -364,6 +364,12 @@ export function nhlSeasonList(now: Date = new Date()): number[] {
 }
 
 /** Every season in scope for this sport, oldest first. */
+/** The season still being played: the last one seasonListFor reads. */
+export function currentByomSeason(sport: ByomSport, now: Date = new Date()): number {
+  const list = seasonListFor(sport, now);
+  return list[list.length - 1];
+}
+
 export function seasonListFor(sport: ByomSport, now: Date = new Date()): number[] {
   if (sport === 'NBA') return nbaSeasonList(now);
   if (sport === 'NHL') return nhlSeasonList(now);
@@ -490,6 +496,52 @@ export function byomRoi(record: ByomRecord): number | null {
   return record.units / record.risked;
 }
 
+/**
+ * Fewer bets than this reads as a small sample. The same 50 the main
+ * models need before their record is judged (CLAUDE.md §2).
+ */
+export const BYOM_SMALL_SAMPLE_BETS = 50;
+
+/** Matt, 2026-11-05: more filters make luck easier to find. */
+export function smallSampleNote(record: ByomRecord | null): string | null {
+  if (record == null || record.bets <= 0 || record.bets >= BYOM_SMALL_SAMPLE_BETS) return null;
+  return `Only ${record.bets} bet${record.bets === 1 ? '' : 's'}. A record this small can come from luck. Check it holds in more than one season.`;
+}
+
+/** NFL labels the start year. NBA and NHL label the ending year: 2027 is 2026-27. */
+export function byomSeasonName(sport: ByomSport, season: number): string {
+  if (sport === 'NFL') return String(season);
+  return `${season - 1}-${String(season % 100).padStart(2, '0')}`;
+}
+
+export interface ByomSeasonRow {
+  season: number;
+  label: string;
+  record: ByomRecord;
+}
+
+/** Newest first. A season with no counted bet is left out. */
+export function seasonRows(
+  sport: ByomSport,
+  seasons: readonly { season: number | null; rows: readonly ByomCountedRow[] }[],
+): ByomSeasonRow[] {
+  const out: ByomSeasonRow[] = [];
+  for (const item of seasons) {
+    if (item.season == null) continue;
+    const record = recordFromRows(item.rows);
+    if (record.bets <= 0) continue;
+    out.push({ season: item.season, label: byomSeasonName(sport, item.season), record });
+  }
+  return out.sort((a, b) => b.season - a.season);
+}
+
+/** "Up in 2 of 5 seasons". Null when units are unknown or one season counts. */
+export function seasonsUpLine(rows: readonly ByomSeasonRow[]): string | null {
+  if (rows.length < 2 || rows.some((row) => row.record.units == null)) return null;
+  const up = rows.filter((row) => (row.record.units ?? 0) > 0).length;
+  return `Up in ${up} of ${rows.length} seasons`;
+}
+
 /** W–L–P. Ties sit in the third count with pushes; both return the stake. */
 export function formatByomRecord(record: ByomRecord): string {
   return `${record.wins}\u2013${record.losses}\u2013${record.pushes + record.ties}`;
@@ -552,6 +604,12 @@ export function filtersForDraft(
     marketCount: 1,
     primetime: draft.primetime,
   });
+  if (draft.market === 'totals') {
+    // A total has no team: no opponent, and no team's last game.
+    delete next.opponents;
+    delete next.prev_result;
+    delete next.prev_ats;
+  }
   return byomFilters(next);
 }
 

@@ -26,6 +26,7 @@ PROP_LOOKUP_SQL = "byom_prop_lookup_2026_11_04.sql"
 NHL_SQL = "byom_nhl_2026_11_05.sql"
 SAVE_SQL = "byom_save_filters_2026_11_05.sql"
 UNITS_SQL = "byom_units_inline_2026_11_05.sql"
+TREND_SQL = "byom_trend_filters_2026_11_05.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -326,7 +327,7 @@ def scratch():
                      LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL,
                      PROP_LOOKUP_SQL, PROP_LOOKUP_SQL, NHL_SQL, NHL_SQL,
                      SAVE_SQL, SAVE_SQL,
-                     UNITS_SQL, UNITS_SQL):
+                     UNITS_SQL, UNITS_SQL, TREND_SQL, TREND_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -900,6 +901,166 @@ def test_a_second_pass_leaves_the_staking_functions_alone(scratch):
 def test_the_units_file_is_registered_after_nhl():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert ACTIVE_MIGRATIONS.index(UNITS_SQL) > ACTIVE_MIGRATIONS.index(NHL_SQL)
+
+
+def _close_h2h(cur, filters):
+    cur.execute("SELECT canonical_key, leg_side FROM byom_legs(2026, %s::jsonb, 'close') "
+                "WHERE market = 'h2h' ORDER BY 1, 2", (filters,))
+    return cur.fetchall()
+
+
+def test_division_game_and_last_game_filters(scratch):
+    """Matt, 2026-11-05: more inputs to narrow game bets. DAL@PHI is an
+    NFC East game; DAL lost at GB the week before (the fixture's games)."""
+    _pg, cur = scratch
+    assert _close_h2h(cur, '{"markets":["h2h"],"side":"home","division_game":true}') == [
+        ("2026_07_DAL_PHI", "home")]
+    assert ("2026_07_DAL_PHI", "home") not in _close_h2h(
+        cur, '{"markets":["h2h"],"side":"home","division_game":false}')
+    # DAL's previous game this season (week 6 at GB) was a loss.
+    assert _close_h2h(cur, '{"markets":["h2h"],"side":"away","prev_result":"lost"}') == [
+        ("2026_07_DAL_PHI", "away")]
+    assert _close_h2h(cur, '{"markets":["h2h"],"side":"away","prev_result":"won"}') == []
+    # DAL covered nothing at GB: ats_away_result 'loss'.
+    assert _close_h2h(cur, '{"markets":["h2h"],"side":"away","prev_ats":"not_covered"}') == [
+        ("2026_07_DAL_PHI", "away")]
+    # A team's first game has no previous game, so a last-game filter drops it.
+    assert ("2026_06_DAL_GB", "away") not in _close_h2h(
+        cur, '{"markets":["h2h"],"side":"away","prev_result":"lost"}')
+
+
+def test_a_last_game_filter_waits_for_that_game_on_the_official_line(scratch):
+    """The official lock cannot use a result that is not in yet: DAL's
+    week-6 game started 2026-10-19 00:20 UTC, so a quote on 10-15 is not
+    a candidate for 'off a loss'; the 10-20 quote is."""
+    _pg, cur = scratch
+    cur.execute("""
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result)
+        VALUES
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'h2h', 'away', '', 'any',
+           'underdog', 'DAL', '2026-10-15 00:00+00', NULL, 150, 'win'),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'h2h', 'away', '', 'any',
+           'underdog', 'DAL', '2026-10-20 12:00+00', NULL, 170, 'win')""")
+    cur.execute("SELECT price, locked_at::date::text FROM byom_legs(2026, "
+                "'{\"markets\":[\"h2h\"],\"side\":\"away\",\"prev_result\":\"lost\"}', 'official')")
+    assert cur.fetchall() == [(170, "2026-10-20")]
+    cur.execute("SELECT price FROM byom_legs(2026, "
+                "'{\"markets\":[\"h2h\"],\"side\":\"away\"}', 'official')")
+    assert cur.fetchall() == [(150,)]
+
+
+def test_line_move_uses_the_quote_that_was_bet_never_the_close(scratch):
+    """PHI home spread opened -3, moved to -4.5 (toward PHI), closed -4.5
+    in this test. Official 'toward' locks the -4.5 quote; official 'none'
+    locks the opener; the close compares -4.5 to the opener."""
+    _pg, cur = scratch
+    cur.execute("""
+        UPDATE byom_game_facts SET dk_spread_home = -4.5, ats_home_result = 'win',
+               ats_away_result = 'loss'
+         WHERE canonical_key = '2026_07_DAL_PHI';
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result)
+        VALUES
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'spreads', 'home', '', 'any',
+           'favorite', 'PHI', '2026-10-14 00:00+00', -3, -110, 'win'),
+          ('2026_07_DAL_PHI', 'NFL', 2026, 'spreads', 'home', '', 'any',
+           'favorite', 'PHI', '2026-10-18 00:00+00', -4.5, -110, 'win')""")
+
+    def legs(filters, timing):
+        cur.execute("SELECT point FROM byom_legs(2026, %s::jsonb, %s) "
+                    "WHERE canonical_key = '2026_07_DAL_PHI'", (filters, timing))
+        return [float(r[0]) for r in cur.fetchall()]
+
+    home = '{"markets":["spreads"],"side":"home","line_move":"%s"}'
+    assert legs(home % "toward", "official") == [-4.5]
+    assert legs(home % "none", "official") == [-3.0]
+    assert legs(home % "against", "official") == []
+    assert legs(home % "toward", "close") == [-4.5]
+    assert legs(home % "none", "close") == []
+    away = '{"markets":["spreads"],"side":"away","line_move":"against"}'
+    cur.execute("SELECT count(*) FROM byom_legs(2026, %s::jsonb, 'close') "
+                "WHERE canonical_key = '2026_07_DAL_PHI'", (away,))
+    assert cur.fetchone()[0] == 1
+
+
+def test_line_move_and_divisions_are_plain_functions(scratch):
+    _pg, cur = scratch
+    cur.execute("""
+        SELECT byom_line_move('spreads', 'home', -3, -110, -4.5, -110),
+               byom_line_move('spreads', 'away', -3, -110, -4.5, -110),
+               byom_line_move('totals', 'over', 44.5, -110, 46, -110),
+               byom_line_move('totals', 'under', 44.5, -110, 46, -110),
+               byom_line_move('player_points', 'over', 20.5, -110, 20.5, -120),
+               byom_line_move('h2h', 'home', NULL, -150, NULL, -170),
+               byom_line_move('h2h', 'away', NULL, 130, NULL, 150),
+               byom_line_move('spreads', 'home', NULL, NULL, -3, -110)""")
+    assert cur.fetchone() == ("toward", "against", "toward", "against", "none",
+                              "toward", "against", None)
+    cur.execute("SELECT proname, proconfig FROM pg_proc "
+                "WHERE proname IN ('byom_line_move', 'byom_team_division') ORDER BY 1")
+    assert cur.fetchall() == [("byom_line_move", None), ("byom_team_division", None)]
+
+
+# Team codes byom_game_facts held on 2026-11-05 (Supabase, per sport).
+_CODES = {
+    "NFL": "ARI ATL BAL BUF CAR CHI CIN CLE DAL DEN DET GB HOU IND JAX KC LA LAC "
+           "LV MIA MIN NE NO NYG NYJ PHI PIT SEA SF TB TEN WAS",
+    "NBA": "ATL BKN BOS CHA CHI CLE DAL DEN DET GSW HOU IND LAC LAL MEM MIA MIL "
+           "MIN NOP NYK OKC ORL PHI PHX POR SAC SAS TOR UTA WAS",
+    "NHL": "ANA BOS BUF CAR CBJ CGY CHI COL DAL DET EDM FLA LAK MIN MTL NJD NSH "
+           "NYI NYR OTT PHI PIT SEA SJS STL TBL TOR UTA VAN VGK WPG WSH",
+}
+
+
+def test_every_team_has_one_division_each_season(scratch):
+    _pg, cur = scratch
+    cases = [("NFL", 2020, 32, 8), ("NFL", 2026, 32, 8), ("NBA", 2021, 30, 6),
+             ("NBA", 2027, 30, 6), ("NHL", 2020, 31, 4), ("NHL", 2021, 31, 4),
+             ("NHL", 2022, 32, 4), ("NHL", 2027, 32, 4)]
+    for sport, season, teams, divisions in cases:
+        codes = [c for c in _CODES[sport].split() if not (sport == "NHL" and season < 2022 and c == "SEA")]
+        cur.execute("SELECT count(byom_team_division(%s, %s, t)), "
+                    "count(DISTINCT byom_team_division(%s, %s, t)) "
+                    "FROM unnest(%s::text[]) AS t", (sport, season, sport, season, codes))
+        assert cur.fetchone() == (teams, divisions), (sport, season)
+    cur.execute("SELECT byom_team_division('NHL', 2021, 'TOR'), "
+                "byom_team_division('NHL', 2022, 'UTA'), byom_team_division('NHL', 2020, 'UTA'), "
+                "byom_team_division('NFL', 2026, 'DAL') = byom_team_division('NFL', 2026, 'PHI')")
+    assert cur.fetchone() == ("North", "Central", "Pacific", True)
+
+
+def test_the_save_keeps_the_trend_filters_and_refuses_bad_values(scratch):
+    psycopg2 = pytest.importorskip("psycopg2")
+    _pg, cur = scratch
+    keep = ('{"markets":["h2h"],"side":"away","line_move":"toward","prev_result":"lost",'
+            '"prev_ats":"not_covered","prev_total":"over","division_game":true}')
+    _saved, stored = _save(cur, "trends", keep)
+    assert stored == __import__("json").loads(keep)
+    for key, value in (("line_move", '"up"'), ("prev_result", '"tie"'),
+                       ("prev_ats", '"push"'), ("prev_total", '"push"'),
+                       ("division_game", '"yes"')):
+        with pytest.raises(psycopg2.errors.RaiseException, match=f"unknown filter key: {key}"):
+            _save(cur, f"bad {key}", '{"markets":["h2h"],"side":"home","%s":%s}' % (key, value))
+
+
+def test_the_trend_file_leaves_earlier_byom_files_skipping(scratch):
+    _pg, cur = scratch
+    from data.db import _adapt_sql
+
+    cur.execute("SELECT string_agg(xmin::text, ',' ORDER BY proname) FROM pg_proc "
+                "WHERE proname IN ('byom_legs', 'byom_save_model')")
+    before = cur.fetchone()[0]
+    for name in (SQL_NAME, BAND_SQL, PROP_LOOKUP_SQL, NHL_SQL, SAVE_SQL, UNITS_SQL, TREND_SQL):
+        cur.execute(_adapt_sql((ROOT / "data/migrations" / name).read_text(encoding="utf-8")))
+    cur.execute("SELECT string_agg(xmin::text, ',' ORDER BY proname) FROM pg_proc "
+                "WHERE proname IN ('byom_legs', 'byom_save_model')")
+    assert cur.fetchone()[0] == before
+    cur.execute("SELECT 'plan_cache_mode=force_custom_plan' = ANY (proconfig) "
+                "FROM pg_proc WHERE proname = 'byom_legs'")
+    assert cur.fetchone()[0] is True
 
 
 def test_no_active_migration_guards_on_unnamed_identity_arguments():

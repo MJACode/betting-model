@@ -16,6 +16,10 @@ const MINUS = '\u2212';
 export type ByomKickSlot = 'early' | 'late' | 'prime';
 export type ByomPriceBand = 'plus' | 'mid' | 'heavy' | 'custom';
 export type ByomSportId = 'NFL' | 'NBA' | 'NHL';
+export type ByomLineMove = 'toward' | 'against' | 'none';
+export type ByomPrevResult = 'won' | 'lost';
+export type ByomPrevAts = 'covered' | 'not_covered';
+export type ByomPrevTotal = 'over' | 'under';
 
 export interface ByomBand {
   min: number;
@@ -42,6 +46,12 @@ export interface ByomPropFilterState {
   player: string | null;
   shortWeek: boolean;
   offBye: boolean;
+  /** Trend filters (Matt, 2026-11-05). Null is Any. */
+  lineMove: ByomLineMove | null;
+  prevResult: ByomPrevResult | null;
+  prevAts: ByomPrevAts | null;
+  prevTotal: ByomPrevTotal | null;
+  division: boolean | null;
 }
 
 export const EMPTY_PROP_FILTERS: ByomPropFilterState = {
@@ -55,6 +65,11 @@ export const EMPTY_PROP_FILTERS: ByomPropFilterState = {
   player: null,
   shortWeek: false,
   offBye: false,
+  lineMove: null,
+  prevResult: null,
+  prevAts: null,
+  prevTotal: null,
+  division: null,
 };
 
 export interface FilterSummary {
@@ -247,11 +262,12 @@ export function toggleMember<T>(selected: readonly T[], value: T, all: readonly 
   return next;
 }
 
-export function resetSheetFilters(state: ByomPropFilterState): ByomPropFilterState {
+/** A prop keeps its rest chips (they sit on step 2); a game bet's are in the sheet. */
+export function resetSheetFilters(state: ByomPropFilterState, prop = true): ByomPropFilterState {
   return {
     ...EMPTY_PROP_FILTERS,
-    shortWeek: state.shortWeek,
-    offBye: state.offBye,
+    shortWeek: prop ? state.shortWeek : false,
+    offBye: prop ? state.offBye : false,
     kickSlots: state.kickSlots.includes('prime') ? ['prime'] : [],
   };
 }
@@ -338,6 +354,42 @@ export function matchupSummary(
   return { detail: bits.map((bit) => bit.detail).join(' · '), pills: bits.map((bit) => bit.pill) };
 }
 
+export const LINE_MOVE_CHOICES: readonly { value: ByomLineMove; label: string }[] = [
+  { value: 'toward', label: 'Moved toward this side' },
+  { value: 'against', label: 'Moved away from this side' },
+  { value: 'none', label: 'Didn\u2019t move' },
+];
+export const PREV_RESULT_CHOICES: readonly { value: ByomPrevResult; label: string }[] = [
+  { value: 'won', label: 'Off a win' },
+  { value: 'lost', label: 'Off a loss' },
+];
+export const PREV_ATS_CHOICES: readonly { value: ByomPrevAts; label: string }[] = [
+  { value: 'covered', label: 'Covered' },
+  { value: 'not_covered', label: 'Didn\u2019t cover' },
+];
+export const PREV_TOTAL_CHOICES: readonly { value: ByomPrevTotal; label: string }[] = [
+  { value: 'over', label: 'Both went over' },
+  { value: 'under', label: 'Both went under' },
+];
+
+const MOVE_PILL: Record<ByomLineMove, string> = {
+  toward: 'Line moved toward',
+  against: 'Line moved against',
+  none: 'Line didn\u2019t move',
+};
+
+export function trendsSummary(state: ByomPropFilterState): FilterSummary {
+  const bits: string[] = [];
+  if (state.lineMove) bits.push(MOVE_PILL[state.lineMove]);
+  if (state.prevResult) bits.push(state.prevResult === 'won' ? 'Off a win' : 'Off a loss');
+  if (state.prevAts) bits.push(state.prevAts === 'covered' ? 'Covered last game' : 'Didn\u2019t cover last game');
+  if (state.prevTotal) bits.push(state.prevTotal === 'over' ? 'Last games over' : 'Last games under');
+  if (state.division === true) bits.push('Division game');
+  else if (state.division === false) bits.push('Not a division game');
+  if (bits.length === 0) return ANY;
+  return { detail: bits.join(' \u00b7 '), pills: bits };
+}
+
 export function propFilterSummary(
   filters: ByomFilters,
   sport: ByomSportId,
@@ -345,13 +397,17 @@ export function propFilterSummary(
 ): string | null {
   const state = propStateFromFilters(filters);
   const slots = shownKickSlots(state.kickSlots, filters.primetime ?? null);
+  // A game bet's side is already in its market line, so it is not repeated.
+  const game = market === 'h2h' || market === 'spreads' || market === 'totals';
   const parts = [
     oddsSummary(state).detail,
     timeSummary(state, sport, slots).detail,
-    matchupSummary(filters.side ?? null, state).detail,
+    matchupSummary(game ? null : filters.side ?? null, state).detail,
+    trendsSummary(state).detail,
   ].filter((detail) => detail !== 'Any');
-  if (state.shortWeek) parts.push('Short week');
-  if (state.offBye) parts.push('Off a bye');
+  // Rest chips are NFL's; NBA and NHL rest is in the market line.
+  if (sport === 'NFL' && state.shortWeek) parts.push('Short week');
+  if (sport === 'NFL' && state.offBye) parts.push('Off a bye');
   if (market == null && parts.length === 0) return null;
   if (parts.length === 0) return null;
   return parts.join(' · ');
@@ -420,6 +476,12 @@ export function propStateFromFilters(filters: ByomFilters): ByomPropFilterState 
     player: player === '' ? null : player,
     shortWeek: filters.max_rest_days === 6,
     offBye: filters.min_rest_days != null && filters.min_rest_days >= 12,
+    lineMove: filters.line_move === 'toward' || filters.line_move === 'against' || filters.line_move === 'none'
+      ? filters.line_move : null,
+    prevResult: filters.prev_result === 'won' || filters.prev_result === 'lost' ? filters.prev_result : null,
+    prevAts: filters.prev_ats === 'covered' || filters.prev_ats === 'not_covered' ? filters.prev_ats : null,
+    prevTotal: filters.prev_total === 'over' || filters.prev_total === 'under' ? filters.prev_total : null,
+    division: typeof filters.division_game === 'boolean' ? filters.division_game : null,
   };
 }
 
@@ -439,6 +501,11 @@ const PHASE_A_KEYS: (keyof ByomFilters)[] = [
   'kick_slots',
   'opponents',
   'player',
+  'line_move',
+  'prev_result',
+  'prev_ats',
+  'prev_total',
+  'division_game',
 ];
 
 function clearPhaseA(next: ByomFilters): void {
@@ -455,8 +522,10 @@ function putBand(next: ByomFilters, minKey: keyof ByomFilters, maxKey: keyof Byo
 }
 
 /**
- * Writes the Phase A keys. Game markets drop them. NBA does not write
- * kickoff slots. NFL props own rest days for the short-week and bye chips.
+ * Writes the sheet's keys. A game bet takes price, time, opponent and
+ * trends, never a player line or a player (Matt, 2026-11-05). NBA and NHL
+ * do not write kickoff slots; their rest chips are filtersForDraft's. NFL
+ * owns rest days here, for the short-week and bye chips.
  */
 export function applyPropFilterKeys(
   next: ByomFilters,
@@ -469,12 +538,8 @@ export function applyPropFilterKeys(
     primetime: boolean | null;
   },
 ): ByomFilters {
-  if (!opts.prop) {
-    clearPhaseA(next);
-    return next;
-  }
   clearPhaseA(next);
-  const oneMarket = opts.marketCount === 1 && !opts.yesOnly;
+  const oneMarket = opts.prop && opts.marketCount === 1 && !opts.yesOnly;
   if (oneMarket) putBand(next, 'min_line', 'max_line', state.lineBand);
   if (state.priceBand === 'plus') next.min_price = 100;
   else if (state.priceBand === 'mid') {
@@ -487,7 +552,12 @@ export function applyPropFilterKeys(
   if (state.months.length > 0) next.months = [...state.months];
   if (state.weekdays.length > 0) next.weekdays = [...state.weekdays];
   if (state.opponents.length > 0) next.opponents = [...state.opponents];
-  if (state.player) next.player = state.player;
+  if (opts.prop && state.player) next.player = state.player;
+  if (state.lineMove) next.line_move = state.lineMove;
+  if (state.prevResult) next.prev_result = state.prevResult;
+  if (state.prevAts) next.prev_ats = state.prevAts;
+  if (state.prevTotal) next.prev_total = state.prevTotal;
+  if (state.division != null) next.division_game = state.division;
   if (opts.sport === 'NFL') {
     if (state.kickSlots.length > 0) {
       next.kick_slots = [...state.kickSlots];

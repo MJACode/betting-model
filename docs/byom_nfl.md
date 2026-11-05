@@ -266,6 +266,47 @@ card is not 0-0 while the rebuild is unfinished or for a season the
 official build does not cover. The closing line stays under the official
 headline. The bets are on `ByomBetsScreen`.
 
+## Trend filters (2026-11-05)
+
+Matt, 2026-11-05: game bets needed more inputs ("if you don't select prime
+time it's basically every bet"), and he approved three steps.
+
+**The More filters sheet on game bets.** Moneyline, spread (puck line) and
+total get the sheet props already had: price, month, weekday, NFL kickoff
+slot, opponent. A game bet has no player line and no player; a total has
+no team, so it has no opponent and no team's last game. NFL game bets get
+Rest (short week, 6 days or fewer; off a bye, 12 or more), the same cuts the
+NFL prop chips use. NBA and NHL keep their back-to-back and 2+ days chips.
+
+**Five server keys** (`byom_trend_filters_2026_11_05.sql`, graded by
+`byom_legs` and kept by `byom_save_model`):
+
+| Key | Values | Meaning |
+|---|---|---|
+| `line_move` | toward / against / none | The DraftKings line since the first stored quote (the opener), on this side. A spread moves toward home when the home number falls; a total or a prop toward the over when it rises; a moneyline toward a side when its implied chance rises. |
+| `prev_result` | won / lost | The bet team's previous game this season. |
+| `prev_ats` | covered / not_covered | That game against its closing spread. |
+| `prev_total` | over / under | Both teams' previous games went over (or both under). |
+| `division_game` | true / false | Both teams in one division that season (`byom_team_division`). |
+
+**No lookahead.** On the official line, `line_move` is the move up to the
+quote that became the bet, so the lock is the first quote where the move
+fits; the close is never used for an official bet. A last-game filter is not
+known until that game is over, so the official lock waits for the first
+quote at least 4 hours after the later of the two teams' previous starts.
+On the closing line both are known at kickoff. A team's first game of a
+season has no previous game, so a last-game filter leaves it out.
+
+**Divisions** are a fixed list in `byom_team_division`: NFL since 2002, NBA
+since 2004-05, NHL from 2013-14 with the 2020-21 temporary divisions and the
+2021-22 realignment. NHL's UTA code is Arizona through 2023-24 and Utah
+after. Codes match `byom_game_facts` (measured 2026-11-05).
+
+**Season breakdown.** Under All seasons the record card is followed by one
+row per season (the headline's timing) and "Up in X of Y seasons". Under 50
+bets (`BYOM_SMALL_SAMPLE_BETS`, the main models' gate) a note says the record
+could be luck.
+
 ## Refresh
 
 Since 2026-11-04 the scheduler queues `byom_refresh` with apply true every

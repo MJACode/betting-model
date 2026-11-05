@@ -500,6 +500,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # the 2.7s NBA 2025-26 points record. Same staking. Skips once both
     # carry byom_units_inline_v1 and no proconfig.
     "byom_units_inline_2026_11_05.sql",
+    # 2026-11-05 (Matt: "Add 1-3 for now"): trend filters on every bet,
+    # line_move, prev_result, prev_ats, prev_total, division_game. byom_legs
+    # and byom_save_model gain them; byom_line_move and byom_team_division
+    # are new. Skips once both bodies carry byom_trend_filters_v1.
+    "byom_trend_filters_2026_11_05.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.

@@ -235,6 +235,8 @@ export interface ByomTimedRows {
   headline: ByomTiming;
   official: ByomBacktestRow[];
   close: ByomBacktestRow[];
+  /** One entry per season read. Season is null for the current-season read. */
+  seasons: { season: number | null; official: ByomBacktestRow[]; close: ByomBacktestRow[] }[];
 }
 
 function isMissingFunction(error: { code?: unknown; message?: unknown }): boolean {
@@ -328,6 +330,11 @@ export async function fetchByomScopedRecord(
     headline: headlineFor(sport, official, close),
     official,
     close,
+    seasons: groups.map((group, index) => ({
+      season: seasons[index] ?? null,
+      official: group.official,
+      close: group.close,
+    })),
   };
 }
 
