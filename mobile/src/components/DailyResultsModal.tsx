@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
 import { unitsSpeech } from '@/lib/a11y';
-import { addDays, formatAmerican } from '@/lib/format';
+import { addDays, formatAmerican, labelWithoutStake } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
 import { modelHistoryMark, modelLong, modelShort } from '@/lib/modelMeta';
 import { postedPickUnits } from '@/lib/thresholds';
@@ -579,7 +579,7 @@ function PickRow({ pick }: { pick: Pick }) {
       </View>
       <View style={styles.modelNameWrap}>
         <Text style={styles.modelName} numberOfLines={2}>
-          {pick.pick_label}
+          {labelWithoutStake(pick.pick_label)}
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
@@ -607,7 +607,7 @@ function PendingPickRow({ pick }: { pick: Pick }) {
       </View>
       <View style={styles.modelNameWrap}>
         <Text style={styles.modelName} numberOfLines={2}>
-          {pick.pick_label}
+          {labelWithoutStake(pick.pick_label)}
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}

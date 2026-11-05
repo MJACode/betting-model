@@ -485,9 +485,15 @@ def matchup_clause(pick: dict) -> tuple[str | None, bool]:
 
 
 def _render_pick(pick: dict, *, mascots: dict | None) -> str:
+    # Imported here, as publish_due_picks does, so the module keeps its
+    # import-time dependencies.
+    from tracking.pick_integrity import label_without_stake
+
     emoji = _SPORT_EMOJI.get(pick.get("sport"), "🎯")
     odds, book = _publish_price(pick)
-    head = f"{emoji} {pick['label']}"
+    # No old NFL sizing figure ("· 0.79u"): it is not the posted stake
+    # (mike, 2026-11-04). The bet is word for word.
+    head = f"{emoji} {label_without_stake(pick['label'])}"
     price = ""
     if odds is not None:
         price = f"{_american(odds)} at {book}" if book else _american(odds)

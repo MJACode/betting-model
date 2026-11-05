@@ -41,7 +41,7 @@ import { clvBetQuote } from '@/lib/clvBet';
 import { openForAction } from '@/lib/discordPublish';
 import { betslipPlayerFromPick } from '@/lib/betslipGuard';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus, labelWithoutStake } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLongWithMark, sportOfModel } from '@/lib/modelMeta';
 import {
@@ -343,12 +343,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={[styles.label, styles.labelFlex]}>{pick.pick_label}</Text>
+            <Text style={[styles.label, styles.labelFlex]}>{labelWithoutStake(pick.pick_label)}</Text>
             {/* Recent news for the player this prop is on — same icon, same
                 sheet as the player detail screen. */}
             <PlayerNewsButton
               playerName={playerName ?? 'Player'}
-              subtitle={pick.pick_label}
+              subtitle={labelWithoutStake(pick.pick_label)}
               news={playerNews}
             />
           </View>

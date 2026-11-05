@@ -22,6 +22,7 @@ import {
   formatPctSigned,
   formatSigned,
   gameDayLabelET,
+  labelWithoutStake,
 } from '@/lib/format';
 import { clvOutcome } from '@/lib/clvBeat';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
@@ -454,7 +455,7 @@ function TodayPickRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[pick.pick_label, signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
       style={styles.pickRow}
       onPress={onPress}
     >
@@ -498,7 +499,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={[
-        pick.pick_label,
+        labelWithoutStake(pick.pick_label),
         pick.result,
         dayLabelSpokenET(pick.game_date),
         `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`,

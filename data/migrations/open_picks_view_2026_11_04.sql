@@ -42,7 +42,7 @@ BEGIN
 
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
-         = 'open_picks d9ff8a668d77'
+         = 'open_picks 34e691f79a37'
      AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
   THEN
@@ -67,9 +67,14 @@ BEGIN
              WHEN p.sport = 'UFC' THEN g.away_team || ' vs ' || g.home_team
              ELSE g.away_team || ' @ ' || g.home_team
            END AS matchup,
-           -- The pick exactly as stored (CLAUDE.md 00). Never rebuilt from the
-           -- line: a spread's stored line is the HOME number.
-           p.pick_label AS pick,
+           -- The pick as stored (CLAUDE.md 00). Never rebuilt from the line:
+           -- a spread's stored line is the HOME number. One token is dropped:
+           -- the sizing figure older NFL wind and opener labels end in
+           -- ("LA @ WAS Under 47.5 · 0.87u"). It is not the stake; the stake
+           -- column is (mike, 2026-11-04: one unit basis). Same pattern as
+           -- tracking/pick_integrity._STAKE_TOKEN. Every other label, and
+           -- the bet itself, is returned word for word.
+           regexp_replace(p.pick_label, '\s*·\s*\d+(?:\.\d+)?u(?!\s*[^\s·])', '', 'g') AS pick,
            -- The price the pick was decided at (decision_odds since
            -- 2026-09-09, DraftKings before), and the book it was decided at.
            ROUND(COALESCE(p.decision_odds, p.dk_odds))::integer AS price,
@@ -261,7 +266,7 @@ BEGIN
       )
     ORDER BY g.commence_time::timestamptz NULLS LAST, p.created_at, p.pick_id
 $view$;
-  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks d9ff8a668d77'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 34e691f79a37'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
   GRANT SELECT ON public.open_picks TO anon, authenticated;
 END $mig$;

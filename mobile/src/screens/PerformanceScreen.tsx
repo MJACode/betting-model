@@ -20,7 +20,7 @@ import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
 import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
-import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits } from '@/lib/format';
+import { FLAT_UNIT, FLAT_UNIT_TONE_SCALE, formatAmerican, formatFlatStake, formatFlatUnits, labelWithoutStake } from '@/lib/format';
 import { unitsSpeech } from '@/lib/a11y';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
@@ -78,7 +78,7 @@ export function PerformanceScreen() {
         }
       }}
       onRowLongPress={(row) => {
-        Alert.alert('Stop tracking?', row.pick.pick_label, [
+        Alert.alert('Stop tracking?', labelWithoutStake(row.pick.pick_label), [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Untrack',
@@ -463,7 +463,7 @@ function TrackedBetsCard({
               onLongPress={() => onRowLongPress(row)}
               accessibilityRole="button"
               accessibilityLabel={[
-                row.pick.pick_label,
+                labelWithoutStake(row.pick.pick_label),
                 formatGameDate(row.pick.game_date),
                 decisionOdds(row.pick) != null
                   ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
@@ -606,7 +606,7 @@ function StakeEditModal({
         <View style={styles.stakeModalCard} accessibilityViewIsModal>
           <Text style={styles.stakeModalTitle}>Your stake for this bet, in units</Text>
           <Text style={styles.stakeModalLabel} numberOfLines={2}>
-            {row?.pick.pick_label ?? ''}
+            {labelWithoutStake(row?.pick.pick_label)}
           </Text>
           <Text style={styles.stakeModalHint}>
             What you risk on this bet, settled at its posted price. Leave it empty to keep the

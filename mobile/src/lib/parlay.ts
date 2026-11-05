@@ -19,7 +19,7 @@
  * recomputes everything synchronously.
  */
 
-import { americanToDecimal } from '@/lib/format';
+import { americanToDecimal, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
@@ -202,7 +202,8 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     isGameLine: isGameLineModel(p.model_id),
     isLive: p.is_live === true,
     isFavorite: odds < 0,
-    label: p.pick_label,
+    // No old NFL sizing figure ("· 0.79u"): the slip shows its own stake.
+    label: labelWithoutStake(p.pick_label),
     modelProb: p.model_probability,
     decimalOdds: americanToDecimal(odds),
     americanOdds: odds,
@@ -900,7 +901,8 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     // in-play caveat cannot apply to them.
     isLive: false,
     isFavorite: sl.isFavorite,
-    label: sl.label,
+    // A slip saved before carries the label as it was then.
+    label: labelWithoutStake(sl.label),
     modelProb: sl.modelProb,
     decimalOdds: sl.decimalOdds,
     americanOdds: sl.americanOdds,

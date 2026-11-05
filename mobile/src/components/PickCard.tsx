@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, labelWithoutStake } from '@/lib/format';
 import {
   bestHandoffForPick,
   handoffQuotesForPick,
@@ -581,7 +581,8 @@ export function PickCard({
     : joinCardSpeech([
         matchup,
         gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
-        pick.pick_label,
+        // The title's words (splitPickTitle): no old NFL sizing figure.
+        labelWithoutStake(pick.pick_label),
         paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
         // The signals footer speaks the model. The board layout has no
         // model line, so a shared paused or retired name is spoken here.
