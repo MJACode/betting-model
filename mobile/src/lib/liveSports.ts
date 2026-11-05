@@ -37,18 +37,18 @@ const LIVE_EMPTY_VALID = 'Zero of them is a valid answer, not a board that faile
 
 /**
  * The Live board's empty subtitle for a sport that HAS an in-play model: when
- * the board can fill. NBA says when it checks, because its models do not
+ * the board can fill. NBA says when it checks, because its model does not
  * watch a game continuously: models/nba_live_loop.py reads the books once an
- * hour while a game is in progress (the backtest's own timing), and each of
- * its three models decides a game once (quarters 1-2 for the early spread,
- * quarter 3 for the late spread and moneyline). No clock minute is named
- * here, so the copy does not go stale if the loop's minute moves.
+ * hour while a game is in progress (the backtest's own timing), and its one
+ * live model, the early spread, decides a game once, in quarters 1-2. No
+ * clock minute is named here, so the copy does not go stale if the loop's
+ * minute moves.
  */
 export function liveEmptySubtitle(sport: string): string {
   if (sport === 'NBA') {
     return (
-      'NBA in-play models check games in progress once an hour, through the third quarter, and ' +
-      'bet each game at most once per model. ' +
+      'The NBA in-play model checks games in progress once an hour, through the first half, and ' +
+      'bets each game at most once. ' +
       LIVE_EMPTY_VALID
     );
   }

@@ -1037,8 +1037,6 @@ export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_l
  */
 export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   'nba_live_spread_q12',
-  'nba_live_ml_q3',
-  'nba_live_spread_q3',
 ]);
 
 /**

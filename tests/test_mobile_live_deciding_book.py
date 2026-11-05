@@ -101,8 +101,8 @@ eq(bestHandoffForPick(nba, [later], nh).verb, 'Open', 'NBA: Open BetMGM');
 def test_the_lock_row_names_the_period_by_sport(tmp_path):
     _run(tmp_path, MARKETS_FILES, LIVE + """
 import { pickTimingInfo } from './markets.ts';
-const nba = pickTimingInfo({ ...FD_LIVE, sport: 'NBA', model_id: 'nba_live_ml_q3', inning_at_pick: 3 });
-eq([nba.label.includes('· Q3'), nba.label.includes('inning')], [true, false], nba.label);
+const nba = pickTimingInfo({ ...FD_LIVE, sport: 'NBA', model_id: 'nba_live_spread_q12', inning_at_pick: 2 });
+eq([nba.label.includes('· Q2'), nba.label.includes('inning')], [true, false], nba.label);
 const mlb = pickTimingInfo({ ...FD_LIVE, sport: 'MLB', model_id: 'mlb_live_over_under', inning_at_pick: 7 });
 eq(mlb.label.includes('· inning 7'), true, mlb.label);
 const ncaaf = pickTimingInfo({ ...FD_LIVE, inning_at_pick: 2 });
@@ -115,28 +115,29 @@ def test_the_nba_names_say_when_the_bet_is_placed_and_the_page_says_when_it_chec
     _run(tmp_path, META_FILES + ["liveSports.ts"], """
 import { MODEL_META, modelPageTiming } from './modelMeta.ts';
 import { liveEmptySubtitle } from './liveSports.ts';
-const names = ['nba_live_spread_q12', 'nba_live_spread_q3', 'nba_live_ml_q3']
+const names = ['nba_live_spread_q12']
   .map((id) => [MODEL_META[id].longLabel, MODEL_META[id].shortLabel]);
-eq(names, [['NBA Early Live Spreads', 'Early Spread'], ['NBA Late Live Spreads', 'Late Spread'],
-           ['NBA Late Live Moneyline', 'LIVE ML']], 'names');
+eq(names, [['NBA Early Live Spreads', 'Early Spread']], 'names');
+// The quarter-3 moneyline and spread are held out of the live list
+// (models/nba_live_ig2.HELD_OUT_RULES): no label until they ship.
+eq([MODEL_META['nba_live_spread_q3'], MODEL_META['nba_live_ml_q3']], [undefined, undefined], 'held out');
 for (const [label] of names) {
   if (/First Half|Quarter/.test(label)) throw new Error(`${label} names a period; the bet settles on the game`);
 }
 const q12 = modelPageTiming('nba_live_spread_q12');
-const q3 = modelPageTiming('nba_live_ml_q3');
-for (const t of [q12, q3]) {
+for (const t of [q12]) {
   const all = [t.title, t.body, t.empty, t.note].join(' ');
   eq([t.title, all.includes('Live Signals'), all.includes('once an hour'), /pipeline|for the day|on the hour|tip off/.test(all)],
      ['Bets during the game', true, true, false], all);
 }
-eq([q12.body.includes('first and second quarters'), q3.body.includes('third quarter'),
-    q12.body.includes('settles on the final score')], [true, true, true], 'when, and what it settles on');
+eq([q12.body.includes('first and second quarters'), q12.body.includes('third quarter'),
+    q12.body.includes('settles on the final score')], [true, false, true], 'when, and what it settles on');
 const generic = modelPageTiming('ncaaf_live_win_prob');
 eq([generic.title, generic.empty.includes('Live Signals'), /pipeline/.test(generic.body + generic.empty)],
    ['Bets during the game', true, false], 'other in-play models');
 const empty = liveEmptySubtitle('NBA');
-eq([empty.includes('once an hour'), empty.includes('third quarter'), empty.includes('at most once per model'),
-    /on the hour|tip off|tip-off/.test(empty)], [true, true, true, false], empty);
+eq([empty.includes('once an hour'), empty.includes('first half'), empty.includes('third quarter'),
+    empty.includes('at most once'), /on the hour|tip off|tip-off/.test(empty)], [true, true, false, true, false], empty);
 eq(liveEmptySubtitle('MLB').includes('DraftKings'), false, 'no DraftKings claim on the other sports');
 """)
 

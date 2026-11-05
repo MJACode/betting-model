@@ -468,20 +468,6 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
-  nba_live_ml_q3: {
-    shortLabel: 'LIVE ML',
-    longLabel: 'NBA Late Live Moneyline',
-    type: 'game',
-    statKey: null,
-    statLabel: '',
-  },
-  nba_live_spread_q3: {
-    shortLabel: 'Late Spread',
-    longLabel: 'NBA Late Live Spreads',
-    type: 'game',
-    statKey: null,
-    statLabel: '',
-  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -1058,7 +1044,7 @@ export interface ModelPageTiming {
   note: string;
 }
 
-// The NBA in-play models (models/nba_live_ig2.py): when each one bets, and
+// The NBA in-play model (models/nba_live_ig2.py): when it bets, and
 // what its bet settles on. The loop checks games in progress once an hour
 // (models/nba_live_loop.py); no clock minute is named, so this copy does not
 // go stale if that minute moves. Each bet is on the FULL game.
@@ -1066,14 +1052,6 @@ const NBA_LIVE_TIMING: Readonly<Record<string, { when: string; settles: string }
   nba_live_spread_q12: {
     when: 'during the first and second quarters',
     settles: 'The bet is on the full-game spread: it settles on the final score, not on the half.',
-  },
-  nba_live_spread_q3: {
-    when: 'during the third quarter',
-    settles: 'The bet is on the full-game spread: it settles on the final score, not on the quarter.',
-  },
-  nba_live_ml_q3: {
-    when: 'during the third quarter',
-    settles: 'The bet is on who wins the game: it settles on the final score, not on the quarter.',
   },
 };
 
