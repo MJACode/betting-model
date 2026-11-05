@@ -562,6 +562,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # win-loss record. Sits before the posted-stake pair, which stays
     # last and only inserts units when they are absent.
     "clv_push_beat_rate_2026_11_04.sql",
+    # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
+    # open pre-game BET the app, Discord and push show, for any Claude chat
+    # with the Supabase connector. One security_invoker view and its SELECT
+    # grant. Returns on a catalog read once the view's comment matches the
+    # hash of its body. It calls published_pick_stake, so on a fresh database
+    # it waits (a NOTICE, not an error) until the pair below has run. Does
+    # not write picks, push_sent or the record. Sits before the pair.
+    "open_picks_view_2026_11_04.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

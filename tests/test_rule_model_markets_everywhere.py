@@ -12,8 +12,10 @@ a totals pick: no over price, no line, nothing to compare.
     pick's CLV standard_v2 with every column NULL once capture has missed for
     six hours, and nothing revisits a standard_v2 row.
   * check_line_movement's CASE (models/scorer.py, the check-lines step).
-  * the Claude-mobile picks prompt's latest_odds join
-    (docs/mobile_picks_prompt.md).
+
+The Claude-mobile picks prompt carried a third copy in its live-odds join until
+2026-11-04. The prompt is gone (the open picks are the public.open_picks view,
+which reads no odds rows), so that copy is gone too.
 
 The app's own mapping (mobile/src/lib/markets.ts) is pinned by
 mobile/scripts/verify_preferred_book.ts and verify_pick_timing.ts.
@@ -35,7 +37,6 @@ from tracking.paper_tracker import _RULE_MODEL_MARKETS  # noqa: E402
 
 CLV_MIG = ROOT / "data" / "migrations" / "clv_standard_v2_2026_10_14.sql"
 SCORER = ROOT / "models" / "scorer.py"
-PROMPT = ROOT / "docs" / "mobile_picks_prompt.md"
 
 RULE_IDS = sorted(_RULE_MODEL_MARKETS)
 
@@ -87,12 +88,6 @@ def _scorer_case():
     return _case(src[j:src.index("END", j)])
 
 
-def _prompt_case():
-    src = PROMPT.read_text(encoding="utf-8")
-    j = src.index("AND lo.market = CASE")
-    return _case(src[j:src.index("END", j)])
-
-
 def test_the_case_reader_reads_the_name_patterns_as_postgres_does():
     """The evaluator above must agree with the patterns it reads, or the tests
     below prove nothing."""
@@ -101,10 +96,7 @@ def test_the_case_reader_reads_the_name_patterns_as_postgres_does():
     assert scorer("nhl_over_under") == "totals"
     assert scorer("mlb_runline") == "spreads"
     assert scorer("nba_moneyline") == "h2h"
-    prompt = _prompt_case()
-    assert prompt("nhl_moneyline_regulation") == "h2h_3way"
-    assert prompt("nba_spread") == "spreads"
-    assert prompt("some_model_nobody_named") == "h2h"
+    assert scorer("some_model_nobody_named") == "h2h"
 
 
 @pytest.mark.parametrize("model_id", RULE_IDS)
@@ -166,7 +158,3 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
 def test_the_line_movement_check_reads_the_rule_card_s_market(model_id):
     assert _scorer_case()(model_id) == _RULE_MODEL_MARKETS[model_id], model_id
 
-
-@pytest.mark.parametrize("model_id", RULE_IDS)
-def test_the_claude_mobile_prompt_reads_the_rule_card_s_market(model_id):
-    assert _prompt_case()(model_id) == _RULE_MODEL_MARKETS[model_id], model_id

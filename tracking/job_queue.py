@@ -2511,9 +2511,14 @@ def _job_byom_prop_facts(**kw):
         # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
         from data.view_migrations import apply_view_migrations
         apply_view_migrations(conn)
-        return build_seasons(
+        result = build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
             sport=str(kw.get("sport") or "NFL").strip().upper())
+        if kw.get("apply"):
+            # The planner's row counts, after a write (byom/analyze.py).
+            from byom.analyze import analyze_tables
+            analyze_tables(conn)
+        return result
     finally:
         conn.close()
 
@@ -2606,6 +2611,17 @@ def _job_daily_pipeline(**kw):
     return {"status": status or "unknown", "start_number": start_number}
 
 
+def _job_byom_analyze(**kw):
+    """ANALYZE the BYOM tables. Reads a sample; changes no row."""
+    from byom.analyze import analyze_tables
+
+    conn = _byom_connection()
+    try:
+        return {"analyzed": analyze_tables(conn)}
+    finally:
+        conn.close()
+
+
 def _job_byom_game_facts(**kw):
     """Write byom_game_facts. Does not touch picks or a live model."""
     from byom.load import build_seasons
@@ -2617,9 +2633,14 @@ def _job_byom_game_facts(**kw):
         # (byom_official_legs_2026_11_04.sql). Idempotent, never raises.
         from data.view_migrations import apply_view_migrations
         apply_view_migrations(conn)
-        return build_seasons(
+        result = build_seasons(
             conn, kw.get("season"), apply=bool(kw.get("apply")),
             sport=str(kw.get("sport") or "NFL").strip().upper())
+        if kw.get("apply"):
+            # The planner's row counts, after a write (byom/analyze.py).
+            from byom.analyze import analyze_tables
+            analyze_tables(conn)
+        return result
     finally:
         conn.close()
 
@@ -2762,6 +2783,9 @@ JOBS = {
     # job once. The owner turns it on. apply false is the freshness
     # report and does not read odds.
     "byom_refresh": (_job_byom_refresh, _validate_byom_refresh),
+    # 2026-11-05: the planner's row counts for the BYOM tables
+    # (byom/analyze.py). No arguments, no rows changed.
+    "byom_analyze": (_job_byom_analyze, lambda a: {}),
 }
 
 
