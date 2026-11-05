@@ -2217,348 +2217,419 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # Record the run in pipeline_runs so the daily path is as visible as the
     # refresh passes. Failures inside the ledger are swallowed by run_ledger.
     from tracking.run_ledger import start_run, finish_run
+    from tracking.deploy_drain import DEPLOY_CUTOFF, DeployCutoff, checkpoint
     _run_id = start_run("daily")
     results = {}
+    try:
 
-    # ── Step 0a: UFC fight results (must precede settlement) ────────────────
-    logger.info("Step 0a: Ingesting UFC results from ufcstats.com...")
-    results["ufc_results"] = step_ufc_results(run_date)
-    time.sleep(1)
+        # ── Step 0a: UFC fight results (must precede settlement) ────────────────
+        logger.info("Step 0a: Ingesting UFC results from ufcstats.com...")
+        checkpoint("ufc_results")
+        results["ufc_results"] = step_ufc_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0b: NHL final scores (must precede settlement) ─────────────────
-    logger.info("Step 0b: Ingesting NHL final scores...")
-    results["nhl_results"] = step_nhl_results(run_date)
-    time.sleep(1)
+        # ── Step 0b: NHL final scores (must precede settlement) ─────────────────
+        logger.info("Step 0b: Ingesting NHL final scores...")
+        checkpoint("nhl_results")
+        results["nhl_results"] = step_nhl_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0c: Golf results (must precede settlement) ─────────────────────
-    logger.info("Step 0c: Ingesting completed golf results from DataGolf...")
-    results["golf_results"] = step_golf_results(run_date)
-    time.sleep(1)
+        # ── Step 0c: Golf results (must precede settlement) ─────────────────────
+        logger.info("Step 0c: Ingesting completed golf results from DataGolf...")
+        checkpoint("golf_results")
+        results["golf_results"] = step_golf_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0d: MLB player game logs (MUST precede settlement) ──────────────
-    # Prop picks settle from player_game_log, so yesterday's box scores have to
-    # be ingested BEFORE step_settle runs — otherwise prop settlement finds no
-    # log row and every prop lags a full extra day (game picks settle same-day
-    # because settle fetches final scores itself; props do not).
-    logger.info("Step 0d: Ingesting yesterday's MLB player game logs (pre-settle)...")
-    results["game_log"] = step_game_log(run_date)
-    time.sleep(1)
+        # ── Step 0d: MLB player game logs (MUST precede settlement) ──────────────
+        # Prop picks settle from player_game_log, so yesterday's box scores have to
+        # be ingested BEFORE step_settle runs — otherwise prop settlement finds no
+        # log row and every prop lags a full extra day (game picks settle same-day
+        # because settle fetches final scores itself; props do not).
+        logger.info("Step 0d: Ingesting yesterday's MLB player game logs (pre-settle)...")
+        checkpoint("game_log")
+        results["game_log"] = step_game_log(run_date)
+        time.sleep(1)
 
-    # ── Step 0e: WNBA finals + box scores via ESPN (MUST precede settlement) ─
-    # nba_api (stats.nba.com) blocks Actions IPs, so WNBA results used to depend
-    # entirely on the local "Basketball Daily Ingest" job — when it lagged, WNBA
-    # picks sat unsettled for days. ESPN's hidden API IS reachable from Actions
-    # (the injuries step uses it), so this ingests finals + player box scores
-    # for the trailing window (+ self-heal over any recent NULL-score WNBA game)
-    # and rebuilds the season team-stats snapshot from our own DB. The local job
-    # remains a redundant/authoritative source (idempotent upserts coexist).
-    # NBA game logs still come from the local job (off-season until ~Oct 2026).
-    logger.info("Step 0e: Ingesting WNBA finals + box scores from ESPN (pre-settle)...")
-    results["wnba_results"] = step_wnba_results(run_date)
-    time.sleep(1)
+        # ── Step 0e: WNBA finals + box scores via ESPN (MUST precede settlement) ─
+        # nba_api (stats.nba.com) blocks Actions IPs, so WNBA results used to depend
+        # entirely on the local "Basketball Daily Ingest" job — when it lagged, WNBA
+        # picks sat unsettled for days. ESPN's hidden API IS reachable from Actions
+        # (the injuries step uses it), so this ingests finals + player box scores
+        # for the trailing window (+ self-heal over any recent NULL-score WNBA game)
+        # and rebuilds the season team-stats snapshot from our own DB. The local job
+        # remains a redundant/authoritative source (idempotent upserts coexist).
+        # NBA game logs still come from the local job (off-season until ~Oct 2026).
+        logger.info("Step 0e: Ingesting WNBA finals + box scores from ESPN (pre-settle)...")
+        checkpoint("wnba_results")
+        results["wnba_results"] = step_wnba_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0e1: NBA schedule via ESPN (before the NBA results step) ───────
-    # The schedule was one by-hand load (2026-10-15) until this step: the Cup
-    # week, the knockout games, play-in and playoffs and any moved tip never
-    # reached it, and the NBA prop models price and read rest only from what
-    # it lists (data/ingestors/nba_schedule_refresh.py).
-    logger.info("Step 0e1: Refreshing the NBA schedule from ESPN...")
-    results["nba_schedule"] = step_nba_schedule(run_date)
-    time.sleep(1)
+        # ── Step 0e1: NBA schedule via ESPN (before the NBA results step) ───────
+        # The schedule was one by-hand load (2026-10-15) until this step: the Cup
+        # week, the knockout games, play-in and playoffs and any moved tip never
+        # reached it, and the NBA prop models price and read rest only from what
+        # it lists (data/ingestors/nba_schedule_refresh.py).
+        logger.info("Step 0e1: Refreshing the NBA schedule from ESPN...")
+        checkpoint("nba_schedule")
+        results["nba_schedule"] = step_nba_schedule(run_date)
+        time.sleep(1)
 
-    # ── Step 0e2: NBA finals + box scores via ESPN (MUST precede settlement) ─
-    # The worker's only NBA results source: nba_api is blocked here, and the
-    # local job last ran 2026-08-30. No ESPN call unless a started game still
-    # lacks a score or a box (data/ingestors/nba_results_ingestor.py).
-    logger.info("Step 0e2: Ingesting NBA finals + box scores from ESPN (pre-settle)...")
-    results["nba_results"] = step_nba_results(run_date)
-    time.sleep(1)
+        # ── Step 0e2: NBA finals + box scores via ESPN (MUST precede settlement) ─
+        # The worker's only NBA results source: nba_api is blocked here, and the
+        # local job last ran 2026-08-30. No ESPN call unless a started game still
+        # lacks a score or a box (data/ingestors/nba_results_ingestor.py).
+        logger.info("Step 0e2: Ingesting NBA finals + box scores from ESPN (pre-settle)...")
+        checkpoint("nba_results")
+        results["nba_results"] = step_nba_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0f: NFL finals via nflverse (MUST precede settlement) ───────────
-    # nfl_wind_totals picks (the §28 wind card) settle off games scores through
-    # the generic totals path. Free no-op whenever no NFL finals are pending.
-    logger.info("Step 0f: Ingesting NFL finals from nflverse (pre-settle)...")
-    results["nfl_results"] = step_nfl_results(run_date)
-    time.sleep(1)
+        # ── Step 0f: NFL finals via nflverse (MUST precede settlement) ───────────
+        # nfl_wind_totals picks (the §28 wind card) settle off games scores through
+        # the generic totals path. Free no-op whenever no NFL finals are pending.
+        logger.info("Step 0f: Ingesting NFL finals from nflverse (pre-settle)...")
+        checkpoint("nfl_results")
+        results["nfl_results"] = step_nfl_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0g: NCAAF finals via CFBD (MUST precede settlement) ─────────────
-    logger.info("Step 0g: Ingesting NCAAF finals from CFBD (pre-settle)...")
-    results["ncaaf_results"] = step_ncaaf_results(run_date)
-    time.sleep(1)
+        # ── Step 0g: NCAAF finals via CFBD (MUST precede settlement) ─────────────
+        logger.info("Step 0g: Ingesting NCAAF finals from CFBD (pre-settle)...")
+        checkpoint("ncaaf_results")
+        results["ncaaf_results"] = step_ncaaf_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0g1/0g2: NCAAB schedule, then finals, via ESPN (pre-settle) ─────
-    # ESPN's schedule owns every NCAAB games row (data/ingestors/ncaab_teams.py);
-    # the schedule step writes today..+14 days, the results step the finals of
-    # any started game still unscored. Both before settle, so last night's
-    # NCAAB picks grade in this run.
-    logger.info("Step 0g1: Refreshing the NCAAB schedule from ESPN...")
-    results["ncaab_schedule"] = step_ncaab_schedule(run_date)
-    time.sleep(1)
-    logger.info("Step 0g2: Ingesting NCAAB finals from ESPN (pre-settle)...")
-    results["ncaab_results"] = step_ncaab_results(run_date)
-    time.sleep(1)
+        # ── Step 0g1/0g2: NCAAB schedule, then finals, via ESPN (pre-settle) ─────
+        # ESPN's schedule owns every NCAAB games row (data/ingestors/ncaab_teams.py);
+        # the schedule step writes today..+14 days, the results step the finals of
+        # any started game still unscored. Both before settle, so last night's
+        # NCAAB picks grade in this run.
+        logger.info("Step 0g1: Refreshing the NCAAB schedule from ESPN...")
+        checkpoint("ncaab_schedule")
+        results["ncaab_schedule"] = step_ncaab_schedule(run_date)
+        time.sleep(1)
+        logger.info("Step 0g2: Ingesting NCAAB finals from ESPN (pre-settle)...")
+        checkpoint("ncaab_results")
+        results["ncaab_results"] = step_ncaab_results(run_date)
+        time.sleep(1)
 
-    # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
-    # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
-    # fill it (4b the leaderboard columns, 4c the modelling columns; they parse
-    # the same weekly CSV). Until 2026-09-10 they ran as Steps 4b/4c, AFTER
-    # settle: the 6am run posted the 2026-09-09 recap at 06:02 with MLB only,
-    # 4c wrote the NE @ SEA box scores at 06:11, and the 07:17 refresh pass
-    # settled the three NFL BETs at 07:24 -- an hour after the recap was
-    # ledgered. Same rule as 0d/0e/0f/0g: a sport's box scores land before the
-    # settle that grades them, or its picks lag a pass and the recap ships
-    # without the sport. Self-healing (first run backfills 3 seasons); the
-    # off-season is a clean no-op; 4c also writes the SCHEDULED-game rows the
-    # prop scorer needs, which is why it runs even with no finals pending.
-    logger.info("Step 0h: NFL player box scores from nflverse (pre-settle)...")
-    results["nfl_player_stats"] = step_nfl_player_stats(run_date)
-    results["nfl_props_data"] = step_nfl_props_data(run_date)
-    time.sleep(1)
+        # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
+        # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
+        # fill it (4b the leaderboard columns, 4c the modelling columns; they parse
+        # the same weekly CSV). Until 2026-09-10 they ran as Steps 4b/4c, AFTER
+        # settle: the 6am run posted the 2026-09-09 recap at 06:02 with MLB only,
+        # 4c wrote the NE @ SEA box scores at 06:11, and the 07:17 refresh pass
+        # settled the three NFL BETs at 07:24 -- an hour after the recap was
+        # ledgered. Same rule as 0d/0e/0f/0g: a sport's box scores land before the
+        # settle that grades them, or its picks lag a pass and the recap ships
+        # without the sport. Self-healing (first run backfills 3 seasons); the
+        # off-season is a clean no-op; 4c also writes the SCHEDULED-game rows the
+        # prop scorer needs, which is why it runs even with no finals pending.
+        logger.info("Step 0h: NFL player box scores from nflverse (pre-settle)...")
+        checkpoint("nfl_player_stats")
+        results["nfl_player_stats"] = step_nfl_player_stats(run_date)
+        checkpoint("nfl_props_data")
+        results["nfl_props_data"] = step_nfl_props_data(run_date)
+        time.sleep(1)
 
-    # ── Step 0h1: NHL per-game logs (MUST precede settlement) ────────────────
-    # The same pull ran only at Step 4, after settle. The recap posted at 06:03,
-    # the pull flagged the goalie's start at 06:09, and the 07:17 pass graded his
-    # saves prop at 07:24, on 17 mornings between 10-01 and 10-29. Step 4 still
-    # pulls again, which costs nothing and keeps its rates current.
-    logger.info("Step 0h1: NHL per-game logs from the stats API (pre-settle)...")
-    results["nhl_game_logs"] = step_nhl_game_logs(run_date)
-    time.sleep(1)
+        # ── Step 0h1: NHL per-game logs (MUST precede settlement) ────────────────
+        # The same pull ran only at Step 4, after settle. The recap posted at 06:03,
+        # the pull flagged the goalie's start at 06:09, and the 07:17 pass graded his
+        # saves prop at 07:24, on 17 mornings between 10-01 and 10-29. Step 4 still
+        # pulls again, which costs nothing and keeps its rates current.
+        logger.info("Step 0h1: NHL per-game logs from the stats API (pre-settle)...")
+        checkpoint("nhl_game_logs")
+        results["nhl_game_logs"] = step_nhl_game_logs(run_date)
+        time.sleep(1)
 
-    # ── Step 0: Settle yesterday's picks ────────────────────────────────────
-    logger.info("Step 0/6: Settling yesterday's picks...")
-    results["settle"] = step_settle(yesterday)
-    time.sleep(1)
+        # ── Step 0: Settle yesterday's picks ────────────────────────────────────
+        logger.info("Step 0/6: Settling yesterday's picks...")
+        checkpoint("settle")
+        results["settle"] = step_settle(yesterday)
+        time.sleep(1)
 
-    # ── Step 0c: Apply idempotent view/column migrations ─────────────────────
-    # BEFORE threshold_sync. A migration can change the pause register
-    # (clear_unauthorized_auto_pauses_2026_09_14 deleted the two unapproved
-    # rows); if sync runs first, the table keeps paused=true until tomorrow.
-    # Measured 2026-09-14/15: #727's migration landed on refresh, the table
-    # stayed paused, five MLB props never reached Discord.
-    logger.info("Step 0c: Applying view migrations...")
-    results["column_migrations"] = step_apply_column_migrations(run_date)
-    results["view_migrations"] = step_apply_view_migrations(run_date)
+        # ── Step 0c: Apply idempotent view/column migrations ─────────────────────
+        # BEFORE threshold_sync. A migration can change the pause register
+        # (clear_unauthorized_auto_pauses_2026_09_14 deleted the two unapproved
+        # rows); if sync runs first, the table keeps paused=true until tomorrow.
+        # Measured 2026-09-14/15: #727's migration landed on refresh, the table
+        # stayed paused, five MLB props never reached Discord.
+        logger.info("Step 0c: Applying view migrations...")
+        checkpoint("column_migrations")
+        results["column_migrations"] = step_apply_column_migrations(run_date)
+        checkpoint("view_migrations")
+        results["view_migrations"] = step_apply_view_migrations(run_date)
 
-    # ── Step 0c1: NBA first-quarter team stats (after migrations + results) ─
-    # Quarter scores, play-by-play possessions, then nba_team_q1_games, which
-    # the NBA team page reads. Free ESPN endpoints; only missing games fetched.
-    logger.info("Step 0c1: NBA quarter scores, possessions and 1Q team stats...")
-    # _timed_step is what writes pipeline_log.error_msg. --step already uses
-    # it; the 6am run did not, so a failed nba_quarters left no reason.
-    results["nba_quarters"] = _timed_step(
-        "nba-quarters", lambda: step_nba_quarters(run_date), run_date)
+        # ── Step 0c1: NBA first-quarter team stats (after migrations + results) ─
+        # Quarter scores, play-by-play possessions, then nba_team_q1_games, which
+        # the NBA team page reads. Free ESPN endpoints; only missing games fetched.
+        logger.info("Step 0c1: NBA quarter scores, possessions and 1Q team stats...")
+        # _timed_step is what writes pipeline_log.error_msg. --step already uses
+        # it; the 6am run did not, so a failed nba_quarters left no reason.
+        checkpoint("nba_quarters")
+        results["nba_quarters"] = _timed_step(
+            "nba-quarters", lambda: step_nba_quarters(run_date), run_date)
 
-    # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
-    # Keeps the table (public track record + mobile action filter + Discord)
-    # in lockstep with config.py so a threshold/pause change never needs a
-    # mobile rebuild and never waits overnight after a migration.
-    logger.info("Step 0c2: Syncing action thresholds...")
-    results["sync_thresholds"] = step_sync_thresholds(run_date)
+        # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
+        # Keeps the table (public track record + mobile action filter + Discord)
+        # in lockstep with config.py so a threshold/pause change never needs a
+        # mobile rebuild and never waits overnight after a migration.
+        logger.info("Step 0c2: Syncing action thresholds...")
+        checkpoint("sync_thresholds")
+        results["sync_thresholds"] = step_sync_thresholds(run_date)
 
-    # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
-    # Right after settle so yesterday's finals are graded into
-    # mv_scored_pick_outcomes before anyone opens the custom-model builder.
-    logger.info("Step 0d: Refreshing scored-pick outcomes...")
-    results["refresh_outcomes"] = step_refresh_outcomes(run_date)
-    results["nba_team_stats_box"] = step_nba_team_stats_box(run_date)
-    results["refresh_team_board"] = step_refresh_team_board(run_date)
-    results["live_calibration"] = step_live_calibration(run_date)
-    results["calibration_fit"] = step_calibration_fit(run_date)
+        # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
+        # Right after settle so yesterday's finals are graded into
+        # mv_scored_pick_outcomes before anyone opens the custom-model builder.
+        logger.info("Step 0d: Refreshing scored-pick outcomes...")
+        checkpoint("refresh_outcomes")
+        results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+        checkpoint("nba_team_stats_box")
+        results["nba_team_stats_box"] = step_nba_team_stats_box(run_date)
+        checkpoint("refresh_team_board")
+        results["refresh_team_board"] = step_refresh_team_board(run_date)
+        checkpoint("live_calibration")
+        results["live_calibration"] = step_live_calibration(run_date)
+        checkpoint("calibration_fit")
+        results["calibration_fit"] = step_calibration_fit(run_date)
 
-    # ── Step 1: Injuries ────────────────────────────────────────────────────
-    logger.info("Step 1/6: Injury ingestion...")
-    results["injuries"] = step_injuries(run_date)
-    time.sleep(2)
+        # ── Step 1: Injuries ────────────────────────────────────────────────────
+        logger.info("Step 1/6: Injury ingestion...")
+        checkpoint("injuries")
+        results["injuries"] = step_injuries(run_date)
+        time.sleep(2)
 
-    # ── Step 2: Odds ──────────────────────────────────────────────────────────
-    logger.info("Step 2/7: Fetching opening odds from The Odds API...")
-    results["odds"] = step_odds(run_date, snapshot_type="open")
-    time.sleep(2)
+        # ── Step 2: Odds ──────────────────────────────────────────────────────────
+        logger.info("Step 2/7: Fetching opening odds from The Odds API...")
+        checkpoint("odds")
+        results["odds"] = step_odds(run_date, snapshot_type="open")
+        time.sleep(2)
 
-    # ── Step 2-alt: Alternate spreads and totals (once a day) ─────────────────
-    # The betslip's game-line edit offers every number a book hangs, and the
-    # main fetch above stores one per book. Matt approved the daily cost
-    # (2026-10-29); each call's credits land in alt_game_line_fetches.
-    logger.info("Step 2-alt: Alternate spreads and totals (next 3 days)...")
-    results["alt_game_lines"] = step_alt_game_lines(run_date)
+        # ── Step 2-alt: Alternate spreads and totals (once a day) ─────────────────
+        # The betslip's game-line edit offers every number a book hangs, and the
+        # main fetch above stores one per book. Matt approved the daily cost
+        # (2026-10-29); each call's credits land in alt_game_line_fetches.
+        logger.info("Step 2-alt: Alternate spreads and totals (next 3 days)...")
+        checkpoint("alt_game_lines")
+        results["alt_game_lines"] = step_alt_game_lines(run_date)
 
-    # ── Step 2a: NHL totals ────────────────────────────────────────────────────
-    # Prices Pinnacle against the bettable books in the fetch just stored, so it
-    # runs while that fetch is the newest (scripts/nhl_totals_card.py).
-    logger.info("Step 2a: NHL totals card (Pinnacle vs the bettable books)...")
-    results["nhl_over_under"] = step_nhl_over_under(dry_run=dry_run)
+        # ── Step 2a: NHL totals ────────────────────────────────────────────────────
+        # Prices Pinnacle against the bettable books in the fetch just stored, so it
+        # runs while that fetch is the newest (scripts/nhl_totals_card.py).
+        logger.info("Step 2a: NHL totals card (Pinnacle vs the bettable books)...")
+        checkpoint("nhl_over_under")
+        results["nhl_over_under"] = step_nhl_over_under(dry_run=dry_run)
 
-    # ── Step 2b: Player prop odds ─────────────────────────────────────────────
-    logger.info("Step 2b/7: Fetching DK player prop lines...")
-    results["prop_odds"] = step_prop_odds(run_date, snapshot_type="open")
-    time.sleep(2)
+        # ── Step 2b: Player prop odds ─────────────────────────────────────────────
+        logger.info("Step 2b/7: Fetching DK player prop lines...")
+        checkpoint("prop_odds")
+        results["prop_odds"] = step_prop_odds(run_date, snapshot_type="open")
+        time.sleep(2)
 
-    # ── Step 2c: WNBA player prop odds ───────────────────────────────────────
-    # Uses The Odds API (not stats.nba.com) — runs fine in GitHub Actions.
-    logger.info("Step 2c: Fetching DK WNBA player prop lines...")
-    results["wnba_prop_odds"] = step_wnba_prop_odds(run_date, snapshot_type="open")
-    time.sleep(2)
+        # ── Step 2c: WNBA player prop odds ───────────────────────────────────────
+        # Uses The Odds API (not stats.nba.com) — runs fine in GitHub Actions.
+        logger.info("Step 2c: Fetching DK WNBA player prop lines...")
+        checkpoint("wnba_prop_odds")
+        results["wnba_prop_odds"] = step_wnba_prop_odds(run_date, snapshot_type="open")
+        time.sleep(2)
 
-    # ── Step 2c2: NBA player prop odds ───────────────────────────────────────
-    # Also The Odds API — runs in GitHub Actions (only nba_stats / nba_game_log
-    # need a residential IP).
-    logger.info("Step 2c2: Fetching DK NBA player prop lines...")
-    results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
-    # The NBA prop card reads the fetch just stored (it decides only games
-    # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
-    # closing snapshot for any bet game whose close is due.
-    logger.info("Step 2c3: NBA prop cards (both NBA prop models, one door)...")
-    results["nba_props"] = step_nba_props(dry_run=dry_run)
-    if not dry_run:
-        results["nba_prop_close"] = step_nba_prop_close()
-    time.sleep(2)
+        # ── Step 2c2: NBA player prop odds ───────────────────────────────────────
+        # Also The Odds API — runs in GitHub Actions (only nba_stats / nba_game_log
+        # need a residential IP).
+        logger.info("Step 2c2: Fetching DK NBA player prop lines...")
+        checkpoint("nba_prop_odds")
+        results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
+        # The NBA prop card reads the fetch just stored (it decides only games
+        # 45-57 minutes from tip, so at 6am it normally writes nothing), then the
+        # closing snapshot for any bet game whose close is due.
+        logger.info("Step 2c3: NBA prop cards (both NBA prop models, one door)...")
+        checkpoint("nba_props")
+        results["nba_props"] = step_nba_props(dry_run=dry_run)
+        if not dry_run:
+            checkpoint("nba_prop_close")
+            results["nba_prop_close"] = step_nba_prop_close()
+        time.sleep(2)
 
-    # ── Step 2d: Golf field + odds (DataGolf) ────────────────────────────────
-    # Reachable from GitHub Actions (paid keyed API). No-ops off-weeks.
-    logger.info("Step 2d: Refreshing golf field + DK odds (DataGolf)...")
-    results["golf_field"] = step_golf_field(run_date)
-    results["golf_odds"]  = step_golf_odds(run_date, snapshot_type="open")
-    time.sleep(2)
+        # ── Step 2d: Golf field + odds (DataGolf) ────────────────────────────────
+        # Reachable from GitHub Actions (paid keyed API). No-ops off-weeks.
+        logger.info("Step 2d: Refreshing golf field + DK odds (DataGolf)...")
+        checkpoint("golf_field")
+        results["golf_field"] = step_golf_field(run_date)
+        checkpoint("golf_odds")
+        results["golf_odds"]  = step_golf_odds(run_date, snapshot_type="open")
+        time.sleep(2)
 
-    # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
-    logger.info("Step 3/7: MLB team + pitcher stats...")
-    results["mlb_stats"] = step_mlb_stats(run_date)
-    time.sleep(1)
+        # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
+        logger.info("Step 3/7: MLB team + pitcher stats...")
+        checkpoint("mlb_stats")
+        results["mlb_stats"] = step_mlb_stats(run_date)
+        time.sleep(1)
 
-    # ── Step 3b: Bullpen workload (yesterday's reliever appearances) ─────────
-    # Self-healing daily ingest — was missing entirely until 2026-07-03, which
-    # froze mlb_bullpen_stats at 2026-04-14 and fed 0.0 bullpen-IP features to
-    # every live-scored game.
-    logger.info("Step 3b: MLB bullpen workload (reliever appearances)...")
-    results["bullpen"] = step_bullpen(run_date)
-    time.sleep(1)
+        # ── Step 3b: Bullpen workload (yesterday's reliever appearances) ─────────
+        # Self-healing daily ingest — was missing entirely until 2026-07-03, which
+        # froze mlb_bullpen_stats at 2026-04-14 and fed 0.0 bullpen-IP features to
+        # every live-scored game.
+        logger.info("Step 3b: MLB bullpen workload (reliever appearances)...")
+        checkpoint("bullpen")
+        results["bullpen"] = step_bullpen(run_date)
+        time.sleep(1)
 
-    logger.info("Step 4/7: NHL team + goalie stats...")
-    results["nhl_stats"] = step_nhl_stats(run_date)
-    # Who each source says will start in goal, right after the 6am goalie
-    # rows: the history starts the morning, and a row ESPN has already
-    # contradicted with a confirmation is rewritten before anything scores.
-    results["nhl_goalie_designations"] = step_nhl_goalie_designations()
-    time.sleep(1)
+        logger.info("Step 4/7: NHL team + goalie stats...")
+        checkpoint("nhl_stats")
+        results["nhl_stats"] = step_nhl_stats(run_date)
+        # Who each source says will start in goal, right after the 6am goalie
+        # rows: the history starts the morning, and a row ESPN has already
+        # contradicted with a confirmation is rewritten before anything scores.
+        checkpoint("nhl_goalie_designations")
+        results["nhl_goalie_designations"] = step_nhl_goalie_designations()
+        time.sleep(1)
 
-    # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
-    logger.info("Step 4b2: NCAAF stats (CFBD)...")
-    results["ncaaf_stats"] = step_ncaaf_stats(run_date)
-    results["ncaaf_weather"] = step_ncaaf_weather(run_date)
-    time.sleep(1)
+        # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
+        logger.info("Step 4b2: NCAAF stats (CFBD)...")
+        checkpoint("ncaaf_stats")
+        results["ncaaf_stats"] = step_ncaaf_stats(run_date)
+        checkpoint("ncaaf_weather")
+        results["ncaaf_weather"] = step_ncaaf_weather(run_date)
+        time.sleep(1)
 
-    # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally
-    # NOT in the scheduled daily flow. nba_api calls stats.nba.com, which blocks
-    # GitHub Actions datacenter IPs (consistent read timeouts). Run these manually
-    # on a residential IP (the local Task Scheduler "Basketball Daily Ingest" job
-    # at 7am — see scripts/basketball_daily_ingest.bat):
-    #   python run_pipeline.py --step wnba_stats   / --step wnba-game-log
-    #   python run_pipeline.py --step nba_stats    / --step nba-game-log
-    # Without *_stats: game picks won't generate (no current-season team features).
-    # Without *_game-log: prop rolling features are stale and prop picks can't be
-    # settled.
+        # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally
+        # NOT in the scheduled daily flow. nba_api calls stats.nba.com, which blocks
+        # GitHub Actions datacenter IPs (consistent read timeouts). Run these manually
+        # on a residential IP (the local Task Scheduler "Basketball Daily Ingest" job
+        # at 7am — see scripts/basketball_daily_ingest.bat):
+        #   python run_pipeline.py --step wnba_stats   / --step wnba-game-log
+        #   python run_pipeline.py --step nba_stats    / --step nba-game-log
+        # Without *_stats: game picks won't generate (no current-season team features).
+        # Without *_game-log: prop rolling features are stale and prop picks can't be
+        # settled.
 
-    logger.info("Step 5/7: Weather data (Open-Meteo)...")
-    results["weather"] = step_weather(run_date)
-    time.sleep(1)
+        logger.info("Step 5/7: Weather data (Open-Meteo)...")
+        checkpoint("weather")
+        results["weather"] = step_weather(run_date)
+        time.sleep(1)
 
-    # ── Step 5b: Lineups ──────────────────────────────────────────────────────
-    logger.info("Step 5b/10: Fetching confirmed batting lineups...")
-    results["lineups"] = step_lineups(run_date)
-    time.sleep(1)
+        # ── Step 5b: Lineups ──────────────────────────────────────────────────────
+        logger.info("Step 5b/10: Fetching confirmed batting lineups...")
+        checkpoint("lineups")
+        results["lineups"] = step_lineups(run_date)
+        time.sleep(1)
 
-    # ── Step 5b2: Player news ─────────────────────────────────────────────────
-    logger.info("Step 5b2/10: Fetching recent player news...")
-    results["player_news"] = step_player_news(run_date)
-    time.sleep(1)
+        # ── Step 5b2: Player news ─────────────────────────────────────────────────
+        logger.info("Step 5b2/10: Fetching recent player news...")
+        checkpoint("player_news")
+        results["player_news"] = step_player_news(run_date)
+        time.sleep(1)
 
-    # ── Step 5b3: Player positions (NBA / WNBA / NCAAF) ───────────────────────
-    logger.info("Step 5b3/10: Refreshing player positions...")
-    results["player_positions"] = step_player_positions(run_date)
-    time.sleep(1)
+        # ── Step 5b3: Player positions (NBA / WNBA / NCAAF) ───────────────────────
+        logger.info("Step 5b3/10: Refreshing player positions...")
+        checkpoint("player_positions")
+        results["player_positions"] = step_player_positions(run_date)
+        time.sleep(1)
 
-    # ── Step 5c: Umpires ──────────────────────────────────────────────────────
-    logger.info("Step 5c/10: Fetching today's HP umpire assignments...")
-    results["umpires"] = step_umpires(run_date)
-    time.sleep(1)
+        # ── Step 5c: Umpires ──────────────────────────────────────────────────────
+        logger.info("Step 5c/10: Fetching today's HP umpire assignments...")
+        checkpoint("umpires")
+        results["umpires"] = step_umpires(run_date)
+        time.sleep(1)
 
-    # ── Step 5d: Public betting splits ────────────────────────────────────────
-    logger.info("Step 5d/10: Fetching Action Network public betting splits...")
-    results["public_betting"] = step_public_betting(run_date)
-    time.sleep(1)
+        # ── Step 5d: Public betting splits ────────────────────────────────────────
+        logger.info("Step 5d/10: Fetching Action Network public betting splits...")
+        checkpoint("public_betting")
+        results["public_betting"] = step_public_betting(run_date)
+        time.sleep(1)
 
-    # ── Step 6: Scoring ────────────────────────────────────────────────────────
-    logger.info("Step 6/10: Generating game picks...")
-    results["scoring"] = step_scoring(run_date, dry_run=dry_run)
-    logger.info("Step 6b: MLB spread market card (Pinnacle vs bettable soft)...")
-    results["mlb_game_market"] = step_mlb_game_market(run_date, dry_run=dry_run)
+        # ── Step 6: Scoring ────────────────────────────────────────────────────────
+        logger.info("Step 6/10: Generating game picks...")
+        checkpoint("scoring")
+        results["scoring"] = step_scoring(run_date, dry_run=dry_run)
+        logger.info("Step 6b: MLB spread market card (Pinnacle vs bettable soft)...")
+        checkpoint("mlb_game_market")
+        results["mlb_game_market"] = step_mlb_game_market(run_date, dry_run=dry_run)
 
-    # ── Step 7: Game log ingestion ────────────────────────────────────────────
-    # Moved to Step 0d (pre-settle) so yesterday's props settle same-day. Logs
-    # are already ingested by this point, so prop scoring below has current
-    # rolling stats. (Left as a no-op marker for the numbered step sequence.)
+        # ── Step 7: Game log ingestion ────────────────────────────────────────────
+        # Moved to Step 0d (pre-settle) so yesterday's props settle same-day. Logs
+        # are already ingested by this point, so prop scoring below has current
+        # rolling stats. (Left as a no-op marker for the numbered step sequence.)
 
-    # ── Step 8: Prop scoring ───────────────────────────────────────────────────
-    logger.info("Step 8/10: Generating prop picks (all 11 prop markets)...")
-    results["prop_scoring"] = step_prop_scoring(run_date, dry_run=dry_run)
+        # ── Step 8: Prop scoring ───────────────────────────────────────────────────
+        logger.info("Step 8/10: Generating prop picks (all 11 prop markets)...")
+        checkpoint("prop_scoring")
+        results["prop_scoring"] = step_prop_scoring(run_date, dry_run=dry_run)
 
-    # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
-    logger.info("Step 8b: Generating WNBA player prop picks...")
-    results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
-    results["wnba_prop_market"]  = step_wnba_prop_market(run_date, dry_run=dry_run)
+        # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
+        logger.info("Step 8b: Generating WNBA player prop picks...")
+        checkpoint("wnba_prop_scoring")
+        results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
+        checkpoint("wnba_prop_market")
+        results["wnba_prop_market"]  = step_wnba_prop_market(run_date, dry_run=dry_run)
 
-    # ── Step 8b2: NBA props ────────────────────────────────────────────────────
-    # The NBA prop card ran at Step 2c3, right after its fetch. The generic NBA
-    # prop scorer that ran here was retired with its models (2026-10-15).
+        # ── Step 8b2: NBA props ────────────────────────────────────────────────────
+        # The NBA prop card ran at Step 2c3, right after its fetch. The generic NBA
+        # prop scorer that ran here was retired with its models (2026-10-15).
 
-    # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
-    logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
-    results["golf_scoring"] = step_golf_scoring(run_date, dry_run=dry_run)
+        # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
+        logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
+        checkpoint("golf_scoring")
+        results["golf_scoring"] = step_golf_scoring(run_date, dry_run=dry_run)
 
-    # ── Step 8d: Prune stale NONE picks for started games (table safety net) ───
-    if not dry_run:
-        logger.info("Step 8d: Pruning stale NONE picks for started games...")
-        results["cleanup_picks"] = step_cleanup_picks(run_date)
+        # ── Step 8d: Prune stale NONE picks for started games (table safety net) ───
+        if not dry_run:
+            logger.info("Step 8d: Pruning stale NONE picks for started games...")
+            checkpoint("cleanup_picks")
+            results["cleanup_picks"] = step_cleanup_picks(run_date)
 
-    # ── Step 9: Lock opening signals (shadow track — must run last) ────────────
-    logger.info("Step 9: Locking opening signals (first BET cross per market)...")
-    results["opening_signals"] = step_capture_opening_signals(run_date, dry_run=dry_run)
+        # ── Step 9: Lock opening signals (shadow track — must run last) ────────────
+        logger.info("Step 9: Locking opening signals (first BET cross per market)...")
+        checkpoint("opening_signals")
+        results["opening_signals"] = step_capture_opening_signals(run_date, dry_run=dry_run)
 
-    # ── Step 10: Lock the day's canonical parlay (public parlay track record) ──
-    logger.info("Step 10: Locking the daily tracked parlay (public record)...")
-    results["parlay_track_record"] = step_capture_parlay_track_record(run_date, dry_run=dry_run)
+        # ── Step 10: Lock the day's canonical parlay (public parlay track record) ──
+        logger.info("Step 10: Locking the daily tracked parlay (public record)...")
+        checkpoint("parlay_track_record")
+        results["parlay_track_record"] = step_capture_parlay_track_record(run_date, dry_run=dry_run)
 
-    # ── Step 11: Push notifications (new / dropped signals — must run last) ─────
-    logger.info("Step 11: Sending signal-flip push notifications...")
-    results["push_notifications"] = step_push_notifications(run_date, dry_run=dry_run)
+        # ── Step 11: Push notifications (new / dropped signals — must run last) ─────
+        logger.info("Step 11: Sending signal-flip push notifications...")
+        checkpoint("push_notifications")
+        results["push_notifications"] = step_push_notifications(run_date, dry_run=dry_run)
 
-    # ── Step 11b: Prune line-shop odds history ────────────────────────────────
-    # Runs AFTER settle (which captures DK closing lines for CLV) so nothing can
-    # be pruned out from under a reader. Only touches non-DraftKings rows on
-    # games before today — see data/prune_odds.py.
-    logger.info("Step 11b: Pruning line-shop (non-DK) odds history...")
-    results["prune_odds"] = step_prune_odds(run_date)
+        # ── Step 11b: Prune line-shop odds history ────────────────────────────────
+        # Runs AFTER settle (which captures DK closing lines for CLV) so nothing can
+        # be pruned out from under a reader. Only touches non-DraftKings rows on
+        # games before today — see data/prune_odds.py.
+        logger.info("Step 11b: Pruning line-shop (non-DK) odds history...")
+        checkpoint("prune_odds")
+        results["prune_odds"] = step_prune_odds(run_date)
 
-    # Load-time rows. A dry run writes nothing, including this delete.
-    # 45 days: data/app_timings_retention.py. Skipped when the table is absent.
-    if not dry_run:
-        logger.info("Step 11c: Pruning app_timings older than 45 days...")
-        results["prune_app_timings"] = step_prune_app_timings(run_date)
+        # Load-time rows. A dry run writes nothing, including this delete.
+        # 45 days: data/app_timings_retention.py. Skipped when the table is absent.
+        if not dry_run:
+            logger.info("Step 11c: Pruning app_timings older than 45 days...")
+            checkpoint("prune_app_timings")
+            results["prune_app_timings"] = step_prune_app_timings(run_date)
 
-    # ── Step 12: System health check (feed freshness — after all ingestion) ────
-    # Daily: CRIT failure returns False → the run shows red. Results land in
-    # system_health_checks (anon-readable) for Claude mobile / the app.
-    # Refresh uses --step health-check with fail_on_crit=False so a standing
-    # CRIT cannot redden the ingest pass (2026-09-14: 20/32 non-daily runs).
-    logger.info("Step 12: Running system health check (all API + data feeds)...")
-    results["health_check"] = step_health_check(run_date)
+        # ── Step 12: System health check (feed freshness — after all ingestion) ────
+        # Daily: CRIT failure returns False → the run shows red. Results land in
+        # system_health_checks (anon-readable) for Claude mobile / the app.
+        # Refresh uses --step health-check with fail_on_crit=False so a standing
+        # CRIT cannot redden the ingest pass (2026-09-14: 20/32 non-daily runs).
+        logger.info("Step 12: Running system health check (all API + data feeds)...")
+        checkpoint("health_check")
+        results["health_check"] = step_health_check(run_date)
 
-    # ── Step 13: Model quality (betting-quality — after scoring + health) ────
-    # Observe-only: a CRIT finding must not fail the daily. Results land in
-    # model_quality_checks. The 11:00am ET scheduler job re-runs once the
-    # slate is more complete.
-    logger.info("Step 13: Running model quality monitor (all sports / models)...")
-    results["model_quality"] = step_model_quality(run_date)
+        # ── Step 13: Model quality (betting-quality — after scoring + health) ────
+        # Observe-only: a CRIT finding must not fail the daily. Results land in
+        # model_quality_checks. The 11:00am ET scheduler job re-runs once the
+        # slate is more complete.
+        logger.info("Step 13: Running model quality monitor (all sports / models)...")
+        checkpoint("model_quality")
+        results["model_quality"] = step_model_quality(run_date)
+
+    except DeployCutoff as cut:
+        logger.warning(
+            f"deploy drain: stopped before {cut.before_step} "
+            f"after {len(results)} step(s)"
+        )
+        finish_run(_run_id, len(results), [DEPLOY_CUTOFF])
+        return {"run_date": run_date, "deploy_cutoff": True, **results}
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -2790,6 +2861,10 @@ Examples:
                         help="Check environment configuration")
 
     args = parser.parse_args()
+    # SIGTERM must not kill a step mid-write. The handler returns; the
+    # daily stops before the next step and closes the ledger.
+    from tracking.deploy_drain import install_pipeline_handler
+    install_pipeline_handler()
     run_date = args.run_date or datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
     if args.check:
@@ -2917,5 +2992,8 @@ Examples:
 
     # Full pipeline
     result = run_daily_pipeline(run_date=run_date, dry_run=args.dry_run)
-    all_ok = all(v for k, v in result.items() if k not in ("run_date", "duration_s"))
+    if result.get("deploy_cutoff"):
+        logger.warning("daily pipeline stopped for a deploy (deploy-cutoff)")
+        sys.exit(0)
+    all_ok = all(v for k, v in result.items() if k not in ("run_date", "duration_s", "deploy_cutoff"))
     sys.exit(0 if all_ok else 1)

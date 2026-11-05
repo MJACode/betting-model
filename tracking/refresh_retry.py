@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 from tracking.daily_retry import Decision, _as_dt
+from tracking.deploy_drain import DEPLOY_CUTOFF
 
 # The :17 passes (hourly 7am-5pm ET, overnight midnight-6am ET) both ledger as
 # `hourly`. The evening pass fires every ten minutes, so the next one is never
@@ -94,7 +95,14 @@ def interrupted(run: RefreshRun) -> bool:
     """
     if run.finished_at is None:
         return True
-    return run.steps_total is None and "aborted" in (run.failed_steps or "")
+    tokens = {s.strip() for s in (run.failed_steps or "").split(",") if s.strip()}
+    # A drain closes the row itself and records how far it got. That pass
+    # still did not reach the end of the chain, so the catch-up replaces it.
+    # ``aborted`` with no steps_total is the boot sweep's stamp of a row
+    # the process never closed.
+    if DEPLOY_CUTOFF in tokens:
+        return True
+    return run.steps_total is None and "aborted" in tokens
 
 
 def _next_pass(now: datetime) -> datetime:
