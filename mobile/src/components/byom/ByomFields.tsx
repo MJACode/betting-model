@@ -15,6 +15,8 @@ import {
   type ByomMarket,
   type ByomPropSide,
   type ByomSport,
+  byomHasProps,
+  byomUsesRest,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -97,6 +99,10 @@ export function ByomMarketField({
   explainMissing?: boolean;
 }) {
   const props = sport === 'NBA' ? NBA_PROP_MARKETS : NFL_PROP_MARKETS;
+  // NHL is game bets only (Matt, 2026-11-05).
+  const withProps = byomHasProps(sport ?? 'NFL');
+  const gameMarkets = GAME_MARKETS.map((option) => (
+    option.value === 'spreads' && sport === 'NHL' ? { ...option, label: 'Puck line' } : option));
   const propKicker = sport === 'NBA' ? 'NBA player props' : 'NFL player props';
   const nbaFacts = sport === 'NBA' ? factsStatus : 'ready';
   const kept = isGameMarket(savedGameMarket)
@@ -104,7 +110,7 @@ export function ByomMarketField({
     : isGameMarket(market)
       ? market
       : null;
-  const keptLabel = GAME_MARKETS.find((option) => option.value === kept)?.label ?? null;
+  const keptLabel = gameMarkets.find((option) => option.value === kept)?.label ?? null;
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel="Bet type">
       <View style={styles.block}>
@@ -133,9 +139,9 @@ export function ByomMarketField({
               <Text style={styles.historyLead}>{NBA_GAME_BETS_WHEN}</Text>
             ) : null}
           </View>
-        ) : sport === 'NBA' ? (
+        ) : sport === 'NBA' || sport === 'NHL' ? (
           <View style={styles.grid}>
-            {GAME_MARKETS.map((option) => (
+            {gameMarkets.map((option) => (
               <MarketTile
                 key={option.value}
                 label={option.label}
@@ -145,7 +151,7 @@ export function ByomMarketField({
             ))}
           </View>
         ) : (
-          GAME_MARKETS.map((option) => (
+          gameMarkets.map((option) => (
             <MarketRow
               key={option.value}
               label={option.label}
@@ -155,6 +161,7 @@ export function ByomMarketField({
           ))
         )}
       </View>
+      {withProps ? (
       <View style={styles.block}>
         <Text style={styles.kicker}>{propKicker}</Text>
         {sport === 'NBA' ? (
@@ -179,6 +186,7 @@ export function ByomMarketField({
           ))
         )}
       </View>
+      ) : null}
     </View>
   );
 }
@@ -215,7 +223,8 @@ export function ByomSideFields({
 }) {
   const prop = isPropMarket(market);
   const yesOnly = isYesOnlyProp(market);
-  const showNbaRest = sport === 'NBA' && (factsStatus === 'ready' || rest != null);
+  const showNbaRest = sport === 'NHL'
+    || (sport === 'NBA' && (factsStatus === 'ready' || rest != null));
   return (
     <View>
       {market === 'totals' ? (
@@ -277,7 +286,8 @@ export function ByomSideFields({
               { value: 'any', label: 'Any' },
               { value: 'favorite', label: 'Favorite' },
               { value: 'underdog', label: 'Underdog' },
-              { value: 'pickem', label: 'Pick’em' },
+              // An NHL puck line is always ±1.5, so there is no pick'em.
+              ...(sport === 'NHL' ? [] : [{ value: 'pickem' as const, label: 'Pick’em' }]),
             ]}
           />
         </>
@@ -293,7 +303,7 @@ export function ByomSideFields({
             { value: 'rest2', label: '2+ days rest' },
           ]}
         />
-      ) : sport === 'NBA' ? null : (
+      ) : byomUsesRest(sport ?? 'NFL') ? null : (
         <ByomChoiceGroup
           label="Kickoff"
           value={primetime == null ? 'any' : primetime ? 'prime' : 'other'}

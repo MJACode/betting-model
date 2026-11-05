@@ -801,3 +801,36 @@ if (!rec || rec.step !== 1 || rec.openFrom !== 3.5 || rec.openTo !== 5.5) throw 
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_nhl_is_game_bets_with_rest_chips_and_a_puck_line(tmp_path):
+    """Matt, 2026-11-05: NHL game bets on the builder."""
+    for name in ("byomRecord.ts", "byomFilters.ts", "byomPropFilters.ts"):
+        src = (ROOT / "mobile/src/lib" / name).read_text(encoding="utf-8")
+        src = re.sub(r"from '\./(\w+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = r"""
+import {
+  asByomSport, byomHasProps, byomUsesRest, byomStartWord, filtersForDraft,
+  gameMarketLabel, nhlSeasonList, seasonListFor, otherSportName,
+} from './byomRecord.ts';
+if (asByomSport('NHL') !== 'NHL' || asByomSport('MLB') !== 'NFL' || asByomSport(undefined) !== 'NFL') throw new Error('sport');
+if (byomHasProps('NHL') || !byomHasProps('NBA') || !byomHasProps('NFL')) throw new Error('props');
+if (!byomUsesRest('NHL') || byomUsesRest('NFL')) throw new Error('rest');
+if (byomStartWord('NHL') !== 'puck drop') throw new Error('start');
+if (gameMarketLabel('spreads', 'NHL') !== 'Puck line' || gameMarketLabel('spreads', 'NBA') !== 'Spread') throw new Error('label');
+const nov = new Date('2026-11-05T15:00:00Z');
+if (JSON.stringify(nhlSeasonList(nov)) !== '[2021,2022,2023,2024,2025,2026,2027]') throw new Error('seasons ' + nhlSeasonList(nov));
+if (JSON.stringify(seasonListFor('NHL', nov)) !== JSON.stringify(nhlSeasonList(nov))) throw new Error('dispatch');
+const b2b = filtersForDraft(
+  { market: 'spreads', side: 'home', role: null, primetime: true, propSide: null, rest: 'b2b' },
+  {}, 'NHL');
+if (b2b.min_rest_days !== 1 || b2b.max_rest_days !== 1 || b2b.primetime != null) throw new Error('nhl rest ' + JSON.stringify(b2b));
+if (otherSportName('NHL') !== 'another sport') throw new Error('other');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout

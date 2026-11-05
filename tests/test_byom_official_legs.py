@@ -23,6 +23,7 @@ BAND_SQL = "byom_official_lock_bands_2026_11_04.sql"
 LOCK_READ_SQL = "byom_official_legs_lock_read_idx_2026_11_04.sql"
 PUSHDOWN_SQL = "byom_official_market_pushdown_2026_11_04.sql"
 PROP_LOOKUP_SQL = "byom_prop_lookup_2026_11_04.sql"
+NHL_SQL = "byom_nhl_2026_11_05.sql"
 KICK = datetime(2026, 10, 27, 0, 15, tzinfo=timezone.utc)
 
 
@@ -306,7 +307,7 @@ def scratch():
                      "byom_prop_phase_a_filters_2026_10_29.sql",
                      SQL_NAME, SQL_NAME, BAND_SQL, BAND_SQL,
                      LOCK_READ_SQL, LOCK_READ_SQL, PUSHDOWN_SQL, PUSHDOWN_SQL,
-                     PROP_LOOKUP_SQL, PROP_LOOKUP_SQL):
+                     PROP_LOOKUP_SQL, PROP_LOOKUP_SQL, NHL_SQL, NHL_SQL):
             cur.execute((ROOT / "data/migrations" / name).read_text(encoding="utf-8"))
         cur.execute("""
             INSERT INTO byom_game_facts (
@@ -877,3 +878,42 @@ def test_a_prop_ignores_team_role_spread_and_total(scratch):
     cur.execute("SELECT count(*) FROM byom_record(2026, "
                 "'{\"markets\":[\"h2h\"],\"min_game_total\":60}'::jsonb) WHERE bets > 0")
     assert cur.fetchone()[0] == 0
+
+
+
+def test_nhl_game_bets_grade_label_and_save(scratch):
+    """Matt, 2026-11-05: NHL game bets. Moneyline, puck line, totals."""
+    _pg, cur = scratch
+    cur.execute("""
+        INSERT INTO byom_game_facts (
+          canonical_key, sport, season, week, away_team, home_team,
+          game_date, commence_time, line_basis, home_score, away_score,
+          dk_spread_home, dk_total, home_rest_days, away_rest_days,
+          home_role, away_role, ml_home_result, ml_away_result,
+          dk_ml_home_price, dk_ml_away_price, ats_home_result, ats_away_result,
+          dk_spread_home_price, dk_spread_away_price,
+          ou_over_result, ou_under_result, dk_total_over_price, dk_total_under_price)
+        VALUES ('NHL_2026-11-01_BOS_TOR', 'NHL', 2027, NULL, 'BOS', 'TOR',
+                '2026-11-01', '2026-11-01 23:00:00+00', 'DraftKings line at game start',
+                4, 2, -1.5, 6.5, 1, 2, 'favorite', 'underdog', 'win', 'loss',
+                -150, 130, 'win', 'loss', 160, -190, 'loss', 'win', -110, -110);
+        INSERT INTO byom_official_legs (
+          canonical_key, sport, season, market, leg_side, player_key,
+          match_role, leg_role, team, locked_at, point, price, result,
+          team_spread, game_total, context_at_lock)
+        VALUES ('NHL_2026-11-01_BOS_TOR', 'NHL', 2027, 'spreads', 'home', '',
+                'any', 'favorite', 'TOR', '2026-10-31 15:00+00', -1.5, 175, 'win',
+                -1.5, 6.5, true);
+    """)
+    cur.execute("SELECT timing, bets, wins FROM byom_record(2027, "
+                "'{\"sport\":\"NHL\",\"markets\":[\"spreads\"],\"side\":\"home\"}') ORDER BY 1")
+    assert cur.fetchall() == [("close", 1, 1), ("official", 1, 1)]
+    cur.execute("SELECT label, price FROM byom_bets(2027, "
+                "'{\"sport\":\"NHL\",\"markets\":[\"spreads\"],\"side\":\"home\"}', 'official')")
+    assert cur.fetchall() == [("TOR -1.5", 175)]
+    cur.execute("SELECT set_config('byom.uid', '11111111-1111-1111-1111-111111111111', false)")
+    cur.execute("SELECT season FROM byom_save_model('Home puck line', "
+                "'{\"sport\":\"NHL\",\"markets\":[\"spreads\"],\"side\":\"home\"}', 2027)")
+    assert cur.fetchone()[0] == 2027
+    cur.execute("SELECT sport FROM byom_models WHERE name = 'Home puck line'")
+    assert cur.fetchone()[0] == "NHL"

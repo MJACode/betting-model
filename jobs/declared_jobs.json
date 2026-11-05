@@ -1145,6 +1145,17 @@
     }
   },
   {
+    "key": "byom-nhl-game-facts",
+    "job_type": "byom_game_facts",
+    "requested_by": "owner",
+    "enabled": true,
+    "note": "Matt, 2026-11-05: NHL game bets on the builder (\"Yes go\"). enabled and apply are true, so sync_declared_jobs enqueues this once. Every NHL season from 2021 (2020-21 is the first with a DraftKings line; measured 2026-11-05: 2019 and 2020 have none). Writes byom_game_facts and the official candidates in byom_official_legs. Moneyline, puck line (spreads) and totals; no props. The job applies ACTIVE_MIGRATIONS first, so byom_nhl_2026_11_05.sql is in place. The daily refresh keeps the current season current. Reads stored odds only: no API credits. Does not write picks.",
+    "args": {
+      "sport": "NHL",
+      "apply": true
+    }
+  },
+  {
     "key": "nba-alt-history-2024-2026",
     "job_type": "nba_odds_history",
     "requested_by": "mike",

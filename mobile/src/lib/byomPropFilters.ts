@@ -15,7 +15,7 @@ const MINUS = '\u2212';
 
 export type ByomKickSlot = 'early' | 'late' | 'prime';
 export type ByomPriceBand = 'plus' | 'mid' | 'heavy' | 'custom';
-export type ByomSportId = 'NFL' | 'NBA';
+export type ByomSportId = 'NFL' | 'NBA' | 'NHL';
 
 export interface ByomBand {
   min: number;
@@ -203,11 +203,11 @@ export const KICK_SLOTS: readonly { value: ByomKickSlot; label: string; pill: st
 ];
 
 export function monthsFor(sport: ByomSportId) {
-  return sport === 'NBA' ? NBA_MONTHS : NFL_MONTHS;
+  return sport === 'NFL' ? NFL_MONTHS : NBA_MONTHS;
 }
 
 export function daysFor(sport: ByomSportId) {
-  return sport === 'NBA' ? NBA_DAYS : NFL_DAYS;
+  return sport === 'NFL' ? NFL_DAYS : NBA_DAYS;
 }
 
 export function shownKickSlots(

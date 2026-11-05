@@ -24,7 +24,45 @@ export const BYOM_NFL_FIRST_SEASON = 2020;
  */
 export const BYOM_NBA_FIRST_SEASON = 2023;
 
-export type ByomSport = 'NFL' | 'NBA';
+/**
+ * First NHL season with a DraftKings line (byom.constants
+ * NHL_DK_HISTORY_START_SEASON, measured 2026-11-05). Ending-year label:
+ * 2021 is 2020-21.
+ */
+export const BYOM_NHL_FIRST_SEASON = 2021;
+
+export type ByomSport = 'NFL' | 'NBA' | 'NHL';
+
+/** A sport string from a route param or a row. Anything else is NFL. */
+export function asByomSport(value: unknown): ByomSport {
+  return value === 'NBA' || value === 'NHL' ? value : 'NFL';
+}
+
+/** The builder offers player props on these sports. NHL is game bets only. */
+export function byomHasProps(sport: ByomSport): boolean {
+  return sport !== 'NHL';
+}
+
+/**
+ * NBA and NHL: seasons named by the ending year, rest-day chips
+ * (back-to-back, 2+ days) instead of primetime.
+ */
+export function byomUsesRest(sport: ByomSport): boolean {
+  return sport === 'NBA' || sport === 'NHL';
+}
+
+/** The word for game start. */
+export function byomStartWord(sport: ByomSport): string {
+  if (sport === 'NBA') return 'tipoff';
+  if (sport === 'NHL') return 'puck drop';
+  return 'kickoff';
+}
+
+/** A game market's name on this sport. The NHL spread is the puck line. */
+export function gameMarketLabel(market: ByomGameMarket, sport: ByomSport): string {
+  if (market === 'spreads' && sport === 'NHL') return 'Puck line';
+  return MARKET_LABEL[market];
+}
 
 /**
  * The card headline. `preferred` is official once the server has
@@ -312,6 +350,26 @@ export function currentNbaSeason(now: Date = new Date()): number {
   return month >= 10 ? year + 1 : year;
 }
 
+/** NHL uses the NBA split: the ending year, October on is next year. */
+export function currentNhlSeason(now: Date = new Date()): number {
+  return currentNbaSeason(now);
+}
+
+/** 2021 through the current NHL season, inclusive. */
+export function nhlSeasonList(now: Date = new Date()): number[] {
+  const end = currentNhlSeason(now);
+  const seasons: number[] = [];
+  for (let year = BYOM_NHL_FIRST_SEASON; year <= end; year += 1) seasons.push(year);
+  return seasons;
+}
+
+/** Every season in scope for this sport, oldest first. */
+export function seasonListFor(sport: ByomSport, now: Date = new Date()): number[] {
+  if (sport === 'NBA') return nbaSeasonList(now);
+  if (sport === 'NHL') return nhlSeasonList(now);
+  return nflSeasonList(now);
+}
+
 /** 2023 through the current NBA season, inclusive. */
 export function nbaSeasonList(now: Date = new Date()): number[] {
   const end = currentNbaSeason(now);
@@ -469,7 +527,7 @@ export function filtersForDraft(
     if (draft.market === 'totals' || !draft.role) delete next.role;
     else next.role = draft.role;
   }
-  if (sport === 'NBA') {
+  if (byomUsesRest(sport)) {
     delete next.primetime;
     const rest = draft.rest ?? null;
     if (rest === 'b2b') {
@@ -592,8 +650,11 @@ export function filtersNeedGameFacts(filters: ByomFilters | null | undefined): b
 export const NBA_GAME_BETS_WHEN =
   'Game bets show up once NBA results are in.';
 
-export function otherSportName(sport: ByomSport): ByomSport {
-  return sport === 'NBA' ? 'NFL' : 'NBA';
+/** Names the other sport when there are two to choose from; else says so. */
+export function otherSportName(sport: ByomSport): string {
+  if (sport === 'NBA') return 'NFL';
+  if (sport === 'NFL') return 'NBA';
+  return 'another sport';
 }
 
 export function otherSportAlert(name: string, theirs: string): { title: string; body: string } {
