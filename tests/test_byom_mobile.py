@@ -814,6 +814,7 @@ def test_nhl_is_game_bets_with_rest_chips_and_a_puck_line(tmp_path):
 import {
   asByomSport, byomHasProps, byomUsesRest, byomStartWord, filtersForDraft,
   gameMarketLabel, nhlSeasonList, seasonListFor, otherSportName,
+  marketLabel, betTypeLabel,
 } from './byomRecord.ts';
 if (asByomSport('NHL') !== 'NHL' || asByomSport('MLB') !== 'NFL' || asByomSport(undefined) !== 'NFL') throw new Error('sport');
 if (byomHasProps('NHL') || !byomHasProps('NBA') || !byomHasProps('NFL')) throw new Error('props');
@@ -827,7 +828,11 @@ const b2b = filtersForDraft(
   { market: 'spreads', side: 'home', role: null, primetime: true, propSide: null, rest: 'b2b' },
   {}, 'NHL');
 if (b2b.min_rest_days !== 1 || b2b.max_rest_days !== 1 || b2b.primetime != null) throw new Error('nhl rest ' + JSON.stringify(b2b));
-if (otherSportName('NHL') !== 'another sport') throw new Error('other');
+if (otherSportName('NHL') !== 'another sport' || otherSportName('NBA') !== 'another sport') throw new Error('other');
+// A saved NHL model names its spread the puck line on every screen (UX review).
+if (!marketLabel({ markets: ['spreads'] }, 'NHL').startsWith('Puck line')) throw new Error('row ' + marketLabel({ markets: ['spreads'] }, 'NHL'));
+if (!marketLabel({ markets: ['spreads'] }).startsWith('Spread')) throw new Error('row nfl');
+if (betTypeLabel('spreads', 'NHL') !== 'Puck line') throw new Error('type');
 """
     proc = subprocess.run(
         ["node", "--experimental-strip-types", "--input-type=module", "-e", script],

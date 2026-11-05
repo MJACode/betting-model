@@ -246,9 +246,9 @@ export function propSideForMarket(
   return propSide === 'over' || propSide === 'under' ? propSide : null;
 }
 
-export function betTypeLabel(market: ByomMarket): string {
+export function betTypeLabel(market: ByomMarket, sport: ByomSport = 'NFL'): string {
   if (market === 'h2h' || market === 'spreads' || market === 'totals') {
-    return MARKET_LABEL[market];
+    return gameMarketLabel(market, sport);
   }
   return propMarketLabel(market) ?? '—';
 }
@@ -416,7 +416,7 @@ export function gameMarket(filters: ByomFilters | null | undefined): ByomGameMar
   return null;
 }
 
-export function marketLabel(filters: ByomFilters | null | undefined): string {
+export function marketLabel(filters: ByomFilters | null | undefined, sport: ByomSport = 'NFL'): string {
   const parsed = byomFilters(filters);
   const markets = parsed.markets;
   if (markets == null || markets.length === 0) return '—';
@@ -424,7 +424,7 @@ export function marketLabel(filters: ByomFilters | null | undefined): string {
   let props = false;
   for (const market of markets) {
     if (market === 'h2h' || market === 'spreads' || market === 'totals') {
-      parts.push(MARKET_LABEL[market]);
+      parts.push(gameMarketLabel(market, sport));
     } else {
       const label = propMarketLabel(market);
       if (label) parts.push(label);
@@ -604,7 +604,7 @@ export function assertByomSide(filters: ByomFilters | null | undefined): void {
 
 /** Shown when byom_save_model refuses a name that belongs to the other sport. */
 export const OTHER_SPORT_NAME =
-  'This name is saved on the other sport. Choose another name.';
+  'This name is saved on another sport. Choose another name.';
 
 /** Preview copy when NBA game facts have not been built yet. */
 export const NBA_NO_HISTORY = 'No history yet';
@@ -650,10 +650,8 @@ export function filtersNeedGameFacts(filters: ByomFilters | null | undefined): b
 export const NBA_GAME_BETS_WHEN =
   'Game bets show up once NBA results are in.';
 
-/** Names the other sport when there are two to choose from; else says so. */
-export function otherSportName(sport: ByomSport): string {
-  if (sport === 'NBA') return 'NFL';
-  if (sport === 'NFL') return 'NBA';
+/** Three sports now, so the name is never guessed (UX review, 2026-11-05). */
+export function otherSportName(_sport: ByomSport): string {
   return 'another sport';
 }
 

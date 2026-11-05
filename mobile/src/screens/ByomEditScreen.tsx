@@ -276,7 +276,7 @@ export function ByomEditScreen() {
             style={styles.input}
           />
           <Text style={styles.current}>
-            {market != null && edited ? marketLabel(edited) : marketLabel(model.filters)}
+            {market != null && edited ? marketLabel(edited, sport) : marketLabel(model.filters, sport)}
           </Text>
           {market != null && isPropMarket(market) ? (
             <>

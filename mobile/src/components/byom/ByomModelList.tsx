@@ -85,6 +85,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
           failed={item.failed}
           emptyLabel={byomEmptyLabel(byomSport, facts.status, item.model.filters)}
           closingHeadline={item.timing === 'close'}
+          sport={byomSport}
           onPress={() => navigation.navigate('ByomDetail', { modelId: item.model.model_id })}
         />
       )}
@@ -119,7 +120,7 @@ export function ByomModelList({ sport }: { sport: Sport }) {
         ) : (
           <EmptyState
             title={`No ${sport} models yet`}
-            subtitle="Switch to NFL or NBA to build a model."
+            subtitle="Switch to NFL, NBA or NHL to build a model."
           />
         )
       }

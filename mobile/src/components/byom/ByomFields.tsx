@@ -17,10 +17,12 @@ import {
   type ByomSport,
   byomHasProps,
   byomUsesRest,
+  gameMarketLabel,
+  type ByomGameMarket,
 } from '@/lib/byomRecord';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-const GAME_MARKETS: { value: ByomMarket; label: string }[] = [
+const GAME_MARKETS: { value: ByomGameMarket; label: string }[] = [
   { value: 'h2h', label: 'Moneyline' },
   { value: 'spreads', label: 'Spread' },
   { value: 'totals', label: 'Over/Under' },
@@ -102,7 +104,7 @@ export function ByomMarketField({
   // NHL is game bets only (Matt, 2026-11-05).
   const withProps = byomHasProps(sport ?? 'NFL');
   const gameMarkets = GAME_MARKETS.map((option) => (
-    option.value === 'spreads' && sport === 'NHL' ? { ...option, label: 'Puck line' } : option));
+    ({ ...option, label: gameMarketLabel(option.value, sport ?? 'NFL') })));
   const propKicker = sport === 'NBA' ? 'NBA player props' : 'NFL player props';
   const nbaFacts = sport === 'NBA' ? factsStatus : 'ready';
   const kept = isGameMarket(savedGameMarket)

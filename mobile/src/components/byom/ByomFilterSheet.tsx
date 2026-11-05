@@ -162,7 +162,7 @@ export function ByomFilterSheet({
           })}
         </View>
         <Text style={styles.context}>
-          {sport} · {betTypeLabel(market)} · {sideLabel}
+          {sport} · {betTypeLabel(market, sport)} · {sideLabel}
         </Text>
         <ScrollView
           style={styles.flex}

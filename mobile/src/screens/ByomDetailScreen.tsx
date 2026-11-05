@@ -119,7 +119,7 @@ export function ByomDetailScreen() {
               style={styles.banner}
             />
           ) : null}
-          <Text style={styles.market}>{marketLabel(model.filters)}</Text>
+          <Text style={styles.market}>{marketLabel(model.filters, sport)}</Text>
           {filterLine ? <Text style={styles.filters}>{filterLine}</Text> : null}
           <ByomSeasonToggle />
           <ByomPreviewCard
