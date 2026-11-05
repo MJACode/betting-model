@@ -479,6 +479,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # serves it). Same answers; one market's candidates, not the season's. Keeps
     # the two earlier markers. Skips once its own marker is in the body.
     "byom_official_market_pushdown_2026_11_04.sql",
+    # 2026-11-04: NBA prop records inside the 3s anon limit. Indexes
+    # byom_prop_facts (canonical_key, market, player_key) and (sport,
+    # season, market); the closing prop branch filters market and side
+    # first. Measured before: 3,687 ms for one NBA market. Same answers.
+    # 2026-11-05 (#1172 Medium, Matt via CE): byom_legs sets
+    # plan_cache_mode = force_custom_plan. The skip requires that
+    # proconfig entry, so an already-applied body still gains it once.
+    "byom_prop_lookup_2026_11_04.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
@@ -556,6 +564,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "nba_live_decisions_2026_11_04.sql",
+    # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
+    # open pre-game BET the app, Discord and push show, for any Claude chat
+    # with the Supabase connector. One security_invoker view and its SELECT
+    # grant. Returns on a catalog read once the view's comment matches the
+    # hash of its body. It calls published_pick_stake, so on a fresh database
+    # it waits (a NOTICE, not an error) until the pair below has run. Does
+    # not write picks, push_sent or the record. Sits before the pair.
+    "open_picks_view_2026_11_04.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

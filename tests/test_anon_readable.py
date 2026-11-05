@@ -48,6 +48,9 @@ def test_every_relation_the_app_reads_is_declared():
 # only with the migration that creates it, and it leaves the moment mobile/src
 # reads it -- an allowlist must not hide a grant the app already uses.
 AHEAD_OF_THE_APP = frozenset({
+    # Read by Claude chats through the Supabase connector, not by a screen
+    # (data/migrations/open_picks_view_2026_11_04.sql).
+    "open_picks",
     "v_nhl_player_prop_odds",
     "v_player_season_totals_nhl",
     "v_team_season_totals_nhl",
