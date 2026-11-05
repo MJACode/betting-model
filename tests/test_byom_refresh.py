@@ -196,6 +196,11 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         wrote = refresh(conn, apply=True, today=AS_OF)
         assert wrote["written_game_facts"] == 6
         assert wrote["written_prop_facts"] == 1
+        # The planner's row counts follow the write (byom/analyze.py).
+        from byom.analyze import TABLES
+        assert wrote["analyzed"] == list(TABLES)
+        analyzed = [sql for sql, _p in conn.calls if sql.startswith("ANALYZE ")]
+        assert analyzed == [f"ANALYZE public.{t}" for t in TABLES]
         touched = set()
         for _sql, params in conn.calls:
             if not params:

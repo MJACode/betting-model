@@ -279,4 +279,9 @@ def refresh(conn, apply: bool = False, today: date | datetime | None = None,
     conn.commit()
     report["written_game_facts"] = game["written"]
     report["written_prop_facts"] = prop["written"]
+    # A daily refresh never changes 10% of a table, so Postgres would not
+    # re-count it, and a new season reads as empty to the planner (6.0s
+    # NBA preview, 2026-11-05). byom/analyze.py.
+    from byom.analyze import analyze_tables
+    report["analyzed"] = analyze_tables(conn)
     return report
