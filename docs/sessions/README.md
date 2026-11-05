@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM staking functions inlined (no SET clause): NBA 2025-26 points record timed out, 2.6s of 2.7s was four function calls per row |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, returning sign-in skips the paywall when premium; access_grants (comped, app_review) OR into my_access; founder grant SQL not applied |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM NHL game bets (moneyline, puck line, totals; official and closing; from 2020-21); save drops Phase A prop filters (flagged) |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM tables ANALYZEd after every write: NBA points preview 6.0s because the planner counted 1 current-season prop row (11,075 real); one-off byom_analyze job |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, iOS Sign in with Apple is the system sheet and an identity token; Google stays in the browser; version 1.2.0 so it is not an OTA onto 1.1.0 |

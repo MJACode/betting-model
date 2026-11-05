@@ -2312,6 +2312,10 @@ CREATE POLICY "users read own subscription" ON subscriptions
 -- REVOKE ALL ON TABLE subscriptions FROM anon; GRANT SELECT TO authenticated;
 -- Plus public.has_active_subscription() (SECURITY INVOKER, authenticated) —
 -- the honest entitlement check for future server-side signal gating.
+--
+-- Non-IAP grants live in access_grants (add_access_grants_2026_11_05.sql).
+-- Not applied by the worker. comped and app_review OR into my_access().entitled
+-- beside the subscriptions row. Whop does not. comped also unlocks Discord.
 
 
 -- ── DISCORD LINKING + WHOP MEMBERSHIPS (Apple app, Whop Discord-only) ───────
