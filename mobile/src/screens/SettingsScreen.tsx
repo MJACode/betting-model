@@ -52,7 +52,7 @@ import { discordLinkReady } from '@/lib/discordConfig';
 import { describeDiscordLink, discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
 import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, endTrialEarly, openManageSubscription, restorePurchases } from '@/lib/billing';
-import { earlyUnlockLine, isEntitled, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
+import { earlyUnlockLine, isPlanKey, planStatusCopy } from '@/lib/billingHelpers';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 import { isUpdateReady, subscribeUpdateReady, UPDATE_READY_SETTINGS } from '@/lib/updateReady';
 import {
@@ -281,14 +281,15 @@ export function SettingsScreen() {
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
   // `subscription` describes the App Store plan. A Whop membership does not
   // make this row Premium.
-  const { subscription, hold: planHold, refresh: refreshMembership } = useMembership();
+  const { subscription, hold: planHold, discordPaid, refresh: refreshMembership } = useMembership();
   const { access, unlink, busy: discordBusy } = useAccess();
+  const comped = access.source === 'comped';
   const planStatus = planHold
     ? { badge: 'Free' as const, line: 'Checking your plan…' }
-    : planStatusCopy(subscription, { discordPaid: access.discord_access });
+    : planStatusCopy(subscription, { discordPaid: access.discord_access, comped });
   const [discordSheet, setDiscordSheet] = useState(false);
   const [endingTrial, setEndingTrial] = useState(false);
-  const storePaid = Boolean(subscription && isEntitled(subscription) && subscription.status === 'active');
+  const storePaid = discordPaid;
   const trialPlan = subscription?.plan && isPlanKey(subscription.plan) ? planFor(subscription.plan) : null;
   const linkedName = access.discord_username ?? 'Discord';
   const openHelpline = () => {
