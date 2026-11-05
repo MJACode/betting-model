@@ -1116,9 +1116,9 @@
     "semantic_hash": ""
   },
   "data/supabase_schema.sql": {
-    "mtime": 1793821811.5355895,
-    "seen": 1793858721.1864412,
-    "ast_hash": "4d7db3a42bd2023440657fb5e7143fa4",
+    "mtime": 1793912205.3367963,
+    "seen": 1793913318.8183472,
+    "ast_hash": "290686cb4c30a3fbaa6d1c2ed0c13251",
     "semantic_hash": ""
   },
   "data/team_board_cache.py": {
@@ -1140,9 +1140,9 @@
     "semantic_hash": ""
   },
   "data/view_migrations.py": {
-    "mtime": 1793857870.227949,
-    "seen": 1793858721.1864605,
-    "ast_hash": "af36c5c90583b48921377ad0558b7e2c",
+    "mtime": 1793912205.3435962,
+    "seen": 1793913318.818371,
+    "ast_hash": "c74ca525cca4f22085d74adaedcd2cc7",
     "semantic_hash": ""
   },
   "dk_mlb_sample.json": {
@@ -1236,9 +1236,9 @@
     "semantic_hash": ""
   },
   "jobs/declared_jobs.json": {
-    "mtime": 1793831423.6373537,
-    "seen": 1793858721.1865454,
-    "ast_hash": "ba1bb9b0aad03456524b3ffaffd81db5",
+    "mtime": 1793912205.4065428,
+    "seen": 1793913318.818479,
+    "ast_hash": "eb2df73fd2e4cb2ae7acc0552ddb0bba",
     "semantic_hash": ""
   },
   "mobile/App.tsx": {
@@ -1290,9 +1290,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_auth.ts": {
-    "mtime": 1793857842.3633916,
-    "seen": 1793858721.1866372,
-    "ast_hash": "04de6e3e0755536a91a9fd243ea35206",
+    "mtime": 1793912205.4146616,
+    "seen": 1793913318.8185594,
+    "ast_hash": "9ac7dad9a6361e7f05c53b98d6a7fe85",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_bankroll.ts": {
@@ -1314,9 +1314,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_billing.ts": {
-    "mtime": 1793821812.014744,
-    "seen": 1793858721.1866477,
-    "ast_hash": "615ad9698febecfb492e3382952bc2a3",
+    "mtime": 1793912205.4187047,
+    "seen": 1793913318.818583,
+    "ast_hash": "377fd4d3a7cdb9e3a0abed7cda5d748d",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_book_lines.ts": {
@@ -1356,9 +1356,9 @@
     "semantic_hash": ""
   },
   "mobile/scripts/verify_discord_link.ts": {
-    "mtime": 1793821812.024908,
-    "seen": 1793858721.1866748,
-    "ast_hash": "82b18bac38f529934c3961b72c79550d",
+    "mtime": 1793912205.4325213,
+    "seen": 1793913318.8186402,
+    "ast_hash": "4c447ee5f4415eabe40053af4b193e54",
     "semantic_hash": ""
   },
   "mobile/scripts/verify_error_states.ts": {
@@ -1716,9 +1716,9 @@
     "semantic_hash": ""
   },
   "mobile/src/components/DiscordLinkModal.tsx": {
-    "mtime": 1793821812.1196914,
-    "seen": 1793858721.1869507,
-    "ast_hash": "f5f62e3cd53edb972a16957344d5ad28",
+    "mtime": 1793912205.4368138,
+    "seen": 1793913318.8191164,
+    "ast_hash": "b8a3c00c8af2404660d4a52c52238f2f",
     "semantic_hash": ""
   },
   "mobile/src/components/EmptyState.tsx": {
@@ -2100,9 +2100,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useEntitlement.ts": {
-    "mtime": 1793821812.2281065,
-    "seen": 1793858721.1874359,
-    "ast_hash": "452fffa1c5baca284828eed6ecb5a8cd",
+    "mtime": 1793912205.503182,
+    "seen": 1793913318.8296294,
+    "ast_hash": "f1689b49a4cf22b882b5c2c21dc71544",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useFeedback.ts": {
@@ -2388,9 +2388,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/billingHelpers.ts": {
-    "mtime": 1793821812.3046815,
-    "seen": 1793858721.1876643,
-    "ast_hash": "bb4cef40d72a845631fa41d7c0fb81bd",
+    "mtime": 1793912205.5146203,
+    "seen": 1793913318.8301067,
+    "ast_hash": "66fd9caf2fb8f6bb123e7dbbf7743c4a",
     "semantic_hash": ""
   },
   "mobile/src/lib/buildStamp.ts": {
@@ -2448,9 +2448,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/discordHelpers.ts": {
-    "mtime": 1793821812.3256989,
-    "seen": 1793858721.1877496,
-    "ast_hash": "e4c889a89bd2336b5ec60cfe77606ac1",
+    "mtime": 1793912205.53218,
+    "seen": 1793913318.8302505,
+    "ast_hash": "88691fd60444959aefc473dfb8773299",
     "semantic_hash": ""
   },
   "mobile/src/lib/discordPublish.ts": {
@@ -2508,9 +2508,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/iap.ts": {
-    "mtime": 1793821812.340259,
-    "seen": 1793858721.1877975,
-    "ast_hash": "e0e05f7a9ab30cfb7760c903090959ef",
+    "mtime": 1793912205.534827,
+    "seen": 1793913318.8303185,
+    "ast_hash": "8bd4d95860bf38e13b871b5d306c8776",
     "semantic_hash": ""
   },
   "mobile/src/lib/iapHelpers.ts": {
@@ -2580,9 +2580,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/modelMeta.ts": {
-    "mtime": 1793859379.1287818,
-    "seen": 1793860347.916801,
-    "ast_hash": "ca2183dc84faade201cc1d82c378a100",
+    "mtime": 1793912325.9100094,
+    "seen": 1793913318.8304164,
+    "ast_hash": "3bcef1f849f22cb7ebaf8d2381ad6ea2",
     "semantic_hash": ""
   },
   "mobile/src/lib/otaUpdate.ts": {
@@ -2892,9 +2892,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/ModelsScreen.tsx": {
-    "mtime": 1793821812.4463565,
-    "seen": 1793858721.188209,
-    "ast_hash": "8c9600a42f5a9b8c588273d11380df5a",
+    "mtime": 1793912205.5515902,
+    "seen": 1793913318.8309505,
+    "ast_hash": "4328b61edd79dc13fa2cac06f86a7774",
     "semantic_hash": ""
   },
   "mobile/src/screens/OpeningComparisonScreen.tsx": {
@@ -2946,15 +2946,15 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/SettingsScreen.tsx": {
-    "mtime": 1793821812.4619694,
-    "seen": 1793858721.1882517,
-    "ast_hash": "0ce03a964e0bab80fbd41782f11b7298",
+    "mtime": 1793912205.562202,
+    "seen": 1793913318.8310218,
+    "ast_hash": "28b536745944cc86c5a100c084e8e4b2",
     "semantic_hash": ""
   },
   "mobile/src/screens/SignInScreen.tsx": {
-    "mtime": 1793857842.367443,
-    "seen": 1793858721.188256,
-    "ast_hash": "6cc06e0f7cc55c166a1a09212c7aad21",
+    "mtime": 1793912205.564443,
+    "seen": 1793913318.8310328,
+    "ast_hash": "eca1f319140edb0761452e4bdb5d5afa",
     "semantic_hash": ""
   },
   "mobile/src/screens/StatsScreen.tsx": {
@@ -2976,9 +2976,9 @@
     "semantic_hash": ""
   },
   "mobile/src/types/index.ts": {
-    "mtime": 1793821812.4748926,
-    "seen": 1793858721.1882732,
-    "ast_hash": "b6e758297f9090f32363aff4c8c9f936",
+    "mtime": 1793912205.567692,
+    "seen": 1793913318.8310564,
+    "ast_hash": "cb20c9268ac1c7ebfa8987209f75f57b",
     "semantic_hash": ""
   },
   "mobile/tsconfig.json": {
@@ -3942,21 +3942,21 @@
     "semantic_hash": ""
   },
   "railway.json": {
-    "mtime": 1793821831.3905675,
-    "seen": 1793858721.1891632,
-    "ast_hash": "7d0659c1e7cf4f2719242061e09f24bc",
+    "mtime": 1793912205.5696945,
+    "seen": 1793913318.8392613,
+    "ast_hash": "7606b4d14509ac5889f6e1524d9031ee",
     "semantic_hash": ""
   },
   "run_pipeline.py": {
-    "mtime": 1793821831.3957605,
-    "seen": 1793858721.1891778,
-    "ast_hash": "5b33af80d4b457f9619b68af33821993",
+    "mtime": 1793912205.5727043,
+    "seen": 1793913318.8392677,
+    "ast_hash": "a55bd3d30b55812ceceb343e1911b194",
     "semantic_hash": ""
   },
   "scheduler.py": {
-    "mtime": 1793847188.7358696,
-    "seen": 1793858721.1891835,
-    "ast_hash": "409683bbcf691adf6645441698d90925",
+    "mtime": 1793912205.5799959,
+    "seen": 1793913318.8392727,
+    "ast_hash": "41f0482fdf70046bb715ece75dfa4586",
     "semantic_hash": ""
   },
   "scripts/_envfile.py": {
@@ -4962,9 +4962,9 @@
     "semantic_hash": ""
   },
   "scripts/refresh_pass.sh": {
-    "mtime": 1793821831.6750052,
-    "seen": 1793858721.1905222,
-    "ast_hash": "f3120de81a1a82151b94ccde968067a0",
+    "mtime": 1793912205.5842934,
+    "seen": 1793913318.84743,
+    "ast_hash": "9a015b4fc5c4d89ef8f83a0f93d8ce5b",
     "semantic_hash": ""
   },
   "scripts/regrade_nfl_prop_name_miss.py": {
@@ -5100,9 +5100,9 @@
     "semantic_hash": ""
   },
   "supabase/functions/_shared/entitlement.ts": {
-    "mtime": 1793821831.6983035,
-    "seen": 1793858721.1906476,
-    "ast_hash": "7a176c40d81a63f907d63d883e0bbfdf",
+    "mtime": 1793912205.589817,
+    "seen": 1793913318.8476188,
+    "ast_hash": "66567281aac833aecc47f68b9b23869b",
     "semantic_hash": ""
   },
   "supabase/functions/discord-link/index.ts": {
@@ -5370,9 +5370,9 @@
     "semantic_hash": ""
   },
   "tests/test_daily_retry.py": {
-    "mtime": 1793821831.8112695,
-    "seen": 1793858721.1911714,
-    "ast_hash": "5fea3a246fe8959b5b2ac92a154a16ee",
+    "mtime": 1793912205.6147778,
+    "seen": 1793913318.8483768,
+    "ast_hash": "54fe86a02f3a405b9dc5f16ba46f951e",
     "semantic_hash": ""
   },
   "tests/test_dashboard_rule_models.py": {
@@ -5682,9 +5682,9 @@
     "semantic_hash": ""
   },
   "tests/test_health_pregame_prices_current.py": {
-    "mtime": 1793821831.8640823,
-    "seen": 1793858721.1914287,
-    "ast_hash": "c4a722aa1c0f0a8673c742d46d2660f1",
+    "mtime": 1793912205.618639,
+    "seen": 1793913318.848735,
+    "ast_hash": "f95b8cfe62ac36915fe2129c8bde6cb8",
     "semantic_hash": ""
   },
   "tests/test_health_reason_and_cadence.py": {
@@ -7200,9 +7200,9 @@
     "semantic_hash": ""
   },
   "tests/test_system_health_meta_steps.py": {
-    "mtime": 1793821832.3676033,
-    "seen": 1793858721.1929462,
-    "ast_hash": "c6a651063a5c6e85d3cdeecdda76c9bc",
+    "mtime": 1793912205.634286,
+    "seen": 1793913318.851956,
+    "ast_hash": "852581ab8ac3ed9709c7ee57fc2e1b29",
     "semantic_hash": ""
   },
   "tests/test_team_board_cache.py": {
@@ -7416,9 +7416,9 @@
     "semantic_hash": ""
   },
   "tracking/daily_retry.py": {
-    "mtime": 1793821832.4115431,
-    "seen": 1793858721.1931665,
-    "ast_hash": "2ffcb151e93fabd5fa7ed0cdbefa7d00",
+    "mtime": 1793912205.637842,
+    "seen": 1793913318.8522658,
+    "ast_hash": "3397950bb13ca79783945324236c0ecd",
     "semantic_hash": ""
   },
   "tracking/deploy_checks.py": {
@@ -7464,9 +7464,9 @@
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1793831423.681642,
-    "seen": 1793858721.1932073,
-    "ast_hash": "3e00d7c1d8b1199797723634ab7ae0ff",
+    "mtime": 1793912205.6459465,
+    "seen": 1793913318.852321,
+    "ast_hash": "463bfbc4992d7628022690d9bf7327e5",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -7560,9 +7560,9 @@
     "semantic_hash": ""
   },
   "tracking/refresh_retry.py": {
-    "mtime": 1793821832.4473078,
-    "seen": 1793858721.1933029,
-    "ast_hash": "b6a5d0c462581c9a02f80eea1df86cfe",
+    "mtime": 1793912205.65096,
+    "seen": 1793913318.8524387,
+    "ast_hash": "aadfd2df9fbf5f5e4bd20caea1f99249",
     "semantic_hash": ""
   },
   "tracking/run_ledger.py": {
@@ -7584,9 +7584,9 @@
     "semantic_hash": ""
   },
   "tracking/system_health.py": {
-    "mtime": 1793842336.3582773,
-    "seen": 1793858721.1933186,
-    "ast_hash": "3bbd54d1b0e7432150fd7e01b456f459",
+    "mtime": 1793912205.6554756,
+    "seen": 1793913318.8524976,
+    "ast_hash": "fd3677b70e09d204fcecf87a75c8c739",
     "semantic_hash": ""
   },
   "tracking/threshold_review.py": {
@@ -7698,9 +7698,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/pr-ci.yml": {
-    "mtime": 1793821810.9178467,
-    "seen": 1793858721.1933942,
-    "ast_hash": "9d8d4b9f2a3f1c65a804f8192e3ece44",
+    "mtime": 1793912205.295599,
+    "seen": 1793913318.8527055,
+    "ast_hash": "f120935cffcfa4efa6fd84bec41186dc",
     "semantic_hash": ""
   },
   ".github/workflows/prune-merged-branches.yml": {
@@ -7716,9 +7716,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1793857842.324613,
-    "seen": 1793858721.1934032,
-    "ast_hash": "96f9e4792b73993ac1eb88aa7967d580",
+    "mtime": 1793912205.3002057,
+    "seen": 1793913318.8527231,
+    "ast_hash": "e548fdc44f19e3dd32636a6284db7c01",
     "semantic_hash": ""
   },
   "docs/AGENTS.md": {
@@ -7758,9 +7758,9 @@
     "semantic_hash": ""
   },
   "docs/cloud_worker.md": {
-    "mtime": 1793859726.5114048,
-    "seen": 1793860347.9393713,
-    "ast_hash": "55ecf3b3785bdc4b81d19bfc03ff656d",
+    "mtime": 1793912205.359155,
+    "seen": 1793913318.8528218,
+    "ast_hash": "3f6b9ae2ca21439e68bb742b53c4f8b3",
     "semantic_hash": ""
   },
   "docs/clv.md": {
@@ -8142,9 +8142,9 @@
     "semantic_hash": ""
   },
   "docs/sports/nba.md": {
-    "mtime": 1793857138.1527925,
-    "seen": 1793858721.1936674,
-    "ast_hash": "5983c509b72012b3f7d2cc80c7cb9d05",
+    "mtime": 1793912205.4025347,
+    "seen": 1793913318.8534274,
+    "ast_hash": "23e21864924cc52c96163293c22efa05",
     "semantic_hash": ""
   },
   "docs/sports/ncaaf.md": {
@@ -8238,9 +8238,9 @@
     "semantic_hash": ""
   },
   "mobile/docs/DISCORD_LINKING.md": {
-    "mtime": 1793821811.9935894,
-    "seen": 1793858721.1937234,
-    "ast_hash": "8f8276c0ca669bea67c76e1491a3f956",
+    "mtime": 1793912205.4116483,
+    "seen": 1793913318.8535566,
+    "ast_hash": "d1a55c4fa1392d151603977b4184831d",
     "semantic_hash": ""
   },
   "mobile/docs/UX_REVIEW.md": {
@@ -8796,9 +8796,9 @@
     "semantic_hash": ""
   },
   "tests/test_nba_pbp.py": {
-    "mtime": 1793821832.019032,
-    "seen": 1793858721.1919072,
-    "ast_hash": "b9de8ceae26aaf4ee3097499040dbf2f",
+    "mtime": 1793912205.62529,
+    "seen": 1793913318.8499339,
+    "ast_hash": "5302a0296f919ee68992e1df06ca2b85",
     "semantic_hash": ""
   },
   "tests/test_nba_sbr_archive.py": {
@@ -9006,9 +9006,9 @@
     "semantic_hash": ""
   },
   "byom/constants.py": {
-    "mtime": 1793821810.9271867,
-    "seen": 1793858721.1850476,
-    "ast_hash": "b935124640f8852f19844dfdd3568b22",
+    "mtime": 1793912205.3086393,
+    "seen": 1793913318.8122451,
+    "ast_hash": "0f4169598a27c3a180165d04eccab090",
     "semantic_hash": ""
   },
   "byom/game_facts.py": {
@@ -9018,9 +9018,9 @@
     "semantic_hash": ""
   },
   "byom/load.py": {
-    "mtime": 1793831423.0565696,
-    "seen": 1793858721.1850579,
-    "ast_hash": "35ccc86ec460af10204ebf7a736df372",
+    "mtime": 1793912205.3135667,
+    "seen": 1793913318.8122628,
+    "ast_hash": "b278a383e0efd20767141743c25f7b39",
     "semantic_hash": ""
   },
   "data/migrations/add_app_errors.sql": {
@@ -9276,9 +9276,9 @@
     "semantic_hash": ""
   },
   "tests/test_byom_game_facts.py": {
-    "mtime": 1793831423.6686687,
-    "seen": 1793858721.1910102,
-    "ast_hash": "7c81b34299d162a459d77528e420fa81",
+    "mtime": 1793912205.6005373,
+    "seen": 1793913318.848154,
+    "ast_hash": "aca4e5e83161117243530a1d00c1f838",
     "semantic_hash": ""
   },
   "tests/test_member_sportsbooks_migration.py": {
@@ -9420,9 +9420,9 @@
     "semantic_hash": ""
   },
   "docs/byom_nfl.md": {
-    "mtime": 1793821811.5489278,
-    "seen": 1793858721.1934328,
-    "ast_hash": "f7d67d88a9df85037791f84ede6a0859",
+    "mtime": 1793912205.3518534,
+    "seen": 1793913318.8528066,
+    "ast_hash": "8b890f5f030462fc6ef527a23087e6e7",
     "semantic_hash": ""
   },
   "mobile/tsc-baseline.txt": {
@@ -9780,15 +9780,15 @@
     "semantic_hash": ""
   },
   "byom/refresh.py": {
-    "mtime": 1793831423.0641615,
-    "seen": 1793858721.1850803,
-    "ast_hash": "4aa35a5b5d001ad7716e834189896be2",
+    "mtime": 1793912205.3213425,
+    "seen": 1793913318.812288,
+    "ast_hash": "6c5411a88049c7c3bb0df57d64f1b556",
     "semantic_hash": ""
   },
   "byom/season.py": {
-    "mtime": 1793821810.935133,
-    "seen": 1793858721.1850858,
-    "ast_hash": "6505e7199bdad91f1598d3b7d454b62f",
+    "mtime": 1793912205.322906,
+    "seen": 1793913318.8122935,
+    "ast_hash": "dfa49ae6e3b2679721410bd53ac56f2d",
     "semantic_hash": ""
   },
   "data/ingestors/nba_schedule_refresh.py": {
@@ -9876,15 +9876,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/byom.ts": {
-    "mtime": 1793831423.6519654,
-    "seen": 1793858721.1876721,
-    "ast_hash": "a8341a1c8401f1f7a0d9f8ae96aff09a",
+    "mtime": 1793912205.518622,
+    "seen": 1793913318.8301187,
+    "ast_hash": "da5ac2b01408eac430d06eb10bc4488a",
     "semantic_hash": ""
   },
   "mobile/src/lib/byomFilters.ts": {
-    "mtime": 1793821812.3066804,
-    "seen": 1793858721.1876767,
-    "ast_hash": "4c24f9661e485f9ff531d3a590b749e8",
+    "mtime": 1793912205.5206218,
+    "seen": 1793913318.8301241,
+    "ast_hash": "5be70e4eb1fad8b8d52389f51a72cf37",
     "semantic_hash": ""
   },
   "models/nhl_goalie_gate.py": {
@@ -9948,9 +9948,9 @@
     "semantic_hash": ""
   },
   "tests/test_byom_mobile.py": {
-    "mtime": 1793821831.7763016,
-    "seen": 1793858721.191015,
-    "ast_hash": "ebf8c8388cdb4a104ce9e17bbc182e31",
+    "mtime": 1793912205.6033764,
+    "seen": 1793913318.8481584,
+    "ast_hash": "6d02d5213f8ee1bc2ca6a4d39cb17ecf",
     "semantic_hash": ""
   },
   "tests/test_byom_prop_facts.py": {
@@ -9960,9 +9960,9 @@
     "semantic_hash": ""
   },
   "tests/test_byom_refresh.py": {
-    "mtime": 1793831423.6766434,
-    "seen": 1793858721.1910534,
-    "ast_hash": "3aaf6c6afcb969bb5d4b12748eb99939",
+    "mtime": 1793912205.6124144,
+    "seen": 1793913318.8482237,
+    "ast_hash": "f6a8dd198f3f0b9226d9db141bb2df95",
     "semantic_hash": ""
   },
   "tests/test_byom_saved_models.py": {
@@ -10380,21 +10380,21 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomFields.tsx": {
-    "mtime": 1793821812.187812,
-    "seen": 1793858721.1872966,
-    "ast_hash": "d464eefeb8952ecb783aad253a736bb2",
+    "mtime": 1793912205.444739,
+    "seen": 1793913318.820383,
+    "ast_hash": "8b2dc30f3216399efac3c20046342bb5",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomModelList.tsx": {
-    "mtime": 1793831423.643301,
-    "seen": 1793858721.1873047,
-    "ast_hash": "f7d0012de2a78d292bd802729595e1a2",
+    "mtime": 1793912205.4728036,
+    "seen": 1793913318.8204856,
+    "ast_hash": "13550ba4c03151d47b9199e92514020c",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomModelRow.tsx": {
-    "mtime": 1793831423.644832,
-    "seen": 1793858721.1873093,
-    "ast_hash": "5621be8a895c3d5d042441dd32a4f2d8",
+    "mtime": 1793912205.4738133,
+    "seen": 1793913318.8204927,
+    "ast_hash": "f5db17bf18f04b9c9f001b47164d443e",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomPreviewCard.tsx": {
@@ -10416,15 +10416,15 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useByomLeaderboard.ts": {
-    "mtime": 1793821812.2174585,
-    "seen": 1793858721.187396,
-    "ast_hash": "908eb0795f36edc0273a89245e313531",
+    "mtime": 1793912205.4927294,
+    "seen": 1793913318.828811,
+    "ast_hash": "f7117ddb2379614c820e09672e3f1fd1",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useByomRecord.ts": {
-    "mtime": 1793831423.6499548,
-    "seen": 1793858721.1874034,
-    "ast_hash": "1f881d12644988b32028dfde763b8a9f",
+    "mtime": 1793912205.4959843,
+    "seen": 1793913318.8288233,
+    "ast_hash": "5fb213a3e6c0a3fd164a8a7666d4832c",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useByomSavedModel.ts": {
@@ -10440,9 +10440,9 @@
     "semantic_hash": ""
   },
   "mobile/src/hooks/useMembership.ts": {
-    "mtime": 1793821812.2411158,
-    "seen": 1793858721.1874726,
-    "ast_hash": "81f449b0872eed6f727569cac1d5ff49",
+    "mtime": 1793912205.5057008,
+    "seen": 1793913318.8297021,
+    "ast_hash": "57bb4054bd9617c4cc38075f88a4c68c",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useScoreboard.ts": {
@@ -10452,15 +10452,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/byomRecord.ts": {
-    "mtime": 1793831423.6545236,
-    "seen": 1793858721.187685,
-    "ast_hash": "6c063bfd116fd0e1c834147939afe54a",
+    "mtime": 1793912205.5260446,
+    "seen": 1793913318.8301358,
+    "ast_hash": "b4016356475d62917e82d565d0fa3629",
     "semantic_hash": ""
   },
   "mobile/src/lib/membership.ts": {
-    "mtime": 1793821812.3591897,
-    "seen": 1793858721.1878633,
-    "ast_hash": "f9b1f4bc3553fa0f8cb6b036dd316ab3",
+    "mtime": 1793912205.536827,
+    "seen": 1793913318.8304048,
+    "ast_hash": "e75815a893376c98d19b2c5705cb74a9",
     "semantic_hash": ""
   },
   "mobile/src/lib/nbaQ1.ts": {
@@ -10482,21 +10482,21 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomBuilderScreen.tsx": {
-    "mtime": 1793831423.6592412,
-    "seen": 1793858721.1881642,
-    "ast_hash": "b9a75fdec35896d0f521f6ac73937589",
+    "mtime": 1793912205.5457666,
+    "seen": 1793913318.8308835,
+    "ast_hash": "2b20e517cbaa7afe42f862d5fa681809",
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomDetailScreen.tsx": {
-    "mtime": 1793831423.6603403,
-    "seen": 1793858721.1881688,
-    "ast_hash": "b50b6b6dc1164f2e772dd6c1acc7f4d9",
+    "mtime": 1793912205.547767,
+    "seen": 1793913318.8308887,
+    "ast_hash": "03bcbd863136994387849189b54c66cc",
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomEditScreen.tsx": {
-    "mtime": 1793831423.662349,
-    "seen": 1793858721.1881733,
-    "ast_hash": "b94b46dd3af0b69687f21534d9b10099",
+    "mtime": 1793912205.549765,
+    "seen": 1793913318.8308947,
+    "ast_hash": "f134ec15c810a578b4392a7e14f9f30b",
     "semantic_hash": ""
   },
   "mobile/src/screens/ScoreboardGameScreen.tsx": {
@@ -10566,9 +10566,9 @@
     "semantic_hash": ""
   },
   "tests/test_apple_only_app_access.py": {
-    "mtime": 1793821831.7575467,
-    "seen": 1793858721.1909392,
-    "ast_hash": "fb883c9b54aff2a9978ade23845a2266",
+    "mtime": 1793912205.5918176,
+    "seen": 1793913318.847982,
+    "ast_hash": "d7fbd4ce576c9beb987ffb2f6a8a2e71",
     "semantic_hash": ""
   },
   "tests/test_byom_dk_start_price.py": {
@@ -10818,15 +10818,15 @@
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomFilterSheet.tsx": {
-    "mtime": 1793831423.641529,
-    "seen": 1793858721.187301,
-    "ast_hash": "8a37f058f76bb767fb9b8c3523aef119",
+    "mtime": 1793912205.4517112,
+    "seen": 1793913318.8204708,
+    "ast_hash": "35ee5108bae1ef1f30c72b71aa2e936a",
     "semantic_hash": ""
   },
   "mobile/src/components/byom/ByomPropSideFields.tsx": {
-    "mtime": 1793821812.1941779,
-    "seen": 1793858721.1873221,
-    "ast_hash": "5ca86f0258c7cc39aa48434f597d55e2",
+    "mtime": 1793912205.485175,
+    "seen": 1793913318.820513,
+    "ast_hash": "2d207f7cedc16feacbdbd341cd4fc438",
     "semantic_hash": ""
   },
   "mobile/src/hooks/useNbaGameFacts.ts": {
@@ -10836,15 +10836,15 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/byomPropFilters.ts": {
-    "mtime": 1793821812.3076823,
-    "seen": 1793858721.1876805,
-    "ast_hash": "dbc97b571cb514ee7b278d762317988b",
+    "mtime": 1793912205.5216231,
+    "seen": 1793913318.8301296,
+    "ast_hash": "1494f61a0909b14f10bd150cd5c85cf1",
     "semantic_hash": ""
   },
   "mobile/src/lib/byomTeams.ts": {
-    "mtime": 1793821812.311226,
-    "seen": 1793858721.1876893,
-    "ast_hash": "fdc3d006d87c830f1ecd2896b1fb99e3",
+    "mtime": 1793912205.5290568,
+    "seen": 1793913318.8301408,
+    "ast_hash": "d75b780fc4ca95e61fe9900ca1d5a204",
     "semantic_hash": ""
   },
   "tests/fixtures/espn_nfl_scoreboard_2026-10-18.json": {
@@ -11790,9 +11790,9 @@
     "semantic_hash": ""
   },
   "byom/official.py": {
-    "mtime": 1793831423.0585823,
-    "seen": 1793858721.1850634,
-    "ast_hash": "60872e0a2b9e814c93b66b94d2ee42b5",
+    "mtime": 1793912205.3187537,
+    "seen": 1793913318.8122687,
+    "ast_hash": "fa4315326e15331b40c44c89199a00b0",
     "semantic_hash": ""
   },
   "data/migrations/app_review_sign_in_attempts_2026_11_04.sql": {
@@ -11844,9 +11844,9 @@
     "semantic_hash": ""
   },
   "mobile/src/lib/authShell.ts": {
-    "mtime": 1793821812.2960923,
-    "seen": 1793858721.1876404,
-    "ast_hash": "a6a7bb54b495e4a0518f148fc22157a1",
+    "mtime": 1793912205.5104063,
+    "seen": 1793913318.8300607,
+    "ast_hash": "e92f29941406e3d97064ef2734f99c77",
     "semantic_hash": ""
   },
   "mobile/src/lib/clvBeat.ts": {
@@ -11856,9 +11856,9 @@
     "semantic_hash": ""
   },
   "mobile/src/screens/ByomBetsScreen.tsx": {
-    "mtime": 1793831423.6565042,
-    "seen": 1793858721.18816,
-    "ast_hash": "2aed35d28ad0cbf48d5969d450be094b",
+    "mtime": 1793912205.5427432,
+    "seen": 1793913318.8308778,
+    "ast_hash": "5fa307a8bf1b786434672b2ba6707ee0",
     "semantic_hash": ""
   },
   "scripts/nba_s_q1props.py": {
@@ -11904,9 +11904,9 @@
     "semantic_hash": ""
   },
   "tests/test_byom_official_legs.py": {
-    "mtime": 1793857842.3730378,
-    "seen": 1793858721.1910295,
-    "ast_hash": "cce8f58a05be60f8e11a04a449c8770b",
+    "mtime": 1793912205.607413,
+    "seen": 1793913318.8481827,
+    "ast_hash": "6d09ab235862f2d227afa0401d62fd91",
     "semantic_hash": ""
   },
   "tests/test_byom_open_transaction.py": {
@@ -12060,15 +12060,15 @@
     "semantic_hash": ""
   },
   "tests/test_mobile_live_deciding_book.py": {
-    "mtime": 1793859392.3120835,
-    "seen": 1793860347.9350245,
-    "ast_hash": "abdf619fb8739a5b5f908898354b3ab5",
+    "mtime": 1793912225.7532363,
+    "seen": 1793913318.8494647,
+    "ast_hash": "ef723d0a6f6848ebc834dc647677c8e0",
     "semantic_hash": ""
   },
   "tests/test_nba_live_config.py": {
-    "mtime": 1793857034.9456472,
-    "seen": 1793858721.1918762,
-    "ast_hash": "1b914e14dd0aa332b778860d9bfe9c40",
+    "mtime": 1793912205.6216831,
+    "seen": 1793913318.8498874,
+    "ast_hash": "11b2f9cbb48f4e3f290da8666a378f52",
     "semantic_hash": ""
   },
   "tests/test_nba_live_ig2.py": {
@@ -12090,9 +12090,111 @@
     "semantic_hash": ""
   },
   "tracking/nba_live_health.py": {
-    "mtime": 1793857067.7998402,
-    "seen": 1793858721.1932445,
-    "ast_hash": "864c161e43606c6cf8af4c24a6cccfd1",
+    "mtime": 1793912205.64896,
+    "seen": 1793913318.8523507,
+    "ast_hash": "601b94e54f9851642a8368acd86b0a81",
+    "semantic_hash": ""
+  },
+  "byom/analyze.py": {
+    "mtime": 1793912205.3046157,
+    "seen": 1793913318.8122299,
+    "ast_hash": "98a2a91516f119f6982a1b32a1a0e079",
+    "semantic_hash": ""
+  },
+  "data/migrations/add_access_grants_2026_11_05.sql": {
+    "mtime": 1793912205.3250048,
+    "seen": 1793913318.815915,
+    "ast_hash": "15e539b66c9c119f0b73aa0918ad1aea",
+    "semantic_hash": ""
+  },
+  "data/migrations/byom_nhl_2026_11_05.sql": {
+    "mtime": 1793912205.327014,
+    "seen": 1793913318.8175433,
+    "ast_hash": "246987c7b3269bd676423046145d957d",
+    "semantic_hash": ""
+  },
+  "data/migrations/byom_save_filters_2026_11_05.sql": {
+    "mtime": 1793912205.3283482,
+    "seen": 1793913318.817623,
+    "ast_hash": "2fef0526ac9703dd6111f3c3df43b758",
+    "semantic_hash": ""
+  },
+  "data/migrations/byom_trend_filters_2026_11_05.sql": {
+    "mtime": 1793912205.3303626,
+    "seen": 1793913318.8176415,
+    "ast_hash": "767469e513bfda6a242f9cdec1cad9b4",
+    "semantic_hash": ""
+  },
+  "data/migrations/byom_units_inline_2026_11_05.sql": {
+    "mtime": 1793912205.3313673,
+    "seen": 1793913318.8176472,
+    "ast_hash": "79c012718eedd24ff448d78a9082e2d8",
+    "semantic_hash": ""
+  },
+  "mobile/src/components/byom/ByomSeasonBreakdown.tsx": {
+    "mtime": 1793912205.4871876,
+    "seen": 1793913318.8205187,
+    "ast_hash": "a1aa028b2b24f7c9e3a5dc14e5cb4131",
+    "semantic_hash": ""
+  },
+  "scripts/grant_founder_comped_2026_11_05.sql": {
+    "mtime": 1793912205.580997,
+    "seen": 1793913318.8394845,
+    "ast_hash": "f74e993c35ebf0bb31febbab9168af8d",
+    "semantic_hash": ""
+  },
+  "tests/test_byom_analyze.py": {
+    "mtime": 1793912205.5944364,
+    "seen": 1793913318.8481276,
+    "ast_hash": "60d99d6576e6f89c7cdde7f44f089d65",
+    "semantic_hash": ""
+  },
+  "tests/test_byom_nhl.py": {
+    "mtime": 1793912205.6054034,
+    "seen": 1793913318.8481772,
+    "ast_hash": "2fbc7fb3d64ce2b3c525d1a45a568b75",
+    "semantic_hash": ""
+  },
+  "tests/test_deploy_drain.py": {
+    "mtime": 1793912205.616618,
+    "seen": 1793913318.8484614,
+    "ast_hash": "d62f8c672b63512ffd7d5bc01bdb4248",
+    "semantic_hash": ""
+  },
+  "tests/test_scoring_lease.py": {
+    "mtime": 1793912205.6302698,
+    "seen": 1793913318.8517673,
+    "ast_hash": "8a8738608943807a5ed5c311d554a4c0",
+    "semantic_hash": ""
+  },
+  "tracking/daily_merge_gate.py": {
+    "mtime": 1793912205.635795,
+    "seen": 1793913318.8522594,
+    "ast_hash": "ed3df042898089b73eace26d673071f2",
+    "semantic_hash": ""
+  },
+  "tracking/deploy_drain.py": {
+    "mtime": 1793912205.6394122,
+    "seen": 1793913318.8522756,
+    "ast_hash": "5a9615e4ae535233db7fa02332e588d8",
+    "semantic_hash": ""
+  },
+  "tracking/scoring_lease.py": {
+    "mtime": 1793912205.6519606,
+    "seen": 1793913318.8524601,
+    "ast_hash": "716ac44c7e5010c248f420b8272ba4a2",
+    "semantic_hash": ""
+  },
+  ".github/workflows/daily-merge-gate.yml": {
+    "mtime": 1793912205.289139,
+    "seen": 1793913318.852655,
+    "ast_hash": "2f99dba1b0b54ddafc3879487bde89d7",
+    "semantic_hash": ""
+  },
+  "docs/byom_nhl.md": {
+    "mtime": 1793912205.3541465,
+    "seen": 1793913318.8528118,
+    "ast_hash": "2955da309d101382095e5fafde521324",
     "semantic_hash": ""
   }
 }
