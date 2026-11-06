@@ -29,14 +29,17 @@ Sentry's event id. Join to `app_errors` on `device_id`.
 | tags | `device_id` (the app's anonymous id), `release` (the app version), `screen`, `update_id` | join to app_errors. `device_id` and `release` are set in `initialScope`, before the first event. The id is read synchronously when a previous launch already stored it |
 | `beforeSend` / `beforeBreadcrumb` | strip emails, bearer and basic tokens, JWTs, API keys, passwords, query-string tokens, and `user.email` / `user.ip_address` | a breadcrumb can carry a secret even with `sendDefaultPii` off |
 
-Code: `mobile/src/lib/sentry.ts`. With `SENTRY_DSN = ''` nothing starts.
+Code: `mobile/src/lib/sentry.ts`. The public DSN for org `signal-base`,
+project `signal-base-mobile` is set there. An empty `SENTRY_DSN` still
+starts nothing.
 
 ## Setup — Matt's steps (once)
 
 1. Create a free Sentry account (Developer plan), organisation, and a
    **React Native** project.
-2. Send Claude the project's **DSN** (Settings → Client Keys). It is public by
-   design (it can only send events) and goes into `mobile/src/lib/sentry.ts`.
+2. The public **DSN** is in `mobile/src/lib/sentry.ts` (org `signal-base`,
+   project `signal-base-mobile`). It can only send events. `SENTRY_ORG` is
+   `signal-base` and `SENTRY_PROJECT` is `signal-base-mobile`.
 3. Create an **auth token** with scope `project:read` and `project:releases`
    (Settings → Auth Tokens). Then set the same three values in three places:
 
