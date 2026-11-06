@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NCAAB two-bets-a-game and 1-3u sizing measured on six replays: one a game by highest EV costs 73 units over three seasons, EV does not rank bets; nothing changed |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry public DSN set in the app (org signal-base, project signal-base-mobile); empty DSN still starts nothing; auth token still unset |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry follow-ups (#1199 reviews): OTA source maps from the exported bundle, device_id at init, copy-job timeouts, PII scrub |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry in the app (native crashes, iOS hangs), copied to sentry_events by the worker; app 1.3.0; setup in docs/sentry.md |
