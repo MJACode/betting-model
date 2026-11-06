@@ -3060,9 +3060,169 @@ model's own percentile of raw EV. The prices it lays are unchanged: -194 to +380
   over the three seasons). On its own bet list its claims track its returns (largest gap 3.9
   points across eighths, one of eight outside its range), but its top 2% by its own EV returned
   +1.9% (-7.6 to +11.4, 321 bets), and a single shrink factor for it is unstable (1.35, 0.98,
-  0.62 across folds).
+  0.62 across folds). Worked in section 16 (2026-11-05): nothing clears.
 - The probability each projection pick stores and shows (`model_probability`, and `edge` from it)
   is the uncorrected number, about three times the edge its bets return. Storing the shrunk one
-  changes no bet, but every reader of that column would see the change.
+  changes no bet, but every reader of that column would see the change. Changed by #1196: picks
+  from 2026-11-07 store and show the shrunk number (`config.MODEL_PROB_SHRINK`, k 0.325; section 5).
 
 No model change, so no `Updated-By`.
+
+## 16. The market model at the door: its top 2% returns nothing, and no re-weighting against the projection model clears (2026-11-05, mike)
+
+Section 15 flagged it: at the door, `nba_prop_market` claims +7.9% and returned +3.0%
+walk-forward. The door gives each game to the bet with the highest percentile within its own
+model, so a market bet high in its own range takes the game from a projection bet. Two questions:
+does the market model's EV rank its own bets at the top, and should the door count a market bet
+for less when a projection bet in the same game competes with it?
+
+**Population and method.** The same bets as section 15, built by the same loader:
+`nba_prop_market` 24,572 graded bets (every one an under), `nba_prop_projection` 66,588,
+2023-24..2025-26. "Percentile" is the door's own key: a bet's EV percentile within its model over
+the three seasons (the breakpoints in `models/nba_prop_rank.py`). "Returned" is units over units
+risked; units are one to win. 90% ranges resample nights. Every door rule is compared with today's
+door night by night (4,000 resamples). "Walk-forward" is that comparison on 2024-25 and 2025-26
+only. Each door rule is a family with one setting, so the neighbourhood of settings is shown, plus
+a walk-forward pick: each test season uses the setting that did best on the seasons before it.
+The three "one scale" rows use maps fitted as in section 15: 2024-25 from 2023-24, 2025-26 from
+the two seasons before it, and 2023-24 from the other two (labelled there). "Early" and "late" are the two halves of each season (split in mid-January). Scripts and outputs:
+temp folder `nba_game_edge/mktdoor1105` (`s1_baseline.py` to `s7_drop.py`).
+
+### 16.1 The market model's EV ranks its bets up to its 98th percentile, then turns over
+
+The market model's whole list, by its own EV percentile, three seasons (%):
+
+| percentile | 0-50 | 50-70 | 70-80 | 80-90 | 90-95 | 95-98 | 98-100 |
+|---|---|---|---|---|---|---|---|
+| bets | 12,292 | 4,910 | 2,454 | 2,460 | 1,226 | 738 | 492 |
+| claimed | 0.9 | 2.5 | 3.6 | 4.7 | 5.9 | 7.3 | 10.5 |
+| returned | +2.8 | +1.4 | +4.3 | +4.0 | +5.7 | +7.7 | -1.6 |
+| 90% range | +1.2..+4.3 | -1.0..+3.7 | +1.1..+7.5 | +0.7..+7.3 | +1.2..+10.4 | +1.5..+13.8 | -9.1..+5.9 |
+
+- From the 70th to the 98th percentile its claims track its returns. The bottom half claims less
+  than it returns (+0.9% against +2.8%).
+- The top 2% claims +10.5% and returned -1.6%. Its bets have EVs of 0.082 to 0.296. The median
+  price is +110, and 68% are plus money (38% on the whole list). No single book or prop type
+  makes up the top 2%: the biggest book is Hard Rock at 28%, and the five prop types each hold
+  15-24%.
+
+The top 2% against the band just below it (90th-98th percentile):
+
+| | top 2% returned | 90-98 returned | gap, points (90% range) |
+|---|---|---|---|
+| three seasons | -1.6% (492 bets) | +6.4% (1,964) | -8.0 (-16.4..+0.5) |
+| walk-forward seasons | +0.2% (398) | +6.3% (1,359) | -6.1 (-15.9..+3.8) |
+| 2023-24 | -9.6% (94) | +6.7% (605) | -16.3 (-34.8..+1.5) |
+| 2024-25 | -2.0% (194) | +6.9% (734) | -8.9 (-22.6..+5.0) |
+| 2025-26 | +2.3% (204) | +5.5% (625) | -3.2 (-17.2..+10.2) |
+| early half | +0.9% (220) | +6.8% (958) | -5.9 (-18.8..+6.5) |
+| late half | -3.6% (272) | +6.0% (1,006) | -9.6 (-21.2..+1.7) |
+
+The gap points the same way in every season and in both halves. Every one of its 90% ranges
+includes zero. (Section 15's +1.9% on 321 bets ranked the walk-forward seasons among themselves.
+Here the top 2% is the door's own cut, 398 bets in those seasons.)
+
+**That is the door's over-claim.** Today's door bets the market model 791 times:
+
+| the door's market bets | bets | claimed | returned (90% range) | walk-forward: bets, claimed, returned |
+|---|---|---|---|---|
+| below its 98th percentile | 514 | +6.3% | +8.2% (+1.2..+15.8) | 378, +6.2%, +5.7% |
+| 98th percentile and up | 277 | +10.9% | -1.8% (-12.7..+8.5) | 235, +10.8%, -1.9% |
+
+### 16.2 The projection bets those market bets displace were no better
+
+The market model wins 778 of today's door games in which the projection model also had a bet.
+For each one, here is the market bet next to the projection bet it pushed out (the projection
+model's best bet in that game by its own percentile). Same game, same night:
+
+| | units | risked | returned |
+|---|---|---|---|
+| market bet (bet today) | +38.6 | 749.1 | +5.2% |
+| projection bet it displaced | +41.3 | 656.8 | +6.3% |
+| market minus projection | -2.6 (-61.8..+59.2) | | -1.1 points (-9.7..+7.7) |
+
+- By the market bet's percentile there is no pattern. In the 95-97 band the market bet beat the
+  projection bet by +18.9 units. At 98-99 it lost by 10.8 units, and at 99-100 it beat it by 3.7.
+- In the 277 games where the market bet was in its top 2%, the market bet returned -1.8% and the
+  projection bet it displaced returned +1.2% (+2.7 units). Both were poor bets in those games.
+
+### 16.3 The door, re-graded
+
+One bet a game across both models, six a night, first by tip. Each rule changes only which bet a
+game gets, so only games where both models had a bet can change. Each row is compared with today's
+door night by night. Risk is units risked; units at today's risk is the rule's return times
+today's risk.
+
+| rule | units | return | risk vs today | units at today's risk | return vs today, points | units vs today | walk-forward units vs today |
+|---|---|---|---|---|---|---|---|
+| **today:** own percentile, first six by tip | +183.7 | +8.17% | - | +183.7 | - | - | - |
+| market percentile lowered by 0.02 | +192.3 | +8.67% | -1.3% | +194.8 | +0.5 (-0.9..+2.0) | +8.7 (-22.5..+40.8) | +0.7 (-25.6..+28.0) |
+| market percentile lowered by 0.10 | +183.8 | +8.49% | -3.6% | +190.7 | +0.3 (-1.9..+2.6) | +0.1 (-48.8..+51.3) | +2.4 (-41.2..+48.4) |
+| projection bet whenever it has one | +183.2 | +8.53% | -4.4% | +191.5 | +0.4 (-2.3..+3.1) | -0.5 (-59.2..+59.7) | -4.2 (-58.6..+51.2) |
+| market percentile raised by 0.05 | +159.3 | +6.78% | +4.5% | +152.4 | -1.4 (-3.5..+0.7) | -24.3 (-72.9..+24.0) | -8.2 (-44.7..+28.0) |
+| control: market bet whenever it has one | +92.0 | +3.45% | +18.6% | +77.5 | -4.7 (-8.3..-1.0) | -91.7 (-179.1..+0.2) | -37.8 (-109.5..+31.6) |
+| market percentile capped at 0.95 | +160.8 | +7.23% | -1.0% | +162.5 | -0.9 (-2.2..+0.3) | -22.9 (-50.4..+5.3) | -27.7 (-50.7..-3.8) |
+| market percentile capped at 0.97 | +172.6 | +7.71% | -0.4% | +173.2 | -0.5 (-1.3..+0.3) | -11.1 (-28.6..+6.7) | -19.4 (-34.6..-3.8) |
+| market top 3% loses its game to the projection bet | +190.5 | +8.62% | -1.6% | +193.6 | +0.4 (-1.2..+2.3) | +6.8 (-30.3..+48.6) | -4.9 (-40.9..+30.3) |
+| market top 2% loses its game to the projection bet | +190.7 | +8.57% | -0.9% | +192.5 | +0.4 (-1.1..+2.0) | +7.1 (-26.0..+43.3) | +0.4 (-31.9..+33.2) |
+| market top 3% ranked last in its game (its next-best bet, either model, goes first; it is still bet when alone) | +212.0 | +9.51% | -0.8% | +213.7 | +1.3 (-0.4..+3.2) | +28.4 (-11.3..+70.7) | +14.0 (-23.5..+52.0) |
+| market top 2% ranked last in its game (the same) | +204.3 | +9.11% | -0.2% | +204.7 | +0.9 (-0.6..+2.6) | +20.7 (-14.5..+56.7) | +12.9 (-20.7..+46.9) |
+| both models on one return scale: earlier seasons' return in the bet's band | +120.2 | +5.02% | +6.5% | +112.9 | -3.2 (-7.4..+1.1) | -63.4 (-162.7..+36.0) | -45.5 (-123.6..+30.5) |
+| both on one scale: isotonic return on EV | +149.5 | +6.66% | 0.0% | +149.5 | -1.5 (-4.0..+1.0) | -34.2 (-91.1..+21.8) | -39.2 (-89.9..+11.3) |
+| both on one scale: EV x each model's fitted factor | +183.1 | +8.22% | -0.9% | +184.8 | +0.1 (-1.5..+1.8) | -0.6 (-35.9..+37.3) | -8.3 (-35.0..+18.7) |
+
+The neighbourhoods (units against today; walk-forward in brackets):
+
+- **Market percentile lowered** by 0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15, 0.20, 0.30 or 0.50:
+  -7.3 to +9.6 (-13.6 to +6.6). Risk -0.5% to -4.6%, return -0.1 to +0.7 points. Walk-forward
+  pick of the setting: -24.7 (-62.1..+13.9) when picked by units, -16.3 (-69.2..+37.7) when
+  picked by return.
+- **Market percentile capped** at 0.90, 0.93, 0.95, 0.96, 0.97, 0.98 or 0.99: -2.5 to -27.0
+  (-0.8 to -27.7). A cap hands the game to the projection model's own top bets, which are no
+  better than its 80th-90th percentile (section 15). Walk-forward pick: -17.5 (-33.4..-0.9).
+- **Market top bets lose their game to the projection bet,** top 10%, 7%, 5%, 4%, 3%, 2% or 1%:
+  -2.3, +0.9, -12.1, -14.4, +6.8, +7.1, -3.7 (-1.4, +0.3, -16.5, -22.4, -4.9, +0.4, -9.5).
+  Walk-forward pick (the top 3% both times): -4.9 (-40.9..+30.3).
+- **Market top bets ranked last in their game,** top 5%, 4%, 3%, 2% or 1%: -1.3, +4.5, +28.4, +20.7,
+  +8.3. Walk-forward pick (the top 3% both times): +14.0 (-23.5..+52.0).
+
+What the table says:
+
+- **Counting a market bet for less changes nothing.** Lowering its percentile by any amount from
+  0.01 to 0.50 lands within 10 units of today. Giving the projection model every game it has a
+  bet in moves -0.5 units. The market bets it replaces returned about what the projection bets
+  would have (16.2).
+- **The one row that looks like a result is a peak, and half of it is not market against
+  projection.** Ranking the market model's top 3% last in its game gains +28.4 units. Not betting
+  those bets at all grades the same to the unit, at every setting from the top 5% to the top 1%:
+  no game in the three seasons had only such bets to choose from. Taken apart:
+  - +10.3 from games handed to the projection model;
+  - +10.3 from games handed to the market model's own next-best bet;
+  - +2.2 from one game only the market model bet;
+  - +5.6 from a different game taking the sixth slot when several games tip at the same time.
+
+  Its neighbours are +4.5 (top 4%) and +8.3 (top 1%). At the top 3% the gain is all in the early
+  half (+27.6 early, +0.8 late). Walk-forward it is +14.0, and the 90% range includes zero. The
+  clean version, where the game goes only to the projection bet, is +6.8 (walk-forward -4.9).
+- **Early and late point opposite ways.** Every "lowered" row gains in the early half and gives it
+  back late: giving the projection model every contested game is +31.3 early and -31.8 late. In
+  the contested games the market bet lost to the projection bet in the early half (-37.2 units)
+  and beat it late (+34.6). By season the early half does not hold: 2023-24 -7.1, 2024-25 -37.2,
+  2025-26 +7.1. The late half favours the market bet in all three seasons (+2.8, +11.6, +20.3).
+  That is too small and too unsteady to build a rule on.
+- **None of these wins by betting favourites.** The rules that hand games to the projection model
+  risk up to 4.6% less, because its prices are longer (median +122 to +130, against +120
+  today). That is why each one's units at today's risk sit a few units above its raw units. The
+  market-first control shows the opposite effect: 18.6% more risk and 4.7 points less return.
+- **A ceiling on the market model itself is not worth it either.** On its whole list, its bets
+  with EV above 0.08 made +5.3 units (542 bets; +8.7 walk-forward). Above 0.09 they made -0.3,
+  above 0.07 +40.7. Cutting the top of the market model would move a few units either way. It
+  would also be a model change, which needs `Updated-By`.
+
+**Decision: nothing ships.** The answer to the first question is yes up to the 98th percentile and
+no above it: the market model's top 2% returns nothing, and that is all of its over-claim at the
+door. The answer to the second is no. No way of counting a market bet differently against a
+projection bet clears: the projection bets it would hand the game to did no better. The door
+stays one a game, six a night, first by tip, ranked by each model's own percentile of raw EV.
+The prices it lays are unchanged: -194 to +380, median +120, 78% plus money. No model change,
+so no `Updated-By`.
