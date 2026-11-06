@@ -20,6 +20,11 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, same-game parlays priced as independent legs (+6040 vs FanDuel +4254); estimated SGP price with a per-book cut fitted from member-entered prices (`sgp_price_observations`) |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, nba_prop_projection stores and shows p' = implied + 0.325 (p − implied) at the decision price for games from 2026-11-07; bets, door order and Discord "good to" (paid and free) unchanged on a full replay; config.MODEL_PROB_SHRINK, honest_ev.shrink_factor / shown_probability / decision_probability |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, the scorer's end-of-pass sweep deleted every writer's unsettled NONE rows (257 of 278 NCAAB card rows; NFL opener/wind every pass); now only the models its pass re-writes; restore job for unstarted NCAAB games |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, freeze tracking: trail on every app_errors report; restart / js_stall / modal_stuck kinds; all pop-ups via TrackedModal; migration applied before merge |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Stats NBA matchup column read 2025-26 defences (calendar year, not the ending-year label); now the Teams board season, labelled 2026-27 |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM Trends: Didn't move chip dropped; NBA prop line history starts 2026-27 note; post-deploy timings for #1187 |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, no NBA first-quarter model: every first-quarter search failed (props 0 of 18, team totals 0 of 26); the stale follow-up ticked |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM trend filters (line move, last game, division), More filters on game bets, NFL rest, season breakdown and 50-bet note; no lookahead on the official line |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, daily gate blocks 05:45–06:20 ET even with a clear ledger; pooler user for the readonly secret is daily_gate_reader.vvprgnrmzeekokzkrkfu; body bypass is owner or member only |

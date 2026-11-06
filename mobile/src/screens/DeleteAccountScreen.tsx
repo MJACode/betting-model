@@ -4,7 +4,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Linking,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -460,7 +460,7 @@ export function DeleteAccountScreen() {
         )}
       </View>
 
-      <Modal
+      <Modal trackName="DeleteAccountScreen"
         visible={reauth && signedIn}
         animationType="slide"
         transparent

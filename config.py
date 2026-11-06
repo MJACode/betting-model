@@ -2684,6 +2684,38 @@ MODEL_MARKET_EV_FLOOR: dict = {
 }
 
 
+# A model whose STORED and SHOWN probability is its own pulled toward the price
+# it was bet at (mike, 2026-11-06: "Yes, ship it"): p' = implied + k (p - implied), implied from the
+# decision price, so the EV a pick shows is k x the EV it was decided on.
+#
+# THE DECISION DOES NOT USE IT. The card, its floors (MODEL_MARKET_EV_FLOOR
+# above), the door's ranking (models/nba_prop_rank.py) and the Discord "good to"
+# price all run on the model's own number, exactly as graded. Only what a picks
+# row stores and the app shows -- model_probability, model_probability_cal,
+# edge, decision_edge, best_edge -- is the shrunk one. One number multiplies
+# every EV, so it moves no bet and no ranking. It is not a promoted calibration
+# map on purpose: models/honest_ev.honest_probability runs BEFORE the floor,
+# and a map there would hold a k-sized EV against floors set on the raw scale.
+#
+# "from": the first game_date whose rows store the shrunk number. Every row of
+# an earlier game_date stores the raw one, written before or after this shipped,
+# so a reader (Discord's "good to", a restated slate, research) tells the two
+# apart from the row alone (models/honest_ev.shrink_factor). It must be a date
+# no pick has been written for when this deploys: a row the old code wrote raw
+# on or after it would be read as shrunk.
+#
+# nba_prop_projection, k = 0.325: maximum likelihood (calfit.py method "k",
+# grid 0.005) on all three graded seasons, 66,588 bets, 2023-24..2025-26; 0.324
+# on a 0.001 grid; 90% likelihood range 0.270 to 0.377. Walk-forward it was
+# 0.325 (2023-24 alone) and 0.300 (2023-24 + 2024-25), and with it every eighth
+# of the EV range sat inside its 90% range, where uncorrected seven of eight
+# claimed about three times what the bets returned (docs/nba_models_2026.md,
+# "The probability a pick stores", section 5).
+MODEL_PROB_SHRINK: dict = {
+    "nba_prop_projection": {"k": 0.325, "from": "2026-11-07"},
+}
+
+
 def min_ev_for(model_id: str, prop_market: str | None = None) -> float:
     """The EV floor this model actually bets over: its OWN floor when it
     carries one (MODEL_OWN_EV_FLOOR, the two NFL rules), else the global
