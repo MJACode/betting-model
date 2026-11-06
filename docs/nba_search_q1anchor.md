@@ -184,3 +184,43 @@ The bets each cell would place (2024-25 + 2025-26), and the prices they lay (min
 2025-26 holds far fewer coherent rebounds and assists quotes than 2024-25 (most of that season's are one-sided Hard
 Rock quotes), so several rebounds and assists cells have under 30 bets in 2025-26 at the higher cuts and cannot meet
 the strict season bar. That is a property of the data, stated before the grade.
+
+## 13. Results (graded 2026-11-06, run `2026-11-06-q1anchor`)
+
+Stored in Supabase before it was read: 84 rows in `nba_game2_cells` (36 cells, 48 controls). The grade took 11
+minutes.
+
+**0 of the 36 cells pass.** 5 clear the 95% interval alone, against about 0.9 expected by chance. All 5 are in the
+consensus family, and each of the 5 fails only the bands bar.
+
+**The Pinnacle-anchored family (Q1AP) has nothing.** Its best cell with 200+ bets is points over at EV 0.04: 2,598
+bets, +1.7%, interval −2.1% to +5.5%. Assists overs lose 3.9% to 4.5%, and rebounds unders lose 3.8% to 8.3%.
+
+**The consensus family (Q1AC): players with no Pinnacle full-game quote, anchored on the soft books' median.**
+
+| Cell | Bets | Units | Return | 95% interval | 2024-25 / 2025-26 | Blind | Placebo 95th pct (choosing season) | Fails |
+|---|---|---|---|---|---|---|---|---|
+| assists over, EV 0.02 | 754 | +54.4 | +7.9% | +0.1% to +15.8% | +9.3% on 583 / +3.8% on 171 | −3.8% | −0.1% against +9.3% | bands |
+| assists over, EV 0.04 | 484 | +45.5 | +10.4% | +2.1% to +19.0% | +10.8% / +9.3% | −3.8% | −0.3% against +10.8% | bands |
+| assists over, EV 0.06 | 315 | +52.7 | +19.3% | +8.9% to +30.1% | +17.1% / +26.3% | −3.8% | −0.4% against +17.1% | bands |
+| rebounds under, EV 0.04 | 356 | +38.6 | +10.0% | +0.9% to +19.3% | +7.2% / +16.0% | −8.3% | −3.8% against +7.2% | bands |
+| rebounds under, EV 0.06 | 244 | +39.9 | +15.0% | +3.7% to +26.1% | +15.2% / +14.6% | −8.3% | −3.2% against +15.2% | bands |
+
+- **Why they fail the bands bar.** Assists overs by EV band: 0.00-0.02 +5.8% on 311, 0.02-0.04 +3.5% on 270, **0.04-0.06
+  −4.4% on 169**, 0.06 and up +19.3% on 315. One band below each cut loses, and the bar needs every band from the one
+  below the cut up to be positive. Rebounds unders: 0.00-0.02 −4.8% on 246, 0.02-0.04 −4.0% on 169, 0.04-0.06 −1.1% on
+  112, 0.06 and up +15.0% on 244. Every band below 0.06 loses, which is the shape of a peak.
+- **The control says the player's own share matters for assists.** With the share replaced by one factor, the same
+  assists-over cells return +5.1% to +5.4%, intervals below zero. The rebounds-under control loses (−0.4% to −3.8%).
+- **Where the assists-over bets are.** 2024-25: Hard Rock (503 of 583 at EV 0.02, +10.4%) and Caesars (80, +3.9%).
+  2025-26: BetMGM (170 of 171, +4.5%). None of these bets is on a player and stat the live full-game prop models bet;
+  91% are on a (game, player) where they bet something else.
+- **The rebounds-under bets overlap the live under model:** 61% to 63% are on the same player, stat and side as a live
+  full-game prop bet. Most of their return is that model's lean carried into the first quarter.
+- **Prices laid.** Assists overs, EV 0.02: −195 to +400, median +115, 5th to 95th percentile −154 to +220. Rebounds
+  unders: −200 to +185, median +105.
+- 54-minute fetches made the return; the few 64-minute fetches (48 assists-over bets at EV 0.02) made nothing.
+
+**Answer: first-quarter props anchored on Pinnacle's full-game number are closed. Anchored on the soft books' number,
+for players Pinnacle does not quote, assists overs clear five of six bars at every cut and fail the bands bar on one
+band of 169 bets. Nothing is built from this search without the owner's decision to ship a cell that failed a bar.**
