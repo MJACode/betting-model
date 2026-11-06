@@ -78,3 +78,15 @@ Once each quote is solved to its centre, the books' team totals sit within half 
 
 **11 of the 12 cells are under 200 bets and fail bar 1 by construction**: too few games to tell. Only the
 first-quarter over at EV 0.02 can be judged. Prices laid run from −130 to +110.
+
+## 6. Results (graded 2026-11-06, run `2026-11-06-q1pin`)
+
+Stored in Supabase before it was read (12 rows in `nba_game2_cells`). The grade took 8.4 minutes.
+
+**0 of the 12 cells pass, and none clears the 95% interval.** 11 are under 200 bets: too few games to tell. The one
+cell that can be judged, the first-quarter over at EV 0.02: 368 bets, +20.9 units, +5.1%, interval −3.6% to +14.1%,
++0.2% in 2024-25 (82 bets) and +6.6% in 2025-26 (286); it fails the interval, the bands and the placebo. The blind
+first-quarter over returned −1.2%.
+
+**Closed: the books set their first-quarter and first-half team totals within half a point of Pinnacle's own period
+spread and total 95% of the time, and the few larger gaps do not pay.**
