@@ -489,12 +489,37 @@ def _decimal_to_american(dec: float) -> int:
     return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
 
 
-def _honest(model_id, prob):
-    """The promoted calibration map applied (models.honest_ev); the raw
-    number when there is no map or the lookup fails. Never raises."""
+def _decided(model_id, prob, odds, game_date):
+    """The number a pick was decided on, from the one its row stores
+    (models.honest_ev.decision_probability): the stored number for every model
+    but one in config.MODEL_PROB_SHRINK, whose rows from its "from" game_date
+    store it pulled toward `odds`, the decision price. None when such a row has
+    no date or no price. Never raises."""
+    try:
+        from models.honest_ev import decision_probability
+        return decision_probability(str(model_id), float(prob), odds, game_date)
+    except Exception:  # noqa: BLE001 - a display bound must not stop a post
+        return prob
+
+
+def _honest(model_id, prob, odds=None, game_date=None):
+    """The number the EV floor was applied to, from the stored one: the promoted
+    calibration map applied (models.honest_ev); the raw number when there is no
+    map or the lookup fails. Never raises.
+
+    `odds` and `game_date`, the pick's decision price and game date: a model in
+    config.MODEL_PROB_SHRINK stores a probability pulled toward that price
+    (display only) for games from its "from" date, so the decided number is
+    recovered from it first. Without that, the "good to" bound would solve the
+    raw-scale floor on a k-sized EV and vanish (price_bound returns None) for
+    most of those picks; and without the date, a row written before the shrink
+    would be un-shrunk and inflated (a "good to" at the -200 price floor)."""
+    decided = _decided(model_id, prob, odds, game_date)
+    if decided is None:
+        return None
     try:
         from models.honest_ev import honest_probability
-        return honest_probability(str(model_id), float(prob))
+        return honest_probability(str(model_id), float(decided))
     except Exception:  # noqa: BLE001 - a display bound must not stop a post
         return prob
 
@@ -1008,7 +1033,7 @@ def _new_signals(conn, target_date: str, *,
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -1129,7 +1154,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -2095,8 +2120,13 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "model_id": r[11], "side": r[15], "line": r[16],
         "decision_book": r[18] if len(r) > 18 else None,
         "decision_odds_raw": r[19] if len(r) > 19 else None,
-        # Same "good to" the paid channels publish, from the same gates.
-        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
+        # Same "good to" the paid channels publish, from the same gates. On the
+        # number the pick was DECIDED on: a model in config.MODEL_PROB_SHRINK
+        # stores (and the capture copies) a number pulled toward its decision
+        # price, r[19], for games from its "from" date (every candidate here is
+        # target_date's); for every other model _decided is the stored number.
+        "good_to": price_bound(_decided(r[11], r[12], r[19] if len(r) > 19 else None, target_date),
+                               r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
     } for r in rows], "Discord(free)")
 
 
