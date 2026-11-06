@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -150,7 +150,7 @@ export function DailyResultsModal({
     // SafeAreaProvider doesn't reach it — without this local provider the
     // SafeAreaView gets a 0 top inset and the close button ends up under the
     // status bar (untappable). onRequestClose handles the Android back button.
-    <Modal
+    <Modal trackName="DailyResultsModal"
       visible={visible}
       animationType="slide"
       presentationStyle="fullScreen"

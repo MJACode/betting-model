@@ -52,6 +52,8 @@ import { usePushDeepLink } from '@/hooks/usePushDeepLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
 import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
+import { noteScreen, noteTouch } from '@/lib/freezeLog';
+import { startFreezeLogging } from '@/lib/freezeLogSetup';
 import { startPerfLogging } from '@/lib/perfLogSetup';
 import { setPerfScreen } from '@/lib/perfLog';
 import { AppErrorBoundary } from '@/components/AppErrorBoundary';
@@ -254,6 +256,9 @@ installNotificationHandler();
 // Same reason: catch an error from the first render, and record how the
 // previous launch ended before this one can overwrite the marker.
 startCrashLogging();
+// Freeze tracking: a trail of screens, taps and pop-ups on every report, and
+// a `restart` report when the last session looks force-quit (lib/freezeLog.ts).
+startFreezeLogging();
 // Load times: the first screen is timed from here (lib/perfLog.ts).
 startPerfLogging();
 
@@ -281,6 +286,7 @@ export default function App() {
   const syncRoute = useCallback(() => {
     const name = navRef.getCurrentRoute()?.name;
     setCrashScreen(name);
+    noteScreen(name);
     setPerfScreen(name);
     setRouteName(name);
   }, [navRef]);
@@ -319,7 +325,8 @@ export default function App() {
   }, [signedOut, navReady, navRef, routeName]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    // onTouchStart only records the tap (freezeLog); it never claims it.
+    <GestureHandlerRootView style={{ flex: 1 }} onTouchStart={noteTouch}>
     <SafeAreaProvider>
     <AppErrorBoundary onReset={resetNav}>
       <OnboardingModal

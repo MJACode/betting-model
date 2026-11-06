@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ByomBetCount } from '@/components/byom/ByomBetCount';
@@ -125,7 +125,7 @@ export function ByomFilterSheet({
     if (next.kickSlots.includes('prime')) onPrimetime(null);
   };
   return (
-    <Modal
+    <Modal trackName="ByomFilterSheet"
       visible={tab != null}
       animationType="slide"
       presentationStyle="pageSheet"

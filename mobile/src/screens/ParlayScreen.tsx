@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -14,6 +13,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -468,7 +468,7 @@ function ParlayScreenBody() {
       <EditLineLegSheet spec={editingLine} onClose={() => setEditingLine(null)} onSave={saveEditedLine} />
 
       {/* ── Custom-leg form ─────────────────────────────────────────── */}
-      <Modal visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
+      <Modal trackName="ParlayScreen" visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
         {/* Without this the keyboard slides up OVER the bottom sheet and hides
             the inputs entirely — the sheet must rise with the keyboard. */}
         <KeyboardAvoidingView
