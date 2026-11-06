@@ -73,7 +73,10 @@ export function SgpPriceEntry({
   const save = async () => {
     if (american == null || quote?.multipliedDecimal == null) return;
     if (!plausible) {
-      setRangeNote(`That’s far from ${formatAmerican(quote.americanOdds ?? 0)} — check the number on ${bookName(quote.book)}’s slip.`);
+      // The check compares against the legs multiplied out, so the message
+      // names that number (PR #1198 review L3).
+      const multipliedAmerican = (quote.multipliedDecimal - 1) * 100;
+      setRangeNote(`That’s far from the legs multiplied out (${formatAmerican(multipliedAmerican)}) — check the number on ${bookName(quote.book)}’s slip.`);
       return;
     }
     setSaving(true);
@@ -236,7 +239,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   chip: {
-    minHeight: 36,
+    minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
     borderRadius: radii.pill,

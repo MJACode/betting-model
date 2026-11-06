@@ -27,7 +27,8 @@ import type { ParlayLeg } from '@/lib/parlay';
  */
 export const DEFAULT_SGP_HAIRCUT = 0.158;
 
-/** Entries a book needs before its own fitted cut replaces the default. */
+/** DISTINCT devices (one vote each, sgp_haircuts()) a book needs before its
+ *  own fitted cut replaces the default. */
 export const SGP_MIN_OBSERVATIONS = 5;
 
 /** A fitted cut is used only inside this band; anything outside is a bad fit. */

@@ -106,9 +106,12 @@ BEGIN
 END;
 $$;
 
--- Each book's fitted cut per same-game group: the MEDIAN over the last 120
--- days (one fat-fingered entry cannot move a median), with the count so the
--- app can ignore a book until it has enough entries.
+-- Each book's fitted cut per same-game group, over the last 120 days.
+-- ONE VOTE PER DEVICE (PR #1198 review M2): device_id is client-supplied on an
+-- anonymous insert, so each install's entries collapse to that install's own
+-- median first, and the book's cut is the median of those. n is the number of
+-- DISTINCT devices, which is what the app's minimum counts — one install
+-- entering 50 prices a day is one vote, not fifty.
 CREATE OR REPLACE FUNCTION public.sgp_haircuts()
 RETURNS TABLE (book TEXT, haircut NUMERIC, n BIGINT)
 LANGUAGE sql
@@ -116,14 +119,21 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-    SELECT o.book,
-           percentile_cont(0.5) WITHIN GROUP (
-               ORDER BY 1 - power(o.book_decimal / o.multiplied_decimal, 1.0 / o.sgp_groups)
-           )::NUMERIC AS haircut,
+    WITH per_device AS (
+        SELECT o.book,
+               o.device_id,
+               percentile_cont(0.5) WITHIN GROUP (
+                   ORDER BY 1 - power(o.book_decimal / o.multiplied_decimal, 1.0 / o.sgp_groups)
+               ) AS cut
+          FROM sgp_price_observations o
+         WHERE o.received_at > now() - interval '120 days'
+         GROUP BY o.book, o.device_id
+    )
+    SELECT d.book,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY d.cut)::NUMERIC AS haircut,
            count(*) AS n
-      FROM sgp_price_observations o
-     WHERE o.received_at > now() - interval '120 days'
-     GROUP BY o.book;
+      FROM per_device d
+     GROUP BY d.book;
 $$;
 
 REVOKE ALL ON FUNCTION public.log_sgp_price(TEXT, TEXT, INTEGER, NUMERIC, INTEGER, INTEGER, JSONB, TEXT) FROM PUBLIC;

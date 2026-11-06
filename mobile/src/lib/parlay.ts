@@ -333,9 +333,10 @@ export function legsForPricing(legs: readonly ParlayLeg[]): ParlayLeg[] {
 }
 
 /** The priced legs' slip keys — which slip a typed same-game price belongs to.
- *  The bar and the Betslip screen compute it the same way. */
+ *  Sorted, so reordering the same legs keeps the price. The bar and the
+ *  Betslip screen compute it the same way. */
 export function slipSignature(legs: readonly ParlayLeg[]): string {
-  return legsForPricing(legs).map((l) => l.slipKey).join(',');
+  return legsForPricing(legs).map((l) => l.slipKey).sort().join(',');
 }
 
 export function betslipSummary(

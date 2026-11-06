@@ -175,7 +175,9 @@ check('impliedHaircut inverts applySgpHaircut',
   check('a typed DK price never applies to a slip with no same-game group', !near(b2.americanOdds, 4199, 1));
   const q = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel'], undefined, { fanduel: 4254 });
   check('no best-payout star when typed and estimated prices are mixed', q.every((x) => !x.isBest));
-  check('slip signature is the priced legs in slip order', slipSignature(slip) === slip.map((l) => l.slipKey).join(','));
+  check('reordering the slip keeps its signature (a typed price survives)',
+    slipSignature(slip) === slipSignature([...slip].reverse()));
+  check('a different slip has a different signature', slipSignature(slip) !== slipSignature(slip.slice(1)));
 }
 check('parse "+4,254"', parseEnteredAmerican('+4,254') === 4254);
 check('parse "-120"', parseEnteredAmerican('-120') === -120);
