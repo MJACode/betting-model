@@ -23,8 +23,9 @@ Sentry's event id. Join to `app_errors` on `device_id`.
 |---|---|---|
 | `sendDefaultPii` | false | no email, no IP |
 | `attachScreenshot`, `attachViewHierarchy` | false | screens show emails and bets |
-| session replay | off (`replaysSessionSampleRate` / `replaysOnErrorSampleRate` 0) | Matt: off at first; privacy label first |
-| performance tracing | off | not needed |
+| session replay | off: the replay rates are left UNSET | Matt: off at first. In 7.2.0 any number, 0 included, installs replay |
+| performance tracing | off: `tracesSampleRate` left UNSET | same reason |
+| `shutdownTimeout` | 1000 ms | a crashed app closes sooner; the native layer already saved the event |
 | tags | `device_id` (the app's anonymous id), `screen`, `update_id` | join to app_errors |
 
 Code: `mobile/src/lib/sentry.ts`. With `SENTRY_DSN = ''` nothing starts.
@@ -53,9 +54,14 @@ in eas.json), the OTA step skips, the worker job reports `not_configured`.
    1.2.0 install never gets a bundle that imports Sentry (it would crash on
    launch). 1.2.0 installs get no further OTA updates until they install
    1.3.0 — submit 1.3.0 to the App Store too.
-5. App Store Connect → App Privacy: add **Crash Data** and **Other
-   Diagnostic Data**, not linked to identity, not used for tracking. Update the
-   privacy policy to name Sentry as a processor of crash reports.
+5. App Store Connect → App Privacy. Every event carries the app's
+   `device_id`, and `feedback_threads` stores that id beside `user_id`, so
+   under Apple's definition the data is **linked to the user**. Declare
+   **Diagnostics → Crash Data**, **Diagnostics → Performance Data** (hangs)
+   and **Identifiers → Device ID**, each *linked to the user*, purpose **App
+   Functionality**, **not used for tracking**. (The other way is to stop
+   sending `device_id` to Sentry, which loses the join to `app_errors`.)
+   Update the privacy policy to name Sentry as a processor of crash reports.
 
 ## Reading it
 

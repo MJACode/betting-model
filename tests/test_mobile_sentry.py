@@ -20,9 +20,13 @@ def _src():
 
 def test_privacy_settings():
     src = _src()
-    for line in ("sendDefaultPii: false", "attachScreenshot: false", "attachViewHierarchy: false",
-                 "replaysSessionSampleRate: 0", "replaysOnErrorSampleRate: 0", "tracesSampleRate: 0"):
+    for line in ("sendDefaultPii: false", "attachScreenshot: false", "attachViewHierarchy: false"):
         assert line in src, line
+    # Any NUMBER here, 0 included, installs replay / tracing in 7.2.0.
+    init = src.split("Sentry.init({", 1)[1].split("});", 1)[0]
+    code = "\n".join(l.split("//", 1)[0] for l in init.splitlines())
+    for key in ("tracesSampleRate", "replaysSessionSampleRate", "replaysOnErrorSampleRate", "tracesSampler"):
+        assert key not in code, key + " is set: that turns the feature ON"
     assert "enableAppHangTracking: true" in src and "enableNativeCrashHandling: true" in src
 
 

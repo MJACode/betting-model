@@ -44,9 +44,14 @@ export function startSentry(): void {
     appHangTimeoutInterval: 2,
     attachScreenshot: false,
     attachViewHierarchy: false,
-    tracesSampleRate: 0,
-    replaysSessionSampleRate: 0,
-    replaysOnErrorSampleRate: 0,
+    // A fatal JS error waits on this flush before the app closes, after the
+    // crash log's own 1.5 s (crashLog.ts). The native layer has already
+    // written the event to disk, so a long wait buys little (UX review).
+    shutdownTimeout: 1000,
+    // Tracing and session replay are OFF by leaving tracesSampleRate and the
+    // replay rates UNSET. A 0 turns them on at a 0% sample: in 7.2.0 any
+    // number installs the replay and tracing integrations
+    // (integrations/default.js, typeof === 'number').
   });
   try {
     const updateId = Updates.updateId ?? null;
