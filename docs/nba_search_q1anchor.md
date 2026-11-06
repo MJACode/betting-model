@@ -146,3 +146,41 @@ that has both.
 A pass goes live (CLAUDE.md section 2) with its own EV floor at its cut and the prices it lays stated first. The live
 feed captures no first-quarter prop today, so a pass needs that capture added to the NBA prop fetch, in the same event
 call as the full-game props, so the anchor and the first-quarter quote share a fetch live as they do here.
+
+## 12. Counts before grading (2026-11-06, `--counts`, no bet graded)
+
+The synthetic checks pass (84 rows: 36 cells and 48 controls through the harness, the placebo's identity run equal
+to the real bets). One fix before this run, committed on its own: the proposition's fetch time is read as UTC (the
+props search's `with_props` stores it without a zone, and the join to the anchor refused to run).
+
+- **Fit rows:** 199,389 player-games with first-quarter court time (2023-24 65,706; 2024-25 66,123; 2025-26 67,560),
+  196,920 with a share. With a Pinnacle anchor: 23,400 / 24,552 / 24,784; with a consensus anchor: 38,465 / 41,695 /
+  43,189.
+- **The share** (5th, 25th, 50th, 75th, 95th percentile): 0.194, 0.237, 0.261, 0.287, 0.333.
+- **The first-quarter factor** (anchor × share against the actual first-quarter stat, before any factor): points
+  0.951 / 0.960, rebounds 1.011 / 1.009, assists 1.071 / 1.054 (Pinnacle; pricing 2024-25 / 2025-26); consensus
+  0.955 / 0.964, 0.997 / 1.000, 1.074 / 1.061. The league control's factor is about 0.26 for points, 0.27 for
+  rebounds and 0.28 for assists.
+- **Negative-binomial width** (pricing 2024-25 / 2025-26): rebounds 0.025 / 0.024 (Pinnacle), 0.034 / 0.031
+  (consensus); assists 0 (Poisson). Points price through the line map.
+
+The bets each cell would place (2024-25 + 2025-26), and the prices they lay (minimum / median / maximum):
+
+| Family | Market | Side | EV 0.02 | EV 0.04 | EV 0.06 | Prices at 0.02 |
+|---|---|---|---|---|---|---|
+| Q1AP | points | over | 3,428 (1,525 + 1,903) | 2,598 | 1,914 | −200 / −105 / +170 |
+| Q1AP | points | under | 3,788 (1,945 + 1,843) | 3,013 | 2,407 | −190 / −110 / +165 |
+| Q1AP | rebounds | over | 629 (492 + 137) | 425 | 303 | −200 / +100 / +175 |
+| Q1AP | rebounds | under | 662 (499 + 163) | 469 | 339 | −200 / −119 / +175 |
+| Q1AP | assists | over | 729 (597 + 132) | 513 | 345 | −200 / +105 / +325 |
+| Q1AP | assists | under | 481 (379 + 102) | 332 | 237 | −200 / −125 / +184 |
+| Q1AC | points | over | 520 (395 + 125) | 424 | 327 | −190 / −110 / +178 |
+| Q1AC | points | under | 370 (261 + 109) | 277 | 221 | −185 / −110 / +165 |
+| Q1AC | rebounds | over | 516 (404 + 112) | 329 | 222 | −200 / −105.5 / +260 |
+| Q1AC | rebounds | under | 525 (374 + 151) | 356 | 244 | −200 / +105 / +185 |
+| Q1AC | assists | over | 754 (583 + 171) | 484 | 315 | −195 / +115 / +400 |
+| Q1AC | assists | under | 139 (99 + 40) | 91 | 63 | −200 / +100 / +175 |
+
+2025-26 holds far fewer coherent rebounds and assists quotes than 2024-25 (most of that season's are one-sided Hard
+Rock quotes), so several rebounds and assists cells have under 30 bets in 2025-26 at the higher cuts and cannot meet
+the strict season bar. That is a property of the data, stated before the grade.
