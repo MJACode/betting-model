@@ -211,7 +211,7 @@ bets, +1.7%, interval −2.1% to +5.5%. Assists overs lose 3.9% to 4.5%, and reb
   below the cut up to be positive. Rebounds unders: 0.00-0.02 −4.8% on 246, 0.02-0.04 −4.0% on 169, 0.04-0.06 −1.1% on
   112, 0.06 and up +15.0% on 244. Every band below 0.06 loses, which is the shape of a peak.
 - **The control says the player's own share matters for assists.** With the share replaced by one factor, the same
-  assists-over cells return +5.1% to +5.4%, intervals below zero. The rebounds-under control loses (−0.4% to −3.8%).
+  assists-over cells return +5.1% to +5.4%, and every interval reaches below zero (lower ends −1.3% to −3.9%). The rebounds-under control loses (−0.4% to −3.8%).
 - **Where the assists-over bets are.** 2024-25: Hard Rock (503 of 583 at EV 0.02, +10.4%) and Caesars (80, +3.9%).
   2025-26: BetMGM (170 of 171, +4.5%). None of these bets is on a player and stat the live full-game prop models bet;
   91% are on a (game, player) where they bet something else.
