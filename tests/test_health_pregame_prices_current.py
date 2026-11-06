@@ -28,6 +28,13 @@ CRIT on that shape (NBA 7 of 13, the seven all Friday games last priced
 Oct 22-23) while three other Friday games were still priced. A fetch that
 has stopped has no far game a book is still pricing, so the 09-27 to 09-30
 outage stays CRIT.
+
+A game more than 24 hours out whose only price is more than 7 days old is
+also left out when the same sport has a nearer game DraftKings is still
+pricing and a successful bulk odds or events-list call for that sport landed
+inside the bound. That is the provider not having posted the slate (the
+2026-11-05 15:26Z NBA 2 of 4), not a fetch that stopped. A price only hours
+or a few days old stays in the share, and so does a game inside 24 hours.
 """
 from __future__ import annotations
 
@@ -53,11 +60,13 @@ class _Conn:
     that read fail."""
 
     def __init__(self, rows=None, boom: Exception | None = None,
-                 feed_fresh: bool = True, feed_boom: Exception | None = None):
+                 feed_fresh: bool = True, feed_boom: Exception | None = None,
+                 calls=None):
         self.rows = rows or []
         self.boom = boom
         self.feed_fresh = feed_fresh
         self.feed_boom = feed_boom
+        self.calls = calls or []
         self.rolled_back = False
         self.params = None
         self.sql: list[str] = []
@@ -73,6 +82,8 @@ class _Conn:
         return self
 
     def fetchall(self):
+        if self.sql and "api_call_log" in self.sql[-1]:
+            return self.calls
         return self.rows
 
     def fetchone(self):
@@ -580,3 +591,159 @@ def test_fresh_same_day_games_do_not_hide_a_dead_early_lines_pass():
     assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
     assert "NBA 6 of 10" in res["detail"]
     assert "books pulled" not in res["detail"]
+
+
+# ── a slate the provider has not posted yet (2026-11-05 15:26Z) ─────────────
+#
+# PHI@CLE and POR@LAL sit 33 to 36 hours out with no price from any book
+# since 2026-10-23. Today's two NBA games are fresh, and so are the other
+# sports. The 15:17Z events and odds calls succeeded and listed only today's
+# games. The first test was STALE ("NBA 2 of 4", "the board is emptying")
+# before a weeks-old early line the provider is not listing was left out.
+# A far price that is only hours old stays in the share: that is the
+# early-lines pass dying while today's games are still priced.
+
+NOV5 = datetime(2026, 11, 5, 15, 26, tzinfo=timezone.utc)
+NOV5_FRESH = "2026-11-05T15:17:01Z"
+EARLY = "2026-10-23T02:10:42Z"
+NBA_ODDS = ("/v4/sports/basketball_nba/odds?regions=us&markets=h2h,spreads,totals"
+            "&bookmakers=draftkings&oddsFormat=american")
+NBA_EVENTS = "/v4/sports/basketball_nba/events"
+NBA_PROP = ("/v4/sports/basketball_nba/events/2a76b31e02d1416de069a995589515fc/odds"
+            "?regions=us&markets=player_points")
+
+
+def _nba_today_and_friday(friday_price, any_book=None):
+    rows = [
+        _game("NBA_2026-11-05_ORL_PHX", "NBA", NOV5_FRESH, kick="2026-11-06T02:10:00Z"),
+        _game("NBA_2026-11-05_MIA_GSW", "NBA", NOV5_FRESH, kick="2026-11-06T03:10:00Z"),
+        _game("NBA_2026-11-06_PHI_CLE", "NBA", friday_price, kick="2026-11-07T00:40:00Z",
+              any_book=any_book if any_book is not None else friday_price),
+        _game("NBA_2026-11-06_POR_LAL", "NBA", friday_price, kick="2026-11-07T03:10:00Z",
+              any_book=any_book if any_book is not None else friday_price),
+    ]
+    rows += [_game(f"NHL_2026-11-05_A{i}_B{i}", "NHL", NOV5_FRESH,
+                   kick="2026-11-06T00:00:00Z") for i in range(3)]
+    rows += [_game(f"NCAAB_2026-11-05_C{i}_D{i}", "NCAAB", NOV5_FRESH,
+                   kick="2026-11-06T00:00:00Z") for i in range(3)]
+    rows += [_game(f"NCAAF_2026-11-05_E{i}_F{i}", "NCAAF", NOV5_FRESH,
+                   kick="2026-11-06T00:00:00Z") for i in range(2)]
+    return rows
+
+
+def _call(path, sport="NBA", ts="2026-11-05T15:17:31Z", status=200, ok=True):
+    return (sport, path, status, ok, ts)
+
+
+def _live_slate_calls():
+    """The 15:17Z events list and the bulk odds call, both 200."""
+    return [
+        _call(NBA_EVENTS, ts="2026-11-05T15:17:18Z"),
+        _call(NBA_ODDS),
+    ]
+
+
+def test_the_2026_11_05_unlisted_nba_slate_is_not_a_crit():
+    """Two NBA games more than 24 hours out, only an Oct 23 DraftKings
+    snapshot, today's NBA games fresh, the other sports fresh, and a
+    successful odds-list call that did not list the Friday games."""
+    res, _ = _run(_nba_today_and_friday(EARLY), now=NOV5, calls=_live_slate_calls())
+    assert res["status"] == "OK", res["detail"]
+    assert "board is emptying" not in res["detail"]
+    assert "NBA 2 of 4" not in res["detail"]
+    assert "did not list" in res["detail"]
+    assert "NBA 2" in res["detail"]
+
+
+def test_the_events_list_alone_shows_the_provider_omitted_the_game():
+    """The events call is the list. It does not have to be followed by the
+    bulk odds call for the omission to count."""
+    res, _ = _run(_nba_today_and_friday(EARLY), now=NOV5,
+                  calls=[_call(NBA_EVENTS, ts="2026-11-05T15:17:18Z")])
+    assert res["status"] == "OK", res["detail"]
+    assert "did not list" in res["detail"]
+
+
+def test_a_far_price_only_hours_old_stays_behind_when_the_call_succeeded():
+    """The early-lines pass can die while today's games stay priced. A
+    successful list call does not turn a price from this morning into a
+    weeks-old early line."""
+    hours_old = (NOV5 - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res, _ = _run(_nba_today_and_friday(hours_old), now=NOV5, calls=_live_slate_calls())
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 2 of 4" in res["detail"]
+    assert "did not list" not in res["detail"]
+
+
+def test_a_prop_call_does_not_show_the_provider_omitted_the_game():
+    """Per-event prop odds are for a game the bulk call already returned.
+    They are not the list of games the provider is offering."""
+    res, _ = _run(_nba_today_and_friday(EARLY), now=NOV5, calls=[_call(NBA_PROP)])
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 2 of 4" in res["detail"]
+
+
+def test_another_sports_odds_call_does_not_cover_an_unlisted_nba_slate():
+    res, _ = _run(_nba_today_and_friday(EARLY), now=NOV5,
+                  calls=[_call("/v4/sports/icehockey_nhl/odds?regions=us", sport="NHL")])
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 2 of 4" in res["detail"]
+
+
+def test_a_list_call_older_than_the_price_bound_does_not_count():
+    old_call = (NOV5 - timedelta(minutes=config.PREGAME_PRICE_MAX_AGE_MIN + 30)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res, _ = _run(_nba_today_and_friday(EARLY), now=NOV5,
+                  calls=[_call(NBA_ODDS, ts=old_call), _call(NBA_EVENTS, ts=old_call)])
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 2 of 4" in res["detail"]
+
+
+def test_a_failed_odds_call_does_not_show_the_provider_omitted_the_game():
+    res, _ = _run(_nba_today_and_friday(EARLY), now=NOV5,
+                  calls=[_call(NBA_ODDS, status=401, ok=False),
+                         _call(NBA_EVENTS, status=401, ok=False)])
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 2 of 4" in res["detail"]
+
+
+def test_a_game_inside_24_hours_with_only_an_early_line_stays_behind():
+    """A missing price on a game close enough to play is the board emptying,
+    even when the provider's list call succeeded and the price is weeks old."""
+    close = _kick(NOV5, 10)
+    nearer = _kick(NOV5, 8)
+    rows = [_game(f"NBA_2026-11-05_N{i}_M{i}", "NBA", NOV5_FRESH, kick=nearer)
+            for i in range(2)]
+    rows += [_game(f"NBA_2026-11-05_S{i}_T{i}", "NBA", EARLY, kick=close, any_book=EARLY)
+             for i in range(2)]
+    res, _ = _run(rows, now=NOV5, calls=_live_slate_calls())
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "2 of 4" in res["detail"]
+    assert "did not list" not in res["detail"]
+
+
+def test_a_game_exactly_24_hours_out_with_an_early_line_stays_behind():
+    kick = _kick(NOV5, 24)
+    rows = [_game(f"NBA_2026-11-05_N{i}_M{i}", "NBA", NOV5_FRESH, kick=kick)
+            for i in range(2)]
+    rows += [_game(f"NBA_2026-11-05_S{i}_T{i}", "NBA", EARLY, kick=kick, any_book=EARLY)
+             for i in range(2)]
+    res, _ = _run(rows, now=NOV5, calls=_live_slate_calls())
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "2 of 4" in res["detail"]
+    assert "did not list" not in res["detail"]
+
+
+def test_a_sport_with_no_fresh_near_game_stays_behind_when_the_call_succeeded():
+    """Every NBA game is more than 24 hours out and the only prices are
+    weeks old. A successful list call does not hide a sport whose nearer
+    games are not being priced."""
+    far = _kick(NOV5, 33)
+    rows = [_game(f"NHL_2026-11-05_A{i}_B{i}", "NHL", NOV5_FRESH,
+                  kick=_kick(NOV5, 8)) for i in range(4)]
+    rows += [_game(f"NBA_2026-11-06_C{i}_D{i}", "NBA", EARLY, kick=far, any_book=EARLY)
+             for i in range(4)]
+    res, _ = _run(rows, now=NOV5, calls=_live_slate_calls())
+    assert (res["status"], res["severity"]) == ("STALE", "CRIT"), res["detail"]
+    assert "NBA 4 of 4" in res["detail"]
+    assert "did not list" not in res["detail"]

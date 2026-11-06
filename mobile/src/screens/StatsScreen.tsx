@@ -230,7 +230,7 @@ import {
   type BubbleBox,
   type RulerScale,
 } from '@/lib/lineRuler';
-import { supportsTeamBoard } from '@/lib/teamStatCatalog';
+import { supportsTeamBoard, teamBoardSeason, teamSeasonLabel } from '@/lib/teamStatCatalog';
 import {
   ATD_COPY,
   ATD_HIT_W,
@@ -768,7 +768,11 @@ export function StatsScreen() {
       return;
     }
     let cancelled = false;
-    fetchTeamStats(sport, SEASON)
+    // The SAME season the Teams board reads. `SEASON` is the calendar year, and
+    // NBA/NHL/NCAAB label a season by its ENDING year — so in November it asked
+    // for LAST season and graded tonight's spot on 2025-26 defences (Matt,
+    // 2026-11-06: every NBA row drew three bars).
+    fetchTeamStats(sport, teamBoardSeason(sport))
       .then((res) => {
         if (!cancelled) setTeamStats(res);
       })
@@ -1675,12 +1679,8 @@ export function StatsScreen() {
   const matchupTooltip = useMemo(() => {
     // NBA labels are ENDING years: 2026 reads as "2025-26", or an October
     // bettor takes "the 2026 season" for the one in progress.
-    const seasonName =
-      defenceSeason == null
-        ? null
-        : sport === 'NBA'
-          ? `${defenceSeason - 1}\u2013${String(defenceSeason).slice(2)}`
-          : String(defenceSeason);
+    // One formatter with the Teams board (teamSeasonLabel).
+    const seasonName = defenceSeason == null ? null : teamSeasonLabel(sport, defenceSeason);
     const seasonWords = seasonName != null ? `the ${seasonName} season` : 'the season so far';
     const head =
       'How hard tonight\u2019s spot is for this player. Five filled bars is the ' +

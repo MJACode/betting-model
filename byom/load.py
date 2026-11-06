@@ -25,6 +25,7 @@ import logging
 from byom.constants import (
     DK_HISTORY_START_SEASON,
     NBA_DK_HISTORY_START_SEASON,
+    NHL_DK_HISTORY_START_SEASON,
     SPORT,
 )
 from byom.game_facts import _pre_start, assemble_game, parse_date, parse_game_id
@@ -132,12 +133,14 @@ def _fetch(conn, sql, params):
 def _dk_history_floor(sport: str) -> int | None:
     """First season whose DraftKings game lines are built.
 
-    NFL is 2020. NBA is 2021. Any other sport has no floor.
+    NFL is 2020. NBA and NHL are 2021. Any other sport has no floor.
     """
     if sport == SPORT:
         return DK_HISTORY_START_SEASON
     if sport == "NBA":
         return NBA_DK_HISTORY_START_SEASON
+    if sport == "NHL":
+        return NHL_DK_HISTORY_START_SEASON
     return None
 
 

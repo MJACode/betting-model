@@ -26,7 +26,16 @@
  * scripts/verify_crash_log.ts drives the logic without a device.
  */
 
-export type ReportKind = 'js_fatal' | 'js_error' | 'render' | 'early_exit' | 'emergency_launch';
+export type ReportKind =
+  | 'js_fatal'
+  | 'js_error'
+  | 'render'
+  | 'early_exit'
+  | 'emergency_launch'
+  // Freeze tracking (src/lib/freezeLog.ts, 2026-11-06).
+  | 'restart'
+  | 'js_stall'
+  | 'modal_stuck';
 
 /** Startup stages, in order. `running` = this launch survived its first 15s. */
 export type LaunchStage = 'launching' | 'running';
@@ -82,6 +91,12 @@ export const RUNNING_AFTER_MS = 15_000;
 export const FATAL_FLUSH_MS = 1_500;
 
 let deps: CrashLogDeps | null = null;
+/**
+ * What the app was doing just before a report (freezeLog's trail). Added to
+ * every report's extra as `trail` and `session` unless the report brings its
+ * own trail.
+ */
+let trailProvider: (() => { trail: unknown; session: unknown } | null) | null = null;
 let currentScreen: string | null = null;
 let currentStage: LaunchStage = 'launching';
 let flushing: Promise<void> | null = null;
@@ -101,6 +116,22 @@ function withQueueWrite<T>(fn: () => Promise<T>): Promise<T> {
 
 export function configureCrashLog(d: CrashLogDeps): void {
   deps = d;
+}
+
+export function setTrailProvider(fn: (() => { trail: unknown; session: unknown } | null) | null): void {
+  trailProvider = fn;
+}
+
+function withTrail(extra: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (extra && 'trail' in extra) return extra;
+  let t: { trail: unknown; session: unknown } | null = null;
+  try {
+    t = trailProvider ? trailProvider() : null;
+  } catch {
+    t = null;
+  }
+  if (!t || t.trail == null) return extra ?? null;
+  return { ...(extra ?? {}), trail: t.trail, session: t.session };
 }
 
 /** Called on every navigation change so a report names the screen. */
@@ -192,6 +223,7 @@ export async function recordReport(report: Omit<CrashReport, 'occurredAt' | 'scr
   try {
     await enqueue({
       ...report,
+      extra: withTrail(report.extra),
       occurredAt: new Date(deps.now()).toISOString(),
       screen: report.screen === undefined ? currentScreen : report.screen,
       stage: report.stage === undefined ? currentStage : report.stage,
@@ -332,6 +364,7 @@ export function installGlobalErrorHandler(errorUtils?: ErrorUtilsShape | null): 
 /** Test hook: forget module state between scenarios. */
 export function resetCrashLogForTests(): void {
   deps = null;
+  trailProvider = null;
   currentScreen = null;
   currentStage = 'launching';
   flushing = null;

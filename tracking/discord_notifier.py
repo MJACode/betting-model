@@ -67,7 +67,7 @@ from tracking.publish_keys import key_partition_sql, lock_key_sql, posted_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.clv_math import clv_outcome
-from tracking.pick_integrity import refuse_mismatched
+from tracking.pick_integrity import label_without_stake, refuse_mismatched
 
 ET = ZoneInfo("America/New_York")
 
@@ -489,12 +489,37 @@ def _decimal_to_american(dec: float) -> int:
     return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
 
 
-def _honest(model_id, prob):
-    """The promoted calibration map applied (models.honest_ev); the raw
-    number when there is no map or the lookup fails. Never raises."""
+def _decided(model_id, prob, odds, game_date):
+    """The number a pick was decided on, from the one its row stores
+    (models.honest_ev.decision_probability): the stored number for every model
+    but one in config.MODEL_PROB_SHRINK, whose rows from its "from" game_date
+    store it pulled toward `odds`, the decision price. None when such a row has
+    no date or no price. Never raises."""
+    try:
+        from models.honest_ev import decision_probability
+        return decision_probability(str(model_id), float(prob), odds, game_date)
+    except Exception:  # noqa: BLE001 - a display bound must not stop a post
+        return prob
+
+
+def _honest(model_id, prob, odds=None, game_date=None):
+    """The number the EV floor was applied to, from the stored one: the promoted
+    calibration map applied (models.honest_ev); the raw number when there is no
+    map or the lookup fails. Never raises.
+
+    `odds` and `game_date`, the pick's decision price and game date: a model in
+    config.MODEL_PROB_SHRINK stores a probability pulled toward that price
+    (display only) for games from its "from" date, so the decided number is
+    recovered from it first. Without that, the "good to" bound would solve the
+    raw-scale floor on a k-sized EV and vanish (price_bound returns None) for
+    most of those picks; and without the date, a row written before the shrink
+    would be un-shrunk and inflated (a "good to" at the -200 price floor)."""
+    decided = _decided(model_id, prob, odds, game_date)
+    if decided is None:
+        return None
     try:
         from models.honest_ev import honest_probability
-        return honest_probability(str(model_id), float(prob))
+        return honest_probability(str(model_id), float(decided))
     except Exception:  # noqa: BLE001 - a display bound must not stop a post
         return prob
 
@@ -789,6 +814,12 @@ def _live_webhook_for_sport(sport: str) -> str | None:
         return explicit
     if (getattr(config, "DISCORD_CHANNELS_LIVE", None) or {}).get(sport):
         return _live_channel_webhook(sport)
+    if sport in getattr(config, "DISCORD_LIVE_CHANNEL_REQUIRED", ()):
+        # No fallback for these sports: a pick posted to the shared or the
+        # pre-game channel is ledgered as sent to live and never re-posts.
+        logger.error(f"Discord(live): no DISCORD_WEBHOOK_LIVE_{sport} or DISCORD_CHANNEL_LIVE_{sport}; "
+                     f"{sport} live picks are not posted anywhere else and stay unsent")
+        return None
     return config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(sport)
 
 
@@ -1002,7 +1033,7 @@ def _new_signals(conn, target_date: str, *,
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -1123,7 +1154,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -1171,6 +1202,8 @@ _BOOK_NAMES = {
 # Old labels, still in `picks` and not rewritten:
 #   "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
 #   "... (no bet, FD)"
+# The "· 1.00u" sizing figure is off new NFL labels (mike, 2026-11-04) and is
+# dropped on display (label_without_stake); this book parse is unaffected.
 # A trailing "(FD)" on a prop is not read. Those stored labels still show
 # the book. A new row of the same card does not, so the price line has to.
 _LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
@@ -1322,8 +1355,11 @@ def _signal_field(s: dict) -> dict:
     posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
     if posted:
         line += f" · posted {posted}"
+    # The label beside the posted stake, without the old NFL sizing figure
+    # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
+    # word for word; the stored row is not touched.
     return {
-        "name": s["label"],
+        "name": label_without_stake(s["label"]),
         "value": f"{context}\n{line}" if context else line,
         "inline": False,
     }
@@ -2084,8 +2120,13 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "model_id": r[11], "side": r[15], "line": r[16],
         "decision_book": r[18] if len(r) > 18 else None,
         "decision_odds_raw": r[19] if len(r) > 19 else None,
-        # Same "good to" the paid channels publish, from the same gates.
-        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
+        # Same "good to" the paid channels publish, from the same gates. On the
+        # number the pick was DECIDED on: a model in config.MODEL_PROB_SHRINK
+        # stores (and the capture copies) a number pulled toward its decision
+        # price, r[19], for games from its "from" date (every candidate here is
+        # target_date's); for every other model _decided is the stored number.
+        "good_to": price_bound(_decided(r[11], r[12], r[19] if len(r) > 19 else None, target_date),
+                               r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
     } for r in rows], "Discord(free)")
 
 
@@ -2136,7 +2177,8 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
                   f"Free Pick of the Day — {pretty}"),
         "color": _COLOR_SIGNAL,
         "fields": [{
-            "name": pick["label"],
+            # Beside the posted stake: no old NFL sizing figure (_signal_field).
+            "name": label_without_stake(pick["label"]),
             "value": (f"{context}\n" if context else "") + line,
             "inline": False,
         }],

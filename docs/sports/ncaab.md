@@ -615,8 +615,7 @@ moneyline, overtime included (`games.home_win`).
 
 **The id has "spread" in it, and the pick is a moneyline.** Several places
 read a pick's market from its model id by looking for the word "spread". Each
-one now names this id first: the app (`mobile/src/lib/markets.ts`), the
-Claude-mobile prompt (`docs/mobile_picks_prompt.md`), the closing-line
+one now names this id first: the app (`mobile/src/lib/markets.ts`), the closing-line
 function, settlement and the line-movement check; `tests/test_ncaab_moneyline_own_spread.py`
 and `tests/test_rule_model_markets_everywhere.py` pin them. One was left
 alone: the production view `v_model_full_record`, which nothing in the repo
@@ -1226,6 +1225,34 @@ Nothing else moves. Discord, push, X, settlement and the record all select
 and the ledger; each ledger's `n_bets` counts BETs only. The app's day read is
 paged past the 1,000-row cap (`fetchPicksForDate`) so the extra rows cannot
 push another sport's rows off the All board.
+
+**The game scorer deleted them, 2026-11-04 to the fix (2026-11-06).** The
+sweep at the end of a full scoring pass (`models/scorer.run_scorer`, run by
+the refresh pass and the daily pipeline) had no model filter: it deleted
+every writer's unsettled non-BET row on every game not yet started. picks_log
+holds 278 NCAAB NONE inserts to 2026-11-06 15:00Z and 257 deletes, in 27
+transactions; each landed 0.3 to 2.5 seconds before a full scoring pass logged
+its finish in `pipeline_log`. A card decides a game once, so a deleted row
+never came back. Rows written within minutes of tip survived (the sweep spares
+started games): the 21 first-half spread rows left on 11-05.
+
+The sweep, the per-game clear and the UFC clear now delete only the rows of
+the models their own pass re-writes (`scorer._pass_rewritten_models`: the game
+models in `config.MODELS`, plus the MLB and WNBA prop models a full pass
+re-scores). No NCAAB model is in that set. Test:
+`tests/test_scorer_spares_other_writers_no_bet_rows.py`.
+
+**What was restored.** `tracking/restore_swept_ncaab_none_rows.py` (worker
+job `restore_swept_ncaab_none_rows`, declared to run once after the fix
+deploys, 11 minutes after it starts so the replaced container's drain is
+over) puts back each deleted NONE row whose game has not started and has no
+row now, with its own `pick_id` and `created_at`. The four columns picks_log
+does not keep: the calibrated probability and the best-price columns are
+rebuilt by each card's rule (checked against all 131 NCAAB NONE rows in picks
+at 15:06Z on 11-06, every one matching); the DraftKings and best-book bet
+links stay empty. **NONE rows of games that started before the restore ran
+are not in picks.** For grading every scored pick (CLAUDE.md §7), NCAAB NONE
+rows from 2026-11-04 to the fix are incomplete; picks_log holds them all.
 
 ## Identity: ESPN owns the games row
 

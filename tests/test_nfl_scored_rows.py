@@ -463,7 +463,8 @@ class TestPickEmLabel:
             "side_line": "0", "soft_home_line": "0", "pin_home_line": "2.5",
             "dev": "-2.5", "model_prob": "0.5900", "market_prob": "0.5122",
             "edge": "0.0778", "stake_pct": "2.0"}], 1000.0)
-        assert "— CIN +0 ·" in p["pick_label"]
+        # The bet only, no unit figure (mike, 2026-11-04).
+        assert p["pick_label"] == "CIN @ PIT — CIN +0"
         assert "Opener" not in p["pick_label"] and "Pinnacle" not in p["pick_label"]
         assert p["decision_book"] == "betmgm"
         assert p["decision_odds"] == p["dk_odds"]

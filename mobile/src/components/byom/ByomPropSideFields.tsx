@@ -12,6 +12,7 @@ import {
 import {
   matchupSummary,
   oddsSummary,
+  trendsSummary,
   primeOn,
   shownKickSlots,
   timeSummary,
@@ -20,7 +21,7 @@ import {
 } from '@/lib/byomPropFilters';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-export type ByomSheetTab = 'odds' | 'time' | 'matchup';
+export type ByomSheetTab = 'odds' | 'time' | 'matchup' | 'trends';
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -134,20 +135,37 @@ export function ByomMoreFiltersCard({
   side,
   primetime,
   propFilters,
+  game = false,
+  totals = false,
   onOpen,
 }: {
   sport: ByomSport;
   side: 'home' | 'away' | 'over' | 'under' | null;
   primetime: boolean | null;
   propFilters: ByomPropFilterState;
+  /** A game bet: its side is step 2's, and NFL rest sits in Time. */
+  game?: boolean;
+  /** A total has no team, so it has no Matchup row (UX review). */
+  totals?: boolean;
   onOpen: (tab: ByomSheetTab) => void;
 }) {
   const slots = sport === 'NFL' ? shownKickSlots(propFilters.kickSlots, primetime) : [];
-  const rows: { tab: ByomSheetTab; title: string; summary: { detail: string; pills: string[] } }[] = [
+  const time = timeSummary(propFilters, sport, slots);
+  const rest = game && sport === 'NFL'
+    ? (propFilters.shortWeek ? 'Short week' : propFilters.offBye ? 'Off a bye' : null)
+    : null;
+  const timeRow = rest == null
+    ? time
+    : time.detail === 'Any'
+      ? { detail: rest, pills: [rest] }
+      : { detail: `${time.detail} · ${rest}`, pills: [...time.pills, rest] };
+  const allRows: { tab: ByomSheetTab; title: string; summary: { detail: string; pills: string[] } }[] = [
     { tab: 'odds', title: 'Odds', summary: oddsSummary(propFilters) },
-    { tab: 'time', title: 'Time', summary: timeSummary(propFilters, sport, slots) },
-    { tab: 'matchup', title: 'Matchup', summary: matchupSummary(side, propFilters) },
+    { tab: 'time', title: 'Time', summary: timeRow },
+    { tab: 'matchup', title: 'Matchup', summary: matchupSummary(game ? null : side, propFilters) },
+    { tab: 'trends', title: 'Trends', summary: trendsSummary(propFilters) },
   ];
+  const rows = allRows.filter((row) => !(row.tab === 'matchup' && totals));
   return (
     <View style={styles.more}>
       <Text style={styles.sectionLabel}>More filters · optional</Text>

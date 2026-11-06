@@ -1,4 +1,7 @@
+import type { Sport } from '@/hooks/useSportFilter';
 import type { TonightMatchupRow } from '@/types';
+
+import { teamSeasonLabel } from './teamStatCatalog';
 
 /**
  * Tonight-matchup grading for the Stats tab's MATCHUP column.
@@ -479,7 +482,9 @@ export function gradeOpponentDefence(
   // person ("S. Gray 5.90 ERA") so its subject is obvious; a bare team-season
   // rate under a header reading "Tonight's matchup" can be taken for the
   // player's own number or for a projection of this game (UX review).
-  const seasonNote = season != null ? ` (${season})` : '';
+  // Named the way the Teams board names it: NBA 2027 is "2026-27", not
+  // "2027", a season that reads as not started yet.
+  const seasonNote = season != null ? ` (${teamSeasonLabel(sport as Sport, season)})` : '';
   const claim = [opponentTeam, anchor.verb, shown, anchor.unit].filter(Boolean).join(' ');
   return {
     grade: gradeFor(score),

@@ -145,9 +145,19 @@ check(
   pickLineQuotes(totalsPick({ best_book: 'pinnacle', best_odds: 120 }), []).length === 1,
 );
 
-// Live: DraftKings only, whatever the rows say.
+// Live: the record chip alone, at the book that decided it, whatever the rows say.
 const live = pickLineQuotes(totalsPick({ is_live: true }), totalsRows);
-check('live pick → the DK record chip only', live.length === 1 && live[0].bookmaker === MODEL_BOOK && live[0].isRecord);
+check('live pick decided at DK → the DK record chip only', live.length === 1 && live[0].bookmaker === MODEL_BOOK && live[0].isRecord);
+const liveFd = pickLineQuotes(
+  totalsPick({ is_live: true, decision_book: 'fanduel', decision_odds: -105, best_book: 'fanduel', best_bet_link: 'https://fd.example/lock' }),
+  totalsRows,
+);
+check(
+  'live pick decided at FanDuel → one FanDuel record chip at the locked price, never DK',
+  liveFd.length === 1 && liveFd[0].bookmaker === 'fanduel' && liveFd[0].price === -105 && liveFd[0].isRecord &&
+    liveFd[0].link === 'https://fd.example/lock',
+  JSON.stringify(liveFd),
+);
 
 // Prop rows resolve through the prop market's `line` column.
 const prop = pickLineQuotes(

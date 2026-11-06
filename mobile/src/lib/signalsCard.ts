@@ -16,7 +16,7 @@
  * weather row has no number.
  */
 
-import { MINUS } from './format';
+import { labelWithoutStake, MINUS } from './format';
 
 /** ASCII hyphen used as a minus sign → U+2212. Names with hyphens are left. */
 export function trueMinus(text: string): string {
@@ -102,8 +102,8 @@ function stripTrailingLabelNoise(text: string): string {
   let prev = '';
   while (prev !== text) {
     prev = text;
-    text = text
-      .replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/iu, '')
+    // The stake is the app's one pattern (format.ts labelWithoutStake).
+    text = labelWithoutStake(text)
       .replace(/\s*·\s*NEW\s+\d+m\s*$/iu, '')
       .replace(/\s*·\s*up\s+\d+(?:\.\d+)?[hd]\s*$/iu, '')
       .replace(/\s*·\s*age unknown\s*$/iu, '');
