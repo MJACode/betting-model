@@ -2902,3 +2902,167 @@ its difference from flat (nights resampled). Signals fixed before grading. Live 
   survives a time split. Scripts: `nba_game_edge/volume1104/sizing.py`, `tt_signal.py`.
 
 Updated-By: mike.
+
+## 15. The projection model's EV claims three times what it returns, and a corrected EV does not rank the night better (2026-11-04, mike)
+
+Asked for while grading section 14: the projection model's highest-EV props looked
+overconfident, and that looked like the reason ranking the night by EV lost to tip order. The
+task was a calibration fix for the top of `nba_prop_projection`'s EV range, graded walk-forward,
+then the six-a-night door re-graded with the corrected EVs.
+
+**Population.** Both NBA prop models' graded bets, 2023-24..2025-26, loaded as the cap grade
+loads them: `nba_prop_projection` 66,588 bets (the five books the live feed returns, assists
+overs removed), `nba_prop_market` 24,572. Every bet is a proposition that clears today's floors;
+the lists hold nothing below a floor, so nothing here can move one. Walk-forward: 2024-25 is
+mapped by a fit on 2023-24, and 2025-26 by a fit on 2023-24 + 2024-25 (40,532 projection bets
+between them). 2023-24 has no season before it. It is mapped from the other two seasons only so
+the three-season door grade has a number for it, and it never judges a map. "Claimed" is the
+risk-weighted mean EV, "returned" is units over units risked, and units are one to win.
+Closing-line value is not in these bet lists. Scripts and outputs: temp folder
+`nba_game_edge/projcal1104` (`calfit.py`, `door.py`, `door_roi.py`, `kcheck.py`).
+
+**The overclaim is not at the top. It is in every part of the range.** Eighths of the model's
+EV, the two walk-forward seasons, uncorrected (%):
+
+| eighth of EV | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| claimed | 2.5 | 4.4 | 5.7 | 7.1 | 8.8 | 11.1 | 14.4 | 23.2 |
+| returned | 1.4 | 1.4 | 2.1 | 1.6 | 1.5 | 4.8 | 6.7 | 6.9 |
+| 90% range | -0.9..+3.6 | -0.9..+3.7 | -0.2..+4.3 | -0.7..+3.9 | -0.8..+3.9 | +2.5..+7.2 | +4.3..+9.1 | +4.5..+9.4 |
+
+Seven of the eight claims sit outside their 90% range. Every eighth claims about three times what
+it returns. The top eighth's 16-point gap is the same ratio on a bigger number.
+
+**The fix that clears: multiply the EV by one factor.** EV' = k x EV, which is the model's
+probability pulled toward the price's own implied probability, p' = implied + k (p - implied).
+k is fitted by maximum likelihood on the earlier seasons: 0.325 from 2023-24, 0.300 from
+2023-24 + 2024-25 (0.320 from the other two seasons, for 2023-24). Walk-forward:
+
+| eighth of EV | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| claimed | 0.8 | 1.4 | 1.8 | 2.2 | 2.7 | 3.4 | 4.5 | 7.2 |
+| returned | 1.1 | 2.4 | 2.2 | 0.9 | 2.2 | 5.5 | 5.8 | 6.3 |
+| 90% range | -1.2..+3.3 | +0.1..+4.6 | -0.1..+4.4 | -1.4..+3.2 | -0.1..+4.5 | +3.1..+7.8 | +3.4..+8.2 | +3.9..+8.8 |
+
+- All eight claims are inside their 90% range; the largest gap is 2.1 points.
+- Before and after mid-January (the list's own split): quartiles, 8 of 8 inside.
+- By season: 2024-25, 6 of 6 bands inside; 2025-26, 5 of 6 (its 75th-90th percentile returned
+  +10.6% against +4.4% claimed, an under-claim).
+- The one place it still over-claims: the top 2% claims +11.3% and returned +4.4% (90% range
+  -1.9 to +10.8), just outside.
+- At the door (today's six a night), the projection model's bets claim +28.1% uncorrected and
+  +8.9% shrunk, and returned +9.8% (walk-forward: 27.0 / 8.5 / 10.8).
+
+Because one number multiplies every EV, it changes no bet and no ranking: the door picks the same
+bets bet for bet. It is the honest size of the edge, nothing more.
+
+**What did not clear: a map that ranks the top better.** Five maps that do reorder bets, each
+fitted the same walk-forward way. The return on each map's own top eighth (%):
+
+| map | top eighth returned |
+|---|---|
+| the model's own EV (or the shrink, which keeps its order) | +6.3 to +6.9 |
+| blend: logit p' = a + b logit(implied) + c logit(p); b 0.90-0.98, c 0.19-0.24 | +4.1 |
+| the blend fitted per market and side | +4.3 |
+| the blend plus a squared gap term (lets the edge peak and fall) | +5.5 |
+| isotonic, return on EV | +5.1 |
+| the earlier seasons' return in the bet's EV-percentile band | +6.3 |
+
+None beats the model's own order. By the model's own EV percentile, walk-forward (%):
+
+| percentile | 0-50 | 50-70 | 70-80 | 80-90 | 90-95 | 95-98 | 98-100 |
+|---|---|---|---|---|---|---|---|
+| bets | 20,266 | 8,106 | 4,053 | 4,053 | 2,027 | 1,216 | 811 |
+| returned | +1.6 | +2.7 | +5.7 | +8.3 | +5.2 | +5.6 | +5.9 |
+| 90% range | +0.5..+2.7 | +0.9..+4.6 | +3.0..+8.3 | +5.6..+11.0 | +1.2..+9.1 | +0.5..+10.8 | -0.4..+12.3 |
+
+The EV ranks quality up to about the 80th-90th percentile. Above that the return is flat at about
++5% to +8%, and the top bands sit inside each other's ranges. A percentile that ranks quality at
+the very top cannot be built from these inputs.
+
+**The door, re-graded.** One bet a game across both NBA prop models, 2023-24..2025-26 (2023-24
+mapped leave one out), each rule paired with today's door night by night (4,000 resamples of
+nights; 90% ranges). "Walk-forward" is the same comparison on 2024-25 and 2025-26 only. "One
+scale" sets the projection model's shrunk EV directly against the market model's EV as it is,
+whose claims already track its returns on its own list (below).
+
+| rule | units | return | risk vs today | return vs today, points | units vs today | walk-forward units vs today |
+|---|---|---|---|---|---|---|
+| **today:** own percentile of raw EV, first six games by tip | +183.7 | +8.17% | - | - | - | - |
+| today's percentile, best six of the night | +158.7 | +7.19% | -2% | -1.0 (-3.2..+1.3) | -25.0 (-74.0..+26.9) | -30.1 (-71.6..+13.7) |
+| shrunk EV, one scale with the market model, first six by tip | +179.2 | +8.08% | -1% | -0.1 (-1.5..+1.3) | -4.4 (-35.1..+26.9) | -3.9 (-29.0..+22.4) |
+| shrunk EV, one scale, best six of the night | +154.2 | +7.11% | -4% | -1.1 (-3.5..+1.4) | -29.4 (-83.2..+24.3) | -21.8 (-66.2..+23.1) |
+| blend percentile, first six by tip | +251.7 | +8.69% | +29% | +0.5 (-2.5..+3.5) | +68.1 (-9.5..+146.9) | +55.5 (-17.6..+129.3) |
+| blend percentile, best six of the night | +272.7 | +9.55% | +27% | +1.4 (-1.9..+4.6) | +89.0 (+5.8..+171.0) | +70.5 (-5.5..+148.9) |
+| shrunk EV x risk (expected units), first six by tip | +229.9 | +7.52% | +36% | -0.7 (-3.8..+2.6) | +46.3 (-36.5..+136.3) | +10.1 (-56.6..+80.0) |
+| control, no model: the shortest price in each game, first six by tip | +190.6 | +4.21% | +101% | -4.0 (-8.2..+0.3) | +6.9 (-124.1..+141.5) | -42.3 (-154.3..+72.6) |
+
+The neighbourhood around the shrunk EV:
+
+- Capped at 0.03, 0.04, 0.05, 0.06 or 0.08, so every bet above the cap counts equal: first six
+  by tip -4.3 to +8.5 units against today; best six of the night -25.1 to +0.9.
+- A floor in tip order (the only "best first" rule a per-game decision window can run live):
+  shrunk EV at least 0.00, 0.01, 0.02, 0.03, 0.04 or 0.05, at most six: -3.4 to -28.3 units.
+  Today's own-percentile floor at 0.3 to 0.9: +1.4 to -59.1.
+- By half, first six by tip: today +61.3 early / +122.3 late; the shrunk EV on one scale +72.0 /
+  +107.2; its best six of the night +63.8 / +90.5.
+
+What the door table says:
+
+- **Ranking the night by a corrected EV still loses to tip order.** With the shrink, the best six
+  of the night graded -29.4 units against today (walk-forward -21.8), the same as today's
+  percentile (-25.0). The top of the range is flat (above), so a corrected EV has nothing there
+  to rank by.
+- **Every rule that wins more units than today does it by betting favourites.** Units are one to
+  win, so a -150 bet risks 1.5 for the unit a +150 bet risks 0.67 for: at the same return, a
+  favourite earns more units. The blend percentile moves the median price from +120 to -102 and
+  plus-money bets from 78% to 49%, and risks 29% more. Its return per unit risked is 0.5 points
+  better (-2.5 to +3.5); at today's risk it would be +195.2 units, not +251.7. The no-model control
+  shows the effect alone: the shortest price in each game matches today's units at twice the risk
+  and half the return. None of these clears its walk-forward 90% range.
+- **One row looks like a result and is not.** The percentile of the shrunk EV, with each season
+  mapped by its own fold, graded +21.6 units (+5.8 to +38.2). 55 bets differ from today, 34 of
+  them in 2025-26, because the fitted factor drifted from 0.325 to 0.300 between folds. One
+  factor for every season leaves every percentile, and so the door, exactly as it is.
+
+**Sizing by a corrected EV.** Section 14 graded 1 to 3 units on today's door: sizing up by the
+model's own EV percentile lost to flat, and the reversed scale won. The question here was whether
+a calibration fix removes that. It cannot. The shrink multiplies the projection model's EV by one
+number, so within the model every third holds the same bets as before. Re-graded on the same
+2,639 bets, each scheme scaled to flat's total risk as in section 14 (flat +183.7 units):
+
+| scheme | units at flat's risk | difference from flat, 90% range |
+|---|---|---|
+| 1/2/3 by own percentile, raw EV (section 14) | +158.5 | -57.7 to +8.9 |
+| 3/2/1 reversed, raw EV (section 14) | +208.1 | -8.0 to +57.5 |
+| 1/2/3 by EV third within each model, raw or shrunk (the same bets) | +165.7 | -51.6 to +15.3 |
+| 1/2/3 by shrunk EV, one scale across the two models | +170.8 | -44.9 to +19.8 |
+| 3/2/1 by shrunk EV, one scale | +195.9 | -19.3 to +43.0 |
+| 1 to 3 shaped like Kelly on the shrunk EV, one scale | +172.1 | -35.6 to +12.1 |
+| 1/2/3 by the blend, one scale | +176.8 | -38.4 to +24.1 |
+| 1/2/3 by isotonic, one scale | +180.9 | -35.5 to +31.1 |
+
+- **Inside the door, EV does not rank either model's bets.** The projection model's lowest-EV
+  third returned +14.1% (616 bets), its middle third +6.2%, its top third +8.9%. The market
+  model's thirds returned +4.1%, +10.4% and +0.1% (about 264 bets each). The door already takes
+  each game's top bet, so its bets sit on the flat top of the range (above).
+- **No corrected EV makes sizing up pay.** Putting both models on one scale halves the reversed
+  scale's lead (+12.2 units against +24.4) but does not remove it. Every 90% range includes zero.
+  Flat stays, as section 14 decided. Script: `sizing_cal.py` in the same temp folder.
+
+**Decision: nothing ships.** The door stays one a game, six a night, first by tip, ranked by each
+model's own percentile of raw EV. The prices it lays are unchanged: -194 to +380, median +120,
+78% plus money.
+
+**Flagged, not fixed here:**
+
+- The market model at the door claims +7.9% and returned +3.0% walk-forward (+7.8% and +5.0%
+  over the three seasons). On its own bet list its claims track its returns (largest gap 3.9
+  points across eighths, one of eight outside its range), but its top 2% by its own EV returned
+  +1.9% (-7.6 to +11.4, 321 bets), and a single shrink factor for it is unstable (1.35, 0.98,
+  0.62 across folds).
+- The probability each projection pick stores and shows (`model_probability`, and `edge` from it)
+  is the uncorrected number, about three times the edge its bets return. Storing the shrunk one
+  changes no bet, but every reader of that column would see the change.
+
+No model change, so no `Updated-By`.
