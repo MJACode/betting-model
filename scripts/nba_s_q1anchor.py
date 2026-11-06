@@ -165,7 +165,9 @@ def fit_anchors(fit: pd.DataFrame, anc: pd.DataFrame, props: pd.DataFrame) -> pd
     a proposition of that stat's first-quarter market, else the game's latest fetch holding that kind."""
     base = fit.stat.map({v: k for k, v in STAT_OF_BASE.items()})
     f = fit.assign(base=base.to_numpy())
-    own = props[["game_id", "player_id", "market", "T"]].assign(stat=props.market.map(Q.STAT_OF))
+    # with_props holds T as naive UTC (its .values drop the zone); the anchors' T is UTC
+    own = props[["game_id", "player_id", "market"]].assign(stat=props.market.map(Q.STAT_OF),
+                                                           T=pd.to_datetime(props["T"], utc=True))
     f = f.merge(own[["game_id", "player_id", "stat", "T"]], on=["game_id", "player_id", "stat"], how="left")
     is_prop = f["T"].notna().to_numpy()
     a_own = f.loc[is_prop, ["game_id", "player_id", "base", "T"]].merge(anc, on=ANCHOR_KEY, how="left")

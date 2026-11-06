@@ -27,8 +27,10 @@ def test_a_proposition_takes_its_own_fetch_and_another_row_the_latest():
               ("G1", "p1", "player_rebounds", T2, "pinnacle", 9.0),
               ("G1", "p2", "player_points", T2, "pinnacle", 15.0)])
     anc = A.anchors(qm)
+    # with_props stores T as naive UTC (its .values drop the zone); the full-game anchors carry UTC
     props = pd.DataFrame({"game_id": ["G1", "G1"], "player_id": ["p1", "p2"],
-                          "market": ["player_points_q1", "player_points_q1"], "T": [T1, T3]})
+                          "market": ["player_points_q1", "player_points_q1"],
+                          "T": pd.DatetimeIndex([T1, T3]).tz_convert(None).values})
     fit = pd.DataFrame({"game_id": ["G1", "G1", "G1"], "player_id": ["p1", "p1", "p2"],
                         "stat": ["points", "rebounds", "points"]})
     f = A.fit_anchors(fit, anc, props).set_index(["player_id", "stat"])
