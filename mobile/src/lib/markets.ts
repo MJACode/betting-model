@@ -359,6 +359,10 @@ export function linkForSide(
  *                         customers, Bovada is offshore, and ESPN BET was
  *                         removed by mike; they stay in the feed as reference
  *                         prices but are never offered as "where to bet".
+ *                         betPARX joined them on 2026-11-06 (mike): it is
+ *                         licensed in only a few states (one app each for
+ *                         MD, PA, NJ), so it is never the book a pick names
+ *                         (config.STATE_LIMITED_BOOKMAKERS).
  * The picker and the per-pick line chips read BETTABLE_BOOKS; the All-books
  * table on the detail screen reads everything.
  */
@@ -398,7 +402,7 @@ export const LINE_SHOP_BOOKS: BookKey[] = [
 ];
 
 /** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS. */
-export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet'];
+export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet', 'betparx'];
 
 /** Books a member can be sent to — mirrors config.BEST_LINE_BOOKMAKERS. */
 export const BETTABLE_BOOKS: BookKey[] = LINE_SHOP_BOOKS.filter(

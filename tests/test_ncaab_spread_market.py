@@ -80,8 +80,12 @@ def test_its_ledger_is_worker_only():
 
 
 def test_its_books_are_the_bettable_books():
-    assert set(bq.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
-    assert not set(bq.BOOKS) & set(config.BEST_LINE_EXCLUDE_BOOKMAKERS)
+    # The consensus keeps betparx (fitted with it); the card's bettable= is
+    # config.BEST_LINE_BOOKMAKERS, which never holds it (mike 2026-11-06).
+    rest = set(bq.BOOKS) - config.STATE_LIMITED_BOOKMAKERS
+    assert rest <= set(config.BEST_LINE_BOOKMAKERS)
+    assert not rest & set(config.BEST_LINE_EXCLUDE_BOOKMAKERS)
+    assert "betparx" in bq.BOOKS and "betparx" not in config.BEST_LINE_BOOKMAKERS
 
 
 # ── the committed artifact ───────────────────────────────────────────────────

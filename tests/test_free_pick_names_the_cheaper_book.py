@@ -132,7 +132,9 @@ def test_the_extra_books_are_offered():
     # ballybet and rebet left on 2026-09-20 with the fourteen-to-ten cut (mike):
     # the feed bills every ten named books as a region
     # (tests/test_book_list_budget.py). They decided 7 and 9 bets.
-    for book in ("betrivers", "hardrockbet", "betparx"):
+    # betparx left the OFFERED set on 2026-11-06 (mike: only a few states can
+    # bet it) and is still fetched -- tests/test_betparx_never_a_pick_book.py.
+    for book in ("betrivers", "hardrockbet"):
         assert book in config.BEST_LINE_BOOKMAKERS, f"{book} is not shoppable"
         assert book in config.ODDS_API_BOOKMAKERS_PARAM, f"{book} is not fetched"
 

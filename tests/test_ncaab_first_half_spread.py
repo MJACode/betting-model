@@ -381,7 +381,11 @@ def test_the_card_bets_only_at_books_config_still_lists(monkeypatch):
 
 
 def test_the_model_s_books_are_bettable_today():
-    assert set(fh.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
+    # betparx stays in the fitted consensus set and is never a betting book
+    # (config.STATE_LIMITED_BOOKMAKERS, mike 2026-11-06).
+    assert set(fh.BOOKS) - config.STATE_LIMITED_BOOKMAKERS <= set(config.BEST_LINE_BOOKMAKERS)
+    from scripts.ncaab_first_half_spread_card import bet_books
+    assert "betparx" in fh.BOOKS and "betparx" not in bet_books()
 
 
 # ── registration ─────────────────────────────────────────────────────────────
