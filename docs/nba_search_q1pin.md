@@ -56,3 +56,25 @@ beside the first quarter because the purchase holds both and Pinnacle prices bot
 A pass goes live with its own EV floor at its cut and the prices it lays stated first. The live feed fetches no
 first-quarter or first-half team total and no Pinnacle period spread or total for the NBA today, so a pass needs those
 markets added to the NBA game fetch.
+
+## 5. Counts before grading (2026-11-06, `--counts`, no bet graded)
+
+The synthetic checks pass (12 cells through the harness, both periods betting, every cell with its placebo runs).
+
+| Period | Games with a Pinnacle number | Games with team-total offers | Offers priced | Pinnacle's number minus the team-total market's fair centre: median / 75th / 90th / 95th / 99th percentile of the gap, points | Mean |
+|---|---|---|---|---|---|
+| First quarter | 2,409 | 2,442 | 39,440 | 0.16 / 0.27 / 0.39 / 0.47 / 0.64 | +0.10 |
+| First half | 2,411 | 2,442 | 39,930 | 0.16 / 0.28 / 0.40 / 0.49 / 0.67 | −0.03 |
+
+Once each quote is solved to its centre, the books' team totals sit within half a point of Pinnacle's period numbers
+95% of the time. The bets each cell would place (2024-25 + 2025-26):
+
+| Period | Side | EV 0.02 | EV 0.04 | EV 0.06 |
+|---|---|---|---|---|
+| First quarter | over | 368 (82 + 286) | 82 | 18 |
+| First quarter | under | 91 (81 + 10) | 17 | 3 |
+| First half | over | 91 (49 + 42) | 30 | 15 |
+| First half | under | 147 (71 + 76) | 34 | 7 |
+
+**11 of the 12 cells are under 200 bets and fail bar 1 by construction**: too few games to tell. Only the
+first-quarter over at EV 0.02 can be judged. Prices laid run from −130 to +110.
