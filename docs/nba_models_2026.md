@@ -3061,7 +3061,8 @@ model's own percentile of raw EV. The prices it lays are unchanged: -194 to +380
   0.62 across folds). Worked in section 16 (2026-11-05): nothing clears.
 - The probability each projection pick stores and shows (`model_probability`, and `edge` from it)
   is the uncorrected number, about three times the edge its bets return. Storing the shrunk one
-  changes no bet, but every reader of that column would see the change.
+  changes no bet, but every reader of that column would see the change. Changed by #1196: picks
+  from 2026-11-07 store and show the shrunk number (`config.MODEL_PROB_SHRINK`, k 0.325; section 5).
 
 No model change, so no `Updated-By`.
 
