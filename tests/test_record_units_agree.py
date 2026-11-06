@@ -155,9 +155,9 @@ def test_both_record_views_sum_the_same_functions():
     assert "results_snapshots" not in text.split("DO $mig$")[1]
     assert "push_sent" not in text.split("DO $mig$")[1]
     from data.view_migrations import ACTIVE_MIGRATIONS
-    # pick_stake_units_2026_11_06.sql runs after it: it switches the calls this
-    # file adds to the three-argument pair (tests/test_pick_stake_units.py).
-    assert ACTIVE_MIGRATIONS[-2:] == [MIG.name, "pick_stake_units_2026_11_06.sql"]
+    assert MIG.name == ACTIVE_MIGRATIONS[-1]
+    # The three-argument pair it calls (2026-11-06) is created before the pair.
+    assert ACTIVE_MIGRATIONS.index("pick_stake_units_2026_11_06.sql") < ACTIVE_MIGRATIONS.index(FN_MIG.name)
     assert ACTIVE_MIGRATIONS.index(FN_MIG.name) == ACTIVE_MIGRATIONS.index(MIG.name) - 1
     assert ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql") < ACTIVE_MIGRATIONS.index(FN_MIG.name)
     assert text.count("DO $mig$") == 1
@@ -287,14 +287,14 @@ def test_the_view_sum_drops_voids_and_ungraded_rows():
     db = sqlite3.connect(":memory:")
     install_sqlite(db)
     db.execute(
-        "CREATE TABLE picks (model_id TEXT, result TEXT, decision_odds REAL, dk_odds REAL)"
+        "CREATE TABLE picks (model_id TEXT, result TEXT, decision_odds REAL, dk_odds REAL, stake_units REAL)"
     )
     db.execute(
         f"CREATE VIEW v_public_track_record AS SELECT model_id, {cols} "
         "FROM picks p GROUP BY model_id"
     )
     db.executemany(
-        "INSERT INTO picks VALUES (?,?,?,?)",
+        "INSERT INTO picks (model_id, result, decision_odds, dk_odds) VALUES (?,?,?,?)",
         [
             ("m", "WIN", -110, None),
             ("m", "LOSS", -110, None),

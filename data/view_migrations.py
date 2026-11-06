@@ -590,6 +590,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # it waits (a NOTICE, not an error) until the pair below has run. Does
     # not write picks, push_sent or the record. Sits before the pair.
     "open_picks_view_2026_11_04.sql",
+    # 2026-11-06 (mike): a pick can carry its own stake, picks.stake_units
+    # (units to win, 1..3; NULL is 1u). The two columns (picks and
+    # picks_log, and the audit trigger), the three-argument stake functions,
+    # and open_picks switched to pass it. After open_picks' owner above;
+    # before the pair below, whose view patch calls the three-argument
+    # functions. A NULL row grades exactly as before.
+    "pick_stake_units_2026_11_06.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
@@ -599,15 +606,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # The two record views gain units and risked from the functions
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
     # Reads the live view, so it runs after every owner above, including
-    # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
-    # and does not post.
+    # the CLV stamp. Since 2026-11-06 it passes each pick's stake_units
+    # (the three-argument pair, from pick_stake_units_2026_11_06.sql) and
+    # switches a view that still calls the two-argument pair. Does not
+    # rewrite snapshots, picks, or push_sent, and does not post. This file
+    # stays last.
     "published_record_units_2026_10_16.sql",
-    # 2026-11-06 (mike): a pick can carry its own stake, picks.stake_units
-    # (units to win, 1..3; NULL is 1u). Adds the column, the three-argument
-    # stake functions, and switches the two record views and open_picks to
-    # pass it. Runs after the file above, which adds the two-argument calls
-    # it switches. NULL rows grade exactly as before. This file stays last.
-    "pick_stake_units_2026_11_06.sql",
 ]
 
 

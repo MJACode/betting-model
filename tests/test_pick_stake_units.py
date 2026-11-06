@@ -29,6 +29,7 @@ from tracking.discord_notifier import _SETTLED_SQL, pick_conviction, stake_for  
 from tracking.published_units import unit_profit, unit_risked  # noqa: E402
 
 MIG = ROOT / "data" / "migrations" / "pick_stake_units_2026_11_06.sql"
+UNITS_MIG = ROOT / "data" / "migrations" / "published_record_units_2026_10_16.sql"
 FN_MIG = ROOT / "data" / "migrations" / "published_pick_units_2026_10_17.sql"
 PRICES = [None, 0, -110, -115, -150, -200, -301, -1000, 100, 150, 600]
 UNITS = [None, 1, 1.5, 2, 3, 0.5, 4]
@@ -80,13 +81,14 @@ def test_the_two_argument_functions_are_unchanged():
     assert FN_MIG.exists()
 
 
-def test_it_runs_last_after_the_file_that_adds_the_two_argument_calls():
+def test_it_runs_after_open_picks_and_before_the_posted_pair():
     names = list(vm.MIGRATION_FILES) if hasattr(vm, "MIGRATION_FILES") else None
     if names is None:
         names = [v for k, v in vars(vm).items() if isinstance(v, list) and "published_record_units_2026_10_16.sql" in v][0]
-    assert names[-1] == MIG.name
-    assert names.index("published_record_units_2026_10_16.sql") < names.index(MIG.name)
-    assert names.index("open_picks_view_2026_11_04.sql") < names.index(MIG.name)
+    # after open_picks' owner (it switches that view), before the posted pair
+    # (whose view patch calls the three-argument functions it creates)
+    assert names[-2:] == ["published_pick_units_2026_10_17.sql", "published_record_units_2026_10_16.sql"]
+    assert names.index("open_picks_view_2026_11_04.sql") < names.index(MIG.name) < len(names) - 2
 
 
 def test_the_settled_recap_passes_the_picks_stake():
@@ -171,11 +173,17 @@ def _one(raw, sql):
         return cur.fetchone()
 
 
+def _apply(raw):
+    """This file, then the record-units file that stays last (the list's order)."""
+    with raw.cursor() as cur:
+        cur.execute(MIG.read_text(encoding="utf-8"))
+        cur.execute(UNITS_MIG.read_text(encoding="utf-8"))
+
+
 def test_the_migration_switches_the_views_and_grades_null_rows_as_before(db):
     before = _one(db, "SELECT n, units, risked FROM v_public_track_record")
     before_open = _one(db, "SELECT sum(risk), sum(win) FROM open_picks")
-    with db.cursor() as cur:
-        cur.execute(MIG.read_text(encoding="utf-8"))
+    _apply(db)
     for v in ("v_public_track_record", "v_public_track_record_daily"):
         d = _one(db, f"SELECT pg_get_viewdef('public.{v}'::regclass, true)")[0]
         assert "result, stake_units)" in d and "dk_odds), result)" not in d, v
@@ -196,17 +204,25 @@ def test_the_migration_switches_the_views_and_grades_null_rows_as_before(db):
 
 
 def test_a_second_pass_changes_nothing(db):
-    with db.cursor() as cur:
-        cur.execute(MIG.read_text(encoding="utf-8"))
+    _apply(db)
     oid_defs = _one(db, "SELECT string_agg(pg_get_viewdef(c.oid, true), '|' ORDER BY c.relname) "
                         "FROM pg_class c WHERE relname IN ('v_public_track_record', 'open_picks')")
     xmin_before = _one(db, "SELECT xmin::text FROM pg_class WHERE relname = 'v_public_track_record'")
-    with db.cursor() as cur:
-        cur.execute(MIG.read_text(encoding="utf-8"))
+    _apply(db)
     assert _one(db, "SELECT string_agg(pg_get_viewdef(c.oid, true), '|' ORDER BY c.relname) "
                     "FROM pg_class c WHERE relname IN ('v_public_track_record', 'open_picks')") == oid_defs
     # no CREATE OR REPLACE ran: the view's catalog row was not rewritten
     assert _one(db, "SELECT xmin::text FROM pg_class WHERE relname = 'v_public_track_record'") == xmin_before
+
+def test_a_record_view_its_owner_just_recreated_gets_the_three_argument_units(db):
+    """An owner file rebuilds a record view with no units columns; the
+    record-units file adds them with the pick's stake straight away."""
+    with db.cursor() as cur:
+        cur.execute("DROP VIEW v_public_track_record")
+        cur.execute("CREATE VIEW v_public_track_record AS SELECT count(*) AS n FROM picks p")
+    _apply(db)
+    d = _one(db, "SELECT pg_get_viewdef('public.v_public_track_record'::regclass, true)")[0]
+    assert d.count("result, stake_units)") == 2 and "dk_odds), result)" not in d
 
 
 # production's log_picks_changes() before this migration (read 2026-11-06)

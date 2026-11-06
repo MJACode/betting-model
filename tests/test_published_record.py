@@ -130,10 +130,7 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     # totals are display-only and sit between the stamp and that pair.
     # byom_facts_schema is the same kind of display file: it does not
     # name v_public_track_record, so it may sit after the stamp.
-    # pick_stake_units_2026_11_06.sql follows it: it switches the units
-    # calls this pair adds to the three-argument functions (2026-11-06).
-    stake = "pick_stake_units_2026_11_06.sql"
-    assert ACTIVE_MIGRATIONS[-2:] == [units, stake]
+    assert ACTIVE_MIGRATIONS[-1] == units
     assert ACTIVE_MIGRATIONS.index(clv) < len(ACTIVE_MIGRATIONS) - 1
     assert ACTIVE_MIGRATIONS.index(MIG.name) < len(ACTIVE_MIGRATIONS) - 1
     views = "add_nhl_stats_views_2026_10_16.sql"
@@ -145,10 +142,6 @@ def test_the_migration_is_one_statement_and_runs_after_the_view_owners():
     assert ACTIVE_MIGRATIONS.index("byom_facts_schema_2026_10_16.sql") < ACTIVE_MIGRATIONS.index("published_pick_units_2026_10_17.sql")
     for name in ACTIVE_MIGRATIONS[ACTIVE_MIGRATIONS.index(clv) + 1:]:
         if name == units:
-            continue
-        # Passes picks.stake_units to the same unit functions. A NULL stake
-        # grades exactly as before (tests/test_pick_stake_units.py).
-        if name == stake:
             continue
         # Push counts on the live view. Not a rewrite of wins or units.
         if name == "clv_push_beat_rate_2026_11_04.sql":

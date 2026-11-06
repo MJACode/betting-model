@@ -5,8 +5,8 @@
 -- The first writer is NCAAB (2u when a later NCAAB bet agrees with an
 -- earlier NCAAB bet on the same game; docs/sports/ncaab.md, "Agreement
 -- sizing"). Every other pick leaves stake_units NULL, which is the 1u to
--- win every surface has always used, so no settled record changes: the
--- record views below return the same units and risked for every NULL row.
+-- win every surface has always used, so no settled record changes: a NULL
+-- row grades exactly as the one- and two-argument functions grade it.
 --
 -- 1. picks and picks_log gain stake_units (CHECK 1..3) and stake_reason;
 --    log_picks_changes() copies both.
@@ -14,9 +14,10 @@
 --    two-argument functions stay as they are (BYOM's backtest and anything
 --    else that has no pick row call them); NULL in the third argument is
 --    the two-argument function.
--- 3. v_public_track_record, v_public_track_record_daily and open_picks pass
---    stake_units. Their owner files recreate them on every pass with the
---    two-argument calls; this file runs after them and switches the calls.
+-- 3. open_picks passes stake_units. Its owner file recreates it with the
+--    one-argument stake; this file runs after it and switches the call.
+--    The two record views take stake_units from the next-but-one file,
+--    published_record_units_2026_10_16.sql, which stays last.
 --
 -- Every statement is behind a catalog read, so a second pass changes
 -- nothing and fires no DDL (tests/test_ddl_guard.py). Does not rewrite
@@ -24,7 +25,6 @@
 
 DO $mig$
 DECLARE
-  v text;
   d text;
   replace_log boolean;
 BEGIN
@@ -167,34 +167,7 @@ BEGIN
     $risked$;
   END IF;
 
-  -- 3. the views pass stake_units ---------------------------------------------
-  FOREACH v IN ARRAY ARRAY['v_public_track_record', 'v_public_track_record_daily'] LOOP
-    IF to_regclass('public.' || v) IS NULL THEN
-      RAISE NOTICE '%: missing, waits for its owner', v;
-      CONTINUE;
-    END IF;
-    d := pg_get_viewdef(('public.' || v)::regclass, true);
-    IF position('result, stake_units)' IN d) > 0 THEN
-      CONTINUE;                      -- already passes the stake
-    END IF;
-    IF position('published_pick_unit_profit(COALESCE(decision_odds, dk_odds), result)' IN d) = 0 THEN
-      RAISE NOTICE '%: no posted-stake units yet, waits for published_record_units', v;
-      CONTINUE;
-    END IF;
-    d := replace(d, 'published_pick_unit_profit(COALESCE(decision_odds, dk_odds), result)',
-                    'published_pick_unit_profit(COALESCE(decision_odds, dk_odds), result, stake_units)');
-    d := replace(d, 'published_pick_unit_risked(COALESCE(decision_odds, dk_odds), result)',
-                    'published_pick_unit_risked(COALESCE(decision_odds, dk_odds), result, stake_units)');
-    IF position('published_pick_unit_profit(COALESCE(decision_odds, dk_odds), result)' IN d) > 0
-       OR position('published_pick_unit_risked(COALESCE(decision_odds, dk_odds), result)' IN d) > 0 THEN
-      RAISE EXCEPTION '%: a two-argument unit call is left', v;
-    END IF;
-    EXECUTE format('CREATE OR REPLACE VIEW public.%I AS %s', v, d);
-    EXECUTE format('ALTER VIEW public.%I SET (security_invoker = on)', v);
-    EXECUTE format('GRANT SELECT ON public.%I TO anon, authenticated', v);
-    RAISE NOTICE '%: units now read the pick''s stake_units', v;
-  END LOOP;
-
+  -- 3. open_picks passes stake_units ------------------------------------------
   IF to_regclass('public.open_picks') IS NOT NULL THEN
     d := pg_get_viewdef('public.open_picks'::regclass, true);
     IF position('p.dk_odds), p.stake_units)' IN d) = 0
