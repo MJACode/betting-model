@@ -12,7 +12,6 @@ import {
   bestHandoffForPick,
   handoffQuotesForPick,
   bookLabel,
-  bookLabelShort,
   bookName,
   currentLineQuotes,
   formatSideLine,
@@ -240,15 +239,20 @@ export function PickCard({
   const noEdgeAtMine = myView?.status === 'mine' && (myView.edge ?? 0) <= 0;
   // One short line on a scanned board (UX review): where the model found it,
   // and that the record is kept there. The longer sentence is on Pick Detail.
-  const myBooksNote = myQuote && modelPrice != null
-    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}${
-        noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
-      }`
-    : notAtMyBooks
-      ? pick.is_live === true && modelPrice != null
-        ? liveNotAtMyBooksText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))
-        : NOT_AT_MY_BOOKS
-      : null;
+  // The caption is not a pill slot, so it takes the full short label (PARX,
+  // not the pill's clipped PAR), and the spoken copy takes the book's name.
+  const myBooksNoteWith = (book: string) =>
+    myQuote && modelPrice != null
+      ? `${foundAtText(book, formatAmerican(modelPrice))}${
+          noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
+        }`
+      : notAtMyBooks
+        ? pick.is_live === true && modelPrice != null
+          ? liveNotAtMyBooksText(book, formatAmerican(modelPrice))
+          : NOT_AT_MY_BOOKS
+        : null;
+  const myBooksNote = myBooksNoteWith(bookLabel(storedQuoteBook(pick)));
+  const myBooksNoteSpoken = myBooksNoteWith(bookName(storedQuoteBook(pick)));
   // Green only when the edge on screen is one they can take: at their price
   // it may be gone, and off their books there is nothing to take.
   const myEdgeGone = (myView?.status === 'mine' && (myView.edge ?? 0) <= 0) || notAtMyBooks;
@@ -570,7 +574,7 @@ export function PickCard({
         edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         modelChance: `Model chance ${formatPct(pick.model_probability)}`,
         expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
-        stake: myBooksNote ? `${signalsStakeSpoken}. ${myBooksNote}` : signalsStakeSpoken,
+        stake: myBooksNoteSpoken ? `${signalsStakeSpoken}. ${myBooksNoteSpoken}` : signalsStakeSpoken,
         modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
@@ -593,7 +597,7 @@ export function PickCard({
         flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
         stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
-        myBooksNote,
+        myBooksNoteSpoken,
         timing ? timing.label : null,
         startedSpoken,
       ]);

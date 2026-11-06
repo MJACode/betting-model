@@ -480,7 +480,11 @@ def test_its_ledger_is_worker_only_and_its_rows_are_kept_by_the_prune():
 
 
 def test_the_model_s_books_are_bettable_today():
-    assert set(ft.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
+    # betparx stays in the fitted consensus set and is never a betting book
+    # (config.STATE_LIMITED_BOOKMAKERS, mike 2026-11-06).
+    assert set(ft.BOOKS) - config.STATE_LIMITED_BOOKMAKERS <= set(config.BEST_LINE_BOOKMAKERS)
+    from scripts.ncaab_first_half_total_card import bet_books
+    assert "betparx" in ft.BOOKS and "betparx" not in bet_books()
 
 
 def test_a_game_priced_below_the_cut_is_a_none_row_and_one_with_no_quote_is_no_row():
