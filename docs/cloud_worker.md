@@ -610,7 +610,7 @@ so adding that channel later still delivers the rest of the day's picks.
 
 | Variable (on `worker`) | What it does |
 |---|---|
-| `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` | `sentry_events_sync` (every 15 min) copies the app's Sentry events into `sentry_events`. Unset = the job logs `not_configured` and writes nothing. `docs/sentry.md` |
+| `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` | `sentry_events_sync` (every 15 min, `max_instances=1`) copies the app's Sentry events into `sentry_events`. Each request is bounded (5s connect, 10s read) and a tick stops after 45s, so a Sentry outage cannot run into the next tick. Unset = the job logs `not_configured` and writes nothing. `docs/sentry.md` |
 
 | Variable | Channel it feeds |
 |---|---|

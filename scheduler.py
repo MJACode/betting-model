@@ -893,6 +893,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
+                  # Copies Sentry into sentry_events. Runs on pipeline already
+                  # (it is not a poller job); named here so the set says so.
+                  "sentry_events_sync",
                   "calibration_watch",
                   "model_quality",
                   "kalshi_ladders", "kalshi_game_markets",
@@ -2533,11 +2536,15 @@ def build_scheduler() -> BlockingScheduler:
 
     # Sentry -> Supabase copy (run_sentry_events_sync) — every 15 minutes.
     # A copy, so the cadence only bounds how stale sentry_events can be.
+    # max_instances + coalesce: a tick still inside its HTTP budget must not
+    # be joined by the next one. The budget itself is TICK_BUDGET_S in
+    # data/ingestors/sentry_events.py, well under this 15-minute gap.
     sched.add_job(
         run_sentry_events_sync,
         CronTrigger(minute="7,22,37,52", timezone=TIMEZONE),
         id="sentry_events_sync",
         name="Sentry events -> Supabase (every 15 min)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # Failure alerting — every 10 minutes, 24x7.
