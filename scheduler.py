@@ -809,6 +809,20 @@ def run_heartbeat_watchdog() -> None:
         log.exception("ERROR heartbeat-watchdog crashed")
 
 
+def run_sentry_events_sync() -> None:
+    # Copy the mobile app's Sentry events into Supabase sentry_events
+    # (data/ingestors/sentry_events.py). Matt, 2026-11-06: Sentry in the app,
+    # everything in Supabase. In-process and never raises: a Sentry outage or
+    # a missing key must not cost the scheduler anything. No keys on the
+    # worker = "not_configured" and nothing written.
+    try:
+        from data.ingestors.sentry_events import sync_sentry_events
+        result = sync_sentry_events()
+        log.info("sentry_events: %s", result)
+    except Exception:  # noqa: BLE001
+        log.exception("ERROR sentry-events-sync failed")
+
+
 def run_bovada_feed() -> None:
     # Same supervisor shape as the others: exits after --minutes, the */10 cron
     # relaunches it, max_instances=1 makes intervening ticks no-ops.
@@ -2515,6 +2529,15 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Sentry -> Supabase copy (run_sentry_events_sync) — every 15 minutes.
+    # A copy, so the cadence only bounds how stale sentry_events can be.
+    sched.add_job(
+        run_sentry_events_sync,
+        CronTrigger(minute="7,22,37,52", timezone=TIMEZONE),
+        id="sentry_events_sync",
+        name="Sentry events -> Supabase (every 15 min)",
     )
 
     # Failure alerting — every 10 minutes, 24x7.
