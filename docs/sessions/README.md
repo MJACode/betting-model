@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, betPARX is fetched and never the book a pick names (config.STATE_LIMITED_BOOKMAKERS); app, NFL cards and NBA in-play fetch follow; ncaab_spread_market loses its betPARX games |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry in the app (native crashes, iOS hangs), copied to sentry_events by the worker; app 1.3.0; setup in docs/sentry.md |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, same-game parlays priced as independent legs (+6040 vs FanDuel +4254); estimated SGP price with a per-book cut fitted from member-entered prices (`sgp_price_observations`) |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, nba_prop_projection stores and shows p' = implied + 0.325 (p − implied) at the decision price for games from 2026-11-07; bets, door order and Discord "good to" (paid and free) unchanged on a full replay; config.MODEL_PROB_SHRINK, honest_ev.shrink_factor / shown_probability / decision_probability |

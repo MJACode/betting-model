@@ -3844,13 +3844,35 @@ SHARP_BOOKMAKERS = [
 # narrow loses a bet we could have had — recoverable, and it shows up as a
 # missing row. Too wide LOCKS AN UNPLACEABLE PICK FOREVER, and §1c means
 # nothing can take it back.
-NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada"}
+#
+# STATE-LIMITED BOOKS ARE FETCHED, AND NEVER THE BOOK A PICK NAMES (mike,
+# 2026-11-06: "global rule. remove betparx from sports books for recommeding
+# betting lines in picks only niche avaialble in a few states"). betPARX ships
+# one app per state -- Maryland, Pennsylvania, New Jersey
+# (mobile/src/lib/sportsbookLinks.ts) -- so a pick decided there sends most
+# members to a book they cannot open. 60 BETs had been decided at it by that
+# day (14 models, 53 of them in the previous 30 days, measured in `picks`).
+#
+# It stays in LINE_SHOP_BOOKMAKERS on purpose: the NCAAB consensus models take
+# a median over every book and were fitted with betPARX in the set
+# (models/ncaab_book_quotes.BOOKS), so its quotes must keep arriving. What
+# changes is only where a pick may be DECIDED and where a member is SENT.
+#
+# Unlike espnbet below, this is NOT reversible by an environment variable:
+# BETTABLE_BOOKS and BEST_LINE_BOOKMAKERS drop these books after any override.
+# Adding a book here is the one edit; tests/test_betparx_never_a_pick_book.py
+# pins every copy of the list (the NFL cards' fallback, the app's mirror).
+STATE_LIMITED_BOOKMAKERS = {"betparx"}
+NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada", *STATE_LIMITED_BOOKMAKERS}
 BETTABLE_BOOKS = [
-    b.strip().lower()
-    for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
-        b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
-    )).split(",")
-    if b.strip()
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
+            b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
+        )).split(",")
+        if b.strip()
+    )
+    if b not in STATE_LIMITED_BOOKMAKERS
 ]
 
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
@@ -4003,14 +4025,18 @@ SCORE_OFF_ANY_BOOK_LINE: bool = (
 # (WynnBET exited US online sports betting).
 #
 # Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
-# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS.
-_BEST_LINE_EXCLUDE_DEFAULT = "pinnacle,bovada,espnbet"
-BEST_LINE_EXCLUDE_BOOKMAKERS = [
-    b.strip().lower()
-    for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
-                            _BEST_LINE_EXCLUDE_DEFAULT).split(",")
-    if b.strip()
-]
+# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS -- every book
+# except STATE_LIMITED_BOOKMAKERS (betparx, mike 2026-11-06), which no override
+# puts back.
+_BEST_LINE_EXCLUDE_DEFAULT = ",".join(
+    ["pinnacle", "bovada", "espnbet", *sorted(STATE_LIMITED_BOOKMAKERS)])
+BEST_LINE_EXCLUDE_BOOKMAKERS = list(dict.fromkeys([
+    *(b.strip().lower()
+      for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
+                              _BEST_LINE_EXCLUDE_DEFAULT).split(",")
+      if b.strip()),
+    *sorted(STATE_LIMITED_BOOKMAKERS),
+]))
 
 BEST_LINE_BOOKMAKERS = [
     b for b in (
