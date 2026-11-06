@@ -27,9 +27,11 @@ const APP_VERSION = appConfig.expo.version;
  * device id, the same one app_errors carries, so the two join.
  *
  * SENTRY_DSN is public by design (it can only send events), so it lives in
- * source. Empty = Sentry is not started and nothing is sent.
+ * source. This is the signal-base / signal-base-mobile client key. Empty
+ * still means Sentry is not started and nothing is sent.
  */
-export const SENTRY_DSN = '';
+export const SENTRY_DSN =
+  'https://f8fbe2f714eba74c4159b93cf987a942@o4512386387017728.ingest.us.sentry.io/4512386389311488';
 
 let started = false;
 let starting: Promise<void> | null = null;

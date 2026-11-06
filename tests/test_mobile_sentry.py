@@ -35,6 +35,18 @@ def test_privacy_settings():
     assert "enableAppHangTracking: true" in src and "enableNativeCrashHandling: true" in src
 
 
+PUBLIC_DSN = (
+    "https://f8fbe2f714eba74c4159b93cf987a942"
+    "@o4512386387017728.ingest.us.sentry.io/4512386389311488"
+)
+
+
+def test_the_public_dsn_is_set():
+    src = _src()
+    assert f"'{PUBLIC_DSN}'" in src
+    assert "export const SENTRY_DSN = ''" not in src
+
+
 def test_an_empty_dsn_starts_nothing():
     src = _src()
     start = src.split("export function startSentry", 1)[1].split("function initSentry", 1)[0]
