@@ -224,3 +224,21 @@ bets, +1.7%, interval −2.1% to +5.5%. Assists overs lose 3.9% to 4.5%, and reb
 **Answer: first-quarter props anchored on Pinnacle's full-game number are closed. Anchored on the soft books' number,
 for players Pinnacle does not quote, assists overs clear five of six bars at every cut and fail the bands bar on one
 band of 169 bets. Nothing is built from this search without the owner's decision to ship a cell that failed a bar.**
+
+## 14. Would the near miss bet live? (measured 2026-11-06, after the grade)
+
+The 2026-27 first-quarter props were bought for the season so far: 123 games at tip minus 60 minutes, 3,387 rows,
+3,616 credits (`nba_odds_history --q1-props --seasons 2027 2027`; balance after, 964,593). Which books quote them:
+
+| Market | Books (quotes, two-sided) |
+|---|---|
+| assists | Hard Rock only (403, 402 two-sided; 118 games) |
+| rebounds | Hard Rock only (717, 700) |
+| points | FanDuel (1,126, all) and Hard Rock (1,141, 1,117) |
+
+BetMGM, which carried 170 of the 171 near-miss bets in 2025-26, quotes none. **Of Hard Rock's 402 two-sided
+first-quarter assists quotes, 392 are on a player with a Pinnacle full-game assists quote in the live feed in the 75
+minutes before tip, and 1 has no Pinnacle quote and three or more other books.** The consensus family's population is
+players Pinnacle does not quote; live, with the feed fetching many times before tip, Pinnacle quotes almost everyone,
+so the near miss would place about one bet in 16 days. The live population is the Pinnacle-anchored family's, which
+found nothing. **Nothing from this search can be built.**
