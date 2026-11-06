@@ -43,7 +43,7 @@ function check(name: string, cond: boolean, detail = '') {
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf-8');
 
-const REASON = 'Two models agree: the full-game total model also bet Over 141.5';
+const REASON = 'Two models agree: NCAAB Totals also bet Over 141.5';
 
 function mkPick(over: Partial<Pick> = {}): Pick {
   return {
@@ -162,8 +162,11 @@ check('PickCard builds the reason only where a stake is shown',
   /const stakeReason = stakeCaption \? stakeReasonLine\(stake, pick\.stake_reason\) : null;/.test(card));
 check('PickCard renders the reason once per layout (board and signals)',
   (card.match(/\{trueMinus\(stakeReason\)\}/g) ?? []).length === 2);
-check('PickCard renders the reason in the existing caption style, no new colour',
-  (card.match(/<Text style=\{styles\.captionLine\}[^>]*>\s*\{trueMinus\(stakeReason\)\}/g) ?? []).length === 2);
+check('PickCard renders the reason as a glyph row in textSecondary, no new colour (UX review 2026-11-06)',
+  (card.match(/<Text style=\{styles\.stakeReasonText\}>\{trueMinus\(stakeReason\)\}/g) ?? []).length === 2
+    && (card.match(/name="layers-outline"/g) ?? []).length === 2
+    && /stakeReasonText: \{[^}]*color: colors\.textSecondary,/.test(card)
+    && !/stakeReasonText: \{[^}]*colors\.(bet|success|brand|warning)/.test(card));
 check('PickCard speaks the reason with the stake, signals layout',
   /`Stake, \$\{signalsStakeSpeech\(signalsRiskUnits, signalsWinUnits\)\}\$\{stakeReason \? `\. \$\{stakeReason\}` : ''\}`/.test(card));
 check('PickCard speaks the reason right after the stake, board layout',
@@ -173,10 +176,12 @@ check('ReasoningCard sizes the stake with the pick\'s stake_units',
   /const stake = stakeFor\(pick\.kelly_fraction, odds, pick\.stake_units\);/.test(reasoning));
 check('ReasoningCard explains the reason when the stake is above 1u',
   /stakeReasonLine\(stake, pick\.stake_reason\)/.test(reasoning));
-check('ReasoningCard says a 2u pick is not the usual 1u, and keeps the 1u sentence for the rest',
+check('ReasoningCard says a 2u pick is sized up from 1u, and keeps the 1u sentence for the rest',
   reasoning.includes('stake.conviction > FLAT_CONVICTION')
-    && reasoning.includes('not the usual 1u. ${reasonSentence}')
+    && reasoning.includes('Sized up from the usual 1u. ${reasonSentence}')
     && reasoning.includes('Every BET is a 1u play'));
+check('ReasoningCard names no second win amount under the 3u cap (UX review 2026-11-06)',
+  /stake\.capped\s*\?\s*''\s*:\s*`A \$\{formatUnits\(stake\.conviction\)\} play means/.test(reasoning));
 const home = read('src/screens/PicksHomeScreen.tsx');
 check('PicksHomeScreen exposure sum passes the pick\'s stake_units',
   /unitsFor\(d\.pick\.kelly_fraction, decisionOdds\(d\.pick\), d\.pick\.stake_units\)/.test(home));

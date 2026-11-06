@@ -124,14 +124,18 @@ export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
               : formatUnits(stake.conviction)
           }
           sub={
+            // Under the cap the "you lay" sentence would name the uncapped
+            // stake; the cap sentence below gives the real numbers instead.
             (stake.priced
-              ? `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(odds)} you lay ${formatUnits(stake.risk)}. `
+              ? (stake.capped
+                ? ''
+                : `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(odds)} you lay ${formatUnits(stake.risk)}. `)
               : `No book price on this market, so there's nothing to gross the stake up against — this is the bare conviction. `) +
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
               : '') +
             (stake.conviction > FLAT_CONVICTION
-              ? `This pick is staked at ${formatUnits(stake.conviction)} to win, not the usual 1u. ${reasonSentence}`
+              ? `Sized up from the usual 1u. ${reasonSentence}`
               : `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. `) +
             `Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
           }

@@ -259,8 +259,8 @@ def test_a_two_unit_pick_posts_its_stake_and_why():
             "dk_odds": -110, "decision_odds": -110, "decision_book": "fanduel",
             "decision_odds_raw": -110, "best_book": "fanduel", "best_odds": -110}
     two = _signal_field({**base, "stake_units": 2,
-                         "stake_reason": "Two models agree: the full-game total model also bet Kansas vs Duke Under 140.5"})
+                         "stake_reason": "Two models agree: NCAAB Totals also bet Kansas vs Duke Under 140.5"})
     assert "**2.2u to win 2u**" in two["value"]
-    assert two["value"].endswith("Two models agree: the full-game total model also bet Kansas vs Duke Under 140.5")
+    assert two["value"].endswith("Two models agree: NCAAB Totals also bet Kansas vs Duke Under 140.5")
     one = _signal_field({**base, "stake_units": None, "stake_reason": None})
     assert "**1.1u to win 1u**" in one["value"] and "agree" not in one["value"]

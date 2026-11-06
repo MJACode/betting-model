@@ -226,7 +226,7 @@ def test_a_bet_an_earlier_full_game_total_agrees_with_is_two_units(world):
     assert card.run_card(do_publish=True)["published"] == 1
     [(units, reason)] = _first_half_stake(raw, gid)
     assert float(units) == config.NCAAB_AGREEMENT_STAKE_UNITS == 2.0
-    assert reason == "Two models agree: the full-game total model also bet Kansas vs Duke Under 140.5"
+    assert reason == "Two models agree: NCAAB Totals also bet Kansas vs Duke Under 140.5"
 
 
 @pytest.mark.parametrize("side, status, signal", [

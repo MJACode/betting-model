@@ -39,14 +39,15 @@ FAMILY = {
     "ncaab_first_half_spread": "side",
 }
 
-# How a reader names each model in the reason line.
+# How a reader names each model in the reason line: the app's own names
+# (mobile/src/lib/modelMeta.ts longLabel), so the card and the Models tab agree.
 MODEL_NAME = {
-    "ncaab_total_blend": "full-game total",
-    "ncaab_first_half_total": "first-half total",
-    "ncaab_spread_market": "full-game spread",
-    "ncaab_moneyline_own_spread": "moneyline",
-    "ncaab_moneyline_first_post": "opening moneyline",
-    "ncaab_first_half_spread": "first-half spread",
+    "ncaab_total_blend": "NCAAB Totals",
+    "ncaab_first_half_total": "NCAAB First Half Totals",
+    "ncaab_spread_market": "NCAAB Spreads",
+    "ncaab_moneyline_own_spread": "NCAAB Moneyline",
+    "ncaab_moneyline_first_post": "NCAAB Opening Moneyline",
+    "ncaab_first_half_spread": "NCAAB First Half Spreads",
 }
 
 STAKE_FIELDS = ("stake_units", "stake_reason")
@@ -76,7 +77,7 @@ def agreement(conn, game_id: str, model_id: str, side: str) -> tuple[float | Non
     if not hit:
         return None, None
     name = MODEL_NAME.get(hit[0], hit[0])
-    return units, f"Two models agree: the {name} model also bet {hit[1]}"
+    return units, f"Two models agree: {name} also bet {hit[1]}"
 
 
 def stamp(conn, row: dict, cols) -> dict:

@@ -772,7 +772,20 @@ export function PickCard({
         </Text>
       ) : null}
       {stakeReason ? (
-        <Text style={styles.captionLine}>{trueMinus(stakeReason)}</Text>
+        // A sized-up pick (picks.stake_units > 1) says why, with a glyph so it
+        // reads as its own line on a full board (UX review, 2026-11-06). Same
+        // row shape as the books note; textSecondary, never the BET green.
+        <View style={styles.stakeReasonRow}>
+          <Ionicons
+            name="layers-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
       ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
@@ -1070,7 +1083,20 @@ export function PickCard({
         {signalsStakeShown ?? '—'}
       </Text>
       {stakeReason ? (
-        <Text style={styles.captionLine}>{trueMinus(stakeReason)}</Text>
+        // A sized-up pick (picks.stake_units > 1) says why, with a glyph so it
+        // reads as its own line on a full board (UX review, 2026-11-06). Same
+        // row shape as the books note; textSecondary, never the BET green.
+        <View style={styles.stakeReasonRow}>
+          <Ionicons
+            name="layers-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
       ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
@@ -1343,6 +1369,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.caption,
     color: colors.textTertiary,
+  },
+  stakeReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.xs,
+  },
+  stakeReasonText: {
+    flex: 1,
+    marginLeft: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
   },
   card: {
     // Declared tap floor (verify_a11y); the card is already ~150pt, so this
