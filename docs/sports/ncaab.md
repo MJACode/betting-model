@@ -1273,6 +1273,9 @@ build writes with `--bets-out` (the same builds that reproduce the live cards
 bet for bet), joined by game over 2023-24 to 2025-26, the three seasons all six
 cover. 6,555 bets. 1u to win, risk capped at 3u. 95% intervals resample game
 dates. `python -m scripts.ncaab_stacking_check` prints every table below.
+The closing-value lines are not in it. They came from a one-off pass over
+the first-half build's quote cache (each book's last pre-tip first-half
+total) and Pinnacle's stored full-game totals in `odds`.
 
 **Volume.** 15.2 bets a game day on average, 34 at the 90th percentile, 63 at
 most. 4,716 games got one bet, 797 two, 79 three, 2 four. The first-half total
