@@ -1086,6 +1086,42 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _validate_restore_swept_ncaab_none_rows(args: dict) -> dict:
+    """apply defaults false (counts only). Only the boolean true writes.
+    wait_s (default 660) is how long the job waits before it reads."""
+    apply = args.get("apply", False)
+    if not isinstance(apply, bool):
+        raise ValueError(f"apply must be true or false, got {apply!r}")
+    wait_s = args.get("wait_s", 660)
+    if isinstance(wait_s, bool) or not isinstance(wait_s, int) or not 0 <= wait_s <= 1800:
+        raise ValueError(f"wait_s must be an integer 0-1800, got {wait_s!r}")
+    return {"apply": apply, "wait_s": wait_s}
+
+
+def _job_restore_swept_ncaab_none_rows(**kw):
+    """2026-11-06: put back the NCAAB cards' NONE rows the scorer's sweep
+    deleted, for games not yet started. tracking/restore_swept_ncaab_none_rows.py.
+
+    It waits first. The deploy that carries the fix is also the one that
+    queues this job, and the container it replaces keeps running its
+    in-flight step for up to railway.json's drainingSeconds (600) after
+    SIGTERM -- a scoring step whose sweep would delete the restored rows
+    again. 660 s outlasts that drain. The queue runs on the pipeline role
+    only (scheduler._PIPELINE_JOBS), the same container as the refresh
+    passes; the pollers role runs no full scoring pass."""
+    import time
+
+    from data.db import get_connection
+    from tracking.restore_swept_ncaab_none_rows import restore
+
+    time.sleep(kw["wait_s"])
+    conn = get_connection()
+    try:
+        return restore(conn, apply=kw["apply"])
+    finally:
+        conn.close()
+
+
 def _validate_publish_oct13_nhl_reply(args: dict) -> dict:
     """No arguments. The line and the tweet it replies to are fixed."""
     if args:
@@ -2733,6 +2769,10 @@ JOBS = {
     "publish_oct13_nhl_reply": (_job_publish_oct13_nhl_reply,
                                 _validate_publish_oct13_nhl_reply),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
+    # One-off, 2026-11-06: the NCAAB NONE rows the scorer's sweep deleted,
+    # for games not yet started. apply defaults false.
+    "restore_swept_ncaab_none_rows": (_job_restore_swept_ncaab_none_rows,
+                                      _validate_restore_swept_ncaab_none_rows),
     # Read-only: asks Discord which channel each webhook points at.
     "discord_probe": (_job_discord_probe, lambda a: {}),
     # One-off: a sport's channel cloned from another's (NCAAB from NCAAF,
