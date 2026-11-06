@@ -41,7 +41,7 @@ import {
 } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
-import { useSgpHaircuts } from '@/hooks/useSgpHaircuts';
+import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import type { SgpHaircuts } from '@/lib/sgpPricing';
 import { SgpPriceEntry } from '@/components/SgpPriceEntry';
 import { fetchPlayerTeams } from '@/lib/queries';
@@ -49,6 +49,7 @@ import {
   isValidCombo,
   legsForPricing,
   lineShopParlay,
+  slipSignature,
   makeCustomLeg,
   CUSTOM_MODEL_ID,
   parlayRecommendedUnits,
@@ -186,14 +187,9 @@ function ParlayScreenBody() {
   // (lib/sgpPricing.ts); a price the member typed in from a book's own slip
   // replaces the estimate at that book, for this slip only.
   const sgpFits = useSgpHaircuts();
-  const [enteredPrices, setEnteredPrices] = useState<Record<string, number>>({});
-  const slipSignature = useMemo(() => pricedLegs.map((l) => l.slipKey).join(','), [pricedLegs]);
-  useEffect(() => {
-    setEnteredPrices({}); // a typed price belongs to the slip it was read off
-  }, [slipSignature]);
-  const handleSgpEntered = useCallback((book: string, american: number) => {
-    setEnteredPrices((prev) => ({ ...prev, [book]: american }));
-  }, []);
+  // Shared with the betslip bar, keyed to this exact slip (hooks/useSgpHaircuts).
+  const sig = useMemo(() => slipSignature(legs), [legs]);
+  const { prices: enteredPrices, enter: handleSgpEntered, clear: handleSgpCleared } = useEnteredSgpPrices(sig);
   const metrics = useMemo(() => {
     const m = computeCorrelatedMetrics(pricedLegs, rho, resolveTeam, undefined, sgpFits);
     const dkTyped = enteredPrices[MODEL_BOOK];
@@ -481,6 +477,7 @@ function ParlayScreenBody() {
             sgpFits={sgpFits}
             enteredPrices={enteredPrices}
             onSgpEntered={handleSgpEntered}
+            onSgpCleared={handleSgpCleared}
           />
         )}
       </ScrollView>
@@ -784,18 +781,35 @@ function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
  * edge) on this exact slip, and — when same-game legs are correlated — the joint
  * probability vs the naïve product, which is the whole point of the engine.
  */
-function CorrelatedExtras({ m, allDk }: { m: CorrelatedMetrics; allDk: boolean }) {
+function CorrelatedExtras({
+  m,
+  allDk,
+  estimated,
+}: {
+  m: CorrelatedMetrics;
+  allDk: boolean;
+  /** The slip price is an estimated same-game price (lib/sgpPricing.ts). */
+  estimated: boolean;
+}) {
   const holdPositive = m.dkHoldPct >= 0;
+  const est = estimated ? 'est. ' : '';
   return (
     <View style={styles.corrExtras}>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>Fair odds</Text>
         <Text style={styles.corrValue}>
-          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {formatAmerican(m.americanOdds)}
+          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {est}{formatAmerican(m.americanOdds)}
         </Text>
       </View>
       <View style={styles.corrRow}>
-        <Text style={styles.corrLabel}>{holdPositive ? (allDk ? 'DK hold on this slip' : 'Hold on this slip') : 'Your edge on this slip'}</Text>
+        <Text style={styles.corrLabel}>
+          {estimated ? 'Est. ' : ''}
+          {holdPositive
+            ? estimated
+              ? allDk ? 'DK hold on this slip' : 'hold on this slip'
+              : allDk ? 'DK hold on this slip' : 'Hold on this slip'
+            : estimated ? 'edge on this slip' : 'Your edge on this slip'}
+        </Text>
         <Text style={[styles.corrValue, { color: holdPositive ? colors.avoidInk : colors.betInk }]}>
           {formatPct(Math.abs(m.dkHoldPct))}
         </Text>
@@ -883,6 +897,7 @@ function SlipBody({
   sgpFits,
   enteredPrices,
   onSgpEntered,
+  onSgpCleared,
 }: {
   legs: ParlayLeg[];
   /** `legs` minus pre-game alternates held after kickoff. The price, the
@@ -903,8 +918,9 @@ function SlipBody({
   editingId: string | null;
   onSaved: (id: string) => void;
   sgpFits: SgpHaircuts;
-  enteredPrices: Record<string, number>;
+  enteredPrices: Readonly<Record<string, number>>;
   onSgpEntered: (book: string, american: number) => void;
+  onSgpCleared: (book: string) => void;
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
@@ -1023,6 +1039,9 @@ function SlipBody({
   }
 
   const stake = parlayRecommendedUnits(metrics);
+  // DraftKings' price is our estimate when legs share a game and the member has
+  // not typed DK's own price in.
+  const estimated = metrics.sgpGroups > 0 && enteredPrices[MODEL_BOOK] == null;
   const payout = stake.risk * metrics.decimalPayout;
 
   return (
@@ -1043,10 +1062,15 @@ function SlipBody({
           <Text style={styles.resultTitle}>{pricedLegs.length}-Leg Play</Text>
           <View style={styles.resultHeaderRight}>
             <GradeBadge grade={metrics.grade} />
-            {metrics.sgpGroups > 0 && enteredPrices[MODEL_BOOK] == null ? (
-              <Text style={styles.resultOddsEst} accessibilityLabel="estimated">est.</Text>
-            ) : null}
-            <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+            {/* One VoiceOver stop: the qualifier must not be skippable. */}
+            <View
+              accessible
+              accessibilityLabel={`${estimated ? 'estimated ' : ''}${formatAmerican(metrics.americanOdds)}`}
+              style={styles.resultOddsWrap}
+            >
+              {estimated ? <Text style={styles.resultOddsEst}>est.</Text> : null}
+              <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+            </View>
           </View>
         </View>
 
@@ -1073,7 +1097,7 @@ function SlipBody({
           <Stat label="Potential payout" value={formatUnits(payout)} spoken={unitsSpeech(formatUnits(payout))} />
         </View>
 
-        <CorrelatedExtras m={metrics} allDk={allDk} />
+        <CorrelatedExtras m={metrics} allDk={allDk} estimated={estimated} />
 
         {/* The staleness caveat has to follow the leg to the screen the bet is
             placed from, not stay on the board it was picked off. One line, and
@@ -1113,6 +1137,7 @@ function SlipBody({
           sgpGroups={metrics.sgpGroups}
           entered={enteredPrices}
           onEntered={onSgpEntered}
+          onCleared={onSgpCleared}
         />
 
         <BetslipBooksRow legs={pricedLegs} sgpFits={sgpFits} enteredPrices={enteredPrices} />
@@ -1477,6 +1502,11 @@ const styles = StyleSheet.create({
   missingNoteText: {
     color: colors.textSecondary,
     fontSize: font.size.footnote,
+  },
+  resultOddsWrap: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.xs,
   },
   resultOddsEst: {
     fontSize: font.size.footnote,

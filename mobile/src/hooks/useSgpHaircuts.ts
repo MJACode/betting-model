@@ -56,3 +56,48 @@ export function useSgpHaircuts(): SgpHaircuts {
   }, []);
   return fits;
 }
+
+// ── Prices a member typed in from a book's own slip ─────────────────────────
+//
+// Shared, not screen state: the betslip bar and the Betslip screen must show
+// the same number, and the bar is mounted outside the screen. Keyed by the
+// slip's signature (its priced legs' slip keys): a price belongs to the slip it
+// was read off, so a different slip reads as nothing entered.
+
+let enteredSig = '';
+let enteredPrices: Readonly<Record<string, number>> = Object.freeze({});
+const enteredListeners = new Set<() => void>();
+const EMPTY: Readonly<Record<string, number>> = Object.freeze({});
+
+function setEntered(sig: string, next: Record<string, number>) {
+  enteredSig = sig;
+  enteredPrices = Object.freeze(next);
+  enteredListeners.forEach((fn) => fn());
+}
+
+export function useEnteredSgpPrices(sig: string): {
+  prices: Readonly<Record<string, number>>;
+  enter: (book: string, american: number) => void;
+  clear: (book: string) => void;
+} {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const fn = () => bump((n) => n + 1);
+    enteredListeners.add(fn);
+    return () => {
+      enteredListeners.delete(fn);
+    };
+  }, []);
+  const prices = sig !== '' && sig === enteredSig ? enteredPrices : EMPTY;
+  return {
+    prices,
+    enter: (book, american) =>
+      setEntered(sig, { ...(sig === enteredSig ? enteredPrices : {}), [book]: american }),
+    clear: (book) => {
+      if (sig !== enteredSig) return;
+      const next = { ...enteredPrices };
+      delete next[book];
+      setEntered(sig, next);
+    },
+  };
+}

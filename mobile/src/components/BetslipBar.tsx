@@ -7,9 +7,10 @@ import { setBetslipBarInset } from '@/hooks/useBetslipBarInset';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
-import { betslipSummary, shouldShowBetslipBar, BETSLIP_BAR_STAKE } from '@/lib/parlay';
+import { betslipSummary, shouldShowBetslipBar, slipSignature, BETSLIP_BAR_STAKE } from '@/lib/parlay';
+import { MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
-import { useSgpHaircuts } from '@/hooks/useSgpHaircuts';
+import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import { formatUnits } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -68,10 +69,15 @@ function BetslipBarContent({
   const insets = useSafeAreaInsets();
   const { legs, count, resolving } = useResolvedSlip();
   const sgpFits = useSgpHaircuts();
+  // A DraftKings price the member typed on the Betslip screen shows here too,
+  // so the bar and the screen's headline never disagree.
+  const sig = useMemo(() => slipSignature(legs), [legs]);
+  const { prices: typed } = useEnteredSgpPrices(sig);
+  const typedDk = typed[MODEL_BOOK];
 
   const summary = useMemo(
-    () => betslipSummary(legs, count, sgpFits),
-    [legs, count, sgpFits],
+    () => betslipSummary(legs, count, sgpFits, typedDk),
+    [legs, count, sgpFits, typedDk],
   );
 
   // Over the tab bar the home-indicator inset is already spent by the tabs;

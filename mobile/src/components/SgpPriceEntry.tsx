@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { showToast } from '@/components/Toast';
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { refreshSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import { americanToDecimal, formatAmerican } from '@/lib/format';
@@ -28,11 +29,14 @@ export function SgpPriceEntry({
   sgpGroups,
   entered,
   onEntered,
+  onCleared,
 }: {
   legs: ParlayLeg[];
   sgpGroups: number;
   entered: Readonly<Record<string, number>>;
   onEntered: (book: string, american: number) => void;
+  /** Remove a typed price (a typo that passed the range check). */
+  onCleared: (book: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   // Only books that price every leg have a multiplied price to compare with.
@@ -58,6 +62,13 @@ export function SgpPriceEntry({
   if (sgpGroups <= 0 || books.length === 0) return null;
 
   const enteredBooks = Object.keys(entered);
+  const title = `Estimated price · ${sgpGroups === 1 ? 'same-game legs' : `${sgpGroups} same-game groups`}`;
+  const body =
+    'Books price legs from the same game together, usually for less than the legs multiplied out. This is our estimate.' +
+    (enteredBooks.length > 0
+      ? ` Using your price at ${enteredBooks.map(bookName).join(', ')}.`
+      : ' Tap to enter the price your book shows.');
+  const typedHere = quote ? entered[quote.book] : undefined;
 
   const save = async () => {
     if (american == null || quote?.multipliedDecimal == null) return;
@@ -69,6 +80,7 @@ export function SgpPriceEntry({
     setError(null);
     // The price shows on this slip whether or not the save reaches the server.
     onEntered(quote.book, american);
+    showToast(`Using your ${bookName(quote.book)} price, ${formatAmerican(american)}`);
     try {
       await logSgpPrice({
         deviceId: await getDeviceId(),
@@ -97,21 +109,14 @@ export function SgpPriceEntry({
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel="Same-game legs, the price is an estimate. Enter the price your book shows."
+        accessibilityLabel={`${title}. ${body}`}
         hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
         style={styles.header}
       >
         <Ionicons name="git-merge-outline" size={16} color={colors.medInk} />
         <View style={styles.headerText}>
-          <Text style={styles.title}>
-            Estimated price · {sgpGroups === 1 ? 'same-game legs' : `${sgpGroups} same-game groups`}
-          </Text>
-          <Text style={styles.body}>
-            Books price legs from the same game together, for less than the legs multiplied out.
-            {enteredBooks.length > 0
-              ? ` Using your price at ${enteredBooks.map(bookName).join(', ')}.`
-              : ' Tap to enter the price your book shows.'}
-          </Text>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.body}>{body}</Text>
         </View>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} />
       </Pressable>
@@ -131,6 +136,7 @@ export function SgpPriceEntry({
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
                   accessibilityLabel={bookName(q.book)}
+                  hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
                   style={[styles.chip, on && styles.chipOn]}
                 >
                   <Text style={[styles.chipText, on && styles.chipTextOn]}>{bookLabel(q.book)}</Text>
@@ -173,6 +179,22 @@ export function SgpPriceEntry({
             </Pressable>
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          {typedHere != null && quote ? (
+            <Pressable
+              onPress={() => {
+                onCleared(quote.book);
+                showToast(`Back to the estimate at ${bookName(quote.book)}`);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`Clear your ${bookName(quote.book)} price, ${formatAmerican(typedHere)}`}
+              hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
+              style={({ pressed }) => [styles.clear, pressed && styles.pressed]}
+            >
+              <Text style={styles.clearText}>
+                Clear your {bookLabel(quote.book)} price ({formatAmerican(typedHere)})
+              </Text>
+            </Pressable>
+          ) : null}
           <Text style={styles.hint}>
             Your price shows on this slip and helps us price same-game slips at {bookName(quote?.book ?? MODEL_BOOK)} for everyone.
           </Text>
@@ -213,7 +235,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   chip: {
-    minHeight: 32,
+    minHeight: 36,
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
     borderRadius: radii.pill,
@@ -254,6 +276,12 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
   },
   pressed: { opacity: 0.7 },
+  clear: { marginTop: spacing.sm, alignSelf: 'flex-start' },
+  clearText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
   error: {
     fontSize: font.size.footnote,
     color: colors.avoidInk,

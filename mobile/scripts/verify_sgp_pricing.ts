@@ -32,6 +32,7 @@ import {
   lineShopParlay,
   makeCustomLeg,
   priceBooksForParlay,
+  slipSignature,
   type ParlayLeg,
 } from '../src/lib/parlay';
 import {
@@ -166,6 +167,15 @@ check('impliedHaircut inverts applySgpHaircut',
   const m = withDecimalPayout(headline, toDec(4199));
   check('an entered DK price moves EV and grade with it',
     near(m.ev, m.jointProb * toDec(4199) - 1, 1e-12) && near(m.americanOdds, 4199, 1e-6));
+}
+{
+  const b = betslipSummary(slip, slip.length, undefined, 4199);
+  check('bar shows a typed DK price, not the estimate', near(b.americanOdds, 4199, 1e-6) && !b.sgpEstimated);
+  const b2 = betslipSummary([slip[0], slip[1]], 2, undefined, 4199);
+  check('a typed DK price never applies to a slip with no same-game group', !near(b2.americanOdds, 4199, 1));
+  const q = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel'], undefined, { fanduel: 4254 });
+  check('no best-payout star when typed and estimated prices are mixed', q.every((x) => !x.isBest));
+  check('slip signature is the priced legs in slip order', slipSignature(slip) === slip.map((l) => l.slipKey).join(','));
 }
 check('parse "+4,254"', parseEnteredAmerican('+4,254') === 4254);
 check('parse "-120"', parseEnteredAmerican('-120') === -120);

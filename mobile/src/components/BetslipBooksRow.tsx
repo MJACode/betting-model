@@ -154,8 +154,8 @@ export function BetslipBooksRow({
               <Text style={[styles.odds, !full && styles.oddsNa]}>
                 {full ? formatAmerican(q.americanOdds!) : 'N/A'}
               </Text>
-              <Text style={styles.coverage}>
-                {q.entered ? 'book price' : q.sgpEstimated ? `${q.priced}/${q.total} · est.` : `${q.priced}/${q.total} legs`}
+              <Text style={styles.coverage} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                {q.entered ? 'Book price' : q.sgpEstimated ? `${q.priced}/${q.total} · est.` : `${q.priced}/${q.total} legs`}
               </Text>
             </Pressable>
           );

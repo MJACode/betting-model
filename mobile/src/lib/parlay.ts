@@ -332,10 +332,18 @@ export function legsForPricing(legs: readonly ParlayLeg[]): ParlayLeg[] {
   return legs.filter((l) => !l.pregameStale);
 }
 
+/** The priced legs' slip keys — which slip a typed same-game price belongs to.
+ *  The bar and the Betslip screen compute it the same way. */
+export function slipSignature(legs: readonly ParlayLeg[]): string {
+  return legsForPricing(legs).map((l) => l.slipKey).join(',');
+}
+
 export function betslipSummary(
   legs: ParlayLeg[],
   selectionCount: number,
   sgpFits: SgpHaircuts = NO_SGP_FITS,
+  /** DraftKings price the member typed in from DK's own slip, if any. */
+  enteredDkAmerican?: number,
 ): BetslipSummary {
   const priced = legsForPricing(legs);
   const held = legs.length - priced.length;
@@ -351,6 +359,18 @@ export function betslipSummary(
     };
   }
   const m = computeParlayMetrics(priced, sgpFits);
+  const typed = m.sgpGroups > 0 && enteredDkAmerican != null ? americanToDecimal(enteredDkAmerican) : NaN;
+  if (typed > 1) {
+    return {
+      count: selectionCount,
+      resolved: priced.length,
+      americanOdds: decimalToAmerican(typed),
+      payoutPerUnit: BETSLIP_BAR_STAKE * typed,
+      isParlay: priced.length >= 2,
+      sgpEstimated: false,
+      held,
+    };
+  }
   return {
     count: selectionCount,
     resolved: priced.length,
@@ -643,7 +663,11 @@ export function priceBooksForParlay(
     return b.priced - a.priced;
   });
   const bestDecimal = quotes[0]?.decimalPayout ?? null;
-  if (bestDecimal != null) {
+  // A typed price at one book against estimates at the others is not a fair
+  // comparison, so no star when the full quotes mix the two.
+  const full = quotes.filter((q) => q.decimalPayout != null);
+  const mixed = full.some((q) => q.entered) && full.some((q) => q.sgpEstimated);
+  if (bestDecimal != null && !mixed) {
     for (const q of quotes) q.isBest = q.decimalPayout === bestDecimal;
   }
   return quotes;
