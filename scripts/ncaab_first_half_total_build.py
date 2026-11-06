@@ -69,15 +69,20 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config  # noqa: E402
 import models.ncaab_first_half_total as ft  # noqa: E402
 from scripts.ncaab_first_half_spread_build import closing_lines, halves  # noqa: E402
 
 FIRST_SEASON = 2021      # the first season with stored closing full-game lines
 FIRST_REPLAY = 2024      # the first season with a bought tip-minus-60 first half
-CUT = 0.02
+# The live cut, read from config so the artifact's replay is always graded at
+# the cut the card bets on (0.02 at launch, 0.025 from 2026-11-06, mike).
+# --research-scored compares at this cut (the research's scored quotes, cut
+# here); --research-bets is the research's 0.02 cell and only matches at 0.02.
+CUT = float(config.MODEL_EDGE_THRESHOLDS[ft.MODEL_ID])
 MIN_PRICE = -200.0       # config.MODEL_MIN_ODDS (pinned); the research's AF1 floor
 TIP60_SOURCE = "odds_api_ncaab_derivative_tip60"
-CELL = "A_to|totals_h1|tip60|best|0.02"
+CELL = "A_to|totals_h1|tip60|best|0.02"   # the research's registered cell (cut 0.02)
 
 
 # ── loading ──────────────────────────────────────────────────────────────────

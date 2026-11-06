@@ -343,7 +343,7 @@ def pick_rows(decisions: list[ft.Decision], games: dict[str, dict],
             "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
             "game_date": g.get("game_date"), "game_time": g.get("commence_time"),
             "pick_side": b.side, "pick_label": label,
-            # P(side wins | no push) at this number: the number the 0.02 cut
+            # P(side wins | no push) at this number: the number the cut
             # was measured on (models/ncaab_first_half_total.py).
             "model_probability": round(b.prob, 4),
             "model_probability_cal": round(b.prob, 4),
