@@ -1106,7 +1106,9 @@ def _job_restore_swept_ncaab_none_rows(**kw):
     queues this job, and the container it replaces keeps running its
     in-flight step for up to railway.json's drainingSeconds (600) after
     SIGTERM -- a scoring step whose sweep would delete the restored rows
-    again. 660 s outlasts that drain."""
+    again. 660 s outlasts that drain. The queue runs on the pipeline role
+    only (scheduler._PIPELINE_JOBS), the same container as the refresh
+    passes; the pollers role runs no full scoring pass."""
     import time
 
     from data.db import get_connection
