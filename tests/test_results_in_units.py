@@ -98,7 +98,7 @@ def test_every_dashboard_query_actually_applies_the_action_filter():
 def _dashboard_helpers() -> dict:
     src = _read(DASH)
     tree = ast.parse(src)
-    wanted = {"_price_or_none", "_units_cell", "_stake_cell", "_units_at_risk"}
+    wanted = {"_price_or_none", "_units_cell", "_stake_cell", "_units_at_risk", "_stake_or_none"}
     found = {n.name: ast.get_source_segment(src, n) for n in tree.body
              if isinstance(n, ast.FunctionDef) and n.name in wanted}
     assert set(found) == wanted, f"missing helpers: {wanted - set(found)}"
@@ -129,6 +129,18 @@ def test_the_dashboard_stake_is_the_published_stake():
     assert h["_stake_cell"](0.03, float("nan"), -200) == "2u to win 1u"
     assert h["_stake_cell"](0.03, None, None) == "1u"
     assert h["_units_at_risk"]([(0.03, -110, None), (0.03, None, -200)]) == "3.1u"
+
+
+def test_the_dashboard_reads_a_picks_own_stake():
+    # picks.stake_units (pick_stake_units_2026_11_06.sql): 2u to win at -110
+    # lays 2.2u; at -200 the 3u risk cap binds and the win is recomputed.
+    h = _dashboard_helpers()
+    assert h["_stake_cell"](0.03, -110, None, 2) == "2.2u to win 2u"
+    assert h["_stake_cell"](0.03, -200, None, 2) == "3u to win 1.5u"
+    assert h["_stake_cell"](0.03, -110, None, float("nan")) == "1.1u to win 1u"
+    assert h["_units_cell"]("WIN", -110, 2) == "+2.00u"
+    assert h["_units_cell"]("LOSS", -110, 2) == "-2.20u"
+    assert h["_units_at_risk"]([(0.03, -110, None, 2), (0.03, -110, None, None)]) == "3.3u"
 
 
 # ── email/render_picks_email.py ──────────────────────────────────────────────

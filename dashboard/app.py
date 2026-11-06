@@ -123,23 +123,35 @@ def _price_or_none(decision_odds, dk_odds):
     return None
 
 
-def _units_cell(result, price) -> str:
+def _units_cell(result, price, stake_units=None) -> str:
     """The published stake's result: '+1.00u', '-2.00u' (a -200 loss), '0.00u'
-    on a push; '–' until the pick grades. No price is the bare 1u."""
+    on a push; '–' until the pick grades. No price is the bare stake.
+    `stake_units` is the pick's own stake (picks.stake_units); None is 1u."""
     if not isinstance(result, str) or result not in ("WIN", "LOSS", "PUSH"):
         return "–"
-    u = unit_profit(None if price is None or pd.isna(price) else float(price), result)
+    u = unit_profit(None if price is None or pd.isna(price) else float(price), result,
+                    _stake_or_none(stake_units))
     return "0.00u" if round(u, 2) == 0 else f"{u:+.2f}u"
 
 
-def _stake_cell(kelly_fraction, decision_odds, dk_odds) -> str:
+def _stake_or_none(stake_units):
+    """picks.stake_units as a float, or None (1u) when it is missing or NaN."""
+    if stake_units is None or pd.isna(stake_units):
+        return None
+    return float(stake_units)
+
+
+def _stake_cell(kelly_fraction, decision_odds, dk_odds, stake_units=None) -> str:
     """The published stake: '1.1u to win 1u', or '1u' with no price."""
-    return fmt_stake(stake_for(kelly_fraction, _price_or_none(decision_odds, dk_odds)))
+    return fmt_stake(stake_for(kelly_fraction, _price_or_none(decision_odds, dk_odds),
+                               _stake_or_none(stake_units)))
 
 
 def _units_at_risk(rows) -> str:
-    """Units laid across (kelly_fraction, decision_odds, dk_odds) rows."""
-    return fmt_units(sum(units_for(k, _price_or_none(d, o)) for k, d, o in rows))
+    """Units laid across (kelly_fraction, decision_odds, dk_odds[, stake_units]) rows."""
+    return fmt_units(sum(units_for(r[0], _price_or_none(r[1], r[2]),
+                                   _stake_or_none(r[3] if len(r) > 3 else None))
+                         for r in map(tuple, rows)))
 
 
 # ── Page Config ───────────────────────────────────────────────────────────────
@@ -267,7 +279,7 @@ with tab_picks:
                p.confidence_tier, p.injury_flag, p.injury_detail,
                p.public_bet_pct, p.public_money_pct,
                p.result, g.home_team, g.away_team, g.home_score, g.away_score,
-               p.pick_side
+               p.pick_side, p.stake_units
         FROM picks p
         LEFT JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
@@ -292,7 +304,7 @@ with tab_picks:
         with col3:
             st.metric("Units at Risk", _units_at_risk(zip(
                 picks_df["kelly_fraction"], picks_df["decision_odds"],
-                picks_df["dk_odds"])))
+                picks_df["dk_odds"], picks_df["stake_units"])))
         with col4:
             high_tier = len(picks_df[picks_df["confidence_tier"] == "HIGH"])
             st.metric("HIGH Confidence", high_tier)
@@ -331,7 +343,8 @@ with tab_picks:
                 with c5:
                     st.metric("Stake", _stake_cell(row["kelly_fraction"],
                                                    row["decision_odds"],
-                                                   row["dk_odds"]))
+                                                   row["dk_odds"],
+                                                   row.get("stake_units")))
 
                 # Public betting coverage (Action Network) — fade-the-public context
                 pb = row.get("public_bet_pct")
@@ -531,7 +544,7 @@ with tab_log:
                p.model_probability, p.dk_implied_prob,
                p.edge, p.dk_odds, p.decision_odds, p.kelly_fraction,
                p.result, p.profit_flat,
-               p.injury_flag
+               p.injury_flag, p.stake_units
         FROM picks p
         WHERE p.game_date >= %s
           AND p.signal_type = 'BET'{_LOG_EXCLUSIONS}
@@ -558,11 +571,12 @@ with tab_log:
         log_df["dk_implied_prob"]   = log_df["dk_implied_prob"].map(lambda x: f"{x:.1%}" if x else "–")
         log_df["edge"]              = log_df["edge"].map(lambda x: f"{x:+.1%}" if x else "–")
         # Stake and result in units (§4), beside the result.
-        stake = [_stake_cell(k, d, o) for k, d, o in zip(
-            log_df["kelly_fraction"], log_df["decision_odds"], log_df["dk_odds"])]
-        units = [_units_cell(r, _price_or_none(d, o)) for r, d, o in zip(
-            log_df["result"], log_df["decision_odds"], log_df["dk_odds"])]
-        log_df = log_df.drop(columns=["kelly_fraction", "profit_flat"])
+        stake = [_stake_cell(k, d, o, u) for k, d, o, u in zip(
+            log_df["kelly_fraction"], log_df["decision_odds"], log_df["dk_odds"],
+            log_df["stake_units"])]
+        units = [_units_cell(r, _price_or_none(d, o), u) for r, d, o, u in zip(
+            log_df["result"], log_df["decision_odds"], log_df["dk_odds"], log_df["stake_units"])]
+        log_df = log_df.drop(columns=["kelly_fraction", "profit_flat", "stake_units"])
         at = log_df.columns.get_loc("result")
         log_df.insert(at, "stake", stake)
         log_df.insert(at + 2, "units", units)

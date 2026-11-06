@@ -103,8 +103,9 @@ def test_profit_and_risked_call_the_stake_function_and_nothing_else():
 
 
 def test_the_recap_adds_the_function_columns_and_does_not_recompute_them():
-    assert f"{PROFIT_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result)" in _SETTLED_SQL
-    assert f"{RISKED_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result)" in _SETTLED_SQL
+    # The pick's own stake rides along as the third argument (2026-11-06).
+    assert f"{PROFIT_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)" in _SETTLED_SQL
+    assert f"{RISKED_FN}(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)" in _SETTLED_SQL
     # A win at -110 is +1u on 1.1 risked via stake_for. The columns win.
     forced = _tally([("MLB", "m", "WIN", 0.02, -110, None, False, 5.5, 2.25)])
     assert forced["units"] == pytest.approx(5.5)
@@ -154,7 +155,9 @@ def test_both_record_views_sum_the_same_functions():
     assert "results_snapshots" not in text.split("DO $mig$")[1]
     assert "push_sent" not in text.split("DO $mig$")[1]
     from data.view_migrations import ACTIVE_MIGRATIONS
-    assert MIG.name == ACTIVE_MIGRATIONS[-1]
+    # pick_stake_units_2026_11_06.sql runs after it: it switches the calls this
+    # file adds to the three-argument pair (tests/test_pick_stake_units.py).
+    assert ACTIVE_MIGRATIONS[-2:] == [MIG.name, "pick_stake_units_2026_11_06.sql"]
     assert ACTIVE_MIGRATIONS.index(FN_MIG.name) == ACTIVE_MIGRATIONS.index(MIG.name) - 1
     assert ACTIVE_MIGRATIONS.index("clv_standard_v2_2026_10_14.sql") < ACTIVE_MIGRATIONS.index(FN_MIG.name)
     assert text.count("DO $mig$") == 1

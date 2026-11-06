@@ -1273,6 +1273,70 @@ links stay empty. **NONE rows of games that started before the restore ran
 are not in picks.** For grading every scored pick (CLAUDE.md §7), NCAAB NONE
 rows from 2026-11-04 to the fix are incomplete; picks_log holds them all.
 
+### Agreement sizing: 2u when a second model agrees (2026-11-06, mike)
+
+mike, 2026-11-06: *"I want a pick that has a higher confidence and higher long
+term win to be higher units, you can slice this from back testing"*.
+
+**The rule.** An NCAAB bet on the same game and the same side as an earlier
+NCAAB bet is staked at **2u to win**, not 1u. Totals agree on the same Over or
+Under (full game or first half). Sides agree on the same team (the full-game
+spread, both moneylines, the first-half spread). Only the later bet is sized
+up: the earlier one is already written and stands (CLAUDE.md §1c). A voided
+bet, or a game priced and not bet, does not count. Risk stays capped at 3u a
+pick, so at -150 or shorter a 2u bet risks 3u and wins less than 2u; two bets
+on one game can lay up to 6u between them. Every other NCAAB bet, and every
+other sport, stays at 1u.
+
+**Where it lives.** `models/ncaab_stake.py` decides it inside each card's own
+write. The pick carries `picks.stake_units` (2) and `picks.stake_reason` ("Two
+models agree: the full-game total model also bet …"). Discord, the app, the
+results recap and the Record tab all size the pick from `stake_units`
+(`tracking/discord_notifier.stake_for`, `mobile/src/lib/thresholds.stakeFor`,
+`data/migrations/pick_stake_units_2026_11_06.sql`); a NULL is the flat 1u, so
+no earlier record moved. `config.NCAAB_AGREEMENT_STAKE_UNITS` (2.0) is the
+size, and 1 turns it off.
+
+**The evidence.** The six models' own replays, 2023-24 to 2025-26 (the
+first-half total at its 2.5% bar). Every sizing scheme was graded walk-forward
+on 2024-25 and 2025-26: each bet's tier taken from earlier seasons only, and
+judged on units won per unit risked, not on units alone (betting more always
+wins more units when the record is positive).
+
+| Scheme (1u, 2u or 3u to win) | Return per unit risked | vs flat at the same risk |
+|---|---|---|
+| Flat 1u | +6.18% | |
+| Each model's own EV, thirds | +6.30% | +5.4 units |
+| The model's stated win chance, thirds | +6.04% | -6.3 |
+| Each model's past record (six threshold settings) | +6.01% to +6.46% | -7.7 to +12.5 |
+| Shorter price | +5.48% | -31.7 |
+| **Agreement, 2u (live)** | **+6.90%** | **+32.2** |
+| Agreement, 3u | +7.30% | +50.4 |
+
+The agreeing bets themselves, flat, every season: 233 bets, +64.09 units,
++21.3% (95% interval 10.7 to 31.8), won 67.8% against a 55.5% break-even
+(Wilson 61.5% to 73.5%). Positive in every season (2022 +7.6% on 30, 2023
++29.0% on 20, 2024 +9.6% on 57, 2025 +24.2% on 81, 2026 +38.0% on 44) and in
+both halves (Nov-Dec 67.0% won, January on 68.5%). Every other bet: +6.4%
+(4.2 to 8.6). By pair: first-half totals agreeing with the full-game total 108
+bets +25.2%; the 15:00 UTC moneyline on the same team as the opening moneyline
+86 bets +17.8% (the same bet twice, at two prices); first-half spreads agreeing
+with an earlier side 37 bets +23.2%.
+
+**Why 2u and not 3u.** The interval's low end (+10.7%) is still about 1.7
+times the base return, so 2u holds even if the edge is at the bottom of its
+range; 3u relies on the point estimate.
+
+**The risks, plainly.** Agreement was found while grading two bets on one game,
+not registered beforehand, and about 21 schemes were graded, so some luck is
+expected. 2022 and 2023 hold only 50 of the 233 bets. The decision order was
+checked: 89 of 91 opening-moneyline bets on games the 15:00 UTC card also bet
+were placed before it, and live every full-game total since 2026-11-03 decided
+at least 7.9 hours before tip. Two cards writing in the same minute will not
+see each other, so both stay 1u. Script: `scripts/ncaab_stacking_check.py`
+grades the stacked bets; the sizing grid was a one-off pass over the same
+replays.
+
 ## Identity: ESPN owns the games row
 
 `data/ingestors/ncaab_teams.py` is the contract every other piece reads.

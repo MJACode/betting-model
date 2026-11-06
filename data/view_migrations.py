@@ -600,8 +600,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
     # Reads the live view, so it runs after every owner above, including
     # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
-    # and does not post. This file stays last.
+    # and does not post.
     "published_record_units_2026_10_16.sql",
+    # 2026-11-06 (mike): a pick can carry its own stake, picks.stake_units
+    # (units to win, 1..3; NULL is 1u). Adds the column, the three-argument
+    # stake functions, and switches the two record views and open_picks to
+    # pass it. Runs after the file above, which adds the two-argument calls
+    # it switches. NULL rows grade exactly as before. This file stays last.
+    "pick_stake_units_2026_11_06.sql",
 ]
 
 

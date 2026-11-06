@@ -1921,6 +1921,21 @@ MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05)
 # because quarter-Kelly always exceeded the 5% cap (picks were all flat-bet at 5%).
 # Tenth-Kelly keeps bets at 2-4% of bankroll, letting edge size drive differentiation.
 KELLY_MULTIPLIER: float     = float(os.environ.get("KELLY_MULTIPLIER",      0.10))
+# NCAAB agreement sizing (2026-11-06, mike: "I want a pick that has a higher
+# confidence and higher long term win to be higher units, you can slice this
+# from back testing"). A NCAAB BET on the same game and side as an EARLIER
+# NCAAB BET (totals: the same Over/Under, full game or first half; sides: the
+# same team across the spread, both moneylines and the first-half spread) is
+# written with picks.stake_units = this many units TO WIN, risk still capped at
+# 3u (models/ncaab_stake.py). On the six models' replays, 2023-24..2025-26:
+# 233 such bets, +21.3% flat (95% interval 10.7 to 31.8), 67.8% won against a
+# 55.5% break-even, positive in all five seasons and both halves; every other
+# bet +6.4%. Graded walk-forward on 2025-26 at the same bets: 2u returns 6.90%
+# per unit risked against 6.18% flat (+32.2 units at the same risk), 3u 7.30%
+# (+50.4). 2u because the interval's low end (10.7%) is still 1.7x the base
+# return; 3u leans on the point estimate. 1 turns it off. Every other model
+# and every other NCAAB bet stays flat 1u (stake_units NULL).
+NCAAB_AGREEMENT_STAKE_UNITS: float = float(os.environ.get("NCAAB_AGREEMENT_STAKE_UNITS", 2.0))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
 
