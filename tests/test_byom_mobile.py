@@ -914,6 +914,10 @@ def test_the_sheet_opens_for_game_bets_and_has_a_trends_tab():
         assert "<ByomSeasonBreakdown" in screen
     assert "'trends'" in sheet and "function TrendsTab" in sheet
     assert "Short week (6 days or fewer)" in sheet
+    # Matt, 2026-11-05: no "Didn't move" chip unless a saved model holds it;
+    # NBA props say their line history starts in 2026-27.
+    assert "choice.value !== 'none' || propFilters.lineMove === 'none'" in sheet
+    assert "NBA prop line history starts in 2026-27. Before that, this filter finds no bets." in sheet
     # UX review: a total has no team, so no Matchup tab or row.
     assert "(['odds', 'time', 'trends'] as const)" in sheet
     for screen in (builder, edit):

@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Stats NBA matchup column read 2025-26 defences (calendar year, not the ending-year label); now the Teams board season, labelled 2026-27 |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM Trends: Didn't move chip dropped; NBA prop line history starts 2026-27 note; post-deploy timings for #1187 |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, no NBA first-quarter model: every first-quarter search failed (props 0 of 18, team totals 0 of 26); the stale follow-up ticked |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM trend filters (line move, last game, division), More filters on game bets, NFL rest, season breakdown and 50-bet note; no lookahead on the official line |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, daily gate blocks 05:45–06:20 ET even with a clear ledger; pooler user for the readonly secret is daily_gate_reader.vvprgnrmzeekokzkrkfu; body bypass is owner or member only |
