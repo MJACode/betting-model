@@ -2809,6 +2809,8 @@ was graded, its counts, and its results at the end. All runs are stored in Supab
 | The two prop models on the postseason | `docs/nba_search_postseason.md` | `2026-10-31-postseason` | 7 | 1 | **`nba_prop_market` passes on 272 Cup final, play-in and playoff games: 1,953 bets, +138.87 units, +6.8%** |
 | First-quarter player props (added 2026-11-04) | `docs/nba_search_q1props.md` | `2026-11-04-q1props` | 18 | 0 | Nearest miss assists over, +3.0%, -1.7% to +7.6%; the blind bets lose 5% to 8% |
 | First-quarter and first-half team totals (added 2026-11-04) | `docs/nba_search_q1tt.md` | `2026-11-04-q1tt` | 26 | 0 | Books set them from their own period spread and total; the live home team-total rule carried over makes +3%, too few bets to tell |
+| First-quarter props anchored to the full-game market (added 2026-11-06) | `docs/nba_search_q1anchor.md` | `2026-11-06-q1anchor` | 36 | 0 | Off Pinnacle's full-game number: nothing. Off the soft books' number, for players Pinnacle does not quote, assists overs clear five of six bars (754 bets, +7.9%, +0.1% to +15.8%) and fail the bands bar on one band |
+| First-quarter and first-half team totals against Pinnacle's period lines (added 2026-11-06) | `docs/nba_search_q1pin.md` | `2026-11-06-q1pin` | 12 | 0 | The books' team totals sit within half a point of Pinnacle's period numbers 95% of the time; 11 cells under 200 bets, the twelfth +5.1%, −3.6% to +14.1% |
 | In-play spread and moneyline on 2026-27's live prices, and a late-game leader (added 2026-11-04) | `docs/nba_search_ingame27.md` | `2026-11-04-ingame27` | 24 | 0 | Every cell under 200 bets this season; quarter 3 and 4 spreads read positive, moneylines lose; the leader is closed by the -200 floor |
 
 **Where this leaves the spread and moneyline.** No pre-game full-game spread or moneyline cell has passed in any search.
@@ -2820,7 +2822,7 @@ written down beforehand, and that needs an NBA in-play loop that does not exist.
 **Where this leaves the first quarter.** No first-quarter cell has passed in any search: spreads and totals in the fifth
 search, the eighth (mike's method) and the starters search; player props and team totals after their prices were
 bought on 2026-11-03 (two seasons, 2024-25 and 2025-26; the feed holds none for 2023-24). Pinnacle prices none of the
-first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them.
+first-quarter prop or team-total markets, so the sharp-reference rule behind the live prop model cannot run on them. The anchored search (2026-11-06) priced them off the same player's full-game number instead: Pinnacle's found nothing, and the soft books' found assists overs that fail only the bands bar. Those near misses would bet about once in 16 days live: this season Pinnacle quotes nearly every player Hard Rock lists. Team totals priced at Pinnacle's own period spread and total (2026-11-06) found nothing either. No first-quarter route the stored data supports is left untested.
 
 **The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
 its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
