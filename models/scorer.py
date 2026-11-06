@@ -2881,7 +2881,9 @@ def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
     statement as the per-game clear in run_scorer: BETs, in-play rows and NFL
     props are never touched. The sweep after the loop would also catch these
     rows, but it yields when it cannot get its locks within 10 s. Housekeeping
-    only, so a failure is logged and never fails the pass."""
+    only, so a failure is logged and never fails the pass. Like the per-game
+    clear, only the models a full pass re-writes (_pass_rewritten_models)."""
+    _mf, _mp = _model_id_filter(_pass_rewritten_models(False))
     try:
         conn.execute("""
             DELETE FROM picks
@@ -2890,7 +2892,7 @@ def _clear_left_out_ufc_id(conn: DBConnection, game_id: str) -> None:
               AND signal_type != 'BET'
               AND is_live IS NOT TRUE
               AND model_id NOT LIKE 'nfl_prop_%%'
-        """, (game_id,))
+        """ + _mf, (game_id,) + _mp)
         conn.commit()
     except Exception as exc:                                  # noqa: BLE001
         try:
@@ -3734,6 +3736,32 @@ def _model_id_filter(model_ids) -> tuple[str, tuple]:
     return f" AND model_id IN ({','.join(['%s'] * len(ids))})", tuple(ids)
 
 
+def _pass_rewritten_models(game_models_only: bool) -> set[str]:
+    """The models whose unsettled no-bet rows a run_scorer clear may delete:
+    the ones this pass re-writes, and no other model's.
+
+    The pre-game poller (game_models_only) re-runs this scorer and nothing
+    else, so only the game models (config.MODELS). A full pass -- the refresh
+    pass and the daily pipeline -- also clears the MLB and WNBA prop models,
+    because their scorers run right after it in the same pass and that clear
+    is what releases a player the prop lock holds at NONE
+    (tests/test_prop_no_bet_rows_survive_to_tipoff.py). NFL props stay out:
+    the evening refresh does not re-run them. Golf has its own scorer and its
+    own delete.
+
+    Every other writer's NONE rows are that writer's (2026-11-06). Until then
+    a full pass cleared every model's: 257 of the 278 NONE rows the five
+    NCAAB cards wrote from 2026-11-04 (PR #1147) were deleted by the sweep
+    below, and a card decides a game once and never writes it again; the NFL
+    opener and wind rows, which publish_scored keeps current in place, were
+    deleted every pass and came back as new rows at the next NFL poll.
+    tests/test_scorer_spares_other_writers_no_bet_rows.py."""
+    if game_models_only:
+        return set(MODELS)
+    return (set(MODELS) | set(_PITCHER_PROP_CONFIG)
+            | set(_BATTER_PROP_CONFIG) | set(_WNBA_PROP_CONFIG))
+
+
 # ── Main Daily Run ────────────────────────────────────────────────────────────
 
 def run_scorer(target_date: str = None, dry_run: bool = False,
@@ -4390,8 +4418,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # as before on both paths: a stale row left in place
                         # would turn the re-insert into a silent no-op
                         # (uq_picks_one_row_per_pick, ON CONFLICT DO NOTHING).
-                        _mf, _mp = (_model_id_filter(relevant_models)
-                                    if game_models_only else ("", ()))
+                        #
+                        # Never another writer's rows (2026-11-06): the full
+                        # pass clears only the models it and the prop scorers
+                        # after it re-write (_pass_rewritten_models).
+                        _mf, _mp = _model_id_filter(
+                            relevant_models if game_models_only
+                            else _pass_rewritten_models(False))
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
@@ -4593,6 +4626,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # reason the per-game clear does not exempt a game that started
         # mid-pass: a start the feed pushes back makes that exemption hold
         # prop players the prop scorers would otherwise have re-scored.
+        #
+        # AND ONLY THE MODELS THIS PASS RE-WRITES, on every path (2026-11-06).
+        # The full pass had no model filter, so this sweep took every
+        # writer's unsettled no-bet rows on every unstarted game in the
+        # window: the NCAAB cards' NONE rows (written once, at the decision,
+        # never again -- 257 of 278 deleted from 2026-11-04) and the NFL
+        # opener and wind rows publish_scored keeps current in place. Those
+        # writers own their rows. _pass_rewritten_models says whose are ours.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -4600,8 +4641,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             if rescored:
                 _keep = f" AND game_id NOT IN ({','.join(['%s'] * len(rescored))})"
                 _keep_p = tuple(sorted(rescored))
-            _mf, _mp = (_model_id_filter(MODELS) if game_models_only
-                        else ("", ()))
+            _mf, _mp = _model_id_filter(_pass_rewritten_models(game_models_only))
             try:
                 conn.execute("SET LOCAL lock_timeout = '10s'")
                 conn.execute("""

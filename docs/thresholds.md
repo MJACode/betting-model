@@ -711,6 +711,7 @@ search and every check are in `docs/nba_models_2026.md` §5).
 | caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
 | decided once | the first look 45-57 min before tip, in the same look as `nba_prop_market` (or alone from 50 min out); a row in `nba_prop_projection_decisions` (whether or not its bet survived the cap) | `scripts/nba_prop_projection_card.py`, `scripts/nba_props_card.py` |
 | stale quote | refused when its clock is > 10 min behind the freshest book's for the same market in the same fetch | `models/nba_prop_projection.py` |
+| stored and shown probability | games from 2026-11-07: p' = implied + 0.325 (p − implied) at the decision price, so the shown EV and edge are 0.325 × the decided ones; display only, the bet is decided on p (mike, 2026-11-06: "Yes, ship it") | `MODEL_PROB_SHRINK`, `docs/nba_models_2026.md` §5 |
 | not bet | assists overs (chosen by the search, failed on 2025-26), points and the scoring combos, turnovers, double-doubles | `docs/nba_models_2026.md` §5 |
 
 **The caps, 2026-10-20 (mike).** The same rule as `nba_prop_market`, shared with
