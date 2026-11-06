@@ -2,12 +2,12 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
@@ -50,7 +50,7 @@ export function DiscordLinkModal({
   const alreadyLinked = access.discord_linked;
 
   return (
-    <Modal
+    <Modal trackName="DiscordLinkModal"
       visible={visible}
       animationType="fade"
       transparent

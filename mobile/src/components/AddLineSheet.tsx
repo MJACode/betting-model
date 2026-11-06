@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { showToast } from '@/components/Toast';
@@ -94,7 +95,7 @@ export function AddLineSheet({
   };
 
   return (
-    <Modal visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="AddLineSheet" visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
             parent: an accessible Pressable groups everything inside it into
