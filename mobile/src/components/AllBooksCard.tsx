@@ -89,7 +89,7 @@ export function AllBooksCard({
               q.line != null ? `${formatSideLine(q.line, pick.pick_side, market)} at ` : ''
             }${formatAmerican(q.price)}${
               q.isBest ? ', best price' : ''
-            }${reference ? ', reference price, not bettable' : ''}`}
+            }${reference ? ', reference price only' : ''}`}
             // The shared hand-off: the betslip link, else the book's app or
             // site. A bettable book with no per-outcome link still opens,
             // rather than a dead row beside live ones.
