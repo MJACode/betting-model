@@ -714,7 +714,10 @@ ACTION_THRESHOLDS: dict = {
     # 2026-10-20 (mike: "Only the strongest picks need to be sent, like NHL")
     # one bet a game across both NBA prop models and four a night, strongest
     # first by each bet's EV percentile within its own model
-    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced.
+    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced. Six a
+    # night from 2026-11-04 (mike: "we can go slightly more than 4 if we need
+    # to"): +183.7 units against +153.6 in tip order, where the units stop
+    # growing (docs/nba_models_2026.md section 14).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -723,8 +726,9 @@ ACTION_THRESHOLDS: dict = {
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
     # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
-    # game across both NBA prop models and four a night, strongest first by each
-    # bet's EV percentile within its own model (models/nba_prop_rank.py).
+    # game across both NBA prop models and four a night (six from 2026-11-04),
+    # strongest first by each bet's EV percentile within its own model
+    # (models/nba_prop_rank.py).
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
     # we have with other sports"): models/nba_total_luck.py, written by
@@ -754,7 +758,13 @@ ACTION_THRESHOLDS: dict = {
     # Q1 + Q2 points. Graded walk-forward at bought prices, 2023-24..2025-26
     # pooled: 595 bets, 333-259-3, +51.49 units on 643.19 risked, +8.0%, interval
     # +0.4% to +15.4%, every season positive. prob / edge are 0.0 for the same
-    # reason as nba_total_luck's.
+    # reason as nba_total_luck's. From 2026-11-04 (mike: "Only select the
+    # highest EV one") the gap must also be BELOW nba_total_luck's 3.0: at 3.0
+    # or more that model bets the same game on the same gap (323 of 323 graded
+    # games), so this bet was its twin (+3.7% on those 323). Kept: gap 2.0-3.0,
+    # 272 bets, +37.73 units, +12.7%. And one bet a game across the three NBA
+    # game-total models (scripts/nba_game_totals_door.py). docs/nba_models_2026.md
+    # section 14.
     "nba_first_half_total_luck": {"min_prob": 0.0, "min_edge": 0.0},
     # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
     # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
@@ -3870,13 +3880,35 @@ SHARP_BOOKMAKERS = [
 # narrow loses a bet we could have had — recoverable, and it shows up as a
 # missing row. Too wide LOCKS AN UNPLACEABLE PICK FOREVER, and §1c means
 # nothing can take it back.
-NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada"}
+#
+# STATE-LIMITED BOOKS ARE FETCHED, AND NEVER THE BOOK A PICK NAMES (mike,
+# 2026-11-06: "global rule. remove betparx from sports books for recommeding
+# betting lines in picks only niche avaialble in a few states"). betPARX ships
+# one app per state -- Maryland, Pennsylvania, New Jersey
+# (mobile/src/lib/sportsbookLinks.ts) -- so a pick decided there sends most
+# members to a book they cannot open. 60 BETs had been decided at it by that
+# day (14 models, 53 of them in the previous 30 days, measured in `picks`).
+#
+# It stays in LINE_SHOP_BOOKMAKERS on purpose: the NCAAB consensus models take
+# a median over every book and were fitted with betPARX in the set
+# (models/ncaab_book_quotes.BOOKS), so its quotes must keep arriving. What
+# changes is only where a pick may be DECIDED and where a member is SENT.
+#
+# Unlike espnbet below, this is NOT reversible by an environment variable:
+# BETTABLE_BOOKS and BEST_LINE_BOOKMAKERS drop these books after any override.
+# Adding a book here is the one edit; tests/test_betparx_never_a_pick_book.py
+# pins every copy of the list (the NFL cards' fallback, the app's mirror).
+STATE_LIMITED_BOOKMAKERS = {"betparx"}
+NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada", *STATE_LIMITED_BOOKMAKERS}
 BETTABLE_BOOKS = [
-    b.strip().lower()
-    for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
-        b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
-    )).split(",")
-    if b.strip()
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
+            b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
+        )).split(",")
+        if b.strip()
+    )
+    if b not in STATE_LIMITED_BOOKMAKERS
 ]
 
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
@@ -4029,14 +4061,18 @@ SCORE_OFF_ANY_BOOK_LINE: bool = (
 # (WynnBET exited US online sports betting).
 #
 # Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
-# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS.
-_BEST_LINE_EXCLUDE_DEFAULT = "pinnacle,bovada,espnbet"
-BEST_LINE_EXCLUDE_BOOKMAKERS = [
-    b.strip().lower()
-    for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
-                            _BEST_LINE_EXCLUDE_DEFAULT).split(",")
-    if b.strip()
-]
+# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS -- every book
+# except STATE_LIMITED_BOOKMAKERS (betparx, mike 2026-11-06), which no override
+# puts back.
+_BEST_LINE_EXCLUDE_DEFAULT = ",".join(
+    ["pinnacle", "bovada", "espnbet", *sorted(STATE_LIMITED_BOOKMAKERS)])
+BEST_LINE_EXCLUDE_BOOKMAKERS = list(dict.fromkeys([
+    *(b.strip().lower()
+      for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
+                              _BEST_LINE_EXCLUDE_DEFAULT).split(",")
+      if b.strip()),
+    *sorted(STATE_LIMITED_BOOKMAKERS),
+]))
 
 BEST_LINE_BOOKMAKERS = [
     b for b in (

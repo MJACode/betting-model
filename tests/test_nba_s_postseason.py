@@ -590,10 +590,13 @@ def test_the_caps_take_one_bet_a_game_strongest_by_each_models_own_percentile():
     assert list(S.apply_caps(b)) == ["G|1|player_steals"]
 
 
-def test_the_caps_allow_four_a_night():
-    b = _bets([(S.RULE_ID, 0.01 * i, str(i), f"G{i}", "d") for i in range(1, 7)])
+def test_the_caps_allow_the_shipped_number_a_night():
+    """The control is the shipped door's own choose(): four a night until 2026-11-04, six since."""
+    from scripts.nba_props_card import MAX_NBA_PROP_BETS_PER_NIGHT as k
+    n = k + 2
+    b = _bets([(S.RULE_ID, 0.01 * i, str(i), f"G{i}", "d") for i in range(1, n + 1)])
     picks = S.apply_caps(b)
-    assert len(picks) == 4 and "G6|6|player_steals" in picks and "G1|1|player_steals" not in picks
+    assert len(picks) == k and f"G{n}|{n}|player_steals" in picks and "G1|1|player_steals" not in picks
 
 
 def test_the_capped_frame_marks_the_written_propositions_with_their_sides():

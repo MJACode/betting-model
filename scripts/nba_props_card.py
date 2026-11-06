@@ -1,4 +1,4 @@
-"""The NBA prop door: ONE bet a game across both NBA prop models, four a night, the strongest first.
+"""The NBA prop door: ONE bet a game across both NBA prop models, six a night, the strongest first.
 
 mike, 2026-10-20, after opening night wrote 36 NBA prop bets on one game:
 "Void all nba props. Wild you sent like a million props. Only the strongest
@@ -8,8 +8,9 @@ won").
 
 THE SHAPE IS NHL's (scripts/nhl_props_card.py): the prop models' candidates are
 pooled, the strongest bet in each game is kept (none for a game either model
-has already bet), then the strongest MAX_NBA_PROP_BETS_PER_NIGHT of the night
-(one game_date), the bets already written that night counted. "Strongest" is
+has already bet), then the strongest MAX_NBA_PROP_BETS_PER_NIGHT (6; 4 until
+2026-11-04) of the night (one game_date), the bets already written that night
+counted. "Strongest" is
 the bet's EV percentile within its OWN model (below). publish_across_models
 is the only door an NBA prop pick goes through: neither card writes on its own.
 
@@ -46,7 +47,19 @@ bets: raw EV switches the market model off. So a bet ranks by where its EV
 sits among its own model's graded EVs (2023-24..2025-26, fixed breakpoints);
 a tie goes to the larger raw EV, then a stable key. Graded at one a game and
 four a night in tip order: +153.8 units, +9.69%, the market model on about 30%
-of the bets (raw EV: +134.0 units, +8.86%; the gap is inside the noise).
+of the bets (raw EV: +134.0 units, +8.86%; the gap is inside the noise). At six
+a night (2026-11-04): +183.7 units, +8.17%, the market model on 30%.
+
+WHY THE NIGHT STILL FILLS IN TIP ORDER (mike, 2026-11-04, "props seems to be
+coming from earlier games only"). True: at four a night, 20% of the bets came
+from the later half of a night's tips. But the percentile is not a measure of
+which bet is better at the top of either model: one a game, a percentile of
+0.80-0.90 returned +10.1% and 0.98-1.00 +4.7%, and the best four of the whole
+night by percentile graded +102.5 units against +153.6 in tip order. On nights
+of six or more games, the first four tips' bets returned +8.0% and the rest
++2.0%. Skipping each game's top-2% bet for its next one graded better at 6-8 a
+night but is a peak, not a plateau (1.5% and 2.5% did not), so it is not used
+(docs/nba_models_2026.md section 14).
 
 LIVE, a look writes what has cleared by then: a better bet in a game that tips
 later does not replace an earlier one, and an early game can use a night's
@@ -84,13 +97,23 @@ PROJECTION_ID = projection_card.MODEL_ID         # nba_prop_projection
 # card always took them), so no two writers can deadlock.
 PROP_MODEL_IDS = (RULE_ID, PROJECTION_ID)
 MAX_NBA_PROP_BETS_PER_GAME = 1
-# At most this many NBA prop bets a night (one game_date), strongest first, the
-# bets already written that night included (VOID rows excepted). mike,
-# 2026-10-20: "Only the strongest picks need to be sent, like NHL." The NBA
-# grade (both models, one a game, 2023-24..2025-26, in tip order) set it: 3 to
-# 6 a night all returned about 8 to 9%; 4 gave +153.6 units, +9.69%, about 4
-# bets a night instead of about 187 uncapped (docs/thresholds.md).
-MAX_NBA_PROP_BETS_PER_NIGHT = 4
+# At most this many NBA prop bets a night (one game_date), the bets already
+# written that night included (VOID rows excepted). mike, 2026-10-20: "Only the
+# strongest picks need to be sent, like NHL" (4); 2026-11-04: "we can go slightly
+# more than 4 if we need to cause the picks are that good" (6). The NBA grade
+# (both models, one a game, 2023-24..2025-26, in tip order, the order the night
+# fills live), docs/nba_models_2026.md section 14:
+#     4 a night  1,867 bets  +153.6 units  +9.69%  by season +69.2 / +39.5 / +45.0
+#     5 a night  2,277 bets  +161.9 units  +8.36%
+#     6 a night  2,639 bets  +183.7 units  +8.17%  by season +62.7 / +61.4 / +59.6
+#     8 a night  3,190 bets  +182.8 units  +6.73%
+# The 5th and 6th bets of a night: 772 bets, +30.0 units, +4.55% (90% interval
+# -1.6% to +11.0%); the 7th and 8th: 551 bets, -0.8 units. So 6 is where the
+# units stop growing. The night still fills in tip order: ranking the whole
+# night by EV percentile is worse (best 4 of the night +102.5 units against
+# +153.6), because the models' highest-EV props return LESS than their middling
+# ones (one a game, own-model percentile 0.80-0.90 +10.1%, 0.98-1.00 +4.7%).
+MAX_NBA_PROP_BETS_PER_NIGHT = 6
 # Each model's ledger, for correcting n_bets to what was actually written.
 DECISIONS_TABLES = {RULE_ID: rule_card.DECISIONS_TABLE, PROJECTION_ID: projection_card.DECISIONS_TABLE}
 

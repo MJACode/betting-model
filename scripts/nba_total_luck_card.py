@@ -530,14 +530,21 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
 def publish(conn, rows: list[dict], decisions: list[tl.Decision], leads: dict[str, float],
             refused: dict[str, str]) -> tuple[int, int]:
     """Write each decided game once: its decision row and its bet in ONE
-    transaction, under the model's lock, the ledger and the picks re-read
-    inside it. -> (bets written, decisions written)."""
+    transaction, under the shared NBA game-total lock and then the model's own,
+    the ledger and the picks re-read inside them. A game another NBA game-total
+    model has already bet gets its decision row and no bet
+    (scripts/nba_game_totals_door.py). -> (bets written, decisions written)."""
     if not decisions:
         return 0, 0
+    from scripts import nba_game_totals_door as door
     from scripts.nfl_wind_publisher import _lock_model
+    door.lock(conn)              # first: the lock the three NBA game-total cards share
     _lock_model(conn, MODEL_ID)
     gids = sorted({d.game_id for d in decisions})
     done = decided_games(conn, gids)
+    # One NBA game-total bet a game (scripts/nba_game_totals_door.py): a game another
+    # of the three models has bet is decided here with no bet, the reason on its row.
+    taken = door.other_bets(conn, gids, MODEL_ID)
     by_game = {r["game_id"]: r for r in rows}
     n_bets = n_decided = 0
     for d in sorted(decisions, key=lambda x: x.game_id):
@@ -545,6 +552,10 @@ def publish(conn, rows: list[dict], decisions: list[tl.Decision], leads: dict[st
             continue
         row = by_game.get(d.game_id)
         detail = d.detail if d.game_id not in refused else f"{d.detail}; refused {refused[d.game_id]}"
+        if row is not None and d.game_id in taken:
+            logger.info(f"{MODEL_ID}: {d.game_id} not written, {taken[d.game_id]} already bet it "
+                        f"(one NBA game-total bet a game)")
+            detail, row = f"{detail}; {door.reason(taken[d.game_id])}", None
         got = conn.execute(_INSERT_DECISION, {
             "game_id": d.game_id, "fetch_at": pd.Timestamp(d.fetch_at).isoformat(),
             "lead_min": round(leads.get(d.game_id, float("nan")), 2),

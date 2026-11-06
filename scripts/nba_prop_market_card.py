@@ -8,7 +8,7 @@ stored. It decides only games whose tip is 45-57 minutes away; every other
 game is counted in the diagnostic line and left alone.
 
 THE PLAY-IN, THE PLAYOFFS AND THE CUP FINAL TOO, AND THIS MODEL ALONE (mike's rule,
-unchanged: same cut, same floor, same one a game and four a night). `rule_slate`
+unchanged: same cut, same floor, same one a game and six a night). `rule_slate`
 adds them to `slate` for this card and nothing else; every other NBA model, the
 projection model included, keeps reading the regular-season `slate` (`rule_slate`,
 and tests/test_nba_postseason_gate.py).

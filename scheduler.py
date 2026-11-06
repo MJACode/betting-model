@@ -1488,7 +1488,7 @@ def run_nba_prop_window() -> None:
 
     Otherwise: fetch props for exactly the games to decide, run both NBA prop
     cards on that fetch in one step (one bet a game across both models, at most
-    4 a night: scripts/nba_props_card.py), take any closing snapshot
+    6 a night: scripts/nba_props_card.py), take any closing snapshot
     that is due, and publish what the cards wrote. THEN, for the games about 65
     minutes from tip, pull the ESPN injury list and store their projections (the
     projection card prices them two ticks later, inside the window). A step
@@ -1512,7 +1512,7 @@ def run_nba_prop_window() -> None:
             [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
             "nba-prop-window-fetch", timeout=t["fetch"])
         # BOTH NBA prop cards in ONE step: their candidates meet in one choice
-        # (one bet a game across both models, four a night, strongest first by
+        # (one bet a game across both models, six a night, strongest first by
         # each bet's EV percentile within its own model;
         # scripts/nba_props_card.py), so the order they run in cannot decide
         # which model's bet a game gets.
@@ -1689,13 +1689,17 @@ def run_nba_total_luck_window() -> None:
     own order. nba_total_luck: fetch the NBA board, run its card.
     nba_team_total_luck: its team-total fetch for exactly the due games, its card,
     then the closing team totals of its bet games. nba_first_half_total_luck: the
-    same three steps. No step of one model reads another's rows or outcome, so a
+    same three steps. No step of one model waits on another's step or outcome, so a
     failed team-total call cannot stop the first half's, and one model's slow card
     cannot move another's fetch or cost it a look at the game: run one after the
     other, a team-total card killed at its limit pushed the first-half fetch back
     about 3 minutes, and with both killed each model lost one of its three attempts
     a window (tests/test_nba_first_half_total_luck_window.py). The longest tick is
-    6 minutes at the steps' own limits. Then publish what the cards wrote, once, when
+    6 minutes at the steps' own limits. The one read across models is each card's
+    publish re-reading the other two models' BETs on its games, under a lock the three
+    share: one NBA game-total bet a game, the first writer keeping it (mike,
+    2026-11-04; scripts/nba_game_totals_door.py). A game that gets no bet that way
+    says so on its decision row. Then publish what the cards wrote, once, when
     all of them are done. A tick can pass a minute and the next tick coalesces into
     it; each window holds six ticks or more, so one skipped tick loses no game. A
     step that fails or is killed raises AFTER publishing, so the heartbeat records
