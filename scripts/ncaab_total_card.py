@@ -98,6 +98,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import ncaab_stake  # noqa: E402
 import models.ncaab_total_blend as nb  # noqa: E402
 from data.anon_readable import API_ROLES, lock_down  # noqa: E402
 from data.db import get_connection  # noqa: E402
@@ -391,7 +392,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "confidence_tier", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
          "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
-         "downgrade_reason")
+         "downgrade_reason",
+         "stake_units", "stake_reason")
 # Its own column list, NOT models.scorer._insert_picks: that one stamps
 # model_probability_cal from the promoted map, and this model decides on its
 # own number (config.MODELS_ON_OWN_PROBABILITY).
@@ -511,7 +513,9 @@ def publish(conn, rows: list[dict], decisions: list[nb.Decision], check_hour: da
         if not got:
             continue
         n_decided += 1
-        if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
+        # A bet an earlier NCAAB bet on this game and side agrees with is
+        # staked at NCAAB_AGREEMENT_STAKE_UNITS (models/ncaab_stake.py).
+        if row is not None and conn.execute(_INSERT, ncaab_stake.stamp(conn, row, _COLS)).fetchone():
             n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided

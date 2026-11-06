@@ -137,6 +137,17 @@ export interface Pick {
   decision_odds: number | null;
   decision_implied_prob: number | null;
   decision_edge: number | null;
+  /**
+   * The pick's own stake in units TO WIN, 1 to 3 (2026-11-06; NCAAB
+   * agreement sizing). NULL is the usual 1u to win. Read it through
+   * stakeFor's third argument, never as a number on its own: anything
+   * outside 1..3 is the flat 1u there, as in tracking/discord_notifier.
+   * Optional so hand-built rows and older caches still type-check.
+   */
+  stake_units?: number | null;
+  /** Why stake_units is above 1, in words, shown under the stake on the
+   *  card. NULL on a 1u pick. */
+  stake_reason?: string | null;
 }
 
 /**
@@ -194,6 +205,11 @@ export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
   // from before v8 lacks them and is dropped by the cache-key bump.
   player_key?: string | null;
   prop_market?: string | null;
+  // The pick's own stake (Pick.stake_units), selected by SETTLED_PICK_COLUMNS
+  // so a model page books a 2u pick as the Record tab does. Optional: a row
+  // cached before the column existed lacks it and reads as the flat 1u, which
+  // is what every such row was (see settledPickCache.ts on why no bump).
+  stake_units?: number | null;
   // Client-only. attachDiscordPublish stamps it after the fetch. Not a
   // column, so it stays out of SETTLED_PICK_COLUMNS and the cache key.
   discordPublish?: DiscordPublish;
