@@ -667,6 +667,12 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # load-time logging -- SECURITY DEFINER, insert-only, returns nothing
     # (data/migrations/add_app_timings.sql, mobile/src/lib/perfLogSetup.ts)
     "log_app_timings",
+    # same-game parlay prices a member read off a book's slip -- SECURITY
+    # DEFINER, insert-only, returns nothing; and the per-book fitted cut,
+    # aggregates only (data/migrations/add_sgp_price_observations_2026_11_06.sql,
+    # mobile/src/lib/queries.ts)
+    "log_sgp_price",
+    "sgp_haircuts",
     # NOT called by the app, but REQUIRED by it: custom_model_picks and
     # custom_model_backtest are SECURITY INVOKER and both call this helper, so
     # the CALLER needs EXECUTE. Revoking it breaks the custom-model screen with

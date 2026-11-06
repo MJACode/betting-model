@@ -809,6 +809,20 @@ def run_heartbeat_watchdog() -> None:
         log.exception("ERROR heartbeat-watchdog crashed")
 
 
+def run_sentry_events_sync() -> None:
+    # Copy the mobile app's Sentry events into Supabase sentry_events
+    # (data/ingestors/sentry_events.py). Matt, 2026-11-06: Sentry in the app,
+    # everything in Supabase. In-process and never raises: a Sentry outage or
+    # a missing key must not cost the scheduler anything. No keys on the
+    # worker = "not_configured" and nothing written.
+    try:
+        from data.ingestors.sentry_events import sync_sentry_events
+        result = sync_sentry_events()
+        log.info("sentry_events: %s", result)
+    except Exception:  # noqa: BLE001
+        log.exception("ERROR sentry-events-sync failed")
+
+
 def run_bovada_feed() -> None:
     # Same supervisor shape as the others: exits after --minutes, the */10 cron
     # relaunches it, max_instances=1 makes intervening ticks no-ops.
@@ -879,6 +893,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
+                  # Copies Sentry into sentry_events. Runs on pipeline already
+                  # (it is not a poller job); named here so the set says so.
+                  "sentry_events_sync",
                   "calibration_watch",
                   "model_quality",
                   "kalshi_ladders", "kalshi_game_markets",
@@ -2515,6 +2532,19 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Sentry -> Supabase copy (run_sentry_events_sync) — every 15 minutes.
+    # A copy, so the cadence only bounds how stale sentry_events can be.
+    # max_instances + coalesce: a tick still inside its HTTP budget must not
+    # be joined by the next one. The budget itself is TICK_BUDGET_S in
+    # data/ingestors/sentry_events.py, well under this 15-minute gap.
+    sched.add_job(
+        run_sentry_events_sync,
+        CronTrigger(minute="7,22,37,52", timezone=TIMEZONE),
+        id="sentry_events_sync",
+        name="Sentry events -> Supabase (every 15 min)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # Failure alerting — every 10 minutes, 24x7.

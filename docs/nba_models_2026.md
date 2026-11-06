@@ -357,6 +357,69 @@ fetch. Each game is decided once (`nba_prop_projection_decisions`). The injury l
 game was projected with is kept in `nba_injury_asof`, which also holds the 2018-19..2025-26
 history from the official report.
 
+**The probability a pick stores (mike, 2026-11-06: "Yes, ship it").** Graded walk-forward on 2024-25 and 2025-26,
+every eighth of the model's EV range claims about three times what its bets return (the EV
+calibration grade, PR #1178). So for games from 2026-11-07, a picks row stores and the app
+shows the model's probability pulled toward the price it was bet at: p' = implied + k (p −
+implied), implied from the decision price, k = 0.325 (`config.MODEL_PROB_SHRINK`). A row for
+an earlier game stores p, whenever it was written, so every reader tells the two apart from
+the row's own `game_date`. `model_probability`, `model_probability_cal`, `edge`,
+`decision_edge` and `best_edge` all come from p', so the shown EV and the shown edge at the
+bet's price are k times what they were. **The bet does not change**: `find_bets` decides on p
+against the same floors, and the door ranks on the raw EV.
+
+- *k.* Maximum likelihood on all three seasons' 66,588 graded bets (`calfit.py` method `k`,
+  grid 0.005): 0.325; on a 0.001 grid 0.324; 90% likelihood range 0.270 to 0.377. Fitted on
+  earlier seasons only, it was 0.325 (2023-24) and 0.300 (2023-24 + 2024-25).
+- *The replay* (`tests/test_nba_prop_projection_shrink.py`, every graded bet of both NBA prop
+  models through the live `pick_rows`, the door's `choose` and Discord's `price_bound`, with the
+  boundary moved before them; it runs where the research bet lists exist). With and without the shrink the door chose the same bets
+  in the same order, with the same reason for every candidate it dropped: 1,867 bets at four a
+  night, 2,639 at six. Every stored probability is implied + k (p − implied). The smallest
+  stored decision edge is +0.0015, so the action filter's cut (decision edge ≥ 0.0) keeps every
+  bet. Discord's "good to" price is printed identically on all 66,588.
+- *What a member sees.* At the door (six a night), the projection model's 1,852 bets: the EV
+  stored until now claims +28.1%, the shrunk EV +9.1%, and the bets returned +9.9% (+147.5
+  units). In-sample, because k was fitted on these seasons; walk-forward the shrunk claim was
+  +8.5% against +10.8% returned. One live pick: "Myles Turner Under 1.5 Blocks" at BetParx +110
+  (2026-11-04) is stored as 58.85% with an edge of +11.2% and an EV of +23.6%; shrunk it would
+  show 51.3%, +3.7% and +7.7%. Same bet, price, stake and "good to".
+
+Every reader of the three numbers, and what changes:
+
+| reader | what it reads | after the change |
+|---|---|---|
+| The app: pick card, reasoning card, model screen ("Model %", "Edge", EV) | `model_probability`, `decision_edge` | the shrunk numbers; no app release |
+| The app, Discord and push action filter | probability ≥ 0.0, `COALESCE(decision_edge, edge)` ≥ 0.0 | unchanged: every bet passes |
+| Record views (`v_model_full_record`, `v_model_full_outcome_*`), BYOM backtests | `decision_edge` ≥ the cut | unchanged, the same reason |
+| Discord posts | no probability or edge is posted; "good to" solves the EV floor from `model_probability` | identical: `discord_notifier._honest` recovers the decided number (`models/honest_ev.decision_probability`). Without it, 31,143 of 66,588 bets would have posted no "good to" |
+| The free pick of the day (Discord free channel, X) | the probability and DraftKings `edge` copied into `opening_signals` at capture | "good to" identical (`discord_notifier._decided`, the same recovery); eligibility cuts on the DraftKings `edge` ≥ 0.0, see below |
+| `models/honest_ev.gate`, `config.MODELS_ON_OWN_PROBABILITY` | the model's own number, before the write | unchanged; it stays on its own number (a promoted map would be applied before the floor and change bets) |
+| The door (`models/nba_prop_rank.py`) | `_ev`, the raw EV | unchanged |
+| Closing-line value | prices only | unchanged |
+| Calibration monitor (`tracking/system_health`), weekly fitter | `COALESCE(model_probability_cal, model_probability)` of settled bets | new picks are graded on the shrunk number; see below |
+| A member's own-book EV, parlays, BYOM filters | `model_probability` | the shrunk number |
+| Claude mobile's `confirmed_picks` view; the picks email renderer (no job calls it) | the stored probability and edge | the shrunk numbers |
+| The app's sharp score | the model's edge bar | none for this model, as before (it has no bar) |
+| Local dashboard (`dashboard/app.py`) | `edge` (DraftKings) ≥ 0.0 | a pick whose DraftKings price is worse than its book's can drop off its list |
+
+**Not rewritten, and the boundary.** The 78 BET rows written through 2026-11-04 (28 of them
+VOID), and every row for a game before 2026-11-07, keep the raw number (CLAUDE.md 1c).
+`models/honest_ev.decision_probability` gives the decided number for any row from its stored
+number, decision price and game date. The date has to be one no pick was written for before the
+change deploys: a raw row the old code wrote for a game on or after it would be read as shrunk
+(re-posted by Discord, it would say "good to −200"). Without the date at all, a re-post of an
+old pick would do the same: "Myles Turner Under 1.5 Blocks", stored 0.5885, posts −136 and
+would have posted −200. Flagged, not fixed: the
+calibration monitor's window opens at the model's version date, so until the old picks age out
+it averages raw and shrunk claims together. And the DraftKings-reference `edge` goes negative
+more often: on the 55 live picks with a DraftKings price, 1 is negative now and 8 would be.
+Two readers cut on it: the local dashboard, and the free pick's eligibility
+(`discord_notifier._free_pick_candidates`, `os.edge`), which unlike the app's filter does not
+read the decision edge. So such a pick is still a bet on every board and channel, but is not
+offered as the free pick. Making the free pick cut on the decision edge, as the app does, would
+change every model's free-pick pool, so it is left for its own change.
+
 ## 6. Second search: spread, moneyline and total (pre-registered 2026-10-17, before any grid)
 
 mike, 2026-10-16: *"We need nba spread / ml / totals models … find edge and I don't care how

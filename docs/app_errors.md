@@ -79,6 +79,8 @@ GROUP BY 1, 2 ORDER BY 3 DESC;
 Migration: `data/migrations/app_errors_freeze_kinds_2026_11_06.sql` (hand-applied,
 widens the kind CHECK and the RPC, raises the `extra` cap to 16,000 chars).
 
+**Native crashes and iOS app hangs** are in Sentry, copied to `sentry_events`: `docs/sentry.md`.
+
 ## Where it lives
 
 | Piece | What |

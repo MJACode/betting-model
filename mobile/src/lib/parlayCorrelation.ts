@@ -37,6 +37,8 @@
 
 import { marketClassForModel, type MarketClass } from '@/lib/markets';
 import type { ParlayLeg, ParlayMetrics } from '@/lib/parlay';
+import { MODEL_BOOK } from '@/lib/markets';
+import { applySgpHaircut, sameGameGroupCount, NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
 
 /** Number of Monte-Carlo draws per joint-probability estimate (±~1pp SE). */
 export const MC_DRAWS = 10000;
@@ -380,9 +382,15 @@ export function computeCorrelatedMetrics(
   table: RhoTable,
   resolveTeam?: TeamResolver,
   draws = MC_DRAWS,
+  sgpFits: SgpHaircuts = NO_SGP_FITS,
 ): CorrelatedMetrics {
-  let decimalPayout = 1;
-  for (const l of legs) decimalPayout *= l.decimalOdds;
+  let multipliedDecimal = 1;
+  for (const l of legs) multipliedDecimal *= l.decimalOdds;
+  // DraftKings' price. Legs sharing a game are a same-game parlay there, paid
+  // below the legs multiplied out — so the payout, EV and grade use the
+  // estimated same-game price (lib/sgpPricing.ts).
+  const sgpGroups = sameGameGroupCount(legs);
+  const decimalPayout = applySgpHaircut(multipliedDecimal, sgpGroups, MODEL_BOOK, sgpFits);
   const { jointProb, hasCorrelation } = correlatedJointProb(legs, table, resolveTeam, draws);
   const independentProb = legs.reduce((a, l) => a * clampProb(l.modelProb), 1);
 
@@ -396,6 +404,8 @@ export function computeCorrelatedMetrics(
   return {
     parlayProb: jointProb,
     decimalPayout,
+    multipliedDecimal,
+    sgpGroups,
     americanOdds: decimalToAmericanLocal(decimalPayout),
     ev,
     dkImpliedProb,
@@ -407,6 +417,30 @@ export function computeCorrelatedMetrics(
     fairDecimal,
     fairAmerican: decimalToAmericanLocal(fairDecimal),
     dkHoldPct: 1 - jointProb * decimalPayout,
+    grade: gradeForEv(ev),
+  };
+}
+
+/**
+ * The same metrics at a different payout — the price a member read off the
+ * book's own slip (components/SgpPriceEntry.tsx). The win probability does not
+ * depend on the price, so only the payout-derived fields change.
+ */
+export function withDecimalPayout(m: CorrelatedMetrics, decimalPayout: number): CorrelatedMetrics {
+  if (!(decimalPayout > 1)) return m;
+  const b = decimalPayout - 1;
+  const p = m.jointProb;
+  const ev = p * decimalPayout - 1;
+  const dkImpliedProb = 1 / decimalPayout;
+  return {
+    ...m,
+    decimalPayout,
+    americanOdds: decimalToAmericanLocal(decimalPayout),
+    ev,
+    dkImpliedProb,
+    edgeVsDk: p - dkImpliedProb,
+    kellyFraction: Math.max(0, (b * p - (1 - p)) / b),
+    dkHoldPct: 1 - p * decimalPayout,
     grade: gradeForEv(ev),
   };
 }

@@ -1661,5 +1661,15 @@
     "enabled": true,
     "note": "2026-11-05: the NBA points preview took 6.0s for the current season (anon cuts off at 3s) because 11,075 byom_prop_facts rows were written after the last automatic analyze and the planner counted 1 row for NBA 2027. Runs ANALYZE on byom_game_facts, byom_prop_facts and byom_official_legs once. Reads a sample, changes no row, uses no API credits. The builders analyze after every write from this change on (byom/analyze.py). Does not write picks.",
     "args": {}
+  },
+  {
+    "key": "restore-swept-ncaab-none-rows-2026-11-06",
+    "job_type": "restore_swept_ncaab_none_rows",
+    "requested_by": "claude",
+    "enabled": true,
+    "note": "2026-11-06: the game scorer's end-of-pass sweep deleted the NCAAB cards' NONE rows (priced, not bet; no stake) minutes after each card wrote them, from 2026-11-04 (PR #1147). The deploy that carries this entry scopes the sweep to the models its pass re-writes, so this runs once after it: for every NCAAB card NONE row picks_log shows deleted whose game has not started and which has no row in picks now, it inserts the logged row back with its own pick_id and created_at. Rows of started games are not restored. Publishes nothing, settles nothing, uses no API credits.",
+    "args": {
+      "apply": true
+    }
   }
 ]
