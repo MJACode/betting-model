@@ -236,6 +236,16 @@ function mkPick(over: Partial<Pick>): Pick {
     nflLive?.label,
   );
 
+  // The NBA loop writes the quarter into the same column (nba_live_loop.build_pick).
+  const nbaLive = pickTimingInfo(
+    mkPick({ sport: 'NBA', model_id: 'nba_live_spread_q12', is_live: true, inning_at_pick: 2 }),
+  );
+  check(
+    'NBA live shows a quarter, not an inning',
+    Boolean(nbaLive?.label.includes('· Q2')) && !nbaLive?.label.includes('inning'),
+    nbaLive?.label,
+  );
+
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(
     'live without a period still stamps the time',

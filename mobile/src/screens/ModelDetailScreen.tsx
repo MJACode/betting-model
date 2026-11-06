@@ -20,6 +20,7 @@ import {
   formatPctSigned,
   formatSigned,
   gameDayLabelET,
+  labelWithoutStake,
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
@@ -194,7 +195,7 @@ export function ModelDetailScreen() {
               upcoming.map((ep) => (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={[ep.pick.pick_label, signalDisplayName(ep.pick.signal_type), modelShort(ep.pick.model_id), `${gameDayLabelET(ep.pick.game_time) ?? 'Today'}${ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}`, `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`].filter(Boolean).join(', ')}
+                  accessibilityLabel={[labelWithoutStake(ep.pick.pick_label), signalDisplayName(ep.pick.signal_type), modelShort(ep.pick.model_id), `${gameDayLabelET(ep.pick.game_time) ?? 'Today'}${ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}`, `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`].filter(Boolean).join(', ')}
                   key={ep.pick.pick_id}
                   style={styles.pickRow}
                   onPress={() => navigation.navigate('PickDetail', { pickId: ep.pick.pick_id })}
@@ -202,7 +203,7 @@ export function ModelDetailScreen() {
                   <View style={styles.pickLeft}>
                     <ModelBadgeRow badge={modelShort(ep.pick.model_id)}>
                       <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
-                        {ep.pick.pick_label}
+                        {labelWithoutStake(ep.pick.pick_label)}
                       </Text>
                       <View style={styles.pickMeta}>
                         <SignalBadge signal={ep.pick.signal_type} small />
@@ -224,14 +225,14 @@ export function ModelDetailScreen() {
         renderItem={({ item }) => (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={[item.pick_label, signalDisplayName(item.signal_type), modelShort(item.model_id), item.result, unitsSpeech(formatSigned(item.units, 2, 'u'))].filter(Boolean).join(', ')}
+            accessibilityLabel={[labelWithoutStake(item.pick_label), signalDisplayName(item.signal_type), modelShort(item.model_id), item.result, unitsSpeech(formatSigned(item.units, 2, 'u'))].filter(Boolean).join(', ')}
             style={styles.pickRow}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick_id })}
           >
             <View style={styles.pickLeft}>
               <ModelBadgeRow badge={modelShort(item.model_id)}>
                 <Text style={styles.pickLabel} numberOfLines={1} ellipsizeMode="middle">
-                  {item.pick_label}
+                  {labelWithoutStake(item.pick_label)}
                 </Text>
                 <View style={styles.pickMeta}>
                   <SignalBadge signal={item.signal_type} small />

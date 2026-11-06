@@ -133,6 +133,20 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB")
 # without the reference price.
 DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB"})
 
+# Sports whose LIVE pulls (the refresh pass and the 30-second pre-game poller)
+# label a row stamped after the event's start 'in_play' at write time, the
+# rule the historical purchases already apply (_mark_in_play). The bulk /odds
+# endpoint keeps serving a game once it is under way, and until 2026-11-04
+# every such NBA row was stored 'open', the label every pre-game reader trusts:
+# on the 15 games of 2026-11-02, 5,735 of 16,508 'open' full-game NBA rows
+# (35%) were stamped after the listed tip (production, read 2026-11-04). The
+# NBA in-play models (models/nba_live_ig2.py) read the clock, not the label,
+# so this changes none of their inputs; it stops a pre-game reader that trusts
+# the label from reading a live price. Other sports are not in the set: each
+# would change what its line-shop views show for a game under way, and the
+# readers of theirs bound on the start time already (docs/live_betting.md).
+LIVE_PULL_IN_PLAY_SPORTS = frozenset({"NBA"})
+
 # Markets to pull (full-game). The bulk endpoint. Alternate ladders are NOT
 # in this list: mixing them in 422s the whole slate, the same failure as
 # h2h_3way. They are additional markets, fetched per event below.
@@ -1452,6 +1466,8 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
                 continue        # never fall back to minting NFL or NCAAB game ids
         game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at,
                                                resolve_game_id=resolve)
+        if sp in LIVE_PULL_IN_PLAY_SPORTS:
+            _mark_in_play(game_rows, odds_rows)
         if sp == "UFC":
             try:
                 conn = conn or get_connection()
@@ -1587,6 +1603,10 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                     logger.info(f"UFC: skipped {n_phantom} non-UFC "
                                 f"(unknown-fighter) event(s)")
 
+            if sp in LIVE_PULL_IN_PLAY_SPORTS:
+                n_live = _mark_in_play(game_rows, odds_rows)
+                if n_live:
+                    logger.info(f"{sp}: {n_live} row(s) stamped after the start stored as in_play")
             n_games = _upsert_games(conn, game_rows)
             n_odds  = _insert_odds(conn, odds_rows)
             total_games += n_games

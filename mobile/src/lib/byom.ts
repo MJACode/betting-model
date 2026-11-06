@@ -22,9 +22,8 @@
 import { byomFilters, readStoredFilters, type ByomFilters } from './byomFilters';
 import {
   assertByomSide,
+  seasonListFor,
   headlineFromCounts,
-  nbaSeasonList,
-  nflSeasonList,
   type ByomSeasonScope,
   type ByomSport,
 } from './byomRecord';
@@ -173,7 +172,7 @@ function rpcFilters(
   // until byom_nba_props_2026_10_29.sql is applied, and a missing
   // sport there is NFL. Sending it on every NFL call would break the
   // live builder before that file is applied.
-  if (sport === 'NBA') return { ...checked, sport: 'NBA' };
+  if (sport !== 'NFL') return { ...checked, sport };
   return checked;
 }
 
@@ -236,6 +235,8 @@ export interface ByomTimedRows {
   headline: ByomTiming;
   official: ByomBacktestRow[];
   close: ByomBacktestRow[];
+  /** One entry per season read. Season is null for the current-season read. */
+  seasons: { season: number | null; official: ByomBacktestRow[]; close: ByomBacktestRow[] }[];
 }
 
 function isMissingFunction(error: { code?: unknown; message?: unknown }): boolean {
@@ -321,7 +322,7 @@ export async function fetchByomScopedRecord(
   const parsed = byomFilters(filters);
   const seasons: (number | null)[] = scope === 'current'
     ? [null]
-    : sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+    : seasonListFor(sport, now);
   const groups = await pool(seasons, 4, (season) => fetchByomRecord(season, parsed, sport));
   const official = groups.flatMap((group) => group.official);
   const close = groups.flatMap((group) => group.close);
@@ -329,6 +330,11 @@ export async function fetchByomScopedRecord(
     headline: headlineFor(sport, official, close),
     official,
     close,
+    seasons: groups.map((group, index) => ({
+      season: seasons[index] ?? null,
+      official: group.official,
+      close: group.close,
+    })),
   };
 }
 
@@ -389,7 +395,7 @@ export async function fetchByomScopedBets(
   const parsed = byomFilters(filters);
   const seasons: (number | null)[] = scope === 'current'
     ? [null]
-    : (sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now)).slice().reverse();
+    : seasonListFor(sport, now).slice().reverse();
   const pages = await pool(seasons, 4, async (season) => {
     const { data, error } = await supabase.rpc('byom_bets', {
       p_season: season,
@@ -443,7 +449,7 @@ export async function fetchByomScopedBacktest(
 ): Promise<ByomBacktestRow[]> {
   const parsed = byomFilters(filters);
   if (scope === 'current') return fetchByomBacktest(null, parsed, sport);
-  const seasons = sport === 'NBA' ? nbaSeasonList(now) : nflSeasonList(now);
+  const seasons = seasonListFor(sport, now);
   const groups = await pool(seasons, 4, (season) => fetchByomBacktest(season, parsed, sport));
   return groups.flat();
 }

@@ -136,6 +136,35 @@ export function formatUnits(u: number): string {
   return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
 }
 
+/**
+ * The old NFL sizing figure on a stored label: a "·", a number, then "u",
+ * followed by another "·" tag or the end. The pattern is the server's
+ * (tracking/pick_integrity._STAKE_TOKEN and the open_picks view), pinned
+ * together by tests/test_mobile_label_units.py.
+ */
+const LABEL_STAKE_TOKEN = /\s*·\s*\d+(?:\.\d+)?u(?!\s*[^\s·])/gu;
+
+/**
+ * A stored pick label, as the app prints it beside a stake.
+ *
+ * Older NFL wind and opener labels end in the model's own
+ * sizing figure: "DAL @ IND — IND +7.5 · 0.79u · NEW 0m",
+ * "LA @ WAS Under 47.5 · 0.87u". That figure is not the stake anyone books.
+ * The row beside it shows the posted stake or the posted units (1u to win at
+ * the decided price, risk capped at 3u), so one row carried two unit numbers
+ * that disagreed (mike, 2026-11-04: "everything must be units"). Labels
+ * written since carry no unit figure, as no other sport's label does. A stored
+ * label is never rewritten (CLAUDE.md §1c), so the old figure comes off here,
+ * on screen and in VoiceOver only.
+ *
+ * Only that token goes. The bet itself, the age tag ("NEW 0m") and every
+ * parenthetical stay word for word (CLAUDE.md §00). Every other label is
+ * returned as stored.
+ */
+export function labelWithoutStake(label: string | null | undefined): string {
+  return (label ?? '').replace(LABEL_STAKE_TOKEN, '');
+}
+
 /** An unsigned stake from a stored per-100 amount: 100 → "1u", 50 → "0.5u". */
 export function formatFlatStake(perHundred: number | null | undefined): string {
   const u = flatToUnits(perHundred);
@@ -417,7 +446,15 @@ interface GameLike {
 const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   MLB: 6 * 3_600_000,
   NHL: 5 * 3_600_000,
-  NBA: 5 * 3_600_000,
+  // The NBA has an in-play model (nba_live_*) and, like football below, no live
+  // game feed in the app, and its scores land at the next morning's
+  // settlement. So this window is the only thing that takes a finished game
+  // off the Live board, and at 5h an in-play pick stayed there, with a
+  // hand-off, long after the game ended. isGameOver below already treats an
+  // NBA game as over 3h after tip (GAME_DURATION_HOURS); 3.5h keeps another
+  // half hour for overtime and a late start. Same reasoning as NCAAF and NFL
+  // below.
+  NBA: 3.5 * 3_600_000,
   WNBA: 5 * 3_600_000,
   // A college basketball game runs about two hours, and the late West Coast
   // tips start after 10pm ET with no live feed in the app, so this window is

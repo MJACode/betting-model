@@ -8,6 +8,7 @@ import { formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { handoffAtBook, matchupForLeg, priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
+import { NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -37,12 +38,22 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * (lib/lineLegs.ts) leaves its tile partial like any other book's — so the
  * row can, on such a slip, hold no complete quote at all.
  */
-export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
+export function BetslipBooksRow({
+  legs,
+  sgpFits = NO_SGP_FITS,
+  enteredPrices,
+}: {
+  legs: ParlayLeg[];
+  /** Fitted same-game cuts; a same-game slip's tiles are estimates. */
+  sgpFits?: SgpHaircuts;
+  /** Prices the member typed in from a book's own slip, by book. */
+  enteredPrices?: Readonly<Record<string, number>>;
+}) {
   const quotes = useMemo(
     // Bettable books only: a tile opens the book, and Pinnacle / Bovada /
     // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
-    () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS),
-    [legs],
+    () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS, sgpFits, enteredPrices),
+    [legs, sgpFits, enteredPrices],
   );
   // The book whose hand-off sheet is open, or null. Held as the book key rather
   // than a boolean so the sheet's own `book` prop cannot drift from the tile
@@ -91,7 +102,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
           <InfoTooltip
             title="Place this bet at"
             body={
-              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nOpening a book puts every linked leg on that book’s slip when the book accepts a multi-pick link. A book that doesn’t still lists each leg so you can add it there.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
+              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nOpening a book puts every linked leg on that book’s slip when the book accepts a multi-pick link. A book that doesn’t still lists each leg so you can add it there.\n\n“est.” means two or more legs share a game. Books price those legs together, as a same-game parlay, for less than the legs multiplied out, so the tile shows our estimate. “Book price” is the price you entered from that book’s slip.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
             }
             accessibilityLabel="About placing this bet"
           />
@@ -117,7 +128,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
               accessibilityRole="button"
               accessibilityLabel={
                 full
-                  ? `Bet on ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
+                  ? `Bet on ${bookName(q.book)}, ${q.sgpEstimated ? 'estimated ' : q.entered ? 'your entered ' : ''}combined odds ${formatAmerican(q.americanOdds!)}${
                       q.isBest && fullCount > 1 ? ', best payout' : ''
                     }`
                   : `Bet on ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
@@ -143,8 +154,8 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
               <Text style={[styles.odds, !full && styles.oddsNa]}>
                 {full ? formatAmerican(q.americanOdds!) : 'N/A'}
               </Text>
-              <Text style={styles.coverage}>
-                {q.priced}/{q.total} legs
+              <Text style={styles.coverage} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                {q.entered ? 'Book price' : q.sgpEstimated ? `${q.priced}/${q.total} · est.` : `${q.priced}/${q.total} legs`}
               </Text>
             </Pressable>
           );

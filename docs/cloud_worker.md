@@ -138,6 +138,106 @@ second call cannot abort a pass this process has just opened. The one-off
 view-migration pass if boot has not already. This sweep does not re-run
 the pass.
 
+### Drain on redeploy, and the merge gate (2026-11-05)
+
+A merge to master redeploys the worker and Railway sends SIGTERM. The
+scheduler forwards that to the in-flight child and waits. It does not
+kill the child. `python run_pipeline.py` (the daily) and
+`scripts/refresh_pass.sh` finish the step they are in, do not start the
+next one, and close `pipeline_runs` with `failed_steps` containing
+`deploy-cutoff` (`ok` false). That is a deploy-kill, same as `aborted`:
+the same-day catch-up may start the daily again, and a drained hourly
+is still replaced at boot. SIGKILL cannot be caught. If the platform's
+stop grace ends before the step returns, the row stays unfinished and
+the boot sweep still stamps it `aborted`.
+
+`railway.json` sets `deploy.drainingSeconds` to **600**. Railway's
+schema is a number. Config in the file overrides the service settings
+for that deployment (`docs.railway.com` config-as-code reference). The
+default without it is 0, so SIGKILL follows SIGTERM immediately and the
+handler never runs. A step that is still going at 600 seconds is
+SIGKILLed. The file is included in `watchPatterns`, so the change
+deploys with the worker. On the deployment page, draining seconds shows
+a file icon when it came from `railway.json`.
+
+SIGTERM is sent after the new container is already active, so the two
+processes overlap until the old one exits. `_DAILY_LOCK` is in-process
+(and the #1160 wait between daily and refresh is not on master). The
+cross-process guard is a session advisory lock
+(`tracking/scoring_lease.py`): the daily child holds the daily key
+until it has closed the row, and `refresh_pass.sh` holds the refresh
+key the same way. The boot sweep does not stamp a kind whose key is
+held. The daily catch-up waits for the daily key, on its own thread,
+before it starts another daily. The refresh catch-up waits for the
+refresh key. A leaked lock does not silence the 6am cron: the holder
+gives up after the drain window and runs. The first deploy of this
+lease overlaps a process that is not holding it, so that one boot can
+still sweep the live row.
+
+A refresh on the new container does not wait for the daily key. During
+the drain, that refresh can score while the old daily finishes its
+current step. Live loops are not under the lease either. They start as
+soon as the new scheduler does. #1160's in-process wait, if it lands,
+still does not see the other container.
+
+Merges into master are blocked while a daily is open by the check
+**daily pipeline not running**
+(`.github/workflows/daily-merge-gate.yml`; the Actions UI prefixes the
+workflow name). It reads `pipeline_runs` where `run_kind = 'daily'`,
+`finished_at` is null, and `started_at::timestamptz` is inside the last
+75 minutes (`MAX_DAILY_RUN`). An older unfinished row is not a live
+daily. The pull-request job runs from the base branch and checks out
+the base sha. It reads `DATABASE_URL_READONLY` only. Without that
+secret it falls back to 06:00–07:15 America/New_York, which misses a
+catch-up daily outside that window. A result from push time goes
+stale, so a schedule on master re-posts the same check name on every
+open PR head every 10 minutes from 09:00 UTC through 03:59 UTC (an
+hour before 6:00am ET through the 22:00 ET catch-up cutoff, in both
+EST and EDT). That schedule uses `DATABASE_URL`, the table owner, because it
+runs only from the default branch. From 05:45 until 06:20
+America/New_York the check blocks even when `pipeline_runs` has no
+open daily, so a late tick cannot leave a green check across the
+6:00am start. Outside that stretch a merge between ticks can still
+land on a catch-up daily. Re-running the failed pull-request job
+re-evaluates that one PR. The check blocks merges
+only after it is a required status on `master` (Settings → Rules →
+Rulesets, or branch protection, required status checks). Add
+`daily pipeline not running`.
+
+`DATABASE_URL_READONLY` is a new Actions secret. `pipeline_runs` has
+RLS on and no other policy, so the role needs its own SELECT policy or
+the query returns no rows and the pull-request job stays green during
+a daily. The Postgres role name is `daily_gate_reader`. On a Supavisor
+pooler host (`*.pooler.supabase.com`, port 5432 or 6543) the connection
+username is `daily_gate_reader.<project-ref>`, not the bare role. A
+bare user fails to connect, the check treats that as an unread ledger,
+and every PR stays red. This project's ref is `vvprgnrmzeekokzkrkfu`
+(`docs/config_topology.md`). The direct host
+`db.vvprgnrmzeekokzkrkfu.supabase.co` takes the bare role; that host is
+not what the worker or Actions uses.
+
+```text
+postgresql://daily_gate_reader.vvprgnrmzeekokzkrkfu:[password]@aws-1-us-west-2.pooler.supabase.com:6543/postgres
+```
+
+Run this in the Supabase SQL editor. The password goes only in the
+secret. The role name in the SQL stays bare; the suffix is only the
+pooler username.
+
+```sql
+CREATE ROLE daily_gate_reader LOGIN PASSWORD 'choose-a-password';
+GRANT USAGE ON SCHEMA public TO daily_gate_reader;
+GRANT SELECT ON TABLE public.pipeline_runs TO daily_gate_reader;
+CREATE POLICY daily_gate_reader_select ON public.pipeline_runs
+  FOR SELECT TO daily_gate_reader
+  USING (true);
+```
+
+Emergency bypass: label the PR `emergency-merge` (the check re-runs on
+the label), or, as an owner or member, put `bypass-daily-gate` in the
+PR body and re-run the check. A repo admin can also use GitHub's bypass
+of branch protections.
+
 ### NFL polling (changed 2026-08-22)
 
 The four fixed wind-card slots and the daily opener card were replaced by one poll
@@ -180,6 +280,32 @@ Credit safety: in-play fetches are debounced (60s) and capped by `LIVE_DAILY_CRE
 Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cadence.
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
+
+### The NBA in-play loop (added 2026-11-04)
+
+`models/nba_live_loop.py`, job `nba_live` on `pollers`, every 10 minutes 11am-2:50am ET as
+a supervisor (one launch runs a whole slate and exits after 3 idle ticks). The model and
+its evidence: `docs/sports/nba.md`, "In play". It beats `job_heartbeats` itself every 5
+minutes while a slate runs (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and
+`system_health` reads its outputs the next morning (`nba_live_outputs`). A game
+or fetch window that finished before the loop's first tick (2026-11-05 11:00 ET)
+is not scored; the check was added in the same deploy as the loop.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NBA_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NBA` or `DISCORD_WEBHOOK_LIVE_NBA` | unset | Where NBA live picks post. **Required**: NBA live picks never fall back to the shared live or the pre-game channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`), and with neither set the loop decides nothing and exits 3 while a game is in progress, so the job reads failed. A channel id resolves through `DISCORD_BOT_TOKEN` (the bot makes a webhook named `nba-live`) |
+| `NBA_LIVE_FETCH_OFFSET_SEC` | `264` | Fetch at each hour minus this (the archive's hourly purchase served the market 264 s before the hour) |
+| `NBA_LIVE_FETCH_WINDOW_SEC` | `240` | How long after that instant an attempt may still start (retries of a skipped game) |
+| `NBA_LIVE_RETRY_GAP_SEC` | `60` | Seconds between attempts inside a window |
+| `NBA_LIVE_PBP_WAIT_SEC` | `170` | Seconds after the fetch before ESPN's summary is read (the scoring plays' measured 99th-percentile publication lag) |
+| `NBA_LIVE_PBP_RECHECK_SEC` | `60` | Seconds to the second read; a play logged before the fetch that appears only then skips the game (fail closed) |
+| `NBA_LIVE_HEADER_RECHECK_SEC` | `20` | ESPN's header score ahead of its play list: re-read after this, refuse if still ahead |
+| `NBA_LIVE_PLAY_LAG_MAX_SEC` | `230` | Refuse when ESPN's newest play is older than this while its clock is running |
+| `NBA_LIVE_CALL_CAP` / `NBA_LIVE_CREDIT_CAP` | `100` / `200` | Per-process ceilings on Odds API calls and credits (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the loop stops fetching under 1,000 credits left or 15% of the plan |
+| `NBA_LIVE_POLL_SEC` / `NBA_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
+
+`--dry-run` makes no Odds API call and writes nothing.
 
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 
@@ -482,6 +608,10 @@ One channel per sport. Set only the sports you actually want; a sport with no
 webhook is skipped, and — importantly — its signals are **not** marked as sent,
 so adding that channel later still delivers the rest of the day's picks.
 
+| Variable (on `worker`) | What it does |
+|---|---|
+| `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` | `sentry_events_sync` (every 15 min, `max_instances=1`) copies the app's Sentry events into `sentry_events`. Each request is bounded (5s connect, 10s read) and a tick stops after 45s, so a Sentry outage cannot run into the next tick. Unset = the job logs `not_configured` and writes nothing. `docs/sentry.md` |
+
 | Variable | Channel it feeds |
 |---|---|
 | `DISCORD_WEBHOOK_MLB` | e.g. `#mlb-picks` |
@@ -493,10 +623,10 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_GOLF` | `#golf-picks` |
 | `DISCORD_WEBHOOK_NCAAF` | `#ncaaf-picks` |
 | `DISCORD_WEBHOOK_NCAAB` | `#ncaab`. Optional: NCAAB can post through `DISCORD_CHANNEL_NCAAB` instead (next row). When both are set, the webhook wins. |
-| `DISCORD_CHANNEL_<SPORT>` | A sport's channel ID, in place of its webhook (added 2026-10-30 for NCAAB: `DISCORD_CHANNEL_NCAAB`; NCAABW, 2026-11-03: `DISCORD_CHANNEL_NCAABW`). Not a secret. It only works on a service that also has `DISCORD_BOT_TOKEN`, which is the `worker`, where the NCAAB cards run; `pollers` has no bot token, so the ID set there resolves nothing and pollers' publish passes skip that sport without marking it sent. The notifier uses the token to reuse the bot's own webhook in that channel, or creates one named after the sport (`ncaab`), and keeps its URL in memory only. The ID comes from the one-off `discord_create_channel` worker job (`scripts/discord_create_sport_channel.py`). That job accepts a channel name with one leading emoji and a hyphen (`🔴-ncaab-live`); the rest of the name stays a lowercase slug with a letter in it. Redeploy after setting. The `discord_probe` job reports such a sport by the channel and the bot's webhook ID and name. |
+| `DISCORD_CHANNEL_<SPORT>` | A sport's channel ID, in place of its webhook (added 2026-10-30 for NCAAB: `DISCORD_CHANNEL_NCAAB`; NCAABW, 2026-11-03: `DISCORD_CHANNEL_NCAABW`). Not a secret. It only works on a service that also has `DISCORD_BOT_TOKEN`. The NCAAB cards run on `worker`, which has both. `pollers` has the token too (variable names read 2026-11-05) but not this id, so pollers' publish passes skip that sport without marking it sent and the worker posts it. The notifier uses the token to reuse the bot's own webhook in that channel, or creates one named after the sport (`ncaab`), and keeps its URL in memory only. The ID comes from the one-off `discord_create_channel` worker job (`scripts/discord_create_sport_channel.py`). That job accepts a channel name with one leading emoji and a hyphen (`🔴-ncaab-live`); the rest of the name stays a lowercase slug with a letter in it. Redeploy after setting. The `discord_probe` job reports such a sport by the channel and the bot's webhook ID and name. |
 | `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
 | `DISCORD_WEBHOOK_LIVE_NFL` / `_LIVE_MLB` / `_LIVE_NCAAF` | **The sport's live channel** (`#nfl-live`, `#mlb-live`, `#ncaaf-live`; mike, 2026-09-09). Set on BOTH `worker` and `pollers`. Any `DISCORD_WEBHOOK_LIVE_{SPORT}` over the sport list works, and it wins over a live channel id. Measured 2026-11-03: the MLB live loop, the NCAAF live loop and the NFL-leader loop run on `pollers` (`SERVICE_ROLE=poller`). `worker` (`SERVICE_ROLE=pipeline`) skips those jobs. The retired NFL in-play worker, when `RUN_NFL_LIVE=1`, is a pipeline job. |
-| `DISCORD_CHANNEL_LIVE_<SPORT>` | A sport's live channel ID, used when `DISCORD_WEBHOOK_LIVE_<SPORT>` is unset (2026-11-03: `DISCORD_CHANNEL_LIVE_NCAAB`, `DISCORD_CHANNEL_LIVE_NCAABW`, set on `worker`). Not a secret. The notifier reuses the bot's webhook in that channel or creates one named `<sport>-live`. It only resolves where `DISCORD_BOT_TOKEN` is set. `pollers` has no bot token and does not have these ids, and that is where the live loops post. A channel id on a service with no token is skipped: one error line, no Discord call, the pick is not marked sent, and it is not redirected to the shared or pre-game channel. To post NCAAB / NCAABW live from `pollers`, set `DISCORD_BOT_TOKEN` there (Manage Webhooks on those channels) plus these ids, or set `DISCORD_WEBHOOK_LIVE_NCAAB` and `DISCORD_WEBHOOK_LIVE_NCAABW` on `pollers`. |
+| `DISCORD_CHANNEL_LIVE_<SPORT>` | A sport's live channel ID, used when `DISCORD_WEBHOOK_LIVE_<SPORT>` is unset (2026-11-03: `DISCORD_CHANNEL_LIVE_NCAAB`, `DISCORD_CHANNEL_LIVE_NCAABW`, set on `worker`). Not a secret. The notifier reuses the bot's webhook in that channel or creates one named `<sport>-live`. It only resolves where `DISCORD_BOT_TOKEN` is set. `pollers`, where the live loops post, now holds `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_LIVE_NCAAB` and `DISCORD_CHANNEL_LIVE_NCAABW` (variable names read 2026-11-05). The NBA in-play model's `DISCORD_CHANNEL_LIVE_NBA` goes there too. A channel id on a service with no token is skipped: one error line, no Discord call, the pick is not marked sent, and it is not redirected to the shared or pre-game channel. |
 | `DISCORD_WEBHOOK_LIVE` | Shared in-play channel, the fallback for a sport with no live webhook and no live channel id. Falls back to the sport's channel if unset too. |
 | `DISCORD_WEBHOOK_RESULTS` | The morning results recap (cross-sport, so it needs its own home). Falls back to `DISCORD_WEBHOOK_DEFAULT`. |
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
@@ -509,7 +639,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_PARLAYMATT` | ParlayMatt recaps in his channel only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
 | `DISCORD_PARLAYMATT_CHANNEL_ID` | The `#parlaymatt-picks` channel id the bot reads. Unset, his poll does not call Discord. |
 | `DISCORD_PARLAYMATT_AUTHOR_ID` | Discord user id of the only ParlayMatt author stored. The username is not the filter. |
-| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. A sport that posts through `DISCORD_CHANNEL_<SPORT>` also needs **Manage Webhooks** on that channel, and the `discord_create_channel` job needs **Manage Channels** in the guild (plus whatever permissions the copied overwrites grant). It is on `worker` only (variable names read 2026-10-30: `pollers` has none). |
+| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. A sport that posts through `DISCORD_CHANNEL_<SPORT>` also needs **Manage Webhooks** on that channel, and the `discord_create_channel` job needs **Manage Channels** in the guild (plus whatever permissions the copied overwrites grant). It is on `worker` and `pollers` (variable names read 2026-11-05; on 2026-10-30 `pollers` had none). |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |

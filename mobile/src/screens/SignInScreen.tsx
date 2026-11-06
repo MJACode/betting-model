@@ -34,6 +34,11 @@ import {
 import { BrandMark } from '@/components/BrandMark';
 import { AUTH_PROVIDERS, EMAIL_OTP_LENGTH } from '@/lib/authConfig';
 import { billingReady } from '@/lib/billingConfig';
+import { fetchSubscription, isEntitled } from '@/lib/billing';
+import { postSignInRoutes } from '@/lib/authShell';
+import { fetchAccess } from '@/lib/discord';
+import { signalsEntitled } from '@/lib/iap';
+import { isAppPremium } from '@/lib/membership';
 import { PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -110,13 +115,24 @@ export function SignInScreen() {
   const [busy, setBusy] = useState<AuthProvider | 'email' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const finish = useCallback(() => {
-    const routes: { name: 'Tabs' | 'Paywall'; params?: { autoCloseIfEntitled: boolean } }[] = [
-      { name: 'Tabs' },
-    ];
+  const finish = useCallback(async (userId: string | undefined) => {
+    let premium = false;
     if (billingReady()) {
-      routes.push({ name: 'Paywall', params: { autoCloseIfEntitled: true } });
+      const [access, sub] = await Promise.all([
+        fetchAccess().catch(() => null),
+        fetchSubscription().catch(() => null),
+      ]);
+      let rcSignals = false;
+      if (access?.entitled !== true && !isEntitled(sub) && userId) {
+        rcSignals = await signalsEntitled(userId);
+      }
+      premium = isAppPremium({
+        accessEntitled: access?.entitled === true,
+        subscription: sub,
+        rcSignals,
+      });
     }
+    const routes = postSignInRoutes(billingReady(), premium);
     navigation.reset({ index: routes.length - 1, routes });
   }, [navigation]);
 
@@ -154,7 +170,7 @@ export function SignInScreen() {
         const session = await signInWithProvider(provider);
         // null = the user dismissed the Apple sheet or the Google browser.
         // Not an error; stay put.
-        if (session) finish();
+        if (session) await finish(session.user.id);
       } catch (e) {
         setError(authErrorMessage(e));
       } finally {
@@ -170,8 +186,8 @@ export function SignInScreen() {
     setError(null);
     setBusy('email');
     try {
-      await verifyEmailCode(email, code);
-      finish();
+      const session = await verifyEmailCode(email, code);
+      await finish(session.user.id);
     } catch (e) {
       setError(authErrorMessage(e));
     } finally {

@@ -1,0 +1,100 @@
+# Fail while a daily pipeline run is open, so a merge does not redeploy
+# the Railway worker on top of it.
+#
+# The check name is "daily pipeline not running" (the job name). The
+# Actions UI shows it as "Daily pipeline gate / daily pipeline not
+# running". It blocks merges only after that check is required on master
+# (Settings → Rules → master → required status checks). The job itself
+# cannot mark itself required.
+#
+# pull_request_target runs the workflow file from the base branch, and
+# the checkout below is the base sha. The PR head is not checked out and
+# its copy of this file is not the one that runs. That is what keeps
+# secrets.DATABASE_URL off PR-branch code. The pull-request job reads
+# secrets.DATABASE_URL_READONLY only. Until that secret exists, this job
+# uses the 06:00–07:15 America/New_York clock.
+#
+# A result from push time goes stale: a PR that was green at 5:30am can
+# be merged at 6:20am, and a PR pushed during the daily stays red after
+# the row closes. merge_group would run at merge time. It is not the
+# trigger here. This repo has no merge queue, other workflows do not
+# listen for merge_group, and a merge_group run uses the workflow from
+# the merge commit, which is the PR's copy. Enabling the queue is a
+# branch-protection change and would stall merges until every required
+# check also runs on merge_group.
+#
+# The schedule re-posts the same check name on each open PR head. It
+# runs from the default branch only, so it may use secrets.DATABASE_URL
+# (the table owner, which bypasses RLS). The window is 09:00 UTC through
+# 03:59 UTC: 5:00am EDT / 4:00am EST through after the 22:00 ET catch-up
+# cutoff in both EST and EDT. From 05:45 until 06:20 America/New_York
+# the check blocks even when the ledger is clear, so a late tick cannot
+# stay green across the 6:00am start. Outside that stretch a merge in
+# the gap between ticks can still land on a catch-up daily. Re-running the
+# failed pull-request job re-evaluates that one PR immediately.
+#
+# Source of truth: pipeline_runs, run_kind = daily, finished_at IS NULL,
+# started_at::timestamptz within the last 75 minutes.
+#
+# Emergency: label the PR emergency-merge, or, as an owner or member,
+# put bypass-daily-gate in the PR body and re-run this check.
+# See tracking/daily_merge_gate.py.
+name: Daily pipeline gate
+
+on:
+  pull_request_target:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+  schedule:
+    # Every 10 minutes, 09:00 UTC through 03:59 UTC. See the header.
+    - cron: "*/10 9-23,0-3 * * *"
+  workflow_dispatch:
+    inputs:
+      bypass:
+        description: "Pass even if a daily is running (emergency)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
+
+concurrency:
+  group: daily-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  daily-not-running:
+    name: daily pipeline not running
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Base sha on a pull request. github.sha on the schedule, which is
+      # the default-branch commit. Never the PR head.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Postgres client library
+        run: python -m pip install psycopg2-binary
+
+      - name: Block the merge while a daily run is open
+        if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_READONLY }}
+          # pull_request_target has no inputs context. Short-circuit keeps that path off it.
+          DAILY_GATE_BYPASS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bypass == 'true' && '1' || '0' }}
+        run: python -m tracking.daily_merge_gate
+
+      - name: Refresh open pull requests
+        if: github.event_name == 'schedule'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m tracking.daily_merge_gate --refresh-open-prs

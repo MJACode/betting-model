@@ -15,7 +15,7 @@ from. This is the same lesson as the session-68 full-outcome sweep (the `BET`-on
 sweep overstated `mlb_moneyline` at +29% on 23 bets; the full-outcome sample said
 +4.1% on 50) and it is why `mv_scored_pick_outcomes` (§113) grades the whole universe.
 
-Four coverage traps to check BEFORE trusting any such analysis:
+Five coverage traps to check BEFORE trusting any such analysis:
 
 1. **`NONE` rows did not always exist.** They were only introduced 2026-05-12
    (session 16). Anything before that date has no dead-zone rows to grade.
@@ -70,6 +70,13 @@ Four coverage traps to check BEFORE trusting any such analysis:
    runs) or the scoring step fails outright (0 of 663 scoring steps
    2026-09-28 → 10-12 in `pipeline_log`). Production has not been searched for a
    case where this cost a bet.
+5. **Card-written `NONE` rows were deleted by the game scorer's end-of-pass sweep**
+   until the 2026-11-06 fix (`scorer._pass_rewritten_models`). A full pass deleted
+   every writer's unsettled non-BET rows on unstarted games: the NCAAB cards' rows
+   from their start on 2026-11-04 (257 of 278 deleted; the survivors are rows written
+   minutes before tip) and the NFL opener/wind rows every pass (re-inserted at the
+   next NFL poll, so their `created_at` is the last re-insert). `picks_log` holds the
+   deleted rows. `docs/sports/ncaab.md`, "Every scored game is a row".
 
 ### 29.2 Analysis: does the daily pick lock cost us signals? (2026-08-23)
 

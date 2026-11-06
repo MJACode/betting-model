@@ -177,7 +177,8 @@ def test_a_model_page_row_says_the_day_of_a_game_that_is_not_today():
         "formatGameTimeET(game?.commence_time));"
     ) in row
     # One label, used for both what is drawn and what is spoken.
-    assert "accessibilityLabel={[pick.pick_label, signalDisplayName(pick.signal_type), timeLabel," in row
+    # The label without the old NFL sizing figure (tests/test_mobile_label_units.py).
+    assert "accessibilityLabel={[labelWithoutStake(pick.pick_label), signalDisplayName(pick.signal_type), timeLabel," in row
     assert "{timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}" in row
     imports = src[:src.index("\nfunction ")]
     assert re.search(r"import \{[^}]*\bgameDayLabelET\b[^}]*\} from '@/lib/format';", imports)

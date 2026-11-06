@@ -1,5 +1,6 @@
 import React from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useBettingState } from '@/hooks/useBettingState';
@@ -62,7 +63,7 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
   const installed = useBookAppInstalled(book);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="ParlayDkHandoff" visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       {/* Backdrop tap dismisses, as every other sheet in the app does — the X
           alone sits in the one corner a thumb cannot reach (UX review). */}
       <View style={styles.backdrop}>

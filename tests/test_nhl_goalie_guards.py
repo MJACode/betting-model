@@ -580,6 +580,9 @@ ALLOWED = {
     "scripts/wnba_prop_market_card.py": "WNBA player props only",
     "tracking/first_signal_repair.py": ("restores a BET that already existed, after churn deleted it "
                                         "(CLAUDE.md 1c); refusing it would erase a pick, not stop a bet"),
+    "tracking/restore_swept_ncaab_none_rows.py": ("puts back NCAAB card NONE rows (no stake) the "
+                                                  "scorer's sweep deleted; it reads only sport "
+                                                  "'NCAAB' and the five NCAAB card ids"),
 }
 _SKIP = {".git", "node_modules", "__pycache__", "graphify-out", ".venv", "venv", "tests", "mobile"}
 
