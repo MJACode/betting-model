@@ -870,7 +870,7 @@ ACTION_THRESHOLDS: dict = {
     # RAISED 0.02 -> 0.025 (2026-11-06, mike: fewer picks, units and closing
     # value the only goal). The same replay with the -200 floor, by cut:
     # 0.02 2,527 bets +123.78 units (+4.34%); 0.0215 2,297 +127.16; 0.0235
-    # 2,051 +134.27; 0.025 1,887 +127.31 (+5.98%, [1.78, 10.56]); 0.0265
+    # 2,051 +134.27; 0.025 1,887 +127.31 (+5.98%, [1.51, 10.33]); 0.0265
     # 1,711 +114.09; 0.03 1,369 +76.86 (+4.98%, [-0.20, 10.08]). 0.025 sits
     # in the 0.0215-0.0265 plateau: a quarter fewer bets than 0.02 for +3.5
     # units, positive every season (2023-24 664 +54.28, 2024-25 620 +44.03,

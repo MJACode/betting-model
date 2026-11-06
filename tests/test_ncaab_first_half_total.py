@@ -216,18 +216,20 @@ def test_the_replay_matched_the_research_game_by_game_and_its_maps_are_the_resea
     assert abs(maps[2026]["a"] - -1.9748874924167727) < 1e-9
     assert abs(maps[2026]["b"] - 0.4855872048552734) < 1e-9 and maps[2026]["n"] == 26343
     assert abs(maps[2024]["a"] - -1.2958745940175829) < 1e-9 and maps[2024]["n"] == 14853
-    for key, bets, units in (("without_floor", 2529, 125.78), ("with_floor", 2527, 123.78)):
-        r = rp[key]
-        assert r["pooled"]["bets"] == bets and r["pooled"]["units"] == units, key
-        vs = r["vs_research"]
-        assert vs["identical_game_side_book_line_price"] == bets, key
-        assert vs["n_only_research"] == 0 and vs["n_only_replay"] == 0, key
-        assert vs["max_edge_gap"] < 1e-12, key
-    assert rp["without_floor"]["pooled"]["ci95"] == [0.57, 8.12]
-    assert rp["with_floor"]["pooled"]["ci95"] == [0.45, 8.05]
+    # The replay is graded at the live cut (config, 0.025 from 2026-11-06; it
+    # was 2,527 bets / +123.78 at 0.02). The research's own -200 version, cut
+    # at the same 0.025, matches it game by game.
+    assert rp["cut"] == config.MODEL_EDGE_THRESHOLDS[ft.MODEL_ID] == 0.025
     w = rp["with_floor"]
-    assert (w["2024"]["units"], w["2025"]["units"], w["2026"]["units"]) == (67.27, 41.03, 15.48)
+    assert w["pooled"]["bets"] == 1887 and w["pooled"]["units"] == 127.31
+    vs = w["vs_research"]
+    assert vs["identical_game_side_book_line_price"] == 1887
+    assert vs["n_only_research"] == 0 and vs["n_only_replay"] == 0
+    assert vs["max_edge_gap"] < 1e-12
+    assert w["pooled"]["ci95"] == [1.51, 10.33]
+    assert (w["2024"]["units"], w["2025"]["units"], w["2026"]["units"]) == (54.28, 44.03, 29.01)
     assert w["pooled"]["price_min"] >= -200
+    assert rp["without_floor"]["pooled"]["bets"] == 1887
 
 
 def test_the_artifact_for_another_season_is_refused():
