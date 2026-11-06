@@ -33,7 +33,7 @@ import {
   type Movement,
 } from '@/lib/markets';
 import { modelHistoryMark, modelLongWithMark, isPropModel } from '@/lib/modelMeta';
-import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
+import { stakeFor, stakeReasonLine, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
 import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
@@ -302,8 +302,9 @@ export function PickCard({
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
   // On 'mine' the risk is grossed up at their price, so "Bet 0.95u · Win 1u"
-  // is what that book takes to win the same unit.
-  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick));
+  // is what that book takes to win the same unit. The units to win are the
+  // pick's own stake_units when it carries one (2u: "Bet 2.2u · Win 2u").
+  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick), pick.stake_units);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
@@ -407,6 +408,9 @@ export function PickCard({
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
         : formatUnits(stake.conviction);
+  // A stake above the usual 1u says why, once, in a caption under the stake
+  // (picks.stake_reason). Only where a stake is shown; nothing on a 1u pick.
+  const stakeReason = stakeCaption ? stakeReasonLine(stake, pick.stake_reason) : null;
   const caption = [
     `Model ${formatPct(pick.model_probability)}`,
     flagged ? 'EV —' : ev == null ? null : `EV ${formatPctSigned(ev)}`,
@@ -549,7 +553,7 @@ export function PickCard({
         })
       : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null);
   const signalsStakeSpoken = signalsStakeShown
-    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}`
+    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
     : 'Stake unavailable';
   const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
   // The first spoken word is the chip on the card. A paused or preview row
@@ -593,6 +597,8 @@ export function PickCard({
         flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
         stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+        // Why the stake is above 1u, spoken once, right after it.
+        stakeReason,
         myBooksNote,
         timing ? timing.label : null,
         startedSpoken,
@@ -764,6 +770,9 @@ export function PickCard({
         <Text style={styles.captionLine} numberOfLines={2}>
           {caption}
         </Text>
+      ) : null}
+      {stakeReason ? (
+        <Text style={styles.captionLine}>{trueMinus(stakeReason)}</Text>
       ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
@@ -1060,6 +1069,9 @@ export function PickCard({
       <Text style={[styles.stakeRow, signalsStakeShown == null ? styles.metricMuted : null]}>
         {signalsStakeShown ?? '—'}
       </Text>
+      {stakeReason ? (
+        <Text style={styles.captionLine}>{trueMinus(stakeReason)}</Text>
+      ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
           <Ionicons

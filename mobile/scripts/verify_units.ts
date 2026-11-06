@@ -136,8 +136,10 @@ eq(unitsFor(0.05, null), 3, 'unitsFor with no price falls back to conviction');
 
 // ── No per-user sizing knob exists ──────────────────────────────────
 // The bankroll and Kelly-aggressiveness settings were removed on 2026-09-20.
-// stakeFor/convictionFor take no options, so the app cannot publish a stake
-// that differs from the one in the Discord channel. The risk cap still binds.
+// stakeFor/convictionFor take no per-user options, so the app cannot publish a
+// stake that differs from the one in the Discord channel. stakeFor's third
+// argument is the pick's own stake_units, the same row for every viewer
+// (verify_pick_stake.ts). The risk cap still binds.
 {
   const s = stakeFor(0.05, -300);
   eq(s.risk, 3, 'the 3u risk cap holds at a steep price');

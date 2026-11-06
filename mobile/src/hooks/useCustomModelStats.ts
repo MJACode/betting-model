@@ -256,6 +256,10 @@ export function useCustomModelBacktest(
     return settled
       .filter((p) => pickMatchesModel(p, sub) && p.result != null && p.result !== 'NO_ACTION'
         && !isDuplicateCopy(p))
+      // A custom model is the member's own: each row at the flat 1u to win,
+      // not the pick's stake_units, as computeCustomModelStats and the server
+      // rows above book it.
+      .map((row) => ({ ...row, stake_units: null }))
       .map((p) => ({
         pick_id: p.pick_id,
         model_id: p.model_id,
