@@ -54,7 +54,7 @@ import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
 import { noteScreen, noteTouch } from '@/lib/freezeLog';
 import { startFreezeLogging } from '@/lib/freezeLogSetup';
-import { setSentryScreen, startSentry, wrapWithSentry } from '@/lib/sentry';
+import { sentryReadyNow, setSentryScreen, startSentry, wrapWithSentry } from '@/lib/sentry';
 import { startPerfLogging } from '@/lib/perfLogSetup';
 import { setPerfScreen } from '@/lib/perfLog';
 import { AppErrorBoundary } from '@/components/AppErrorBoundary';
@@ -256,15 +256,24 @@ function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
 installNotificationHandler();
 // Same reason: catch an error from the first render, and record how the
 // previous launch ended before this one can overwrite the marker.
-// Sentry first: native crashes and iOS app hangs (lib/sentry.ts). The crash
-// log below then wraps its JS error handler, so both see every error.
-startSentry();
-startCrashLogging();
-// Freeze tracking: a trail of screens, taps and pop-ups on every report, and
-// a `restart` report when the last session looks force-quit (lib/freezeLog.ts).
-startFreezeLogging();
-// Load times: the first screen is timed from here (lib/perfLog.ts).
-startPerfLogging();
+// Sentry first: native crashes and iOS app hangs (lib/sentry.ts). When the
+// device id is already on disk, init happens in this turn and the other
+// loggers follow immediately. The first launch of a build with a DSN waits
+// for AsyncStorage, then inits, so the first event already carries the id
+// the crash log uses. An empty DSN skips init and the other loggers still
+// start in this turn. The crash log wraps the JS error handler, so both see
+// every error.
+function startOtherLoggers(): void {
+  startCrashLogging();
+  // Freeze tracking: a trail of screens, taps and pop-ups on every report, and
+  // a `restart` report when the last session looks force-quit (lib/freezeLog.ts).
+  startFreezeLogging();
+  // Load times: the first screen is timed from here (lib/perfLog.ts).
+  startPerfLogging();
+}
+const sentryStarting = startSentry();
+if (sentryReadyNow()) startOtherLoggers();
+else void sentryStarting.then(startOtherLoggers);
 
 function App() {
   const { seen, ready, markSeen } = useOnboarding();

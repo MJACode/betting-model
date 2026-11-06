@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Callable, Iterable
 
 log = logging.getLogger(__name__)
@@ -35,7 +36,12 @@ DEFAULT_URL = "https://sentry.io"
 # First run, or after an outage: how far back to read.
 LOOKBACK = "14d"
 MAX_PAGES = 20
-TIMEOUT_S = 30
+# One request, then the whole tick. The job runs at minutes 7, 22, 37, 52.
+# A dead socket must end well before the next of those, or max_instances=1
+# spends the following tick skipping a copy that is still hung.
+CONNECT_TIMEOUT_S = 5
+READ_TIMEOUT_S = 10
+TICK_BUDGET_S = 45
 
 _INSERT = """
 INSERT INTO sentry_events (
@@ -106,16 +112,24 @@ def row_for(event: dict[str, Any]) -> tuple:
 
 
 def fetch_pages(cfg: dict[str, str], get: Callable[..., Any], *, lookback: str = LOOKBACK,
-                max_pages: int = MAX_PAGES) -> Iterable[list[dict[str, Any]]]:
-    """Yield pages of events, newest first."""
+                max_pages: int = MAX_PAGES, clock: Callable[[], float] | None = None,
+                budget_s: float = TICK_BUDGET_S) -> Iterable[list[dict[str, Any]]]:
+    """Yield pages of events, newest first. Stops when the tick budget is used."""
+    tick = clock or time.monotonic
+    deadline = tick() + budget_s
     path = f"{cfg['url']}/api/0/projects/{cfg['org']}/{cfg['project']}/events/"
     headers = {"Authorization": f"Bearer {cfg['token']}"}
     cursor: str | None = None
     for _ in range(max_pages):
+        now = tick()
+        if now >= deadline:
+            log.warning("sentry_events: stopped, tick budget of %ss used", budget_s)
+            return
         params = {"full": "true", "statsPeriod": lookback}
         if cursor:
             params["cursor"] = cursor
-        resp = get(path, headers=headers, params=params, timeout=TIMEOUT_S)
+        resp = get(path, headers=headers, params=params,
+                   timeout=(CONNECT_TIMEOUT_S, min(READ_TIMEOUT_S, deadline - now)))
         if resp.status_code != 200:
             raise RuntimeError(f"Sentry events API returned {resp.status_code}: {resp.text[:300]}")
         page = resp.json()
@@ -128,7 +142,9 @@ def fetch_pages(cfg: dict[str, str], get: Callable[..., Any], *, lookback: str =
 
 
 def sync_sentry_events(conn=None, *, get: Callable[..., Any] | None = None,
-                       env: dict[str, str] | None = None) -> dict[str, Any]:
+                       env: dict[str, str] | None = None,
+                       clock: Callable[[], float] | None = None,
+                       budget_s: float = TICK_BUDGET_S) -> dict[str, Any]:
     """Copy new Sentry events into sentry_events. Returns a summary dict.
 
     Stops paging at the first page whose events are all already stored: the
@@ -146,7 +162,7 @@ def sync_sentry_events(conn=None, *, get: Callable[..., Any] | None = None,
         conn = get_connection()
     inserted = seen = 0
     try:
-        for page in fetch_pages(cfg, get):
+        for page in fetch_pages(cfg, get, clock=clock, budget_s=budget_s):
             rows = [row_for(e) for e in page if isinstance(e, dict)]
             rows = [r for r in rows if r[0]]
             seen += len(rows)
