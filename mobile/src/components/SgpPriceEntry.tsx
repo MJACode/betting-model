@@ -7,7 +7,7 @@ import { getDeviceId } from '@/hooks/useDeviceId';
 import { refreshSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import { americanToDecimal, formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS, MODEL_BOOK } from '@/lib/markets';
-import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
+import { decimalToAmerican, priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { logSgpPrice } from '@/lib/queries';
 import { enteredPriceIsPlausible, parseEnteredAmerican } from '@/lib/sgpPricing';
 import { APP_VERSION } from '@/lib/socialLinks';
@@ -75,7 +75,7 @@ export function SgpPriceEntry({
     if (!plausible) {
       // The check compares against the legs multiplied out, so the message
       // names that number (PR #1198 review L3).
-      const multipliedAmerican = (quote.multipliedDecimal - 1) * 100;
+      const multipliedAmerican = decimalToAmerican(quote.multipliedDecimal);
       setRangeNote(`That’s far from the legs multiplied out (${formatAmerican(multipliedAmerican)}) — check the number on ${bookName(quote.book)}’s slip.`);
       return;
     }
