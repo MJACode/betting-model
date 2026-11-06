@@ -50,7 +50,7 @@ export function SgpPriceEntry({
   const [book, setBook] = useState<string>(MODEL_BOOK);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [rangeNote, setRangeNote] = useState<string | null>(null);
 
   const quote = books.find((q) => q.book === book) ?? books[0];
   const american = parseEnteredAmerican(text);
@@ -73,11 +73,11 @@ export function SgpPriceEntry({
   const save = async () => {
     if (american == null || quote?.multipliedDecimal == null) return;
     if (!plausible) {
-      setError(`That’s far from ${formatAmerican(quote.americanOdds ?? 0)} — check the number on ${bookName(quote.book)}’s slip.`);
+      setRangeNote(`That’s far from ${formatAmerican(quote.americanOdds ?? 0)} — check the number on ${bookName(quote.book)}’s slip.`);
       return;
     }
     setSaving(true);
-    setError(null);
+    setRangeNote(null);
     // The price shows on this slip whether or not the save reaches the server.
     onEntered(quote.book, american);
     showToast(`Using your ${bookName(quote.book)} price, ${formatAmerican(american)}`);
@@ -131,7 +131,7 @@ export function SgpPriceEntry({
                   key={q.book}
                   onPress={() => {
                     setBook(q.book);
-                    setError(null);
+                    setRangeNote(null);
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
@@ -151,7 +151,7 @@ export function SgpPriceEntry({
               value={text}
               onChangeText={(t) => {
                 setText(t);
-                setError(null);
+                setRangeNote(null);
               }}
               placeholder={`${bookLabel(quote?.book ?? MODEL_BOOK)} slip price, e.g. +4254`}
               placeholderTextColor={colors.textTertiary}
@@ -178,7 +178,7 @@ export function SgpPriceEntry({
               )}
             </Pressable>
           </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {rangeNote ? <Text style={styles.rangeNote}>{rangeNote}</Text> : null}
           {typedHere != null && quote ? (
             <Pressable
               onPress={() => {
@@ -212,6 +212,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.medSoft,
   },
   header: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.sm,
@@ -276,13 +277,13 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
   },
   pressed: { opacity: 0.7 },
-  clear: { marginTop: spacing.sm, alignSelf: 'flex-start' },
+  clear: { minHeight: 44, justifyContent: 'center', marginTop: spacing.xs, alignSelf: 'flex-start' },
   clearText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
-  error: {
+  rangeNote: {
     fontSize: font.size.footnote,
     color: colors.avoidInk,
     marginTop: spacing.sm,

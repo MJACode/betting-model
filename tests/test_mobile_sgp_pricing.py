@@ -43,7 +43,8 @@ def test_every_pricing_surface_applies_the_same_game_estimate():
 def test_bar_and_screen_read_the_same_fits():
     bar = _read("components/BetslipBar.tsx")
     screen = _read("screens/ParlayScreen.tsx")
-    assert "betslipSummary(legs, count, sgpFits)" in bar
+    assert "betslipSummary(legs, count, sgpFits, typedDk)" in bar
+    assert "useEnteredSgpPrices(" in bar and "useEnteredSgpPrices(" in screen
     assert "useSgpHaircuts()" in bar and "useSgpHaircuts()" in screen
     # BetslipBar is outside the NavigationContainer (.claude/rules/frontend.md).
     hook = _read("hooks/useSgpHaircuts.ts")
