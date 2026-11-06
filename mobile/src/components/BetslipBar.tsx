@@ -9,6 +9,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { betslipSummary, shouldShowBetslipBar, BETSLIP_BAR_STAKE } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
+import { useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import { formatUnits } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -66,10 +67,11 @@ function BetslipBarContent({
 }) {
   const insets = useSafeAreaInsets();
   const { legs, count, resolving } = useResolvedSlip();
+  const sgpFits = useSgpHaircuts();
 
   const summary = useMemo(
-    () => betslipSummary(legs, count),
-    [legs, count],
+    () => betslipSummary(legs, count, sgpFits),
+    [legs, count, sgpFits],
   );
 
   // Over the tab bar the home-indicator inset is already spent by the tabs;
@@ -115,7 +117,7 @@ function BetslipBarContent({
       accessibilityRole="button"
       accessibilityLabel={
         priced
-          ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, ${formatAmerican(summary.americanOdds)}${summary.held > 0 ? ', odds exclude pre-game lines' : ''}`
+          ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, ${summary.sgpEstimated ? 'estimated ' : ''}${formatAmerican(summary.americanOdds)}${summary.held > 0 ? ', odds exclude pre-game lines' : ''}`
           : heldOnly
             ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, no live price`
             : `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}`
@@ -154,7 +156,7 @@ function BetslipBarContent({
         <View style={styles.right}>
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>
-              {summary.isParlay ? 'Parlay odds' : 'Odds'}
+              {summary.sgpEstimated ? 'Est. odds' : summary.isParlay ? 'Parlay odds' : 'Odds'}
               {summary.held > 0 ? ' · live' : ''}
             </Text>
             <Text style={styles.priceValue}>{formatAmerican(summary.americanOdds)}</Text>

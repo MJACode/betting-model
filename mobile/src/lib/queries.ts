@@ -3803,3 +3803,44 @@ export async function fetchScoreboardGame(gameId: string): Promise<GameRow | nul
   const row = (data ?? [])[0];
   return row ? (row as unknown as GameRow) : null;
 }
+
+// ── Same-game parlay prices (data/migrations/add_sgp_price_observations_2026_11_06.sql)
+
+export interface SgpHaircutRow {
+  book: string;
+  haircut: number | string;
+  n: number | string;
+}
+
+/** Each book's fitted same-game cut — aggregates only, a few rows. */
+export async function fetchSgpHaircuts(): Promise<SgpHaircutRow[]> {
+  const { data, error } = await supabase.rpc('sgp_haircuts');
+  if (error) throw error;
+  return (data ?? []) as unknown as SgpHaircutRow[];
+}
+
+export interface SgpPriceEntry {
+  deviceId: string;
+  book: string;
+  bookAmerican: number;
+  multipliedDecimal: number;
+  sgpGroups: number;
+  legCount: number;
+  legs: { label: string; gameId: string | null }[];
+  appVersion: string | null;
+}
+
+/** Store a same-game price a member read off a book's slip. Insert-only. */
+export async function logSgpPrice(e: SgpPriceEntry): Promise<void> {
+  const { error } = await supabase.rpc('log_sgp_price', {
+    p_device_id: e.deviceId,
+    p_book: e.book,
+    p_book_american: Math.round(e.bookAmerican),
+    p_multiplied_decimal: e.multipliedDecimal,
+    p_sgp_groups: e.sgpGroups,
+    p_leg_count: e.legCount,
+    p_legs: e.legs,
+    p_app_version: e.appVersion,
+  });
+  if (error) throw error;
+}

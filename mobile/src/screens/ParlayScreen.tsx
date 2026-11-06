@@ -41,6 +41,9 @@ import {
 } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { useSgpHaircuts } from '@/hooks/useSgpHaircuts';
+import type { SgpHaircuts } from '@/lib/sgpPricing';
+import { SgpPriceEntry } from '@/components/SgpPriceEntry';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   isValidCombo,
@@ -57,11 +60,12 @@ import { formatStake, formatUnits } from '@/lib/thresholds';
 import { unitsSpeech } from '@/lib/a11y';
 import {
   computeCorrelatedMetrics,
+  withDecimalPayout,
   GRADE_LABEL,
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -178,10 +182,23 @@ function ParlayScreenBody() {
   // A pre-game alternate held after kickoff stays in `legs` (the card, the
   // remove control) and is left out of the price, the book row, and a save.
   const pricedLegs = useMemo(() => legsForPricing(legs), [legs]);
-  const metrics = useMemo(
-    () => computeCorrelatedMetrics(pricedLegs, rho, resolveTeam),
-    [pricedLegs, rho, resolveTeam],
-  );
+  // Legs sharing a game are priced as an estimated same-game parlay
+  // (lib/sgpPricing.ts); a price the member typed in from a book's own slip
+  // replaces the estimate at that book, for this slip only.
+  const sgpFits = useSgpHaircuts();
+  const [enteredPrices, setEnteredPrices] = useState<Record<string, number>>({});
+  const slipSignature = useMemo(() => pricedLegs.map((l) => l.slipKey).join(','), [pricedLegs]);
+  useEffect(() => {
+    setEnteredPrices({}); // a typed price belongs to the slip it was read off
+  }, [slipSignature]);
+  const handleSgpEntered = useCallback((book: string, american: number) => {
+    setEnteredPrices((prev) => ({ ...prev, [book]: american }));
+  }, []);
+  const metrics = useMemo(() => {
+    const m = computeCorrelatedMetrics(pricedLegs, rho, resolveTeam, undefined, sgpFits);
+    const dkTyped = enteredPrices[MODEL_BOOK];
+    return m.sgpGroups > 0 && dkTyped != null ? withDecimalPayout(m, americanToDecimal(dkTyped)) : m;
+  }, [pricedLegs, rho, resolveTeam, sgpFits, enteredPrices]);
   // Every card still on the slip counts, including a held pre-game alt.
   // The price, the book row, and a save use pricedLegs.
   const valid = useMemo(() => isValidCombo(legs), [legs]);
@@ -461,6 +478,9 @@ function ParlayScreenBody() {
             onClearStale={handleClearStale}
             editingId={editingId}
             onSaved={setEditingParlayId}
+            sgpFits={sgpFits}
+            enteredPrices={enteredPrices}
+            onSgpEntered={handleSgpEntered}
           />
         )}
       </ScrollView>
@@ -860,6 +880,9 @@ function SlipBody({
   onClearStale,
   editingId,
   onSaved,
+  sgpFits,
+  enteredPrices,
+  onSgpEntered,
 }: {
   legs: ParlayLeg[];
   /** `legs` minus pre-game alternates held after kickoff. The price, the
@@ -879,6 +902,9 @@ function SlipBody({
   onClearStale: () => void;
   editingId: string | null;
   onSaved: (id: string) => void;
+  sgpFits: SgpHaircuts;
+  enteredPrices: Record<string, number>;
+  onSgpEntered: (book: string, american: number) => void;
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
@@ -1017,6 +1043,9 @@ function SlipBody({
           <Text style={styles.resultTitle}>{pricedLegs.length}-Leg Play</Text>
           <View style={styles.resultHeaderRight}>
             <GradeBadge grade={metrics.grade} />
+            {metrics.sgpGroups > 0 && enteredPrices[MODEL_BOOK] == null ? (
+              <Text style={styles.resultOddsEst} accessibilityLabel="estimated">est.</Text>
+            ) : null}
             <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
           </View>
         </View>
@@ -1079,7 +1108,14 @@ function SlipBody({
           />
         ) : null}
 
-        <BetslipBooksRow legs={pricedLegs} />
+        <SgpPriceEntry
+          legs={pricedLegs}
+          sgpGroups={metrics.sgpGroups}
+          entered={enteredPrices}
+          onEntered={onSgpEntered}
+        />
+
+        <BetslipBooksRow legs={pricedLegs} sgpFits={sgpFits} enteredPrices={enteredPrices} />
 
         <LineShopRow lineShop={lineShopParlay(pricedLegs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
@@ -1441,6 +1477,11 @@ const styles = StyleSheet.create({
   missingNoteText: {
     color: colors.textSecondary,
     fontSize: font.size.footnote,
+  },
+  resultOddsEst: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.medInk,
   },
   customInput: {
     backgroundColor: colors.noneSoft,
