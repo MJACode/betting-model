@@ -54,6 +54,7 @@ import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
 import { noteScreen, noteTouch } from '@/lib/freezeLog';
 import { startFreezeLogging } from '@/lib/freezeLogSetup';
+import { setSentryScreen, startSentry, wrapWithSentry } from '@/lib/sentry';
 import { startPerfLogging } from '@/lib/perfLogSetup';
 import { setPerfScreen } from '@/lib/perfLog';
 import { AppErrorBoundary } from '@/components/AppErrorBoundary';
@@ -255,6 +256,9 @@ function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
 installNotificationHandler();
 // Same reason: catch an error from the first render, and record how the
 // previous launch ended before this one can overwrite the marker.
+// Sentry first: native crashes and iOS app hangs (lib/sentry.ts). The crash
+// log below then wraps its JS error handler, so both see every error.
+startSentry();
 startCrashLogging();
 // Freeze tracking: a trail of screens, taps and pop-ups on every report, and
 // a `restart` report when the last session looks force-quit (lib/freezeLog.ts).
@@ -262,7 +266,7 @@ startFreezeLogging();
 // Load times: the first screen is timed from here (lib/perfLog.ts).
 startPerfLogging();
 
-export default function App() {
+function App() {
   const { seen, ready, markSeen } = useOnboarding();
   const { ready: authReady, signedIn } = useAuth();
   // A member who saw the intro before the sportsbook step existed gets that
@@ -287,6 +291,7 @@ export default function App() {
     const name = navRef.getCurrentRoute()?.name;
     setCrashScreen(name);
     noteScreen(name);
+    setSentryScreen(name);
     setPerfScreen(name);
     setRouteName(name);
   }, [navRef]);
@@ -488,3 +493,5 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+export default wrapWithSentry(App);

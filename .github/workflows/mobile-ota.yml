@@ -137,6 +137,25 @@ jobs:
             --message "${{ inputs.message || format('master {0}', github.sha) }}" \
             --non-interactive
 
+      # Sentry (mobile/src/lib/sentry.ts): upload this bundle's source maps so a
+      # stack trace from an OTA maps back to source. Skipped, not failed, until
+      # the SENTRY_AUTH_TOKEN / SENTRY_ORG / SENTRY_PROJECT secrets exist: the
+      # update has already shipped, and a missing map only makes traces harder
+      # to read.
+      - name: Upload source maps to Sentry
+        working-directory: mobile
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_ORG" ] || [ -z "$SENTRY_PROJECT" ]; then
+            echo "::warning::Sentry secrets not set; source maps not uploaded"
+            exit 0
+          fi
+          npx sentry-expo-upload-sourcemaps dist || \
+            echo "::warning::Sentry source map upload failed; the update itself shipped"
+
       - name: Next steps
         run: |
           echo "Published to the 'production' channel."
