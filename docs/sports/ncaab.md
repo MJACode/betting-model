@@ -1101,7 +1101,7 @@ confirmed line by line from its `r5_lib.py`, `r5_prep.py`, `r5_score.py`,
 5. **The bet.** A side priced shorter than -200 is set aside first, the limit
    every NCAAB model carries. Of the rest, the single quote with the largest
    edge, ties to the alphabetically first book. Bet when that edge is above
-   **0.02**; otherwise the game is decided with no bet.
+   **0.025** (0.02 until 2026-11-06); otherwise the game is decided with no bet.
 
 **When.** The decision is the capture's call an hour before tip, the one it
 already made for history. If it fails, the job retries every minute, and a
@@ -1135,7 +1135,26 @@ At 0.02 by season: 2023-24 859 bets, +67.27 units; 2024-25 852, +41.03;
 its 10 best dates: +48.11 units. Without Hard Rock: 2,320 bets, +122.02 units,
 [0.91, 8.48]. November alone: 690 bets, +35.91 units.
 
-**The shipped code reproduces it exactly.** The build replays 2023-24 to
+****The cut was raised to 0.025 on 2026-11-06** (mike: fewer picks, with units
+and closing value the only goal). The same replay with the -200 limit, every
+game, by cut:
+
+| Cut | Bets | Units | ROI | 95% interval | 2023-24 | 2024-25 | 2025-26 | Nov-Dec | Jan on |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.02 (until 11-06) | 2,527 | +123.78 | +4.34% | [0.45, 8.05] | +67.27 | +41.03 | +15.48 | +28.28 | +95.50 |
+| 0.0215 | 2,297 | +127.16 | +4.90% | | | | | +26.45 | +100.71 |
+| 0.0235 | 2,051 | +134.27 | +5.80% | | | | | +27.76 | +106.51 |
+| **0.025 (live)** | **1,887** | **+127.31** | **+5.98%** | **[1.78, 10.56]** | **+54.28** | **+44.03** | **+29.01** | **+18.04** | **+109.27** |
+| 0.0265 | 1,711 | +114.09 | +5.91% | | | | | +19.75 | +94.34 |
+| 0.03 | 1,369 | +76.86 | +4.98% | [-0.20, 10.08] | +39.10 | +26.01 | +11.76 | +18.77 | +58.09 |
+
+0.025 is the middle of a plateau (0.0215 to 0.0265 all make +114 to +134
+units), not its peak (0.0235). Against 0.02 it bets a quarter fewer games for
++3.5 units, and 2024-25 and 2025-26 are both better. 0.03 would have bet 46%
+fewer for 46.9 fewer units. Prices -160 to +115. The grid is in-sample: the
+same three seasons chose the model and now its cut.
+
+The shipped code reproduces it exactly.** The build replays 2023-24 to
 2025-26 through the card's own functions (the as-of consensus total, the team
 term, the pricing, the -200 limit, the best-offer choice), refitting the
 frozen numbers before each season on the earlier seasons only. Its fitted
@@ -1147,9 +1166,9 @@ difference 4e-16).
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.02 (P(win, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.02: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
-| EV floor | 0.03, just under the smallest EV the cut admitted in the replay with the limit (+0.0343; median +0.059), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| the cut | edge > 0.025 from 2026-11-06 (was 0.02; P(win, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.025: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
+| EV floor | 0.037 (was 0.03): an edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay was +0.0426 | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen, and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | books | the eight above, and only those `BEST_LINE_BOOKMAKERS` still lists | `models/ncaab_first_half_total.BOOKS` |
 | decision fetch | 55 to 60.5 minutes before tip, the tip-minus-60 call or its retries | `scripts/ncaab_first_half_total_card.DECISION_LEAD_MIN` |

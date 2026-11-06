@@ -450,9 +450,20 @@ def test_the_alerter_names_a_game_either_first_half_model_lost(monkeypatch):
 
 def test_it_is_registered_where_every_rule_card_is():
     mid = ft.MODEL_ID
-    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.02}
-    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.02 and config.MODEL_PROB_THRESHOLDS[mid] == 0.0
-    assert config.min_odds_for(mid) == -200 and config.min_ev_for(mid) == 0.03
+    # The cut moved 0.02 -> 0.025 on 2026-11-06 (mike); the EV floor 0.03 -> 0.037.
+    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.025}
+    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.025 and config.MODEL_PROB_THRESHOLDS[mid] == 0.0
+    assert config.min_odds_for(mid) == -200 and config.min_ev_for(mid) == 0.037
+
+
+def test_the_ev_floor_never_removes_a_bet_the_cut_takes():
+    """EV = edge x decimal. At the shortest price the model may lay (-200,
+    decimal 1.5) an edge just over the cut is EV just over cut x 1.5. The
+    floor must sit at or under that, or it removes bets the cut admitted,
+    silently (the GLOBAL_MIN_EV failure, CLAUDE.md §1b)."""
+    mid = ft.MODEL_ID
+    shortest = 1 + 100 / abs(config.min_odds_for(mid))
+    assert config.min_ev_for(mid) <= config.MODEL_EDGE_THRESHOLDS[mid] * shortest
     assert mid in config.MODELS_ON_OWN_PROBABILITY and config.scoring_method(mid) == "rule"
     assert mid not in config.PAUSED_MODELS and mid not in config.RETIRED_MODELS
     assert mid not in config.MODELS
