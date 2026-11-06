@@ -675,8 +675,10 @@ class _Cur:
 class _Conn:
     """Answers the card's reads; records its writes."""
 
-    def __init__(self, decided=(), bet=(), ledger_table=True):
+    def __init__(self, decided=(), bet=(), ledger_table=True, other_bets=None):
         self.decided, self.bet, self.ledger_table = set(decided), set(bet), ledger_table
+        # {game_id: model_id}: another NBA game-total model's BET (scripts/nba_game_totals_door.py)
+        self.other_bets = dict(other_bets or {})
         self.sql, self.ledger, self.picks, self.commits = [], [], [], 0
 
     def execute(self, sql, params=None):
@@ -685,6 +687,8 @@ class _Conn:
             return _Cur([(1,)] if self.ledger_table else [])
         if "FROM nba_total_luck_decisions" in sql:
             return _Cur([(g,) for g in self.decided])
+        if sql.startswith("SELECT game_id, min(model_id) FROM picks"):
+            return _Cur(sorted(self.other_bets.items()))
         if "FROM picks" in sql:
             return _Cur([(g,) for g in self.bet])
         if sql.startswith("INSERT INTO nba_total_luck_decisions"):
@@ -729,6 +733,50 @@ def test_a_decided_game_is_never_decided_again():
     assert any("pg_advisory_xact_lock" in s for s in conn.sql), "published without the model lock"
     conn2 = _Conn(bet={b.game_id})
     assert card.publish(conn2, rows, d, {}, {}) == (0, 0)
+
+
+def test_a_game_another_nba_game_total_model_bet_is_decided_with_no_bet(monkeypatch):
+    """RULE (mike, 2026-11-04: "Only select the highest EV one"): one NBA game-total
+    bet a game across nba_total_luck, nba_team_total_luck and
+    nba_first_half_total_luck (scripts/nba_game_totals_door.py). A game another of
+    them has bet is decided here, its row says why, and no pick is written. The
+    shared lock is taken before the model's own."""
+    from scripts import nba_game_totals_door as door
+    from scripts import nba_total_luck_card as card
+    import scripts.nfl_wind_publisher as pub
+    order = []
+    monkeypatch.setattr(pub, "_lock_model", lambda conn, key: order.append(key))
+    b = _bet()
+    rows, refused = card.pick_rows([b], GAMES, 1000.0)
+    d = [tl.Decision(b.game_id, b.fetch_at, 4.2, 1, "bet")]
+    conn = _Conn(other_bets={b.game_id: "nba_team_total_luck"})
+    assert card.publish(conn, rows, d, {b.game_id: 62.0}, refused) == (0, 1)
+    assert conn.picks == []
+    [row] = conn.ledger
+    assert row["n_bets"] == 0
+    assert row["detail"] == "bet; one_total_a_game:nba_team_total_luck_already_bet"
+    assert order == [door.LOCK_KEY, card.MODEL_ID]
+    # a game no other model has bet is written as before
+    conn2 = _Conn(other_bets={"ANOTHER_GAME": "nba_first_half_total_luck"})
+    assert card.publish(conn2, rows, d, {b.game_id: 62.0}, refused) == (1, 1)
+
+
+def test_the_door_reads_only_the_other_two_models_bets():
+    from scripts import nba_game_totals_door as door
+    seen = {}
+
+    class C:
+        def execute(self, sql, params):
+            seen["sql"], seen["params"] = " ".join(sql.split()), params
+            return _Cur([("G1", "nba_first_half_total_luck")])
+    assert door.MODEL_IDS == ("nba_total_luck", "nba_team_total_luck", "nba_first_half_total_luck")
+    assert door.other_bets(C(), ["G1"], "nba_total_luck") == {"G1": "nba_first_half_total_luck"}
+    others, gids = seen["params"]
+    assert others == ["nba_team_total_luck", "nba_first_half_total_luck"] and gids == ["G1"]
+    assert "signal_type = 'BET'" in seen["sql"] and "condition_status" not in seen["sql"]
+    assert door.other_bets(C(), [], "nba_total_luck") == {}
+    with pytest.raises(ValueError):
+        door.other_bets(C(), ["G1"], "nba_prop_market")
 
 
 def test_a_no_bet_decision_is_recorded_so_a_later_offer_cannot_bet_it():

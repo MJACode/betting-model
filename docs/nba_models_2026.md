@@ -2827,3 +2827,78 @@ first-quarter prop or team-total markets, so the sharp-reference rule behind the
 **The postseason pass is real arithmetic with a warning on it.** Most of its return is a general lean to unders, and
 its one-a-game, four-a-night version is 251 bets, +12.37 units, +6.7%, with an interval of -8.7% to +20.9%. Section 9.1
 of its doc has the check.
+
+## 14. Pick volume: one game total a game, six props a night (2026-11-04, mike)
+
+mike, 2026-11-04: *"Betting Game Over Under AND individual team totals AND 1H over under seems
+duplicitiave - too many pciks. ONly selected the highest EV one, unless it;s exceptioanlly high"*,
+and on props, *"props seems to be coming fro earlier games only recently? because we articidially
+limit to 4 ... we can go slightly more than 4 if we need to cause the picks are that good or
+less"*. The goal he set: the highest-EV picks, to maximise units won and closing-line value.
+
+The tables are in `docs/thresholds.md` (the `nba_first_half_total_luck` section, "One bet a game
+across the NBA game totals", and the `nba_prop_market` section, "Six a night"). What they say:
+
+**Game totals.** The full-game over (gap >= 3) and the first-half over (gap >= 2) read the same
+gap, so every game the full-game model bet, the first-half model bet too: 323 of 323 graded
+games. The twins returned +3.7% against +10.2% for the full-game bet on the same games. The home
+team total under met an over on 2 of 942 games. So:
+
+- the first-half over bets only below the full-game cut (`FULL_GAME_GAP_CUT`), and
+- one bet a game holds across the three models (`scripts/nba_game_totals_door.py`), the first
+  writer keeping the game.
+
+Graded: +152.79 units on 1,267 bets with every bet, +139.08 on 942 with one a game, the full game
+first. Choosing by the highest model EV instead: +124.40. A bigger gap did not win more, so no
+"exceptionally strong" tier keeps both.
+
+On the population the models bet live (no 10-game wait): every full-game bet had its twin (450 of
+450), the twins +3.7%; every bet +156.27 units on 1,624, the live rule +136.74 on 1,162.
+
+**Props.** The early-game lean is real and comes from the night filling in tip order. It is also
+where the money was: on nights of six or more games, the first four tips' bets returned +8.0%, the
+rest +2.0%. Each model's EV percentile does not rank quality at its top (0.80-0.90 +10.1%,
+0.98-1.00 +4.7%), so filling the night by EV graded worse (+102.5 units for the best four of a
+night against +153.6 in tip order). Six a night in tip order is where the units stop growing:
++183.7 units, +8.17%; the 7th and 8th bets of a night earned -0.8.
+
+**What did not ship.** Taking each game's best bet below its model's top 2% graded +19.6 units
+better at six a night, but the top 1.5% and 2.5% did not hold up: a peak, not a plateau.
+
+**Sizing 1 to 3 units instead of flat (mike, 2026-11-04: *"why not explore fewer bets, but 1-3
+unit spreads with 3 on more confident bets?"*).** Units grow with the stake, so 3 units on
+everything is three times the units at three times the risk: that is the size of a unit, a
+bankroll choice. The question a sizing rule answers is where the same risk goes. So each scheme
+below is scaled to the flat rule's total risk (its return times flat's risk), with a 90% range on
+its difference from flat (nights resampled). Signals fixed before grading. Live rules,
+2023-24..2025-26:
+
+| Scheme | Bets | Units at flat's risk | Return | Difference from flat, 90% range |
+|---|---|---|---|---|
+| Props, flat 1 unit (live: one a game, six a night) | 2,639 | +183.7 | +8.17% | |
+| 1/2/3 units by the model's own EV percentile | 2,639 | +158.5 | +7.05% | -57.7 to +8.9 |
+| 1 to 3 units shaped like Kelly (EV over price) | 2,639 | +189.4 | +8.43% | -21.7 to +32.4 |
+| 3 units on each night's top 2, the rest not bet | 968 | +180.5 | +8.03% | -107.8 to +102.7 |
+| 3 units on the top third, the rest not bet | 880 | +103.8 | +4.62% | -198.6 to +36.2 |
+| 3/2/1, reversed (most on the lowest EV) | 2,639 | +208.1 | +9.26% | -8.0 to +57.5 |
+| Game totals, flat 1 unit (live) | 1,162 | +136.7 | +10.75% | |
+| 1/2/3 units by the luck gap, within each model | 1,162 | +135.9 | +10.68% | -24.8 to +23.6 |
+| 3 team total, 2 full game, 1 first half | 1,162 | +141.8 | +11.14% | -17.5 to +27.3 |
+
+- **Sizing up on the model's confidence loses.** It puts the most money on the props the models
+  overstate most (section 14 above), the same pattern that took the 1-3 unit scale off every model
+  on 2026-08-29 (`tracking/discord_notifier.conviction_for`).
+- **Fewer bets at 3 units does not help.** At the same risk, the top two a night earn what six a
+  night earn, with a far wider range; the top third earns less.
+- **The reversed scale is better in all three seasons** (+10.7 / +8.9 / +8.4% against +9.0 / +7.7 /
+  +7.9%), but its range includes zero, and the same inversion was unstable on the 2026-08-29 data.
+  It is the overconfidence again, which the projection model's calibration work addresses, not a
+  sizing rule.
+- **The game totals have no size signal either.** The full-game over's largest-gap third returned
+  +1.6% (the middle third +12.1%). The home team total under by its own number, on its 429 bets:
+  weakest third +7.3%, middle +25.4%, strongest +10.2%; 1/2/3 units gives +71.1 at flat's risk
+  against +68.7.
+- **Verdict: flat stays.** `conviction_for`'s rule holds: re-open when a signal chosen in advance
+  survives a time split. Scripts: `nba_game_edge/volume1104/sizing.py`, `tt_signal.py`.
+
+Updated-By: mike.
