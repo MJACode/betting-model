@@ -24,6 +24,7 @@ import {
   type ByomRecord,
   type ByomSeasonScope,
   type ByomSport,
+  asByomSport,
 } from '@/lib/byomRecord';
 
 export interface ByomLeaderboardRow {
@@ -46,8 +47,8 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
   const seenScope = useRef(scope);
-  const built = sport === 'NFL' || sport === 'NBA';
-  const byomSport: ByomSport = sport === 'NBA' ? 'NBA' : 'NFL';
+  const built = sport === 'NFL' || sport === 'NBA' || sport === 'NHL';
+  const byomSport: ByomSport = asByomSport(sport);
   const enabled = built && ready && signedIn;
 
   const load = useCallback(async () => {
@@ -79,7 +80,7 @@ export function useByomLeaderboard(sport: string, scope: ByomSeasonScope) {
             scope,
             model.filters,
             new Date(),
-            model.sport === 'NBA' ? 'NBA' : 'NFL',
+            asByomSport(model.sport),
           );
           const rows = timed.headline === 'official' ? timed.official : timed.close;
           return {

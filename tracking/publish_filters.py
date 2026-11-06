@@ -67,7 +67,16 @@ def live_publishable_sql(alias: str = "p") -> str:
           -- A pick written while its model was paused is NOT A SIGNAL
           -- (scorer._paused_signal, 2026-09-28), whatever the model's state
           -- now. The live lanes write NONE for a paused model today
-          -- (live_scorer), so this is the same rule held on the row.{config.paused_row_exclusion_sql(alias)}"""
+          -- (live_scorer), so this is the same rule held on the row.{config.paused_row_exclusion_sql(alias)}
+          -- An in-play pick is announced only while its game is in progress
+          -- (2026-11-04): announcing it after the final sends the reader to
+          -- a bet that cannot be taken. Held for the sports in
+          -- config.LIVE_ANNOUNCE_WHILE_IN_PROGRESS, whose `games` score is
+          -- written only at the final (NBA: data/ingestors/nba_results_ingestor).
+          AND NOT ({alias}.sport IN ({", ".join(repr(s) for s in sorted(config.LIVE_ANNOUNCE_WHILE_IN_PROGRESS))})
+                   AND EXISTS (SELECT 1 FROM games g_fin
+                               WHERE g_fin.game_id = {alias}.game_id
+                                 AND g_fin.home_score IS NOT NULL))"""
 
 
 def captured_not_voided_sql(alias: str = "os") -> str:

@@ -20,7 +20,7 @@ import { bookName, booksName, MODEL_BOOK } from '@/lib/markets';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
-import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
+import { formatAmerican, formatPct, formatPctSigned, labelWithoutStake } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
@@ -121,7 +121,7 @@ export function SavedParlaysScreen() {
       book,
       legs: sp.legs.map((l, i) => ({
         key: String(l.pickId),
-        label: l.label,
+        label: labelWithoutStake(l.label),
         matchup: l.matchup,
         americanOdds: l.americanOdds,
         betLink: links[i] ?? null,
@@ -286,7 +286,7 @@ function SavedParlayCard({
             <View style={styles.legBody}>
               {leg.matchup ? <Text style={styles.legMatchup}>{leg.matchup}</Text> : null}
               <Text style={styles.legLabel} numberOfLines={2}>
-                {leg.label}
+                {labelWithoutStake(leg.label)}
               </Text>
             </View>
             <View style={styles.legMeta}>

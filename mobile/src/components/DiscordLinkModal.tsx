@@ -2,24 +2,23 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { discordErrorMessage, discordInviteIfPaid } from '@/lib/discord';
 import { openLink } from '@/lib/socialLinks';
 import { useAccess } from '@/hooks/useAccess';
 import { useMembership } from '@/hooks/useMembership';
-import { isEntitled } from '@/lib/billingHelpers';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
  * Connect Discord. Free and trial are linking a Whop account, not joining.
- * The invite opens only when the App Store subscription is active.
+ * The invite opens for an active App Store subscription or a comped grant.
  */
 export function DiscordLinkModal({
   visible,
@@ -29,9 +28,8 @@ export function DiscordLinkModal({
   onClose: () => void;
 }) {
   const { access, link, busy } = useAccess();
-  const { subscription } = useMembership();
-  const applePaid = Boolean(subscription && isEntitled(subscription) && subscription.status === 'active');
-  const invite = discordInviteIfPaid(applePaid);
+  const { discordPaid } = useMembership();
+  const invite = discordInviteIfPaid(discordPaid);
   const [working, setWorking] = useState(false);
 
   const onConnect = useCallback(async () => {
@@ -52,7 +50,7 @@ export function DiscordLinkModal({
   const alreadyLinked = access.discord_linked;
 
   return (
-    <Modal
+    <Modal trackName="DiscordLinkModal"
       visible={visible}
       animationType="fade"
       transparent
@@ -77,10 +75,10 @@ export function DiscordLinkModal({
           </Text>
           <Text style={styles.body}>
             {alreadyLinked
-              ? applePaid
+              ? discordPaid
                 ? 'Open Discord to jump into the subscriber channels.'
                 : 'The invite unlocks when your Apple plan is paid. No invite is shown until then.'
-              : applePaid
+              : discordPaid
                 ? 'Your subscription includes the subscriber Discord. Connect your account to join.'
                 : 'Already in Discord via Whop? Connect Discord to link your account. Premium in the app is still via Apple.'}
           </Text>

@@ -1,0 +1,190 @@
+/**
+ * Same-game parlay price estimate (src/lib/sgpPricing.ts and every surface
+ * that prices a slip). Run with:
+ *
+ *   npx tsx scripts/verify_sgp_pricing.ts
+ *
+ * The fixture is the slip Matt sent on 2026-11-06: four NBA legs in two games
+ * (MIA@GSW: Lendeborg O24.5 pts, Klay O3.5 3PM; ORL@PHX: Booker O29.5 pts,
+ * Carter O9.5 reb). The app multiplied all four and showed +5993 at DraftKings
+ * and +6040 at FanDuel; FanDuel's own slip priced it +4254 as two same-game
+ * parlays.
+ *
+ * Pins:
+ *  - Legs in DIFFERENT games are multiplied, exactly as before — no cut.
+ *  - Legs sharing a game are cut once per game with 2+ legs, at every surface
+ *    that shows a price: the headline (computeCorrelatedMetrics), the betslip
+ *    bar (betslipSummary), each book tile (priceBooksForParlay) and a saved
+ *    slip (computeParlayMetrics). The four must agree.
+ *  - The default cut reproduces FanDuel's quote on the fixture from the app's
+ *    own FanDuel tile (the measurement the default was taken from).
+ *  - A book with SGP_MIN_OBSERVATIONS entries uses its own fit; fewer, or an
+ *    out-of-band fit, uses the default.
+ *  - A price entered for a book replaces the estimate at that book only.
+ *  - Line-shopping across books is withheld for a same-game slip: a same-game
+ *    parlay is one bet at one book.
+ *  - Hand-typed custom legs never form a same-game group.
+ */
+
+import {
+  betslipSummary,
+  computeParlayMetrics,
+  lineShopParlay,
+  makeCustomLeg,
+  priceBooksForParlay,
+  slipSignature,
+  type ParlayLeg,
+} from '../src/lib/parlay';
+import {
+  computeCorrelatedMetrics,
+  PARLAY_CORRELATION_PRIORS,
+  withDecimalPayout,
+} from '../src/lib/parlayCorrelation';
+import {
+  DEFAULT_SGP_HAIRCUT,
+  SGP_MIN_OBSERVATIONS,
+  applySgpHaircut,
+  enteredPriceIsPlausible,
+  haircutFor,
+  impliedHaircut,
+  parseEnteredAmerican,
+  sameGameGroupCount,
+} from '../src/lib/sgpPricing';
+
+let failures = 0;
+function check(name: string, cond: boolean, detail = '') {
+  console.log(`${cond ? '[PASS]' : '[FAIL]'} ${name}${detail ? ' — ' + detail : ''}`);
+  if (!cond) failures++;
+}
+const near = (a: number | null | undefined, b: number, tol: number) =>
+  a != null && Number.isFinite(a) && Math.abs(a - b) <= tol;
+const toDec = (am: number) => (am > 0 ? 1 + am / 100 : 1 + 100 / Math.abs(am));
+
+/** A Stats-line style leg: a real game id, a DK price, one FanDuel price. */
+function leg(id: number, gameId: string, dk: number, fd: number, label: string): ParlayLeg {
+  return {
+    pickId: id,
+    slipKey: `${gameId}|line|${id}`,
+    gameId,
+    modelId: 'line',
+    isGameLine: false,
+    isLive: false,
+    isFavorite: dk < 0,
+    label,
+    modelProb: 1 / toDec(dk),
+    decimalOdds: toDec(dk),
+    americanOdds: dk,
+    legEdge: 0,
+    bestBook: null,
+    bookPrices: [{ bookmaker: 'fanduel', american: fd, decimal: toDec(fd), link: null }],
+    pick: null,
+    game: null,
+    dkPriced: true,
+  };
+}
+
+const MIA = 'NBA_2026-11-05_MIA_GSW';
+const ORL = 'NBA_2026-11-05_ORL_PHX';
+// DK prices from the app screenshot; Klay's DK price backed out of +5993.
+// FanDuel prices chosen so the four multiply to the app's FD tile, +6040.
+const slip: ParlayLeg[] = [
+  leg(1, MIA, 279, 285, 'Yaxel Lendeborg Over 24.5 Points'),
+  leg(2, ORL, 215, 215, 'Devin Booker Over 29.5 Points'),
+  leg(3, ORL, 120, 120, 'Wendell Carter Jr Over 9.5 Rebounds'),
+  leg(4, MIA, 132, 0, 'Klay Thompson Over 3.5 3PM'),
+];
+// Solve Klay's FD price so the FD multiplied total is exactly 61.40 (+6040).
+{
+  const others = toDec(285) * toDec(215) * toDec(120);
+  const klay = 61.4 / others;
+  slip[3].bookPrices = [{ bookmaker: 'fanduel', american: (klay - 1) * 100, decimal: klay, link: null }];
+}
+
+// ── grouping ────────────────────────────────────────────────────────────────
+
+check('two games with two legs each = 2 same-game groups', sameGameGroupCount(slip) === 2);
+check('one leg per game = no group', sameGameGroupCount([slip[0], slip[1]]) === 0);
+check('custom legs never group', sameGameGroupCount([makeCustomLeg('a', 150), makeCustomLeg('b', 150)]) === 0);
+
+// ── cross-game slips are unchanged ──────────────────────────────────────────
+
+{
+  const two = [slip[0], slip[1]];
+  const m = computeParlayMetrics(two);
+  check('cross-game payout = legs multiplied', near(m.decimalPayout, toDec(279) * toDec(215), 1e-9));
+  check('cross-game is not an estimate', m.sgpGroups === 0 && m.decimalPayout === m.multipliedDecimal);
+  const fd = priceBooksForParlay(two, 1, ['fanduel']).find((q) => q.book === 'fanduel');
+  check('cross-game FD tile = FD legs multiplied', near(fd?.decimalPayout, toDec(285) * toDec(215), 1e-9) && fd?.sgpEstimated === false);
+}
+
+// ── the screenshot slip ─────────────────────────────────────────────────────
+
+const quotes = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel']);
+const fd = quotes.find((q) => q.book === 'fanduel')!;
+const dk = quotes.find((q) => q.book === 'draftkings')!;
+check('FD multiplied price is the old +6040', near(fd.multipliedDecimal, 61.4, 1e-6));
+check('FD tile is no longer +6040', fd.americanOdds != null && fd.americanOdds < 5000, `FD ${fd.americanOdds?.toFixed(0)}`);
+check('FD tile ≈ FanDuel’s own +4254 (within 25)', near(fd.americanOdds, 4254, 25), `FD ${fd.americanOdds?.toFixed(0)}`);
+check('FD tile is marked an estimate', fd.sgpEstimated && !fd.entered);
+check('DK tile is cut by the same default', near(dk.decimalPayout, dk.multipliedDecimal! * (1 - DEFAULT_SGP_HAIRCUT) ** 2, 1e-9));
+
+const headline = computeCorrelatedMetrics(slip, PARLAY_CORRELATION_PRIORS, undefined, 2000);
+const bar = betslipSummary(slip, slip.length);
+const saved = computeParlayMetrics(slip);
+check('headline = DK tile', near(headline.decimalPayout, dk.decimalPayout!, 1e-9));
+check('bar = headline', near(bar.americanOdds, headline.americanOdds, 1e-9) && bar.sgpEstimated);
+check('saved slip = headline', near(saved.decimalPayout, headline.decimalPayout, 1e-9));
+check('EV is on the estimated price, not the multiplied one',
+  near(headline.ev, headline.jointProb * headline.decimalPayout - 1, 1e-12) && headline.decimalPayout < headline.multipliedDecimal);
+check('no line-shop row on a same-game slip', lineShopParlay(slip, headline.jointProb, headline.ev) === null);
+
+// ── fitted cuts ─────────────────────────────────────────────────────────────
+
+check('a book with too few entries uses the default',
+  haircutFor('fanduel', { fanduel: { haircut: 0.3, n: SGP_MIN_OBSERVATIONS - 1 } }) === DEFAULT_SGP_HAIRCUT);
+check('a book with enough entries uses its own fit',
+  haircutFor('fanduel', { fanduel: { haircut: 0.3, n: SGP_MIN_OBSERVATIONS } }) === 0.3);
+check('an out-of-band fit is ignored',
+  haircutFor('fanduel', { fanduel: { haircut: 0.9, n: 50 } }) === DEFAULT_SGP_HAIRCUT);
+{
+  const fits = { fanduel: { haircut: 0.3, n: 10 } };
+  const q = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel'], fits);
+  check('fit applies to its own book only',
+    near(q.find((x) => x.book === 'fanduel')!.decimalPayout, 61.4 * 0.7 ** 2, 1e-9) &&
+    near(q.find((x) => x.book === 'draftkings')!.decimalPayout, dk.decimalPayout!, 1e-9));
+}
+check('impliedHaircut inverts applySgpHaircut',
+  near(impliedHaircut(applySgpHaircut(61.4, 2, 'fanduel'), 61.4, 2), DEFAULT_SGP_HAIRCUT, 1e-12));
+
+// ── entered prices ──────────────────────────────────────────────────────────
+
+{
+  const q = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel'], undefined, { fanduel: 4254 });
+  const f = q.find((x) => x.book === 'fanduel')!;
+  const d = q.find((x) => x.book === 'draftkings')!;
+  check('entered FD price shows at FD', near(f.americanOdds, 4254, 1e-6) && f.entered && !f.sgpEstimated);
+  check('entered FD price leaves DK on the estimate', d.sgpEstimated && !d.entered);
+  const m = withDecimalPayout(headline, toDec(4199));
+  check('an entered DK price moves EV and grade with it',
+    near(m.ev, m.jointProb * toDec(4199) - 1, 1e-12) && near(m.americanOdds, 4199, 1e-6));
+}
+{
+  const b = betslipSummary(slip, slip.length, undefined, 4199);
+  check('bar shows a typed DK price, not the estimate', near(b.americanOdds, 4199, 1e-6) && !b.sgpEstimated);
+  const b2 = betslipSummary([slip[0], slip[1]], 2, undefined, 4199);
+  check('a typed DK price never applies to a slip with no same-game group', !near(b2.americanOdds, 4199, 1));
+  const q = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel'], undefined, { fanduel: 4254 });
+  check('no best-payout star when typed and estimated prices are mixed', q.every((x) => !x.isBest));
+  check('reordering the slip keeps its signature (a typed price survives)',
+    slipSignature(slip) === slipSignature([...slip].reverse()));
+  check('a different slip has a different signature', slipSignature(slip) !== slipSignature(slip.slice(1)));
+}
+check('parse "+4,254"', parseEnteredAmerican('+4,254') === 4254);
+check('parse "-120"', parseEnteredAmerican('-120') === -120);
+check('reject "42" (not American odds)', parseEnteredAmerican('42') === null);
+check('reject "abc"', parseEnteredAmerican('abc') === null);
+check('a typo 10x off is implausible', !enteredPriceIsPlausible(toDec(425), 61.4));
+check('FanDuel’s real quote is plausible', enteredPriceIsPlausible(toDec(4254), 61.4));
+
+console.log(failures === 0 ? '\nAll SGP pricing checks passed.' : `\n${failures} check(s) FAILED.`);
+process.exit(failures === 0 ? 0 : 1);

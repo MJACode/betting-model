@@ -10,6 +10,7 @@ import {
   formatByomRecord,
   marketLabel,
   type ByomRecord,
+  type ByomSport,
 } from '@/lib/byomRecord';
 import type { ByomFilters } from '@/lib/byomFilters';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
@@ -24,6 +25,7 @@ export function ByomModelRow({
   failed = false,
   emptyLabel = 'No games match',
   closingHeadline = false,
+  sport = 'NFL',
   onPress,
 }: {
   rank: number | null;
@@ -38,11 +40,13 @@ export function ByomModelRow({
   emptyLabel?: string;
   /** This row's number is the close because official rows are empty. */
   closingHeadline?: boolean;
+  /** Names the NHL spread "Puck line". */
+  sport?: ByomSport;
   onPress: () => void;
 }) {
   const { width, fontScale } = useWindowDimensions();
   const stacked = modelRecordBelow(fontScale, width);
-  const market = marketLabel(filters);
+  const market = marketLabel(filters, sport);
   const unknown = ungraded || failed;
   const noGames = !unknown && (record == null || record.bets === 0);
   const rate = record == null ? null : byomWinRate(record);

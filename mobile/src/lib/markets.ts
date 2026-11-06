@@ -9,7 +9,7 @@
  *   - total/spread line moved 0.5+ against the pick    → SKIP
  */
 
-import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, parseStamp } from './format';
+import { americanImplied, americanToDecimal, formatStampET, gameHasStarted, labelWithoutStake, parseStamp } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
 import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
@@ -209,10 +209,10 @@ export function matchupLedBet(label: string): string | null {
  * stored. A team total names its team and the row's date places the game; a
  * first half names no team, so pickRowMatchup puts it on its own line. A prop
  * keeps its player name. The row's accessibility label keeps the whole stored
- * label.
+ * label, less the old NFL sizing figure (labelWithoutStake), as this title is.
  */
 export function pickRowTitle(pick: { pick_label: string }): string {
-  const label = pick.pick_label ?? '';
+  const label = labelWithoutStake(pick.pick_label);
   return matchupLedBet(label) ?? label;
 }
 
@@ -222,7 +222,7 @@ export function pickRowTitle(pick: { pick_label: string }): string {
  * label, whose title already says who plays.
  */
 export function pickRowMatchup(pick: { pick_label: string }): string | null {
-  const label = pick.pick_label ?? '';
+  const label = labelWithoutStake(pick.pick_label);
   if (!matchupLedBet(label)?.startsWith('First Half ')) return null;
   return label.slice(0, label.indexOf(' — ')).trim();
 }
@@ -231,7 +231,8 @@ export function splitPickTitle(pick: { pick_label: string }): {
   primary: string;
   secondary: string | null;
 } {
-  const label = pick.pick_label ?? '';
+  // The old NFL sizing figure ("· 0.79u") is not the stake the card shows.
+  const label = labelWithoutStake(pick.pick_label);
   // A team total or a first half: the bold line is the bet (the card's header
   // already shows the matchup).
   const bet = matchupLedBet(label);
@@ -830,9 +831,11 @@ export interface LineQuote extends BookQuote {
  *   - The scorer's own best-price stamp (`best_book` / `best_odds`) fills in
  *     when today's per-book rows don't carry that book — it is the same
  *     number the Discord post's "also … @ …" line quotes.
- *   - LIVE PICKS ARE DRAFTKINGS ONLY (Matt, 2026-09-03): the in-play model
- *     reads DK's line and the bet is placed there, so a live pick gets the
- *     record chip and nothing else.
+ *   - A LIVE PICK GETS THE RECORD CHIP AND NOTHING ELSE: the book that
+ *     decided it, at the price it was decided at. Since 2026-09-10 the in-play
+ *     models decide at the best bettable in-play price (DraftKings until then,
+ *     Matt 2026-09-03), so the record book is `decision_book`, which may not
+ *     be DraftKings. No other book's in-play number is shopped.
  */
 export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
   const recordBook = storedQuoteBook(pick);
@@ -1024,6 +1027,71 @@ export function quoteIsCurrent(snapshotAt: string | null | undefined, now: numbe
  */
 export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_leader_ml']);
 
+/**
+ * In-play models whose loop reads the books only at fixed instants: the NBA
+ * loop fetches once an hour, and only while some game still has an undecided
+ * rule (models/nba_live_loop.py). Any in-play row we hold for these games is
+ * up to an hour old, so it is never shown as the live price. The card shows
+ * the lock, says the live price is not tracked, and opens the deciding book
+ * without quoting a number — the LIVE_PRICE_STOPS_AT_BET shape, with no
+ * "newer row" exception.
+ */
+export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
+  'nba_live_spread_q12',
+]);
+
+/**
+ * The in-play rows a Live-board pick may carry: DraftKings' (the reference
+ * row) and the book that decided it, never another pick's deciding book on the
+ * same game. A LIVE_PRICE_SLOT_ONLY model keeps DraftKings' row only: its
+ * deciding book's row is up to an hour old, and parlay.legFromPick would turn
+ * it into an "Open with" price in the slip — the number the card itself never
+ * shows. The card's hand-off reads the lock (recordLink), not these rows.
+ */
+export function liveBookRowsForPick<R extends { bookmaker: string }>(
+  pick: Pick,
+  rows: readonly R[],
+): R[] {
+  const decided = storedQuoteBook(pick);
+  const slotOnly = LIVE_PRICE_SLOT_ONLY.has(pick.model_id ?? '');
+  return rows.filter((r) => r.bookmaker === MODEL_BOOK || (!slotOnly && r.bookmaker === decided));
+}
+
+/**
+ * Is the deciding book's live price one this app does not hold, so the card
+ * must not draw "Now —" (which reads as "still loading") for the whole game?
+ *
+ *   - a LIVE_PRICE_SLOT_ONLY model: always (see above);
+ *   - a LIVE_PRICE_STOPS_AT_BET model: when there is no current price, or
+ *     its row is not newer than the lock (that row IS the lock's quote);
+ *   - any other in-play pick decided away from DraftKings: when we hold
+ *     in-play rows for the game but none at the deciding book. The NCAAF
+ *     loop shops every book's in-play price but stores only DraftKings'
+ *     (measured 2026-11-04 on two FanDuel-decided games), so a FanDuel bet
+ *     has no FanDuel row to show. With no rows at all the read may simply
+ *     have failed, and the board's banner says so; that keeps "Now —".
+ */
+function livePriceUntracked(
+  pick: Pick,
+  book: string,
+  latest: LatestDkOddsRow | null | undefined,
+  bookRows: BookPricedRow[] | undefined,
+  hasCurrent: boolean,
+): boolean {
+  const id = pick.model_id ?? '';
+  if (LIVE_PRICE_SLOT_ONLY.has(id)) return true;
+  if (LIVE_PRICE_STOPS_AT_BET.has(id)) {
+    if (!hasCurrent) return true;
+    const at = bookSnapshotAt(book, latest, bookRows);
+    const lockT = pick.created_at ? parseStamp(pick.created_at).getTime() : NaN;
+    return at == null || Number.isNaN(lockT) || !(parseStamp(at).getTime() > lockT);
+  }
+  if (book === MODEL_BOOK) return false;
+  const rows = bookRows ?? [];
+  const holdsGame = latest != null || rows.length > 0;
+  return holdsGame && !rows.some((r) => r.bookmaker === book);
+}
+
 /** The newest stamp we hold for `book` on this pick's market, or null. */
 function bookSnapshotAt(
   book: string,
@@ -1142,7 +1210,10 @@ export function heroAmericanForPick(
   const locked = decisionOdds(pick);
   if (locked == null) return null;
   const live = pick.is_live === true;
-  const book = live ? MODEL_BOOK : storedQuoteBook(pick);
+  // The book that decided the pick, live or not (§6). An in-play pick is
+  // decided at the best bettable in-play price since 2026-09-10, so its Now
+  // price is that book's too, never DraftKings' beside another book's lock.
+  const book = storedQuoteBook(pick);
 
   // The scorer's rule: an unstarted game's price older than the bound is no
   // price. Only a row we HOLD can be stale; a missing one keeps the old path.
@@ -1166,26 +1237,23 @@ export function heroAmericanForPick(
   let current = currentAtBook(pick, book, latest, bookRows);
   const lockedLine = numOrNull(pick.scored_line);
 
-  // A model whose loop stops reading the book once its bet is written holds
-  // no live price after the bet: its newest in-play row IS the lock's own
-  // quote, which would otherwise read as the live price for the rest of the
-  // game. Every other in-play model keeps logging, and DraftKings simply has
-  // not republished yet (a median 43 s after the lock on the last 60 live
-  // bets, UX review 2026-10-14), so its row stays the live price.
-  const untracked = live && LIVE_PRICE_STOPS_AT_BET.has(pick.model_id ?? '');
-  if (untracked && current != null) {
-    const at = bookSnapshotAt(book, latest, bookRows);
-    const lockT = pick.created_at ? parseStamp(pick.created_at).getTime() : NaN;
-    if (at == null || Number.isNaN(lockT) || !(parseStamp(at).getTime() > lockT)) current = null;
-  }
+  // A live price this app does not hold (livePriceUntracked): a model whose
+  // loop stops reading the book once its bet is written, whose newest in-play
+  // row IS the lock's own quote; the NBA loop, which reads the books only
+  // once an hour; and a book whose in-play prices are not stored. Every other
+  // in-play model keeps logging, and the book simply has not republished yet
+  // (DraftKings: a median 43 s after the lock on the last 60 live bets, UX
+  // review 2026-10-14), so its row stays the live price.
+  const untracked = live && livePriceUntracked(pick, book, latest, bookRows, current != null);
+  if (untracked) current = null;
 
   if (live && current == null) {
     return {
       kind: 'now',
       price: null,
-      book: MODEL_BOOK,
+      book,
       line: null,
-      link: pick.dk_bet_link ?? null,
+      link: recordLink(pick, book),
       lockedPrice: locked,
       showLockedCaption: true,
       ...(untracked ? { untracked: true } : {}),
@@ -1352,21 +1420,26 @@ function resolveBoardHandoff(
   allowedBooks?: readonly string[],
 ): { handoff: BoardHandoff | null; quotes: LineQuote[] } {
   if (pick.is_live === true) {
-    if (allowedBooks && !allowedBooks.includes(MODEL_BOOK)) return { handoff: null, quotes: [] };
+    // The one book an in-play pick hands off to is the book that decided it
+    // (decision_book; DraftKings before 2026-09-10). Not one of the member's
+    // books: no hand-off, as on a pre-game card (Matt, 2026-10-19).
+    const book = hero?.book ?? storedQuoteBook(pick);
+    if (allowedBooks && !allowedBooks.includes(book)) return { handoff: null, quotes: [] };
+    const recordHref = recordLink(pick, book);
     // No live number to quote after the bet: open the book without one,
     // rather than print the lock as if it were still on offer.
     if (hero?.untracked) {
       return {
-        handoff: { bookmaker: MODEL_BOOK, price: null, link: hero.link ?? pick.dk_bet_link ?? null, verb: 'Open' },
+        handoff: { bookmaker: book, price: null, link: hero.link ?? recordHref, verb: 'Open' },
         quotes: [],
       };
     }
     const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
     if (price == null) return { handoff: null, quotes: [] };
-    const link = hero?.link ?? pick.dk_bet_link ?? null;
+    const link = hero?.link ?? recordHref;
     return {
-      handoff: { bookmaker: MODEL_BOOK, price, link, verb: 'Bet' },
-      quotes: [loneQuote(MODEL_BOOK, price, link, true)],
+      handoff: { bookmaker: book, price, link, verb: 'Bet' },
+      quotes: [loneQuote(book, price, link, true)],
     };
   }
   // No hand-off to a book whose newest price is older than the bound
@@ -1953,11 +2026,14 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   }
 
   if (pick.is_live) {
+    // `inning_at_pick` is the shared period column: the inning for MLB, the
+    // quarter for every other in-play sport (NCAAF, NFL, and NBA, whose loop
+    // writes the quarter there — models/nba_live_loop.build_pick).
     const period =
       pick.inning_at_pick != null
-        ? pick.sport === 'NCAAF' || pick.sport === 'NFL'
-          ? ` · Q${pick.inning_at_pick}`
-          : ` · inning ${pick.inning_at_pick}`
+        ? pick.sport === 'MLB'
+          ? ` · inning ${pick.inning_at_pick}`
+          : ` · Q${pick.inning_at_pick}`
         : '';
     return {
       kind: 'live',

@@ -487,6 +487,24 @@ ACTIVE_MIGRATIONS: list[str] = [
     # plan_cache_mode = force_custom_plan. The skip requires that
     # proconfig entry, so an already-applied body still gains it once.
     "byom_prop_lookup_2026_11_04.sql",
+    # 2026-11-05 (Matt): NHL game bets on the builder. byom_legs and
+    # byom_save_model accept NHL; a null season is the ending year.
+    # Skips once both bodies carry byom_nhl_v1.
+    "byom_nhl_2026_11_05.sql",
+    # 2026-11-05 (Matt): a saved model keeps every filter the preview
+    # grades (22 keys); an unknown key is refused by name, not dropped.
+    # Skips once byom_save_model carries byom_save_filters_v1.
+    "byom_save_filters_2026_11_05.sql",
+    # 2026-11-05: byom_win_units / byom_risk_units without a SET clause,
+    # so the planner inlines them. Four full calls per row took 2.6s of
+    # the 2.7s NBA 2025-26 points record. Same staking. Skips once both
+    # carry byom_units_inline_v1 and no proconfig.
+    "byom_units_inline_2026_11_05.sql",
+    # 2026-11-05 (Matt: "Add 1-3 for now"): trend filters on every bet,
+    # line_move, prev_result, prev_ats, prev_total, division_game. byom_legs
+    # and byom_save_model gain them; byom_line_move and byom_team_division
+    # are new. Skips once both bodies carry byom_trend_filters_v1.
+    "byom_trend_filters_2026_11_05.sql",
     # 2026-10-28 (Matt): Scoreboard reads the latest NCAAF live state.
     # One view over ncaaf_live_states, plus the SELECT policy the closed
     # table never had. Does not rewrite picks, odds, or the record.
@@ -558,6 +576,20 @@ ACTIVE_MIGRATIONS: list[str] = [
     # win-loss record. Sits before the posted-stake pair, which stays
     # last and only inserts units when they are absent.
     "clv_push_beat_rate_2026_11_04.sql",
+    # 2026-11-04 (mike): the NBA in-play loop's decision ledger, one row per
+    # game and in-play rule (models/nba_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "nba_live_decisions_2026_11_04.sql",
+    # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
+    # open pre-game BET the app, Discord and push show, for any Claude chat
+    # with the Supabase connector. One security_invoker view and its SELECT
+    # grant. Returns on a catalog read once the view's comment matches the
+    # hash of its body. It calls published_pick_stake, so on a fresh database
+    # it waits (a NOTICE, not an error) until the pair below has run. Does
+    # not write picks, push_sent or the record. Sits before the pair.
+    "open_picks_view_2026_11_04.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not

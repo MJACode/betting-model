@@ -14,12 +14,14 @@ export function useMembership() {
   const { entitled, loading: accessLoading, access, refresh: refreshAccess } = useEntitlement();
   const { subscription, loading: subLoading, refresh: refreshSub } = useSubscription();
   const billingOn = billingReady();
+  const comped = access.source === 'comped';
   const resolved = !billingOn || entitled || (!accessLoading && !subLoading);
   const tier: MembershipTier = membershipTier({
     billingOn,
     entitled: resolved ? entitled : false,
     subscription,
     discordPaid: access.discord_access,
+    comped,
   });
 
   return {

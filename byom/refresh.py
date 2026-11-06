@@ -22,19 +22,29 @@ from zoneinfo import ZoneInfo
 from byom.constants import DK_HISTORY_START_SEASON, SPORT
 from byom.game_facts import parse_date, parse_game_id
 from byom.load import _fetch, _games
-from byom.season import current_nba_season, current_nfl_season
+from byom.season import current_nba_season, current_nfl_season, current_nhl_season
 
 # NFL and NBA (Matt, 2026-11-04: the NBA builder gets the same refresh).
-REFRESH_SPORTS = ("NFL", "NBA")
+# NHL game bets joined 2026-11-05 (Matt: "Yes go").
+REFRESH_SPORTS = ("NFL", "NBA", "NHL")
+
+# Sports whose builder has player props. A game in any other sport is
+# never due for a missing prop pass, or every past game would be due
+# every day.
+PROP_SPORTS = ("NFL", "NBA")
 
 
 def _season_for(sport: str, as_of) -> int:
-    return current_nba_season(as_of) if sport == "NBA" else current_nfl_season(as_of)
+    if sport == "NBA":
+        return current_nba_season(as_of)
+    if sport == "NHL":
+        return current_nhl_season(as_of)
+    return current_nfl_season(as_of)
 
 
 def _game_key(game: dict, sport: str) -> str | None:
-    """canonical_key: the NFL key parsed from the id, the game id on NBA."""
-    if sport == "NBA":
+    """canonical_key: the NFL key parsed from the id, the game id elsewhere."""
+    if sport != SPORT:
         return str(game["game_id"]) if game.get("game_id") else None
     parsed = parse_game_id(game["game_id"])
     if parsed is None or parsed[1] < DK_HISTORY_START_SEASON:
@@ -161,7 +171,8 @@ def due_games(conn, today: date | datetime | None = None,
             reason = "missing"
         elif past and _incomplete(stored):
             reason = "incomplete"
-        elif past and key not in props and not _props_recorded(stored):
+        elif (past and sport in PROP_SPORTS and key not in props
+              and not _props_recorded(stored)):
             reason = "props"
         else:
             continue
@@ -206,7 +217,7 @@ def freshness(conn, today: date | datetime | None = None,
         stored = facts.get(key)
         if window:
             in_window += 1
-            if key not in props:
+            if sport in PROP_SPORTS and key not in props:
                 window_missing_prop_facts += 1
             stamped = None if stored is None else stored[2]
             if stamped is not None and stamped < stale_before:
@@ -273,10 +284,17 @@ def refresh(conn, apply: bool = False, today: date | datetime | None = None,
     # it returns. The prop read below is a new transaction.
     game = build_season(
         conn, report["season"], apply=True, game_ids=ids, sport=sport)
-    prop = build_props(
-        conn, report["season"], apply=True, game_ids=ids, sport=sport)
-    _mark_props_scanned(conn, prop.get("canonical_keys") or [], sport)
+    prop = {"written": 0, "canonical_keys": []}
+    if sport in PROP_SPORTS:
+        prop = build_props(
+            conn, report["season"], apply=True, game_ids=ids, sport=sport)
+        _mark_props_scanned(conn, prop.get("canonical_keys") or [], sport)
     conn.commit()
     report["written_game_facts"] = game["written"]
     report["written_prop_facts"] = prop["written"]
+    # A daily refresh never changes 10% of a table, so Postgres would not
+    # re-count it, and a new season reads as empty to the planner (6.0s
+    # NBA preview, 2026-11-05). byom/analyze.py.
+    from byom.analyze import analyze_tables
+    report["analyzed"] = analyze_tables(conn)
     return report

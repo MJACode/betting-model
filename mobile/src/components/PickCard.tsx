@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
+import { formatGameTimeET, formatSigned, gameDayLabelET, gameStatus, labelWithoutStake } from '@/lib/format';
 import {
   bestHandoffForPick,
   handoffQuotesForPick,
@@ -28,7 +28,6 @@ import {
   splitPickTitle,
   storedQuoteBook,
   todayBoardHandoff,
-  MODEL_BOOK,
   type BoardHandoff,
   type HeroAmerican,
   type Movement,
@@ -45,6 +44,7 @@ import { PickBooksSheet } from './PickBooksSheet';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   foundAtText,
+  liveNotAtMyBooksText,
   myBooksView,
   NOT_AT_MY_BOOKS,
   recordNoteShortFor,
@@ -208,7 +208,8 @@ export function PickCard({
     myBooksReady && pick.signal_type === 'BET' && hasPricedLine(pick) && openForAction(pick)
       ? myBooksView({
           quotes: currentLineQuotes(pick, item.bookRows, modelHero, priceAge),
-          recordBook: pick.is_live === true ? MODEL_BOOK : storedQuoteBook(pick),
+          // Live or not, the record is kept at the book that decided it (§6).
+          recordBook: storedQuoteBook(pick),
           myBooks,
           modelProbability: pick.model_probability,
         })
@@ -244,7 +245,9 @@ export function PickCard({
         noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
       }`
     : notAtMyBooks
-      ? NOT_AT_MY_BOOKS
+      ? pick.is_live === true && modelPrice != null
+        ? liveNotAtMyBooksText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))
+        : NOT_AT_MY_BOOKS
       : null;
   // Green only when the edge on screen is one they can take: at their price
   // it may be gone, and off their books there is nothing to take.
@@ -344,7 +347,7 @@ export function PickCard({
   const offersBook = !preview && !paused && pick.signal_type === 'BET' && !signalsMuted && !notAtMyBooks;
   // Until the member's books have loaded, a pre-game card does not name a
   // shop book or open the sheet (the default set is every book, for one
-  // frame). A live pick stays the DraftKings quote.
+  // frame). A live pick never shops: its one book is the one that decided it.
   const handoff = offersBook && cta.handoff && (myBooksReady || pick.is_live === true)
     ? bestHandoffForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : null;
@@ -355,7 +358,8 @@ export function PickCard({
   const shopQuotes = handoff
     ? handoffQuotesForPick(pick, item.bookRows, heroPrice, priceAge, myBooksReady ? myBooks : undefined)
     : [];
-  // Live is DraftKings only. A dash on another book would pretend we shopped it.
+  // Live offers only the book that decided it. A dash on another book would
+  // pretend we shopped it.
   const sheetRows = pickSportsbookRows(
     shopQuotes,
     pick.is_live === true || !myBooksReady ? null : myBooks,
@@ -577,7 +581,8 @@ export function PickCard({
     : joinCardSpeech([
         matchup,
         gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
-        pick.pick_label,
+        // The title's words (splitPickTitle): no old NFL sizing figure.
+        labelWithoutStake(pick.pick_label),
         paused ? 'Paused model, not a bet' : signalDisplayName(pick.signal_type),
         // The signals footer speaks the model. The board layout has no
         // model line, so a shared paused or retired name is spoken here.

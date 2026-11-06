@@ -26,7 +26,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -34,6 +33,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -96,7 +96,7 @@ export function FilterSheet({
   }, [visible]);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="FilterSheet" visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       {/* The sheet is anchored to the bottom, so a focused search box or number
           field would otherwise sit under the keyboard. The avoider is the OUTER
           flex:1 element on purpose — the sheet's maxHeight is a percentage, and

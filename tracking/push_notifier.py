@@ -35,7 +35,7 @@ from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
 from tracking.publish_filters import live_publishable_sql
 from tracking.publish_keys import key_partition_sql, live_lock_key_sql, lock_key_sql
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
-from tracking.pick_integrity import refuse_mismatched
+from tracking.pick_integrity import label_without_stake, refuse_mismatched
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
@@ -210,7 +210,9 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
 # ── Message building ─────────────────────────────────────────────────────────
 
 def _summary_body(labels: list[str]) -> str:
-    shown = labels[:_MAX_LABELS]
+    # No old NFL sizing figure ("· 0.79u") on a label: it is not the posted
+    # stake (mike, 2026-11-04). The bet is word for word.
+    shown = [label_without_stake(x) for x in labels[:_MAX_LABELS]]
     extra = len(labels) - len(shown)
     body = " · ".join(shown)
     if extra > 0:
@@ -562,7 +564,8 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
                     # opposite of the alert, on the shortest reaction window we
                     # have (UX review).
                     "title": f"{'📉' if a['against'] else '📈'} Line {arrow}",
-                    "body": f"{a['label']}: {a['locked']:+d} → {a['current']:+d}",
+                    "body": (f"{label_without_stake(a['label'])}: "
+                             f"{a['locked']:+d} → {a['current']:+d}"),
                     # Always one pick, so this is the one push that can always
                     # open the bet itself — which is the whole point when the
                     # line the user locked has moved.
