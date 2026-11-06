@@ -549,8 +549,11 @@ def test_a_bet_on_either_id_locks_the_model_for_both(_clock, monkeypatch):
     assert (TWIN_B, "ufc_moneyline") not in scored, scored
     assert (TWIN_B, "ufc_total_rounds") in scored
     assert all(g == TWIN_B for g, _ in scored), scored
-    # The id left out loses its old no-bet rows (BETs are never deleted).
-    assert (TWIN_A,) in conn.deletes
+    # The id left out loses its old no-bet rows (BETs are never deleted), the
+    # UFC models' rows only (scorer._pass_rewritten_models, 2026-11-06).
+    left_out = [d for d in conn.deletes if d[:1] == (TWIN_A,)]
+    assert left_out, conn.deletes
+    assert all("ufc_moneyline" in d[1:] for d in left_out), left_out
 
 
 def test_the_chosen_id_still_borrows_a_market_only_its_twin_carries(_clock, monkeypatch):

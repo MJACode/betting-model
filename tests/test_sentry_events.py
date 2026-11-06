@@ -9,7 +9,14 @@ event shape is Sentry's published OpenAPI schema example
 import json
 from pathlib import Path
 
-from data.ingestors.sentry_events import next_cursor, row_for, sync_sentry_events
+from data.ingestors.sentry_events import (
+    CONNECT_TIMEOUT_S,
+    READ_TIMEOUT_S,
+    TICK_BUDGET_S,
+    next_cursor,
+    row_for,
+    sync_sentry_events,
+)
 
 ROOT = Path(__file__).parent.parent
 ENV = {"SENTRY_AUTH_TOKEN": "tok", "SENTRY_ORG": "org", "SENTRY_PROJECT": "app"}
@@ -98,6 +105,7 @@ def test_pages_until_a_page_is_all_known_and_never_duplicates():
         assert url == "https://sentry.io/api/0/projects/org/app/events/"
         assert headers == {"Authorization": "Bearer tok"}
         assert params["full"] == "true"
+        assert timeout == (CONNECT_TIMEOUT_S, READ_TIMEOUT_S)
         seen_cursors.append(params.get("cursor"))
         return pages[params.get("cursor")]
 
@@ -117,11 +125,46 @@ def test_an_api_error_raises_for_the_scheduler_wrapper_to_log():
         sync_sentry_events(FakeConn(), get=lambda *a, **k: Resp({"detail": "bad"}, status=401), env=ENV)
 
 
+def test_a_hung_sentry_cannot_outlive_the_tick():
+    seen = []
+
+    def get(url, headers, params, timeout):
+        seen.append(timeout)
+        return Resp([_event("e9")], _link("next", True))
+
+    # deadline = 0 + 45. The second page is asked for at t=100, past the budget.
+    times = iter([0.0, 0.0, 100.0])
+    out = sync_sentry_events(
+        FakeConn(), get=get, env=ENV, clock=lambda: next(times), budget_s=TICK_BUDGET_S,
+    )
+    assert out["inserted"] == 1
+    assert seen == [(CONNECT_TIMEOUT_S, READ_TIMEOUT_S)]
+
+    # Near the end of the budget the read timeout shrinks to what is left.
+    seen.clear()
+
+    def get_once(url, headers, params, timeout):
+        seen.append(timeout)
+        return Resp([], None)
+
+    times = iter([0.0, 40.0])
+    sync_sentry_events(
+        FakeConn(), get=get_once, env=ENV, clock=lambda: next(times), budget_s=TICK_BUDGET_S,
+    )
+    assert seen == [(CONNECT_TIMEOUT_S, 5)]
+    assert TICK_BUDGET_S < 15 * 60
+
+
 def test_scheduler_runs_it_and_swallows_failures():
     src = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     fn = src.split("def run_sentry_events_sync", 1)[1].split("\ndef ", 1)[0]
     assert "except Exception" in fn and "sync_sentry_events()" in fn
     assert 'id="sentry_events_sync"' in src
+    # The name contains "(every 15 min)", so the job ends at the closing line, not the first ")".
+    job = src.split('id="sentry_events_sync"', 1)[1].split("\n    )", 1)[0]
+    assert "max_instances=1" in job and "coalesce=True" in job
+    pipeline = src.split("_PIPELINE_JOBS = {", 1)[1].split("\n_POLLER_JOBS", 1)[0]
+    assert '"sentry_events_sync"' in pipeline
 
 
 def test_the_table_is_closed_to_the_app():

@@ -21,6 +21,9 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, picks.stake_units: a pick's own stake (1-3u to win); NCAAB bets that agree with an earlier NCAAB bet on the game go 2u (+21.3% flat on 233 replay bets; the only sizing slice that earned more per unit risked) |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NCAAB first-half total cut 0.02 -> 0.025 (a quarter fewer bets, +3.5 units on the replay; 0.03 would have cost 47), EV floor 0.037 |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NBA first quarter: props anchored to the full-game market (0 of 36) and team totals against Pinnacle's period lines (0 of 12); the near miss would not bet live; 2026-27 first-quarter props bought |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry public DSN set in the app (org signal-base, project signal-base-mobile); empty DSN still starts nothing; auth token still unset |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry follow-ups (#1199 reviews): OTA source maps from the exported bundle, device_id at init, copy-job timeouts, PII scrub |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Sentry in the app (native crashes, iOS hangs), copied to sentry_events by the worker; app 1.3.0; setup in docs/sentry.md |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, same-game parlays priced as independent legs (+6040 vs FanDuel +4254); estimated SGP price with a per-book cut fitted from member-entered prices (`sgp_price_observations`) |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, nba_prop_projection stores and shows p' = implied + 0.325 (p − implied) at the decision price for games from 2026-11-07; bets, door order and Discord "good to" (paid and free) unchanged on a full replay; config.MODEL_PROB_SHRINK, honest_ev.shrink_factor / shown_probability / decision_probability |
