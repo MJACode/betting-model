@@ -2,7 +2,15 @@ import type React from 'react';
 import * as Sentry from '@sentry/react-native';
 import * as Updates from 'expo-updates';
 
-import { getDeviceId } from '@/hooks/useDeviceId';
+import appConfig from '../../app.json';
+
+import { getDeviceId, peekDeviceId } from '@/hooks/useDeviceId';
+import { scopeTags } from '@/lib/sentryScope';
+import { scrubBreadcrumb, scrubSentryEvent } from '@/lib/sentryScrub';
+
+// Same value as socialLinks.APP_VERSION. Read here so starting Sentry does not
+// pull the share-message helpers in.
+const APP_VERSION = appConfig.expo.version;
 
 /**
  * Sentry (2026-11-06, Matt: "Can we add Sentry tracking in the app … Yes
@@ -24,15 +32,60 @@ import { getDeviceId } from '@/hooks/useDeviceId';
 export const SENTRY_DSN = '';
 
 let started = false;
+let starting: Promise<void> | null = null;
+// True when this call already inited, or skipped init, before returning.
+// App.tsx uses it to start the other loggers in the same turn.
+let readyNow = false;
 
-export function startSentry(): void {
+/**
+ * device_id is read before init and put on initialScope. A tag set in a
+ * promise after init misses a crash in that gap, and that tag is how a
+ * Sentry row joins app_errors. When the id is already on disk the read is
+ * synchronous (useDeviceId.peekDeviceId). The first launch of a build waits
+ * for AsyncStorage, then inits.
+ *
+ * release here is a TAG, the app version. The SDK's own release string is
+ * left unset so it stays the native one (bundle id, version, build) that the
+ * dSYM from the TestFlight build was uploaded under.
+ */
+export function startSentry(): Promise<void> {
+  if (started || !SENTRY_DSN) {
+    readyNow = true;
+    return Promise.resolve();
+  }
+  if (starting) return starting;
+  const known = peekDeviceId();
+  if (known) {
+    initSentry(known);
+    readyNow = true;
+    return Promise.resolve();
+  }
+  starting = getDeviceId()
+    .then((id) => {
+      initSentry(id);
+    })
+    .catch(() => {
+      initSentry(null);
+    });
+  return starting;
+}
+
+/** Init already happened in this turn (or there is nothing to start). */
+export function sentryReadyNow(): boolean {
+  return readyNow;
+}
+
+function initSentry(deviceId: string | null): void {
   if (started || !SENTRY_DSN) return;
   started = true;
   let channel: string | null = null;
+  let updateId: string | null = null;
   try {
     channel = Updates.channel ?? null;
+    updateId = Updates.updateId ?? null;
   } catch {
     channel = null;
+    updateId = null;
   }
   Sentry.init({
     dsn: SENTRY_DSN,
@@ -52,16 +105,12 @@ export function startSentry(): void {
     // replay rates UNSET. A 0 turns them on at a 0% sample: in 7.2.0 any
     // number installs the replay and tracing integrations
     // (integrations/default.js, typeof === 'number').
+    beforeSend: scrubSentryEvent,
+    beforeBreadcrumb: scrubBreadcrumb,
+    initialScope: {
+      tags: scopeTags({ deviceId, release: APP_VERSION, updateId }),
+    },
   });
-  try {
-    const updateId = Updates.updateId ?? null;
-    if (updateId) Sentry.setTag('update_id', updateId);
-  } catch {
-    // expo-updates throws in some dev contexts
-  }
-  void getDeviceId()
-    .then((id) => Sentry.setTag('device_id', id))
-    .catch(() => undefined);
 }
 
 /** Called on every navigation change so an event names the screen. */
