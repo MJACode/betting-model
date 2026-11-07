@@ -739,6 +739,9 @@ export interface ChartGame {
   opp: string | null;
   /** Full-length version for the tapped-bar caption ("@ Ohio State"). */
   oppFull: string | null;
+  /** The opponent's defense rank that season (1 = toughest), when the chart
+   *  is filtered by defense toughness (lib/defenseTier). */
+  rank?: number | null;
 }
 
 /**

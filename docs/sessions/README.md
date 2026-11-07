@@ -21,6 +21,7 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, nba_q1_trend_ml live on mike's instruction ("Build it anyway"): the first-quarter moneyline on the spread model's rule (87 bets, +25.8%, failed the 200-bet bar); one call now fetches both first-quarter markets; replay 87 of 87 |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA first-quarter moneyline and total search: 0 of 12 pass; the total closed (+0.9% where the first half made +8.0%); the step on the moneyline is 87 bets +25.8% [+1.7, +50.0], fails the bet count, same games as nba_q1_trend |
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, Player page: filter the chart by opponent defense toughness (Tough / Average / Soft over the last 3 seasons played, next opponent tagged; NBA, WNBA, NFL) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA in-play loop: the 15%-of-plan credit floor removed (only the 1,000-credit line stops it; mike: balance is not a reason to stop) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB spread and moneyline re-graded without betPARX: a tie goes to the bettable book (spread 405 bets +10.09%, moneyline 836 +4.27% on 2021-2025); a strictly-best betPARX quote is a no-bet that no longer fails the card |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, nba_q1_trend live on mike's instruction: the first-quarter cover-record step (88 bets, +27.4%, failed the 200-bet bar); replay 88 of 88; 2026-27 first-quarter spreads bought |

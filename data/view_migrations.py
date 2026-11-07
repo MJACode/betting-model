@@ -404,6 +404,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # v_public_track_record. Sits with the other display reads, before the
     # posted-stake pair. Guards each piece so the DDL fires once.
     "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-11-07 (Matt): the player page's defense-toughness filter. One
+    # player's games over his last 3 seasons played, each with that season's
+    # rank of the opponent's defense (1 = toughest), plus the next
+    # opponent's rank. NBA, WNBA, NFL. Display only. Does not rewrite
+    # v_public_track_record. Guards on all three existing, so the DDL fires
+    # once. Needs player_positions (above).
+    "add_player_vs_defense_rpcs_2026_11_07.sql",
     # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
     # Display only: one new table behind two device-scoped RPCs. No model,
     # pick or record view reads it. Returns on a catalog read once applied.

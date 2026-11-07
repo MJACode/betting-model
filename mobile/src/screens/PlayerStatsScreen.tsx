@@ -112,6 +112,18 @@ import {
 import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
 import { ordinal } from '@/lib/teamDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import {
+  DEFENSE_SEASONS_PLAYED,
+  DEFENSE_TIERS,
+  groupNoun,
+  nextDefenseLine,
+  openingDefenseFilter,
+  tierChartGames,
+  tierCounts,
+  tierLabel,
+  tierPips,
+  type DefenseFilter,
+} from '@/lib/defenseTier';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
@@ -179,6 +191,10 @@ export function PlayerStatsScreen() {
   // was showing, so the card cannot open on the complement of the row tapped.
   const [mode, setMode] = useState<HitMode>(requestedMode);
   const [modeOpen, setModeOpen] = useState(false);
+  // Defense-toughness filter (Matt, 2026-11-07). Until the reader taps a
+  // chip, the page follows the next opponent's tier (openingDefenseFilter);
+  // after a tap it keeps theirs.
+  const [defensePicked, setDefensePicked] = useState<DefenseFilter | null>(null);
 
   useEffect(() => {
     navigation.setOptions({ title: playerName });
@@ -189,6 +205,7 @@ export function PlayerStatsScreen() {
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
+    setDefensePicked(null);
     // The board's window when this screen offers that span (Stats L3 → L3
     // here, H2H → H2H); else this screen's own default. 'Season' has no
     // equivalent span here, so it falls back rather than guess one.
@@ -432,6 +449,20 @@ export function PlayerStatsScreen() {
   }, [range, gameWindow]);
   const isH2H = range === 'h2h';
 
+  // The toughness filter applies to the L5 / L10 / L20 / All spans, never to
+  // H2H (one opponent is one tier). Offered once the read has tiered games.
+  const defenseGames = detail.defenseGames;
+  const defenseCounts = useMemo(
+    () => (defenseGames ? tierCounts(defenseGames.games) : null),
+    [defenseGames],
+  );
+  const defenseOffered =
+    !isH2H && defenseCounts != null && defenseCounts.tough + defenseCounts.avg + defenseCounts.soft > 0;
+  const defenseFilter: DefenseFilter = !defenseOffered
+    ? 'all'
+    : defensePicked ?? openingDefenseFilter(defenseGames);
+  const defenseNoun = detail.defenseGroup ? groupNoun(detail.defenseGroup) : '';
+
   // The windowed games, most recent first, each with its date and opponent so
   // every bar on the chart says which game it is (Matt, 2026-10-28). A number
   // or All slices the log. H2H charts the meetings, newest first — the same
@@ -439,6 +470,11 @@ export function PlayerStatsScreen() {
   // venue, so the label is the bare opponent name: opponentLabel will not
   // print "vs" without a home game it can vouch for.
   const windowedGames = useMemo(() => {
+    // A toughness tier charts the player's games against that tier over his
+    // last three seasons played, newest first, cut to the same span chips.
+    if (range !== 'h2h' && defenseFilter !== 'all' && defenseGames) {
+      return tierChartGames(defenseGames.games, defenseFilter, range);
+    }
     if (range === 'h2h') {
       const row = { opponent: h2hOpponent, venue: null };
       return (detail.h2hMeetings ?? []).map((m) => ({
@@ -450,7 +486,7 @@ export function PlayerStatsScreen() {
     }
     const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs, sport === 'NCAAB');
     return range === 'all' ? all : all.slice(0, range);
-  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs]);
+  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs, defenseFilter, defenseGames]);
   // The values ARE the labelled games' values, so the chart's bars and labels
   // cannot fall out of step (review, 2026-10-28).
   const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
@@ -576,7 +612,9 @@ export function PlayerStatsScreen() {
   // the one sentence a reader who tapped that stat came for (UX review).
   const noEvidenceText = isH2H
     ? `No ${statLabel} in ${hitTotal} games vs ${h2hOpponent}`
-    : `No ${statLabel} in the last ${hitTotal} games`;
+    : defenseFilter !== 'all'
+      ? `No ${statLabel} in ${hitTotal} games vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : `No ${statLabel} in the last ${hitTotal} games`;
   const hitColor = noEvidence
     ? colors.none
     : hitPct >= HIT_RATE_GOOD
@@ -613,7 +651,11 @@ export function PlayerStatsScreen() {
 
   const windowLabel = isH2H
     ? `vs ${h2hOpponent} · last 2 seasons`
-    : range === 'all' ? `${windowed.length} games` : `last ${range}`;
+    : defenseFilter !== 'all'
+      ? `vs ${tierLabel(defenseFilter).toLowerCase()} defenses · ${
+        range === 'all' ? `${windowed.length} games` : `last ${windowed.length}`
+      }`
+      : range === 'all' ? `${windowed.length} games` : `last ${range}`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
@@ -647,11 +689,13 @@ export function PlayerStatsScreen() {
   const statReachAbove = groups.length === 1 && groupsOfChips(allChips).length > 1 ? 6 : 0;
   const statReach = reachFrame(statReachAbove);
   // The range chips reach 6pt down over the next sibling, raised so it is
-  // hit-tested first: the hit card's 8pt top margin, the empty card's 16pt
-  // padding or the spinner's margin — never the ErrorBanner, whose Retry
-  // starts at its top edge.
+  // hit-tested first: the defense row's label when that row is drawn, else
+  // the hit card's 8pt top margin, the empty card's 16pt padding or the
+  // spinner's margin — never the ErrorBanner, whose Retry starts at its top
+  // edge. The defense chips reach the same 6pt over what follows them.
   const rangeReachBelow = error ? 0 : 6;
   const rangeReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
+  const defenseReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -818,6 +862,76 @@ export function PlayerStatsScreen() {
           })}
         </ScrollView>
 
+        {/* Defense-toughness filter (Matt, 2026-11-07): how this player does
+            against defenses like the next one. The next opponent's tier is
+            tagged NEXT and is where the page opens. */}
+        {defenseOffered && defenseCounts ? (
+          <View style={styles.defenseBlock}>
+            <Text style={styles.defenseLabel} accessibilityRole="header">
+              Vs defenses that are
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={defenseReach.frame}
+              contentContainerStyle={[styles.defenseRow, defenseReach.content]}
+            >
+              {(['all', ...DEFENSE_TIERS] as DefenseFilter[]).map((f) => {
+                const active = f === defenseFilter;
+                const isNext = f !== 'all' && defenseGames?.next?.tier === f;
+                const count = f === 'all' ? null : defenseCounts[f];
+                const name = f === 'all' ? 'All' : tierLabel(f);
+                return (
+                  <Pressable
+                    key={f}
+                    onPress={() => setDefensePicked(f)}
+                    hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={
+                      f === 'all'
+                        ? 'All defenses'
+                        : `${name} defenses, ${count} game${count === 1 ? '' : 's'}${
+                          isNext ? `, next opponent ${defenseGames?.next?.opponent} is in this tier` : ''
+                        }`
+                    }
+                    style={[styles.windowChip, styles.defenseChip, active && styles.windowChipActive]}
+                  >
+                    {f !== 'all' ? (
+                      <View style={styles.pips} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                        {[0, 1, 2].map((i) => (
+                          <View
+                            key={i}
+                            style={[
+                              styles.pip,
+                              { backgroundColor: active ? colors.textInverse : colors.textSecondary },
+                              i >= tierPips(f) && styles.pipOff,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
+                    <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                      {count != null ? `${name} ${count}` : name}
+                    </Text>
+                    {isNext ? (
+                      <View style={styles.nextTag}>
+                        <Text style={styles.nextTagText}>NEXT</Text>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Text style={styles.defenseNote}>
+              {defenseGames?.next
+                ? `${nextDefenseLine(defenseGames.next, defenseNoun)}. `
+                : ''}
+              Last {DEFENSE_SEASONS_PLAYED} seasons played.{defenseFilter !== 'all' ? ' #1 = toughest.' : ''}
+            </Text>
+          </View>
+        ) : null}
+
         {error ? (
           <ErrorBanner
             what="recent games"
@@ -829,6 +943,7 @@ export function PlayerStatsScreen() {
         ) : null}
 
         {(loading && games.length === 0)
+          || (!isH2H && defensePicked == null && detail.defensePending)
           || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null || !logSettled)) ? (
           <ActivityIndicator
             style={styles.loading}
@@ -858,6 +973,8 @@ export function PlayerStatsScreen() {
             <Text style={styles.emptyText}>
               {isH2H
                 ? `No meetings with ${h2hOpponent} in the last 2 seasons.`
+                : defenseFilter !== 'all'
+                ? `No games vs ${tierLabel(defenseFilter).toLowerCase()} defenses in the last ${DEFENSE_SEASONS_PLAYED} seasons played.`
                 : games.length === 0
                 ? 'No recent games on file.'
                 : `No ${statLabel.toLowerCase()} in the last ${games.length} games.`}
@@ -1986,6 +2103,57 @@ const styles = StyleSheet.create({
   },
   windowChipTextActive: {
     color: colors.textInverse,
+  },
+  defenseBlock: {
+    marginTop: spacing.xs,
+  },
+  defenseLabel: {
+    paddingHorizontal: spacing.lg,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  defenseRow: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  defenseChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  pips: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  pip: {
+    width: spacing.xs,
+    height: spacing.xs,
+    borderRadius: radii.pill,
+  },
+  pipOff: {
+    opacity: 0.3,
+  },
+  // Amber lives on navy chrome only (UX_REVIEW §2: amber on white is 1.9:1).
+  nextTag: {
+    backgroundColor: colors.brandNavy,
+    borderRadius: radii.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+  },
+  nextTagText: {
+    fontSize: font.size.nano,
+    fontWeight: font.weight.bold,
+    color: colors.brand,
+    letterSpacing: 0.3,
+  },
+  defenseNote: {
+    paddingHorizontal: spacing.lg,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   hitCard: {
     backgroundColor: colors.bgCard,
