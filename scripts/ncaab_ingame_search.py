@@ -1,0 +1,482 @@
+"""NCAAB in-play search: the game-state model graded on every decision moment.
+
+Reads Supabase only (ncaab_pbp, games, ncaab_events, odds, ncaab_inplay_fetches)
+and decides through models/ncaab_live_ig, the code the live loop runs.
+
+STEPS
+  states   every 30 s game state of each season's games, with the pre-game
+           prior and the final score (the training set)
+  fit      walk-forward: season S's margin and total models fit on seasons < S;
+           calibration on S printed (mean error, sd ratio, coverage by f)
+  grade    the in-play quotes of the purchase (source
+           ncaab_inplay_history.SOURCE), each joined to its fetch's served
+           time; the decision per game and rule at the FIRST eligible fetch;
+           units at the taken price, one unit to win, risk capped at 3; the
+           house standard of docs/nba_models_2026.md 9.1 per cell.
+
+Caches (a cache of Supabase, regenerable: NCAAB_RESEARCH_CACHE, default the
+temp dir) hold the reads so a re-run does not re-read 14M plays.
+
+    PYTHONPATH=. python -m scripts.ncaab_ingame_search --fit
+    PYTHONPATH=. python -m scripts.ncaab_ingame_search --grade --step 60
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import config  # noqa: E402
+from models import ncaab_live_ig as M  # noqa: E402
+
+CACHE = Path(os.environ.get("NCAAB_RESEARCH_CACHE")
+             or Path(tempfile.gettempdir()) / "ncaab_ingame_cache")
+SEASONS = (2021, 2022, 2023, 2024, 2025, 2026)
+GRADED = (2022, 2023, 2024, 2025, 2026)
+CUTS = (0.02, 0.05, 0.08)
+INPLAY_SOURCE = "odds_api_ncaab_inplay_history"
+BOOKS = tuple(config.BEST_LINE_BOOKMAKERS)
+N_BOOT = 4000
+N_PLACEBO = 200
+
+
+def _conn():
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT.parents[2] / ".env") if (ROOT.parents[2] / ".env").exists() else None
+    from data.db import get_connection
+    c = get_connection()
+    c.execute("SET statement_timeout = '900s'")
+    return c
+
+
+def _read(conn, sql: str, params=()) -> pd.DataFrame:
+    cur = conn._conn.cursor()
+    cur.execute(sql, params)
+    cols = [d[0] for d in cur.description]
+    df = pd.DataFrame(cur.fetchall(), columns=cols)
+    cur.close()
+    conn.commit()
+    return df
+
+
+def _cached(name: str, build):
+    CACHE.mkdir(parents=True, exist_ok=True)
+    p = CACHE / f"{name}.parquet"
+    if p.exists():
+        return pd.read_parquet(p)
+    df = build()
+    df.to_parquet(p, index=False)
+    return df
+
+
+# ── reads ────────────────────────────────────────────────────────────────────
+
+def load_plays(conn, season: int) -> pd.DataFrame:
+    def build():
+        df = _read(conn, """
+            SELECT game_id, season, play_no, period, clock_s, game_s, wallclock, type_text,
+                   home_score AS h_pts, away_score AS a_pts, team_side
+              FROM ncaab_pbp
+             WHERE season = %s AND type_text IS DISTINCT FROM 'Substitution'
+        """, (season,))
+        for c in ("period", "play_no", "h_pts", "a_pts"):
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        for c in ("clock_s", "game_s"):
+            df[c] = pd.to_numeric(df[c], errors="coerce").astype(float)
+        df["wallclock"] = pd.to_datetime(df["wallclock"], utc=True)
+        return df
+    return _cached(f"plays_{season}", build)
+
+
+def load_games(conn) -> pd.DataFrame:
+    def build():
+        df = _read(conn, """
+            SELECT g.game_id, g.season, g.commence_time, g.home_score, g.away_score,
+                   e.season_type, e.espn_event_id, pg.score_matches, pg.n_plays
+              FROM games g
+              JOIN ncaab_events e USING (game_id)
+              LEFT JOIN ncaab_pbp_games pg ON pg.espn_game_id = e.espn_event_id
+             WHERE g.sport = 'NCAAB' AND g.home_score IS NOT NULL
+        """)
+        df["tip"] = pd.to_datetime(df["commence_time"], utc=True, errors="coerce")
+        df["home_score"] = pd.to_numeric(df["home_score"]).astype(float)
+        df["away_score"] = pd.to_numeric(df["away_score"]).astype(float)
+        return df.drop(columns="commence_time")
+    return _cached("games", build)
+
+
+def load_priors(conn, season: int) -> pd.DataFrame:
+    """(game_id, mu_pre, T_pre, prior_src): Pinnacle's last pre-tip spread and
+    total, else the median of the deciding books' last pre-tip quotes."""
+    def build():
+        q = _read(conn, """
+            SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker)
+                   o.game_id, o.market, o.bookmaker, o.spread_home, o.total_line
+              FROM odds o JOIN games g ON g.game_id = o.game_id
+             WHERE o.sport = 'NCAAB' AND g.season = %s AND o.market IN ('spreads', 'totals')
+               AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+               AND (o.source IS NULL OR o.source IN ('', 'odds_api_historical'))
+               AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+             ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at::timestamptz DESC
+        """, (season,))
+        q["num"] = np.where(q["market"] == "spreads", pd.to_numeric(q["spread_home"]),
+                            pd.to_numeric(q["total_line"])).astype(float)
+        out = []
+        for (gid, mk), g in q.groupby(["game_id", "market"]):
+            pin = g[g["bookmaker"] == "pinnacle"]["num"].dropna()
+            soft = g[g["bookmaker"].isin(BOOKS)]["num"].dropna()
+            if len(pin):
+                out.append((gid, mk, float(pin.iloc[0]), "pinnacle"))
+            elif len(soft):
+                out.append((gid, mk, float(soft.median()), "median"))
+        p = pd.DataFrame(out, columns=["game_id", "market", "num", "src"])
+        sp = p[p["market"] == "spreads"].set_index("game_id")
+        to = p[p["market"] == "totals"].set_index("game_id")
+        res = pd.DataFrame({"mu_pre": -sp["num"], "src_sp": sp["src"]}).join(
+            pd.DataFrame({"T_pre": to["num"], "src_to": to["src"]}), how="inner")
+        res["prior_src"] = np.where((res["src_sp"] == "pinnacle") & (res["src_to"] == "pinnacle"),
+                                    "pinnacle", "median")
+        return res.reset_index()[["game_id", "mu_pre", "T_pre", "prior_src"]]
+    return _cached(f"priors_{season}", build)
+
+
+# ── states ───────────────────────────────────────────────────────────────────
+
+def clean_games(plays: pd.DataFrame, games: pd.DataFrame) -> set[str]:
+    """Games fit for training and grading: the play-by-play's last score is the
+    final, and no 45-minute wallclock gap (a feed restart)."""
+    ok = games[games["score_matches"].fillna(False).astype(bool)]["game_id"]
+    p = plays[plays["game_id"].isin(ok)].sort_values(["game_id", "play_no"])
+    gap = p.groupby("game_id")["wallclock"].diff().dt.total_seconds()
+    jumped = set(p.loc[gap > 45 * 60, "game_id"])
+    return set(ok) - jumped
+
+
+def grid_states(plays: pd.DataFrame, step: int = M.GRID_STEP_S) -> pd.DataFrame:
+    """Each game's state every `step` s of regulation game time (TRAIN_SECS)."""
+    s = plays.dropna(subset=["game_s"]).sort_values(["game_s", "play_no"], kind="stable")
+    g = np.arange(M.TRAIN_SECS[0], M.TRAIN_SECS[1] + 1, step, dtype=float)
+    ids = s["game_id"].unique()
+    left = pd.DataFrame({"game_id": np.repeat(ids, len(g)), "g": np.tile(g, len(ids))})
+    left = left.sort_values("g", kind="stable")
+    x = pd.merge_asof(left, s, left_on="g", right_on="game_s", by="game_id", direction="backward")
+    x = x.dropna(subset=["period"])
+    return x[x["period"] <= 2].reset_index(drop=True)
+
+
+def training_states(conn, season: int, games: pd.DataFrame) -> pd.DataFrame:
+    def build():
+        plays = M.with_team_fouls(load_plays(conn, season))
+        keep = clean_games(plays, games)
+        plays = plays[plays["game_id"].isin(keep)]
+        st = M.state_columns(grid_states(plays))
+        pri = load_priors(conn, season)
+        gm = games[["game_id", "home_score", "away_score", "season_type"]]
+        st = st.merge(pri, on="game_id").merge(gm, on="game_id")
+        st["final_margin"] = st["home_score"] - st["away_score"]
+        st["final_total"] = st["home_score"] + st["away_score"]
+        st["season"] = season
+        cols = ["game_id", "season", "season_type", "g", "period", "clock_s", "game_s",
+                "type_text", "h_pts", "a_pts", "h_tf", "a_tf", "secs_left", "f", "half_left",
+                "m", "t", "is_break", "mu_pre", "T_pre", "prior_src", "final_margin",
+                "final_total"]
+        return st[cols]
+    return _cached(f"states_{season}", build)
+
+
+# ── fit and calibration ──────────────────────────────────────────────────────
+
+def fit_models(states: dict[int, pd.DataFrame], S: int) -> dict[str, M.StateModel]:
+    train = pd.concat([M.features(states[s]) for s in states if s < S], ignore_index=True)
+    return {t: M.StateModel(t).fit(train, S) for t in ("margin", "total")}
+
+
+def calibration(models: dict, st: pd.DataFrame) -> pd.DataFrame:
+    x = M.features(st)
+    rows = []
+    for t, mdl in models.items():
+        mean, sd = mdl.predict(x)
+        y = x["final_margin" if t == "margin" else "final_total"].to_numpy(float)
+        z = (y - mean) / sd
+        fb = pd.cut(x["f"], [0, 0.1, 0.25, 0.5, 0.75, 1.0], include_lowest=True)
+        d = pd.DataFrame({"fb": fb, "err": y - mean, "z": z})
+        for b, g in d.groupby("fb", observed=True):
+            rows.append({"target": t, "f_bucket": str(b), "n": len(g),
+                         "mean_err": round(g["err"].mean(), 3),
+                         "sd_ratio": round(g["z"].std(), 3),
+                         "cover_68": round((g["z"].abs() <= 1).mean(), 3)})
+    return pd.DataFrame(rows)
+
+
+def run_fit(conn) -> dict:
+    games = load_games(conn)
+    states = {s: training_states(conn, s, games) for s in SEASONS}
+    out = {}
+    for S in GRADED:
+        mdl = fit_models(states, S)
+        cal = calibration(mdl, states[S])
+        print(f"\n== season {S}: margin beta {np.round(mdl['margin'].beta, 3)} "
+              f"s1 {mdl['margin'].s1:.1f} s0 {mdl['margin'].s0:.2f} | total beta "
+              f"{np.round(mdl['total'].beta, 3)} s1 {mdl['total'].s1:.1f} s0 {mdl['total'].s0:.2f}")
+        print(cal.to_string(index=False))
+        out[S] = {k: v.to_dict() for k, v in mdl.items()}
+    return out
+
+
+# ── quotes, decisions, grade ─────────────────────────────────────────────────
+
+def load_fetches(conn) -> pd.DataFrame:
+    df = _read(conn, "SELECT requested_at, snapshot_ts FROM ncaab_inplay_fetches")
+    df["requested_at"] = pd.to_datetime(df["requested_at"], utc=True)
+    df["served"] = pd.to_datetime(df["snapshot_ts"], utc=True)
+    return df[["requested_at", "served"]].sort_values("served").reset_index(drop=True)
+
+
+def load_quotes(conn, season: int) -> pd.DataFrame:
+    def build():
+        q = _read(conn, """
+            SELECT o.game_id, o.market, o.bookmaker AS book, o.snapshot_at, o.home_price,
+                   o.away_price, o.spread_home, o.total_line, o.over_price, o.under_price
+              FROM odds o JOIN games g ON g.game_id = o.game_id
+             WHERE o.sport = 'NCAAB' AND g.season = %s AND o.source = %s
+        """, (season, INPLAY_SOURCE))
+        q["stamp"] = pd.to_datetime(q["snapshot_at"], utc=True)
+        for c in ("home_price", "away_price", "spread_home", "total_line", "over_price",
+                  "under_price"):
+            q[c] = pd.to_numeric(q[c], errors="coerce").astype(float)
+        return q.drop(columns="snapshot_at")
+    return _cached(f"quotes_{season}", build)
+
+
+def assign_fetch(q: pd.DataFrame, fetches: pd.DataFrame) -> pd.DataFrame:
+    """Each quote to the first fetch that could have served it (served >=
+    stamp); an identical quote stored by two fetches keeps the first."""
+    q = q.sort_values("stamp")
+    f = fetches.rename(columns={"served": "fetch_at"})
+    x = pd.merge_asof(q, f.sort_values("fetch_at"), left_on="stamp", right_on="fetch_at",
+                      direction="forward")
+    x = x.dropna(subset=["fetch_at"])
+    key = ["game_id", "market", "book", "stamp", "home_price", "away_price", "spread_home",
+           "total_line", "over_price", "under_price"]
+    return x.drop_duplicates(key).reset_index(drop=True)
+
+
+def state_at(plays: pd.DataFrame, at: pd.DataFrame, col: str) -> pd.DataFrame:
+    """The last play logged at or before at[col] per game (ties by play order)."""
+    p = plays.dropna(subset=["wallclock"]).sort_values(["wallclock", "play_no"], kind="stable")
+    a = at.sort_values(col, kind="stable")
+    return pd.merge_asof(a, p, left_on=col, right_on="wallclock", by="game_id",
+                         direction="backward")
+
+
+def quote_states(q: pd.DataFrame, plays: pd.DataFrame) -> pd.DataFrame:
+    """Each quote with the state at its stamp and the points scored between its
+    stamp and its fetch's served time (the FRESH rule)."""
+    plays = plays.sort_values(["game_id", "play_no"])
+    keep = ["game_id", "play_no", "wallclock", "period", "clock_s", "game_s", "type_text",
+            "h_pts", "a_pts", "h_tf", "a_tf"]
+    s = state_at(plays[keep], q, "stamp")
+    at_fetch = state_at(plays[["game_id", "play_no", "wallclock", "h_pts", "a_pts"]],
+                        s[["game_id", "fetch_at"]].drop_duplicates(), "fetch_at")
+    at_fetch = at_fetch.rename(columns={"h_pts": "h_fetch", "a_pts": "a_fetch"})[
+        ["game_id", "fetch_at", "h_fetch", "a_fetch"]]
+    s = s.merge(at_fetch, on=["game_id", "fetch_at"], how="left")
+    s["pts_since"] = (s["h_fetch"] + s["a_fetch"]) - (s["h_pts"] + s["a_pts"])
+    return s.dropna(subset=["period"])
+
+
+def priced_offers(qs: pd.DataFrame, models: dict, games_prior: pd.DataFrame) -> pd.DataFrame:
+    """Every offer of every eligible decision quote, priced by the model.
+
+    Eligible, as the loop decides (models/ncaab_live_ig): not an outlier against
+    the other books in its fetch, fresh (no point between its stamp and the
+    fetch), in a phase, at a deciding book. The decision fetch per (game, rule)
+    is the first holding an eligible quote; only its quotes are returned."""
+    st = M.state_columns(qs.merge(games_prior, on="game_id"))
+    st = M.drop_outliers(st)
+    st["phase"] = M.phase_of(st)
+    st = st[(st["phase"] != "") & (st["pts_since"] == 0) & st["book"].isin(BOOKS)]
+    st["rule"] = st["market"] + "_" + st["phase"]
+    first = st.groupby(["game_id", "rule"])["fetch_at"].transform("min")
+    st = st[st["fetch_at"] == first]
+    x = M.features(st)
+    mu_m, sd_m = models["margin"].predict(x)
+    mu_t, sd_t = models["total"].predict(x)
+    x = x.assign(mu_m=mu_m, sd_m=sd_m, mu_t=mu_t, sd_t=sd_t)
+    return price(M.offers_from_quotes(x))
+
+
+def price(off: pd.DataFrame) -> pd.DataFrame:
+    is_tot = (off["market"] == "totals").to_numpy()
+    mu = np.where(is_tot, off["mu_t"], off["mu_m"])
+    sd = np.where(is_tot, off["sd_t"], off["sd_m"])
+    pw, pp = M.side_probs(off["market"], off["side"], off["line"], mu, sd)
+    return off.assign(p_win=pw, p_push=pp, ev=M.ev_of(off["price"], pw, pp))
+
+
+def best(off: pd.DataFrame) -> pd.DataFrame:
+    """The decision per (game, rule): its best-EV allowed offer (cut applied later)."""
+    return M.choose(off, -np.inf, BOOKS)
+
+
+def grade(d: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+    b = d.merge(games[["game_id", "home_score", "away_score", "tip"]], on="game_id")
+    b["result"] = M.settle(b["market"], b["side"], b["line"], b["home_score"], b["away_score"])
+    b["units"], b["risk"] = M.units(b["result"], b["price"])
+    b["day"] = (b["tip"] - pd.Timedelta(hours=5)).dt.date
+    return b
+
+
+def roi(b: pd.DataFrame) -> float:
+    r = b["risk"].sum()
+    return float(b["units"].sum() / r) if r else float("nan")
+
+
+def boot_ci(b: pd.DataFrame, seed: int = 7, n: int = N_BOOT) -> tuple[float, float]:
+    """Whole-day bootstrap 95% interval of the return (units / risk)."""
+    if not len(b):
+        return (np.nan, np.nan)
+    by = b.groupby("day")[["units", "risk"]].sum()
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(by), size=(n, len(by)))
+    u, r = by["units"].to_numpy()[idx].sum(1), by["risk"].to_numpy()[idx].sum(1)
+    return float(np.percentile(u / r, 2.5)), float(np.percentile(u / r, 97.5))
+
+
+def blind(off: pd.DataFrame, side: str, games: pd.DataFrame) -> float:
+    """Every decision's best-priced offer on one real side, graded (bar 4)."""
+    o = off[(off["side"] == side) & off["book"].isin(BOOKS) & (off["price"] >= M.PRICE_FLOOR)]
+    o = o.sort_values("price", ascending=False).drop_duplicates(["game_id", "rule"])
+    return roi(grade(o, games)) if len(o) else float("nan")
+
+
+def placebo(off: pd.DataFrame, rule: str, cut: float, games: pd.DataFrame,
+            runs: int = N_PLACEBO) -> np.ndarray:
+    """The rule's return with the model's (mean, sd) shuffled between games in
+    the same fetch, seeds 1..runs (bar 6)."""
+    o = off[off["rule"] == rule]
+    keys = o[["game_id", "fetch_at"]].drop_duplicates().reset_index(drop=True)
+    model = o.drop_duplicates("game_id").set_index("game_id")[["mu_m", "sd_m", "mu_t", "sd_t"]]
+    base = o.drop(columns=["mu_m", "sd_m", "mu_t", "sd_t", "p_win", "p_push", "ev"])
+    out = []
+    for seed in range(1, runs + 1):
+        rng = np.random.default_rng(seed)
+        src = keys.groupby("fetch_at")["game_id"].transform(lambda s: rng.permutation(s.to_numpy()))
+        mp = dict(zip(keys["game_id"], src))
+        donor = base["game_id"].map(mp)
+        sh = base.assign(**{c: model[c].reindex(donor).to_numpy() for c in model.columns})
+        d = best(price(sh))
+        d = d[d["ev"] >= cut]
+        out.append(roi(grade(d, games)) if len(d) else 0.0)
+    return np.asarray(out)
+
+
+def cell_verdict(off: pd.DataFrame, dec: pd.DataFrame, rule: str, cut: float,
+                 games: pd.DataFrame, n_placebo: int = N_PLACEBO) -> dict:
+    """The house standard (docs/nba_models_2026.md 9.1) on one cell."""
+    d = dec[dec["rule"] == rule]
+    b = grade(d[d["ev"] >= cut], games)
+    out = {"rule": rule, "cut": cut, "bets": len(b)}
+    if not len(b):
+        return out
+    lo, hi = boot_ci(b)
+    by_s = {int(s): (len(g), roi(g)) for s, g in b.groupby("season")}
+    judged = [v for v in by_s.values() if v[0] >= 30]
+    dom = b["side"].value_counts().idxmax()
+    bl = blind(off[off["rule"] == rule], dom, games)
+    edges = [0.0, *CUTS, np.inf]
+    i = edges.index(cut)
+    bands = {}
+    for a, z in zip(edges[i - 1:-1], edges[i:]):
+        bb = grade(d[(d["ev"] >= a) & (d["ev"] < z)], games)
+        bands[f"{a:.2f}-{z:.2f}"] = (len(bb), roi(bb) if len(bb) else float("nan"))
+    bands_ok = all(r > 0 for n, r in bands.values() if n >= 30) and roi(b) > 0
+    pl = placebo(off, rule, cut, games, n_placebo) if n_placebo else None
+    p95 = float(np.nanpercentile(pl, 95)) if pl is not None else float("nan")
+    half = b["tip"] <= b["tip"].quantile(0.5)
+    dk = b[b["book"] == "draftkings"]
+    out.update({
+        "units": round(float(b["units"].sum()), 1), "roi": round(roi(b), 4),
+        "ci": (round(lo, 4), round(hi, 4)),
+        "seasons": {s: (n, round(r, 3)) for s, (n, r) in by_s.items()},
+        "early": round(roi(b[half]), 4), "late": round(roi(b[~half]), 4),
+        "dominant": dom, "blind": round(bl, 4),
+        "bands": {k: (n, round(r, 3)) for k, (n, r) in bands.items()},
+        "placebo_p95": round(p95, 4),
+        "dk_only": (len(dk), round(roi(dk), 4) if len(dk) else None),
+        "prices": (float(b["price"].min()), float(b["price"].median()), float(b["price"].max())),
+        "bar1_n": len(b) >= 200, "bar2_ci": lo > 0,
+        "bar3_seasons": len(judged) >= 2 and sum(r <= 0 for _, r in judged) <= 1,
+        "bar4_blind": roi(b) > bl, "bar5_bands": bands_ok,
+        "bar6_placebo": (roi(b) > p95) if pl is not None else None,
+    })
+    out["passes"] = all(bool(out[k]) for k in ("bar1_n", "bar2_ci", "bar3_seasons",
+                                               "bar4_blind", "bar5_bands", "bar6_placebo"))
+    return out
+
+
+def season_offers(conn, S: int, states: dict, games: pd.DataFrame,
+                  fetches: pd.DataFrame) -> pd.DataFrame | None:
+    models = fit_models(states, S)
+    plays = M.with_team_fouls(load_plays(conn, S))
+    keep = clean_games(plays, games)
+    q = load_quotes(conn, S)
+    q = q[q["game_id"].isin(keep)]
+    if not len(q):
+        print(f"season {S}: no in-play quotes stored")
+        return None
+    qs = quote_states(assign_fetch(q, fetches), plays[plays["game_id"].isin(keep)])
+    off = priced_offers(qs, models, load_priors(conn, S))
+    off["season"] = S
+    print(f"season {S}: {len(q):,} quotes, {off['game_id'].nunique():,} games decided")
+    return off
+
+
+def run_grade(conn, step: int, n_placebo: int = N_PLACEBO, seasons=GRADED) -> pd.DataFrame:
+    games = load_games(conn)
+    states = {s: training_states(conn, s, games) for s in SEASONS}
+    fetches = load_fetches(conn)
+    if step == 60:
+        fetches = fetches[fetches["requested_at"].dt.minute == 0]
+    offs = [o for S in seasons if (o := season_offers(conn, S, states, games, fetches)) is not None]
+    off = pd.concat(offs, ignore_index=True)
+    dec = best(off)
+    off.to_parquet(CACHE / f"offers_step{step}.parquet", index=False)
+    rows = [cell_verdict(off, dec, f"{mk}_{ph}", c, games, n_placebo)
+            for mk in M.MARKETS for ph in M.PHASES for c in CUTS]
+    return pd.DataFrame(rows)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--fit", action="store_true")
+    ap.add_argument("--grade", action="store_true")
+    ap.add_argument("--step", type=int, choices=(60, 30), default=60)
+    ap.add_argument("--placebo", type=int, default=N_PLACEBO)
+    a = ap.parse_args(argv)
+    conn = _conn()
+    try:
+        if a.fit:
+            out = run_fit(conn)
+            (CACHE / "fit.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        if a.grade:
+            res = run_grade(conn, a.step, a.placebo)
+            pd.set_option("display.width", 250)
+            print(res.to_string(index=False))
+            res.to_json(CACHE / f"grade_step{a.step}.json", orient="records", indent=1)
+    finally:
+        conn.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
