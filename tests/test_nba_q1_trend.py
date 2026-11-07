@@ -212,3 +212,27 @@ def test_the_live_fetch_keys_each_pair_on_the_home_number():
     assert set(rows) == {-1.5, -2.5}
     assert rows[-1.5]["home_price"] == -110 and rows[-1.5]["away_price"] == -110
     assert rows[-2.5]["home_price"] == 120 and rows[-2.5]["away_price"] == -150
+
+
+def test_a_game_that_is_not_the_pattern_records_no_pick_and_says_why(art):
+    """A night with one pattern game and one that is not. The second has no hot team, and its decision row must carry
+    pick None and say not_a_step. With a text pick in the same column pandas files the missing one as NaN, which the
+    rule read as a pick: the game was recorded "below_cut: k None" and its ledger row stored pick 'NaN' as text
+    (measured in a temp table: Postgres casts the float to text on insert, so nothing failed and no bet changed).
+    Found 2026-11-07 on tonight's real lines, where six of seven games were not the pattern."""
+    hist = pd.concat([_history(HOT_HOME, COLD_AWAY),
+                      pd.DataFrame(_team_rows("MIA", "home", [1, -1] * 5, "2026-10-21")
+                                   + _team_rows("BOS", "away", [1, -1] * 5, "2026-10-22"))], ignore_index=True)
+    targets = pd.concat([_target(), pd.DataFrame([{"game_id": "NBA_2026-11-19_BOS_MIA", "season": 2027,
+                                                   "game_date": "2026-11-19", "home_team": "MIA",
+                                                   "away_team": "BOS"}])], ignore_index=True)
+    q = _quotes([("pinnacle", -1.5, -110, -110), ("fanduel", -1.5, -105, -115)])
+    q2 = q.assign(game_id="NBA_2026-11-19_BOS_MIA")
+    times = pd.DataFrame({"game_id": ["NBA_2026-11-19_LAC_DEN", "NBA_2026-11-19_BOS_MIA"], "T": [T, T]})
+    bets, decisions, diag = q1.decide(targets, pd.concat([q, q2], ignore_index=True), hist, times, art)
+    by = {d.game_id: d for d in decisions}
+    assert diag["bets"] == 1 and diag["not_a_step"] == 1, diag
+    d = by["NBA_2026-11-19_BOS_MIA"]
+    assert d.pick is None and d.detail.startswith("not_a_step"), (d.pick, d.detail)
+    assert by["NBA_2026-11-19_LAC_DEN"].pick == "home"
+    assert all(not (isinstance(v, float) and v != v) for v in (d.pick, d.number))

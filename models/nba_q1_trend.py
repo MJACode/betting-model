@@ -307,6 +307,10 @@ class Q1Decision:
     book_ages: dict = field(default_factory=dict)
 
 
+def _side(v):
+    return v if v in ("home", "away") else None
+
+
 def _f(v):
     try:
         f = float(v)
@@ -366,7 +370,11 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, history_tg: pd.DataFrame
         fr = fair_by.get(gid)
         c = bet_by.get(gid)
         seen = {} if s is None else {
-            "number": _f(s.number), "pick": getattr(s, f"pick_{WINDOW}"), "k": _f(getattr(s, f"k_{WINDOW}")),
+            # pandas files a missing pick as NaN once the column also holds a text one: the ledger's pick column
+            # is TEXT, so anything but 'home' / 'away' is None here (tests/test_nba_q1_trend.py, the night with
+            # one pattern game and one not)
+            "number": _f(s.number), "pick": _side(getattr(s, f"pick_{WINDOW}")),
+            "k": _f(getattr(s, f"k_{WINDOW}")),
             "h5": _f(s.h_ats5), "a5": _f(s.a_ats5), "h10": _f(s.h_ats10), "a10": _f(s.a_ats10),
             "check": bool(getattr(s, f"chk_{WINDOW}"))}
         offer = {} if c is None else {"book": str(c.book), "line": float(c.line), "price": float(c.price),
