@@ -463,9 +463,9 @@ def test_the_ev_floor_never_removes_a_bet_the_cut_takes():
     decimal 1.5) an edge just over the cut is EV just over cut x 1.5. The
     floor must sit at or under that, or it removes bets the cut admitted,
     silently (the GLOBAL_MIN_EV failure, CLAUDE.md §1b)."""
-    mid = ft.MODEL_ID
-    shortest = 1 + 100 / abs(config.min_odds_for(mid))
-    assert config.min_ev_for(mid) <= config.MODEL_EDGE_THRESHOLDS[mid] * shortest
+    for mid in (ft.MODEL_ID, "ncaab_first_half_spread", "ncaab_total_blend"):
+        shortest = 1 + 100 / abs(config.min_odds_for(mid))
+        assert config.min_ev_for(mid) <= config.MODEL_EDGE_THRESHOLDS[mid] * shortest, mid
     assert mid in config.MODELS_ON_OWN_PROBABILITY and config.scoring_method(mid) == "rule"
     assert mid not in config.PAUSED_MODELS and mid not in config.RETIRED_MODELS
     assert mid not in config.MODELS

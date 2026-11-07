@@ -1217,16 +1217,17 @@ refuses a season it does not end just before.
 mike, 2026-10-30: *"Yes to the totals model."* Team ratings refit as of
 DraftKings' total, a correction for shooting luck and playing style, blended
 with DraftKings' total; bet the side whose chance of winning (a push left out)
-beats DraftKings' implied chance by more than 0.04, with no games-played wait
+beats DraftKings' implied chance by more than 0.05 (0.04 until 2026-11-07,
+mike: fewer picks), with no games-played wait
 (mike, 2026-11-02), at DraftKings' first posted total (mike, 2026-11-03)
 (`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
 evidence and its risks are `docs/sports/ncaab.md` "The models").
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.04 | `MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.04. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
-| EV floor | 0.07, on its own probability. The smallest EV the 0.04 cut admitted in the first-post replay of 2022-2026 was +0.0734 (2,436 bets; +0.0743 on the quotes it shipped on); an edge above 0.04 at -120 or longer is EV above 0.073, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| the cut | edge > 0.05 (0.04 until 2026-11-07) | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.05. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.07, on its own probability, unchanged at the 0.05 cut: an edge above 0.05 at -200 or longer is EV above 0.075, so the floor removes nothing the cut takes (the first-post replay's smallest EV at 0.05 is +0.0936; at 0.04 it was +0.0734, 2,436 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned; it laid -120 to +110 (median -110) | `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02: *"we do not need to wait 10 games, I never approved that"*). With no wait the replay is 1,513 bets, +5.66% on 2022-2026, against 1,157 bets, +7.06% with it; the 356 bets it adds are +1.13%, interval [-10.1, 12.1]. `docs/sports/ncaab.md` has the table | `models/ncaab_total_blend.decide` |
 | decision moment | from 2026-11-03 (mike): DraftKings' first posted total (the earliest pre-game row, total 90-220, both prices), bet only while it is still DraftKings' standing number, else `first_post_gone` with no bet; the card every 5 minutes, 3 after each capture poll. It replaced 22:00 UTC the evening before / 15:00 UTC on the day, which at its own instant made 1,563 bets, +3.90%, interval [-0.50, 8.00] on 2022-2026 | `scripts/ncaab_total_card.py`, `scheduler.run_ncaab_total_card` |
@@ -1394,17 +1395,17 @@ mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
 what"*. About ten minutes before tip: the bettable books' full-game consensus
 spread, mapped to a first-half mean, plus a heavily shrunk team first-half
 tendency; every bettable book's first-half spread priced through a table of
-past first-half margins; bet the single best quote when its edge is above 0.02.
-No games-played wait (`models/ncaab_first_half_spread.py`,
+past first-half margins; bet the single best quote when its edge is above 0.025
+(0.02 until 2026-11-07, mike: fewer picks). No games-played wait (`models/ncaab_first_half_spread.py`,
 `scripts/ncaab_first_half_spread_card.py`; the model, its evidence and its risks
 are `docs/sports/ncaab.md` "The models"). **It did not clear the research bar:**
 the pooled interval's lower bound is below zero.
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.025 (0.02 until 2026-11-06) | `MODEL_EDGE_THRESHOLDS` |
+| the cut | edge > 0.025 (0.02 until 2026-11-07; this row said 0.025 from 11-06 by mistake, a doc slip in #1207) | `MODEL_EDGE_THRESHOLDS` |
 | prob / edge filter | 0.0 / 0.025. model_probability is the same P(cover, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
-| EV floor | 0.03, on its own probability. The smallest EV the 0.02 cut admitted in the replay was +0.0346 (median +0.0552, 1,253 bets); an edge above 0.02 at -140 or longer is EV above 0.034, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| EV floor | 0.03, on its own probability, unchanged at the 0.025 cut: an edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes (the replay's smallest EV at 0.025 is +0.0436; at 0.02 it was +0.0346, 1,253 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned; it laid -140 to +125 | `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). With the old 10-game rule the same cut made +6.87 units on 698 bets (+0.90%) | the card |
 | decided once | on the tip-minus-10 first-half fetch (or its retries, 5 to 10.5 minutes before tip); a row in `ncaab_first_half_spread_decisions`, bet or not | `scripts/ncaab_first_half_spread_card.py`, `scheduler.run_ncaab_first_half_window` |
@@ -1444,8 +1445,8 @@ It cleared the research bar, narrowly: the pooled lower bound is +0.57%.
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.02 | `MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.02. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| the cut | edge > 0.025 (0.02 until 2026-11-06) | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.025. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
 | EV floor | 0.037 (0.03 until 2026-11-06), on its own probability. An edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay with the -200 limit was +0.0426 (median +0.068, 1,887 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen (2,527 of the research's 2,529 bets; prices -160 to +155), and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). November alone made +35.91 units on 690 bets | the card |
