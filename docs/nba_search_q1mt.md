@@ -116,7 +116,10 @@ quarter. The effect does not carry to the first quarter. **Closed.**
 - **The live rule on the moneyline clears five of six bars and fails only the 200-bet bar**, the same standing as
   `nba_q1_trend` on the spread. Its bands are positive (k 0-2 +3.2% on 85; k 2-4 +26.8% on 64; k 4+ +22.9% on 23) and
   it is above its placebo.
-- **It is the same bet.** It takes the same team in 87 of the spread model's 88 games (the 88th had no moneyline
-  offer). The hot team is getting points in 66 of the 88 spread bets, so the moneyline is mostly a plus price (median
-  +130, up to +360). Live beside the spread model it would double the stake on one signal; it adds no game.
+- **It is the same bet, and the weaker way to make it.** It takes the same team in 87 of the spread model's 88 games
+  (the 88th, POR @ MEM on 2024-11-25, drew no moneyline bet) and in no other game. On those games the spread made
+  +26.33 units (+27.4%, 58-29-1) and the moneyline +17.78 (+25.8%, 46-35-6). The hot team is getting points in 66 of
+  the 88 spread bets, so the moneyline is mostly a plus price (median +130, up to +360). Live beside the spread model it
+  would double the stake on one signal; it adds no game.
+- The control, the cold team's moneyline with no check: 123 bets, -14.62 units, -12.8%.
 - 2025-26, the latest season, made +4.3% on 36 bets, against +39% and +46% in the two before.
