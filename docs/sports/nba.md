@@ -323,8 +323,10 @@ each hour minus 264 seconds from the first tip to three hours after the last,
 while a game in progress has a rule not yet decided, so about 12 credits a
 night at the median, plus 2 for each retry (at most 5 attempts a moment). Caps:
 100 calls and 200 credits a process, the shared `LIVE_DAILY_CREDIT_CAP`
-(`live_credit_telemetry`), and no fetch below 1,000 credits left or 15% of the
-plan (the line `system_health` warns at). `--dry-run` makes no call. The
+(`live_credit_telemetry`), and no fetch below 1,000 credits left. (A second
+floor, 15% of the plan, was removed 2026-11-07, mike: "I dont care about the
+odds api balance". At 387,166 of 5,000,000 it stopped the loop after the first
+fetch of each night.) `--dry-run` makes no call. The
 fetched rows go to `odds` as `in_play`.
 
 **Decided once, recorded once.** Every decision, bet or not, is a row in

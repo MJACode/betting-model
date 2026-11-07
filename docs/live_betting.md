@@ -333,7 +333,7 @@ at each hour minus 264 s (the archive's hourly purchase; retried to +240 s)
 **Cost.** 6 fetch moments a slate at the median on the 2026-27 schedule (14 at
 most), 2 credits each plus 2 a retry, fetched only while a game has a rule not
 yet decided. Caps: 100 calls and 200 credits a process, and no fetch below
-1,000 credits left or 15% of the plan. The first call of each process logs its
+1,000 credits left (the 15%-of-plan floor was removed 2026-11-07, mike). The first call of each process logs its
 `x-requests-last`.
 
 **Discord.** NBA live picks post only to the NBA live channel

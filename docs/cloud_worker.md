@@ -302,7 +302,7 @@ is not scored; the check was added in the same deploy as the loop.
 | `NBA_LIVE_PBP_RECHECK_SEC` | `60` | Seconds to the second read; a play logged before the fetch that appears only then skips the game (fail closed) |
 | `NBA_LIVE_HEADER_RECHECK_SEC` | `20` | ESPN's header score ahead of its play list: re-read after this, refuse if still ahead |
 | `NBA_LIVE_PLAY_LAG_MAX_SEC` | `230` | Refuse when ESPN's newest play is older than this while its clock is running |
-| `NBA_LIVE_CALL_CAP` / `NBA_LIVE_CREDIT_CAP` | `100` / `200` | Per-process ceilings on Odds API calls and credits (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the loop stops fetching under 1,000 credits left or 15% of the plan |
+| `NBA_LIVE_CALL_CAP` / `NBA_LIVE_CREDIT_CAP` | `100` / `200` | Per-process ceilings on Odds API calls and credits (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the loop stops fetching under 1,000 credits left (no share-of-plan floor since 2026-11-07, mike) |
 | `NBA_LIVE_POLL_SEC` / `NBA_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
 
 `--dry-run` makes no Odds API call and writes nothing.
