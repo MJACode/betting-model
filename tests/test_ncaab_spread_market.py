@@ -294,6 +294,23 @@ def test_below_the_cut_no_quotes_and_a_book_no_longer_bettable():
     assert d.status == "book_not_bettable" and d.best["bookmaker"] == "betrivers"
 
 
+
+def test_an_exact_tie_with_a_book_that_cannot_be_bet_goes_to_the_book_that_can():
+    """The same line and price at betPARX and BetRivers is the same bet, and
+    betPARX is fetch-only (mike, 2026-11-06). By name betPARX sorts first, so
+    without this the game was a no-bet (74 of 89 replayed betPARX bets were
+    exact ties). A betPARX number that is strictly best is still not replaced."""
+    c, t = _art()
+    seven = tuple(b for b in bq.BOOKS if b != "betparx")
+    tie = GOOD + [("g", "betparx", 30, -8.0, -110, -110)]
+    (d,) = sm.decide(["g"], _snap(tie), c, t, 0.03, bettable=seven)
+    assert d.status == "bets" and d.best["bookmaker"] == "betrivers" and d.best["line"] == -8.0
+    (d,) = sm.decide(["g"], _snap(tie), c, t, 0.03)         # every book bettable: the evidence's order
+    assert d.status == "bets" and d.best["bookmaker"] == "betparx"
+    strict = GOOD + [("g", "betparx", 30, -7.5, -110, -110)]
+    (d,) = sm.decide(["g"], _snap(strict), c, t, 0.03, bettable=seven)
+    assert d.status == "book_not_bettable" and d.best["bookmaker"] == "betparx"
+
 # ── the card's rows ──────────────────────────────────────────────────────────
 
 GAMES = {"g": {"season": 2027, "game_date": "2026-12-05", "tip": TIP.to_pydatetime(),

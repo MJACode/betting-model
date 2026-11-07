@@ -33,8 +33,10 @@ THE RULE, per game, at 15:00 UTC on its date (models/ncaab_book_quotes.py):
   6. BET the single best quote of the game when its edge is above 0.03 and at
      least MIN_OTHER_BOOKS other books are in the consensus. Best = largest
      edge; a tie goes to the better line for the side, then the better price,
-     then the book's name in alphabetical order. A tie on line AND price is the
-     same bet at two books, so the alphabetical step only names which.
+     then a book a bet may be placed at, then the book's name in alphabetical
+     order. A tie on line AND price is the same bet at two books, so those last
+     two steps only name which (betPARX, fetch-only since 2026-11-06, never
+     takes a tie from a bettable book).
   7. A best edge above the data-error cap (models/ncaab_quote_bounds.EDGE_CAP)
      is not a bet: the game is decided as edge_cap with none, and the card's
      run fails so the failure alerter says so.
@@ -112,15 +114,23 @@ def price_quotes(q: pd.DataFrame, c_by_phase: dict, table: dict) -> pd.DataFrame
     return z
 
 
-def best_per_game(z: pd.DataFrame) -> pd.DataFrame:
+def best_per_game(z: pd.DataFrame, bettable=None) -> pd.DataFrame:
     """The single best priced quote per game: largest edge; a tie goes to the
-    better line for the side, then the better price, then the book's name."""
+    better line for the side, then the better price, then a book in `bettable`
+    (None: every book is), then the book's name.
+
+    A tie on line and price is the same bet at two books, so the bettable book
+    takes it (mike, 2026-11-07, after betPARX left the deciding books: 74 of the
+    89 replayed bets it held were exact ties, 70 with BetRivers alone). With
+    every book bettable the order is the evidence's exactly."""
     z = z[z["edge"].notna()].copy()
     z["_line_for_side"] = np.where(z["side"] == 1, z["line"], -z["line"])
     z["_dprice"] = dec(z["price"])
-    z = z.sort_values(["game_id", "edge", "_line_for_side", "_dprice", "bookmaker"],
-                      ascending=[True, False, False, False, True], kind="mergesort")
-    return z.drop_duplicates("game_id", keep="first").drop(columns=["_line_for_side", "_dprice"])
+    z["_unbettable"] = 0 if bettable is None else (~z["bookmaker"].isin(list(bettable))).astype(int)
+    z = z.sort_values(["game_id", "edge", "_line_for_side", "_dprice", "_unbettable", "bookmaker"],
+                      ascending=[True, False, False, False, True, True], kind="mergesort")
+    return z.drop_duplicates("game_id", keep="first").drop(
+        columns=["_line_for_side", "_dprice", "_unbettable"])
 
 
 # ── the artifact ──────────────────────────────────────────────────────────────
@@ -182,7 +192,8 @@ def decide(game_ids, snap: pd.DataFrame, c_by_phase: dict, table: dict, cut: flo
     output for them, with a `phase` column. bettable: the books a bet may be
     placed at now (config.BEST_LINE_BOOKMAKERS); the best quote is chosen over
     every book first, as the evidence chose it, and a best quote at a book not
-    bettable now is not replaced by the next one. dropped: the quotes the
+    bettable now is not replaced by the next one. An exact tie (same line and
+    price) is the same bet, so it goes to the bettable book (best_per_game). dropped: the quotes the
     snapshot dropped as data errors (models/ncaab_book_quotes.dropped_quotes),
     listed in each game's decision; nothing is priced from them."""
     out: list[Decision] = []
@@ -190,7 +201,7 @@ def decide(game_ids, snap: pd.DataFrame, c_by_phase: dict, table: dict, cut: flo
     drops = ({g: x for g, x in dropped.groupby("game_id")}
              if dropped is not None and len(dropped) else {})
     priced = price_quotes(snap, c_by_phase, table) if len(snap) else snap
-    best = best_per_game(priced).set_index("game_id") if len(priced) else None
+    best = best_per_game(priced, bettable).set_index("game_id") if len(priced) else None
     for gid in game_ids:
         q = by_game.get(gid)
         dg = drops.get(gid)
