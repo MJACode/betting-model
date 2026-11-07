@@ -459,11 +459,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // (HELD_OUT_RULES) and have no entry until they ship. The bet SETTLES ON THE
   // FULL GAME, so the long name says when the bet is placed, never a period:
   // "First Half" in this app names a bet on that period alone
-  // (nba_first_half_total_luck). The chip is LIVE Spread, as every other
-  // in-play chip starts with LIVE ("Early" alone reads as an opening line).
-  // Its picks appear on the Live segment only.
+  // (nba_first_half_total_luck). The chip is Early Spread (mike, 2026-11-05:
+  // "early is fine"), chosen over the design review's LIVE Spread. Its picks
+  // appear on the Live segment only.
   nba_live_spread_q12: {
-    shortLabel: 'LIVE Spread',
+    shortLabel: 'Early Spread',
     longLabel: 'NBA Early Live Spreads',
     type: 'game',
     statKey: null,
