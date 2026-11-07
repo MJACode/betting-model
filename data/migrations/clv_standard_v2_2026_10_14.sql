@@ -28,7 +28,7 @@
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-nba-q1-trend';
   work_left boolean;
   def text;
   new_def text;
@@ -370,7 +370,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post';
+      'clv-standard-v2-power-80-0.05-12-nba-q1-trend';
   END IF;
 
   SELECT EXISTS (
