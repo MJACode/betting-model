@@ -50,6 +50,9 @@ const TOP_PAD = 18; // room for the value label above each bar
 const BOTTOM_PAD = 18; // room for the game-index label under each bar
 // Opponent, date, and the LATEST tag under the newest bar.
 const LABELLED_BOTTOM_PAD = 46;
+// One more line under each bar when the games carry a defense rank
+// (the defense-toughness filter, lib/defenseTier).
+const RANK_LINE = 13;
 
 /**
  * Bar chart of a player's per-game stat, colored by whether the game won the
@@ -97,10 +100,13 @@ export function HitRateChart({
   const n = ordered.length;
   const barW = labelled ? LABELLED_BAR_W : BAR_W;
   const gap = labelled ? LABELLED_GAP : GAP;
-  const bottomPad = labelled ? LABELLED_BOTTOM_PAD : BOTTOM_PAD;
+  // Ranked only when every labelled game carries one: a partly ranked chart
+  // would print "#7" under some bars and nothing under others.
+  const ranked = labelled && games!.every((g) => g.rank != null);
+  const bottomPad = labelled ? LABELLED_BOTTOM_PAD + (ranked ? RANK_LINE : 0) : BOTTOM_PAD;
   // The chart keeps its plot height when labels are added, so the bars do not
   // shrink to make room for them.
-  const svgH = labelled ? height - BOTTOM_PAD + LABELLED_BOTTOM_PAD : height;
+  const svgH = labelled ? height - BOTTOM_PAD + bottomPad : height;
 
   const plotH = svgH - TOP_PAD - bottomPad;
   const maxV = Math.max(...ordered, line, median ?? 0, avg ?? 0);
@@ -217,10 +223,22 @@ export function HitRateChart({
                 >
                   {g.date}
                 </SvgText>
-                {isLatest ? (
+                {ranked ? (
                   <SvgText
                     x={cx}
                     y={labelY + 38}
+                    fill={isLatest ? colors.tint : colors.textPrimary}
+                    fontSize={9}
+                    fontWeight="700"
+                    textAnchor="middle"
+                  >
+                    {`#${g.rank}`}
+                  </SvgText>
+                ) : null}
+                {isLatest ? (
+                  <SvgText
+                    x={cx}
+                    y={labelY + 38 + (ranked ? RANK_LINE : 0)}
                     fill={colors.tint}
                     fontSize={font.size.nano}
                     fontWeight="800"
@@ -260,10 +278,11 @@ export function HitRateChart({
   const sel = labelled ? games![Math.min(selected, n - 1)] : null;
   const selHit = sel ? isHit(sel.value, line, side) : false;
   const ago = selected === 0 ? 'Latest' : selected === 1 ? '1 game ago' : `${selected} games ago`;
-  const caption = sel ? [ago, sel.date, sel.oppFull, fmtTick(sel.value)].filter(Boolean).join(' · ') : null;
+  const rankText = sel?.rank != null ? `#${sel.rank} defense` : null;
+  const caption = sel ? [ago, sel.date, sel.oppFull, rankText, fmtTick(sel.value)].filter(Boolean).join(' · ') : null;
   // What VoiceOver reads for the selected game: the whole sentence.
   const spoken = sel
-    ? `${ago}, ${sel.date}${sel.oppFull ? `, ${sel.oppFull}` : ''}, ${fmtTick(sel.value)}${unit ? ` ${unit}` : ''}, ${selHit ? 'hit' : 'miss'}`
+    ? `${ago}, ${sel.date}${sel.oppFull ? `, ${sel.oppFull}` : ''}${rankText ? `, number ${sel.rank} ranked defense` : ''}, ${fmtTick(sel.value)}${unit ? ` ${unit}` : ''}, ${selHit ? 'hit' : 'miss'}`
     : '';
 
   const scroller = (
