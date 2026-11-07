@@ -365,25 +365,44 @@ def blind(off: pd.DataFrame, side: str, games: pd.DataFrame) -> float:
     return roi(grade(o, games)) if len(o) else float("nan")
 
 
-def placebo(off: pd.DataFrame, rule: str, cut: float, games: pd.DataFrame,
-            runs: int = N_PLACEBO) -> np.ndarray:
-    """The rule's return with the model's (mean, sd) shuffled between games in
-    the same fetch, seeds 1..runs (bar 6)."""
-    o = off[off["rule"] == rule]
-    keys = o[["game_id", "fetch_at"]].drop_duplicates().reset_index(drop=True)
-    model = o.drop_duplicates("game_id").set_index("game_id")[["mu_m", "sd_m", "mu_t", "sd_t"]]
-    base = o.drop(columns=["mu_m", "sd_m", "mu_t", "sd_t", "p_win", "p_push", "ev"])
-    out = []
+def placebo_all(off: pd.DataFrame, rule: str, cuts, games: pd.DataFrame,
+                runs: int = N_PLACEBO) -> dict[float, np.ndarray]:
+    """{cut: the rule's return in each of `runs` shuffles} (bar 6). Each run
+    gives every decision game another game's model (mean, sd), drawn within
+    the same fetch, re-prices every offer and takes the best-EV offer per game
+    exactly as best() does (EV rounded to 12 decimals, ties to the earlier
+    book). Seeds 1..runs. Every offer is settled once, outside the runs."""
+    o = off[(off["rule"] == rule) & off["book"].isin(BOOKS) & (off["price"] >= M.PRICE_FLOOR)]
+    o = o.merge(games[["game_id", "home_score", "away_score"]], on="game_id").reset_index(drop=True)
+    res = M.settle(o["market"], o["side"], o["line"], o["home_score"], o["away_score"])
+    units, risk = M.units(res, o["price"])
+    gcode, gids = pd.factorize(o["game_id"])
+    first = pd.Series(np.arange(len(o))).groupby(gcode).first().to_numpy()
+    fcode = pd.factorize(o["fetch_at"].to_numpy()[first])[0]
+    is_tot = (o["market"] == "totals").to_numpy()
+    mu_g = np.where(is_tot[first], o["mu_t"].to_numpy()[first], o["mu_m"].to_numpy()[first])
+    sd_g = np.where(is_tot[first], o["sd_t"].to_numpy()[first], o["sd_m"].to_numpy()[first])
+    rank = o["book"].map({b: i for i, b in enumerate(BOOKS)}).to_numpy()
+    market, side, line, price_ = o["market"].to_numpy(), o["side"].to_numpy(), o["line"].to_numpy(),         o["price"].to_numpy(float)
+    n = len(gids)
+    idx_a = np.lexsort((np.arange(n), fcode))
+    out = {c: [] for c in cuts}
     for seed in range(1, runs + 1):
         rng = np.random.default_rng(seed)
-        src = keys.groupby("fetch_at")["game_id"].transform(lambda s: rng.permutation(s.to_numpy()))
-        mp = dict(zip(keys["game_id"], src))
-        donor = base["game_id"].map(mp)
-        sh = base.assign(**{c: model[c].reindex(donor).to_numpy() for c in model.columns})
-        d = best(price(sh))
-        d = d[d["ev"] >= cut]
-        out.append(roi(grade(d, games)) if len(d) else 0.0)
-    return np.asarray(out)
+        idx_b = np.lexsort((rng.random(n), fcode))
+        donor = np.empty(n, dtype=int)
+        donor[idx_a] = idx_b
+        mu, sd = mu_g[donor][gcode], sd_g[donor][gcode]
+        pw, pp = M.side_probs(market, side, line, mu, sd)
+        ev = np.round(M.ev_of(price_, pw, pp), 12)
+        order = np.lexsort((rank, -ev, gcode))
+        g_sorted = gcode[order]
+        pick = order[np.r_[True, g_sorted[1:] != g_sorted[:-1]]]
+        for c in cuts:
+            m = pick[ev[pick] >= c]
+            r = risk[m].sum()
+            out[c].append(float(units[m].sum() / r) if r else 0.0)
+    return {c: np.asarray(v) for c, v in out.items()}
 
 
 def pin_split(b: pd.DataFrame) -> dict:
@@ -421,7 +440,7 @@ def pin_split(b: pd.DataFrame) -> dict:
 
 
 def cell_verdict(off: pd.DataFrame, dec: pd.DataFrame, rule: str, cut: float,
-                 games: pd.DataFrame, n_placebo: int = N_PLACEBO) -> dict:
+                 games: pd.DataFrame, pl: np.ndarray | None = None) -> dict:
     """The house standard (docs/nba_models_2026.md 9.1) on one cell."""
     d = dec[dec["rule"] == rule]
     b = grade(d[d["ev"] >= cut], games)
@@ -440,7 +459,6 @@ def cell_verdict(off: pd.DataFrame, dec: pd.DataFrame, rule: str, cut: float,
         bb = grade(d[(d["ev"] >= a) & (d["ev"] < z)], games)
         bands[f"{a:.2f}-{z:.2f}"] = (len(bb), roi(bb) if len(bb) else float("nan"))
     bands_ok = all(r > 0 for n, r in bands.values() if n >= 30) and roi(b) > 0
-    pl = placebo(off, rule, cut, games, n_placebo) if n_placebo else None
     p95 = float(np.nanpercentile(pl, 95)) if pl is not None else float("nan")
     half = b["tip"] <= b["tip"].quantile(0.5)
     dk = b[b["book"] == "draftkings"]
@@ -503,8 +521,13 @@ def run_grade(conn, step: int, n_placebo: int = N_PLACEBO, seasons=GRADED) -> pd
     off = pd.concat(offs, ignore_index=True)
     dec = best(off)
     off.to_parquet(CACHE / f"offers_step{step}.parquet", index=False)
-    rows = [cell_verdict(off, dec, f"{mk}_{ph}", c, games, n_placebo)
-            for mk in M.MARKETS for ph in M.PHASES for c in CUTS]
+    rows = []
+    for mk in M.MARKETS:
+        for ph in M.PHASES:
+            rule = f"{mk}_{ph}"
+            pls = placebo_all(off, rule, CUTS, games, n_placebo) if n_placebo else {}
+            rows += [cell_verdict(off, dec, rule, c, games, pls.get(c)) for c in CUTS]
+            print(f"{rule} judged", flush=True)
     return pd.DataFrame(rows)
 
 
