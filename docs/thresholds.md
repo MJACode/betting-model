@@ -1481,6 +1481,37 @@ makes 1,143 bets, +74.40 units, +5.90%, [0.71, 11.69]: it now clears the bar it
 missed. No earlier fetch time beats tip minus 10 on the same games (research
 round 5 `h2h.csv`). `docs/sports/ncaab.md` has the seasons.
 
+## NCAAB — in play: three game-state models, the best few a night (2026-11-07, mike)
+
+mike: *"3-5 best per night"*. Evidence and the full grid: `docs/sports/ncaab.md`,
+"In play". Every bet settles on the full game.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | EV, per NIGHT: the EV the graded decisions exceeded 4 times per expected decision on a slate that size, never under the rule's floor; at most 5 bets a slate night, first come, best EV first within a fetch | `models/ncaab_live_ig.night_cut`, `NIGHT_TARGET`, `NIGHT_CAP` |
+| the rule floors | `ncaab_live_spread_h1` 0.02, `ncaab_live_spread_h2` 0.05, `ncaab_live_total_h2` 0.02: each rule's lowest cut that passed the house standard | `MODEL_OWN_EV_FLOOR`, `models/ncaab_live_ig.RULES` |
+| prob / edge filter | 0.0 / 0.0: neither binds beyond the cut | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS`, `MODEL_EDGE_THRESHOLDS` |
+| probability | their own (P(win given no push) at the deciding price); no calibration map | `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, as graded, pinned | `MODEL_MIN_ODDS` |
+| data-error cap | edge 0.50 (largest graded edge 0.453) | `models/ncaab_quote_bounds.EDGE_CAP` |
+| decided once | per game and rule, a row in `ncaab_live_decisions`, bet or not | `models/ncaab_live_loop.py` |
+
+**Graded on the night's selection, walk-forward 2022-23 to 2025-26** (half-hour
+purchase; each season's model and night table from earlier seasons only):
+
+| Model | Bets | Units | Return | Status | Prices (min / median / max) |
+|---|---|---|---|---|---|
+| all three | 2,533 on 588 nights (4.3 a night) | +290.4 | +10.1% (95% +6.4 .. +13.8) | **LIVE** | -145 / -115 / +185 |
+| `ncaab_live_spread_h1` | 834 | +93.8 | +9.9% | **LIVE** | |
+| `ncaab_live_spread_h2` | 834 | +113.0 | +11.9% | **LIVE** | |
+| `ncaab_live_total_h2` | 865 | +83.7 | +8.5% | **LIVE** | |
+
+Every season positive (+8.2% to +13.0%), both halves of the period (+9.0% /
++11.1%), DraftKings alone +9.0% on 658, the placebo's 95th percentile -1.1% (200
+runs). Held out: the first-half total and the second-half moneyline (fail the
+bands), the first-half moneyline (passes; stale-soft-book signature). Go-live
+gate standing: 0 settled of 50.
+
 ## NBA — the in-play game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 mike, 2026-11-04: *"everything goes live now, that's why we do back testing ...

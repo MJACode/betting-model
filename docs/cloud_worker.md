@@ -307,6 +307,27 @@ is not scored; the check was added in the same deploy as the loop.
 
 `--dry-run` makes no Odds API call and writes nothing.
 
+### NCAAB in-play loop (added 2026-11-07)
+
+`models/ncaab_live_loop.py`, job `ncaab_live` on `pollers`, every 10 minutes
+11am-2:50am ET as a supervisor (one launch runs a whole slate and exits after 3
+idle ticks). The models and their evidence: `docs/sports/ncaab.md`, "In play".
+It beats `job_heartbeats` every 5 minutes while a slate runs
+(`tracking/job_heartbeat.ACTIVE_HOURS_ET`). The decision ledger
+`ncaab_live_decisions` is created by `data/migrations/ncaab_live_decisions_2026_11_07.sql`
+(applied by `data.view_migrations`); the loop refuses to start without it.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NCAAB_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NCAAB` or `DISCORD_WEBHOOK_LIVE_NCAAB` | the channel id is set (2026-11-07) | Where NCAAB live picks post. **Required**: no fallback to the shared live or #ncaab channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`); with neither set the loop decides nothing and exits 3 while a game is in progress. A channel id resolves through `DISCORD_BOT_TOKEN`, set on pollers |
+| `NCAAB_LIVE_FETCH_OFFSET_SEC` | `262` | Fetch at each :00 and :30 minus this (the purchase served the market 261-263 s before each instant, 2022-23 on) |
+| `NCAAB_LIVE_FETCH_WINDOW_SEC` / `NCAAB_LIVE_RETRY_GAP_SEC` | `240` / `60` | How long after that instant an attempt may start, and the seconds between attempts |
+| `NCAAB_LIVE_PBP_WAIT_SEC` / `NCAAB_LIVE_PBP_RECHECK_SEC` | `90` / `60` | ESPN's summary is read this long after the fetch and again this much later (scoring plays served a median 37 s after their wallclock, longest 58 s, 2026-11-07) |
+| `NCAAB_LIVE_HEADER_RECHECK_SEC` / `NCAAB_LIVE_PLAY_LAG_MAX_SEC` | `20` / `120` | Header score ahead of the plays: re-read after this; refuse when the newest play is older than the second while the clock runs |
+| `NCAAB_LIVE_CALL_CAP` / `NCAAB_LIVE_CREDIT_CAP` | `200` / `600` | Per-process ceilings (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
+| `NCAAB_LIVE_POLL_SEC` / `NCAAB_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
+
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 
 `live_scoreboard` job, `pollers` service, every minute 24x7
