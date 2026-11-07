@@ -235,40 +235,44 @@ def run_fit(conn) -> dict:
 # ── quotes, decisions, grade ─────────────────────────────────────────────────
 
 def load_fetches(conn) -> pd.DataFrame:
-    df = _read(conn, "SELECT requested_at, snapshot_ts FROM ncaab_inplay_fetches")
+    """Every bought snapshot: what was asked for, what the feed served, and the
+    commit time its rows carry (odds.created_at defaults to the transaction's
+    now(), the same instant as the ledger row's pulled_at)."""
+    df = _read(conn, "SELECT requested_at, snapshot_ts, pulled_at FROM ncaab_inplay_fetches")
     df["requested_at"] = pd.to_datetime(df["requested_at"], utc=True)
     df["served"] = pd.to_datetime(df["snapshot_ts"], utc=True)
-    return df[["requested_at", "served"]].sort_values("served").reset_index(drop=True)
+    df["pulled_at"] = pd.to_datetime(df["pulled_at"], utc=True)
+    return df[["requested_at", "served", "pulled_at"]].sort_values("served").reset_index(drop=True)
 
 
 def load_quotes(conn, season: int) -> pd.DataFrame:
     def build():
         q = _read(conn, """
-            SELECT o.game_id, o.market, o.bookmaker AS book, o.snapshot_at, o.home_price,
-                   o.away_price, o.spread_home, o.total_line, o.over_price, o.under_price
+            SELECT o.game_id, o.market, o.bookmaker AS book, o.snapshot_at, o.created_at,
+                   o.home_price, o.away_price, o.spread_home, o.total_line, o.over_price,
+                   o.under_price
               FROM odds o JOIN games g ON g.game_id = o.game_id
              WHERE o.sport = 'NCAAB' AND g.season = %s AND o.source = %s
                AND o.snapshot_type = 'in_play'          -- idx_odds_source_inplay
         """, (season, INPLAY_SOURCE))
         q["stamp"] = pd.to_datetime(q["snapshot_at"], utc=True)
+        q["stored_at"] = pd.to_datetime(q["created_at"], utc=True)
         for c in ("home_price", "away_price", "spread_home", "total_line", "over_price",
                   "under_price"):
             q[c] = pd.to_numeric(q[c], errors="coerce").astype(float)
-        return q.drop(columns="snapshot_at")
-    return _cached(f"quotes_{season}", build)
+        return q.drop(columns=["snapshot_at", "created_at"])
+    return _cached(f"quotes2_{season}", build)
 
 
 def assign_fetch(q: pd.DataFrame, fetches: pd.DataFrame) -> pd.DataFrame:
-    """Each quote to the first fetch that could have served it (served >=
-    stamp); an identical quote stored by two fetches keeps the first."""
-    q = q.sort_values("stamp")
+    """Each quote to the snapshot that SERVED it: its row was written in that
+    snapshot's transaction (stored_at == pulled_at). `fetches` is the cadence's
+    set, so a quote another cadence's snapshot served is not in it. An unchanged
+    quote served by two snapshots was stored by each and is in each."""
     f = fetches.rename(columns={"served": "fetch_at"})
-    x = pd.merge_asof(q, f.sort_values("fetch_at"), left_on="stamp", right_on="fetch_at",
-                      direction="forward")
-    x = x.dropna(subset=["fetch_at"])
-    key = ["game_id", "market", "book", "stamp", "home_price", "away_price", "spread_home",
-           "total_line", "over_price", "under_price"]
-    return x.drop_duplicates(key).reset_index(drop=True)
+    x = q.merge(f[["pulled_at", "fetch_at", "requested_at"]], left_on="stored_at",
+                right_on="pulled_at", how="inner")
+    return x.drop(columns=["pulled_at"]).reset_index(drop=True)
 
 
 def state_at(plays: pd.DataFrame, at: pd.DataFrame, col: str) -> pd.DataFrame:
@@ -382,6 +386,40 @@ def placebo(off: pd.DataFrame, rule: str, cut: float, games: pd.DataFrame,
     return np.asarray(out)
 
 
+def pin_split(b: pd.DataFrame) -> dict:
+    """Where Pinnacle quoted the same game and market in the same fetch: the
+    bet's number against Pinnacle's, in the bet's favour (points; no-vig
+    probability for a moneyline), and whether Pinnacle sits nearer the model or
+    the soft book. ROI concentrated where the soft book is well off Pinnacle in
+    the bet's favour is a stale soft book, which a live bet would not get."""
+    if not len(b) or "pin_num" not in b:
+        return {}
+    sp, to = b["market"] == "spreads", b["market"] == "totals"
+    a_side = b["side"].isin(["home", "over"])
+    p_soft = 1.0 / M.dec(b["price"])
+    p_pin_side = np.where(b["side"] == "home", b["pin_num"], 1.0 - b["pin_num"])
+    fav = np.where(sp, np.where(a_side, b["line"] - b["pin_num"], b["pin_num"] - b["line"]),
+                   np.where(to, np.where(a_side, b["pin_num"] - b["line"], b["line"] - b["pin_num"]),
+                            p_pin_side - p_soft))
+    tol = np.where(sp | to, 1.0, 0.03)
+    has = b["pin_num"].notna()
+    bucket = np.select([~has, np.abs(fav) <= tol, fav > tol], ["no pinnacle", "within", "soft better"],
+                       "soft worse")
+    model = np.where(sp, -b["mu_m"], np.where(to, b["mu_t"], np.nan))
+    nearer = np.where(sp | to, np.where(np.abs(b["pin_num"] - model) < np.abs(b["line"] - model),
+                                        "pin nearer model", "soft nearer model"), "")
+    out = {}
+    for k in ("no pinnacle", "within", "soft better", "soft worse"):
+        g = b[bucket == k]
+        if len(g):
+            row = {"n": len(g), "roi": round(roi(g), 4)}
+            if k == "soft better":
+                nn = pd.Series(nearer[bucket == k]).value_counts().to_dict()
+                row["pin_nearer_model"] = int(nn.get("pin nearer model", 0))
+            out[k] = row
+    return out
+
+
 def cell_verdict(off: pd.DataFrame, dec: pd.DataFrame, rule: str, cut: float,
                  games: pd.DataFrame, n_placebo: int = N_PLACEBO) -> dict:
     """The house standard (docs/nba_models_2026.md 9.1) on one cell."""
@@ -416,6 +454,7 @@ def cell_verdict(off: pd.DataFrame, dec: pd.DataFrame, rule: str, cut: float,
         "placebo_p95": round(p95, 4),
         "dk_only": (len(dk), round(roi(dk), 4) if len(dk) else None),
         "prices": (float(b["price"].min()), float(b["price"].median()), float(b["price"].max())),
+        "pinnacle": pin_split(b),
         "bar1_n": len(b) >= 200, "bar2_ci": lo > 0,
         "bar3_seasons": len(judged) >= 2 and sum(r <= 0 for _, r in judged) <= 1,
         "bar4_blind": roi(b) > bl, "bar5_bands": bands_ok,
@@ -436,10 +475,21 @@ def season_offers(conn, S: int, states: dict, games: pd.DataFrame,
     if not len(q):
         print(f"season {S}: no in-play quotes stored")
         return None
-    qs = quote_states(assign_fetch(q, fetches), plays[plays["game_id"].isin(keep)])
+    aq = assign_fetch(q, fetches)
+    qs = quote_states(aq, plays[plays["game_id"].isin(keep)])
     off = priced_offers(qs, models, load_priors(conn, S))
     off["season"] = S
-    print(f"season {S}: {len(q):,} quotes, {off['game_id'].nunique():,} games decided")
+    pin = qs[qs["book"] == "pinnacle"]
+    pin = pin.assign(pin_num=np.where(pin["market"] == "spreads", pin["spread_home"],
+                     np.where(pin["market"] == "totals", pin["total_line"],
+                              M.novig_home(pin["home_price"].fillna(-110), pin["away_price"].fillna(-110)))),
+                     pin_age=(pin["fetch_at"] - pin["stamp"]).dt.total_seconds(),
+                     pin_fresh=pin["pts_since"] == 0)
+    off = off.merge(pin[["game_id", "market", "fetch_at", "pin_num", "pin_age", "pin_fresh"]]
+                    .drop_duplicates(["game_id", "market", "fetch_at"]),
+                    on=["game_id", "market", "fetch_at"], how="left")
+    print(f"season {S}: {len(q):,} quotes, {len(aq):,} served at this cadence, "
+          f"{off['game_id'].nunique():,} games decided")
     return off
 
 

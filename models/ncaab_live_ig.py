@@ -201,8 +201,9 @@ class StateModel:
 # ── prices ───────────────────────────────────────────────────────────────────
 
 def _phi(x):
-    x = np.asarray(x, float)
-    return 0.5 * (1.0 + np.vectorize(math.erf)(x / math.sqrt(2.0)))
+    """The standard normal CDF (scipy is a worker dependency, requirements.txt)."""
+    from scipy.special import ndtr
+    return ndtr(np.asarray(x, float))
 
 
 def dec(price) -> np.ndarray:
