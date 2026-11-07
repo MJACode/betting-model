@@ -88,3 +88,35 @@ games with a shooting-luck gap and a total offer: 3,202. The bets each cell woul
 **Every family M cell is under 200 bets and fails bar 1 by construction**: the step is rare (about 29 to 42 games a
 season), so a first-quarter moneyline on it cannot be told from zero by the house standard. It is graded and reported
 in full anyway. The over at gap >= 2 bets the same 595 games the live first-half over was graded on.
+
+## 7. Results (graded 2026-11-07, run `2026-11-07-q1mt`)
+
+Stored in Supabase before it was read (14 rows in `nba_game2_cells`: 12 registered, 2 controls). 200 placebo runs a
+cell. **0 of the 12 cells pass; 1 clears the 95% interval alone** (0.3 expected by chance).
+
+**Family T, the shooting-luck gap on the first-quarter total: nothing.**
+
+| Side | Gap >= 1 | >= 2 | >= 3 | >= 4 |
+|---|---|---|---|---|
+| over | 1,043 bets, -2.5% | 595, +0.9% (-6.9% to +8.5%) | 323, -3.1% | 150, +2.7% |
+| under | 1,067, -2.5% | 594, -5.5% | 295, -1.9% | 122, +8.4% (-9.3% to +26.6%) |
+
+The over at gap >= 2 is the first-half model's cut on the same 595 games: +8.0% on the first half, +0.9% on the first
+quarter. The effect does not carry to the first quarter. **Closed.**
+
+**Family M, the step's hot team on the first-quarter moneyline:**
+
+| Cell | Bets | Units | Return | 95% interval | 2023-24 / 2024-25 / 2025-26 | Fails |
+|---|---|---|---|---|---|---|
+| **the spread check, k >= 2 (the live rule)** | 87 | +17.78 | +25.8% | **+1.7% to +50.0%** | +39.3% / +45.5% / +4.3% | bar 1 (bets) only |
+| the spread check, k >= 4 | 23 | +3.85 | +22.9% | -27.2% to +74.5% | +43.2% / +32.4% / +5.8% | bets, interval, seasons |
+| no check, k >= 2 | 125 | +12.86 | +10.5% | -7.6% to +28.8% | +19.8% / +27.3% / -5.9% | bets, interval |
+| no check, k >= 4 | 29 | +2.81 | +11.5% | -29.9% to +52.4% | +55.5% / +22.4% / -19.9% | bets, interval, seasons |
+
+- **The live rule on the moneyline clears five of six bars and fails only the 200-bet bar**, the same standing as
+  `nba_q1_trend` on the spread. Its bands are positive (k 0-2 +3.2% on 85; k 2-4 +26.8% on 64; k 4+ +22.9% on 23) and
+  it is above its placebo.
+- **It is the same bet.** It takes the same team in 87 of the spread model's 88 games (the 88th had no moneyline
+  offer). The hot team is getting points in 66 of the 88 spread bets, so the moneyline is mostly a plus price (median
+  +130, up to +360). Live beside the spread model it would double the stake on one signal; it adds no game.
+- 2025-26, the latest season, made +4.3% on 36 bets, against +39% and +46% in the two before.
