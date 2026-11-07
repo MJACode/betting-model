@@ -448,7 +448,7 @@ export interface TeamPickRecords {
   teamTotals: number;
   /** First-half bets (a first half's total or spread): in `settled`, in no tile. */
   firstHalves: number;
-  /** First-quarter bets (a first quarter's spread): in `settled`, in no tile. */
+  /** First-quarter bets (a first quarter's spread or moneyline): in `settled`, in no tile. */
   firstQuarters: number;
   /** A ledger read failed. Unknown stamps stayed in the counts. */
   ledgerUnread: boolean;

@@ -968,8 +968,9 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   nba_q1_trend_ml:
     'What our model says is the chance this team wins the first quarter, leaving out a tied quarter, ' +
     'which returns the stake. It is the market’s fair chance plus about 14 percentage points, the extra ' +
-    'these bets won over the last three NBA seasons (57% won where the market’s fair chance averaged 43%). ' +
-    'That is only 87 bets, so the real extra could be much smaller. Read it as an upper bound.',
+    'these bets won over the last three NBA seasons (of the 81 that were not tied, 57% won where the market’s ' +
+    'fair chance averaged 43%). That is only 87 bets, 6 of them tied, so the real extra could be much smaller. ' +
+    'Read it as an upper bound.',
   // The win chance the bet book's own spread implies
   // (models/ncaab_moneyline_own_spread.py); the edge is that minus the same
   // book's moneyline price's implied chance (UX review, 2026-11-02).
@@ -1137,6 +1138,26 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         `finds one. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
       empty: `This model bets while games are being played. ${LIVE_NOT_IN_LIST}`,
       note: 'In-play bets appear on Live Signals, not in this list.',
+    };
+  }
+  // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): a moneyline
+  // has no line, so its page names only the price, as its Pick Detail note
+  // does. It says a tied quarter returns the stake (some books also sell a
+  // three-way first-quarter moneyline, where a tie loses), and that it bets the
+  // same team in the same games as the first-quarter spread model (UX review,
+  // 2026-11-07).
+  if (modelId === 'nba_q1_trend_ml') {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, about an hour before tip-off, and posts a bet only when it ' +
+        'finds one. It bets the same team, in the same games, as the NBA First Quarter Spreads model. ' +
+        'A tied first quarter returns the stake. A posted bet is never re-priced: it stays at the price it ' +
+        'posted at.',
+      empty:
+        'This model checks each game about an hour before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted about an hour before tip-off and never re-priced.',
     };
   }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
