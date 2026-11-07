@@ -180,3 +180,9 @@ A surface with an extra GATE can only lose rows, and does it silently —
   in-play model announces its BETs there, and a new in-play model that writes
   `is_live` picks without calling `notify_discord_live` is the NFL bug of
   2026-09-05 again. Webhooks, fallbacks and the routing: `docs/discord.md`.
+- **A PICK'S OWN STAKE IS THE PUBLISHED STAKE.** (mike, 2026-11-06.)
+  `picks.stake_units` (1-3u to win; NULL is the flat 1u) sizes the pick on
+  every surface: `stake_for(kelly, odds, stake_units)`, the app's `stakeFor`,
+  and the three-argument SQL unit functions the record views call. A surface
+  that sizes a pick without it shows a 2u bet as 1u. Only NCAAB agreement
+  sizing writes it today (`models/ncaab_stake.py`, `docs/sports/ncaab.md`).

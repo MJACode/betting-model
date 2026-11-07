@@ -584,10 +584,11 @@ export function PicksHomeScreen() {
     return { total: todayData.length, bet, paused };
   }, [todayData, thresholdsRevision]);
 
-  // Signals / Live views: exposure of the recommended stakes on screen.
+  // Signals / Live views: exposure of the recommended stakes on screen, each
+  // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick)), 0);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
   }, [filtered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,

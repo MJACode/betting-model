@@ -8,11 +8,14 @@ import {
 import {
   isProbOnlyModel,
   stakeFor,
+  stakeReasonLine,
   formatUnits,
+  FLAT_CONVICTION,
   MAX_RISK_UNITS,
   isUnlockedPreview,
   passesActionFilter,
 } from '@/lib/thresholds';
+import { trueMinus } from '@/lib/signalsCard';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
 import {
@@ -52,7 +55,14 @@ export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
   // (2026-09-12). It shows the pick's own side, as the label does.
   const lineMarket = marketForPick(pick);
   const implied = pick.decision_implied_prob ?? pick.dk_implied_prob;
-  const stake = stakeFor(pick.kelly_fraction, odds);
+  // The pick's own stake (picks.stake_units, units to win) when it carries
+  // one, the usual 1u otherwise: the same stake as the card and Discord.
+  const stake = stakeFor(pick.kelly_fraction, odds, pick.stake_units);
+  // Why it is above 1u (picks.stake_reason), as a sentence; null on a 1u pick.
+  const reason = stakeReasonLine(stake, pick.stake_reason);
+  const reasonSentence = reason
+    ? `${trueMinus(reason)}${/[.!?]$/.test(reason) ? '' : '.'} `
+    : '';
   // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
   // pick must keep being explained the way it was made.
   const isProbOnly = isProbOnlyModel(pick.model_id);
@@ -114,13 +124,20 @@ export function ReasoningCard({ pick, paused = false, stale = false }: Props) {
               : formatUnits(stake.conviction)
           }
           sub={
+            // Under the cap the "you lay" sentence would name the uncapped
+            // stake; the cap sentence below gives the real numbers instead.
             (stake.priced
-              ? `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(odds)} you lay ${formatUnits(stake.risk)}. `
+              ? (stake.capped
+                ? ''
+                : `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(odds)} you lay ${formatUnits(stake.risk)}. `)
               : `No book price on this market, so there's nothing to gross the stake up against — this is the bare conviction. `) +
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
               : '') +
-            `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
+            (stake.conviction > FLAT_CONVICTION
+              ? `Sized up from the usual 1u. ${reasonSentence}`
+              : `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. `) +
+            `Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
           }
         />
       ) : null}

@@ -1,8 +1,8 @@
 """Rank an NBA prop bet by its EV PERCENTILE WITHIN ITS OWN MODEL. Pure, no I/O.
 
 The NBA prop door (scripts/nba_props_card.py) gives each game ONE bet across both NBA prop
-models and the night at most four. mike, 2026-10-20: "Only the strongest picks need to be sent,
-like NHL." The two models' EVs are not on one scale:
+models and the night at most six (four until 2026-11-04). mike, 2026-10-20: "Only the strongest
+picks need to be sent, like NHL." The two models' EVs are not on one scale:
   - nba_prop_market's EV is Pinnacle's no-vig under times the price: median 0.020;
   - nba_prop_projection's is its own calibrated probability times the price: median 0.083.
 Ranked on raw EV, the projection model held 99.7% of the pooled top tenth and the market model
@@ -12,6 +12,12 @@ four a night in tip order (2023-24..2025-26) it gave +153.6 units, +9.69% (90% r
 +13.74), the market model on 29.8% of the bets (re-run from the breakpoints below: +153.8
 units, +9.69%, 4 of 1,867 bets different); raw EV gave +134.0 units, +8.86%. The gap is inside
 the noise: the choice is about which models get to bet, not about units.
+
+THE PERCENTILE DOES NOT RANK QUALITY AT THE TOP (measured 2026-11-04, docs/nba_models_2026.md
+section 14). One a game, by own-model percentile band: 0.80-0.90 +10.1%, 0.90-0.95 +8.9%,
+0.95-0.98 +5.0%, 0.98-1.00 +4.7%; the projection model's top eighth claims +24.6% and returns
++6.6%. So it shares the night between the two models; it is not used to pick the night's best
+(the best four of a night by percentile graded +102.5 units against +153.6 in tip order).
 
 BREAKPOINTS: each model's EV at the 0th, 1st, ..., 100th percentile (101 values, rounded to 4
 decimals) of the bets it would have made at its LIVE rule over 2023-24, 2024-25 and 2025-26:

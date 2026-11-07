@@ -85,6 +85,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import ncaab_stake  # noqa: E402
 import data.ingestors.ncaab_first_half_odds as feed  # noqa: E402
 import models.ncaab_first_half_total as ft  # noqa: E402
 import models.ncaab_quote_bounds as qb  # noqa: E402
@@ -275,7 +276,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "confidence_tier", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
          "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
-         "downgrade_reason")
+         "downgrade_reason",
+         "stake_units", "stake_reason")
 # Its own column list, NOT models.scorer._insert_picks: that one stamps
 # model_probability_cal from the promoted map, and this model decides on its
 # own number (config.MODELS_ON_OWN_PROBABILITY).
@@ -343,7 +345,7 @@ def pick_rows(decisions: list[ft.Decision], games: dict[str, dict],
             "game_id": d.game_id, "model_id": MODEL_ID, "sport": SPORT,
             "game_date": g.get("game_date"), "game_time": g.get("commence_time"),
             "pick_side": b.side, "pick_label": label,
-            # P(side wins | no push) at this number: the number the 0.02 cut
+            # P(side wins | no push) at this number: the number the cut
             # was measured on (models/ncaab_first_half_total.py).
             "model_probability": round(b.prob, 4),
             "model_probability_cal": round(b.prob, 4),
@@ -409,7 +411,9 @@ def publish(conn, rows: list[dict], decided: list[dict]) -> tuple[int, int]:
             continue
         n_decided += 1
         row = by_game.get(rec["game_id"])
-        if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
+        # A bet an earlier NCAAB bet on this game and side agrees with is
+        # staked at NCAAB_AGREEMENT_STAKE_UNITS (models/ncaab_stake.py).
+        if row is not None and conn.execute(_INSERT, ncaab_stake.stamp(conn, row, _COLS)).fetchone():
             n_bets += row["signal_type"] == "BET"
     conn.commit()
     return n_bets, n_decided

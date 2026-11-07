@@ -83,6 +83,7 @@ check('DraftKings is bettable', isBettableBook(MODEL_BOOK));
 check('Pinnacle is not', !isBettableBook('pinnacle'));
 check('Bovada is not', !isBettableBook('bovada'));
 check('ESPN BET is not (mike, 2026-09-03)', !isBettableBook('espnbet'));
+check('betPARX is not: a few states only (mike, 2026-11-06)', !isBettableBook('betparx'));
 check('an unknown key is not bettable', !isBettableBook('somebook'));
 check(
   'every book has a real name and a short label',

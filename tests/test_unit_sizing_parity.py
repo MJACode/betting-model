@@ -30,6 +30,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "unit_sizing_parity.json"
 # a bet nobody was given.
 KELLYS = (0.001, 0.0167, 0.022, 0.025, 0.0328, 0.039, 0.05, 0.2)
 ODDS = (-110, -115, -135, -147, -200, -325, -1000, 100, 150, 600, None)
+# A pick's own stake (picks.stake_units, 2026-11-06): 2u and 3u to win at every
+# price above, plus values outside 1..3 that must fall back to the flat 1u. A
+# row carries "stake_units" only when it is set; a row without it is 1u.
+STAKE_UNITS = (2, 3, 1.5, 0.5, 4)
 
 
 def _rows() -> list[dict]:
@@ -39,6 +43,18 @@ def _rows() -> list[dict]:
             s = dn.stake_for(k, o)
             out.append({
                 "kelly": k, "odds": o,
+                "conviction": s.conviction,
+                "risk": round(s.risk, 9),
+                "win": round(s.win, 9),
+                "capped": s.capped,
+                "priced": s.priced,
+                "fmt": dn.fmt_stake(s),
+            })
+    for u in STAKE_UNITS:
+        for o in ODDS:
+            s = dn.stake_for(0.025, o, u)
+            out.append({
+                "kelly": 0.025, "odds": o, "stake_units": u,
                 "conviction": s.conviction,
                 "risk": round(s.risk, 9),
                 "win": round(s.win, 9),
@@ -77,11 +93,13 @@ def test_the_fixture_actually_covers_the_interesting_branches():
     cases = _rows()
     assert any(c["capped"] for c in cases), "no capped case"
     assert any(not c["priced"] for c in cases), "no unpriced case"
-    # Conviction is FLAT while the tier scale is retired, so "reaches max
-    # conviction" is no longer a branch to cover. What still matters is that
-    # the fixture spans the price axis, which is what stake_for actually
-    # varies on now.
-    assert all(c["conviction"] == 1.0 for c in cases), "conviction is flat"
+    # Conviction is FLAT unless the pick carries its own stake_units; values
+    # outside 1..3 fall back to flat. The fixture spans the price axis for
+    # both.
+    assert all(c["conviction"] == 1.0 for c in cases if "stake_units" not in c), "conviction is flat"
+    assert any(c.get("stake_units") == 2 and c["conviction"] == 2.0 for c in cases), "no 2u case"
+    assert any(c.get("stake_units") == 3 and c["capped"] for c in cases), "no capped 3u case"
+    assert all(c["conviction"] == 1.0 for c in cases if c.get("stake_units") in (0.5, 4)),         "a stake outside 1..3 must be the flat unit"
     assert any(c["risk"] > c["win"] for c in cases), "no favourite case"
     assert any(c["risk"] < c["win"] for c in cases), "no underdog case"
     assert any(c["conviction"] == 1.0 for c in cases), "never reaches min conviction"

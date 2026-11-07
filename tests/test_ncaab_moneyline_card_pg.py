@@ -75,7 +75,7 @@ def db(dsn, monkeypatch, p_home):
                  home_price TEXT, away_price TEXT, home_link TEXT, away_link TEXT)""")
     cols = ", ".join(f"{col} TEXT" for col in card._COLS
                      if col not in ("model_probability", "dk_implied_prob", "edge", "scored_line"))
-    c.execute(f"""CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, {cols},
+    c.execute(f"""CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, {cols}, condition_status TEXT,
                   model_probability NUMERIC NOT NULL, dk_implied_prob NUMERIC NOT NULL,
                   edge NUMERIC NOT NULL, scored_line NUMERIC,
                   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")

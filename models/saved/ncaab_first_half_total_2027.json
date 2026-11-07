@@ -13,7 +13,7 @@
   "hardrockbet",
   "betparx"
  ],
- "cut": 0.02,
+ "cut": 0.025,
  "min_price": -200.0,
  "map": {
   "a": -1.928448688532018,
@@ -31977,10 +31977,10 @@
    29
   ]
  },
- "built_at": "2026-11-03T18:36:26Z",
+ "built_at": "2026-11-06T18:33:52Z",
  "command": "python -m scripts.ncaab_first_half_total_build --cache <copy of the three reads> --quotes <tip60 first-half totals> --asof-fg <later fg_odds parts> --last-season 2026",
  "replay": {
-  "cut": 0.02,
+  "cut": 0.025,
   "rule": "every game, no games-played wait; best book; edge > cut",
   "maps": [
    {
@@ -32011,58 +32011,58 @@
   "with_floor": {
    "ungradable_bets": 0,
    "pooled": {
-    "bets": 2527,
-    "record": "1383-1121-23",
-    "units": 123.78,
-    "roi_pct": 4.34,
+    "bets": 1887,
+    "record": "1047-819-21",
+    "units": 127.31,
+    "roi_pct": 5.98,
     "price_min": -160.0,
-    "price_max": 155.0,
+    "price_max": 115.0,
     "ci95": [
-     0.45,
-     8.05
+     1.51,
+     10.33
     ]
    },
    "2024": {
-    "bets": 859,
-    "record": "474-367-18",
-    "units": 67.27,
-    "roi_pct": 7.06,
+    "bets": 664,
+    "record": "366-282-16",
+    "units": 54.28,
+    "roi_pct": 7.39,
     "price_min": -125.0,
     "price_max": 114.0
    },
    "2025": {
-    "bets": 852,
-    "record": "467-380-5",
-    "units": 41.03,
-    "roi_pct": 4.27,
+    "bets": 620,
+    "record": "346-269-5",
+    "units": 44.03,
+    "roi_pct": 6.28,
     "price_min": -140.0,
     "price_max": 115.0
    },
    "2026": {
-    "bets": 816,
-    "record": "442-374-0",
-    "units": 15.48,
-    "roi_pct": 1.65,
+    "bets": 603,
+    "record": "335-268-0",
+    "units": 29.01,
+    "roi_pct": 4.18,
     "price_min": -160.0,
-    "price_max": 155.0
+    "price_max": 110.0
    },
-   "min_ev": 0.0343,
-   "median_ev": 0.059,
-   "under_share": 0.778,
+   "min_ev": 0.0426,
+   "median_ev": 0.068,
+   "under_share": 0.78,
    "books": {
-    "fanduel": 739,
-    "williamhill_us": 517,
-    "betrivers": 397,
-    "hardrockbet": 394,
-    "draftkings": 247,
-    "betmgm": 233
+    "fanduel": 543,
+    "williamhill_us": 414,
+    "hardrockbet": 289,
+    "betrivers": 273,
+    "draftkings": 202,
+    "betmgm": 166
    },
    "vs_research": {
-    "research_bets": 2527,
-    "replay_bets": 2527,
-    "research_units": 123.78,
-    "in_both": 2527,
-    "identical_game_side_book_line_price": 2527,
+    "research_bets": 1887,
+    "replay_bets": 1887,
+    "research_units": 127.31,
+    "in_both": 1887,
+    "identical_game_side_book_line_price": 1887,
     "differ": [],
     "only_research": [],
     "n_only_research": 0,
@@ -32074,64 +32074,51 @@
   "without_floor": {
    "ungradable_bets": 0,
    "pooled": {
-    "bets": 2529,
-    "record": "1385-1121-23",
-    "units": 125.78,
-    "roi_pct": 4.4,
-    "price_min": -240.0,
-    "price_max": 155.0,
+    "bets": 1887,
+    "record": "1047-819-21",
+    "units": 127.31,
+    "roi_pct": 5.97,
+    "price_min": -230.0,
+    "price_max": 115.0,
     "ci95": [
-     0.57,
-     8.12
+     1.51,
+     10.33
     ]
    },
    "2024": {
-    "bets": 859,
-    "record": "474-367-18",
-    "units": 67.27,
-    "roi_pct": 7.06,
+    "bets": 664,
+    "record": "366-282-16",
+    "units": 54.28,
+    "roi_pct": 7.39,
     "price_min": -125.0,
     "price_max": 114.0
    },
    "2025": {
-    "bets": 852,
-    "record": "467-380-5",
-    "units": 41.03,
-    "roi_pct": 4.27,
+    "bets": 620,
+    "record": "346-269-5",
+    "units": 44.03,
+    "roi_pct": 6.28,
     "price_min": -140.0,
     "price_max": 115.0
    },
    "2026": {
-    "bets": 818,
-    "record": "444-374-0",
-    "units": 17.48,
-    "roi_pct": 1.85,
-    "price_min": -240.0,
-    "price_max": 155.0
+    "bets": 603,
+    "record": "335-268-0",
+    "units": 29.01,
+    "roi_pct": 4.17,
+    "price_min": -230.0,
+    "price_max": 110.0
    },
-   "min_ev": 0.0329,
-   "median_ev": 0.059,
-   "under_share": 0.779,
+   "min_ev": 0.0426,
+   "median_ev": 0.068,
+   "under_share": 0.78,
    "books": {
-    "fanduel": 738,
-    "williamhill_us": 517,
-    "betrivers": 397,
-    "hardrockbet": 397,
-    "draftkings": 247,
-    "betmgm": 233
-   },
-   "vs_research": {
-    "research_bets": 2529,
-    "replay_bets": 2529,
-    "research_units": 125.78,
-    "in_both": 2529,
-    "identical_game_side_book_line_price": 2529,
-    "differ": [],
-    "only_research": [],
-    "n_only_research": 0,
-    "only_replay": [],
-    "n_only_replay": 0,
-    "max_edge_gap": 4.440892098500626e-16
+    "fanduel": 542,
+    "williamhill_us": 414,
+    "hardrockbet": 290,
+    "betrivers": 273,
+    "draftkings": 202,
+    "betmgm": 166
    }
   }
  }
