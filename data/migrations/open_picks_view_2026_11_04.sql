@@ -42,7 +42,7 @@ BEGIN
 
   IF to_regclass('public.open_picks') IS NOT NULL
      AND COALESCE(obj_description(to_regclass('public.open_picks'), 'pg_class'), '')
-         = 'open_picks 34e691f79a37'
+         = 'open_picks 77ce34f84edf'
      AND has_table_privilege('anon', 'public.open_picks', 'SELECT')
      AND has_table_privilege('authenticated', 'public.open_picks', 'SELECT')
   THEN
@@ -267,7 +267,7 @@ BEGIN
       )
     ORDER BY g.commence_time::timestamptz NULLS LAST, p.created_at, p.pick_id
 $view$;
-  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 34e691f79a37'$c$;
+  EXECUTE $c$COMMENT ON VIEW public.open_picks IS 'open_picks 77ce34f84edf'$c$;
   REVOKE ALL ON public.open_picks FROM anon, authenticated;
   GRANT SELECT ON public.open_picks TO anon, authenticated;
 END $mig$;
