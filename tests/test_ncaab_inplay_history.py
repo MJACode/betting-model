@@ -74,3 +74,34 @@ def test_its_ledger_is_not_the_lines_purchase_ledger():
     # skip every instant: the in-play purchase keeps its own
     assert H.LEDGER == "ncaab_inplay_fetches"
     assert "odds_history_pulls" not in H.LEDGER_DDL
+
+
+class _Conn:
+    """Answers the two reads check_resume makes."""
+
+    def __init__(self, stored, ledgered):
+        self.stored, self.ledgered = stored, ledgered
+
+    def execute(self, sql, params=None):
+        class R:
+            def __init__(s, v):
+                s.v = v
+
+            def fetchone(s):
+                return (s.v,)
+        if "to_regclass" in sql:
+            return R("ncaab_inplay_fetches")
+        if "FROM odds" in sql:
+            assert params == (H.SOURCE,)
+            return R(self.stored)
+        return R(self.ledgered)
+
+    def commit(self):
+        pass
+
+
+def test_the_resume_refuses_when_the_ledger_does_not_cover_the_stored_rows():
+    import pytest
+    assert H.check_resume(_Conn(2752, 2752)) == (2752, 2752)
+    with pytest.raises(H.LedgerMismatch):
+        H.check_resume(_Conn(2752, 0))           # ledger lost: a re-run would re-buy

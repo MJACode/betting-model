@@ -136,6 +136,39 @@ def held_instants(conn) -> set[datetime]:
     return out
 
 
+class LedgerMismatch(RuntimeError):
+    """`odds` holds rows under SOURCE that the ledger does not account for."""
+
+
+def stored_rows(conn) -> int:
+    """Rows already in `odds` under this purchase's source marker (through
+    idx_odds_source_inplay: every stored row is in_play)."""
+    n = conn.execute("SELECT COUNT(*) FROM odds WHERE source = %s AND snapshot_type = 'in_play'",
+                     (SOURCE,)).fetchone()[0]
+    conn.commit()
+    return int(n)
+
+
+def check_resume(conn) -> tuple[int, int]:
+    """(rows stored under SOURCE, rows the ledger says were stored). The resume
+    skips every ledgered instant; it is only honest while the ledger accounts
+    for what `odds` holds under the marker. Rows and ledger row are written in
+    one transaction, so the two agree; if the ledger was lost or cleared, a
+    re-run would re-buy and store every row twice, so this REFUSES instead."""
+    have = stored_rows(conn)
+    if conn.execute("SELECT to_regclass('public.ncaab_inplay_fetches')").fetchone()[0] is None:
+        conn.commit()
+        ledgered = 0
+    else:
+        ledgered = int(conn.execute(
+            "SELECT COALESCE(SUM(rows), 0) FROM ncaab_inplay_fetches").fetchone()[0])
+        conn.commit()
+    if have > ledgered:
+        raise LedgerMismatch(f"odds holds {have:,} rows under {SOURCE} but the ledger accounts "
+                             f"for {ledgered:,}: a re-run would buy them again")
+    return have, ledgered
+
+
 def played_ids(conn, first: int, last: int) -> set[str]:
     """Games with a final score: a postponed or cancelled game was never in play."""
     out = {r[0] for r in conn.execute(
@@ -218,6 +251,7 @@ def _params(when: datetime) -> dict:
 def buy(conn, meter: PoolMeter, first: int, last: int, step_min: int) -> dict:
     check_precondition(conn, list(range(first, last + 1)))
     ensure_tables(conn)
+    check_resume(conn)
     games, instants, todo, _ = plan(conn, first, last, step_min)
     resolver = _resolver(conn, games)
     tips = {g["game_id"]: g.get("commence_time") for g in games}
