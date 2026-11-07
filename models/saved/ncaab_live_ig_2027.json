@@ -1,8 +1,8 @@
 {
  "kind": "ncaab_live_ig",
  "version": "2027.2026-11-07",
- "built_at": "2026-11-07T22:12:52Z",
- "built_from_commit": "225d7af1",
+ "built_at": "2026-11-07T22:55:38Z",
+ "built_from_commit": "5fcafa5e",
  "season": 2027,
  "train_seasons": [
   2021,
@@ -1187,10 +1187,10 @@
    }
   },
   "placebo": {
-   "runs": 3,
-   "mean": -0.0279,
-   "p95": -0.0267,
-   "max": -0.0266
+   "runs": 200,
+   "mean": -0.0314,
+   "p95": -0.0114,
+   "max": 0.0099
   }
  }
 }

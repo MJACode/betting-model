@@ -53,11 +53,13 @@ export function liveEmptySubtitle(sport: string): string {
     );
   }
   if (sport === 'NCAAB') {
-    // models/ncaab_live_loop.py: games in progress every half hour, and only
-    // the night's strongest few bets, at most five a night (mike, 2026-11-07).
+    // models/ncaab_live_loop.py: games in progress twice an hour, only the
+    // biggest edges, and no more than five bets a night (mike, 2026-11-07).
+    // tests/test_ncaab_live_config.py pins "twice an hour" and "five" to the
+    // loop's cadence and cap.
     return (
-      'The NCAAB in-play models check games in progress every half hour and post only the night\u2019s ' +
-      'strongest few bets, at most five a night. ' +
+      'The NCAAB in-play models check games in progress twice an hour, bet only their biggest edges, ' +
+      'and stop after five bets a night. ' +
       LIVE_EMPTY_VALID
     );
   }

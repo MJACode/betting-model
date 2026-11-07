@@ -246,6 +246,22 @@ function mkPick(over: Partial<Pick>): Pick {
     nbaLive?.label,
   );
 
+  // The NCAAB loop writes the HALF (ncaab_live_loop.build_pick): halves, never a quarter.
+  const ncaabEarly = pickTimingInfo(
+    mkPick({ sport: 'NCAAB', model_id: 'ncaab_live_spread_h1', is_live: true, inning_at_pick: 1 }),
+  );
+  check('NCAAB early live shows the first half, not a quarter',
+    Boolean(ncaabEarly?.label.includes('· 1st half')) && !ncaabEarly?.label.includes('Q1'), ncaabEarly?.label);
+  const ncaabBreak = pickTimingInfo(
+    mkPick({ sport: 'NCAAB', model_id: 'ncaab_live_total_h2', is_live: true, inning_at_pick: 1 }),
+  );
+  check('an NCAAB late bet at period 1 was placed at halftime',
+    Boolean(ncaabBreak?.label.includes('· halftime')), ncaabBreak?.label);
+  const ncaabLate = pickTimingInfo(
+    mkPick({ sport: 'NCAAB', model_id: 'ncaab_live_spread_h2', is_live: true, inning_at_pick: 2 }),
+  );
+  check('NCAAB late live shows the second half', Boolean(ncaabLate?.label.includes('· 2nd half')), ncaabLate?.label);
+
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(
     'live without a period still stamps the time',

@@ -98,3 +98,13 @@ def test_the_committed_artifact_is_the_one_the_code_expects():
     assert art.margin.S == M.SEASON and art.total.S == M.SEASON
     assert max(art.raw["train_seasons"]) < M.SEASON          # walk-forward
     assert len(art.ev_quantiles) == 1001 and art.per_game > 0
+
+
+def test_the_app_copy_names_the_loops_own_cadence_and_cap():
+    """The app says "twice an hour" and "five bets a night"; if the loop's
+    cadence or cap moves, this fails rather than the copy going stale."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "mobile" / "src" / "lib"
+    copy = (root / "liveSports.ts").read_text(encoding="utf-8") + (root / "modelMeta.ts").read_text(encoding="utf-8")
+    assert M.CADENCE_MIN == 30 and "twice an hour" in copy
+    assert M.NIGHT_CAP == 5 and "five bets a night" in copy
