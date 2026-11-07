@@ -1646,6 +1646,9 @@ NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
 # nba_first_half_total_luck's steps, bounded the same way: its own event list and
 # one event call per due game, then the same card reads.
 NBA_FIRST_HALF_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
+# nba_q1_trend: one spreads_q1 call per game, and a card that also reads two seasons of first-quarter numbers
+# and quarter scores for the cover records (one query each): the first half's limits.
+NBA_Q1_TREND_WINDOW_TIMEOUT_S = {"fetch": 90, "card": 180, "close": 90}
 
 
 def _run_models_side_by_side(models: list[list[tuple[str, list[str], float]]]) -> dict[str, str]:
@@ -1744,7 +1747,11 @@ def run_nba_total_luck_window() -> None:
                         "nba-team-total-luck", plan.team_total, NBA_TEAM_TOTAL_WINDOW_TIMEOUT_S),
         per_event_steps("first-half totals", "scripts.nba_first_half_total_luck_window",
                         "nba-first-half-total-luck", plan.first_half,
-                        NBA_FIRST_HALF_WINDOW_TIMEOUT_S)])
+                        NBA_FIRST_HALF_WINDOW_TIMEOUT_S),
+        # nba_q1_trend, the first-quarter spread (mike, 2026-11-07): its own spreads_q1 fetch, its card, its
+        # closing snapshot, the first half's limits.
+        per_event_steps("first-quarter spreads", "scripts.nba_q1_trend_window", "nba-q1-trend",
+                        plan.first_quarter, NBA_Q1_TREND_WINDOW_TIMEOUT_S)])
     if outcomes:
         _publish_new_signals("nba-total-luck-window")
     bad = {k: v for k, v in outcomes.items() if v != "ok"}

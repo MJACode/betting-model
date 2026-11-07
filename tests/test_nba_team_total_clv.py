@@ -258,8 +258,8 @@ def test_the_sql_recompute_reads_a_team_total_close_from_close_rows_only(alias):
     because the recompute runs only in Postgres; checked there with EXPLAIN."""
     body = _lateral(MIGRATION.read_text(encoding="utf-8"), alias)
     assert ("((s.game_market LIKE 'team_totals%' OR (s.sport_prefix = 'NBA' "
-            "AND s.game_market IN ('totals_h1', 'spreads_h1'))) AND o.snapshot_type = 'close') "
+            "AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1'))) AND o.snapshot_type = 'close') "
             "OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1') "
             "AND o.snapshot_type <> 'in_play' AND o.snapshot_at::timestamptz > s.created_at) "
             "OR (s.game_market NOT LIKE 'team_totals%' AND s.game_market NOT IN "
-            "('totals_h1', 'spreads_h1') AND o.snapshot_type <> 'in_play')") in body
+            "('totals_h1', 'spreads_h1', 'spreads_q1') AND o.snapshot_type <> 'in_play')") in body

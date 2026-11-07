@@ -155,6 +155,16 @@ def first_half_from_periods(rows, home_score, away_score) -> tuple[int, int] | N
     return per[1][0] + per[2][0], per[1][1] + per[2][1]
 
 
+def first_quarter_from_periods(rows, home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in the first quarter, under exactly first_half_from_periods' check (the periods sum to
+    the stored final, are numbered 1..n with n >= 4, periods 1 and 2 both there): the rule the first-quarter bets
+    were graded on (scripts/nba_game_harness.with_periods). None when a settlement cannot trust them."""
+    if first_half_from_periods(rows, home_score, away_score) is None:
+        return None
+    per = {int(r[0]): (r[1], r[2]) for r in rows}
+    return per[1][0], per[1][1]
+
+
 def replace_game(conn, game_id: str, rows: list[dict]) -> None:
     """Swap one game's stored periods for `rows`, in ONE transaction: a failure
     keeps the old rows, it cannot leave the game with no quarters."""
@@ -209,6 +219,9 @@ def run(start: str, end: str) -> dict:
 # The model whose picks settle on these rows, and how many of its dates one pass
 # may fetch: one scoreboard call a date, newest first.
 FIRST_HALF_MODEL = "nba_first_half_total_luck"
+# Every model whose picks settle on these rows: the first half's total and the first quarter's spread
+# (models/nba_q1_trend.py). The same trust check covers both (first_quarter_from_periods).
+PERIOD_MODELS = (FIRST_HALF_MODEL, "nba_q1_trend")
 MAX_PENDING_DATES = 20
 
 
@@ -224,11 +237,11 @@ def _refused_games(conn) -> dict[str, dict]:
     rows = conn.execute(
         "SELECT DISTINCT p.game_id, p.game_date, g.home_score, g.away_score "
         "FROM picks p JOIN games g ON g.game_id = p.game_id "
-        "WHERE p.model_id = %s AND p.signal_type = 'BET' AND p.result IS NULL "
+        "WHERE p.model_id = ANY(%s) AND p.signal_type = 'BET' AND p.result IS NULL "
         "AND g.home_score IS NOT NULL "
         "AND EXISTS (SELECT 1 FROM nba_period_scores s WHERE s.game_id = p.game_id) "
         "ORDER BY p.game_date DESC LIMIT %s",
-        (FIRST_HALF_MODEL, MAX_PENDING_DATES)).fetchall()
+        (list(PERIOD_MODELS), MAX_PENDING_DATES)).fetchall()
     return {gid: {"date": str(d), "home": home, "away": away} for gid, d, home, away in rows
             if first_half_from_periods(_stored_periods(conn, gid), home, away) is None}
 
@@ -268,11 +281,11 @@ def ensure_first_half_period_scores(get=requests.get) -> dict:
         ensure_table(conn)
         todo = [str(r[0]) for r in conn.execute(
             "SELECT DISTINCT p.game_date FROM picks p JOIN games g ON g.game_id = p.game_id "
-            "WHERE p.model_id = %s AND p.signal_type = 'BET' AND p.result IS NULL "
+            "WHERE p.model_id = ANY(%s) AND p.signal_type = 'BET' AND p.result IS NULL "
             "AND g.home_score IS NOT NULL "
             "AND NOT EXISTS (SELECT 1 FROM nba_period_scores s WHERE s.game_id = p.game_id) "
             "ORDER BY p.game_date DESC LIMIT %s",
-            (FIRST_HALF_MODEL, MAX_PENDING_DATES)).fetchall()]
+            (list(PERIOD_MODELS), MAX_PENDING_DATES)).fetchall()]
         refused = _refused_games(conn)
         conn.rollback()
         dates = sorted({*todo, *(g["date"] for g in refused.values())}, reverse=True)

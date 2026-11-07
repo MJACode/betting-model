@@ -285,6 +285,9 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live",
                      "odds_api_nba_first_half_live",
+                     # nba_q1_trend's decision fetches and closes (data/ingestors/nba_first_quarter_odds.py): its
+                     # record, and every later game's cover-record number.
+                     "odds_api_nba_first_quarter_live",
                      "odds_api_ncaab_first_half_live",
                      # Alternate spread/total ladders (2026-10-29): many rungs per
                      # (game, market, book), which the keepers would thin.

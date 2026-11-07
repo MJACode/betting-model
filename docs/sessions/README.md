@@ -20,6 +20,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB spread and moneyline re-graded without betPARX: a tie goes to the bettable book (spread 405 bets +10.09%, moneyline 836 +4.27% on 2021-2025); a strictly-best betPARX quote is a no-bet that no longer fails the card |
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, nba_q1_trend live on mike's instruction: the first-quarter cover-record step (88 bets, +27.4%, failed the 200-bet bar); replay 88 of 88; 2026-27 first-quarter spreads bought |
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB volume cuts: full-game total bar 0.05, first-half spread 0.025; full slate ~38 -> ~30 picks for ~13 units a season with 2u sizing |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NBA in-play: a bet DraftKings did not price failed its insert (dk_implied_prob NULL); now 0.0 as the scorer's line-book picks; OKC -13.5 posted and won |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, picks.stake_units: a pick's own stake (1-3u to win); NCAAB bets that agree with an earlier NCAAB bet on the game go 2u (+21.3% flat on 233 replay bets; the only sizing slice that earned more per unit risked) |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NCAAB first-half total cut 0.02 -> 0.025 (a quarter fewer bets, +3.5 units on the replay; 0.03 would have cost 47), EV floor 0.037 |

@@ -59,7 +59,8 @@ mike, 2026-10-30: *"Yes to the totals model."* Real money, like every model
    sigma 16.51 on 24,540).
 4. **Priced at DraftKings' own two prices** on that total: the chance the bet
    wins, a push left out, minus the price's implied chance. The better side
-   is bet when that edge is above **0.04**. DraftKings only: the evidence
+   is bet when that edge is above **0.05** (0.04 until 2026-11-07; see "The
+   bar raised to 0.05" below). DraftKings only: the evidence
    priced DraftKings and nothing else, so the line is not shopped.
 5. **No games-played wait** (mike, 2026-11-02: *"we do not need to wait 10
    games, I never approved that, that is why we fucking have back testing, I
@@ -227,8 +228,8 @@ with a team on 0 games cleared the cut.
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.04 (P(win, push left out) minus DraftKings' implied) | `config.MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.04: the edge filter IS the card's cut, because model_probability is that same P(win, push left out) | `ACTION_THRESHOLDS` |
+| the cut | edge > 0.05 from 2026-11-07 (was 0.04; P(win, push left out) minus DraftKings' implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.05: the edge filter IS the card's cut, because model_probability is that same P(win, push left out) | `ACTION_THRESHOLDS` |
 | EV floor | 0.07, just under the smallest EV the cut admitted in the first-post replay of 2022-2026 (+0.0734, 2,436 bets; it was +0.0743 on the old quotes), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned (it laid -120 to +110) | `MODEL_MIN_ODDS` |
 | decision moment | DraftKings' first posted total (earliest pre-game row, total 90-220, both prices), bet only while it still stands; the card every 5 minutes, 3 after each capture poll | `scripts/ncaab_total_card.load_first_posts`, `scheduler.run_ncaab_total_card` |
@@ -236,6 +237,25 @@ with a team on 0 games cleared the cut.
 | settlement | full-game total, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
 | kill switch | `RUN_NCAAB_TOTAL_CARD=0` | the card |
 | frozen numbers | built from 2011-2026; blend and residual refit at the first post 2026-11-03 | `models/saved/ncaab_total_blend_2027.json` |
+
+**The bar raised to 0.05 (2026-11-07, mike: "Make the two cuts", fewer
+picks on a full slate).** The first-post replay, 2021-22 to 2025-26, by bar:
+
+| Bar | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|
+| 0.04 (until 11-07) | 2,436 | +180.71 | +6.77% | [3.07, 10.61] |
+| 0.045 | 1,867 | +137.84 | +6.74% | [2.60, 11.01] |
+| **0.05 (live)** | **1,432** | **+136.06** | **+8.68%** | **[3.51, 13.55]** |
+| 0.055 | 1,076 | +129.57 | +11.00% | [5.56, 16.41] |
+| 0.06 | 806 | +111.00 | +12.58% | [6.08, 18.78] |
+
+At 0.05 every season is positive (+25.6, +16.9, +17.9, +29.8, +45.9) and so
+are both halves (Nov-Dec +28.1, January on +108.0). Prices -120 to +102. The
+bets it stops were profitable: +44.65 units over five seasons, about 9 a
+season. It is a volume cut, not a better cut: about 5.7 fewer picks on a full
+slate. It also feeds fewer 2u agreements (a first-half total that agrees with
+a full-game total), so with agreement sizing it costs about 8 units a season
+on 2023-24 to 2025-26.
 
 **The evidence, graded exactly as it runs live** (scratch chain of
 2026-10-30: box-score possessions in every season, no returning-minutes input,
@@ -969,7 +989,8 @@ line from its `fh_lib.py`, `fh_prep.py`, `fh_score.py` and `fh_grade.py`):
    chance the side covers, a push left out, minus the price's own implied
    chance (vig included) is the edge. Each quote takes its better side.
 5. **The bet.** The single quote with the largest edge, ties to the
-   alphabetically first book. Bet when that edge is above **0.02**; otherwise the
+   alphabetically first book. Bet when that edge is above **0.025** (0.02 until
+   2026-11-07; see "The bar raised to 0.025" below); otherwise the
    game is decided with no bet.
 
 **When.** The capture fetches each game's first-half lines nine times
@@ -1025,8 +1046,8 @@ graded games.
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.02 (P(cover, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.02: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
+| the cut | edge > 0.025 from 2026-11-07 (was 0.02; P(cover, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.025: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
 | EV floor | 0.03, just under the smallest EV the cut admitted in the replay (+0.0346; median +0.0552), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned (it laid -140 to +125) | `MODEL_MIN_ODDS` |
 | books | the eight above, and only those `BEST_LINE_BOOKMAKERS` still lists | `models/ncaab_first_half_spread.BOOKS` |
@@ -1036,6 +1057,27 @@ graded games.
 | closing value | the bet book's newest pre-tip row on the same line, strictly after the pick was created. The card decides on the tip-minus-10 call, the last fetch, so that pull is the price taken and a spread usually stays unmeasured | `tracking/paper_tracker._closing_odds`, the CLV migration |
 | kill switch | `RUN_NCAAB_FIRST_HALF=0` stops the fetches and the card | `scripts/ncaab_first_half_window.enabled` |
 | frozen numbers | fitted on 2021-2026 | `models/saved/ncaab_first_half_spread_2027.json` |
+
+**The bar raised to 0.025 (2026-11-07, mike: "Make the two cuts").** The
+replay, 2023-24 to 2025-26, by bar:
+
+| Bar | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|
+| 0.02 (until 11-07) | 1,253 | +68.07 | +4.91% | [-0.18, 10.17] |
+| 0.0225 | 1,035 | +44.93 | +3.91% | [-1.55, 9.89] |
+| **0.025 (live)** | **845** | **+57.43** | **+6.13%** | **[0.04, 12.29]** |
+| 0.0275 | 705 | +49.71 | +6.37% | [-0.35, 12.97] |
+| 0.03 | 575 | +35.65 | +5.61% | [-1.55, 13.03] |
+
+Every season positive at 0.025 (+31.0, +6.9, +19.6). The grid is bumpy (0.0225
+dips), so 0.025 is a volume cut whose removed bets made +10.64 units, about
+2.7 fewer picks on a full slate, not a better cut. With agreement sizing it
+costs about 4.7 units a season. Prices -140 to +125.
+
+**Both cuts together** (with agreement sizing, 2023-24 to 2025-26): a full
+slate goes from about 38 picks to about 30 (90th percentile 47 to 37), every
+game day from 13.3 to 10.7, 2u picks from about 61 a season to 41, for about
+13 units a season.
 
 **The risks, plainly:**
 

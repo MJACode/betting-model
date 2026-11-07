@@ -1005,6 +1005,8 @@ const MAIN_GAME_ODDS_MARKETS = [
   'team_totals_away',
   'totals_h1',
   'spreads_h1',
+  // The NBA first quarter's spread (nba_q1_trend).
+  'spreads_q1',
 ] as const;
 
 /**
