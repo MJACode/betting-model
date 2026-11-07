@@ -45,6 +45,11 @@ export function gameMarketForModel(modelId: string): string | null {
   // about twice as big. Before the 'spread' substring rule below, which would
   // read the full-game spread for it.
   if (modelId === 'ncaab_first_half_spread') return 'spreads_h1';
+  // The NBA first quarter's spread (models/nba_q1_trend.py): stored under its
+  // own market, never the game's 'spreads' rows. Its id has no 'spread' in it,
+  // so without this every price, movement and line-shop lookup would read the
+  // moneyline rows.
+  if (modelId === 'nba_q1_trend') return 'spreads_q1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -190,9 +195,10 @@ export function playerNameFromPickLabel(label: string): string | null {
  * (CLAUDE.md §00 / §1c).
  */
 /**
- * A team total's or a first half's bet, quoted from its label after the dash:
- * "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total Under 115.5",
- * "BOS @ MIL — First Half Over 112.5" -> "First Half Over 112.5".
+ * A team total's, a first half's or a first quarter's bet, quoted from its label
+ * after the dash: "BOS @ MIL — MIL Team Total Under 115.5" -> "MIL Team Total
+ * Under 115.5", "BOS @ MIL — First Half Over 112.5" -> "First Half Over 112.5",
+ * "DEN @ LAC — First Quarter DEN -1.5" -> "First Quarter DEN -1.5".
  * Null for any other label. The whole label is wider than a phone's one-line
  * title, so it clipped the side and the number, the part the row is for.
  */
@@ -200,7 +206,7 @@ export function matchupLedBet(label: string): string | null {
   const dash = label.indexOf(' — ');
   if (dash <= 0) return null;
   const bet = label.slice(dash + 3).trim();
-  return bet.includes(' Team Total ') || bet.startsWith('First Half ') ? bet : null;
+  return bet.includes(' Team Total ') || /^First (Half|Quarter) /.test(bet) ? bet : null;
 }
 
 /**
@@ -217,13 +223,13 @@ export function pickRowTitle(pick: { pick_label: string }): string {
 }
 
 /**
- * The caption under a first half's row title, quoted from the label before the
- * dash: "BOS @ MIL — First Half Over 112.5" -> "BOS @ MIL". Null for every other
- * label, whose title already says who plays.
+ * The caption under a first half's or a first quarter's row title, quoted from
+ * the label before the dash: "BOS @ MIL — First Half Over 112.5" -> "BOS @ MIL".
+ * Null for every other label, whose title already says who plays.
  */
 export function pickRowMatchup(pick: { pick_label: string }): string | null {
   const label = labelWithoutStake(pick.pick_label);
-  if (!matchupLedBet(label)?.startsWith('First Half ')) return null;
+  if (!/^First (Half|Quarter) /.test(matchupLedBet(label) ?? '')) return null;
   return label.slice(0, label.indexOf(' — ')).trim();
 }
 
@@ -280,6 +286,8 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'ncaab_first_half_total') return 'game_total';
   // A moneyline, though its id has 'spread' in it (see gameMarketForModel).
   if (modelId === 'ncaab_moneyline_own_spread') return 'game_ml';
+  // A spread, though its id has no 'spread' in it: the first quarter's.
+  if (modelId === 'nba_q1_trend') return 'game_spread';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -1781,10 +1789,12 @@ export function computeMovement(
  *
  * The NCAAB first-half spread card (scripts/ncaab_first_half_spread_card.py)
  * writes the same row shape, and so does the NCAAB first-half total card
- * (scripts/ncaab_first_half_total_card.py).
+ * (scripts/ncaab_first_half_total_card.py), and the NBA first-quarter spread
+ * card (scripts/nba_q1_trend_card.py).
  */
 const BET_BOOK_LINE_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
+  'nba_q1_trend',
   'ncaab_first_half_spread',
   'ncaab_first_half_total',
   'nba_prop_market',
@@ -2089,6 +2099,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_total_luck' ||
     pick.model_id === 'nba_team_total_luck' ||
     pick.model_id === 'nba_first_half_total_luck' ||
+    pick.model_id === 'nba_q1_trend' ||
     pick.model_id === 'ncaab_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
     pick.model_id === 'ncaab_moneyline_own_spread' ||

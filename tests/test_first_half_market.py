@@ -263,7 +263,10 @@ class _FakeConn:
                 return s.rows[0] if s.rows else None
         s = self.calls[-1]
         if s.startswith("SELECT DISTINCT p.game_date"):
-            assert params == (MODEL_ID, 20)
+            # every model that settles on these rows: the first half's total and the first quarter's spread
+            from data.ingestors.nba_period_scores import PERIOD_MODELS
+            assert MODEL_ID in PERIOD_MODELS and "nba_q1_trend" in PERIOD_MODELS
+            assert params == (list(PERIOD_MODELS), 20)
             return C([(d,) for d in self.pending])
         if s.startswith("SELECT game_id FROM games"):
             return C([(g,) for g in params[0]])
@@ -336,7 +339,7 @@ def test_the_query_asks_only_for_this_model_s_unsettled_bets_with_a_final_and_no
     monkeypatch.setattr(ps, "ensure_table", lambda c: None)
     ps.ensure_first_half_period_scores(get=None)
     q = next(s for s in conn.calls if s.startswith("SELECT DISTINCT"))
-    for piece in ("p.model_id = %s", "p.signal_type = 'BET'", "p.result IS NULL",
+    for piece in ("p.model_id = ANY(%s)", "p.signal_type = 'BET'", "p.result IS NULL",
                   "g.home_score IS NOT NULL", "NOT EXISTS (SELECT 1 FROM nba_period_scores"):
         assert piece in q, piece
 

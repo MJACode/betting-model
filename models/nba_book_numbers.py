@@ -111,10 +111,13 @@ ALTERNATE_MARKET = {"team_totals_home": "team_totals_home_alternate",
                     "totals_h1": "totals_h1_alternate",
                     # The NCAAB first-half spread (data/ingestors/ncaab_first_half_odds.py):
                     # its number is spread_home and its two prices home / away.
-                    "spreads_h1": "spreads_h1_alternate"}
+                    "spreads_h1": "spreads_h1_alternate",
+                    # The NBA first-quarter spread (data/ingestors/nba_first_quarter_odds.py,
+                    # models/nba_q1_trend.py): the same shape as spreads_h1.
+                    "spreads_q1": "spreads_q1_alternate"}
 # The markets whose number is the HOME spread and whose prices are home / away,
 # not total_line and over / under.
-_SPREAD_MARKETS = frozenset({"spreads_h1"})
+_SPREAD_MARKETS = frozenset({"spreads_h1", "spreads_q1"})
 
 
 def split_main_rungs(rows: list[dict]) -> tuple[list[dict], list[dict]]:

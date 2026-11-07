@@ -453,6 +453,22 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first quarter's spread, the hot team (models/nba_q1_trend.py, mike,
+  // 2026-11-07): mike's cover-record trend. When a team that is 4-1 or 5-0
+  // against the first-quarter spread in its last five games at this venue meets
+  // one that is 2-3 or 1-3 there, the last ten games agree, and both teams'
+  // first-quarter scoring this season says the hot team covers, it bets that
+  // team's first-quarter spread, once, about an hour before tip, at the best
+  // price. It settles on the first quarter's score alone. The label is
+  // "DEN @ LAC — First Quarter DEN -1.5". A game line, not a picker slot.
+  nba_q1_trend: {
+    // 1Q Spread, spelled out like '1H Spread'. The side is in the pick label.
+    shortLabel: '1Q Spread',
+    longLabel: 'NBA First Quarter Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // NBA in-play (models/nba_live_ig2.py, 2026-11-04): the game-state model's
   // margin against the live line, one bet per game at the first fresh price,
   // during quarters 1-2. The quarter-3 moneyline and spread are held out
@@ -922,6 +938,15 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'What our model says is the chance this side hits: the market’s fair chance plus about 6 percentage ' +
     'points, the extra these bets won over the last three NBA seasons (56% won where the market’s fair ' +
     'chance averaged 50%). Read it as an upper bound.',
+  // The market's fair chance plus the walk-forward uplift (+0.1526 for
+  // 2026-27): on the 88 graded bets, 65.9% won where the market's fair chance
+  // averaged 50.7% (models/nba_q1_trend.py). Few bets, so the extra is large and
+  // uncertain; the note says so.
+  nba_q1_trend:
+    'What our model says is the chance this side covers the first-quarter spread. It is the market’s ' +
+    'fair chance plus about 15 percentage points, the extra these bets won over the last three NBA ' +
+    'seasons (66% won where the market’s fair chance averaged 51%). That is only 88 bets, so the real ' +
+    'extra could be much smaller. Read it as an upper bound.',
   // The win chance the bet book's own spread implies
   // (models/ncaab_moneyline_own_spread.py); the edge is that minus the same
   // book's moneyline price's implied chance (UX review, 2026-11-02).
@@ -962,6 +987,8 @@ export function modelProbabilityNote(modelId: string): string {
 // to 60 minutes out).
 const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
+  // The NBA first-quarter spreads (scripts/nba_q1_trend_card.py, 45-66).
+  'nba_q1_trend',
   'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
@@ -1330,6 +1357,8 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   if (id === 'ncaab_first_half_spread') return null;
   // The NCAAB first half's total, the same: not the game's total line.
   if (id === 'ncaab_first_half_total') return null;
+  // The NBA first quarter's spread, the same: not the game's spread line.
+  if (id === 'nba_q1_trend') return null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

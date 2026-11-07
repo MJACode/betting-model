@@ -1072,6 +1072,27 @@ does not end just before, and that run fails, so the window job reports an error
 on every tick until the artifact is refitted (and buys the game again each
 tick in its window).
 
+## NBA — `nba_q1_trend`, first-quarter spreads, the hot team (2026-11-07, mike)
+
+mike's own first-quarter method, as he described it on 2026-10-28, the eighth search's "bump it out to L10" step with
+his season-average check (`docs/nba_models_2026.md` section 12; `models/nba_q1_trend.py`,
+`scripts/nba_q1_trend_card.py`). **Live on mike's instruction (2026-11-07: "I WANT THAT MODEL"), not on the house
+standard**: it failed the 200-bet bar. `docs/sports/nba.md`, "First quarter", has the record and what it failed.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | the rule: last-5 venue cover net 3 or more against an opponent at -1 or -2, then k = min(the hot team's last-10 net, minus the opponent's) at least 2, and the hot team's projected first-quarter margin covering its number (both teams 5+ games) | `models/nba_q1_trend.K_CUT`, `signals`; the lab's `step_k`, `last_n`, `season_averages` |
+| prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
+| price floor | -200, pinned. It laid -125 to +118 on its 88 graded bets, median -110 | `config.MODEL_MIN_ODDS` |
+| EV floor | 0.00 on the fair probability plus the uplift (+0.1526 for 2026-27), a push scored as a loss. It removes none of the 88: their smallest EV is +0.19, the median +0.26 | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
+| the game's number | Pinnacle's coherent main first-quarter spread (the HOME number) at the decision fetch, else the deciding books' median, to the nearest half point | `scripts/nba_game8_q1_trends.game_numbers` |
+| the fair line | Pinnacle's no-vig first-quarter spread when it quotes coherently, else the deciding books' consensus, priced through the first quarter's margin around a + b × Pinnacle's full-game close, fitted on 2020-21 .. 2025-26 (7,230 games) | `models/nba_q1_trend.pricing_dist` |
+| the offer | the hot side with the highest expected value under that fair line, at a deciding book, each at its own main number | `scripts/nba_game_harness.choose` |
+| decided once | on this model's own first-quarter fetch 45-66 minutes before tip, at most 5 minutes old, planned 45-56 minutes out; a row in `nba_q1_trend_decisions`, bet or not | `scripts/nba_q1_trend_window.py`, `scheduler.run_nba_total_luck_window` |
+| settlement | period 1 of `nba_period_scores` against the HOME number, a level quarter a push; untrusted periods: pending | `tracking/paper_tracker._first_quarter_points` |
+| closing line | one more call 12-25 minutes before tip, only for bet games, stored as `close` | `scripts/nba_q1_trend_window.py` |
+| artifact | the pricing rows and the cell's 88 graded bets | `models/saved/nba_q1_trend_20261107.pkl` |
+
 ## NBA — `nba_first_half_total_luck`, first-half totals, overs (2026-10-30, mike)
 
 The same shooting luck, read on the first half's line. When both defences have

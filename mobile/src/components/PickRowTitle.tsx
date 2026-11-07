@@ -11,7 +11,7 @@ interface Props {
 /**
  * The title of a pick row on a model's page and the tracked list.
  *
- * A first half's title clips its middle, never the number at the end (UX review,
+ * A first half's (or a first quarter's) title clips its middle, never the number at the end (UX review,
  * 2026-10-31: the whole label on one line lost the side and number first at
  * larger text). Its matchup goes on a line of its own, because middle-clipping
  * the whole label removes "First Half" and leaves what reads as a plain over.
