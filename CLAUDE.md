@@ -478,6 +478,7 @@ silently fails to reach production.
   it from `config.py` on master.
 - **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` is what
   gets fetched; `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED at.
+  **betPARX is fetched, and never the book a pick names** (few states; mike 11-06).
 
 **The invariants that must not be broken are in
 `.claude/rules/config-topology.md`** (loads on `config.py`, the scorers,
@@ -580,7 +581,6 @@ to be known BEFORE deciding which file to open.
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline
   steps are left in place; reviving it starts with the key, not with config.
-- **Every model is live real money.** Units and the record are the same graded set (§2).
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.

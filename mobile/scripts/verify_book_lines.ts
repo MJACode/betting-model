@@ -41,14 +41,19 @@ function check(name: string, cond: boolean, detail = '') {
 const books = (qs: { bookmaker: string }[]) => qs.map((q) => q.bookmaker).join(',');
 
 // ── Book list mirrors config.py ─────────────────────────────────────────────
-// config.LINE_SHOP_BOOKMAKERS (13) and BEST_LINE_EXCLUDE_BOOKMAKERS (3).
+// Measured 2026-11-06: config fetches 10 books (LINE_SHOP_BOOKMAKERS) and decides
+// at 7 (BEST_LINE_BOOKMAKERS); BEST_LINE_EXCLUDE_BOOKMAKERS is 4 since betparx
+// joined (config.STATE_LIMITED_BOOKMAKERS). The app still lists 14 and 10:
+// ballybet, rebet, fliff (no price since 2026-09-20) and espnbet were never cut
+// here, so the fetched-count check below stays red until that list is.
 check('13 books fetched', LINE_SHOP_BOOKS.length === 13, `${LINE_SHOP_BOOKS.length}`);
-check('3 reference-only books', REFERENCE_ONLY_BOOKS.length === 3);
+check('4 reference-only books', REFERENCE_ONLY_BOOKS.length === 4, `${REFERENCE_ONLY_BOOKS.length}`);
 check('10 bettable books', BETTABLE_BOOKS.length === 10, `${BETTABLE_BOOKS.length}`);
 check('DraftKings is bettable', isBettableBook(MODEL_BOOK));
 check('Pinnacle is not', !isBettableBook('pinnacle'));
 check('Bovada is not', !isBettableBook('bovada'));
 check('ESPN BET is not (mike, 2026-09-03)', !isBettableBook('espnbet'));
+check('betPARX is not: a few states only (mike, 2026-11-06)', !isBettableBook('betparx'));
 check('an unknown key is not bettable', !isBettableBook('somebook'));
 check(
   'every book has a real name and a short label',

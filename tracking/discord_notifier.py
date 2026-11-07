@@ -269,13 +269,33 @@ def conviction_for(kelly_fraction) -> float:
     pre-specified signal, per-half records and a Wilson CI, per the §31 house
     rules. `kelly_fraction` is untouched on the pick and still carries the
     model's own conviction for whenever that day comes.
+
+    A pick's OWN stake overrides the flat unit: `stake_units` (picks.stake_units,
+    1..3 units to win), written by the card that decided the pick and read by
+    every surface. The first writer is NCAAB's agreement rule (mike, 2026-11-06;
+    docs/sports/ncaab.md, "Agreement sizing"), the signal that survived the
+    time split, the per-half records and the Wilson interval above asked for.
+    Anything outside 1..3, or missing, is the flat unit.
     """
     return FLAT_CONVICTION
 
 
-def stake_for(kelly_fraction, dk_odds=None) -> UnitStake:
-    """Conviction + the price-aware risk/win pair. See the block comment above."""
-    conviction = conviction_for(kelly_fraction)
+def pick_conviction(kelly_fraction, stake_units=None) -> float:
+    """The conviction a pick publishes: its own stake_units when that is a
+    number from 1 to 3, else conviction_for() (flat)."""
+    try:
+        u = float(stake_units)
+    except (TypeError, ValueError):
+        return conviction_for(kelly_fraction)
+    if MIN_CONVICTION <= u <= MAX_CONVICTION:
+        return u
+    return conviction_for(kelly_fraction)
+
+
+def stake_for(kelly_fraction, dk_odds=None, stake_units=None) -> UnitStake:
+    """Conviction + the price-aware risk/win pair. See the block comment above.
+    `stake_units` is the pick's own stake (picks.stake_units); None is 1u."""
+    conviction = pick_conviction(kelly_fraction, stake_units)
     dec = _decimal_or_none(dk_odds)
     if dec is None or dec <= 1.0:
         # No price to gross up against — publish the bare conviction.
@@ -289,12 +309,12 @@ def stake_for(kelly_fraction, dk_odds=None) -> UnitStake:
     return UnitStake(conviction, risk, conviction, False, True)
 
 
-def units_for(kelly_fraction, dk_odds=None) -> float:
+def units_for(kelly_fraction, dk_odds=None, stake_units=None) -> float:
     """
     Units LAID on a pick — what exposure sums and the recap tally should add up.
     Price-aware: at -110 a 1u-conviction play returns 1.1.
     """
-    return stake_for(kelly_fraction, dk_odds).risk
+    return stake_for(kelly_fraction, dk_odds, stake_units).risk
 
 
 def fmt_stake(stake: UnitStake) -> str:
@@ -489,12 +509,37 @@ def _decimal_to_american(dec: float) -> int:
     return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
 
 
-def _honest(model_id, prob):
-    """The promoted calibration map applied (models.honest_ev); the raw
-    number when there is no map or the lookup fails. Never raises."""
+def _decided(model_id, prob, odds, game_date):
+    """The number a pick was decided on, from the one its row stores
+    (models.honest_ev.decision_probability): the stored number for every model
+    but one in config.MODEL_PROB_SHRINK, whose rows from its "from" game_date
+    store it pulled toward `odds`, the decision price. None when such a row has
+    no date or no price. Never raises."""
+    try:
+        from models.honest_ev import decision_probability
+        return decision_probability(str(model_id), float(prob), odds, game_date)
+    except Exception:  # noqa: BLE001 - a display bound must not stop a post
+        return prob
+
+
+def _honest(model_id, prob, odds=None, game_date=None):
+    """The number the EV floor was applied to, from the stored one: the promoted
+    calibration map applied (models.honest_ev); the raw number when there is no
+    map or the lookup fails. Never raises.
+
+    `odds` and `game_date`, the pick's decision price and game date: a model in
+    config.MODEL_PROB_SHRINK stores a probability pulled toward that price
+    (display only) for games from its "from" date, so the decided number is
+    recovered from it first. Without that, the "good to" bound would solve the
+    raw-scale floor on a k-sized EV and vanish (price_bound returns None) for
+    most of those picks; and without the date, a row written before the shrink
+    would be un-shrunk and inflated (a "good to" at the -200 price floor)."""
+    decided = _decided(model_id, prob, odds, game_date)
+    if decided is None:
+        return None
     try:
         from models.honest_ev import honest_probability
-        return honest_probability(str(model_id), float(prob))
+        return honest_probability(str(model_id), float(decided))
     except Exception:  # noqa: BLE001 - a display bound must not stop a post
         return prob
 
@@ -945,7 +990,8 @@ def _new_signals(conn, target_date: str, *,
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
-                   p.decision_book, p.decision_odds AS decision_odds_raw
+                   p.decision_book, p.decision_odds AS decision_odds_raw,
+                   p.stake_units, p.stake_reason
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1008,7 +1054,7 @@ def _new_signals(conn, target_date: str, *,
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -1026,6 +1072,10 @@ def _new_signals(conn, target_date: str, *,
         # that price is the number in dk_odds.
         "decision_book": r[23] if len(r) > 23 else None,
         "decision_odds_raw": r[24] if len(r) > 24 else None,
+        # The pick's own stake (picks.stake_units, units to win; None is 1u)
+        # and why it is above 1u. stake_for reads it; the card shows both.
+        "stake_units": r[25] if len(r) > 25 else None,
+        "stake_reason": r[26] if len(r) > 26 else None,
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -1076,7 +1126,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    t.min_edge, t.min_odds, p.game_date,
                    COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
                    p.pick_side, p.scored_line, p.prop_market,
-                   p.decision_book, p.decision_odds AS decision_odds_raw
+                   p.decision_book, p.decision_odds AS decision_odds_raw,
+                   p.stake_units, p.stake_reason
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -1129,7 +1180,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # On the HONEST probability (2026-09-19): the same promoted map the
         # EV floor was applied through, so the bound solves the gate the pick
         # actually cleared. The card still SHOWS model_probability, as the app.
-        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19],
+        "good_to": price_bound(_honest(r[3], r[4], r[19], r[18]), r[3], r[16], r[17], r[19],
                                r[22] if len(r) > 22 else None),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
@@ -1142,6 +1193,10 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         "side": r[20], "line": r[21],
         "decision_book": r[23] if len(r) > 23 else None,
         "decision_odds_raw": r[24] if len(r) > 24 else None,
+        # The pick's own stake (picks.stake_units, units to win; None is 1u)
+        # and why it is above 1u. stake_for reads it; the card shows both.
+        "stake_units": r[25] if len(r) > 25 else None,
+        "stake_reason": r[26] if len(r) > 26 else None,
     } for r in rows]
 
 
@@ -1302,7 +1357,7 @@ def _signal_field(s: dict) -> dict:
     # The stake is grossed up by the price being PUBLISHED, not by DraftKings'.
     # Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
     # -120 would have them lay 16% more than the bet needs.
-    stake = fmt_stake(stake_for(s.get("kelly"), odds))
+    stake = fmt_stake(stake_for(s.get("kelly"), odds, s.get("stake_units")))
 
     price = _american(odds)
     if book:
@@ -1330,6 +1385,11 @@ def _signal_field(s: dict) -> dict:
     posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
     if posted:
         line += f" · posted {posted}"
+    # A pick staked above 1u says why, once, on its own line (picks.stake_reason;
+    # NCAAB agreement sizing, mike 2026-11-06). A flat pick adds nothing.
+    reason = s.get("stake_reason")
+    if reason and pick_conviction(s.get("kelly"), s.get("stake_units")) > FLAT_CONVICTION:
+        line += "\n" + reason
     # The label beside the posted stake, without the old NFL sizing figure
     # ("· 0.79u"): one unit number per pick (mike, 2026-11-04). The bet is
     # word for word; the stored row is not touched.
@@ -2059,7 +2119,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
                pk.created_at, pk.best_book, pk.best_odds,
                os.model_id, os.model_probability, t.min_edge, t.min_odds,
                os.pick_side, os.scored_line, pk.prop_market,
-               pk.decision_book, pk.decision_odds
+               pk.decision_book, pk.decision_odds, pk.stake_units
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -2069,7 +2129,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
             -- markets in one transaction (same created_at) cannot lend one
             -- bet the other's price and book.
             SELECT p.created_at, p.best_book, p.best_odds, p.prop_market,
-                   p.decision_book, p.decision_odds
+                   p.decision_book, p.decision_odds, p.stake_units
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -2095,8 +2155,14 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "model_id": r[11], "side": r[15], "line": r[16],
         "decision_book": r[18] if len(r) > 18 else None,
         "decision_odds_raw": r[19] if len(r) > 19 else None,
-        # Same "good to" the paid channels publish, from the same gates.
-        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
+        "stake_units": r[20] if len(r) > 20 else None,
+        # Same "good to" the paid channels publish, from the same gates. On the
+        # number the pick was DECIDED on: a model in config.MODEL_PROB_SHRINK
+        # stores (and the capture copies) a number pulled toward its decision
+        # price, r[19], for games from its "from" date (every candidate here is
+        # target_date's); for every other model _decided is the stored number.
+        "good_to": price_bound(_decided(r[11], r[12], r[19] if len(r) > 19 else None, target_date),
+                               r[11], r[13], r[14], r[3], r[17] if len(r) > 17 else None),
     } for r in rows], "Discord(free)")
 
 
@@ -2131,7 +2197,7 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     # book and price"). The free card is the shop window; a shop window showing
     # a worse number than the shop is a strange thing to have built.
     odds, book = publish_price(pick)
-    stake = fmt_stake(stake_for(pick.get("kelly"), odds))
+    stake = fmt_stake(stake_for(pick.get("kelly"), odds, pick.get("stake_units")))
     price = _american(odds)
     if book:
         price = f"{price} @ {book}"
@@ -2286,8 +2352,8 @@ _SETTLED_SQL = r"""
                COALESCE(p.decision_odds, p.dk_odds),
                CASE WHEN p.clv_method = 'standard_v2' THEN p.clv_pct END,
                p.is_live,
-               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result),
-               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)
+               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units),
+               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)
         FROM picks p
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
@@ -2301,8 +2367,8 @@ _SETTLED_SQL = r"""
 
 
 _UNIT_COLUMN_SQL = (
-    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result)"
-    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result)"
+    ",\n               published_pick_unit_profit(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)"
+    ",\n               published_pick_unit_risked(COALESCE(p.decision_odds, p.dk_odds), p.result, p.stake_units)"
 )
 
 
@@ -2317,7 +2383,12 @@ def _sql_without_unit_functions(sql: str) -> str:
 
 
 def _unit_functions_missing(exc: BaseException) -> bool:
+    """The posted-stake functions, or the stake_units column their third
+    argument reads (both from pick_stake_units_2026_11_06.sql), are not there
+    yet. Dropping the function columns drops every stake_units reference too."""
     text = str(exc).lower()
+    if "stake_units" in text:
+        return "does not exist" in text or "no such column" in text
     if "published_pick_unit_" not in text:
         return False
     return "does not exist" in text or "no such function" in text
@@ -2655,7 +2726,9 @@ def _tally(rows: list[tuple]) -> dict:
         # skips them at source, so this is belt-and-braces rather than the only
         # guard -- but a figure this easy to misread deserves both.
         # Column 6 is already NULL unless clv_method is standard_v2. Columns
-        # 8 and 9 are the posted-stake units and risked.
+        # 8 and 9 are the posted-stake units and risked, at the pick's own
+        # stake_units (picks.stake_units; NULL is 1u). The shorter fallback
+        # tuple (the three-argument functions not yet migrated) is 1u.
         # A same-book close that equals the price taken (0% at the stored
         # grain) is a push. It is not a beat and it is not a loss, so it
         # stays out of clv_n. The average, where one is taken, still

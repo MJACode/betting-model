@@ -714,7 +714,10 @@ ACTION_THRESHOLDS: dict = {
     # 2026-10-20 (mike: "Only the strongest picks need to be sent, like NHL")
     # one bet a game across both NBA prop models and four a night, strongest
     # first by each bet's EV percentile within its own model
-    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced.
+    # (scripts/nba_props_card.py); the 10-16 no-cap rule is replaced. Six a
+    # night from 2026-11-04 (mike: "we can go slightly more than 4 if we need
+    # to"): +183.7 units against +153.6 in tip order, where the units stop
+    # growing (docs/nba_models_2026.md section 14).
     "nba_prop_market":          {"min_prob": 0.0, "min_edge": 0.0},
     # The NBA projection model (2026-10-16, mike: "build the projection model",
     # "maximize units won"): minutes x per-minute rate, a negative-binomial width
@@ -723,8 +726,9 @@ ACTION_THRESHOLDS: dict = {
     # 2023-24..2025-26 at the best bettable price: 83,360 bets, +4.12%
     # (docs/nba_models_2026.md section 5). THE CUT IS EV, per market, in the card.
     # Written through scripts/nba_props_card.py from 2026-10-20 (mike): one bet a
-    # game across both NBA prop models and four a night, strongest first by each
-    # bet's EV percentile within its own model (models/nba_prop_rank.py).
+    # game across both NBA prop models and four a night (six from 2026-11-04),
+    # strongest first by each bet's EV percentile within its own model
+    # (models/nba_prop_rank.py).
     "nba_prop_projection":      {"min_prob": 0.0, "min_edge": 0.0},
     # NBA full-game totals, OVER only (2026-10-17, mike: "Find it ... edge like
     # we have with other sports"): models/nba_total_luck.py, written by
@@ -754,7 +758,13 @@ ACTION_THRESHOLDS: dict = {
     # Q1 + Q2 points. Graded walk-forward at bought prices, 2023-24..2025-26
     # pooled: 595 bets, 333-259-3, +51.49 units on 643.19 risked, +8.0%, interval
     # +0.4% to +15.4%, every season positive. prob / edge are 0.0 for the same
-    # reason as nba_total_luck's.
+    # reason as nba_total_luck's. From 2026-11-04 (mike: "Only select the
+    # highest EV one") the gap must also be BELOW nba_total_luck's 3.0: at 3.0
+    # or more that model bets the same game on the same gap (323 of 323 graded
+    # games), so this bet was its twin (+3.7% on those 323). Kept: gap 2.0-3.0,
+    # 272 bets, +37.73 units, +12.7%. And one bet a game across the three NBA
+    # game-total models (scripts/nba_game_totals_door.py). docs/nba_models_2026.md
+    # section 14.
     "nba_first_half_total_luck": {"min_prob": 0.0, "min_edge": 0.0},
     # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
     # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
@@ -865,9 +875,18 @@ ACTION_THRESHOLDS: dict = {
     # 2024-25 +41.03, 2025-26 +15.48 units (+1.65%, the floor on). Neighbours:
     # 0.01 +129.76 units, 0.03 +76.86 units. Without the 10 best dates +48.11
     # units. 78% unders. 14 of the 1,036 cells cleared the interval test where
-    # about 26 would by chance. min_edge 0.02 IS the card's cut (decision_edge
-    # is that edge); min_prob 0.0 because the edge is the cut.
-    "ncaab_first_half_total":   {"min_prob": 0.0, "min_edge": 0.02},
+    # about 26 would by chance. min_edge IS the card's cut (decision_edge is
+    # that edge); min_prob 0.0 because the edge is the cut.
+    # RAISED 0.02 -> 0.025 (2026-11-06, mike: fewer picks, units and closing
+    # value the only goal). The same replay with the -200 floor, by cut:
+    # 0.02 2,527 bets +123.78 units (+4.34%); 0.0215 2,297 +127.16; 0.0235
+    # 2,051 +134.27; 0.025 1,887 +127.31 (+5.98%, [1.51, 10.33]); 0.0265
+    # 1,711 +114.09; 0.03 1,369 +76.86 (+4.98%, [-0.20, 10.08]). 0.025 sits
+    # in the 0.0215-0.0265 plateau: a quarter fewer bets than 0.02 for +3.5
+    # units, positive every season (2023-24 664 +54.28, 2024-25 620 +44.03,
+    # 2025-26 603 +29.01) and in both halves of the seasons (Nov-Dec 890
+    # +18.04, Jan on 997 +109.27). Prices -160 to +115.
+    "ncaab_first_half_total":   {"min_prob": 0.0, "min_edge": 0.025},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1912,6 +1931,21 @@ MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05)
 # because quarter-Kelly always exceeded the 5% cap (picks were all flat-bet at 5%).
 # Tenth-Kelly keeps bets at 2-4% of bankroll, letting edge size drive differentiation.
 KELLY_MULTIPLIER: float     = float(os.environ.get("KELLY_MULTIPLIER",      0.10))
+# NCAAB agreement sizing (2026-11-06, mike: "I want a pick that has a higher
+# confidence and higher long term win to be higher units, you can slice this
+# from back testing"). A NCAAB BET on the same game and side as an EARLIER
+# NCAAB BET (totals: the same Over/Under, full game or first half; sides: the
+# same team across the spread, both moneylines and the first-half spread) is
+# written with picks.stake_units = this many units TO WIN, risk still capped at
+# 3u (models/ncaab_stake.py). On the six models' replays, 2023-24..2025-26:
+# 233 such bets, +21.3% flat (95% interval 10.7 to 31.8), 67.8% won against a
+# 55.5% break-even, positive in all five seasons and both halves; every other
+# bet +6.4%. Graded walk-forward on 2025-26 at the same bets: 2u returns 6.90%
+# per unit risked against 6.18% flat (+32.2 units at the same risk), 3u 7.30%
+# (+50.4). 2u because the interval's low end (10.7%) is still 1.7x the base
+# return; 3u leans on the point estimate. 1 turns it off. Every other model
+# and every other NCAAB bet stays flat 1u (stake_units NULL).
+NCAAB_AGREEMENT_STAKE_UNITS: float = float(os.environ.get("NCAAB_AGREEMENT_STAKE_UNITS", 2.0))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
 
@@ -2485,14 +2519,16 @@ MODEL_OWN_EV_FLOOR: dict = {
     # at -140 or longer is EV above 0.034, so 0.03 never removes a bet the
     # evidence took.
     "ncaab_first_half_spread":  0.03,
-    # NCAAB first-half total (2026-11-03, mike). The cut is the edge (0.02, in
-    # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
-    # that cut admitted in the replay of 2023-24..2025-26 with the -200 floor:
-    # P(win | no push) x decimal - 1 = +0.0343 (2,527 bets; median +0.059).
-    # EV is edge x decimal and the shortest price it may lay is -200 (decimal
-    # 1.5), so an edge above 0.02 is EV above 0.03 at every price it can bet:
-    # this floor never removes a bet the cut takes.
-    "ncaab_first_half_total":   0.03,
+    # NCAAB first-half total (2026-11-03, mike; cut raised 2026-11-06, mike).
+    # The cut is the edge (0.025, in MODEL_EDGE_THRESHOLDS), so this floor
+    # sits just under the smallest EV that cut admitted in the replay of
+    # 2023-24..2025-26 with the -200 floor: P(win | no push) x decimal - 1 =
+    # +0.0426 (1,887 bets; median +0.068). EV is edge x decimal and the
+    # shortest price it may lay is -200 (decimal 1.5), so an edge above 0.025
+    # is EV above 0.0375 at every price it can bet: at 0.037 this floor never
+    # removes a bet the cut takes (0.042 would, at -150 and shorter). Was 0.03
+    # at the 0.02 cut.
+    "ncaab_first_half_total":   0.037,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2684,6 +2720,38 @@ MODEL_MARKET_EV_FLOOR: dict = {
 }
 
 
+# A model whose STORED and SHOWN probability is its own pulled toward the price
+# it was bet at (mike, 2026-11-06: "Yes, ship it"): p' = implied + k (p - implied), implied from the
+# decision price, so the EV a pick shows is k x the EV it was decided on.
+#
+# THE DECISION DOES NOT USE IT. The card, its floors (MODEL_MARKET_EV_FLOOR
+# above), the door's ranking (models/nba_prop_rank.py) and the Discord "good to"
+# price all run on the model's own number, exactly as graded. Only what a picks
+# row stores and the app shows -- model_probability, model_probability_cal,
+# edge, decision_edge, best_edge -- is the shrunk one. One number multiplies
+# every EV, so it moves no bet and no ranking. It is not a promoted calibration
+# map on purpose: models/honest_ev.honest_probability runs BEFORE the floor,
+# and a map there would hold a k-sized EV against floors set on the raw scale.
+#
+# "from": the first game_date whose rows store the shrunk number. Every row of
+# an earlier game_date stores the raw one, written before or after this shipped,
+# so a reader (Discord's "good to", a restated slate, research) tells the two
+# apart from the row alone (models/honest_ev.shrink_factor). It must be a date
+# no pick has been written for when this deploys: a row the old code wrote raw
+# on or after it would be read as shrunk.
+#
+# nba_prop_projection, k = 0.325: maximum likelihood (calfit.py method "k",
+# grid 0.005) on all three graded seasons, 66,588 bets, 2023-24..2025-26; 0.324
+# on a 0.001 grid; 90% likelihood range 0.270 to 0.377. Walk-forward it was
+# 0.325 (2023-24 alone) and 0.300 (2023-24 + 2024-25), and with it every eighth
+# of the EV range sat inside its 90% range, where uncorrected seven of eight
+# claimed about three times what the bets returned (docs/nba_models_2026.md,
+# "The probability a pick stores", section 5).
+MODEL_PROB_SHRINK: dict = {
+    "nba_prop_projection": {"k": 0.325, "from": "2026-11-07"},
+}
+
+
 def min_ev_for(model_id: str, prop_market: str | None = None) -> float:
     """The EV floor this model actually bets over: its OWN floor when it
     carries one (MODEL_OWN_EV_FLOOR, the two NFL rules), else the global
@@ -2851,7 +2919,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_first_post": 0.015,  # 2026-11-03 mike: THE cut, at a book's first moneyline post; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.02,   # 2026-11-02 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
-    "ncaab_first_half_total":   0.02,   # 2026-11-03 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
+    "ncaab_first_half_total":   0.025,  # 2026-11-03 mike, raised 2026-11-06 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -3812,13 +3880,35 @@ SHARP_BOOKMAKERS = [
 # narrow loses a bet we could have had — recoverable, and it shows up as a
 # missing row. Too wide LOCKS AN UNPLACEABLE PICK FOREVER, and §1c means
 # nothing can take it back.
-NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada"}
+#
+# STATE-LIMITED BOOKS ARE FETCHED, AND NEVER THE BOOK A PICK NAMES (mike,
+# 2026-11-06: "global rule. remove betparx from sports books for recommeding
+# betting lines in picks only niche avaialble in a few states"). betPARX ships
+# one app per state -- Maryland, Pennsylvania, New Jersey
+# (mobile/src/lib/sportsbookLinks.ts) -- so a pick decided there sends most
+# members to a book they cannot open. 60 BETs had been decided at it by that
+# day (14 models, 53 of them in the previous 30 days, measured in `picks`).
+#
+# It stays in LINE_SHOP_BOOKMAKERS on purpose: the NCAAB consensus models take
+# a median over every book and were fitted with betPARX in the set
+# (models/ncaab_book_quotes.BOOKS), so its quotes must keep arriving. What
+# changes is only where a pick may be DECIDED and where a member is SENT.
+#
+# Unlike espnbet below, this is NOT reversible by an environment variable:
+# BETTABLE_BOOKS and BEST_LINE_BOOKMAKERS drop these books after any override.
+# Adding a book here is the one edit; tests/test_betparx_never_a_pick_book.py
+# pins every copy of the list (the NFL cards' fallback, the app's mirror).
+STATE_LIMITED_BOOKMAKERS = {"betparx"}
+NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada", *STATE_LIMITED_BOOKMAKERS}
 BETTABLE_BOOKS = [
-    b.strip().lower()
-    for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
-        b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
-    )).split(",")
-    if b.strip()
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
+            b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
+        )).split(",")
+        if b.strip()
+    )
+    if b not in STATE_LIMITED_BOOKMAKERS
 ]
 
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
@@ -3971,14 +4061,18 @@ SCORE_OFF_ANY_BOOK_LINE: bool = (
 # (WynnBET exited US online sports betting).
 #
 # Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
-# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS.
-_BEST_LINE_EXCLUDE_DEFAULT = "pinnacle,bovada,espnbet"
-BEST_LINE_EXCLUDE_BOOKMAKERS = [
-    b.strip().lower()
-    for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
-                            _BEST_LINE_EXCLUDE_DEFAULT).split(",")
-    if b.strip()
-]
+# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS -- every book
+# except STATE_LIMITED_BOOKMAKERS (betparx, mike 2026-11-06), which no override
+# puts back.
+_BEST_LINE_EXCLUDE_DEFAULT = ",".join(
+    ["pinnacle", "bovada", "espnbet", *sorted(STATE_LIMITED_BOOKMAKERS)])
+BEST_LINE_EXCLUDE_BOOKMAKERS = list(dict.fromkeys([
+    *(b.strip().lower()
+      for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
+                              _BEST_LINE_EXCLUDE_DEFAULT).split(",")
+      if b.strip()),
+    *sorted(STATE_LIMITED_BOOKMAKERS),
+]))
 
 BEST_LINE_BOOKMAKERS = [
     b for b in (

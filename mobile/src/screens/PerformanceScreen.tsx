@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -592,7 +592,7 @@ function StakeEditModal({
   };
 
   return (
-    <Modal visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal trackName="PerformanceScreen" visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.stakeModalBackdrop}>
         {/* Tap outside the card to dismiss (audit M10). A sibling behind the
             card, not its parent, so VoiceOver still reaches the card's input

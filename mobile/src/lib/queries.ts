@@ -762,17 +762,21 @@ const PICK_COLUMNS =
   'clv_captured_at, clv_method, clv_close_book, clv_bet_book, ' +
   'market_clv_pct, market_clv_pp, market_clv_method, pinnacle_close_odds, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
+  // The pick's own stake (2026-11-06): units to win, NULL = 1u, and why.
+  // Columns on `picks` only. open_picks and the record views do not carry them.
+  'stake_units, stake_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
 // with SettledPickKey — and bump the cache key in settledPickCache.ts when it
-// changes, or cached rows will be missing the new column.
+// changes, or cached rows will be missing the new column. stake_units is the
+// one exception, and settledPickCache.ts says why.
 const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
   'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
-  'is_live, downgrade_reason, player_key, prop_market';
+  'is_live, downgrade_reason, player_key, prop_market, stake_units';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -3802,4 +3806,45 @@ export async function fetchScoreboardGame(gameId: string): Promise<GameRow | nul
   if (error) throw error;
   const row = (data ?? [])[0];
   return row ? (row as unknown as GameRow) : null;
+}
+
+// ── Same-game parlay prices (data/migrations/add_sgp_price_observations_2026_11_06.sql)
+
+export interface SgpHaircutRow {
+  book: string;
+  haircut: number | string;
+  n: number | string;
+}
+
+/** Each book's fitted same-game cut — aggregates only, a few rows. */
+export async function fetchSgpHaircuts(): Promise<SgpHaircutRow[]> {
+  const { data, error } = await supabase.rpc('sgp_haircuts');
+  if (error) throw error;
+  return (data ?? []) as unknown as SgpHaircutRow[];
+}
+
+export interface SgpPriceEntry {
+  deviceId: string;
+  book: string;
+  bookAmerican: number;
+  multipliedDecimal: number;
+  sgpGroups: number;
+  legCount: number;
+  legs: { label: string; gameId: string | null }[];
+  appVersion: string | null;
+}
+
+/** Store a same-game price a member read off a book's slip. Insert-only. */
+export async function logSgpPrice(e: SgpPriceEntry): Promise<void> {
+  const { error } = await supabase.rpc('log_sgp_price', {
+    p_device_id: e.deviceId,
+    p_book: e.book,
+    p_book_american: Math.round(e.bookAmerican),
+    p_multiplied_decimal: e.multipliedDecimal,
+    p_sgp_groups: e.sgpGroups,
+    p_leg_count: e.legCount,
+    p_legs: e.legs,
+    p_app_version: e.appVersion,
+  });
+  if (error) throw error;
 }

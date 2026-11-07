@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { BETTING_STATES, useBettingState } from '@/hooks/useBettingState';
@@ -20,7 +21,7 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
     onClose();
   };
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="StatePickerSheet" visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
             parent: an accessible Pressable groups everything inside it into

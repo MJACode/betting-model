@@ -5,7 +5,8 @@
 // The tap persists, the same way a SportToggle tap does (useSportFilter).
 
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
@@ -33,7 +34,7 @@ export function StatsSportButton() {
         <Text style={styles.label}>{sport}</Text>
         <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
       </Pressable>
-      <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
+      <Modal trackName="StatsSportButton" visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <View style={styles.backdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}

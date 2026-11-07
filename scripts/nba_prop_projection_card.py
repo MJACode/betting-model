@@ -15,7 +15,7 @@ wait for it.
       Prices the stored projections against the game's newest prop fetch from
       inside the decision window. Both NBA prop cards then write through ONE
       door (scripts/nba_props_card.publish_across_models): one bet a game
-      across both models and four a night, strongest first (each bet's EV
+      across both models and six a night, strongest first (each bet's EV
       percentile within its own model); each decided game's
       ledger row (nba_prop_projection_decisions) and its bets in one
       transaction, under both models' locks.
@@ -38,6 +38,16 @@ BET ROWS ONLY in picks, as nba_prop_market: a decision with no bet lives in
 the ledger, and the per-look diagnostic line is how an empty card is told
 apart from a broken one.
 
+THE PROBABILITY A ROW STORES IS SHRUNK; THE BET IS NOT (mike, 2026-11-06).
+Graded on 2023-24..2025-26, the model's EV claims about three times what its
+bets return, in every part of its range. So a row stores and the app shows
+p' = implied + k (p - implied) at the decision price (k in
+config.MODEL_PROB_SHRINK, for games from its "from" date; an earlier game's row
+stores p): model_probability, model_probability_cal and the three edges come
+from p'. The bet itself is decided, floored and ranked on the
+model's own p and EV, unchanged: find_bets never sees k, and the door's key
+(`_ev`) is the raw EV, so the same bets are written in the same order.
+
     python -m scripts.nba_prop_projection_card                     # print the card, write nothing
     python -m scripts.nba_prop_projection_card --project G1 G2     # project these games and store it
     python -m scripts.nba_prop_projection_card --publish           # both NBA prop cards through the shared door
@@ -58,6 +68,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import models.honest_ev as honest_ev  # noqa: E402
 import models.nba_prop_projection as pj  # noqa: E402
 import models.nba_props as nb  # noqa: E402
 import scripts.nba_prop_market_card as rule_card  # noqa: E402
@@ -545,7 +556,12 @@ def pick_rows(bets: list[pj.ProjectionBet], bankroll: float) -> list[dict]:
             continue
         price = float(b.price)
         dec_implied = implied(price)
-        decision_edge = round(b.prob - dec_implied, 4)
+        # What the row stores and the app shows: the model's probability pulled toward the
+        # decision price (config.MODEL_PROB_SHRINK). One number, so every edge below is p'
+        # against a price, and decision_edge is exactly k x the edge the bet was decided on.
+        # b.prob and b.ev, which decided and rank the bet, are not touched.
+        shown = honest_ev.shown_probability(MODEL_ID, b.prob, price, b.game_date)
+        decision_edge = round(shown - dec_implied, 4)
         dk = b.dk_price
         dk_implied = implied(dk) if dk is not None else None
         at_dk = b.book == "draftkings"
@@ -553,11 +569,16 @@ def pick_rows(bets: list[pj.ProjectionBet], bankroll: float) -> list[dict]:
             "game_id": b.game_id, "model_id": MODEL_ID, "sport": SPORT,
             "game_date": b.game_date, "game_time": b.tip,
             "pick_side": b.side, "pick_label": label,
-            # the calibrated probability IS the model's own (config.MODELS_ON_OWN_PROBABILITY)
-            "model_probability": round(b.prob, 4), "model_probability_cal": round(b.prob, 4),
+            # The calibrated column is the shown number too (no pooled map on top:
+            # config.MODELS_ON_OWN_PROBABILITY); the calibration monitor grades it. UNROUNDED
+            # (the column is an unscaled numeric): Discord's "good to" price recovers the decided
+            # number from it (models/honest_ev.decision_probability), and a rounded p' moves that
+            # by the rounding / k. Rounded to 6 decimals, 113 of the 66,588 graded bets' "good
+            # to" prices broke a half-point tie the other way (2026-11-05).
+            "model_probability": shown, "model_probability_cal": shown,
             "dk_odds": dk,
             "dk_implied_prob": round(dk_implied, 4) if dk is not None else 0.0,
-            "edge": round(b.prob - dk_implied, 4) if dk is not None else 0.0,
+            "edge": round(shown - dk_implied, 4) if dk is not None else 0.0,
             "dk_bet_link": b.dk_link if dk is not None else None,
             "line_book": None if dk is not None else b.book,
             "scored_line": b.line,
@@ -592,8 +613,9 @@ def render(bets, diag: dict, written=None, decided=None) -> str:
         head += f" written={written}"
     lines = [head]
     for b in sorted(bets, key=lambda x: -x.ev):
+        shown = honest_ev.shown_probability(MODEL_ID, b.prob, b.price, b.game_date)
         lines.append(f"  {b.game_id:26s} {pick_label(b)} @{b.book} {b.price:+.0f}  p {b.prob:.4f}  "
-                     f"EV {b.ev:+.4f}  mu {b.mu:.2f}")
+                     f"EV {b.ev:+.4f}  shown p {shown:.4f}  mu {b.mu:.2f}")
     return "\n".join(lines)
 
 

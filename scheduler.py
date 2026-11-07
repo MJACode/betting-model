@@ -809,6 +809,20 @@ def run_heartbeat_watchdog() -> None:
         log.exception("ERROR heartbeat-watchdog crashed")
 
 
+def run_sentry_events_sync() -> None:
+    # Copy the mobile app's Sentry events into Supabase sentry_events
+    # (data/ingestors/sentry_events.py). Matt, 2026-11-06: Sentry in the app,
+    # everything in Supabase. In-process and never raises: a Sentry outage or
+    # a missing key must not cost the scheduler anything. No keys on the
+    # worker = "not_configured" and nothing written.
+    try:
+        from data.ingestors.sentry_events import sync_sentry_events
+        result = sync_sentry_events()
+        log.info("sentry_events: %s", result)
+    except Exception:  # noqa: BLE001
+        log.exception("ERROR sentry-events-sync failed")
+
+
 def run_bovada_feed() -> None:
     # Same supervisor shape as the others: exits after --minutes, the */10 cron
     # relaunches it, max_instances=1 makes intervening ticks no-ops.
@@ -879,6 +893,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
+                  # Copies Sentry into sentry_events. Runs on pipeline already
+                  # (it is not a poller job); named here so the set says so.
+                  "sentry_events_sync",
                   "calibration_watch",
                   "model_quality",
                   "kalshi_ladders", "kalshi_game_markets",
@@ -1471,7 +1488,7 @@ def run_nba_prop_window() -> None:
 
     Otherwise: fetch props for exactly the games to decide, run both NBA prop
     cards on that fetch in one step (one bet a game across both models, at most
-    4 a night: scripts/nba_props_card.py), take any closing snapshot
+    6 a night: scripts/nba_props_card.py), take any closing snapshot
     that is due, and publish what the cards wrote. THEN, for the games about 65
     minutes from tip, pull the ESPN injury list and store their projections (the
     projection card prices them two ticks later, inside the window). A step
@@ -1495,7 +1512,7 @@ def run_nba_prop_window() -> None:
             [sys.executable, "-m", "scripts.nba_prop_window", "--fetch", *plan.decide],
             "nba-prop-window-fetch", timeout=t["fetch"])
         # BOTH NBA prop cards in ONE step: their candidates meet in one choice
-        # (one bet a game across both models, four a night, strongest first by
+        # (one bet a game across both models, six a night, strongest first by
         # each bet's EV percentile within its own model;
         # scripts/nba_props_card.py), so the order they run in cannot decide
         # which model's bet a game gets.
@@ -1672,13 +1689,17 @@ def run_nba_total_luck_window() -> None:
     own order. nba_total_luck: fetch the NBA board, run its card.
     nba_team_total_luck: its team-total fetch for exactly the due games, its card,
     then the closing team totals of its bet games. nba_first_half_total_luck: the
-    same three steps. No step of one model reads another's rows or outcome, so a
+    same three steps. No step of one model waits on another's step or outcome, so a
     failed team-total call cannot stop the first half's, and one model's slow card
     cannot move another's fetch or cost it a look at the game: run one after the
     other, a team-total card killed at its limit pushed the first-half fetch back
     about 3 minutes, and with both killed each model lost one of its three attempts
     a window (tests/test_nba_first_half_total_luck_window.py). The longest tick is
-    6 minutes at the steps' own limits. Then publish what the cards wrote, once, when
+    6 minutes at the steps' own limits. The one read across models is each card's
+    publish re-reading the other two models' BETs on its games, under a lock the three
+    share: one NBA game-total bet a game, the first writer keeping it (mike,
+    2026-11-04; scripts/nba_game_totals_door.py). A game that gets no bet that way
+    says so on its decision row. Then publish what the cards wrote, once, when
     all of them are done. A tick can pass a minute and the next tick coalesces into
     it; each window holds six ticks or more, so one skipped tick loses no game. A
     step that fails or is killed raises AFTER publishing, so the heartbeat records
@@ -2515,6 +2536,19 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Sentry -> Supabase copy (run_sentry_events_sync) — every 15 minutes.
+    # A copy, so the cadence only bounds how stale sentry_events can be.
+    # max_instances + coalesce: a tick still inside its HTTP budget must not
+    # be joined by the next one. The budget itself is TICK_BUDGET_S in
+    # data/ingestors/sentry_events.py, well under this 15-minute gap.
+    sched.add_job(
+        run_sentry_events_sync,
+        CronTrigger(minute="7,22,37,52", timezone=TIMEZONE),
+        id="sentry_events_sync",
+        name="Sentry events -> Supabase (every 15 min)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # Failure alerting — every 10 minutes, 24x7.

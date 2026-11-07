@@ -72,11 +72,12 @@ def test_the_dashboard_totals_are_the_published_record(name):
 def _dash_units_cell():
     src = _read(DASH)
     tree = ast.parse(src)
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_units_cell")
     import pandas as pd
     from tracking.published_units import unit_profit
     ns = {"pd": pd, "unit_profit": unit_profit}
-    exec(ast.get_source_segment(src, fn), ns)
+    for name in ("_stake_or_none", "_units_cell"):
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+        exec(ast.get_source_segment(src, fn), ns)
     return ns["_units_cell"]
 
 

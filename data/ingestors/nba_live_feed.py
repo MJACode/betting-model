@@ -57,9 +57,15 @@ _install_api_call_log()
 
 
 def feed_books() -> list[str]:
-    """The deciding books plus Pinnacle, at most ten (one region group)."""
+    """The deciding books plus Pinnacle, at most ten (one region group).
+
+    Plus the state-limited books (betparx, mike 2026-11-06): they left the
+    deciding list, not the data, and this pull is the only in-play NBA source.
+    A book stays here only while it is still fetched pre-game."""
     import config
-    books = list(dict.fromkeys([*config.BEST_LINE_BOOKMAKERS, SHARP]))
+    kept = [b for b in sorted(config.STATE_LIMITED_BOOKMAKERS)
+            if b in config.LINE_SHOP_BOOKMAKERS]
+    books = list(dict.fromkeys([*config.BEST_LINE_BOOKMAKERS, *kept, SHARP]))
     if len(books) > 10:
         raise ValueError(f"{len(books)} books would bill a second region: {books}")
     return books

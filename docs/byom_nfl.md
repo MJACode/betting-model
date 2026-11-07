@@ -303,6 +303,14 @@ no previous game, so a last-game filter leaves it out. The opener is the
 first DraftKings quote stored, not necessarily DraftKings' own open; a move
 on a spread, total or prop is the number only, not the price.
 
+**Chips (Matt, 2026-11-05).** The app offers Moved toward and Moved away;
+"Didn't move" is dropped, because on the official line the opener has not
+moved, so it was nearly every bet. The server still accepts `none`, and a
+model saved with it still shows the chip. NBA player props hold one stored
+line each before 2026-27 (measured 2026-11-05: 1.00 candidates per prop for
+2023-24 to 2025-26, 10.97 for 2026-27), so the Trends tab says line history
+starts in 2026-27. NFL props hold about 2.4 per prop for 2023-2025.
+
 **Divisions** are a fixed list in `byom_team_division`: NFL since 2002, NBA
 since 2004-05, NHL from 2013-14 with the 2020-21 temporary divisions and the
 2021-22 realignment. NHL's UTA code is Arizona through 2023-24 and Utah

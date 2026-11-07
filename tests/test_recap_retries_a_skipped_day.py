@@ -135,7 +135,8 @@ def _schema(db):
         decision_odds REAL, clv_pct REAL, clv_method TEXT, is_live INTEGER,
         downgrade_reason TEXT,
         condition_status TEXT, settled_at TEXT, game_id TEXT, pick_side TEXT,
-        player_id TEXT, player_key TEXT, prop_market TEXT, pick_label TEXT)""")
+        player_id TEXT, player_key TEXT, prop_market TEXT, pick_label TEXT,
+        stake_units REAL)""")
     db.execute("""CREATE TABLE push_sent (
         lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
         UNIQUE (lock_key, kind))""")

@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ByomBetCount } from '@/components/byom/ByomBetCount';
@@ -125,7 +125,7 @@ export function ByomFilterSheet({
     if (next.kickSlots.includes('prime')) onPrimetime(null);
   };
   return (
-    <Modal
+    <Modal trackName="ByomFilterSheet"
       visible={tab != null}
       animationType="slide"
       presentationStyle="pageSheet"
@@ -216,6 +216,7 @@ export function ByomFilterSheet({
           ) : null}
           {shown === 'trends' ? (
             <TrendsTab
+              sport={sport}
               market={market}
               propFilters={propFilters}
               onPropFilters={onPropFilters}
@@ -621,15 +622,24 @@ function ChoiceRow<T extends string>({
  * waits for that game to finish.
  */
 function TrendsTab({
+  sport,
   market,
   propFilters,
   onPropFilters,
 }: {
+  sport: ByomSport;
   market: ByomMarket;
   propFilters: ByomPropFilterState;
   onPropFilters: (next: ByomPropFilterState) => void;
 }) {
   const teamBet = market !== 'totals';
+  // Matt, 2026-11-05: "Didn't move" is dropped. On the official line it is
+  // nearly every bet (the opener has not moved). A model saved with it
+  // still shows it, so the choice can be cleared.
+  const moveChoices = LINE_MOVE_CHOICES.filter(
+    (choice) => choice.value !== 'none' || propFilters.lineMove === 'none');
+  // Measured 2026-11-05: NBA props before 2026-27 hold one stored line each.
+  const noPropHistory = sport === 'NBA' && isPropMarket(market);
   return (
     <View>
       <Card
@@ -637,10 +647,15 @@ function TrendsTab({
         detail="The DraftKings line since it opened, up to when the bet became official (the close, on the closing line). Toward means the market moved onto this side: fewer points on a spread, a higher total for an over or a lower one for an under, or a shorter moneyline price. Away is the reverse."
       >
         <ChoiceRow
-          choices={LINE_MOVE_CHOICES}
+          choices={moveChoices}
           value={propFilters.lineMove}
           onChange={(lineMove) => onPropFilters({ ...propFilters, lineMove })}
         />
+        {noPropHistory ? (
+          <Text style={styles.note}>
+            NBA prop line history starts in 2026-27. Before that, this filter finds no bets.
+          </Text>
+        ) : null}
       </Card>
       {teamBet ? (
         <Card title="Last game" detail="This team’s previous game this season">

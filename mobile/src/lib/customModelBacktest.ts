@@ -119,13 +119,20 @@ export interface BacktestPickRow {
   units: number;
 }
 
-/** The units and risk a set of graded picks books at the published stake. */
+/**
+ * The units and risk a set of graded picks books at the published stake.
+ * `ownStake` reads each pick's stake_units (a built-in model, booked as
+ * v_public_track_record books it). Without it every pick is the flat 1u to
+ * win (a custom model is the member's own, and its server half, the
+ * two-argument function, books it flat too).
+ */
 function postedTotals(picks: Iterable<{ kelly_fraction?: number | null; dk_odds?: number | null;
-  decision_odds?: number | null; result?: string | null }>): { units: number; risked: number } {
+  decision_odds?: number | null; result?: string | null; stake_units?: number | null }>,
+  ownStake: boolean): { units: number; risked: number } {
   let units = 0;
   let risked = 0;
   for (const p of picks) {
-    const u = postedPickUnits(p);
+    const u = postedPickUnits(ownStake ? p : { ...p, stake_units: null });
     units += u.units;
     risked += u.risked;
   }
@@ -266,8 +273,10 @@ export function computeCustomModelStats(model: CustomModel, settled: SettledPick
   }
 
   const decided = wins + losses;
-  // The published stake, as the Record tab books it (an unpriced pick at 1u).
-  const posted = postedTotals(counted);
+  // The published stake's price math (an unpriced pick at 1u), at the flat
+  // 1u to win: a custom model is the member's own, not the posted pick's
+  // stake_units, and the server half books it the same way.
+  const posted = postedTotals(counted, false);
   return {
     picks,
     wins,
@@ -326,8 +335,9 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
   }
 
   const decided = wins + losses;
-  // The published stake, as the Record tab books it (an unpriced pick at 1u).
-  const posted = postedTotals(counted);
+  // The published stake, as the Record tab books it (an unpriced pick at its
+  // bare stake), each pick at its own stake_units when it carries one.
+  const posted = postedTotals(counted, true);
   return {
     picks,
     wins,

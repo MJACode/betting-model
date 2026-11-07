@@ -61,6 +61,23 @@ def _run(clock, after_s=30):
     return card.run_card(do_publish=True, now=clock() + timedelta(seconds=after_s))
 
 
+def test_a_game_the_full_game_model_already_bet_gets_no_team_total_bet(monkeypatch):
+    """RULE (mike, 2026-11-04): one NBA game-total bet a game across the three NBA
+    game-total models (scripts/nba_game_totals_door.py). The full-game over decides
+    first (60-66 minutes before tip); this card still decides the game and records
+    why, and writes no pick."""
+    clock, db, f, _ = card_world(monkeypatch)
+    db.rows["picks"].append({"game_id": GID, "model_id": "nba_total_luck",
+                             "signal_type": "BET", "condition_status": None})
+    feed.fetch_team_totals([GID], "open", conn=db)
+    out = _run(clock)
+    assert out["published"] == 0 and out["decided"] == 1
+    assert [r["model_id"] for r in db.rows["picks"]] == ["nba_total_luck"]
+    [d] = db.rows["nba_team_total_luck_decisions"]
+    assert d["n_bets"] == 0
+    assert d["detail"].endswith("; one_total_a_game:nba_total_luck_already_bet")
+
+
 def test_a_game_with_no_draftkings_team_total_is_stored_decided_and_bet(monkeypatch):
     """RULE: DraftKings hung no team total; FanDuel's under is the best price
     at Pinnacle's fair line, so the bet is written there, with no DraftKings

@@ -1101,7 +1101,7 @@ confirmed line by line from its `r5_lib.py`, `r5_prep.py`, `r5_score.py`,
 5. **The bet.** A side priced shorter than -200 is set aside first, the limit
    every NCAAB model carries. Of the rest, the single quote with the largest
    edge, ties to the alphabetically first book. Bet when that edge is above
-   **0.02**; otherwise the game is decided with no bet.
+   **0.025** (0.02 until 2026-11-06); otherwise the game is decided with no bet.
 
 **When.** The decision is the capture's call an hour before tip, the one it
 already made for history. If it fails, the job retries every minute, and a
@@ -1135,7 +1135,26 @@ At 0.02 by season: 2023-24 859 bets, +67.27 units; 2024-25 852, +41.03;
 its 10 best dates: +48.11 units. Without Hard Rock: 2,320 bets, +122.02 units,
 [0.91, 8.48]. November alone: 690 bets, +35.91 units.
 
-**The shipped code reproduces it exactly.** The build replays 2023-24 to
+****The cut was raised to 0.025 on 2026-11-06** (mike: fewer picks, with units
+and closing value the only goal). The same replay with the -200 limit, every
+game, by cut:
+
+| Cut | Bets | Units | ROI | 95% interval | 2023-24 | 2024-25 | 2025-26 | Nov-Dec | Jan on |
+|---|---|---|---|---|---|---|---|---|---|
+| 0.02 (until 11-06) | 2,527 | +123.78 | +4.34% | [0.45, 8.05] | +67.27 | +41.03 | +15.48 | +28.28 | +95.50 |
+| 0.0215 | 2,297 | +127.16 | +4.90% | | | | | +26.45 | +100.71 |
+| 0.0235 | 2,051 | +134.27 | +5.80% | | | | | +27.76 | +106.51 |
+| **0.025 (live)** | **1,887** | **+127.31** | **+5.98%** | **[1.51, 10.33]** | **+54.28** | **+44.03** | **+29.01** | **+18.04** | **+109.27** |
+| 0.0265 | 1,711 | +114.09 | +5.91% | | | | | +19.75 | +94.34 |
+| 0.03 | 1,369 | +76.86 | +4.98% | [-0.20, 10.08] | +39.10 | +26.01 | +11.76 | +18.77 | +58.09 |
+
+0.025 is the middle of a plateau (0.0215 to 0.0265 all make +114 to +134
+units), not its peak (0.0235). Against 0.02 it bets a quarter fewer games for
++3.5 units, and 2024-25 and 2025-26 are both better. 0.03 would have bet 46%
+fewer for 46.9 fewer units. Prices -160 to +115. The grid is in-sample: the
+same three seasons chose the model and now its cut.
+
+The shipped code reproduces it exactly.** The build replays 2023-24 to
 2025-26 through the card's own functions (the as-of consensus total, the team
 term, the pricing, the -200 limit, the best-offer choice), refitting the
 frozen numbers before each season on the earlier seasons only. Its fitted
@@ -1147,9 +1166,9 @@ difference 4e-16).
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.02 (P(win, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.02: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
-| EV floor | 0.03, just under the smallest EV the cut admitted in the replay with the limit (+0.0343; median +0.059), on its own probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| the cut | edge > 0.025 from 2026-11-06 (was 0.02; P(win, push left out) minus the bet book's implied) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.025: the edge filter IS the card's cut | `ACTION_THRESHOLDS` |
+| EV floor | 0.037 (was 0.03): an edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay was +0.0426 | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen, and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | books | the eight above, and only those `BEST_LINE_BOOKMAKERS` still lists | `models/ncaab_first_half_total.BOOKS` |
 | decision fetch | 55 to 60.5 minutes before tip, the tip-minus-60 call or its retries | `scripts/ncaab_first_half_total_card.DECISION_LEAD_MIN` |
@@ -1225,6 +1244,98 @@ Nothing else moves. Discord, push, X, settlement and the record all select
 and the ledger; each ledger's `n_bets` counts BETs only. The app's day read is
 paged past the 1,000-row cap (`fetchPicksForDate`) so the extra rows cannot
 push another sport's rows off the All board.
+
+**The game scorer deleted them, 2026-11-04 to the fix (2026-11-06).** The
+sweep at the end of a full scoring pass (`models/scorer.run_scorer`, run by
+the refresh pass and the daily pipeline) had no model filter: it deleted
+every writer's unsettled non-BET row on every game not yet started. picks_log
+holds 278 NCAAB NONE inserts to 2026-11-06 15:00Z and 257 deletes, in 27
+transactions; each landed 0.3 to 2.5 seconds before a full scoring pass logged
+its finish in `pipeline_log`. A card decides a game once, so a deleted row
+never came back. Rows written within minutes of tip survived (the sweep spares
+started games): the 21 first-half spread rows left on 11-05.
+
+The sweep, the per-game clear and the UFC clear now delete only the rows of
+the models their own pass re-writes (`scorer._pass_rewritten_models`: the game
+models in `config.MODELS`, plus the MLB and WNBA prop models a full pass
+re-scores). No NCAAB model is in that set. Test:
+`tests/test_scorer_spares_other_writers_no_bet_rows.py`.
+
+**What was restored.** `tracking/restore_swept_ncaab_none_rows.py` (worker
+job `restore_swept_ncaab_none_rows`, declared to run once after the fix
+deploys, 11 minutes after it starts so the replaced container's drain is
+over) puts back each deleted NONE row whose game has not started and has no
+row now, with its own `pick_id` and `created_at`. The four columns picks_log
+does not keep: the calibrated probability and the best-price columns are
+rebuilt by each card's rule (checked against all 131 NCAAB NONE rows in picks
+at 15:06Z on 11-06, every one matching); the DraftKings and best-book bet
+links stay empty. **NONE rows of games that started before the restore ran
+are not in picks.** For grading every scored pick (CLAUDE.md §7), NCAAB NONE
+rows from 2026-11-04 to the fix are incomplete; picks_log holds them all.
+
+### Agreement sizing: 2u when a second model agrees (2026-11-06, mike)
+
+mike, 2026-11-06: *"I want a pick that has a higher confidence and higher long
+term win to be higher units, you can slice this from back testing"*.
+
+**The rule.** An NCAAB bet on the same game and the same side as an earlier
+NCAAB bet is staked at **2u to win**, not 1u. Totals agree on the same Over or
+Under (full game or first half). Sides agree on the same team (the full-game
+spread, both moneylines, the first-half spread). Only the later bet is sized
+up: the earlier one is already written and stands (CLAUDE.md §1c). A voided
+bet, or a game priced and not bet, does not count. Risk stays capped at 3u a
+pick, so at -150 or shorter a 2u bet risks 3u and wins less than 2u; two bets
+on one game can lay up to 6u between them. Every other NCAAB bet, and every
+other sport, stays at 1u.
+
+**Where it lives.** `models/ncaab_stake.py` decides it inside each card's own
+write. The pick carries `picks.stake_units` (2) and `picks.stake_reason` ("Two
+models agree: the full-game total model also bet …"). Discord, the app, the
+results recap and the Record tab all size the pick from `stake_units`
+(`tracking/discord_notifier.stake_for`, `mobile/src/lib/thresholds.stakeFor`,
+`data/migrations/pick_stake_units_2026_11_06.sql`); a NULL is the flat 1u, so
+no earlier record moved. `config.NCAAB_AGREEMENT_STAKE_UNITS` (2.0) is the
+size, and 1 turns it off.
+
+**The evidence.** The six models' own replays, 2023-24 to 2025-26 (the
+first-half total at its 2.5% bar). Every sizing scheme was graded walk-forward
+on 2024-25 and 2025-26: each bet's tier taken from earlier seasons only, and
+judged on units won per unit risked, not on units alone (betting more always
+wins more units when the record is positive).
+
+| Scheme (1u, 2u or 3u to win) | Return per unit risked | vs flat at the same risk |
+|---|---|---|
+| Flat 1u | +6.18% | |
+| Each model's own EV, thirds | +6.30% | +5.4 units |
+| The model's stated win chance, thirds | +6.04% | -6.3 |
+| Each model's past record (six threshold settings) | +6.01% to +6.46% | -7.7 to +12.5 |
+| Shorter price | +5.48% | -31.7 |
+| **Agreement, 2u (live)** | **+6.90%** | **+32.2** |
+| Agreement, 3u | +7.30% | +50.4 |
+
+The agreeing bets themselves, flat, every season: 233 bets, +64.09 units,
++21.3% (95% interval 10.7 to 31.8), won 67.8% against a 55.5% break-even
+(Wilson 61.5% to 73.5%). Positive in every season (2022 +7.6% on 30, 2023
++29.0% on 20, 2024 +9.6% on 57, 2025 +24.2% on 81, 2026 +38.0% on 44) and in
+both halves (Nov-Dec 67.0% won, January on 68.5%). Every other bet: +6.4%
+(4.2 to 8.6). By pair: first-half totals agreeing with the full-game total 108
+bets +25.2%; the 15:00 UTC moneyline on the same team as the opening moneyline
+86 bets +17.8% (the same bet twice, at two prices); first-half spreads agreeing
+with an earlier side 37 bets +23.2%.
+
+**Why 2u and not 3u.** The interval's low end (+10.7%) is still about 1.7
+times the base return, so 2u holds even if the edge is at the bottom of its
+range; 3u relies on the point estimate.
+
+**The risks, plainly.** Agreement was found while grading two bets on one game,
+not registered beforehand, and about 21 schemes were graded, so some luck is
+expected. 2022 and 2023 hold only 50 of the 233 bets. The decision order was
+checked: 89 of 91 opening-moneyline bets on games the 15:00 UTC card also bet
+were placed before it, and live every full-game total since 2026-11-03 decided
+at least 7.9 hours before tip. Two cards writing in the same minute will not
+see each other, so both stay 1u. Script: `scripts/ncaab_stacking_check.py`
+grades the stacked bets; the sizing grid was a one-off pass over the same
+replays.
 
 ## Identity: ESPN owns the games row
 

@@ -60,7 +60,7 @@ THE RULE, per game, ONCE:
 CAPS (mike, 2026-10-20: "Only the strongest picks need to be sent, like
 NHL"; it replaced 2026-10-16's no-cap "maximize units won"). Every qualifying
 proposition is a CANDIDATE; scripts/nba_props_card.py writes one bet a game
-across both NBA prop models and four a night, strongest first by each bet's EV
+across both NBA prop models and six a night, strongest first by each bet's EV
 percentile within its own model (models/nba_prop_rank.py).
 
 WHAT THE WORKER CAN SEE, AND WHY THE MODEL USES ONLY THAT. The live worker
@@ -77,9 +77,14 @@ injury report at the decision lists Out or Day-To-Day, and (live) everyone a
 book prices in the game. Training also had the game's own box; the timing
 verifier rescored the card on the pre-game roster only and it held (+3.99%).
 
-THE PROBABILITY SHOWN IS AN UPPER BOUND. Choosing on EV selects on the
-model's own error: in the graded band the calibrated number claimed 0.533,
-the bets won 0.501, the price implied 0.483.
+THE MODEL'S OWN PROBABILITY IS AN UPPER BOUND, SO IT IS NOT WHAT A PICK SHOWS.
+Choosing on EV selects on the model's own error: in the graded band the
+calibrated number claimed 0.533, the bets won 0.501, the price implied 0.483,
+and over 2023-24..2025-26 every part of the EV range claimed about three times
+what it returned. The bet is still decided here on that number (`prob`, `ev`),
+against the floors it was graded on; the picks row stores and the app shows it
+pulled toward the decision price, p' = implied + k (p - implied), k in
+config.MODEL_PROB_SHRINK (scripts/nba_prop_projection_card.pick_rows).
 """
 from __future__ import annotations
 
@@ -319,7 +324,8 @@ class ProjectionBet:
     line: float
     book: str
     price: float
-    prob: float                # calibrated P(side): the model's own probability (an upper bound)
+    prob: float                # calibrated P(side): the model's own probability (an upper bound;
+                               # what decides the bet, not what the row stores)
     ev: float
     mu: float                  # the projected count
     link: str | None
