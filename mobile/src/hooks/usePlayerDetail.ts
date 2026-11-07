@@ -31,6 +31,7 @@ import {
   fetchH2HStatValues,
   fetchLineupSlot,
   fetchPlayerPositionGroup,
+  fetchPlayerVsDefense,
   fetchPositionVsOpponent,
   fetchSeasonStarted,
   fetchPropLineRows,
@@ -39,6 +40,12 @@ import {
   fetchSettledPropPicksForPlayer,
   fetchSlateGames,
 } from '@/lib/queries';
+import {
+  DEFENSE_SEASONS_PLAYED,
+  defenseSeasons,
+  splitDefenseRows,
+  type PlayerDefenseGames,
+} from '@/lib/defenseTier';
 import { isLogDerivedStat, propMarketForStat, type StatDef } from '@/lib/statCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
@@ -61,6 +68,7 @@ import type {
   GameRow,
   H2HStatValuesRow,
   LineupSlotRow,
+  PlayerVsDefenseRow,
   PositionVsOpponentRow,
   PlayerType,
   PropOddsByBookRow,
@@ -399,6 +407,42 @@ export function usePlayerDetail(args: {
   const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '')
     && pvo.data.opponent === opponent;
 
+  // ── Defense-toughness filter (Matt, 2026-11-07) ─────────────────────────
+  // The player's games over his last three seasons played, each with that
+  // season's rank of the opponent's defense, plus the next opponent's rank.
+  // NBA, WNBA and NFL (lib/defenseTier). Tagged with the query that produced
+  // it, the same rule as the reads above: useSection keeps the previous
+  // payload during a refetch, so an untagged row would tier the last stat's
+  // games under the new stat's chips for one round trip.
+  const defenseSport = sport === 'NBA' || sport === 'WNBA' || sport === 'NFL';
+  const defenseKey =
+    defenseSport && playerId && stat && serverStat && posGroup && pvoSeason != null
+      ? `${sport}|${playerId}|${String(stat.key)}|${posGroup}|${pvoSeason}|${opponent ?? ''}`
+      : '';
+  const defense = useSection<{ key: string; rows: PlayerVsDefenseRow[] }>(
+    { key: '', rows: [] },
+    defenseKey !== '' && playerId && stat && posGroup && pvoSeason != null
+      ? async () => {
+          const rows = await fetchPlayerVsDefense(
+            sport,
+            playerId,
+            String(stat.key),
+            posGroup,
+            defenseSeasons(pvoSeason),
+            DEFENSE_SEASONS_PLAYED,
+            opponent,
+          );
+          return { key: defenseKey, rows };
+        }
+      : null,
+    [defenseKey, nonce],
+  );
+  const defenseFresh = defenseKey !== '' && defense.data.key === defenseKey;
+  const defenseGames: PlayerDefenseGames | null = useMemo(
+    () => (defenseFresh ? splitDefenseRows(defense.data.rows) : null),
+    [defenseFresh, defense.data.rows],
+  );
+
   return {
     reload,
     reloadH2h,
@@ -406,7 +450,8 @@ export function usePlayerDetail(args: {
     // them are still in flight (UX review, 2026-10-21).
     loading:
       slate.loading || lines.loading || logGames.loading || picks.loading
-      || h2hRow.loading || pvo.loading || savant.loading || lineup.loading || rosterPos.loading,
+      || h2hRow.loading || pvo.loading || savant.loading || lineup.loading || rosterPos.loading
+      || defense.loading,
     books,
     booksReady,
     market,
@@ -441,6 +486,15 @@ export function usePlayerDetail(args: {
           }
         : null,
     slateLoading: slate.loading,
+    // Null until this query's rows land, on a failure, and for sports or
+    // stats the server has no ranks for: the filter row is not drawn then.
+    defenseGames,
+    defenseGroup: defenseKey !== '' ? posGroup : null,
+    // The read is in flight for this player and stat. The chart holds its
+    // spinner until it answers, so it does not draw the last-N games and then
+    // swap to the next opponent's tier under the reader (UX review,
+    // 2026-11-07). A failure ends it: the chart falls back to All.
+    defensePending: defenseKey !== '' && !defenseFresh && defense.error == null,
     tonight,
     move,
     linesLoading: lines.loading,

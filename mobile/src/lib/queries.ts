@@ -88,6 +88,7 @@ import type {
   RecentGameRow,
   SavantStatsRow,
   H2HStatValuesRow,
+  PlayerVsDefenseRow,
   PositionVsOpponentRow,
   PositionDefenseRankRow,
   SeasonStatValuesRow,
@@ -713,6 +714,63 @@ export async function fetchPositionVsOpponent(
 }
 
 /**
+ * One player's games over his last three seasons PLAYED, each with that
+ * season's rank of the opponent's defense (1 = toughest), plus one row
+ * (game_id null) for the next opponent's rank. Backs the player page's
+ * defense-toughness filter (Matt, 2026-11-07).
+ *
+ * ROW COUNT, measured on production 2026-11-07 by running the function body
+ * read-only: Kyrie Irving points (NBA, 3 seasons) 116 rows in 385 ms;
+ * Ja'Marr Chase receiving yards (NFL) 41 rows. A full three NBA seasons is
+ * ~250 rows at most. Paged anyway: the 1,000-row cap is a property of every
+ * read (.claude/rules/frontend.md), on an order the REQUEST names.
+ *
+ * NBA, WNBA and NFL; other sports return [] without a request. Literal .rpc()
+ * names, never one picked by a variable (tests/test_anon_readable.py).
+ */
+export async function fetchPlayerVsDefense(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  playerId: string,
+  statKey: string,
+  posGroup: string,
+  seasons: number[],
+  seasonCount: number,
+  nextOpponent: string | null,
+): Promise<PlayerVsDefenseRow[]> {
+  const args = {
+    p_player_id: playerId,
+    p_stat: statKey,
+    p_pos_group: posGroup,
+    p_seasons: seasons,
+    p_season_count: seasonCount,
+    p_next_opponent: nextOpponent,
+  };
+  const key = (r: PlayerVsDefenseRow) => `${r.season}:${r.game_id ?? 'next'}:${r.game_date ?? ''}`;
+  if (sport === 'NBA') {
+    return fetchAllPages<PlayerVsDefenseRow>(
+      (from, to) =>
+        supabase.rpc('player_vs_defense_nba', args).order('season').order('game_date').order('game_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'WNBA') {
+    return fetchAllPages<PlayerVsDefenseRow>(
+      (from, to) =>
+        supabase.rpc('player_vs_defense_wnba', args).order('season').order('game_date').order('game_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'NFL') {
+    return fetchAllPages<PlayerVsDefenseRow>(
+      (from, to) =>
+        supabase.rpc('player_vs_defense_nfl', args).order('season').order('game_date').order('game_id').range(from, to),
+      key,
+    );
+  }
+  return [];
+}
+
+/**
  * Every defense's rank for one NFL position group and stat. 32 rows, so it
  * is not paged. Rank 1 allows the most. The Anytime TD board calls it once
  * per group (position_defense_ranks_nfl).
@@ -1005,6 +1063,8 @@ const MAIN_GAME_ODDS_MARKETS = [
   'team_totals_away',
   'totals_h1',
   'spreads_h1',
+  // The NBA first quarter's spread (nba_q1_trend).
+  'spreads_q1',
 ] as const;
 
 /**

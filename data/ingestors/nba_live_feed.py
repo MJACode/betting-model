@@ -300,19 +300,21 @@ class Fetch:
     remaining: int | None         # x-requests-remaining
 
 
-# The account balance below which the loop stops fetching: the low-quota line
-# tracking/system_health.py already alerts on (fewer than 1,000 credits, or
-# under 15% of the plan), so the loop goes quiet where the platform starts
-# shouting, and never runs the balance to zero.
+# The account balance below which the loop stops fetching: 1,000 credits, the
+# line just above zero (the September 2026 outage hit zero and stopped every
+# feed). There is no share-of-plan floor (mike, 2026-11-07: "I dont care about
+# the odds api balance"): the 15%-of-plan rule it had stopped the model after
+# its first fetch of each night once the balance fell under 750,000 of
+# 5,000,000, while the loop spends 12-28 credits a night.
 QUOTA_FLOOR_CREDITS = 1000
-QUOTA_FLOOR_SHARE = 0.15
 
 
-def below_floor(remaining: int | None, used: int | None) -> bool:
+def below_floor(remaining: int | None, used: int | None = None) -> bool:
+    """True only when the balance is under QUOTA_FLOOR_CREDITS. `used` is kept
+    for the callers' signature and no longer read."""
     if remaining is None:
         return False
-    total = (used or 0) + remaining
-    return remaining < QUOTA_FLOOR_CREDITS or (total > 0 and remaining / total < QUOTA_FLOOR_SHARE)
+    return remaining < QUOTA_FLOOR_CREDITS
 
 
 class LiveOddsFeed:

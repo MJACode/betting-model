@@ -318,9 +318,10 @@ def test_a_failing_team_total_plan_still_runs_the_full_game_model_then_fails(mon
     monkeypatch.setattr(scheduler, "_publish_new_signals", published.append)
     with pytest.raises(RuntimeError, match="nba_team_total_luck plan"):
         scheduler.run_nba_total_luck_window()
-    # The other two models' steps run; none of the team total's. G50 is 50 minutes
-    # out, so the first half's plan holds it too.
+    # The other models' steps run; none of the team total's. G50 is 50 minutes
+    # out, so the first half's and the first quarter's plans hold it too.
     assert sorted(ran) == ["nba-first-half-total-luck", "nba-first-half-total-luck-fetch",
+                           "nba-q1-trend", "nba-q1-trend-fetch",
                            "nba-total-luck", "nba-total-luck-fetch"]
     assert published == ["nba-total-luck-window"]
 

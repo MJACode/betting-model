@@ -285,6 +285,29 @@ def test_a_window_fetches_once_decides_and_writes_the_bet(art, monkeypatch):
     assert loop.feed.calls == 1
 
 
+# Production's NOT NULL columns on picks with no default, read from
+# information_schema on 2026-11-06. data/supabase_schema.sql still lists
+# dk_odds as NOT NULL; production dropped that, and a line-book pick stores
+# NULL there. The test fixture enforces none of these, which is how a NULL
+# dk_implied_prob passed every test and failed the first real insert.
+PICKS_NOT_NULL = ("model_id", "sport", "game_date", "pick_side", "pick_label", "model_probability",
+                  "dk_implied_prob", "edge", "kelly_fraction", "recommended_bet", "bankroll_at_pick")
+
+
+def test_a_bet_draftkings_does_not_price_fills_every_column_production_requires(art, monkeypatch):
+    """The 2026-11-06 slate: UTA +5.5 at Hard Rock -105, DraftKings at another number.
+    build_pick left dk_implied_prob NULL, the insert failed, and the bet was
+    neither stored nor posted. A line-book pick stores 0.0 there, as the
+    scorer does."""
+    loop, db, _clock, _w, _slot = standard(art, monkeypatch)
+    loop.tick()
+    p = db.picks[0]
+    assert p["line_book"] == "fanduel" and p["dk_odds"] is None    # DraftKings hung another number
+    missing = [c for c in PICKS_NOT_NULL if p.get(c) is None]
+    assert missing == [], f"production rejects a pick with {missing} NULL"
+    assert p["dk_implied_prob"] == 0.0 and p["edge"] == 0.0
+
+
 # ─── ESPN: the wait, and the second read ──────────────────────────────────────
 
 def test_the_wait_puts_a_basket_logged_before_the_served_time_into_the_rule(art, monkeypatch):
@@ -636,3 +659,31 @@ def test_the_quota_floor_stops_fetching():
     f = LiveOddsFeed(100, 200, session=Sess())
     assert f.fetch() is not None and Sess.calls == 1
     assert f.fetch() is None and Sess.calls == 1               # 900 left: under the floor
+
+
+def test_a_low_share_of_the_plan_does_not_stop_fetching():
+    """2026-11-07: 387,166 left of 5,000,000 (7.7%) stopped the loop after its
+    first fetch under the old 15%-of-plan rule. Only the 1,000-credit line stops it."""
+    from data.ingestors.nba_live_feed import LiveOddsFeed, below_floor
+
+    class R:
+        headers = {"x-requests-last": "2", "x-requests-remaining": "387166",
+                   "x-requests-used": "4612834"}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return []
+
+    class Sess:
+        calls = 0
+
+        def get(self, *a, **k):
+            Sess.calls += 1
+            return R()
+    import os
+    os.environ.setdefault("ODDS_API_KEY", "test-key-not-real")
+    f = LiveOddsFeed(100, 200, session=Sess())
+    assert f.fetch() is not None and f.fetch() is not None and Sess.calls == 2
+    assert not below_floor(387166, 4612834) and below_floor(999, 4999001)

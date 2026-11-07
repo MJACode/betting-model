@@ -93,8 +93,9 @@ def _art(teams, season=2027):
 
 def test_config_carries_the_model_as_a_rule_with_its_own_cut_and_floor():
     mid = "ncaab_total_blend"
-    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.04}
-    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.04
+    # The cut moved 0.04 -> 0.05 on 2026-11-07 (mike: fewer picks).
+    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.05}
+    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.05
     assert config.MODEL_PROB_THRESHOLDS[mid] == 0.0
     assert config.MODEL_OWN_EV_FLOOR[mid] == 0.07
     assert config.min_ev_for(mid) == 0.07

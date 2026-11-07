@@ -425,6 +425,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/nba_first_half_odds.py).
     "nba_first_half_total_luck_decisions",
     "nba_first_half_total_fetches",
+    # The NBA first-quarter spread model's two, the same pair (scripts/nba_q1_trend_card.py,
+    # data/ingestors/nba_first_quarter_odds.py).
+    "nba_q1_trend_decisions",
+    "nba_first_quarter_fetches",
     # The NCAAB first-half spread model's three
     # (scripts/ncaab_first_half_spread_card.py, data/ingestors/ncaab_first_half_odds.py):
     # its decisions ledger, its fetch ledger (one row per Odds API call with
@@ -624,6 +628,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # Anytime TD board: one rank per defense for a position group
     # (data/migrations/position_defense_ranks_nfl_2026_10_18.sql).
     "position_defense_ranks_nfl",
+    # Player page defense-toughness filter
+    # (data/migrations/add_player_vs_defense_rpcs_2026_11_07.sql).
+    "player_vs_defense_nba",
+    "player_vs_defense_nfl",
+    "player_vs_defense_wnba",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
