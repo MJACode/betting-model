@@ -781,7 +781,15 @@ ACTION_THRESHOLDS: dict = {
     # agrees with it. min_prob 0.0: the edge is the cut, and a probability
     # floor could only hide a pick the card wrote (the smallest written
     # probability on 2021-2025 is 0.5403).
-    "ncaab_total_blend":        {"min_prob": 0.0, "min_edge": 0.04},
+    # RAISED 0.04 -> 0.05 (2026-11-07, mike: "Make the two cuts", fewer picks
+    # on a full slate). First-post replay 2021-22..2025-26: 0.04 2,436 bets
+    # +180.71 units (+6.77%); 0.045 1,867 +137.84; 0.05 1,432 +136.06
+    # (+8.68%, [3.51, 13.55]); 0.055 1,076 +129.57; 0.06 806 +111.00. Every
+    # season positive at 0.05 (+25.6 / +16.9 / +17.9 / +29.8 / +45.9), both
+    # halves too. The removed bets were profitable (+44.65 units over five
+    # seasons, about 9 a season): a volume cut, not an edge gain. Prices -120
+    # to +102. It also feeds fewer 2u agreements (models/ncaab_stake.py).
+    "ncaab_total_blend":        {"min_prob": 0.0, "min_edge": 0.05},
     # NCAAB full-game spreads (2026-11-02, mike: "we need to build 1H and game
     # lines ML and Spread no matter what"; no games-played wait):
     # models/ncaab_spread_market.py, written by scripts/ncaab_spread_card.py.
@@ -856,7 +864,13 @@ ACTION_THRESHOLDS: dict = {
     # +35.65 units. Without the 10 best dates +16.75 units. Prices -140 to
     # +125. min_edge 0.02 IS the card's cut (decision_edge is that edge);
     # min_prob 0.0 because the edge is the cut.
-    "ncaab_first_half_spread":  {"min_prob": 0.0, "min_edge": 0.02},
+    # RAISED 0.02 -> 0.025 (2026-11-07, mike: "Make the two cuts"). Replay
+    # 2023-24..2025-26: 0.02 1,253 bets +68.07 units (+4.91%); 0.0225 1,035
+    # +44.93; 0.025 845 +57.43 (+6.13%, [0.04, 12.29]); 0.0275 705 +49.71;
+    # 0.03 575 +35.65. Every season positive at 0.025 (+31.0 / +6.9 / +19.6).
+    # The grid is bumpy (0.0225 dips), so read 0.025 as a volume cut whose
+    # removed bets made +10.64 units, not as a better cut. Prices -140 to +125.
+    "ncaab_first_half_spread":  {"min_prob": 0.0, "min_edge": 0.025},
     # NCAAB FIRST-HALF total (2026-11-03, mike: "we need to build 1H ... no
     # matter what", "I want it all done and go live now"; no games-played
     # wait): models/ncaab_first_half_total.py, written by
@@ -2488,6 +2502,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # above 0.073, so 0.07 never removes a bet the evidence took. Re-measured
     # 2026-11-03 at DraftKings' first posted total (mike): +0.0734 over the
     # replay's 2,436 bets of 2022-2026, so 0.07 stands.
+    # Unchanged at the 0.05 cut (2026-11-07): an edge above 0.05 at -200 or
+    # longer is EV above 0.075, so 0.07 still removes nothing the cut takes;
+    # the replay's smallest EV at 0.05 is +0.0936.
     "ncaab_total_blend":        0.07,
     # NCAAB spreads (2026-11-02, mike). The cut is the edge (0.03, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
@@ -2518,6 +2535,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     # decimal - 1 = +0.0346 (1,253 bets; median +0.0552). An edge above 0.02
     # at -140 or longer is EV above 0.034, so 0.03 never removes a bet the
     # evidence took.
+    # Unchanged at the 0.025 cut (2026-11-07): an edge above 0.025 at -200 or
+    # longer is EV above 0.0375, so 0.03 still removes nothing the cut takes;
+    # the replay's smallest EV at 0.025 is +0.0436.
     "ncaab_first_half_spread":  0.03,
     # NCAAB first-half total (2026-11-03, mike; cut raised 2026-11-06, mike).
     # The cut is the edge (0.025, in MODEL_EDGE_THRESHOLDS), so this floor
@@ -2914,11 +2934,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
-    "ncaab_total_blend":        0.04,   # 2026-10-30 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
+    "ncaab_total_blend":        0.05,   # 2026-10-30 mike, raised 2026-11-07 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_first_post": 0.015,  # 2026-11-03 mike: THE cut, at a book's first moneyline post; see ACTION_THRESHOLDS
-    "ncaab_first_half_spread":  0.02,   # 2026-11-02 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
+    "ncaab_first_half_spread":  0.025,  # 2026-11-02 mike, raised 2026-11-07 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "ncaab_first_half_total":   0.025,  # 2026-11-03 mike, raised 2026-11-06 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
