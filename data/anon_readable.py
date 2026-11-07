@@ -425,6 +425,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/nba_first_half_odds.py).
     "nba_first_half_total_luck_decisions",
     "nba_first_half_total_fetches",
+    # The NBA first-quarter spread model's two, the same pair (scripts/nba_q1_trend_card.py,
+    # data/ingestors/nba_first_quarter_odds.py).
+    "nba_q1_trend_decisions",
+    "nba_first_quarter_fetches",
     # The NCAAB first-half spread model's three
     # (scripts/ncaab_first_half_spread_card.py, data/ingestors/ncaab_first_half_odds.py):
     # its decisions ledger, its fetch ledger (one row per Odds API call with

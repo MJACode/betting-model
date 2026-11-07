@@ -167,6 +167,7 @@ BEGIN
              WHEN 'nba_total_luck' THEN 'NBA Totals'
              WHEN 'nba_team_total_luck' THEN 'NBA Team Totals'
              WHEN 'nba_first_half_total_luck' THEN 'NBA First Half Totals'
+             WHEN 'nba_q1_trend' THEN 'NBA First Quarter Spreads'
              WHEN 'nba_live_spread_q12' THEN 'NBA Early Live Spreads'
              WHEN 'ufc_moneyline' THEN 'UFC Moneyline'
              WHEN 'ufc_total_rounds' THEN 'UFC Totals'
