@@ -248,6 +248,7 @@ def load_quotes(conn, season: int) -> pd.DataFrame:
                    o.away_price, o.spread_home, o.total_line, o.over_price, o.under_price
               FROM odds o JOIN games g ON g.game_id = o.game_id
              WHERE o.sport = 'NCAAB' AND g.season = %s AND o.source = %s
+               AND o.snapshot_type = 'in_play'          -- idx_odds_source_inplay
         """, (season, INPLAY_SOURCE))
         q["stamp"] = pd.to_datetime(q["snapshot_at"], utc=True)
         for c in ("home_price", "away_price", "spread_home", "total_line", "over_price",
@@ -302,6 +303,7 @@ def priced_offers(qs: pd.DataFrame, models: dict, games_prior: pd.DataFrame) -> 
     fetch), in a phase, at a deciding book. The decision fetch per (game, rule)
     is the first holding an eligible quote; only its quotes are returned."""
     st = M.state_columns(qs.merge(games_prior, on="game_id"))
+    st, _errors = M.in_bounds(st)
     st = M.drop_outliers(st)
     st["phase"] = M.phase_of(st)
     st = st[(st["phase"] != "") & (st["pts_since"] == 0) & st["book"].isin(BOOKS)]

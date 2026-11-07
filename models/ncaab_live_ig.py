@@ -273,6 +273,33 @@ def offers_from_quotes(q: pd.DataFrame) -> pd.DataFrame:
     return o.reset_index(drop=True)
 
 
+_BOUNDS_COLS = {"spreads": ("spread_home", ("home_price", "away_price")),
+                "totals": ("total_line", ("over_price", "under_price")),
+                "h2h": (None, ("home_price", "away_price"))}
+
+
+def in_bounds(q: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(quotes, data errors): every NCAAB card's one guard against a feed typo
+    (models/ncaab_quote_bounds: a line outside its market's range, a price
+    beyond +/-100000), applied before anything else reads a quote. Its ranges
+    were measured on pre-game rows; an in-play spread past +/-60 (a blowout) is
+    dropped with them, which removes a number no rule here would bet."""
+    from models import ncaab_quote_bounds as QB
+    keep, bad = [], []
+    for mk, (line_col, prices) in _BOUNDS_COLS.items():
+        part = q[q["market"] == mk]
+        if not len(part):
+            continue
+        ok, err = QB.split(part, mk, line_col=line_col, price_cols=prices)
+        keep.append(ok)
+        bad.append(err)
+    other = q[~q["market"].isin(list(_BOUNDS_COLS))]
+    keep.append(other)
+    good = pd.concat(keep).sort_index() if keep else q.iloc[:0]
+    errs = pd.concat(bad) if bad else q.iloc[:0]
+    return good, errs
+
+
 def novig_home(home_price, away_price) -> np.ndarray:
     ph, pa = 1.0 / dec(home_price), 1.0 / dec(away_price)
     return ph / (ph + pa)

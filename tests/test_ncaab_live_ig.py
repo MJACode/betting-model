@@ -112,3 +112,16 @@ def test_outlier_quote_is_dropped_against_the_other_books():
                       "spread_home": [np.nan] * 4, "home_price": [np.nan] * 4,
                       "away_price": [np.nan] * 4})
     assert M.drop_outliers(q)["book"].tolist() == ["a", "b", "c"]
+
+
+def test_feed_typos_are_dropped_by_the_ncaab_guard_before_anything_reads_them():
+    # the two measured typos: DraftKings' 1465.0 total and Hard Rock's -200000
+    q = pd.DataFrame({"game_id": ["g"] * 4, "market": ["totals", "totals", "spreads", "h2h"],
+                      "book": list("abcd"), "total_line": [1465.0, 146.5, np.nan, np.nan],
+                      "over_price": [-110, -110, np.nan, np.nan],
+                      "under_price": [-110, -110, np.nan, np.nan],
+                      "spread_home": [np.nan, np.nan, -5.5, np.nan],
+                      "home_price": [np.nan, np.nan, -110, -200000],
+                      "away_price": [np.nan, np.nan, -110, 4000]})
+    ok, bad = M.in_bounds(q)
+    assert ok["book"].tolist() == ["b", "c"] and bad["book"].tolist() == ["a", "d"]
