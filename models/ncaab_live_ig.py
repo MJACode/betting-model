@@ -31,7 +31,8 @@ THE DECISION, per game and rule (a market and a phase), at a fetch:
             NCAAB in-play Pinnacle quotes 6 of 26 games at 2026-01-23 00:55Z,
             so the deciding quote's own freshness is the rule. A deviation from
             the NBA rule, named.)
-  BAD ROWS  a price strictly between -100 and +100; a spread or total more than
+  BAD ROWS  a price strictly between -100 and +100; a spread or total priced
+            beyond +/-LINE_PRICE_MAX; a spread or total more than
             OUTLIER_PTS from the median of the other books' numbers on the same
             game, market and fetch; a moneyline more than OUTLIER_NOVIG no-vig
             from the others' median.
@@ -65,6 +66,10 @@ OUTLIER_PTS = 6.0
 OUTLIER_NOVIG = 0.25
 PRICE_FLOOR = -200.0
 MAX_RISK = 3.0
+# An in-play spread or total priced beyond this is a feed error, not a price
+# (2021-26 purchase: 4 of 31,005 spread/total bets at EV >= 0.05 sat outside it,
+# at +270, +300, +2200 and +4500; every other one inside -170..+185).
+LINE_PRICE_MAX = 250.0
 PHASES = ("H1", "H2")
 MARKETS = ("spreads", "totals", "h2h")
 FOUL_TYPES = ("PersonalFoul", "Technical Foul")
@@ -271,6 +276,7 @@ def offers_from_quotes(q: pd.DataFrame) -> pd.DataFrame:
     if len(o):
         o = o[o["price"].notna() & ~((o["price"] > -100) & (o["price"] < 100))]
         o = o[(o["market"] == "h2h") | o["line"].notna()]
+        o = o[(o["market"] == "h2h") | (o["price"].abs() <= LINE_PRICE_MAX)]
     return o.reset_index(drop=True)
 
 

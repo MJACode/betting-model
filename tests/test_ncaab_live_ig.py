@@ -125,3 +125,12 @@ def test_feed_typos_are_dropped_by_the_ncaab_guard_before_anything_reads_them():
                       "away_price": [np.nan, np.nan, -110, 4000]})
     ok, bad = M.in_bounds(q)
     assert ok["book"].tolist() == ["b", "c"] and bad["book"].tolist() == ["a", "d"]
+
+
+def test_a_spread_or_total_at_a_junk_price_is_not_an_offer():
+    q = pd.DataFrame({"game_id": ["g", "g"], "market": ["spreads", "totals"], "book": ["a", "b"],
+                      "home_price": [4500.0, np.nan], "away_price": [-110.0, np.nan],
+                      "spread_home": [-12.5, np.nan], "total_line": [np.nan, 133.5],
+                      "over_price": [np.nan, 2200.0], "under_price": [np.nan, -115.0]})
+    off = M.offers_from_quotes(q)
+    assert sorted(off["price"].tolist()) == [-115.0, -110.0]
