@@ -138,6 +138,13 @@ def test_the_app_reads_and_draws_it():
     assert "openingDefenseFilter(defenseGames)" in screen
     # Never applied to H2H: one opponent is one tier.
     assert "!isH2H && defenseCounts != null" in screen
+    # The chart holds its spinner while the read is in flight, so it never
+    # draws the last-N games and then swaps tiers (UX review, 2026-11-07).
+    assert "(!isH2H && defensePicked == null && detail.defensePending)" in screen
+    assert "defensePending: defenseKey !== '' && !defenseFresh && defense.error == null" in hook
+    # Amber only on navy (UX_REVIEW §2).
+    tag = screen.split("nextTag: {", 1)[1].split("},", 1)[0]
+    assert "colors.brandNavy" in tag
     chart = _read(CHART)
     assert "games!.every((g) => g.rank != null)" in chart
 

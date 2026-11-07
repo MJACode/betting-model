@@ -689,11 +689,13 @@ export function PlayerStatsScreen() {
   const statReachAbove = groups.length === 1 && groupsOfChips(allChips).length > 1 ? 6 : 0;
   const statReach = reachFrame(statReachAbove);
   // The range chips reach 6pt down over the next sibling, raised so it is
-  // hit-tested first: the hit card's 8pt top margin, the empty card's 16pt
-  // padding or the spinner's margin — never the ErrorBanner, whose Retry
-  // starts at its top edge.
+  // hit-tested first: the defense row's label when that row is drawn, else
+  // the hit card's 8pt top margin, the empty card's 16pt padding or the
+  // spinner's margin — never the ErrorBanner, whose Retry starts at its top
+  // edge. The defense chips reach the same 6pt over what follows them.
   const rangeReachBelow = error ? 0 : 6;
   const rangeReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
+  const defenseReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -871,7 +873,8 @@ export function PlayerStatsScreen() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.defenseRow}
+              style={defenseReach.frame}
+              contentContainerStyle={[styles.defenseRow, defenseReach.content]}
             >
               {(['all', ...DEFENSE_TIERS] as DefenseFilter[]).map((f) => {
                 const active = f === defenseFilter;
@@ -882,14 +885,14 @@ export function PlayerStatsScreen() {
                   <Pressable
                     key={f}
                     onPress={() => setDefensePicked(f)}
-                    hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+                    hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
                     accessibilityLabel={
                       f === 'all'
                         ? 'All defenses'
                         : `${name} defenses, ${count} game${count === 1 ? '' : 's'}${
-                          isNext ? `, includes the next opponent ${defenseGames?.next?.opponent}` : ''
+                          isNext ? `, next opponent ${defenseGames?.next?.opponent} is in this tier` : ''
                         }`
                     }
                     style={[styles.windowChip, styles.defenseChip, active && styles.windowChipActive]}
@@ -924,7 +927,7 @@ export function PlayerStatsScreen() {
               {defenseGames?.next
                 ? `${nextDefenseLine(defenseGames.next, defenseNoun)}. `
                 : ''}
-              Last {DEFENSE_SEASONS_PLAYED} seasons played. #1 = toughest.
+              Last {DEFENSE_SEASONS_PLAYED} seasons played.{defenseFilter !== 'all' ? ' #1 = toughest.' : ''}
             </Text>
           </View>
         ) : null}
@@ -940,6 +943,7 @@ export function PlayerStatsScreen() {
         ) : null}
 
         {(loading && games.length === 0)
+          || (!isH2H && defensePicked == null && detail.defensePending)
           || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null || !logSettled)) ? (
           <ActivityIndicator
             style={styles.loading}
@@ -2119,30 +2123,31 @@ const styles = StyleSheet.create({
   defenseChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
   },
   pips: {
     flexDirection: 'row',
     gap: 2,
   },
   pip: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: spacing.xs,
+    height: spacing.xs,
+    borderRadius: radii.pill,
   },
   pipOff: {
     opacity: 0.3,
   },
+  // Amber lives on navy chrome only (UX_REVIEW §2: amber on white is 1.9:1).
   nextTag: {
-    backgroundColor: colors.brand,
-    borderRadius: 4,
-    paddingHorizontal: 4,
+    backgroundColor: colors.brandNavy,
+    borderRadius: radii.xs,
+    paddingHorizontal: spacing.xs,
     paddingVertical: 1,
   },
   nextTagText: {
     fontSize: font.size.nano,
     fontWeight: font.weight.bold,
-    color: colors.brandInk,
+    color: colors.brand,
     letterSpacing: 0.3,
   },
   defenseNote: {

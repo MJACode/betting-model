@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { isHit, type HitDirection } from '@/lib/hitRate';
 import type { ChartGame } from '@/lib/playerLog';
+import { ordinal } from '@/lib/teamDetail';
 import { colors, font, spacing } from '@/lib/theme';
 
 interface Props {
@@ -228,7 +229,7 @@ export function HitRateChart({
                     x={cx}
                     y={labelY + 38}
                     fill={isLatest ? colors.tint : colors.textPrimary}
-                    fontSize={9}
+                    fontSize={font.size.nano}
                     fontWeight="700"
                     textAnchor="middle"
                   >
@@ -282,7 +283,7 @@ export function HitRateChart({
   const caption = sel ? [ago, sel.date, sel.oppFull, rankText, fmtTick(sel.value)].filter(Boolean).join(' · ') : null;
   // What VoiceOver reads for the selected game: the whole sentence.
   const spoken = sel
-    ? `${ago}, ${sel.date}${sel.oppFull ? `, ${sel.oppFull}` : ''}${rankText ? `, number ${sel.rank} ranked defense` : ''}, ${fmtTick(sel.value)}${unit ? ` ${unit}` : ''}, ${selHit ? 'hit' : 'miss'}`
+    ? `${ago}, ${sel.date}${sel.oppFull ? `, ${sel.oppFull}` : ''}${rankText ? `, ${ordinal(sel.rank!)} toughest defense` : ''}, ${fmtTick(sel.value)}${unit ? ` ${unit}` : ''}, ${selHit ? 'hit' : 'miss'}`
     : '';
 
   const scroller = (

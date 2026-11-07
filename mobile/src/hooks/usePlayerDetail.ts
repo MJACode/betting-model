@@ -490,6 +490,11 @@ export function usePlayerDetail(args: {
     // stats the server has no ranks for: the filter row is not drawn then.
     defenseGames,
     defenseGroup: defenseKey !== '' ? posGroup : null,
+    // The read is in flight for this player and stat. The chart holds its
+    // spinner until it answers, so it does not draw the last-N games and then
+    // swap to the next opponent's tier under the reader (UX review,
+    // 2026-11-07). A failure ends it: the chart falls back to All.
+    defensePending: defenseKey !== '' && !defenseFresh && defense.error == null,
     tonight,
     move,
     linesLoading: lines.loading,
