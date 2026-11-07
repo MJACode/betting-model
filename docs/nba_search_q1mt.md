@@ -70,3 +70,21 @@ tell".
 A pass ships live (mike's standing rule: what passes goes live), with its own EV floor and the prices it lays stated
 first. Family M needs a live first-quarter moneyline fetch beside the spread one; family T a live first-quarter total
 fetch, each in the same call as `nba_q1_trend`'s spread fetch.
+
+## 6. Counts before grading (2026-11-07, `--counts`, no bet graded)
+
+Prepared in 348 seconds. First-quarter moneyline offers: 57,896 over 3,667 games; first-quarter total offers: 46,178;
+games with a shooting-luck gap and a total offer: 3,202. The bets each cell would place (2023-24 / 2024-25 / 2025-26):
+
+| Family | Cell | Bets | By season | Prices (min / median / max) |
+|---|---|---|---|---|
+| Q1M | no check, k >= 2 | 125 | 31 / 41 / 53 | -198 / +110 / +360 |
+| Q1M | no check, k >= 4 | 29 | 6 / 12 / 11 | -162 / +120 / +250 |
+| Q1M | the spread check, k >= 2 | 87 | 20 / 31 / 36 | -192 / +130 / +360 |
+| Q1M | the spread check, k >= 4 | 23 | 5 / 9 / 9 | -155 / +128 / +250 |
+| Q1L | over, gap >= 1 / 2 / 3 / 4 | 1,043 / 595 / 323 / 150 | 386-335-322 at >= 1 | -137 / -111 / +135 at >= 1 |
+| Q1L | under, gap >= 1 / 2 / 3 / 4 | 1,067 / 594 / 295 / 122 | 365-366-336 at >= 1 | -141 / -111 / +138 at >= 1 |
+
+**Every family M cell is under 200 bets and fails bar 1 by construction**: the step is rare (about 29 to 42 games a
+season), so a first-quarter moneyline on it cannot be told from zero by the house standard. It is graded and reported
+in full anyway. The over at gap >= 2 bets the same 595 games the live first-half over was graded on.
