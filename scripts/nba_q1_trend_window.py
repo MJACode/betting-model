@@ -1,4 +1,5 @@
-"""The NBA first-quarter spread window: nba_q1_trend's fetch, decision and close.
+"""The NBA first-quarter window: the fetch, decisions and close of nba_q1_trend (the spread) and nba_q1_trend_ml
+(the moneyline), which decide on the same fetch.
 
 The fetch and the decision about an hour before each tip, the closing snapshot 12-25 minutes before it: the first-half
 total's window (scripts/nba_first_half_total_luck_window.py), its lead constants imported. The graded bets were
@@ -10,11 +11,13 @@ ONE JOB, ONE PLANNING READ: this model's ticks run inside the NBA pre-game windo
 (scripts/nba_pregame_window.py).
 
 WHAT A TICK DOES FOR THIS MODEL:
-  1. plan(): the unstarted regular-season games tipping FETCH_LEAD_MIN (45-56) minutes from now that the card has not
-     decided, and the games holding an nba_q1_trend BET whose closing snapshot is due and not yet taken. Reads only.
-  2. --fetch G...: one spreads_q1 call per named game, stored (data/ingestors/nba_first_quarter_odds.py). Exit 1 when
-     a call failed, not when the books offered nothing.
-  3. The card (step nba-q1-trend) decides on that fetch.
+  1. plan(): the unstarted regular-season games tipping FETCH_LEAD_MIN (45-56) minutes from now that EITHER card has
+     not decided, and the games holding a BET of either model whose closing snapshot is due and not yet taken. Reads
+     only.
+  2. --fetch G...: one spreads_q1 + h2h_q1 call per named game, stored (data/ingestors/nba_first_quarter_odds.py).
+     Exit 1 when a call failed, not when the books offered nothing.
+  3. The cards (steps nba-q1-trend, then nba-q1-trend-ml) decide on that fetch, each game once in each model's own
+     ledger.
   4. --close G...: the closing snapshot, filed 'close', for closing-line value only (the card reads 'open' only).
 
     python -m scripts.nba_q1_trend_window                 # print what a tick would do
@@ -34,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import models.nba_q1_trend as q1  # noqa: E402
 import scripts.nba_q1_trend_card as card  # noqa: E402
+import scripts.nba_q1_trend_ml_card as mlcard  # noqa: E402
 import scripts.nba_total_luck_card as tlcard  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from scripts.nba_team_total_luck_window import CLOSE_LEAD_MIN, Plan, close_due  # noqa: E402,F401
@@ -43,18 +47,20 @@ PLAN_HORIZON_MIN = max(q1.FETCH_LEAD_MIN[1], CLOSE_LEAD_MIN[1])
 
 
 def plan(conn, now: datetime, games: dict[str, dict] | None = None) -> Plan:
-    """What this tick has to do for nba_q1_trend, from what is stored. Reads only."""
+    """What this tick has to do for nba_q1_trend and nba_q1_trend_ml, from what is stored. Reads only. A game is
+    fetched while either model has not decided it (a game the spread decided before the moneyline existed is still
+    fetched for the moneyline: the spread card writes nothing for it again)."""
     if games is None:
         games = tlcard.slate(conn, now, horizon_min=PLAN_HORIZON_MIN)
     games = {g: v for g, v in games.items() if has_teams(v)}
     lo, hi = q1.FETCH_LEAD_MIN
     near = sorted(g for g, v in games.items() if lo <= q1.lead_minutes(v["tip"], now) <= hi)
-    done = card.decided_games(conn, near) if near else set()
+    done = (card.decided_games(conn, near) & mlcard.decided_games(conn, near)) if near else set()
     closing = sorted(g for g, v in games.items() if close_due(v["tip"], now))
     owed: list[str] = []
     if closing:
         from data.ingestors.nba_first_quarter_odds import closes_taken
-        bet = card.games_with_a_bet(conn, closing)
+        bet = card.games_with_a_bet(conn, closing) | mlcard.games_with_a_bet(conn, closing)
         taken = closes_taken(conn, sorted(bet)) if bet else set()
         owed = sorted(bet - taken)
     return Plan(decide=[g for g in near if g not in done], close=owed)

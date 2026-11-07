@@ -57,6 +57,9 @@ Checked:
                   model's market is spreads_q1, models/nba_q1_trend.py) says
                   "First Quarter", so it cannot be read as the full-game spread;
                   its team and signed number are checked as a spread's are.
+                  The first quarter's moneyline (h2h_q1,
+                  models/nba_q1_trend_ml.py) says it too, so it cannot be read
+                  as the full-game moneyline.
 
 A producer that does not supply `side` and `line` cannot be checked, so its
 picks are refused too. A check that dead code can satisfy is not a check (§1b).
@@ -182,9 +185,13 @@ _FIRST_QUARTER = re.compile(r"\bfirst[\s-]*quarter\b", re.IGNORECASE)
 def _first_quarter_problem(label: str, model_id: str | None) -> str | None:
     """A first-quarter pick whose label reads as the full game. None for every model whose market is not a
     first-quarter one."""
-    if _market(model_id) != "spreads_q1":
+    market = _market(model_id)
+    if market not in ("spreads_q1", "h2h_q1"):
         return None
     if not _FIRST_QUARTER.search(label):
+        if market == "h2h_q1":
+            return ("the label does not say First Quarter, so it reads as the full-game moneyline; the pick settles "
+                    "on the first quarter's winner")
         return ("the label does not say First Quarter, so it reads as the full-game spread; the pick settles on "
                 "the first quarter's margin")
     return None

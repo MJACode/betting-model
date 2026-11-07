@@ -123,3 +123,6 @@ quarter. The effect does not carry to the first quarter. **Closed.**
   would double the stake on one signal; it adds no game.
 - The control, the cold team's moneyline with no check: 123 bets, -14.62 units, -12.8%.
 - 2025-26, the latest season, made +4.3% on 36 bets, against +39% and +46% in the two before.
+
+**Built anyway (mike, 2026-11-07: "Build it anyway").** The moneyline cell with the spread check at k >= 2 is live as
+`nba_q1_trend_ml` (`models/nba_q1_trend_ml.py`; `docs/sports/nba.md`, "First quarter"). The total stays closed.

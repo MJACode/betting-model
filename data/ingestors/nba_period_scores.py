@@ -219,9 +219,10 @@ def run(start: str, end: str) -> dict:
 # The model whose picks settle on these rows, and how many of its dates one pass
 # may fetch: one scoreboard call a date, newest first.
 FIRST_HALF_MODEL = "nba_first_half_total_luck"
-# Every model whose picks settle on these rows: the first half's total and the first quarter's spread
-# (models/nba_q1_trend.py). The same trust check covers both (first_quarter_from_periods).
-PERIOD_MODELS = (FIRST_HALF_MODEL, "nba_q1_trend")
+# Every model whose picks settle on these rows: the first half's total, the first quarter's spread
+# (models/nba_q1_trend.py) and the first quarter's moneyline (models/nba_q1_trend_ml.py). The same trust check
+# covers all three (first_quarter_from_periods).
+PERIOD_MODELS = (FIRST_HALF_MODEL, "nba_q1_trend", "nba_q1_trend_ml")
 MAX_PENDING_DATES = 20
 
 

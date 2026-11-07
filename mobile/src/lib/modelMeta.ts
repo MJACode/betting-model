@@ -469,6 +469,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first quarter's moneyline, the same hot team (models/nba_q1_trend_ml.py,
+  // mike, 2026-11-07): the first-quarter spread model's own rule, bet on that
+  // team's first-quarter moneyline, once, about an hour before tip, at the best
+  // price. It settles on the first quarter's score alone; a level quarter is a
+  // push. The label is "DEN @ LAC — First Quarter DEN ML". A game line, not a
+  // picker slot.
+  nba_q1_trend_ml: {
+    // 1Q ML, spelled like '1Q Spread'. The side is in the pick label.
+    shortLabel: '1Q ML',
+    longLabel: 'NBA First Quarter Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // NBA in-play (models/nba_live_ig2.py, 2026-11-04): the game-state model's
   // margin against the live line, one bet per game at the first fresh price,
   // during quarters 1-2. The quarter-3 moneyline and spread are held out
@@ -947,6 +961,15 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'fair chance plus about 15 percentage points, the extra these bets won over the last three NBA ' +
     'seasons (66% won where the market’s fair chance averaged 51%). That is only 88 bets, so the real ' +
     'extra could be much smaller. Read it as an upper bound.',
+  // The market's no-vig chance plus the walk-forward uplift (+0.1416 for
+  // 2026-27): on the 81 graded bets whose first quarter was not level, 56.8%
+  // won where the market's fair chance averaged 42.6% (models/nba_q1_trend_ml.py).
+  // A level quarter is a push, left out of both.
+  nba_q1_trend_ml:
+    'What our model says is the chance this team wins the first quarter, leaving out a tied quarter, ' +
+    'which returns the stake. It is the market’s fair chance plus about 14 percentage points, the extra ' +
+    'these bets won over the last three NBA seasons (57% won where the market’s fair chance averaged 43%). ' +
+    'That is only 87 bets, so the real extra could be much smaller. Read it as an upper bound.',
   // The win chance the bet book's own spread implies
   // (models/ncaab_moneyline_own_spread.py); the edge is that minus the same
   // book's moneyline price's implied chance (UX review, 2026-11-02).
@@ -989,6 +1012,8 @@ const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
   // The NBA first-quarter spreads (scripts/nba_q1_trend_card.py, 45-66).
   'nba_q1_trend',
+  // The NBA first-quarter moneylines, on the same fetch (scripts/nba_q1_trend_ml_card.py).
+  'nba_q1_trend_ml',
   'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
@@ -1359,6 +1384,8 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   if (id === 'ncaab_first_half_total') return null;
   // The NBA first quarter's spread, the same: not the game's spread line.
   if (id === 'nba_q1_trend') return null;
+  // The NBA first quarter's moneyline, the same: not the game's moneyline.
+  if (id === 'nba_q1_trend_ml') return null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

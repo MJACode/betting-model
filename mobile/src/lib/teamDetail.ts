@@ -527,8 +527,9 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
       continue;
     }
     // A first quarter's spread (nba_q1_trend): a different number from the
-    // game's spread, on a quarter of it.
-    if (h1 === 'spreads_q1') {
+    // game's spread, on a quarter of it. A first quarter's moneyline
+    // (nba_q1_trend_ml) is the same: a different bet from the game's winner.
+    if (h1 === 'spreads_q1' || h1 === 'h2h_q1') {
       if (p.discordPublish === 'unknown') out.ledgerUnread = true;
       out.firstQuarters += 1;
       out.settled += 1;

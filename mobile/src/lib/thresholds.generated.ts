@@ -39,6 +39,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_q1_trend: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nba_q1_trend_ml: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_team_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
   ncaab_first_half_spread: { min_prob: 0, min_edge: 0.025, min_odds: -200 },
