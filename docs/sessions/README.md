@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, nba_q1_trend live on mike's instruction: the first-quarter cover-record step (88 bets, +27.4%, failed the 200-bet bar); replay 88 of 88; 2026-27 first-quarter spreads bought |
+| 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NBA in-play: a bet DraftKings did not price failed its insert (dk_implied_prob NULL); now 0.0 as the scorer's line-book picks; OKC -13.5 posted and won |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, picks.stake_units: a pick's own stake (1-3u to win); NCAAB bets that agree with an earlier NCAAB bet on the game go 2u (+21.3% flat on 233 replay bets; the only sizing slice that earned more per unit risked) |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NCAAB first-half total cut 0.02 -> 0.025 (a quarter fewer bets, +3.5 units on the replay; 0.03 would have cost 47), EV floor 0.037 |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NBA first quarter: props anchored to the full-game market (0 of 36) and team totals against Pinnacle's period lines (0 of 12); the near miss would not bet live; 2026-27 first-quarter props bought |
@@ -32,6 +33,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, the scorer's end-of-pass sweep deleted every writer's unsettled NONE rows (257 of 278 NCAAB card rows; NFL opener/wind every pass); now only the models its pass re-writes; restore job for unstarted NCAAB games |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, freeze tracking: trail on every app_errors report; restart / js_stall / modal_stuck kinds; all pop-ups via TrackedModal; migration applied before merge |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, Stats NBA matchup column read 2025-26 defences (calendar year, not the ending-year label); now the Teams board season, labelled 2026-27 |
+| 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, NBA early live spread chip back to Early Spread (mike); #1180's after-merge steps verified in production, none re-run |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM Trends: Didn't move chip dropped; NBA prop line history starts 2026-27 note; post-deploy timings for #1187 |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, no NBA first-quarter model: every first-quarter search failed (props 0 of 18, team totals 0 of 26); the stale follow-up ticked |
 | 2026-11-05 | [2026-11](./2026-11.md) | 2026-11-05, BYOM trend filters (line move, last game, division), More filters on game bets, NFL rest, season breakdown and 50-bet note; no lookahead on the official line |
