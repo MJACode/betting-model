@@ -380,13 +380,17 @@ DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 # the fallback would have posted NBA in-play bets to #nba and ledgered them as
 # sent to live, never to re-post. models/nba_live_loop.py refuses to decide
 # while neither variable is set.
-DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA"})
+# NCAAB (2026-11-07): the in-play models post to #ncaab-live
+# (DISCORD_CHANNEL_LIVE_NCAAB on pollers) and nowhere else.
+DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB"})
 
 # Sports whose in-play picks are announced only while the game has no final
 # score in `games` (tracking/publish_filters.live_publishable_sql). Only a
 # sport whose `games` score is written at the final, never during the game,
 # belongs here; NBA's is written by data/ingestors/nba_results_ingestor.
-LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA"})
+# NCAAB's is written by data/ingestors/ncaab_espn_ingestor only for a
+# completed event (2026-11-07).
+LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA", "NCAAB"})
 
 # Channel for the morning results recap (cross-sport, so it needs its own home).
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
@@ -1037,6 +1041,20 @@ ACTION_THRESHOLDS: dict = {
     # (models/nba_live_ig2.HELD_OUT_RULES); each is added the day it passes.
     # Go-live gate standing: 0 settled of 50.
     "nba_live_spread_q12": {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAAB in play (models/ncaab_live_loop.py, LIVE 2026-11-07, mike: "3-5 best
+    # per night"). Three rules, each passing the house standard at every cut
+    # from its floor up on the half-hour purchase, 2021-22 .. 2025-26. The cut
+    # is EV and set per NIGHT (models/ncaab_live_ig.night_cut: the EV the
+    # graded decisions exceeded 4 times per expected decision on a slate that
+    # size, never under the rule's floor), at most 5 bets a night. Graded,
+    # walk-forward, 2022-23 .. 2025-26: 2,533 bets on 588 nights, +290.4u,
+    # +10.1% (95% +6.4..+13.8), every season positive. NOT HERE, held out by the
+    # same gate: the first-half total and the second-half moneyline (fail the
+    # bands); the first-half moneyline passes and is held out for the
+    # stale-soft-book signature. Go-live gate standing: 0 settled of 50.
+    "ncaab_live_spread_h1": {"min_prob": 0.0, "min_edge": 0.0},
+    "ncaab_live_spread_h2": {"min_prob": 0.0, "min_edge": 0.0},
+    "ncaab_live_total_h2":  {"min_prob": 0.0, "min_edge": 0.0},
     # MLB run-line market-relative rule (models/mlb_game_market). Replaces
     # the paused mlb_runline *publish path* — mlb_runline stays paused
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
@@ -2220,6 +2238,12 @@ MODEL_MIN_ODDS: dict = {
     # laid on the loop's hourly fetch times (min / median / max): -160 / -114 /
     # +114.
     "nba_live_spread_q12":       -200,
+    # The NCAAB in-play rules (models/ncaab_live_ig.py) were graded at the -200
+    # floor; pinned so a DEFAULT_MIN_ODDS override cannot move them off it.
+    # Prices the night's selection laid (min / median / max): -145 / -115 / +185.
+    "ncaab_live_spread_h1":      -200,
+    "ncaab_live_spread_h2":      -200,
+    "ncaab_live_total_h2":       -200,
 }
 
 
@@ -2396,6 +2420,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # push), whose config.expected_value is never below the rule's EV, so this
     # gate cannot refuse a bet the rule took. No record yet: re-read at 50.
     "nba_live_spread_q12":       0.05,
+    # The NCAAB in-play rules (2026-11-07, mike): each rule's FLOOR, its lowest
+    # cut that passed the house standard (models/ncaab_live_ig.RULES). The
+    # night's cut is never under it, and the row's probability is P(win | no
+    # push), whose config.expected_value is never below the rule's EV, so this
+    # gate cannot refuse a bet the rule took. No record yet: re-read at 50.
+    "ncaab_live_spread_h1":      0.02,
+    "ncaab_live_spread_h2":      0.05,
+    "ncaab_live_total_h2":       0.02,
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2649,6 +2681,12 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # EV >= 0.05 cut was graded on. No record, so a promoted map would be the
     # pooled offset borrowed from other models.
     "nba_live_spread_q12",
+    # 2026-11-07 (mike). The NCAAB in-play rules' number is their game-state
+    # model's own probability (models/ncaab_live_ig.py), the one their EV cuts
+    # were graded on. No record, so a promoted map would be borrowed.
+    "ncaab_live_spread_h1",
+    "ncaab_live_spread_h2",
+    "ncaab_live_total_h2",
     # 2026-10-15 (mike: "use what you've learned in this repo"). The NBA prop
     # rule's probability IS Pinnacle's proportional no-vig under at the same
     # line in the same fetch, which its EV >= 0.00 cut was measured on. It has
@@ -2847,6 +2885,13 @@ SCORING_METHODS: dict = {
     # model_registry after the merge (--register) and scored by
     # models/nba_live_loop.py.
     "nba_live_spread_q12": SCORING_ARTIFACT,
+    # The NCAAB in-play rules: their state models and the night table in one
+    # JSON artifact committed under models/saved/ (ncaab_live_ig_2027.json,
+    # scripts/build_ncaab_live_ig_artifact.py), loaded by its pinned path by
+    # models/ncaab_live_loop.py, never registered.
+    "ncaab_live_spread_h1": "rule",
+    "ncaab_live_spread_h2": "rule",
+    "ncaab_live_total_h2":  "rule",
     # A rule with a parameter artifact committed under models/saved/ (the
     # residual sample and the bucket counts, models/nba_total_luck.py), never
     # registered: the card loads it by its pinned path.
@@ -2978,6 +3023,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "nfl_live_leader_ml":          0.02,   # 2026-10-13 mike; the backtest's cut, see ACTION_THRESHOLDS
     "nba_live_spread_q12":         0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h1":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3087,6 +3135,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_live_leader_ml":          0.0,    # 2026-10-13 mike; edge is the cut, see ACTION_THRESHOLDS
     "nba_live_spread_q12":         0.0,    # 2026-11-04 mike; the cut is EV, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h1":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3373,6 +3424,17 @@ LIVE_MODELS = {
     # docs/sports/nba.md "In play", docs/nba_models_2026.md section 7.3.
     "nba_live_spread_q12": ("NBA", "spreads", "engine",
                             "Live spread, quarters 1-2: IG-2 game-state model, EV >= 0.05 at the first fresh fetch"),
+    # NCAAB in play (models/ncaab_live_loop.py, LIVE 2026-11-07, mike).
+    # Settled on the FULL GAME, overtime included: a spread against
+    # scored_line, the HOME number (CLAUDE.md section 4); a total against
+    # scored_line, the live total at the bet. The half in the name is when
+    # the bet is made. docs/sports/ncaab.md, "In play".
+    "ncaab_live_spread_h1": ("NCAAB", "spreads", "engine",
+                             "Live spread, first half: game-state model, the night's best few at the first fresh fetch"),
+    "ncaab_live_spread_h2": ("NCAAB", "spreads", "engine",
+                             "Live spread, second half: game-state model, the night's best few at the first fresh fetch"),
+    "ncaab_live_total_h2":  ("NCAAB", "totals", "engine",
+                             "Live total, second half: game-state model, the night's best few at the first fresh fetch"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────

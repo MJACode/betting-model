@@ -1042,6 +1042,10 @@ export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_l
  */
 export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   'nba_live_spread_q12',
+  // models/ncaab_live_loop.py reads the books at each :00 and :30 only.
+  'ncaab_live_spread_h1',
+  'ncaab_live_spread_h2',
+  'ncaab_live_total_h2',
 ]);
 
 /**

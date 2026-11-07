@@ -402,7 +402,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-03 (mike): NCAAB first-half total; its table's P(win, push left out).
          "ncaab_first_half_total",
          # 2026-11-04 (mike): the NBA in-play quarters 1-2 spread; IG-2's own game-state probability.
-         "nba_live_spread_q12"}
+         "nba_live_spread_q12",
+         # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's own probability.
+         "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

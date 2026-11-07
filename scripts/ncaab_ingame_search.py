@@ -118,34 +118,8 @@ def load_priors(conn, season: int) -> pd.DataFrame:
     """(game_id, mu_pre, T_pre, prior_src): Pinnacle's last pre-tip spread and
     total, else the median of the deciding books' last pre-tip quotes."""
     def build():
-        q = _read(conn, """
-            SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker)
-                   o.game_id, o.market, o.bookmaker, o.spread_home, o.total_line
-              FROM odds o JOIN games g ON g.game_id = o.game_id
-             WHERE o.sport = 'NCAAB' AND g.season = %s AND o.market IN ('spreads', 'totals')
-               AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
-               AND (o.source IS NULL OR o.source IN ('', 'odds_api_historical'))
-               AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
-             ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at::timestamptz DESC
-        """, (season,))
-        q["num"] = np.where(q["market"] == "spreads", pd.to_numeric(q["spread_home"]),
-                            pd.to_numeric(q["total_line"])).astype(float)
-        out = []
-        for (gid, mk), g in q.groupby(["game_id", "market"]):
-            pin = g[g["bookmaker"] == "pinnacle"]["num"].dropna()
-            soft = g[g["bookmaker"].isin(BOOKS)]["num"].dropna()
-            if len(pin):
-                out.append((gid, mk, float(pin.iloc[0]), "pinnacle"))
-            elif len(soft):
-                out.append((gid, mk, float(soft.median()), "median"))
-        p = pd.DataFrame(out, columns=["game_id", "market", "num", "src"])
-        sp = p[p["market"] == "spreads"].set_index("game_id")
-        to = p[p["market"] == "totals"].set_index("game_id")
-        res = pd.DataFrame({"mu_pre": -sp["num"], "src_sp": sp["src"]}).join(
-            pd.DataFrame({"T_pre": to["num"], "src_to": to["src"]}), how="inner")
-        res["prior_src"] = np.where((res["src_sp"] == "pinnacle") & (res["src_to"] == "pinnacle"),
-                                    "pinnacle", "median")
-        return res.reset_index()[["game_id", "mu_pre", "T_pre", "prior_src"]]
+        q = _read(conn, M.PRIOR_CLOSE_SQL.format(where="g.season = %s"), (season,))
+        return M.priors_from_closes(q, BOOKS)
     return _cached(f"priors_{season}", build)
 
 
@@ -275,58 +249,17 @@ def assign_fetch(q: pd.DataFrame, fetches: pd.DataFrame) -> pd.DataFrame:
     return x.drop(columns=["pulled_at"]).reset_index(drop=True)
 
 
-def state_at(plays: pd.DataFrame, at: pd.DataFrame, col: str) -> pd.DataFrame:
-    """The last play logged at or before at[col] per game (ties by play order)."""
-    p = plays.dropna(subset=["wallclock"]).sort_values(["wallclock", "play_no"], kind="stable")
-    a = at.sort_values(col, kind="stable")
-    return pd.merge_asof(a, p, left_on=col, right_on="wallclock", by="game_id",
-                         direction="backward")
-
-
-def quote_states(q: pd.DataFrame, plays: pd.DataFrame) -> pd.DataFrame:
-    """Each quote with the state at its stamp and the points scored between its
-    stamp and its fetch's served time (the FRESH rule)."""
-    plays = plays.sort_values(["game_id", "play_no"])
-    keep = ["game_id", "play_no", "wallclock", "period", "clock_s", "game_s", "type_text",
-            "h_pts", "a_pts", "h_tf", "a_tf"]
-    s = state_at(plays[keep], q, "stamp")
-    at_fetch = state_at(plays[["game_id", "play_no", "wallclock", "h_pts", "a_pts"]],
-                        s[["game_id", "fetch_at"]].drop_duplicates(), "fetch_at")
-    at_fetch = at_fetch.rename(columns={"h_pts": "h_fetch", "a_pts": "a_fetch"})[
-        ["game_id", "fetch_at", "h_fetch", "a_fetch"]]
-    s = s.merge(at_fetch, on=["game_id", "fetch_at"], how="left")
-    s["pts_since"] = (s["h_fetch"] + s["a_fetch"]) - (s["h_pts"] + s["a_pts"])
-    return s.dropna(subset=["period"])
+# The decision path lives in models/ncaab_live_ig, the code the live loop runs.
+state_at = M.state_at
+quote_states = M.quote_states
+price = M.price_offers
 
 
 def priced_offers(qs: pd.DataFrame, models: dict, games_prior: pd.DataFrame) -> pd.DataFrame:
-    """Every offer of every eligible decision quote, priced by the model.
-
-    Eligible, as the loop decides (models/ncaab_live_ig): not an outlier against
-    the other books in its fetch, fresh (no point between its stamp and the
-    fetch), in a phase, at a deciding book. The decision fetch per (game, rule)
-    is the first holding an eligible quote; only its quotes are returned."""
-    st = M.state_columns(qs.merge(games_prior, on="game_id"))
-    st, _errors = M.in_bounds(st)
-    st = M.drop_outliers(st)
-    st["phase"] = M.phase_of(st)
-    st = st[(st["phase"] != "") & (st["pts_since"] == 0) & st["book"].isin(BOOKS)]
-    st["rule"] = st["market"] + "_" + st["phase"]
-    first = st.groupby(["game_id", "rule"])["fetch_at"].transform("min")
-    st = st[st["fetch_at"] == first]
-    x = M.features(st)
-    mu_m, sd_m = models["margin"].predict(x)
-    mu_t, sd_t = models["total"].predict(x)
-    x = x.assign(mu_m=mu_m, sd_m=sd_m, mu_t=mu_t, sd_t=sd_t)
-    return price(M.offers_from_quotes(x))
-
-
-def price(off: pd.DataFrame) -> pd.DataFrame:
-    is_tot = (off["market"] == "totals").to_numpy()
-    mu = np.where(is_tot, off["mu_t"], off["mu_m"])
-    sd = np.where(is_tot, off["sd_t"], off["sd_m"])
-    pw, pp = M.side_probs(off["market"], off["side"], off["line"], mu, sd)
-    return off.assign(p_win=pw, p_push=pp, ev=M.ev_of(off["price"], pw, pp))
+    """Every offer of every eligible decision quote, priced by the model
+    (M.eligible_quotes, then M.decision_offers: the first eligible fetch per
+    game and rule)."""
+    return M.decision_offers(M.eligible_quotes(qs, games_prior, BOOKS), models)
 
 
 def best(off: pd.DataFrame) -> pd.DataFrame:
@@ -531,12 +464,125 @@ def run_grade(conn, step: int, n_placebo: int = N_PLACEBO, seasons=GRADED) -> pd
     return pd.DataFrame(rows)
 
 
+# ── the shipped selection: the best few a night (mike, 2026-11-07: "3-5 best per night") ─
+
+N_QUANTILES = 1001
+
+
+def night_table(dec: pd.DataFrame, slates: pd.DataFrame) -> tuple[np.ndarray, float]:
+    """(EV at q = 0, 1/1000, ..., 1, decisions per slate game) of `dec`, the
+    live rules' decisions of the seasons an artifact is built from."""
+    q = np.quantile(dec["ev"].to_numpy(float), np.linspace(0.0, 1.0, N_QUANTILES))
+    nights = dec[["season", "night"]].drop_duplicates().merge(slates, on=["season", "night"])
+    per_game = len(dec) / nights["slate_games"].sum()
+    return q, float(per_game)
+
+
+def live_decisions(off: pd.DataFrame, games: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(every decision of the live rules, graded, with its night; the slates)."""
+    o = off[off["rule"].isin(list(M.RULE_BY_KEY))]
+    d = grade(best(o), games)
+    d["night"] = d["day"]
+    slates = games.assign(night=(games["tip"] - pd.Timedelta(hours=5)).dt.date) \
+        .groupby(["season", "night"]).size().rename("slate_games").reset_index()
+    return d.merge(slates, on=["season", "night"], how="left"), slates
+
+
+def select_nights(dec: pd.DataFrame, arts: dict) -> pd.DataFrame:
+    """The bets the loop makes: per night, decisions in decision order (fetch,
+    then the higher EV first), each at or above M.night_cut for its rule on
+    that night's slate, the first M.NIGHT_CAP of them. `arts`: {season:
+    M.Artifact} built from earlier seasons only."""
+    out = []
+    for (season, night), x in dec.groupby(["season", "night"]):
+        art = arts.get(int(season))
+        if art is None:
+            continue
+        n = int(x["slate_games"].iloc[0])
+        cut = x["rule"].map({k: M.night_cut(art, n, r) for k, r in M.RULE_BY_KEY.items()}).to_numpy(float)
+        keep = x["ev"].to_numpy(float) >= cut
+        out.append(x[keep].assign(night_cut=cut[keep])
+                   .sort_values(["fetch_at", "ev"], ascending=[True, False]).head(M.NIGHT_CAP))
+    return pd.concat(out) if out else dec.iloc[:0]
+
+
+def season_arts(dec: pd.DataFrame, slates: pd.DataFrame, models_by_season: dict | None = None) -> dict:
+    """{S: an artifact whose night table is built from the decisions of seasons < S}."""
+    arts = {}
+    for S_ in sorted(dec["season"].unique()):
+        prior = dec[dec["season"] < S_]
+        if not len(prior):
+            continue
+        q, per_game = night_table(prior, slates)
+        m = (models_by_season or {}).get(int(S_))
+        arts[int(S_)] = M.Artifact(m["margin"] if m else None, m["total"] if m else None, q, per_game)
+    return arts
+
+
+def night_placebo(off: pd.DataFrame, games: pd.DataFrame, arts: dict, runs: int) -> np.ndarray:
+    """The selection's return with each decision game given another game's
+    model (mean, sd) drawn within its fetch, seeds 1..runs."""
+    o = off[off["rule"].isin(list(M.RULE_BY_KEY)) & off["book"].isin(BOOKS)
+            & (off["price"] >= M.PRICE_FLOOR)].reset_index(drop=True)
+    key = pd.factorize(o["game_id"])[0]
+    first = pd.Series(np.arange(len(o))).groupby(key).first().to_numpy()
+    fcode = pd.factorize(o["fetch_at"].to_numpy()[first])[0]
+    cols = ("mu_m", "sd_m", "mu_t", "sd_t")
+    per_game = {c: o[c].to_numpy()[first] for c in cols}
+    n = len(first)
+    idx_a = np.lexsort((np.arange(n), fcode))
+    out = []
+    for seed in range(1, runs + 1):
+        rng = np.random.default_rng(seed)
+        idx_b = np.lexsort((rng.random(n), fcode))
+        donor = np.empty(n, dtype=int)
+        donor[idx_a] = idx_b
+        sh = o.assign(**{c: per_game[c][donor][key] for c in cols})
+        d, _sl = live_decisions(price(sh), games)
+        b = select_nights(d, arts)
+        out.append(roi(b) if len(b) else 0.0)
+    return np.asarray(out)
+
+
+def run_best_per_night(conn, n_placebo: int = N_PLACEBO) -> dict:
+    off = pd.read_parquet(CACHE / "offers_step30.parquet")
+    games = load_games(conn)
+    dec, slates = live_decisions(off, games)
+    arts = season_arts(dec, slates)
+    b = select_nights(dec, arts)
+    graded_nights = slates[slates["season"].isin(list(arts))]
+    per = b.groupby("night").size()
+    lo, hi = boot_ci(b)
+    half = b["tip"] <= b["tip"].quantile(0.5)
+    pl = night_placebo(off, games, arts, n_placebo) if n_placebo else np.array([np.nan])
+    dk = b[b["book"] == "draftkings"]
+    res = {"bets": len(b), "slate_nights": len(graded_nights),
+           "per_night": round(len(b) / len(graded_nights), 2),
+           "nights_without_a_bet": int(len(graded_nights) - len(per)), "most_in_a_night": int(per.max()),
+           "units": round(float(b["units"].sum()), 1), "roi": round(roi(b), 4),
+           "ci": (round(lo, 4), round(hi, 4)), "early": round(roi(b[half]), 4),
+           "late": round(roi(b[~half]), 4),
+           "seasons": {int(s): (len(x), round(roi(x), 4), round(float(x["units"].sum()), 1))
+                       for s, x in b.groupby("season")},
+           "by_model": {M.RULE_BY_KEY[r].model_id: (len(x), round(roi(x), 4), round(float(x["units"].sum()), 1))
+                        for r, x in b.groupby("rule")},
+           "prices": (float(b["price"].min()), float(b["price"].median()), float(b["price"].max())),
+           "dk_only": (len(dk), round(roi(dk), 4)), "pinnacle": pin_split(b),
+           "placebo": {"runs": int(n_placebo), "mean": round(float(np.nanmean(pl)), 4),
+                       "p95": round(float(np.nanpercentile(pl, 95)), 4), "max": round(float(np.nanmax(pl)), 4)}}
+    b.drop(columns=[c for c in b.columns if str(b[c].dtype) == "category"]).to_parquet(
+        CACHE / "best_per_night.parquet", index=False)
+    return res
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--fit", action="store_true")
     ap.add_argument("--grade", action="store_true")
     ap.add_argument("--step", type=int, choices=(60, 30), default=60)
     ap.add_argument("--placebo", type=int, default=N_PLACEBO)
+    ap.add_argument("--best-per-night", action="store_true",
+                    help="grade the shipped selection (needs the --grade --step 30 offers)")
     a = ap.parse_args(argv)
     conn = _conn()
     try:
@@ -548,6 +594,11 @@ def main(argv=None) -> int:
             pd.set_option("display.width", 250)
             print(res.to_string(index=False))
             res.to_json(CACHE / f"grade_step{a.step}.json", orient="records", indent=1)
+        if a.best_per_night:
+            res = run_best_per_night(conn, a.placebo)
+            print(json.dumps(res, indent=1, default=str))
+            (CACHE / "best_per_night.json").write_text(json.dumps(res, indent=1, default=str),
+                                                       encoding="utf-8")
     finally:
         conn.close()
     return 0

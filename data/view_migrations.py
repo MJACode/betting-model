@@ -582,6 +582,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "nba_live_decisions_2026_11_04.sql",
+    # 2026-11-07 (mike): the NCAAB in-play loop's decision ledger, one row per
+    # game and in-play rule (models/ncaab_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "ncaab_live_decisions_2026_11_07.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

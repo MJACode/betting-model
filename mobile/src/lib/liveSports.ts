@@ -2,7 +2,7 @@
  * WHICH SPORTS HAVE AN IN-PLAY MODEL AT ALL.
  *
  * Mirror of the in-play models in the Python registry: `config.LIVE_MODELS`
- * (MLB, NBA and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
+ * (MLB, NBA, NCAAB and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
  * in `nfl/live_model/config.MODEL_IDS`). PINNED BY
  * tests/test_mobile_live_segment.py, which fails until this set equals those
  * two sources — the same mechanism lib/thresholds.ts uses, for the same reason:
@@ -19,7 +19,7 @@
  */
 
 /** Sports with at least one in-play model writing `is_live` picks. */
-export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NCAAF', 'NFL']);
+export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NCAAB', 'NCAAF', 'NFL']);
 
 /** Does this sport have an in-play model at all? */
 export function hasLiveModel(sport: string): boolean {
@@ -49,6 +49,15 @@ export function liveEmptySubtitle(sport: string): string {
     return (
       'The NBA in-play model checks games in progress once an hour, through the first and second quarters, and ' +
       'bets each game at most once. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  if (sport === 'NCAAB') {
+    // models/ncaab_live_loop.py: games in progress every half hour, and only
+    // the night's strongest few bets, at most five a night (mike, 2026-11-07).
+    return (
+      'The NCAAB in-play models check games in progress every half hour and post only the night\u2019s ' +
+      'strongest few bets, at most five a night. ' +
       LIVE_EMPTY_VALID
     );
   }

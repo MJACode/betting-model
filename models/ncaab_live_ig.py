@@ -367,3 +367,245 @@ def units(result, price) -> tuple[np.ndarray, np.ndarray]:
     r, w = risk_win(price)
     res = np.asarray(result, object)
     return np.where(res == "W", w, np.where(res == "L", -r, 0.0)), r
+
+
+# ── the pre-game prior ───────────────────────────────────────────────────────
+
+# The read both callers make: each book's last pre-tip spread and total row.
+PRIOR_CLOSE_SQL = """
+    SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker)
+           o.game_id, o.market, o.bookmaker, o.spread_home, o.total_line
+      FROM odds o JOIN games g ON g.game_id = o.game_id
+     WHERE o.sport = 'NCAAB' AND {where} AND o.market IN ('spreads', 'totals')
+       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+       AND (o.source IS NULL OR o.source IN ('', 'odds_api_historical'))
+       AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at::timestamptz DESC
+"""
+
+
+def priors_from_closes(q: pd.DataFrame, books: tuple) -> pd.DataFrame:
+    """(game_id, mu_pre, T_pre, prior_src) from each book's last pre-tip
+    spread and total (PRIOR_CLOSE_SQL's rows): Pinnacle's, else the median of
+    the deciding books'. mu_pre is the expected HOME margin (minus the home
+    number). A game missing either market has no prior."""
+    cols = ["game_id", "mu_pre", "T_pre", "prior_src"]
+    if q is None or not len(q):
+        return pd.DataFrame(columns=cols)
+    q = q.assign(num=np.where(q["market"] == "spreads", pd.to_numeric(q["spread_home"], errors="coerce"),
+                              pd.to_numeric(q["total_line"], errors="coerce")).astype(float))
+    out = []
+    for (gid, mk), g in q.groupby(["game_id", "market"]):
+        pin = g[g["bookmaker"] == "pinnacle"]["num"].dropna()
+        soft = g[g["bookmaker"].isin(books)]["num"].dropna()
+        if len(pin):
+            out.append((gid, mk, float(pin.iloc[0]), "pinnacle"))
+        elif len(soft):
+            out.append((gid, mk, float(soft.median()), "median"))
+    p = pd.DataFrame(out, columns=["game_id", "market", "num", "src"])
+    sp = p[p["market"] == "spreads"].set_index("game_id")
+    to = p[p["market"] == "totals"].set_index("game_id")
+    res = pd.DataFrame({"mu_pre": -sp["num"], "src_sp": sp["src"]}).join(
+        pd.DataFrame({"T_pre": to["num"], "src_to": to["src"]}), how="inner")
+    res["prior_src"] = np.where((res["src_sp"] == "pinnacle") & (res["src_to"] == "pinnacle"),
+                                "pinnacle", "median")
+    return res.reset_index()[cols]
+
+
+# ── the decision path, shared by the grade and the loop ─────────────────────
+
+def state_at(plays: pd.DataFrame, at: pd.DataFrame, col: str) -> pd.DataFrame:
+    """The last play logged at or before at[col] per game (ties by play order)."""
+    p = plays.dropna(subset=["wallclock"]).sort_values(["wallclock", "play_no"], kind="stable")
+    a = at.sort_values(col, kind="stable")
+    return pd.merge_asof(a, p, left_on=col, right_on="wallclock", by="game_id",
+                         direction="backward")
+
+
+def quote_states(q: pd.DataFrame, plays: pd.DataFrame) -> pd.DataFrame:
+    """Each quote (game_id, stamp, fetch_at, ...) with the state at its stamp
+    and the points scored between its stamp and its fetch's served time (the
+    FRESH rule). `plays` carries h_tf / a_tf (with_team_fouls)."""
+    plays = plays.sort_values(["game_id", "play_no"])
+    keep = ["game_id", "play_no", "wallclock", "period", "clock_s", "game_s", "type_text",
+            "h_pts", "a_pts", "h_tf", "a_tf"]
+    s = state_at(plays[keep], q, "stamp")
+    at_fetch = state_at(plays[["game_id", "play_no", "wallclock", "h_pts", "a_pts"]],
+                        s[["game_id", "fetch_at"]].drop_duplicates(), "fetch_at")
+    at_fetch = at_fetch.rename(columns={"h_pts": "h_fetch", "a_pts": "a_fetch"})[
+        ["game_id", "fetch_at", "h_fetch", "a_fetch"]]
+    s = s.merge(at_fetch, on=["game_id", "fetch_at"], how="left")
+    s["pts_since"] = (s["h_fetch"] + s["a_fetch"]) - (s["h_pts"] + s["a_pts"])
+    return s.dropna(subset=["period"])
+
+
+def eligible_quotes(qs: pd.DataFrame, prior: pd.DataFrame, books: tuple) -> pd.DataFrame:
+    """Every quote that may decide a rule, with its phase and rule: not a feed
+    typo (in_bounds), not an outlier against the other books its fetch served,
+    fresh, in a phase, at a deciding book. `prior`: game_id, mu_pre, T_pre."""
+    st = state_columns(qs.merge(prior, on="game_id"))
+    st, _errors = in_bounds(st)
+    st = drop_outliers(st)
+    st["phase"] = phase_of(st)
+    st = st[(st["phase"] != "") & (st["pts_since"] == 0) & st["book"].isin(books)]
+    return st.assign(rule=st["market"] + "_" + st["phase"])
+
+
+def price_offers(off: pd.DataFrame) -> pd.DataFrame:
+    is_tot = (off["market"] == "totals").to_numpy()
+    mu = np.where(is_tot, off["mu_t"], off["mu_m"])
+    sd = np.where(is_tot, off["sd_t"], off["sd_m"])
+    pw, pp = side_probs(off["market"], off["side"], off["line"], mu, sd)
+    return off.assign(p_win=pw, p_push=pp, ev=ev_of(off["price"], pw, pp))
+
+
+def decision_offers(el: pd.DataFrame, models: dict) -> pd.DataFrame:
+    """The FIRST fetch's eligible quotes per (game, rule), every side priced."""
+    first = el.groupby(["game_id", "rule"])["fetch_at"].transform("min")
+    x = features(el[el["fetch_at"] == first])
+    mu_m, sd_m = models["margin"].predict(x)
+    mu_t, sd_t = models["total"].predict(x)
+    x = x.assign(mu_m=mu_m, sd_m=sd_m, mu_t=mu_t, sd_t=sd_t)
+    return price_offers(offers_from_quotes(x))
+
+
+# ── the live rules and the night's selection (mike, 2026-11-07: "3-5 best per night") ─
+
+@dataclass(frozen=True)
+class Rule:
+    model_id: str
+    market: str              # "spreads" | "totals"
+    phase: str               # "H1" | "H2"
+    floor: float             # its lowest cut that passed the house standard
+
+    @property
+    def key(self) -> str:
+        return f"{self.market}_{self.phase}"
+
+
+SPREAD_H1 = "ncaab_live_spread_h1"
+SPREAD_H2 = "ncaab_live_spread_h2"
+TOTAL_H2 = "ncaab_live_total_h2"
+# Graded 2021-22 .. 2025-26 on the half-hour purchase (scripts/ncaab_ingame_search.py,
+# docs/sports/ncaab.md "In play"): each passes the house standard at every cut
+# from its floor up. Held out by the same gate: the first-half total (fails the
+# bands and a season) and the second-half moneyline (fails the bands). The
+# first-half moneyline passes and is held out for the stale-soft-book signature
+# (docs/sports/ncaab.md).
+RULES: tuple = (
+    Rule(SPREAD_H1, "spreads", "H1", 0.02),
+    Rule(SPREAD_H2, "spreads", "H2", 0.05),
+    Rule(TOTAL_H2, "totals", "H2", 0.02),
+)
+MODEL_IDS: tuple = tuple(r.model_id for r in RULES)
+RULE_BY_ID = {r.model_id: r for r in RULES}
+RULE_BY_KEY = {r.key: r for r in RULES}
+NIGHT_TARGET = 4.0           # bets a slate night the cut aims at
+NIGHT_CAP = 5                # never more than this many a slate night, first come
+CADENCE_MIN = 30             # the graded purchase: every :00 and :30 ...
+FETCH_OFFSET_SEC = 262       # ... served 261-263 s before the instant asked for (2022-23 on)
+
+
+@dataclass
+class Artifact:
+    margin: StateModel
+    total: StateModel
+    ev_quantiles: np.ndarray        # EV of the graded decisions at q = 0, 1/n, ..., 1
+    per_game: float                 # graded decisions per slate game
+    raw: dict = field(default_factory=dict)
+
+    @property
+    def version(self) -> str:
+        return str(self.raw.get("version", ""))
+
+    @property
+    def models(self) -> dict:
+        return {"margin": self.margin, "total": self.total}
+
+
+ARTIFACT_KIND = "ncaab_live_ig"
+ARTIFACT_PATH = "models/saved/ncaab_live_ig_2027.json"
+SEASON = 2027
+
+
+def artifact_from_dict(d: dict) -> Artifact:
+    if d.get("kind") != ARTIFACT_KIND:
+        raise ValueError(f"not an {ARTIFACT_KIND} artifact (kind={d.get('kind')!r})")
+    q = np.asarray(d["ev_quantiles"], float)
+    if q.ndim != 1 or len(q) < 2 or not np.all(np.diff(q) >= 0):
+        raise ValueError("ev_quantiles must be a non-decreasing table")
+    per_game = float(d["per_game"])
+    if not per_game > 0:
+        raise ValueError("per_game must be positive")
+    return Artifact(StateModel.from_dict(d["margin"]), StateModel.from_dict(d["total"]), q,
+                    per_game, d)
+
+
+def load_artifact(path=None) -> Artifact:
+    import json
+    from pathlib import Path
+    p = Path(path) if path is not None else Path(__file__).resolve().parents[1] / ARTIFACT_PATH
+    return artifact_from_dict(json.loads(p.read_text(encoding="utf-8")))
+
+
+def night_cut(art: Artifact, slate_games: int, rule: Rule) -> float:
+    """Tonight's EV cut for a rule: the EV the graded decisions exceed
+    NIGHT_TARGET times per expected decision on a slate of `slate_games`
+    games, never under the rule's own floor."""
+    expected = art.per_game * max(int(slate_games), 0)
+    q = 1.0 - min(1.0, NIGHT_TARGET / expected) if expected > 0 else 0.0
+    grid = np.linspace(0.0, 1.0, len(art.ev_quantiles))
+    return max(float(np.interp(q, grid, art.ev_quantiles)), rule.floor)
+
+
+# ── picks ────────────────────────────────────────────────────────────────────
+
+def american_to_decimal(price: float) -> float:
+    p = float(price)
+    return 1.0 + (p / 100.0 if p > 0 else 100.0 / abs(p))
+
+
+def prob_no_push(p_win: float, p_push: float) -> float:
+    """P(win | no push): the row's model_probability."""
+    return float(p_win) / max(1.0 - float(p_push or 0.0), 1e-12)
+
+
+def pick_label(rule: Rule, side: str, line: float, home: str, away: str) -> str:
+    """'Bradley -1.5 (live)' / 'Portland @ UT Arlington Over 145.5 (live)'.
+    A spread's number is the SIDE's (the HOME number, negated for away), so
+    tracking.pick_integrity agrees. No half is named: every rule settles on the
+    FULL game, overtime included, and in this app "First Half" names a bet on
+    that half alone; the model's name says when it bets."""
+    if rule.market == "totals":
+        word = "Over" if side == "over" else "Under"
+        return f"{away} @ {home} {word} {float(line):g} (live)"
+    team = home if side == "home" else away
+    n = float(line) if side == "home" else -float(line)
+    num = "PK" if n == 0 else f"{n:+g}"
+    return f"{team} {num} (live)"
+
+
+def winning_margins(side: str, home_line: float) -> tuple:
+    """The integer final home margins a spread bet wins on, inclusive."""
+    x = -float(home_line)
+    if side == "home":
+        return (math.floor(x) + 1.0, math.inf)
+    return (-math.inf, math.ceil(x) - 1.0)
+
+
+def cannot_both_win(a: dict, b: dict) -> bool:
+    """mike, 2026-10-17: "It can't be both." Two spreads no final margin wins
+    together, or an over and an under no final total wins together. A spread
+    and a total can always both win. Each dict: market, side, line (the HOME
+    number for a spread)."""
+    if a["market"] != b["market"]:
+        return False
+    if a["market"] == "totals":
+        if a["side"] == b["side"]:
+            return False
+        over, under = (a, b) if a["side"] == "over" else (b, a)
+        # over wins at total >= floor(o) + 1, under at total <= ceil(u) - 1
+        return math.floor(float(over["line"])) + 1 > math.ceil(float(under["line"])) - 1
+    la, ha = winning_margins(a["side"], a["line"])
+    lb, hb = winning_margins(b["side"], b["line"])
+    return max(la, lb) > min(ha, hb)

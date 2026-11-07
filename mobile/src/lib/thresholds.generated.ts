@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-11-06
+ * Last generated: 2026-11-07
  */
 
 export interface ModelThreshold {
@@ -42,6 +42,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nba_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
   ncaab_first_half_spread: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   ncaab_first_half_total: { min_prob: 0, min_edge: 0.025, min_odds: -200 },
+  ncaab_live_spread_h1: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_live_spread_h2: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_live_total_h2: { min_prob: 0, min_edge: 0, min_odds: -200 },
   ncaab_moneyline_first_post: { min_prob: 0, min_edge: 0.015, min_odds: -200 },
   ncaab_moneyline_own_spread: { min_prob: 0, min_edge: 0.01, min_odds: -200 },
   ncaab_spread_market: { min_prob: 0, min_edge: 0.03, min_odds: -200 },
