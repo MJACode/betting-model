@@ -278,6 +278,25 @@ def test_a_book_no_longer_bettable_is_not_replaced_by_the_next(table):
     assert d.status == "book_not_bettable" and d.best["bookmaker"] == "draftkings"
 
 
+
+def test_an_exact_tie_with_a_book_that_cannot_be_bet_goes_to_the_book_that_can(table):
+    """The same price on the same own spread at betPARX and BetRivers is the same
+    bet; betPARX is fetch-only (mike, 2026-11-06), so the bettable book takes it
+    (36 of 38 replayed betPARX bets were exact ties). Strictly best stays a no-bet."""
+    p = _ph(table, -3.5)
+    seven = tuple(b for b in bq.BOOKS if b != "betparx")
+    sp = SPREADS + [("g", "betparx", 20, -3.5, -110.0, -110.0)]
+    tied = round(_american(p - 0.04))
+    ml = [("g", "draftkings", 10, None, round(_american(p - 0.02)), 120.0),
+          ("g", "betrivers", 10, None, tied, 120.0), ("g", "betparx", 10, None, tied, 120.0)]
+    (d,) = _decide(table, ml, sp=sp, bettable=seven)
+    assert d.status == "bets" and d.best["bookmaker"] == "betrivers"
+    (d,) = _decide(table, ml, sp=sp)                          # every book bettable: the evidence's order
+    assert d.status == "bets" and d.best["bookmaker"] == "betparx"
+    ml[2] = ("g", "betparx", 10, None, round(_american(p - 0.05)), 120.0)
+    (d,) = _decide(table, ml, sp=sp, bettable=seven)
+    assert d.status == "book_not_bettable" and d.best["bookmaker"] == "betparx"
+
 def test_a_game_tipping_within_five_minutes_of_15z_is_not_priced():
     assert om.too_close(INSTANT + pd.Timedelta(minutes=4), INSTANT)
     assert not om.too_close(INSTANT + pd.Timedelta(minutes=5), INSTANT)

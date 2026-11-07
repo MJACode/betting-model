@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB spread and moneyline re-graded without betPARX: a tie goes to the bettable book (spread 405 bets +10.09%, moneyline 836 +4.27% on 2021-2025); a strictly-best betPARX quote is a no-bet that no longer fails the card |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, picks.stake_units: a pick's own stake (1-3u to win); NCAAB bets that agree with an earlier NCAAB bet on the game go 2u (+21.3% flat on 233 replay bets; the only sizing slice that earned more per unit risked) |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NCAAB first-half total cut 0.02 -> 0.025 (a quarter fewer bets, +3.5 units on the replay; 0.03 would have cost 47), EV floor 0.037 |
 | 2026-11-06 | [2026-11](./2026-11.md) | 2026-11-06, NBA first quarter: props anchored to the full-game market (0 of 36) and team totals against Pinnacle's period lines (0 of 12); the near miss would not bet live; 2026-27 first-quarter props bought |

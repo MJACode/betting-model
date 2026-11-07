@@ -404,7 +404,10 @@ recorded as `missed` without an error. Two other conditions fail the run after
 it writes what it can: every due game with no quote at all (the odds steps
 have stopped), and a best quote at a book `config.BEST_LINE_BOOKMAKERS` no
 longer lists. The next-best quote is not bet instead, because that is not the
-quote the research chose.
+quote the research chose. **A state-limited book is the exception**
+(`config.STATE_LIMITED_BOOKMAKERS`, betPARX since 2026-11-06): an exact tie
+with a bettable book bets at that book, and a quote that is strictly best is an
+ordinary no-bet, logged, and the run does not fail (the re-grade below).
 
 **Is a fresh quote there at 15:00?** Measured on the 2026-27 slate on
 2026-11-02 (119 games with odds): the hourly refresh pass at :17 past 9 a.m. ET
@@ -516,6 +519,41 @@ Neighbouring cuts (research, every game, 2021-2025): 0.02 +4.72% on 1,511 bets
 - **The book mix depends on the feed.** FanDuel, BetMGM, betPARX, DraftKings and
   Caesars carry most bets (95, 93, 89, 84 and 83 of 542). A book the feed stops
   sending is simply absent; one whose quote is stale falls out of the window.
+
+**betPARX left the deciding books on 2026-11-06; the re-grade (2026-11-07).**
+mike made betPARX a fetch-only book: licensed in three states, so a pick may
+never name it. It stays in the consensus, which was fitted with it. The card's
+own code was replayed on the research's copy of the 2021-2026 reads
+(`scripts/ncaab_spread_market_build.py` loaders, walk-forward tables, stake_for,
+units, 95% interval resampled by date). With every book bettable it reproduces
+the table above exactly. betPARX quotes appear from 2023-24 only.
+
+| Rule at the 0.03 cut | 2021-2025 | 2025-26 |
+|---|---|---|
+| As built: betPARX a deciding book | 409 bets, +44.60u, +9.97% [0.8, 18.4] | 133, +30.34u, +20.96% [6.3, 35.4] |
+| 11-06 to 11-07: betPARX holds the best number, no bet | 342, +52.99u, +14.19% [4.6, 23.9] | 111, +27.45u, +22.81% [7.3, 38.7] |
+| The best number among the seven deciding books | 406, +43.50u, +9.80% [0.7, 18.2] | 130, +29.46u, +20.81% [5.9, 37.5] |
+| **Live from 11-07: an exact tie goes to the deciding book; betPARX strictly best, no bet** | **405, +44.70u, +10.09% [0.9, 18.5]** | **122, +25.73u, +19.40% [4.0, 34.7]** |
+
+**Why ties.** The as-built model bet 89 games at betPARX (-5.50 units). 74 of
+them were exact ties, same side, line and price, with a book that can still be
+bet, 70 of those with BetRivers alone, and the tie-break handed every one to
+betPARX by name. The model's own rule says a tie on line and price is the same
+bet at two books, so from 2026-11-07 the bettable book takes it
+(`best_per_game(..., bettable)`). Every one of the 527 bets the live rule makes
+on the replay is a bet the research made, at the same line and price. Only the
+15 games where betPARX was strictly best are left unbet (+4.51 units on the
+replay). The next-best quote is still not bet there: it is not the quote the
+research chose.
+
+**The no-bet rule graded better on this model, and that is not trusted.** On
+the as-built bets of 2023-24 to 2025-26, a number held by one book alone made
++21.44% on 258 bets, and one shared by betPARX and BetRivers lost 15.43% on 70
+(-11.91 units). The moneyline model below shows the opposite for the same kind
+of tie: its 36 betPARX ties won 14.24 units. A split found after the fact that
+flips sign between two models of the same games is noise, not a rule. Across
+the two models the tie rule makes 138.15 units on the replay and the no-bet rule
+133.92.
 
 **The build's tables depend on read order in one place.** 140 games have two
 archive rows from the same source (`ncaab_archive_lines`); the build keeps the
@@ -653,6 +691,16 @@ By season: 2020-21 +5.53% (21 bets), 2021-22 +4.90% (285), 2022-23 +5.42%
 (233), 2023-24 +2.71% (174), 2024-25 +1.98% (125), 2025-26 +15.05% (76).
 Neighbouring cuts, 2021-2025: 0.005 +12.00 units (1,450 bets, +0.55%); 0.015
 +13.57 units (430 bets, +2.12%). It laid -200 to +1,000 (median -159).
+
+**betPARX left the deciding books on 2026-11-06; the re-grade (2026-11-07).**
+The same replay with config's seven deciding books (betPARX out, still in the
+consensus): **836 bets, 510-326, +53.68 units, +4.27% [-1.1, 9.3] on 2021-2025;
+2025-26 unchanged** (no game there had betPARX best). Every one of the 912 bets
+is a bet the research made, at the same price. The as-built model bet 38 games
+at betPARX (+13.67 units), and 36 were exact ties with a book that can still be
+bet, which now takes them (`best_per_game(..., bettable)`). The 11-06 rule, no
+bet whenever betPARX held the best side, made 800 bets and +39.44 units on
+2021-2025. The 2 games where betPARX was strictly best stay unbet (-0.57 units).
 
 **The risks, plainly:**
 
