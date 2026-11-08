@@ -183,7 +183,36 @@ def test_player_game_rows_skip_did_not_play(db):
 
 def test_a_rerun_rewrites_nothing(db):
     _rebuild(db, [2027])
-    assert _rebuild(db, [2027]) == {"seasons": [2027], "games": 0, "players": 0}
+    assert _rebuild(db, [2027]) == {"seasons": [2027], "games": 0, "players": 0,
+                                    "deleted_games": 0, "deleted_players": 0}
+
+
+def test_a_row_whose_source_is_gone_is_deleted_and_other_seasons_are_left(db):
+    """Review L3: a box row corrected to DNP, or a game's play-by-play removed."""
+    _rebuild(db, [2026, 2027])
+    cur = db.cursor()
+    cur.execute("INSERT INTO nba_first_basket_games (game_id, team, season, game_date, opponent, is_home, "
+                "scored_first) VALUES ('OLD', 'BOS', 2025, '2025-01-01', 'NYK', true, true)")
+    cur.execute("UPDATE nba_pbp_box SET did_not_play = true WHERE espn_game_id = 1 AND espn_id = 103")
+    cur.execute("DELETE FROM nba_pbp WHERE espn_game_id = 5")
+    try:
+        out = _rebuild(db, [2027])
+        assert out["deleted_games"] == 2 and out["deleted_players"] == 1 + 4, out
+        cur.execute("SELECT count(*) FROM nba_first_basket_games WHERE game_id = 'G5'")
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT count(*) FROM nba_first_basket_players WHERE game_id = 'G1' AND espn_id = 103")
+        assert cur.fetchone()[0] == 0
+        # A season not being rebuilt is never touched.
+        cur.execute("SELECT count(*) FROM nba_first_basket_games WHERE game_id = 'OLD'")
+        assert cur.fetchone()[0] == 1
+    finally:
+        cur.execute("DELETE FROM nba_first_basket_games WHERE game_id = 'OLD'")
+        cur.execute("UPDATE nba_pbp_box SET did_not_play = false WHERE espn_game_id = 1 AND espn_id = 103")
+        cur.execute("INSERT INTO nba_pbp VALUES "
+                    "(5,1,1,'Layup Shot','H',202,null,true,true,2),"
+                    "(5,2,1,'Jump Shot','A',101,null,true,false,0),"
+                    "(5,3,1,'Jump Shot','A',102,null,true,true,3)")
+        _rebuild(db, [2027])
 
 
 def test_team_season_view(db):

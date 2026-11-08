@@ -19,7 +19,8 @@ has not been loaded yet has no row, so it is never counted as a miss.
 WHAT IT WRITES. nba_first_basket_games and nba_first_basket_players
 (data/migrations/add_nba_first_basket_2026_11_08.sql creates both). Each
 season is recomputed with one INSERT ... SELECT per table; a row is
-rewritten only when a value changed.
+rewritten only when a value changed, and a row its source no longer
+produces is deleted.
 
     python -m data.ingestors.nba_first_basket --seasons 2026 2027
 """
@@ -89,7 +90,7 @@ box AS (
 )
 """
 
-GAMES_SQL = _BASE + """,
+_GAMES_ROWS = """,
 sides AS (
   SELECT g.*, s.side,
          CASE s.side WHEN 'H' THEN g.home_team ELSE g.away_team END AS team,
@@ -116,6 +117,9 @@ rows AS (
     LEFT JOIN tfga ON tfga.espn_game_id = s.espn_game_id AND tfga.team_side = s.side
     LEFT JOIN tfs ON tfs.espn_game_id = s.espn_game_id AND tfs.team_side = s.side
 )
+"""
+
+GAMES_SQL = _BASE + _GAMES_ROWS + """
 INSERT INTO nba_first_basket_games AS t
        (game_id, team, season, game_date, opponent, is_home, won_tip, jumper_espn_id,
         jumper_name, scored_first, first_score_kind, first_fga_espn_id, first_fga_made,
@@ -144,7 +148,7 @@ ON CONFLICT (game_id, team) DO UPDATE SET
         EXCLUDED.first_fga_made, EXCLUDED.first_score_espn_id)
 """
 
-PLAYERS_SQL = _BASE + """,
+_PLAYERS_ROWS = """,
 rows AS (
   SELECT g.game_id, b.espn_id, g.season, g.game_date,
          CASE b.side WHEN 'H' THEN g.home_team ELSE g.away_team END AS team,
@@ -163,6 +167,9 @@ rows AS (
     LEFT JOIN tfs ON tfs.espn_game_id = b.espn_game_id AND tfs.team_side = b.side
    WHERE b.name IS NOT NULL
 )
+"""
+
+PLAYERS_SQL = _BASE + _PLAYERS_ROWS + """
 INSERT INTO nba_first_basket_players AS t
        (game_id, espn_id, season, game_date, team, name, starter, first_fga,
         first_fga_made, game_first_score, team_first_score, jumped, jump_won)
@@ -184,6 +191,23 @@ ON CONFLICT (game_id, espn_id) DO UPDATE SET
         EXCLUDED.starter, EXCLUDED.first_fga, EXCLUDED.first_fga_made,
         EXCLUDED.game_first_score, EXCLUDED.team_first_score, EXCLUDED.jumped,
         EXCLUDED.jump_won)
+"""
+
+
+# A row whose source is gone: a box row corrected to did-not-play, a game
+# reclassified or its play-by-play removed, a player id fixed. The upserts
+# above never touch it, so it would count forever (review L3, 2026-11-08).
+# Scoped to the seasons being rebuilt, and to the same rows the INSERT builds.
+GAMES_DELETE_SQL = _BASE + _GAMES_ROWS + """
+DELETE FROM nba_first_basket_games t
+ WHERE t.season = ANY(%(seasons)s)
+   AND NOT EXISTS (SELECT 1 FROM rows r WHERE r.game_id = t.game_id AND r.team = t.team)
+"""
+
+PLAYERS_DELETE_SQL = _BASE + _PLAYERS_ROWS + """
+DELETE FROM nba_first_basket_players t
+ WHERE t.season = ANY(%(seasons)s)
+   AND NOT EXISTS (SELECT 1 FROM rows r WHERE r.game_id = t.game_id AND r.espn_id = t.espn_id)
 """
 
 
@@ -209,8 +233,13 @@ def rebuild(conn, seasons: list[int]) -> dict:
     n_games = cur.rowcount if cur.rowcount is not None else 0
     cur = conn.execute(PLAYERS_SQL, params)
     n_players = cur.rowcount if cur.rowcount is not None else 0
+    cur = conn.execute(GAMES_DELETE_SQL, params)
+    d_games = cur.rowcount if cur.rowcount is not None else 0
+    cur = conn.execute(PLAYERS_DELETE_SQL, params)
+    d_players = cur.rowcount if cur.rowcount is not None else 0
     conn.commit()
-    return {"seasons": seasons, "games": n_games, "players": n_players}
+    return {"seasons": seasons, "games": n_games, "players": n_players,
+            "deleted_games": d_games, "deleted_players": d_players}
 
 
 def main() -> None:
