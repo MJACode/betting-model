@@ -281,6 +281,18 @@ export function fbCandidates(
     }));
 }
 
+/**
+ * What a team's empty candidate list says. When players with a first shot
+ * exist and every one is ruled out tonight, "no first shots stored" would be
+ * false, so it says that instead (UX review, 2026-11-08).
+ */
+export function fbCandidatesEmptyText(team: string, players: NbaFbPlayerRow[], injuryFor: FbInjuryLookup): string {
+  const anyEligible = fbCandidates(team, players, 1).length > 0;
+  return anyEligible && fbCandidates(team, players, 1, injuryFor).length === 0
+    ? `Everyone on ${team} with a first shot this season is ruled out tonight.`
+    : `No first shots stored for ${team} this season yet.`;
+}
+
 /** Has this game tipped off by `nowMs`? Its first basket is then already scored. */
 export function fbGameStarted(g: { commence_time: string | null }, nowMs: number): boolean {
   const t = g.commence_time ? Date.parse(g.commence_time) : NaN;

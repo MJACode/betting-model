@@ -22,6 +22,7 @@
  */
 import {
   fbCandidates,
+  fbCandidatesEmptyText,
   fbCompareLines,
   fbGameStarted,
   fbOrderGames,
@@ -99,6 +100,12 @@ const inj = (name: string | null | undefined) => (name === 'Bravo' ? OUT : name 
 const bosInj = fbCandidates('BOS', players, undefined, inj);
 check('a player ruled out is dropped and the next moves up', bosInj.map((c) => c.name).join(',') === 'Alpha,Charlie,Delta', bosInj.map((c) => c.name));
 check('a Questionable player keeps his place and his tag', bosInj[0].injury?.label === 'Q' && /Alpha, Questionable, 9 starts/.test(bosInj[0].a11y), bosInj[0]);
+
+const allOut = () => OUT;
+check('every first-shot player out: says so, not "none stored"',
+  /Everyone on BOS with a first shot this season is ruled out tonight\./.test(fbCandidatesEmptyText('BOS', players, allOut)));
+check('no first shots at all: says none stored',
+  fbCandidatesEmptyText('PHX', players, allOut) === 'No first shots stored for PHX this season yet.');
 
 console.log('game order');
 const now = Date.parse('2026-11-08T01:00:00Z');

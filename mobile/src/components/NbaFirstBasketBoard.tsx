@@ -33,6 +33,7 @@ import { boardSeasonET, formatGameTimeET, weekdayShortET } from '@/lib/format';
 import { nbaSeasonLabel } from '@/lib/nbaQ1';
 import {
   fbCandidates,
+  fbCandidatesEmptyText,
   fbCompareLines,
   fbGameStarted,
   fbOrderGames,
@@ -264,8 +265,8 @@ function GameCard({
           )}
         </>
       )}
-      <Candidates team={game.away_team} rows={awayC} stack={stack} />
-      <Candidates team={game.home_team} rows={homeC} stack={stack} />
+      <Candidates team={game.away_team} rows={awayC} stack={stack} emptyText={fbCandidatesEmptyText(game.away_team, players, injuryFor)} />
+      <Candidates team={game.home_team} rows={homeC} stack={stack} emptyText={fbCandidatesEmptyText(game.home_team, players, injuryFor)} />
     </View>
   );
 }
@@ -302,7 +303,17 @@ function StackCell({ team, cell }: { team: string; cell: FbCell }) {
   );
 }
 
-function Candidates({ team, rows, stack }: { team: string; rows: FbCandidate[]; stack: boolean }) {
+function Candidates({
+  team,
+  rows,
+  stack,
+  emptyText,
+}: {
+  team: string;
+  rows: FbCandidate[];
+  stack: boolean;
+  emptyText: string;
+}) {
   const startsLabel = (n: number) => `${n} ${n === 1 ? 'start' : 'starts'}`;
   return (
     <View style={styles.candidates}>
@@ -310,7 +321,7 @@ function Candidates({ team, rows, stack }: { team: string; rows: FbCandidate[]; 
         {team} likely first scorers
       </Text>
       {rows.length === 0 ? (
-        <Text style={styles.muted}>No first shots stored for {team} this season yet.</Text>
+        <Text style={styles.muted}>{emptyText}</Text>
       ) : (
         <>
           {stack ? null : (

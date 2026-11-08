@@ -629,6 +629,7 @@ export function StatsScreen() {
     setSlate(EMPTY_SLATE);
     setSlateGames([]);
     setSlateFor(null);
+    setSlateRead(null);
   }
   // Every book's latest line for the selected stat's market on the slate date.
   const [propLines, setPropLines] = useState<{
@@ -751,7 +752,12 @@ export function StatsScreen() {
     // gate existed that user got a board. Releasing early fails OPEN —
     // slateTeams() returns null for an empty slate, so the read is the
     // whole-league one, which is exactly master's behaviour.
+    // A read with no fetch timeout can hang for good: at the bound the 1st
+    // Basket board is told the read failed and shows Retry rather than spin.
+    // A late answer overwrites it in then/catch (UX review, 2026-11-08).
+    const timedOut = () => setSlateRead((r) => (r?.sport === sport ? r : { sport, failed: true }));
     const release = setTimeout(() => {
+      if (!cancelled) timedOut();
       if (!cancelled) setSlateFor(sport);
     }, SLATE_GATE_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
