@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   DefaultTheme,
+  getFocusedRouteNameFromRoute,
   NavigationContainer,
   useNavigation,
   useNavigationContainerRef,
@@ -371,7 +372,17 @@ function App() {
           // So no screen sets headerBackTitle (tests/test_mobile_back_button.py).
           screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}
         >
-          <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
+          <Stack.Screen
+            name="Tabs"
+            component={TabsRoot}
+            // With the arrow-only Back, iOS's long-press Back menu lists the
+            // earlier screen by its title. Without one it would read "Tabs".
+            // It names the tab the reader came from (UX review, 2026-11-08).
+            options={({ route }) => {
+              const tab = getFocusedRouteNameFromRoute(route) ?? 'Picks';
+              return { headerShown: false, title: tab === 'TrackRecord' ? 'Record' : tab };
+            }}
+          />
           <Stack.Screen
             name="PickDetail"
             component={GatedPickDetail}
