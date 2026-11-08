@@ -349,6 +349,8 @@ const ODDS_W = 62;
  * never returns at all (see the slate effect).
  */
 const SLATE_GATE_MS = 4000;
+/** How long the 1st Basket board waits on a slate read before calling it failed (review L4). */
+const SLATE_FAIL_MS = 12000;
 
 /** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
 const EMPTY_ROWS: never[] = [];
@@ -752,14 +754,16 @@ export function StatsScreen() {
     // gate existed that user got a board. Releasing early fails OPEN —
     // slateTeams() returns null for an empty slate, so the read is the
     // whole-league one, which is exactly master's behaviour.
-    // A read with no fetch timeout can hang for good: at the bound the 1st
-    // Basket board is told the read failed and shows Retry rather than spin.
-    // A late answer overwrites it in then/catch (UX review, 2026-11-08).
-    const timedOut = () => setSlateRead((r) => (r?.sport === sport ? r : { sport, failed: true }));
     const release = setTimeout(() => {
-      if (!cancelled) timedOut();
       if (!cancelled) setSlateFor(sport);
     }, SLATE_GATE_MS);
+    // A read with no fetch timeout can hang for good, so the 1st Basket board
+    // is told it failed and shows Retry rather than spin, but only after
+    // SLATE_FAIL_MS: a slow, healthy read at the 4 s gate is not a failure
+    // (review L4, 2026-11-08). A late answer overwrites it in then/catch.
+    const failAfter = setTimeout(() => {
+      if (!cancelled) setSlateRead((r) => (r?.sport === sport ? r : { sport, failed: true }));
+    }, SLATE_FAIL_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
         if (cancelled) return;
@@ -779,6 +783,7 @@ export function StatsScreen() {
     return () => {
       cancelled = true;
       clearTimeout(release);
+      clearTimeout(failAfter);
     };
   }, [slateKey, etDay, sport, slateReload]);
 

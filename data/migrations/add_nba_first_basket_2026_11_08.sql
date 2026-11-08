@@ -146,7 +146,10 @@ BEGIN
   $view$;
   EXECUTE $c$COMMENT ON VIEW public.v_nba_first_basket_team_season IS 'nba_first_basket v1'$c$;
 
-  -- One row per season and player, under his most recent team.
+  -- One row per season and player, under his most recent team. The first-shot
+  -- and first-basket counts are over STARTS only, so the board's "per start"
+  -- rates cannot pass 100% (review L2, 2026-11-08; 0 of 264 bench first shots).
+  -- A traded player's games for his old team are included (the legend says so).
   EXECUTE $view$
     CREATE OR REPLACE VIEW public.v_nba_first_basket_player_season
     WITH (security_invoker = on) AS
@@ -155,9 +158,9 @@ BEGIN
            (array_agg(team ORDER BY game_date DESC, game_id DESC))[1] AS team,
            count(*)::int AS games,
            count(*) FILTER (WHERE starter)::int AS starts,
-           count(*) FILTER (WHERE first_fga)::int AS first_fga,
-           count(*) FILTER (WHERE first_fga_made)::int AS first_fga_made,
-           count(*) FILTER (WHERE game_first_score)::int AS game_first_scores,
+           count(*) FILTER (WHERE first_fga AND starter)::int AS first_fga,
+           count(*) FILTER (WHERE first_fga_made AND starter)::int AS first_fga_made,
+           count(*) FILTER (WHERE game_first_score AND starter)::int AS game_first_scores,
            count(*) FILTER (WHERE team_first_score)::int AS team_first_scores,
            count(*) FILTER (WHERE jumped)::int AS jumps,
            count(*) FILTER (WHERE jump_won)::int AS jumps_won,

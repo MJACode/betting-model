@@ -327,5 +327,6 @@ export const NBA_FB_LEGEND =
   'First basket is the game’s first score of any kind, free throws included. ' +
   'First shot is the team’s first field-goal attempt; Made is how often it went in. ' +
   'The tip goes to the team that gains possession. Players are ranked by how often they took ' +
-  'their team’s first shot, per start; players ruled out tonight are left off. ' +
+  'their team’s first shot, per start; players ruled out tonight are left off, and a traded ' +
+  'player’s numbers include his games for his old team. ' +
   'This season, regular season, from play-by-play.';

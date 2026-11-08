@@ -214,6 +214,22 @@ def test_player_season_view_lists_a_traded_player_under_his_latest_team(db):
     ]
 
 
+def test_player_season_view_counts_first_shots_in_starts_only(db):
+    """'Per start' must stay exact: a bench first shot is not counted (review L2)."""
+    _rebuild(db, [2027])
+    cur = db.cursor()
+    cur.execute("INSERT INTO nba_first_basket_players (game_id, espn_id, season, game_date, team, name, "
+                "starter, first_fga, first_fga_made, game_first_score, team_first_score, jumped, jump_won) "
+                "VALUES ('GX', 999, 2027, '2026-10-30', 'BOS', 'Bench Shooter', false, true, true, true, true, "
+                "false, false)")
+    try:
+        cur.execute("SELECT games, starts, first_fga, first_fga_made, game_first_scores "
+                    "FROM v_nba_first_basket_player_season WHERE season = 2027 AND espn_id = 999")
+        assert cur.fetchone() == (1, 0, 0, 0, 0)
+    finally:
+        cur.execute("DELETE FROM nba_first_basket_players WHERE espn_id = 999")
+
+
 def test_anon_can_read_all_four_relations_and_cannot_write(db):
     _rebuild(db, [2027])
     cur = db.cursor()
