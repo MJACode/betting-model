@@ -51,7 +51,6 @@ export function ByomDetailScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: model?.name ?? 'Model',
-      headerBackTitle: 'My models',
       headerRight: model == null ? undefined : () => (
         <Pressable
           onPress={() => navigation.navigate('ByomEdit', { modelId })}
