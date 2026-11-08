@@ -74,6 +74,11 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_app_review_sign_in.ts
 
+      # NBA 1st Basket board: ranking, "x of N" copy, NBA-only segment.
+      - name: NBA first basket
+        working-directory: mobile
+        run: npx tsx scripts/verify_nba_first_basket.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -163,6 +168,7 @@ jobs:
             tests/test_nba_props.py \
             tests/test_nba_results_ingestor.py \
             tests/test_nba_results_wiring.py \
+            tests/test_nba_first_basket.py \
             tests/test_nba_schedule_ingestor.py \
             tests/test_prop_odds_book_last_update.py \
             tests/test_prop_box_scores.py \

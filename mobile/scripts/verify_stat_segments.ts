@@ -392,8 +392,10 @@ check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed s
     /items=\{boardSegmentsFor\(sport\)\}/.test(top), top.replace(/\s+/g, ' '));
   const posStart = rowSrc.indexOf('items={positions}');
   const tabs = posStart < 0 ? '' : rowSrc.slice(rowSrc.lastIndexOf('<SegmentTabs', posStart), rowSrc.indexOf('/>', posStart) + 2);
-  check('StatSegmentRow: the position row is second-level and hides on Teams',
-    /\bsecond\b/.test(tabs) && /\{!onTeams \?/.test(rowSrc.slice(0, posStart)), tabs.replace(/\s+/g, ' '));
+  // Hides on every board that is not Players: Teams, and the NBA's 1st Basket
+  // (2026-11-08).
+  check('StatSegmentRow: the position row is second-level and hides off the Players board',
+    /\bsecond\b/.test(tabs) && /\{board === 'players' \?/.test(rowSrc.slice(0, posStart)), tabs.replace(/\s+/g, ' '));
   check('StatSegmentRow: passes accessibilityLabelFor and fit to SegmentTabs',
     /<SegmentTabs/.test(tabs) && /accessibilityLabelFor=\{segmentAccessibilityLabel\}/.test(tabs) && /\bfit\b/.test(tabs), tabs.replace(/\s+/g, ' '));
 }

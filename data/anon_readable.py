@@ -142,6 +142,11 @@ ANON_READABLE: tuple[str, ...] = (
     # view is security_invoker over it (add_nba_team_q1_2026_10_28.sql).
     "nba_team_q1_games",
     "v_nba_team_q1_season",
+    # NBA Stats tab, 1st Basket board (Matt, 2026-11-08): the two season
+    # views, security_invoker over the tables in VIEW_BASE_TABLES below
+    # (add_nba_first_basket_2026_11_08.sql).
+    "v_nba_first_basket_team_season",
+    "v_nba_first_basket_player_season",
     # Betslip game-line edit (Matt, 2026-10-29): the current alternate
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
@@ -270,6 +275,11 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "nhl_goalie_game_log",
     "nhl_skater_game_log",
     "nhl_team_game_log",
+    # security_invoker bases of the NBA 1st Basket views, written by
+    # data/ingestors/nba_first_basket.py (RLS on, SELECT policy;
+    # add_nba_first_basket_2026_11_08.sql). The app reads only the views.
+    "nba_first_basket_games",
+    "nba_first_basket_players",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────

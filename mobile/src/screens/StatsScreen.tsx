@@ -42,6 +42,7 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { showToast } from '@/components/Toast';
 import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
+import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
@@ -181,6 +182,8 @@ import {
 } from '@/lib/statCatalog';
 import {
   boardSegmentsFor,
+  supportsFirstBasketBoard,
+  type BoardSegment,
   chipsForSegment,
   defaultSegmentFor,
   emptiedByPosition,
@@ -293,7 +296,7 @@ type Nav = CompositeNavigationProp<
 type StatsRoute = RouteProp<TabParamList, 'Stats'>;
 type Basis = 'total' | 'perGame';
 /** Which half of the Stats tab is showing. */
-type BoardMode = 'players' | 'teams';
+type BoardMode = BoardSegment;
 type Mode = 'totals' | 'hitRate';
 const MODES: Mode[] = ['hitRate', 'totals'];
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
@@ -643,7 +646,9 @@ export function StatsScreen() {
     ? segmentPick
     : defaultSegmentFor(sport);
   const activeSegment: StatSegment =
-    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams' : segment;
+    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams'
+    : boardMode === 'firstBasket' && supportsFirstBasketBoard(sport) ? 'firstBasket'
+    : segment;
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -685,6 +690,8 @@ export function StatsScreen() {
     }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
+    // 1st Basket is NBA only: leaving the NBA on it lands on Players.
+    if (!supportsFirstBasketBoard(sport)) setBoardMode((m) => (m === 'firstBasket' ? 'players' : m));
     // Drop the previous sport's slate in the same commit as the chip reset.
     // Until the new read lands, hasSlate would still be true and the
     // Availability label would name the outgoing slate.
@@ -1087,8 +1094,8 @@ export function StatsScreen() {
    * Keeping the column keeps the line the user was reading, too.
    */
   const pickSegment = (next: StatSegment) => {
-    if (next === 'teams') {
-      setBoardMode('teams');
+    if (next === 'teams' || next === 'firstBasket') {
+      setBoardMode(next);
       return;
     }
     setBoardMode('players');
@@ -2585,6 +2592,33 @@ export function StatsScreen() {
               fromParlay: fromParlay || undefined,
             })
           }
+        />
+      </SafeAreaView>
+    );
+  }
+
+  // 1st Basket board (NBA only, Matt 2026-11-08): one card per game on the
+  // slate. Ahead of the empty-catalog guard, like Teams.
+  if (boardMode === 'firstBasket' && supportsFirstBasketBoard(sport)) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
+            <SettingsButton />
+          </View>
+        </View>
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
+        <NbaFirstBasketBoard
+          games={slate.date ? slateGames.filter((g) => g.game_date === slate.date) : []}
+          slateLabel={slateLabel}
+          slateSettled={slateFor === sport}
+          onRefreshSlate={() => setSlateReload((n) => n + 1)}
         />
       </SafeAreaView>
     );
@@ -4434,24 +4468,27 @@ function StatSegmentRow({
   onChange,
 }: {
   sport: Sport;
-  /** 'teams' while the Teams board is on, else the player segment. */
+  /** 'teams' / 'firstBasket' while that board is on, else the player segment. */
   active: StatSegment;
   /** The player segment last picked, kept while Teams is on. */
   segment: StatSegment;
   onChange: (s: StatSegment) => void;
 }) {
   const positions = positionSegmentsFor(sport);
-  const onTeams = active === 'teams';
+  // The top row's board: Teams and 1st Basket are their own boards; any other
+  // segment is the Players board.
+  const board: BoardSegment = active === 'teams' || active === 'firstBasket' ? active : 'players';
   return (
     <>
       <SegmentTabs
         items={boardSegmentsFor(sport)}
-        active={onTeams ? 'teams' : 'players'}
-        onChange={(next) => onChange(next === 'teams' ? 'teams' : positions.length ? segment : 'players')}
+        active={board}
+        onChange={(next) => onChange(next === 'players' ? (positions.length ? segment : 'players') : next)}
         labelFor={segmentLabel}
+        accessibilityLabelFor={segmentAccessibilityLabel}
         tight
       />
-      {!onTeams ? (
+      {board === 'players' ? (
         <SegmentTabs
           items={positions}
           active={segment}
