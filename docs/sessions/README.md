@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, Back button: iOS arrow only, no custom label (third "Back does nothing" report, iOS 27.2, after a pop-up; first one caught by the freeze trail) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, Player page: filter the chart by opponent defense toughness (Tough / Average / Soft over the last 3 seasons played, next opponent tagged; NBA, WNBA, NFL) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA in-play loop: the 15%-of-plan credit floor removed (only the 1,000-credit line stops it; mike: balance is not a reason to stop) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB spread and moneyline re-graded without betPARX: a tie goes to the bettable book (spread 405 bets +10.09%, moneyline 836 +4.27% on 2021-2025); a strictly-best betPARX quote is a no-bet that no longer fails the card |
