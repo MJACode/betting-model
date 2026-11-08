@@ -526,6 +526,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # marker comment exist. Does not rewrite picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_nba_team_q1_2026_10_28.sql",
+    # 2026-11-08 (Matt): NBA first-basket stats on the Stats tab. Two
+    # tables written by data/ingestors/nba_first_basket.py, SELECT policies,
+    # and two security_invoker season views. Returns on a catalog read once
+    # both tables, both policies and both views' marker comments exist.
+    # Does not rewrite picks, odds or the record. Sits before the
+    # posted-stake pair so those two stay adjacent.
+    "add_nba_first_basket_2026_11_08.sql",
     # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
     # One table, written by data/ingestors/live_scoreboard.py, with a
     # SELECT policy and a SELECT-only grant. Returns on a catalog read once

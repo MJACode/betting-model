@@ -890,6 +890,8 @@ def step_nba_quarters(run_date: str) -> bool:
       3. nba_team_q1_games rebuilt for this season and the last, since the
          last-10 window reaches back into last season early on
          (data/ingestors/nba_team_q1.py)
+      4. nba_first_basket_games / _players rebuilt for the same two seasons,
+         from the same play-by-play (data/ingestors/nba_first_basket.py)
     Until 2026-10-28 nothing on the worker ran 1 or 2: the 2026-27 season had
     0 of 56 finished games with quarter scores. Runs after view migrations
     (which create the table) and after nba_results (which writes the finals).
@@ -938,6 +940,15 @@ def step_nba_quarters(run_date: str) -> bool:
         except Exception as exc:
             conn.rollback()
             logger.error(f"✗ NBA 1Q team stats failed: {exc}")
+            ok = False
+        try:
+            # The Stats tab's 1st Basket board (Matt, 2026-11-08), from the
+            # same play-by-play: tips, first shots and first scores.
+            from data.ingestors.nba_first_basket import rebuild as fb_rebuild
+            logger.success(f"✓ NBA first-basket stats: {fb_rebuild(conn, [season - 1, season])}")
+        except Exception as exc:
+            conn.rollback()
+            logger.error(f"✗ NBA first-basket stats failed: {exc}")
             ok = False
     finally:
         conn.close()

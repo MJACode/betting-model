@@ -39,6 +39,14 @@ import {
 import { normalizePlayerName } from './playerNews';
 import { NBA_Q1_FETCH_GAMES, NBA_Q1_SEASON_COLUMNS, type NbaQ1Game, type NbaQ1SeasonRow } from './nbaQ1';
 import {
+  NBA_FB_PLAYER_COLUMNS,
+  NBA_FB_TEAM_COLUMNS,
+  normalizePlayerRow,
+  normalizeTeamRow,
+  type NbaFbPlayerRow,
+  type NbaFbTeamRow,
+} from './nbaFirstBasket';
+import {
   DUPLICATE_STATUS,
   isDuplicateCopy,
   isPausedRow,
@@ -3907,4 +3915,41 @@ export async function logSgpPrice(e: SgpPriceEntry): Promise<void> {
     p_app_version: e.appVersion,
   });
   if (error) throw error;
+}
+
+/**
+ * The 1st Basket board's team rows for the slate's teams (src/lib/nbaFirstBasket.ts).
+ * One row per team per season, so at most 30: under the row cap.
+ */
+export async function fetchNbaFirstBasketTeams(teams: string[], season: number): Promise<NbaFbTeamRow[]> {
+  if (teams.length === 0) return [];
+  const { data, error } = await supabase
+    .from('v_nba_first_basket_team_season')
+    .select(NBA_FB_TEAM_COLUMNS)
+    .eq('season', season)
+    .in('team', teams);
+  if (error) throw error;
+  return ((data ?? []) as unknown as NbaFbTeamRow[]).map(normalizeTeamRow);
+}
+
+/**
+ * The 1st Basket board's player rows for the slate's teams. One row per player
+ * under his LATEST team, so `.in('team', ...)` filters the same rows the board
+ * groups by (frontend rule: narrow only where the row means the same thing).
+ * Measured 2026-11-08: 457 players in all of 2026-27 so far; paged anyway.
+ */
+export async function fetchNbaFirstBasketPlayers(teams: string[], season: number): Promise<NbaFbPlayerRow[]> {
+  if (teams.length === 0) return [];
+  const rows = await fetchAllPages<NbaFbPlayerRow>(
+    (from, to) =>
+      supabase
+        .from('v_nba_first_basket_player_season')
+        .select(NBA_FB_PLAYER_COLUMNS)
+        .eq('season', season)
+        .in('team', teams)
+        .order('espn_id', { ascending: true })
+        .range(from, to),
+    (r) => String(r.espn_id),
+  );
+  return rows.map(normalizePlayerRow);
 }
