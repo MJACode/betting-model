@@ -16,6 +16,11 @@
  * early November).
  */
 
+import type { InjuryTag } from './injuryStatus';
+
+/** The injury feed's lookup (useInjuryStatus): a player's tag, or null. */
+export type FbInjuryLookup = (name: string | null | undefined, team: string | null | undefined) => InjuryTag | null;
+
 /** v_nba_first_basket_team_season, one row per team. */
 export interface NbaFbTeamRow {
   season: number;
@@ -123,52 +128,89 @@ export function ofNPct(x: number, n: number): string {
   return p ? `${ofN(x, n)} (${p})` : ofN(x, n);
 }
 
-/** One stat line of the team comparison: label, away value, home value. */
+/** One team's cell: the headline value, and the count under it. */
+export interface FbCell {
+  /** "67%", a jumper's name, or an em dash. */
+  value: string;
+  /** "6 of 9" under a percentage, or the jumper's status; null when nothing to add. */
+  sub: string | null;
+  /** The cell in words, for VoiceOver. */
+  spoken: string;
+}
+
+/** One stat line of the team comparison: label, away cell, home cell. */
 export interface FbCompareLine {
   key: string;
   label: string;
-  away: string;
-  home: string;
+  away: FbCell;
+  home: FbCell;
   /** Spoken form for VoiceOver, both teams. */
   a11y: string;
 }
 
-function teamValues(r: NbaFbTeamRow | null) {
-  if (!r) {
-    const dash = '—';
-    return { jumper: dash, jumperTips: dash, tips: dash, first: dash, wonTip: dash, lostTip: dash, allows: dash };
-  }
+const NO_CELL: FbCell = { value: '—', sub: null, spoken: 'no games yet' };
+
+/**
+ * A rate cell. The percentage is the headline and "x of N" sits under it, so
+ * a mid-season "40 of 60 (67%)" never has to fit one 87pt column on a 320pt
+ * phone (UX review, 2026-11-08).
+ */
+export function rateCell(x: number, n: number): FbCell {
+  const p = pctOf(x, n);
+  return p ? { value: p, sub: ofN(x, n), spoken: ofN(x, n) } : NO_CELL;
+}
+
+/** The usual jumper, with his injury status when the feed has one. */
+export function jumperCell(r: NbaFbTeamRow, injury: InjuryTag | null): FbCell {
+  if (!r.jumper_name) return NO_CELL;
   return {
-    jumper: r.jumper_name ?? '—',
-    jumperTips: ofN(r.jumper_jumps_won, r.jumper_jumps),
-    tips: ofNPct(r.tips_won, r.tip_games),
-    first: ofNPct(r.scored_first, r.games),
-    wonTip: ofN(r.scored_first_won_tip, r.tips_won),
-    lostTip: ofN(r.scored_first_lost_tip, r.lost_tip_games),
-    allows: ofNPct(r.allowed_first, r.games),
+    value: r.jumper_name,
+    sub: injury ? (injury.sidelined ? `${injury.spoken}, not playing` : injury.spoken) : null,
+    spoken: `${r.jumper_name}${injury ? `, ${injury.spoken}${injury.sidelined ? ', not playing' : ''}` : ''}`,
   };
 }
 
 /**
  * The team comparison, away first (the card reads AWAY @ HOME). A team with
- * no row yet (no game stored this season) shows dashes, never zeros.
+ * no row yet (no game stored this season) shows dashes, never zeros. The usual
+ * jumper carries his injury status, so "Usual jumper" never names a player
+ * who is out tonight without saying so.
  */
 export function fbCompareLines(
   awayTeam: string,
   homeTeam: string,
   away: NbaFbTeamRow | null,
   home: NbaFbTeamRow | null,
+  injuryFor: FbInjuryLookup = () => null,
 ): FbCompareLine[] {
-  const a = teamValues(away);
-  const h = teamValues(home);
-  const spoken = (label: string, av: string, hv: string) =>
-    `${label}: ${awayTeam} ${av}, ${homeTeam} ${hv}`;
+  const cells = (r: NbaFbTeamRow | null, team: string) =>
+    r
+      ? {
+          jumper: jumperCell(r, injuryFor(r.jumper_name, team)),
+          jumperTips: rateCell(r.jumper_jumps_won, r.jumper_jumps),
+          tips: rateCell(r.tips_won, r.tip_games),
+          first: rateCell(r.scored_first, r.games),
+          wonTip: rateCell(r.scored_first_won_tip, r.tips_won),
+          lostTip: rateCell(r.scored_first_lost_tip, r.lost_tip_games),
+          allows: rateCell(r.allowed_first, r.games),
+        }
+      : {
+          jumper: NO_CELL,
+          jumperTips: NO_CELL,
+          tips: NO_CELL,
+          first: NO_CELL,
+          wonTip: NO_CELL,
+          lostTip: NO_CELL,
+          allows: NO_CELL,
+        };
+  const a = cells(away, awayTeam);
+  const h = cells(home, homeTeam);
   const line = (key: keyof typeof a, label: string): FbCompareLine => ({
     key,
     label,
     away: a[key],
     home: h[key],
-    a11y: spoken(label, a[key], h[key]),
+    a11y: `${label}: ${awayTeam} ${a[key].spoken}, ${homeTeam} ${h[key].spoken}`,
   });
   return [
     line('jumper', 'Usual jumper'),
@@ -185,48 +227,77 @@ export function fbCompareLines(
 export interface FbCandidate {
   espnId: number;
   name: string;
-  games: number;
+  starts: number;
   firstShot: string;
   made: string;
   firstBasket: string;
+  /** Q / DTD / D, shown as a chip. A sidelined player is not listed at all. */
+  injury: InjuryTag | null;
   a11y: string;
 }
 
 /**
  * A team's likely first scorers: players listed under this team, ranked by
  * how many of the team's first shots they took, then by first baskets, then
- * fewer games (the same count in fewer games is the higher rate), then name.
- * A player who has never taken a first shot or scored a first basket is left
- * out, so a thin team shows fewer than three rather than padding with zeros.
+ * fewer starts (the same count in fewer starts is the higher rate), then
+ * name. Rates are over STARTS: no bench player took a first shot in 2026-27
+ * (0 of 264, measured 2026-11-08), so a game off the bench only dilutes.
+ * Left out: a player with no start, a player who has never taken a first
+ * shot or scored a first basket (a thin team shows fewer than three rather
+ * than zeros), and a player the injury feed has sidelined tonight, so the
+ * next one moves up.
  */
 export function fbCandidates(
   team: string,
   players: NbaFbPlayerRow[],
   n: number = NBA_FB_CANDIDATES,
+  injuryFor: FbInjuryLookup = () => null,
 ): FbCandidate[] {
   return players
-    .filter((p) => p.team === team && p.games > 0 && (p.first_fga > 0 || p.game_first_scores > 0))
+    .filter((p) => p.team === team && p.starts > 0 && (p.first_fga > 0 || p.game_first_scores > 0))
+    .map((p) => ({ p, injury: injuryFor(p.name, p.team) }))
+    .filter(({ injury }) => injury?.sidelined !== true)
     .sort(
-      (x, y) =>
+      ({ p: x }, { p: y }) =>
         y.first_fga - x.first_fga ||
         y.game_first_scores - x.game_first_scores ||
-        x.games - y.games ||
+        x.starts - y.starts ||
         x.name.localeCompare(y.name),
     )
     .slice(0, n)
-    .map((p) => ({
+    .map(({ p, injury }) => ({
       espnId: p.espn_id,
       name: p.name,
-      games: p.games,
-      firstShot: slashN(p.first_fga, p.games),
+      starts: p.starts,
+      firstShot: slashN(p.first_fga, p.starts),
       made: slashN(p.first_fga_made, p.first_fga),
-      firstBasket: slashN(p.game_first_scores, p.games),
+      firstBasket: slashN(p.game_first_scores, p.starts),
+      injury,
       a11y:
-        `${p.name}, ${p.games} ${p.games === 1 ? 'game' : 'games'}. ` +
-        `Took the team's first shot ${ofN(p.first_fga, p.games)}` +
+        `${p.name}${injury ? `, ${injury.spoken}` : ''}, ${p.starts} ${p.starts === 1 ? 'start' : 'starts'}. ` +
+        `Took the team's first shot ${ofN(p.first_fga, p.starts)}` +
         (p.first_fga > 0 ? `, made ${ofN(p.first_fga_made, p.first_fga)}` : '') +
-        `. Scored the game's first basket ${ofN(p.game_first_scores, p.games)}.`,
+        `. Scored the game's first basket ${ofN(p.game_first_scores, p.starts)}.`,
     }));
+}
+
+/** Has this game tipped off by `nowMs`? Its first basket is then already scored. */
+export function fbGameStarted(g: { commence_time: string | null }, nowMs: number): boolean {
+  const t = g.commence_time ? Date.parse(g.commence_time) : NaN;
+  return Number.isFinite(t) && t <= nowMs;
+}
+
+/** The slate in card order: games still to tip first, then started ones, each by tip time. */
+export function fbOrderGames<G extends { game_id: string; commence_time: string | null }>(
+  games: G[],
+  nowMs: number,
+): G[] {
+  return [...games].sort(
+    (a, b) =>
+      Number(fbGameStarted(a, nowMs)) - Number(fbGameStarted(b, nowMs)) ||
+      (a.commence_time ?? '').localeCompare(b.commence_time ?? '') ||
+      a.game_id.localeCompare(b.game_id),
+  );
 }
 
 /** The teams on the slate, for the server narrowing of both reads. */
@@ -244,4 +315,5 @@ export const NBA_FB_LEGEND =
   'First basket is the game’s first score of any kind, free throws included. ' +
   'First shot is the team’s first field-goal attempt; Made is how often it went in. ' +
   'The tip goes to the team that gains possession. Players are ranked by how often they took ' +
-  'their team’s first shot. This season, regular season, from play-by-play.';
+  'their team’s first shot, per start; players ruled out tonight are left off. ' +
+  'This season, regular season, from play-by-play.';

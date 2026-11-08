@@ -43,6 +43,7 @@ import { showToast } from '@/components/Toast';
 import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
+import { InjuryChip } from '@/components/InjuryChip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
@@ -594,6 +595,11 @@ export function StatsScreen() {
   // changes (midnight, or a resume via useNow), so a board left open overnight
   // does not keep yesterday's teams under "Playing today".
   const [slateReload, setSlateReload] = useState(0);
+  // Whether the slate READ itself has returned for a sport, and failed. The
+  // release timer below settles `slateFor` without a read, which is right for
+  // the leaderboard (it fails open to the whole league) and wrong for the 1st
+  // Basket board, which is nothing but the slate (UX review, 2026-11-08).
+  const [slateRead, setSlateRead] = useState<{ sport: string; failed: boolean } | null>(null);
   // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
   // grade a spot off the probable starter or the lineup; every other sport had
   // a column of dashes, so a toughness filter over it would have filtered
@@ -698,6 +704,7 @@ export function StatsScreen() {
     setSlate(EMPTY_SLATE);
     setSlateGames([]);
     setSlateFor(null);
+    setSlateRead(null);
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -752,11 +759,13 @@ export function StatsScreen() {
         if (cancelled) return;
         setSlate(buildTonightSlate(games, sport, from));
         setSlateGames(games.filter((g) => g.sport === sport));
+        setSlateRead({ sport, failed: false });
       })
       .catch(() => {
         if (cancelled) return;
         setSlate(EMPTY_SLATE);
         setSlateGames([]);
+        setSlateRead({ sport, failed: true });
       })
       .finally(() => {
         if (!cancelled) setSlateFor(sport);
@@ -2617,8 +2626,14 @@ export function StatsScreen() {
         <NbaFirstBasketBoard
           games={slate.date ? slateGames.filter((g) => g.game_date === slate.date) : []}
           slateLabel={slateLabel}
-          slateSettled={slateFor === sport}
-          onRefreshSlate={() => setSlateReload((n) => n + 1)}
+          slateSettled={slateRead?.sport === sport}
+          slateFailed={slateRead?.sport === sport && slateRead.failed}
+          injuryFor={injuries.lookup}
+          nowMs={now}
+          onRefresh={() => {
+            setSlateReload((n) => n + 1);
+            setInjuryReload((n) => n + 1);
+          }}
         />
       </SafeAreaView>
     );
@@ -4487,6 +4502,9 @@ function StatSegmentRow({
         labelFor={segmentLabel}
         accessibilityLabelFor={segmentAccessibilityLabel}
         tight
+        // Three tabs on the NBA (Players | Teams | 1st Basket): about 96pt each
+        // at 320pt, so labels shrink rather than truncate (UX review, 2026-11-08).
+        fit
       />
       {board === 'players' ? (
         <SegmentTabs
@@ -4986,24 +5004,6 @@ function injurySpoken(injury: InjuryTag | null | undefined): string {
  * soft grounds (theme.ts). Hidden from VoiceOver -- the row's label already
  * says the status in words, and "I R" read out letter by letter does not.
  */
-function InjuryChip({ tag }: { tag: InjuryTag }) {
-  const out = tag.tone === 'out';
-  return (
-    <View
-      style={[styles.injuryChip, { backgroundColor: out ? colors.avoidSoft : colors.medSoft }]}
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-    >
-      <Text
-        style={[styles.injuryChipText, { color: out ? colors.avoidInk : colors.medInk }]}
-        maxFontSizeMultiplier={1.4}
-      >
-        {tag.label}
-      </Text>
-    </View>
-  );
-}
-
 function LeaderRow({
   rank,
   row,
@@ -6331,17 +6331,6 @@ const styles = StyleSheet.create({
   // textTertiary is 4.69:1 on bg (AA at 13pt semibold); textSecondary read
   // as barely different from a playing row (UX review, 2026-10-23).
   rowNameSidelined: { color: colors.textTertiary },
-  injuryChip: {
-    borderRadius: radii.xs,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 1,
-    flexShrink: 0,
-  },
-  injuryChipText: {
-    fontSize: font.size.micro,
-    fontWeight: font.weight.bold,
-    letterSpacing: 0.3,
-  },
   rowTeam: {
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
