@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, NCAAB margin bands: Matt set the sample floor to 100 (blanks rest 35.0 / 80, rest 34.5 / 92, November 35.0 / 97; still not applied) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB margin bands: review fixes on the unapplied migration; sample floor stored at 1 (placeholder, not a chosen policy) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, Player page: filter the chart by opponent defense toughness (Tough / Average / Soft over the last 3 seasons played, next opponent tagged; NBA, WNBA, NFL) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA in-play loop: the 15%-of-plan credit floor removed (only the 1,000-credit line stops it; mike: balance is not a reason to stop) |

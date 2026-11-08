@@ -16,10 +16,13 @@
 -- underdog that is DOG -10.5 (not dog +10.5, which is "dog loses by 10 or
 -- fewer, or wins"), so the DK comparison column is dk_alt_dog_m10_5.
 --
--- Sample floor: internal.ncaab_margin_config.min_baseline_n_games.
--- The stored placeholder is 1, so every baseline cell (each has at least one
--- game) still receives fair odds and min odds. It is not a chosen sample-size
--- policy. A cell under the floor keeps n_games, mean and sd, stores null band
+-- Sample floor: internal.ncaab_margin_config.min_baseline_n_games = 100.
+-- Matt chose 100 on 2026-11-08. On the archive that day, three cells sit
+-- under it and get no fair odds and no min odds:
+--   rest, spread 35.0, 80 games
+--   rest, spread 34.5, 92 games
+--   nov,  spread 35.0, 97 games
+-- A cell under the floor keeps n_games, mean and sd, stores null band
 -- probabilities, and the price row nulls fair odds and min odds and sets
 -- below_sample_floor. Raising the floor also blanks prices on the next
 -- refresh when an older baseline row still holds probabilities. Lowering it
@@ -57,16 +60,16 @@ returns numeric language sql immutable as $$
               else ceil(-100.0 / ((1 + cushion) / p - 1)) end
 $$;
 
--- Placeholder 1 preserves current pricing. Not a chosen sample-size policy.
+-- Matt, 2026-11-08: price a cell only when it rests on at least 100 games.
 create table if not exists internal.ncaab_margin_config (
   singleton boolean primary key default true check (singleton),
   min_baseline_n_games integer not null check (min_baseline_n_games >= 0)
 );
 insert into internal.ncaab_margin_config (singleton, min_baseline_n_games)
-select true, 1
+select true, 100
 where not exists (select 1 from internal.ncaab_margin_config);
 comment on column internal.ncaab_margin_config.min_baseline_n_games is
-  'Placeholder 1. A baseline cell is priced only when n_games is at least this. Not a chosen sample-size policy.';
+  'Matt, 2026-11-08. A baseline cell is priced only when n_games is at least this. 100 blanks three current-archive cells: rest 35.0 (80), rest 34.5 (92), nov 35.0 (97).';
 
 create or replace function internal.ncaab_margin_min_baseline_n_games()
 returns integer language sql stable security invoker set search_path = '' as $$

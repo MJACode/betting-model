@@ -123,7 +123,7 @@ def _reset(cur) -> None:
           public.ncaab_period_scores,
           public.pipeline_log
     """)
-    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 1")
+    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 100")
     cur.execute("""
         INSERT INTO public.ncaab_teams
           (espn_id, school, slug, display_name, short_name, abbreviation)
@@ -214,52 +214,40 @@ def db():
             conn.close()
 
 
-def test_the_file_stays_unapplied_and_the_floor_placeholder_is_one():
+def test_the_file_stays_unapplied_and_the_floor_default_is_100():
     from data.view_migrations import ACTIVE_MIGRATIONS
 
     assert MIG.name not in ACTIVE_MIGRATIONS
     code = _code(SQL)
-    assert "select true, 1" in code
+    assert "select true, 100" in code
+    assert "select true, 1\n" not in code
+    # The three archive cells Matt's 100 blanks, measured 2026-11-08.
+    assert "rest, spread 35.0, 80 games" in SQL
+    assert "rest, spread 34.5, 92 games" in SQL
+    assert "nov,  spread 35.0, 97 games" in SQL
     assert code.count("order by (q.market = 'alternate_spreads') desc") == 4
     assert "last.fav_is_home is not distinct from fin.fav_home" in code
     assert "last.dog_1_10_fair_prob is not distinct from fin.p_dog_1_10" in code
     assert "ncaab_margin_team_side" in code
 
 
-def test_placeholder_prices_a_five_game_cell_and_a_higher_floor_nulls_it(db):
+def test_default_floor_of_100_blanks_99_games_and_prices_100(db):
     cur = db.cursor()
     _reset(cur)
+    cur.execute("SELECT min_baseline_n_games FROM internal.ncaab_margin_config")
+    assert cur.fetchone()[0] == 100
     et, phase, commence, snap = _future()
-    _baseline(cur, 7.5, phase, n_games=5)
+    _baseline(cur, 7.5, phase, n_games=99)
     _event(cur, "g-floor", commence)
     _quote(cur, "g-floor", snap, "pinnacle", "spreads", -7.5, -110, -110)
 
     cur.execute("SELECT internal.refresh_ncaab_margin_prices(%s)", (et,))
     assert cur.fetchone()[0] == 1
     cur.execute("""
-        SELECT below_sample_floor, fav_11p_fair_prob, fav_11p_min_odds, fav_1_10_fair_prob
-          FROM internal.ncaab_margin_prices WHERE game_id = 'g-floor'
-    """)
-    below, p11, min_odds, p110 = cur.fetchone()
-    assert below is False
-    assert float(p11) == pytest.approx(0.30)
-    assert float(p110) == pytest.approx(0.40)
-    assert min_odds is not None
-
-    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 5")
-    cur.execute("SELECT internal.refresh_ncaab_margin_prices(%s)", (et,))
-    assert cur.fetchone()[0] == 0  # n_games >= 5 still prices; nothing moved
-
-    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 6")
-    cur.execute("SELECT internal.refresh_ncaab_margin_prices(%s)", (et,))
-    assert cur.fetchone()[0] == 1
-    cur.execute("""
         SELECT below_sample_floor, fav_11p_fair_prob, fav_11p_min_odds,
                fav_1_10_fair_prob, dog_1_10_fair_prob, dog_11p_fair_prob,
                fav_11p_fair_american
-          FROM internal.ncaab_margin_prices
-         WHERE game_id = 'g-floor'
-         ORDER BY computed_at DESC LIMIT 1
+          FROM internal.ncaab_margin_prices WHERE game_id = 'g-floor'
     """)
     row = cur.fetchone()
     assert row[0] is True
@@ -272,11 +260,28 @@ def test_placeholder_prices_a_five_game_cell_and_a_higher_floor_nulls_it(db):
     """)
     assert cur.fetchone()[0] is False
 
+    cur.execute("""
+        UPDATE internal.ncaab_margin_baseline SET n_games = 100
+         WHERE abs_spread = 7.5 AND season_phase = %s
+    """, (phase,))
+    cur.execute("SELECT internal.refresh_ncaab_margin_prices(%s)", (et,))
+    assert cur.fetchone()[0] == 1
+    cur.execute("""
+        SELECT below_sample_floor, fav_11p_fair_prob, fav_1_10_fair_prob, fav_11p_min_odds
+          FROM internal.ncaab_margin_prices
+         WHERE game_id = 'g-floor'
+         ORDER BY computed_at DESC LIMIT 1
+    """)
+    below, p11, p110, min_odds = cur.fetchone()
+    assert below is False
+    assert float(p11) == pytest.approx(0.30)
+    assert float(p110) == pytest.approx(0.40)
+    assert min_odds is not None
 
-def test_baseline_refresh_nulls_probabilities_under_the_floor_and_keeps_them_at_one(db):
+
+def test_baseline_refresh_nulls_probabilities_under_100(db):
     cur = db.cursor()
     _reset(cur)
-    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 100")
     for i, score in ((1, 80), (2, 81)):
         cur.execute("""
             INSERT INTO public.ncaab_archive_lines
@@ -312,7 +317,7 @@ def test_reapply_does_not_reset_a_floor_someone_stored(db):
     cur.execute(SQL)
     cur.execute("SELECT min_baseline_n_games FROM internal.ncaab_margin_config")
     assert cur.fetchone()[0] == 80
-    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 1")
+    cur.execute("UPDATE internal.ncaab_margin_config SET min_baseline_n_games = 100")
     cur.execute("""
         SELECT has_table_privilege('anon', 'internal.ncaab_margin_config', 'SELECT'),
                has_table_privilege('service_role', 'internal.ncaab_margin_prices', 'SELECT')
