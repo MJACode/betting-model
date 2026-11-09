@@ -1144,14 +1144,33 @@ production backtests were fixed in #895 (`scripts/nhl_prop_backtest.namesakes`).
 The lab was not. Apply the same drop before its merge, then treat every lab
 table in `docs/nhl_market_lab.md` dated before 2026-10-08 as unconfirmed.
 
-## [ ] NHL derivative totals: the grade has two defects
+## [ ] NHL derivative totals: the grade has two defects — fixed in code, re-grade queued
 
 Found 2026-10-08. Team totals were graded on regulation goals, but every book
 prices full-game goals; on full-game goals the same unders lose (-1.78% at EV
-≥ 0.10). The alternate and first-period grades paid a push as an under win on
-whole-number lines. Fix both in `scripts/nhl_derivative_totals_backtest.py`
-and re-grade (it is on the `nhl_research` allowlist). The purchase itself is
-done: all 4,192 priced games.
+≥ 0.10). The second defect was in the model's chance, not the payout: on a
+whole-number line the under was given 1 minus the over's chance, so the
+chance of a push counted as an under win and inflated the under's expected
+value (`side_frame`; the payout already returned the stake). The purchase
+itself is done: all 4,192 priced games.
+
+2026-10-10 (mike, rebuilding PR #863): both fixed, on a branch that was never
+pushed; landed on master 2026-11-09 (mike: "rebuild NHL grading fix on current
+master"). Team totals settle on the
+full-game score only; the prices confirm it (no-vig over 0.5012 against 0.4948
+landed on the full game and 0.4612 on three periods, 39,515 quotes;
+`docs/nhl_derivative_totals.md`). The under's chance is P(goals < line) and
+expected value returns the stake on a push. The re-grade is the declared job
+`nhl-derivative-totals-regrade-2026-11-09`. **Open until its printout
+(`worker_jobs.result->>'stdout'`) has been read** and its numbers replace the
+model tables in `docs/nhl_derivative_totals.md`.
+
+Also in that printout: PR #863's Pinnacle-against-a-bettable-book table. Its
+one cell clear of zero was first-period totals at 2% or more (+19.3% on 160
+bets, interval +1.9 to +37.4, unstable by half-season). Reading it on 2026-27
+needs the 2026-27 derivative prices (the `nhl_derivative_odds_history` job
+buys scored games not yet stored), the grader's seasons extended to 2027, and
+2026-27 period scores, which `step_nhl_results` now keeps current.
 
 ## [ ] A best-price quote far from every other book is taken as real
 

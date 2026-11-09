@@ -11,6 +11,49 @@ goals").
 `config.PAUSED_MODELS`. `scripts/nhl_derivative_totals_card.py` writes nothing
 and is not a pipeline step.
 
+## 2026-10-10: two corrections to the grade below, and a re-grade queued
+
+The model tables further down were made on 2026-10-03 with two defects (the
+follow-up of 2026-10-08). Both were fixed on 2026-10-10 on a branch that was
+never pushed, and landed on master on 2026-11-09 (mike: "rebuild NHL grading
+fix on current master"). The corrected grade is the
+declared worker job `nhl-derivative-totals-regrade-2026-11-09`; its printout
+lands in `worker_jobs.result->>'stdout'`. Until it has been read, treat the
+model rows below as superseded. The blind rows are not affected.
+
+- **A whole-number line can push, and the model counted the push as an
+  under win.** The under's chance was 1 minus the over's chance. On a line of
+  6, that hands the under the chance of exactly 6 goals. The payout itself
+  was right: a push already returned the stake. Whole numbers are 63,108 of
+  the 198,109 bought alternate quotes (32%), 1,939 of 27,029 first-period
+  quotes, and 106 of 39,811 team-total quotes (read 2026-10-10 by `SELECT
+  market, count(*) FILTER (WHERE total_line = floor(total_line)) FROM odds
+  WHERE source = 'odds_api_nhl_totals_history' GROUP BY 1`). The under's
+  chance is now P(goals < line), and expected value is P(win) x payout −
+  P(lose), so a push returns the stake there too.
+- **Team totals settle on the full-game score only.** The 2026-10-03 grade
+  used regulation goals, on DraftKings' 2024 house-rule text. The prices say
+  the books price the full game. On every half-number team-total quote with
+  both prices, the average no-vig chance of the over against how often it
+  landed:
+
+  | book | quotes | no-vig over | over landed, full game | over landed, three periods |
+  |---|---:|---:|---:|---:|
+  | all books | 39,515 | 0.5012 | 0.4948 | 0.4612 |
+  | Pinnacle | 8,102 | 0.5006 | 0.4953 | 0.4606 |
+  | FanDuel | 8,107 | 0.4999 | 0.4936 | 0.4586 |
+
+  Read 2026-10-10 from `odds` (`source = 'odds_api_nhl_totals_history'`,
+  `total_line <> floor(total_line)`) joined to `games` and to
+  `nhl_period_scores` (`source = 'nhl_api_score'`). A book settling on three
+  periods would be giving away about 4 points on every under. The regulation
+  blind row and the regulation model rows are gone from the grader. The
+  full-game team-total rows below already showed the loss: the blind under
+  −4.42%, and the model's unders −1.78% at EV ≥ 0.10.
+
+The grader also gained PR #863's Pinnacle table for all three markets (see
+"What else was tested").
+
 ## What was graded
 
 `python -m scripts.nhl_derivative_totals_backtest --cache <extract>`. The
@@ -66,10 +109,11 @@ Same quotes, **full-game** goals (overtime included). The under flips sign.
 | over | 8,134 | −550.0 | −6.76% | −8.6 .. −4.9 | no |
 | under | 8,101 | −358.3 | −4.42% | −6.4 .. −2.4 | no |
 
-DraftKings' 2024 house rules said a pre-game team total excludes overtime.
-The current rule is unverified (`docs/nhl_market_research.md`). A side that
-wins on only one of the two settlements is not publishable, and this one is
-a blind fade rather than the model. Not published.
+The regulation row above is kept as the record of 2026-10-03. It is not a
+result: the books price team totals on the full game (the 2026-10-10 section
+at the top), so the under's +2.30% on three periods comes from leaving out
+overtime goals that the price counts. The full-game row is the one that
+counts. Not published.
 
 ## Model, price floor −200
 
@@ -81,7 +125,8 @@ under at EV ≥ 0.10 is −13.27% on 3,765 bets (−499.7 units, −21.0 .. −5
 on 763 (interval through zero). At the best bettable price the under at
 EV ≥ 0.10 is −2.30% on 748 (interval through zero); 2025-26 is negative.
 
-Team total, best bettable price, **regulation** settlement. Overs −16% to
+Team total, best bettable price, **regulation** settlement (superseded on
+2026-10-10, kept as the record: the books price the full game). Overs −16% to
 −23%. Unders:
 
 | EV ≥ | bets | units | roi | 95% by day | clears | early | late |
@@ -107,6 +152,58 @@ Dropping shots or rest does not turn the loss into a win.
 | no shots | over | 1,729 | −406.8 | −23.53% | −38.0 .. −7.8 |
 | no rest | under | 3,786 | −468.3 | −12.37% | −20.0 .. −4.1 |
 | no rest | over | 1,764 | −463.0 | −26.25% | −40.4 .. −10.4 |
+
+## What else was tested (PR #863's lab, 2026-10-02)
+
+PR #863 bought the same prices first (4,192 games, 264,043 rows, **125,617
+credits**: a three-game probe measured 30 credits a game plus 1 a date) and
+graded them with its own lab, `scripts/nhl_totals_derivatives_lab.py`. The PR
+was not merged. Its rebuild (2026-10-10) carried over the period-score
+importer and the lab's Pinnacle table, not the lab itself or its buyer;
+master's buyer (#870) uses the same `odds.source` tag. The numbers below are
+the lab's printout of 2026-10-02, quoted from the PR, not re-run. The lab
+settled team totals on the full-game score and returned the stake on a push.
+
+- **A fit to the main total and moneyline says what happens, and still
+  loses.** No hockey inputs: a logistic fit on earlier seasons maps the main
+  total, its no-vig over and the no-vig moneyline to each derivative outcome
+  (a whole number gets a separate fit per side, because it can push). What it
+  claimed matched what happened in every probability bucket of all three
+  markets, and the book's price sat above it in every bucket. At any positive
+  expected value, best bettable price, floor −200: team totals **−5.0% on
+  1,828 bets**, first period **−0.2% on 2,029**, alternates **−0.6% on 1,921**.
+  The books price these markets off the main line, correctly.
+- **Three positive cells, none of them a result.**
+  - Alternates, Pinnacle against a bettable book at 6% or more: +28.1% on 117
+    bets, interval −16.5 to +76.9, median price +525. 2024-25 alone is +97% on
+    32 bets: a few five-to-one winners.
+  - Alternates, the main-line fit at 4% or more: +9.9% on 386, interval
+    through zero, 2023-24 flat, and 2024-25's +32.0% is about 0 in its first
+    half and +64 in its second.
+  - **First period, Pinnacle against a bettable book at 2% or more: +19.3% on
+    160 bets, interval +1.9 to +37.4.** The only interval in the run clear of
+    zero. But 2023-24 has 14 bets, the two seasons that carry it split +50 /
+    −9 and −1 / +42 by half-season, and at 4% there are 30 bets. One cell,
+    not a neighbourhood.
+- **The first-period cell is the one to read again on 2026-27 prices.** The
+  Pinnacle table is now in this grader (`sharp_sides`, last section of the
+  printout), with the lab's cuts so the 2% row lines up. A 2026-27 read needs
+  two things the grader does not have yet. First, the 2026-27 derivative
+  prices: master's buyer job (`nhl_derivative_odds_history`) buys any scored
+  game not yet stored. Second, the grader's `TEST_SEASONS` and its games
+  query extended to ending season 2027. First-period goals for 2026-27 come
+  from the period-score job below.
+
+## Goals by period: where the rows come from
+
+`nhl_period_scores` holds two sources. `sbr_archive_nhl` (the Sportsbook
+Reviews archive, `data/ingestors/nhl_sbr_archive.py`) covers 2018-10-03 to
+2022-11-27. **Every row from 2022-11-28 on is `nhl_api_score`**, from
+`data/ingestors/nhl_period_scores_api.py`, which reads the NHL's free score
+feed (no key). The grader and the model prefer `nhl_api_score` where a game
+has both. `step_nhl_results` tops the table up after every score upsert
+(`top_up`, at most 40 dates a pass; #1020). Read 2026-11-09: 5,531 games from
+`nhl_api_score`, 2022-11-28 to 2026-11-08, and 5,134 from `sbr_archive_nhl`.
 
 ## The buyer
 
