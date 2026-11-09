@@ -1,6 +1,10 @@
 # Environment / secrets — never commit
 .env
 *.env
+# Any copy of the env file (.env.bak-<date>, .env.local, ...). The repo is
+# public; only the templates are tracked.
+.env.*
+!.env.example
 
 # SQLite database (rebuilt from source data)
 data/betting_model.db
