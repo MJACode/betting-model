@@ -21,13 +21,21 @@ add). P(over the line) is the Poisson tail above floor(line), widened to a
 negative binomial when the training rows are wider than Poisson — the same
 rule models/nhl_props.py uses for saves.
 
-SETTLEMENT. Alternate totals and the full-game score include overtime and the
-shootout (one goal to the winner). The first period is the period score.
-Team totals are graded on the three periods, which is what DraftKings' 2024
-house rules said a pre-game team total does; the full-game score (overtime
-included) is reported beside it because the current rule is unverified
-(docs/nhl_market_research.md). A side that only wins on one of the two is not
-publishable.
+A WHOLE-NUMBER LINE CAN PUSH. P(under) is P(count < line), not 1 − P(over):
+on a line of 3 the chance of exactly 3 belongs to neither side. The expected
+value returns the stake on a push: P(win) x payout − P(lose). Until
+2026-10-10 the under was given 1 − P(over), which counted the push as an
+under win and lifted the under's EV on every whole-number line (32% of the
+bought alternate quotes, 63,108 of 198,109).
+
+SETTLEMENT. Alternate totals, team totals and the full-game score include
+overtime and the shootout (one goal to the winner). The first period is the
+period score. Team totals were graded on the three periods until 2026-10-10,
+on DraftKings' 2024 house-rule text. The prices say otherwise. Across 39,515
+half-number team-total quotes in the purchase, the no-vig over averages
+0.5012; the over landed 0.4948 of the time on the full-game score and 0.4612
+on three periods. Pinnacle alone: 0.5006, 0.4953, 0.4606 on 8,102 quotes.
+The books price the full game, so the full game settles it.
 
 NOTHING IN `PUBLISHED` IS LIVE. Registering a side is a config change made
 after `publishable` says yes. This module does not write a pick.
@@ -38,6 +46,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.stats import nbinom, poisson
 
 from models.nhl_props import PARAMS, excess_variance, p_over
 
@@ -246,27 +255,49 @@ def profit(actual, line, price, side: str) -> np.ndarray:
     return np.where(np.isnan(price) | np.isnan(actual) | np.isnan(line), np.nan, out)
 
 
+def p_under(mu, line, dispersion: float = 0.0) -> np.ndarray:
+    """P(count < line): every count up to ceil(line) − 1.
+
+    On a half line this is 1 − p_over. On a whole line it leaves out the push
+    (count == line), which wins for neither side. Same Poisson / negative
+    binomial as models.nhl_props.p_over.
+    """
+    k = np.ceil(np.asarray(line, dtype=float)) - 1.0
+    mu = np.asarray(mu, dtype=float)
+    if dispersion <= 1e-9:
+        return poisson.cdf(k, mu)
+    n = 1.0 / dispersion
+    return nbinom.cdf(k, n, n / (n + mu))
+
+
 def side_frame(df: pd.DataFrame, mu: np.ndarray, line, over, under, actual,
                dispersion: float = 0.0) -> pd.DataFrame:
-    """Both sides of every quote, with the model's probability and the flat profit."""
+    """Both sides of every quote, with the model's probability and the flat profit.
+
+    `p` is the chance the side wins, `p_push` the chance the count lands on
+    the line, and `ev` is p x payout − P(the other side wins): a push returns
+    the stake. On a half line `p_push` is 0 and `ev` is p x (1 + payout) − 1.
+    """
     mu = np.asarray(mu, dtype=float)
     line = np.asarray(line, dtype=float)
     po = p_over(mu, line, dispersion)
+    pu = p_under(mu, line, dispersion)
     base = df.reset_index(drop=True).copy()
     base["mu"] = mu
     base["line"] = line
     base["actual"] = np.asarray(actual, dtype=float)
+    base["p_push"] = np.clip(1.0 - po - pu, 0.0, 1.0)
     over_p = np.asarray(over, dtype=float)
     under_p = np.asarray(under, dtype=float)
     rows = []
-    for side, price, prob in (("over", over_p, po), ("under", under_p, 1.0 - po)):
+    for side, price, prob, lose in (("over", over_p, po, pu), ("under", under_p, pu, po)):
         s = base.copy()
         s["side"] = side
         s["price"] = price
         s["p"] = prob
         s["profit"] = profit(s["actual"], s["line"], price, side)
         pay = _payout(price)
-        s["ev"] = np.where(np.isfinite(price), prob * (1.0 + pay) - 1.0, np.nan)
+        s["ev"] = np.where(np.isfinite(price), prob * pay - lose, np.nan)
         rows.append(s)
     out = pd.concat(rows, ignore_index=True)
     two = np.isfinite(over_p) & np.isfinite(under_p)

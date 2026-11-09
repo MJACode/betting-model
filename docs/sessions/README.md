@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, NHL derivative totals grading fix on master (push no longer an under win; team totals on the full game), re-grade job declared; five totals models bet whole-number unders, push pricing not yet checked |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, the four MLB research write-ups from closed PRs #757, #759, #760, #761 landed on master (docs only, all negative results) |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, the second betting-model copy and the August NFL downloads checked: 98 files kept nowhere else stored (`source LIKE '%|leftover'`); the four unpushed branches graded against master (two superseded, MLB research docs and the NHL derivative-totals grading fix not on master) |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, the old `Downloads/nfl-model` folder deleted (mike); its 524 Open-Meteo files and 5 pre-port opener files stored in `nfl_research_data_backup` (`source LIKE 'downloads_nfl_model|%'`), its git history bundled to the local mirror |
