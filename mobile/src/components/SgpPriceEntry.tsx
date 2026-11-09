@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { InfoSheet, InfoTooltip } from '@/components/InfoTooltip';
-import { showToast } from '@/components/Toast';
 import { getDeviceId } from '@/hooks/useDeviceId';
 import { refreshSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import { americanToDecimal, formatAmerican } from '@/lib/format';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookName } from '@/lib/markets';
 import { decimalToAmerican, type ParlayLeg } from '@/lib/parlay';
 import { logSgpPrice } from '@/lib/queries';
 import { enteredPriceIsPlausible, parseEnteredAmerican } from '@/lib/sgpPricing';
@@ -57,20 +56,24 @@ export function SgpPriceEntry({
   const american = parseEnteredAmerican(text);
   const name = bookName(book);
 
+  // Confirmation stays in the sheet: the app-root toast draws behind an open
+  // Modal on iOS (UX review, 2026-11-09).
   const save = async () => {
     if (american == null) return;
+    Keyboard.dismiss();
     if (!enteredPriceIsPlausible(americanToDecimal(american), multipliedDecimal)) {
       // The check compares against the legs multiplied out, so the message
       // names that number (PR #1198 review L3).
       const multipliedAmerican = decimalToAmerican(multipliedDecimal);
       setRangeNote(`That’s far from the legs multiplied out (${formatAmerican(multipliedAmerican)}). Check the number on ${name}’s slip.`);
+      AccessibilityInfo.announceForAccessibility(`Price looks off. Check the number on ${name}’s slip.`);
       return;
     }
     setSaving(true);
     setRangeNote(null);
     // The price shows on this slip whether or not the save reaches the server.
     onEntered(book, american);
-    showToast(`Using your ${name} price, ${formatAmerican(american)}`);
+    AccessibilityInfo.announceForAccessibility(`Using your ${name} price, ${formatAmerican(american)}`);
     try {
       await logSgpPrice({
         deviceId: await getDeviceId(),
@@ -95,19 +98,20 @@ export function SgpPriceEntry({
   return (
     <View style={styles.wrap}>
       <View style={styles.labelRow}>
+        {entered != null ? <Ionicons name="checkmark-circle" size={16} color={colors.tint} /> : null}
         <Text style={styles.label}>
-          {entered != null ? `Your ${bookLabel(book)} price: ${formatAmerican(entered)}` : `Price on ${name}’s slip`}
+          {entered != null ? `Using your ${name} price, ${formatAmerican(entered)}` : `Price on ${name}’s slip`}
         </Text>
         <InfoTooltip
           title="Same-game price"
-          body={`Two or more legs share a game. Books price those legs together, usually for less than the legs multiplied out, so the ${bookLabel(book)} tile shows our estimate.\n\nEnter the price ${name}’s slip shows and this slip uses it. It also helps us price same-game slips at ${name} for everyone.`}
+          body={`Two or more legs share a game. Books price those legs together, usually for less than the legs multiplied out, so the ${name} tile shows our estimate.\n\nEnter the price ${name}’s slip shows and this slip uses it. It also helps us price same-game slips at ${name} for everyone.`}
           accessibilityLabel="About same-game prices"
         />
       </View>
       <View style={styles.inputRow}>
         <TextInput
           accessibilityLabel={`Price on ${name}’s slip, American odds`}
-          style={styles.input}
+          style={[styles.input, rangeNote != null && styles.inputWarn]}
           value={text}
           onChangeText={(t) => {
             setText(t);
@@ -121,10 +125,12 @@ export function SgpPriceEntry({
         />
         {rangeNote ? (
           <Pressable
-            onPress={() => setNoteOpen(true)}
+            onPress={() => {
+              Keyboard.dismiss();
+              setNoteOpen(true);
+            }}
             accessibilityRole="button"
             accessibilityLabel="Price looks off. Details"
-            hitSlop={{ top: 0, bottom: 0, left: 4, right: 4 }}
             style={({ pressed }) => [styles.warnBtn, pressed && styles.pressed]}
           >
             <Ionicons name="warning" size={22} color={colors.gradeBad} />
@@ -149,7 +155,7 @@ export function SgpPriceEntry({
         <Pressable
           onPress={() => {
             onCleared(book);
-            showToast(`Back to the estimate at ${name}`);
+            AccessibilityInfo.announceForAccessibility(`Back to the estimate at ${name}`);
           }}
           accessibilityRole="button"
           accessibilityLabel={`Clear your ${name} price, ${formatAmerican(entered)}`}
@@ -197,9 +203,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     color: colors.textPrimary,
   },
+  inputWarn: {
+    borderWidth: 1,
+    borderColor: colors.gradeBad,
+  },
   warnBtn: {
     minHeight: 44,
-    minWidth: 36,
+    minWidth: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },

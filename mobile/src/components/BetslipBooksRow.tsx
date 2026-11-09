@@ -164,7 +164,11 @@ export function BetslipBooksRow({
                     }`
                   : `Bet on ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
-              accessibilityHint="Opens the leg-by-leg hand-off for this book"
+              accessibilityHint={
+                q.sgpEstimated || q.entered
+                  ? 'Opens the hand-off, where you can enter the price from this book’s slip'
+                  : 'Opens the leg-by-leg hand-off for this book'
+              }
               // A partial tile fades its ODDS only (oddsNa below): the badge
               // and the "2/3 legs" coverage are the information, and at 55%
               // on textTertiary they were under AA — on DraftKings' own tile,
