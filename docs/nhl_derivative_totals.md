@@ -11,7 +11,42 @@ goals").
 `config.PAUSED_MODELS`. `scripts/nhl_derivative_totals_card.py` writes nothing
 and is not a pipeline step.
 
-## 2026-10-10: two corrections to the grade below, and a re-grade queued
+## 2026-11-09: the corrected grade — still nothing clears
+
+The re-grade ran on the worker (`nhl-derivative-totals-regrade-2026-11-09`,
+finished 19:40Z; full printout in `worker_jobs.result->>'stdout'`) with both
+corrections below: team totals settled on the full-game score, and a push no
+longer an under win. 264,043 pre-game quotes, 4,192 games, 2023-24 to
+2025-26, walk-forward. **No cell clears the grader's bar; `PUBLISHED = ()`.**
+These figures replace the model tables further down, which are kept as the
+2026-10-03 record.
+
+Model, best bettable price, floor −200, EV ≥ 0.10 (the plateau row):
+
+| market | side | bets | units | ROI | 95% by day |
+|---|---|---:|---:|---:|---|
+| alternate total | over | 1,748 | −324.1 | −18.5% | −33.6 .. −1.5 |
+| alternate total | under | 2,142 | −239.4 | −11.2% | −24.1 .. +3.2 |
+| 1st-period total | over | 345 | +10.9 | +3.2% | −13.9 .. +19.9 |
+| 1st-period total | under | 226 | −40.8 | −18.0% | −32.2 .. −4.1 |
+| team total (full game) | over | 755 | −125.3 | −16.6% | −24.1 .. −9.2 |
+| team total (full game) | under | 1,119 | −18.5 | −1.7% | −7.8 .. +4.4 |
+
+The closest misses, none of which clears:
+- Team-total unders at EV ≥ 0.15: 518 bets, +30.9 units, +6.0% (−3.7 ..
+  +15.4); seasons +9.6% / +7.3% / +2.8%.
+- First-period overs at EV ≥ 0.15: 182 bets, +32.0 units, +17.6% (−6.2 ..
+  +42.5), only 8 bets in 2025-26.
+- Pinnacle against a bettable book, first-period total, Pinnacle EV ≥ 0.02:
+  160 bets, +30.9 units, +19.3% (+1.9 .. +37.3). The interval is above zero
+  but 2023-24 has 14 bets, so it fails the season test. At ≥ 0.04: 30 bets.
+
+What would have to change for one to clear: the Pinnacle first-period rule
+needs a 2026-27 season of its own (the derivative prices for scored 2026-27
+games, which the `nhl_derivative_odds_history` job buys, and the grader's
+seasons extended to 2027).
+
+## 2026-10-10: two corrections to the grade below, re-graded 2026-11-09 (above)
 
 The model tables further down were made on 2026-10-03 with two defects (the
 follow-up of 2026-10-08). Both were fixed on 2026-10-10 on a branch that was
