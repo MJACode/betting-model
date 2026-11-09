@@ -29,6 +29,11 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         Returns without an API call when no game is in either range. mike,
         2026-10-16: "we're not leaving our games" -- the hourly passes put no
         look 45-57 minutes before any tip at or before 6pm ET.)
+  * NBA in-play loop      */10 supervisor, 11am-3am ET -> run_nba_live_ingame
+        (python -m nba_live.gameday: ESPN read every 30 s, free; ONE odds call
+        an hour at hh:55:36 UTC while a regular-season NBA game is in play,
+        2 credits measured; exits when nothing is in play; disable with
+        RUN_NBA_LIVE_INGAME=0)
   * In-play live loop     */10 supervisor, 11am-midnight ET
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
@@ -163,6 +168,14 @@ RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
 # write picks for a model in config.RETIRED_MODELS -- do not, without a new
 # model id and the go-live gate (CLAUDE.md §2).
 RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
+
+# NBA in-play game-state loop (nba_live/, run from the repo root): the three
+# models of models/nba_live_ingame.py (mike, 2026-10-17: "Yes We are betting
+# live models"). ON by default; RUN_NBA_LIVE_INGAME=0 stops it without a code
+# change (a Railway variable takes effect on the redeploy that applying it
+# starts).
+RUN_NBA_LIVE_INGAME = (os.environ.get("RUN_NBA_LIVE_INGAME", "1").strip().lower()
+                       not in ("0", "false", "off", "no"))
 
 # NFL in-play LEADER MONEYLINE loop (nfl_live_leader/, run from the repo root)
 # -- a different model and a different loop from the retired worker above,
@@ -579,7 +592,13 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # so it lives beside the passes, not with the loops.
                   "nba_prop_window",
                   # Writes picks through its own card, with its own fetch.
-                  "nba_total_luck_window"}
+                  "nba_total_luck_window",
+                  # The NBA in-play loop. HERE, not with the other live loops on
+                  # the pollers service, because it reads ESPN's site API, and
+                  # api_call_log has that host answering THIS service 200 all of
+                  # 2026-10-10..17 (1,942 of 1,944 calls, no 403) and has no
+                  # call from the pollers service at all. It needs no volume.
+                  "nba_live_ingame"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -682,6 +701,27 @@ def run_ncaaf_live_loop() -> None:
         [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
         "ncaaf-live-loop",
     )
+
+
+def run_nba_live_ingame() -> None:
+    # The NBA in-play loop (nba_live/gameday.py), the supervisor shape of
+    # run_nfl_live_leader: the loop reads ESPN's scoreboard every 30 s (free)
+    # and EXITS after a few passes with no regular-season NBA game in play, so
+    # this */10 cron relaunches it and max_instances=1 makes the ticks during a
+    # slate no-ops. Run from the REPO ROOT.
+    #
+    # Odds API credits are spent ONLY at the hourly tick (hh:55:36 UTC) and
+    # only when an in-play game still has an undecided model: one bulk call,
+    # 2 credits measured (nba_live/odds.py), capped per process, per day (in
+    # live_credit_telemetry) and by an account floor.
+    outcome = _run(
+        [sys.executable, "-m", "nba_live.gameday"],
+        "nba-live-ingame",
+    )
+    if outcome != "ok":
+        # A loop that dies on every launch (a bad import, a missing artifact)
+        # must not read as a healthy job: raising makes the heartbeat 'fail'.
+        raise RuntimeError(f"nba-live-ingame loop exited {outcome}")
 
 
 def run_nfl_live_leader() -> None:
@@ -1923,6 +1963,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_LIVE_LEADER=0 — NFL in-play leader loop NOT scheduled.")
+
+    # NBA in-play loop. 11am-3am ET, every day: the earliest NBA tips are
+    # holiday matinees around noon ET and the last West Coast games end near
+    # 1:30am ET. An idle launch reads ESPN's scoreboard and exits.
+    if RUN_NBA_LIVE_INGAME:
+        sched.add_job(
+            run_nba_live_ingame,
+            CronTrigger(hour="11-23,0-2", minute="*/10", timezone=TIMEZONE),
+            id="nba_live_ingame",
+            name="NBA in-play game-state loop supervisor (11am-3am ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NBA_LIVE_INGAME=0 — NBA in-play loop NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(

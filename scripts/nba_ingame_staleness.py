@@ -235,19 +235,10 @@ def extra(q: pd.DataFrame, tl: pd.DataFrame) -> None:
     print(pd.DataFrame(rows).round(4).to_string(index=False))
 
 
-WINDOWS = ("Q1-Q2", "Q2", "halftime", "Q3", "Q4 6+ min")
-
-
-def window_of(q: pd.DataFrame) -> pd.DataFrame:
-    """Boolean column per decision window (Q2 is a part of Q1-Q2)."""
-    per, ph = q["period"], q["phase"]
-    return pd.DataFrame({
-        "Q1-Q2": per.isin([1, 2]) & ph.isin(["live", "break"]),
-        "Q2": (per == 2) & ph.isin(["live", "break"]),
-        "halftime": ph == "halftime",
-        "Q3": (per == 3) & ph.isin(["live", "break"]),
-        "Q4 6+ min": (per == 4) & (ph == "live") & (q["clock_s"] >= 360),
-    }, index=q.index)
+# The decision windows live with the model the live loop runs
+# (models/nba_live_ingame.py, 2026-10-17), one copy; IG-1 and HT-1 read them
+# through this module as before.
+from models.nba_live_ingame import WINDOWS, window_of  # noqa: E402,F401
 
 
 def coverage(q: pd.DataFrame, fresh_rule: bool) -> pd.DataFrame:

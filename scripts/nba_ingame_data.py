@@ -254,13 +254,16 @@ def label_phase(q: pd.DataFrame, bounds: pd.DataFrame, at: str = "stamp") -> pd.
 IN_PLAY_PHASES = ("live", "break", "halftime")
 
 
-def keep_in_play(q: pd.DataFrame, bounds: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+def keep_in_play(q: pd.DataFrame, bounds: pd.DataFrame, label=None) -> tuple[pd.DataFrame, dict]:
     """Quotes in play by the play-by-play clock (IN-PLAY), whatever their
-    stored label; the phase is attached. Returns (kept, counts)."""
-    q = q.assign(phase=label_phase(q, bounds, "stamp"))
+    stored label; the phase is attached. Returns (kept, counts). `label` is
+    the phase labeller, label_phase unless given (the live loop passes its
+    own for a game still in progress, nba_live/state.py)."""
+    q = q.assign(phase=(label or label_phase)(q, bounds, "stamp"))
     counts = {"phase_counts_all": q["phase"].value_counts().to_dict(),
-              "label_vs_phase": {f"{a}|{b}": int(n) for (a, b), n in
-                                 q.groupby(["label", "phase"]).size().items()}}
+              "label_vs_phase": ({f"{a}|{b}": int(n) for (a, b), n in
+                                  q.groupby(["label", "phase"]).size().items()}
+                                 if "label" in q else {})}
     return q[q["phase"].isin(IN_PLAY_PHASES)].reset_index(drop=True), counts
 
 
@@ -295,8 +298,17 @@ def state_at(q: pd.DataFrame, tl: pd.DataFrame, at: str, cols, suffix: str = "")
     left = left.dropna(subset=["_t"])
     left["_t"] = left["_t"].astype("datetime64[ns, UTC]")
     left = left.sort_values("_t")
-    right = tl[["game_id", "wc", *cols]].dropna(subset=["wc"])
-    right = right.assign(wc=right["wc"].astype("datetime64[ns, UTC]")).sort_values("wc")
+    order = ["play_no"] if "play_no" in tl.columns and "play_no" not in cols else []
+    right = tl[["game_id", "wc", *order, *cols]].dropna(subset=["wc"])
+    # Plays that share a wallclock second (a make and its and-one free throw)
+    # are ordered by play order, stably, so the LAST of them -- the one whose
+    # running counts include all of them -- is the state at that second.
+    # Until 2026-10-17 this sorted by wallclock alone with an unstable sort,
+    # so which tied row won depended on the frame's row order: rebuilding
+    # 2025-26 alone moved the state of 387 of its 83,394 quotes (a quote at
+    # 02:55:20 read 103-75 where the play at 02:55:01 had made it 106-75).
+    right = right.assign(wc=right["wc"].astype("datetime64[ns, UTC]")).sort_values(
+        ["wc", *order], kind="stable").drop(columns=order)
     m = pd.merge_asof(left, right, left_on="_t", right_on="wc", by="game_id",
                       direction="backward", allow_exact_matches=True)
     m = m.set_index("index").reindex(q.index)
@@ -493,6 +505,40 @@ def box_checks(plays: pd.DataFrame, box: pd.DataFrame, games: pd.DataFrame, seas
     return out
 
 
+def attach_state(q: pd.DataFrame, tl: pd.DataFrame, bounds: pd.DataFrame,
+                 label=None) -> tuple[pd.DataFrame, dict]:
+    """Quotes -> the in-play rows every family reads: the game's first play
+    and final end, the phase, the STATE at each stamp (everything logged at or
+    before it), the points scored in the 60 / 120 s before the stamp and
+    between the stamp and served_at (and served_newest), and Pinnacle's paired
+    quote. ONE copy: build() runs it on the archive and the live loop
+    (nba_live/state.py) on each fetch, with its own phase labeller for a game
+    still in progress. `q` carries game_id, market, book, stamp, fetch_at,
+    served_at, served_newest, line, prices, coherent and fa."""
+    first = bounds.groupby("game_id")["start"].min().rename("first_play_at")
+    last = bounds.sort_values("period").groupby("game_id").tail(1).set_index("game_id")["end"].rename("final_end_at")
+    q = q.merge(first.reset_index(), on="game_id", how="left").merge(last.reset_index(), on="game_id", how="left")
+    q, counts = keep_in_play(q, bounds, label)
+    state_cols = [c for c in tl.columns if c not in ("game_id", "wc", "play_no", "type_text")]
+    st_ = state_at(q, tl, "stamp", state_cols)
+    q = pd.concat([q, st_], axis=1)
+    reg = q["period"] <= 4
+    q["secs_left"] = np.where(reg, q["clock_s"] + 720 * (4 - q["period"]), q["clock_s"])
+    q["halftime"] = q["phase"] == "halftime"
+    q["last_play_at"] = state_at(q, tl.assign(lp=tl["wc"]), "stamp", ["lp"])["lp"]
+    for at, suf in (("stamp_m60", "_m60"), ("stamp_m120", "_m120"), ("served_at", "_served"),
+                    ("served_newest", "_served_newest")):
+        if at.startswith("stamp_m"):
+            q[at] = q["stamp"] - pd.Timedelta(seconds=int(at[7:]))
+        s2 = state_at(q, tl, at, ["h_pts", "a_pts"], suf)
+        q = pd.concat([q, s2.fillna(0)], axis=1)
+    q = q.drop(columns=["stamp_m60", "stamp_m120"])
+    q["pts_since_stamp"] = (q["h_pts_served"] + q["a_pts_served"]) - (q["h_pts"] + q["a_pts"])
+    q["pts_since_stamp_newest"] = (q["h_pts_served_newest"] + q["a_pts_served_newest"]) - (q["h_pts"] + q["a_pts"])
+    q = attach_pinnacle(q)
+    return q, counts
+
+
 # ── build ───────────────────────────────────────────────────────────────────
 
 def build(cache: Path = H.CACHE, seasons=SEASONS) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -524,29 +570,8 @@ def build(cache: Path = H.CACHE, seasons=SEASONS) -> tuple[pd.DataFrame, pd.Data
     hs = ht.groupby(ht.index.map(games.set_index("game_id")["season"])).describe(
         percentiles=[.01, .05, .5, .95, .99]).round(1)
     notes["halftime_minutes_by_season"] = hs.to_dict("index")
-    # listed tip vs first play
-    first = bounds.groupby("game_id")["start"].min().rename("first_play_at")
-    last = bounds.sort_values("period").groupby("game_id").tail(1).set_index("game_id")["end"].rename("final_end_at")
-    q = q.merge(first.reset_index(), on="game_id", how="left").merge(last.reset_index(), on="game_id", how="left")
-    q, counts = keep_in_play(q, bounds)
+    q, counts = attach_state(q, tl, bounds)
     notes.update(counts)
-    state_cols = [c for c in tl.columns if c not in ("game_id", "wc", "play_no", "type_text")]
-    st_ = state_at(q, tl, "stamp", state_cols)
-    q = pd.concat([q, st_], axis=1)
-    reg = q["period"] <= 4
-    q["secs_left"] = np.where(reg, q["clock_s"] + 720 * (4 - q["period"]), q["clock_s"])
-    q["halftime"] = q["phase"] == "halftime"
-    q["last_play_at"] = state_at(q, tl.assign(lp=tl["wc"]), "stamp", ["lp"])["lp"]
-    for at, suf in (("stamp_m60", "_m60"), ("stamp_m120", "_m120"), ("served_at", "_served"),
-                    ("served_newest", "_served_newest")):
-        if at.startswith("stamp_m"):
-            q[at] = q["stamp"] - pd.Timedelta(seconds=int(at[7:]))
-        s2 = state_at(q, tl, at, ["h_pts", "a_pts"], suf)
-        q = pd.concat([q, s2.fillna(0)], axis=1)
-    q = q.drop(columns=["stamp_m60", "stamp_m120"])
-    q["pts_since_stamp"] = (q["h_pts_served"] + q["a_pts_served"]) - (q["h_pts"] + q["a_pts"])
-    q["pts_since_stamp_newest"] = (q["h_pts_served_newest"] + q["a_pts_served_newest"]) - (q["h_pts"] + q["a_pts"])
-    q = attach_pinnacle(q)
     g = games.set_index("game_id")
     q["final_home"] = q["game_id"].map(g["home_score"])
     q["final_away"] = q["game_id"].map(g["away_score"])

@@ -73,6 +73,19 @@ def test_artifact_deserialises(path: Path):
             f"{path.name}: a rate model is missing")
         assert artifact["alphas"] and artifact["calibration"], f"{path.name}: no widths or maps"
         return
+    if isinstance(artifact, dict) and artifact.get("kind") == "nba_live_ingame":
+        # The NBA in-play state model (models/nba_live_ingame.py): a fitted
+        # margin model as plain numbers, for the season after its training
+        # seasons, and the residual sample that prices the pre-game prior.
+        from models.nba_live_ingame import FEATURES, StateModel
+        m = StateModel.from_dict(artifact["model"])
+        assert m.cols == FEATURES and len(m.beta) == len(FEATURES), f"{path.name}: features"
+        assert m.s1 > 0 and m.s0 >= 0.25 and m.n_train > 500_000, f"{path.name}: fit"
+        assert m.S == artifact["season"] == max(artifact["training"]["seasons"]) + 1, (
+            f"{path.name}: a model for season {m.S} must be fit on the seasons before it only")
+        seasons = {int(s) for s, _ in artifact["close_resid"]}
+        assert {2021, 2022, 2023, 2024, 2025, 2026} <= seasons, f"{path.name}: residual seasons {seasons}"
+        return
     if isinstance(artifact, dict) and artifact.get("kind") == "nba_total_luck":
         # A rule's parameters, not an estimator (models/nba_total_luck.py): the
         # residual sample the offer is priced with, per season, and the gap >= 3

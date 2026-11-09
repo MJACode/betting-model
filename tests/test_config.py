@@ -204,7 +204,11 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          "nba_prop_projection",
          # 2026-10-17 (mike): the NBA totals overs; market-fair P(over) plus the
          # gap >= 3 bucket's walk-forward uplift, and no record to fit a map on.
-         "nba_total_luck"}
+         "nba_total_luck",
+         # 2026-10-17 (mike: "Yes We are betting live models"): the NBA in-play
+         # state model's own P(win) at the offer's number, which each EV cut
+         # was graded on; no record to fit a map on.
+         "nba_live_spread_h1", "nba_live_spread_q3", "nba_live_moneyline"}
     )
 
 
@@ -274,5 +278,8 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nba_prop_market",
         "nba_prop_projection",      # 2026-10-16 (mike): calibrated inside its own artifact
         "nba_total_luck",           # 2026-10-17 (mike): market-fair P(over) + its bucket's uplift
+        "nba_live_spread_h1",       # 2026-10-17 (mike): the in-play state model's own P(win)
+        "nba_live_spread_q3",
+        "nba_live_moneyline",
     }
     assert not not_named_here

@@ -117,66 +117,28 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from scripts import nba_game_harness as H  # noqa: E402
-from scripts.nba_game_market_lab import norm_cdf, threshold  # noqa: E402
+from scripts.nba_game_market_lab import threshold  # noqa: E402
 from scripts.nba_ingame_data import OUT, OUT_DIR  # noqa: E402
-from scripts.nba_ingame_staleness import window_of  # noqa: E402
+# 2026-10-17: the model itself -- state features, the walk-forward fit,
+# pricing, eligibility and the side -- moved to models/nba_live_ingame.py,
+# the ONE copy the live loop runs. This lab imports it; nothing is copied back.
+from models.nba_live_ingame import (  # noqa: E402,F401
+    CORE, FEATURES, FOULS, GRID_STEP_S, MARKETS, PERIOD_S, PHASES, REG_S, S0_FLOOR,
+    TRAIN_SECS, _WINDOW, StateModel, apply_model, decision_quotes, eligible, features,
+    grid_states, offer_rows, p_home_from, phase_label, priced, solve_prior, with_pin_freshness,
+    with_side_pick)
+from models.nba_live_ingame import models_by_season as _models_by_season  # noqa: E402
 
 FAMILY = "IG-2"
-PHASES = ("Q1-Q2", "Q3", "Q4")
-_WINDOW = {"Q1-Q2": "Q1-Q2", "Q3": "Q3", "Q4": "Q4 6+ min"}
-MARKETS = ("h2h", "spreads")
 CUTS = (0.02, 0.05, 0.08)
 GRADED = (2022, 2023, 2024, 2025, 2026)
 FIT_FROM = 2021
-GRID_STEP_S = 30
-TRAIN_SECS = (360, 2850)
-REG_S, PERIOD_S = 2880.0, 720.0
-S0_FLOOR = 0.25
 N_PLACEBO = 20
-CORE = ["x_mu_pre", "x_f", "x_m", "x_mf"]
-FOULS = ["x_pen", "x_tf", "x_trouble", "x_out", "x_top"]
-FEATURES = CORE + FOULS
 TRAIN_CACHE = OUT_DIR / "ig2_train_states.parquet"
 PRIOR_CACHE = OUT_DIR / "ig2_prior.parquet"
 CELLS_OUT = OUT_DIR / "cells_IG-2.parquet"
 INFO_OUT = OUT_DIR / "ig2_info.json"
 BETS_DIR = OUT_DIR / "ig2_bets"
-
-
-# ── eligibility and the decision ───────────────────────────────────────────
-
-def phase_label(q: pd.DataFrame) -> pd.Series:
-    """'Q1-Q2' / 'Q3' / 'Q4' from the staleness module's windows; '' outside."""
-    w = window_of(q)
-    return pd.Series(np.select([w[_WINDOW[p]].to_numpy() for p in PHASES], list(PHASES), ""),
-                     index=q.index)
-
-
-def with_pin_freshness(q: pd.DataFrame) -> pd.DataFrame:
-    """pin_pts_since: points scored between the paired Pinnacle quote's stamp
-    and its served_at (from Pinnacle's own row in the same fetch)."""
-    pin = q[q["book"] == H.SHARP].set_index(["game_id", "market", "fetch_at", "stamp"])
-    pin = pin[~pin.index.duplicated()]["pts_since_stamp"]
-    key = pd.MultiIndex.from_frame(q[["game_id", "market", "fetch_at", "pin_stamp"]])
-    return q.assign(pin_pts_since=pin.reindex(key).to_numpy())
-
-
-def eligible(q: pd.DataFrame) -> pd.DataFrame:
-    """Deciding-book quotes that pass section 7.1's freshness rule, in a phase."""
-    if "pin_pts_since" not in q:
-        q = with_pin_freshness(q)
-    if "phase_ig2" not in q:
-        q = q.assign(phase_ig2=phase_label(q))
-    m = (q["book"].isin(H.BETTABLE) & q["market"].isin(MARKETS) & q["coherent"].astype(bool)
-         & q["pin_fa"].notna() & (q["pts_since_stamp"] == 0) & (q["pin_pts_since"] == 0)
-         & (q["phase_ig2"] != ""))
-    return q[m].copy()
-
-
-def decision_quotes(el: pd.DataFrame) -> pd.DataFrame:
-    """The eligible quotes of the FIRST eligible fetch per (game, market, phase)."""
-    first = el.groupby(["game_id", "market", "phase_ig2"])["fetch_at"].transform("min")
-    return el[el["fetch_at"] == first].copy()
 
 
 # ── the pre-game prior ─────────────────────────────────────────────────────
@@ -190,108 +152,24 @@ def pregame_prior(cache: Path = H.CACHE, refresh: bool = False) -> pd.DataFrame:
     close = H.pinnacle_close(data)
     dist = H.close_dist(close, data.games)
     c = close[close["market"] == "spreads"].copy()
-    sig = np.array([dist.get((int(s), "spreads")) for s in c["season"]], dtype=object)
-    ok = np.array([v is not None for v in sig])
-    c = c[ok]
-    c["mu_pre"] = H.solve_any(threshold("spreads", c["close_line"]), c["close_fa"].to_numpy(), sig[ok])
-    out = c[["game_id", "season", "mu_pre"]].reset_index(drop=True)
+    c = c[[dist.get((int(s), "spreads")) is not None for s in c["season"]]]
+    out = solve_prior(c, lambda s: dist[(int(s), "spreads")])
     out.to_parquet(PRIOR_CACHE, index=False)
     return out
 
 
-# ── features and the state model ───────────────────────────────────────────
-
-def features(df: pd.DataFrame) -> pd.DataFrame:
-    """The model's inputs (module docstring) from a state frame carrying
-    secs_left, clock_s, period, h_pts, a_pts, mu_pre, team fouls in the period
-    and the top players' fouls. Adds x_* columns, m and f."""
-    f = df["secs_left"].to_numpy(float) / REG_S
-    pl = df["clock_s"].to_numpy(float) / PERIOD_S
-    m = (df["h_pts"] - df["a_pts"]).to_numpy(float)
-    per = df["period"].to_numpy(float)
-    htf, atf = df["h_tf_period"].fillna(0).to_numpy(float), df["a_tf_period"].fillna(0).to_numpy(float)
-    ht = np.column_stack([df[f"h_top{k}_pf"].fillna(0).to_numpy(float) for k in (1, 2, 3)])
-    at = np.column_stack([df[f"a_top{k}_pf"].fillna(0).to_numpy(float) for k in (1, 2, 3)])
-    trouble = (at >= per[:, None] + 1).sum(1) - (ht >= per[:, None] + 1).sum(1)
-    out_ = (at >= 6).sum(1) - (ht >= 6).sum(1)
-    top = at.sum(1) - ht.sum(1)
-    return df.assign(
-        f=f, m=m,
-        x_mu_pre=f * df["mu_pre"].to_numpy(float), x_f=f, x_m=m, x_mf=m * f,
-        x_pen=((atf >= 5).astype(float) - (htf >= 5).astype(float)) * pl,
-        x_tf=(atf - htf) * pl,
-        x_trouble=trouble * f, x_out=out_ * f, x_top=top * f)
-
-
-class StateModel:
-    """Final home margin ~ Normal(m + X b, sqrt(s1 f + s0)), fit on seasons < S."""
-
-    def __init__(self, cols=FEATURES):
-        self.cols = list(cols)
-        self.beta = self.s1 = self.s0 = None
-        self.S = None
-        self.n_train = 0
-
-    def fit(self, train: pd.DataFrame, S: int, allow_own_season: bool = False) -> "StateModel":
-        seasons = set(int(s) for s in train["season"].unique())
-        if allow_own_season:
-            if seasons != {S}:
-                raise ValueError(f"an in-sample fit takes season {S} alone, got {sorted(seasons)}")
-        elif any(s >= S for s in seasons):
-            raise ValueError(f"walk-forward: a model for season {S} cannot see seasons {sorted(seasons)}")
-        X = train[self.cols].to_numpy(float)
-        y = (train["final_margin"] - train["m"]).to_numpy(float)
-        f = train["f"].to_numpy(float)
-        w = 1.0 / np.maximum(f, 1e-3)
-        for _ in range(2):
-            sw = np.sqrt(w)
-            self.beta = np.linalg.lstsq(X * sw[:, None], y * sw, rcond=None)[0]
-            r2 = (y - X @ self.beta) ** 2
-            A = np.column_stack([f, np.ones_like(f)])
-            s1, s0 = np.linalg.lstsq(A, r2, rcond=None)[0]
-            self.s1, self.s0 = max(float(s1), 1e-6), max(float(s0), S0_FLOOR)
-            w = 1.0 / (self.s1 * f + self.s0)
-        self.S, self.n_train = S, len(train)
-        return self
-
-    def predict(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-        """(mean final home margin, sd) at each state."""
-        mean = df["m"].to_numpy(float) + df[self.cols].to_numpy(float) @ self.beta
-        sd = np.sqrt(self.s1 * df["f"].to_numpy(float) + self.s0)
-        return mean, sd
-
-    def p_home(self, df: pd.DataFrame) -> np.ndarray:
-        return p_home_from(*self.predict(df))
-
-
-def p_home_from(mean, sd) -> np.ndarray:
-    return norm_cdf(np.asarray(mean, float) / np.asarray(sd, float))
-
-
 # ── training states from the play-by-play ──────────────────────────────────
 
-def grid_states(tl: pd.DataFrame, step: int = GRID_STEP_S, secs=TRAIN_SECS) -> pd.DataFrame:
-    """Each game's state every `step` s of regulation game time: the latest play
-    (by game time) at or before it, keeping secs_left in [secs[0], secs[1]]."""
-    s = tl.dropna(subset=["game_s"]).sort_values(["game_s", "wc", "play_no"], kind="stable")
-    g = np.arange(step, int(REG_S), step, dtype=float)
-    left = pd.DataFrame({"game_id": np.repeat(s["game_id"].unique(), len(g)),
-                         "g": np.tile(g, s["game_id"].nunique())}).sort_values("g", kind="stable")
-    x = pd.merge_asof(left, s, left_on="g", right_on="game_s", by="game_id", direction="backward")
-    x = x.dropna(subset=["period"])
-    x = x[x["period"] <= 4]
-    x["secs_left"] = x["clock_s"] + PERIOD_S * (4 - x["period"])
-    x = x[(x["secs_left"] >= secs[0]) & (x["secs_left"] <= secs[1])]
-    return x.drop_duplicates(["game_id", "play_no"]).drop(columns="g").reset_index(drop=True)
-
-
 def training_states(cache: Path = H.CACHE, seasons=(2021, 2022, 2023, 2024, 2025),
-                    refresh: bool = False) -> tuple[pd.DataFrame, dict]:
+                    refresh: bool = False, out: Path | None = None) -> tuple[pd.DataFrame, dict]:
     """Grid states with features and the official final margin, per season.
-    Built by nba_ingame_data's own play, top-player and timeline functions."""
-    if TRAIN_CACHE.exists() and not refresh:
-        t = pd.read_parquet(TRAIN_CACHE)
-        notes = json.loads((TRAIN_CACHE.with_suffix(".json")).read_text(encoding="utf-8"))
+    Built by nba_ingame_data's own play, top-player and timeline functions.
+    `out`: where the states are cached (default TRAIN_CACHE, the lab's; the
+    live build, scripts/nba_live_ingame_build.py, writes 2025-26 beside it)."""
+    path = TRAIN_CACHE if out is None else Path(out)
+    if path.exists() and not refresh:
+        t = pd.read_parquet(path)
+        notes = json.loads((path.with_suffix(".json")).read_text(encoding="utf-8"))
         return t, notes
     from scripts import nba_ingame_data as D
     games = H.load_games(cache)
@@ -324,33 +202,14 @@ def training_states(cache: Path = H.CACHE, seasons=(2021, 2022, 2023, 2024, 2025
     keep = ["game_id", "season", "period", "clock_s", "secs_left", "h_pts", "a_pts", "mu_pre",
             "final_margin", "f", "m", *FEATURES]
     t = t[keep]
-    t.to_parquet(TRAIN_CACHE, index=False)
-    TRAIN_CACHE.with_suffix(".json").write_text(json.dumps(notes, indent=1), encoding="utf-8")
+    t.to_parquet(path, index=False)
+    path.with_suffix(".json").write_text(json.dumps(notes, indent=1), encoding="utf-8")
     return t, notes
 
 
 def models_by_season(train: pd.DataFrame, cols=FEATURES, seasons=(FIT_FROM, *GRADED)) -> dict:
     """season -> StateModel fit on seasons before it (2021: on itself, in-sample)."""
-    out = {}
-    for S in seasons:
-        prior = train[train["season"] < S]
-        if len(prior):
-            out[S] = StateModel(cols).fit(prior, S)
-        else:
-            out[S] = StateModel(cols).fit(train[train["season"] == S], S, allow_own_season=True)
-    return out
-
-
-def apply_model(df: pd.DataFrame, models: dict, prefix: str = "") -> pd.DataFrame:
-    """mean / sd / p_home per row from its own season's model."""
-    mean = np.full(len(df), np.nan)
-    sd = np.full(len(df), np.nan)
-    for S, mdl in models.items():
-        k = (df["season"] == S).to_numpy()
-        if k.any():
-            mean[k], sd[k] = mdl.predict(df[k])
-    return df.assign(**{f"{prefix}mean": mean, f"{prefix}sd": sd,
-                        f"{prefix}p_home": p_home_from(mean, sd)})
+    return _models_by_season(train, cols, seasons)
 
 
 # ── the information test ───────────────────────────────────────────────────
@@ -521,32 +380,6 @@ def info_test(q: pd.DataFrame, train: pd.DataFrame, prior: pd.DataFrame) -> dict
 
 
 # ── the grid ───────────────────────────────────────────────────────────────
-
-def offer_rows(dec: pd.DataFrame) -> pd.DataFrame:
-    """Two rows per decision quote (home/away), with T = served_at and the
-    points each side scored in the 120 s before the stamp."""
-    base = dec.assign(T=dec["served_at"], pts120_h=dec["h_pts"] - dec["h_pts_m120"],
-                      pts120_a=dec["a_pts"] - dec["a_pts_m120"])
-    a = base.assign(side="home", price=base["price_a"])
-    b = base.assign(side="away", price=base["price_b"])
-    return pd.concat([a, b], ignore_index=True)
-
-
-def priced(off: pd.DataFrame, mean, sd, p_home) -> pd.DataFrame:
-    pw, pp = H.side_probs(off["market"].to_numpy(), off["side"].to_numpy(), off["line"].to_numpy(),
-                          mu=np.asarray(mean, float), sigma=np.asarray(sd, float),
-                          p_home=np.asarray(p_home, float))
-    return H.with_ev(off.assign(p_win=pw, p_push=pp))
-
-
-def with_side_pick(c: pd.DataFrame) -> pd.DataFrame:
-    """side_pick per (game, market): the side whose best deciding offer has the
-    higher EV under `c`'s own prices (the side the model favours)."""
-    best = c[c["book"].isin(H.BETTABLE)].groupby(["game_id", "market", "side"])["ev"].max().unstack()
-    pick = pd.Series(np.where(best["home"].fillna(-np.inf) >= best["away"].fillna(-np.inf), "home", "away"),
-                     index=best.index, name="side_pick").reset_index()
-    return c.drop(columns="side_pick", errors="ignore").merge(pick, on=["game_id", "market"], how="left")
-
 
 def market_fair_inplay(off: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Pinnacle's live no-vig as (mean home margin, p_home) per offer row; the

@@ -299,6 +299,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # bet or not, with the reason (scripts/nba_total_luck_card.py, which
     # creates it on demand). Read by the card, never by the app.
     "nba_total_luck_decisions",
+    # The NBA in-play loop's decisions ledger: one row per (game, model) it
+    # has decided, bet or not, with the reason (nba_live/gameday.py, which
+    # creates it on demand). The lock across restarts; never read by the app.
+    "nba_live_ingame_decisions",
     # The NBA projection model's three (scripts/nba_prop_projection_card.py,
     # which creates them on demand): its decisions ledger, each player's
     # stored projection, and the injury list each game was projected with.

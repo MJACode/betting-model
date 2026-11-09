@@ -70,6 +70,10 @@ MAX_SILENCE: dict = {
     # RETURNS, and one launch can run a whole Sunday slate (1pm to ~7:30pm
     # ET, ~6.5h), which 700 also clears.
     "nfl_live_leader": 700,
+    # The NBA in-play loop: every 10 minutes 11am-3am ET, off 3-11am. The beat
+    # lands when a launch returns; a slate launch runs ~7pm to ~1:30am ET
+    # (~6.5h) and the overnight gap is 8h, both inside 700.
+    "nba_live_ingame": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,

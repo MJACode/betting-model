@@ -628,6 +628,20 @@ ACTION_THRESHOLDS: dict = {
     # wrote: a decision edge is the EV divided by the decimal price, so it is
     # >= 0 exactly when the bet clears its 0.00 EV floor.
     "nba_total_luck":           {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA IN-PLAY game-state models (2026-10-17, mike: "Yes We are betting live
+    # models"): models/nba_live_ingame.py, written by the nba_live/ loop, one
+    # model per graded cell of docs/nba_models_2026.md 7.3 (IG-2). THE CUT IS
+    # EV per unit risked with a push refunded (0.05 spreads, 0.08 moneyline),
+    # applied in the loop at the best of the 8 deciding books. Pooled
+    # 2021-22..2025-26 at bought in-play prices: first-half spreads 1,475 bets
+    # +103.6 units +6.2% (95% +1.4..+11.1); third-quarter spreads 1,055 bets
+    # +79.6 units +6.7% (+1.2..+12.6); third-quarter moneylines 545 bets +49.6
+    # units +15.8% (+3.8..+27.4). prob / edge are 0.0 so every publisher shows
+    # what the loop wrote: none of the 3,075 graded bets has a decision edge
+    # below zero (smallest +0.0015).
+    "nba_live_spread_h1":       {"min_prob": 0.0, "min_edge": 0.0},
+    "nba_live_spread_q3":       {"min_prob": 0.0, "min_edge": 0.0},
+    "nba_live_moneyline":       {"min_prob": 0.0, "min_edge": 0.0},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -1877,6 +1891,13 @@ MODEL_MIN_ODDS: dict = {
     # -115 to +100 on its 611 graded bets (median -110). Pinned so a Railway
     # DEFAULT_MIN_ODDS override cannot move it off its evidence.
     "nba_total_luck":            -200,
+    # NBA in-play models (2026-10-17, mike): graded at the -200 floor, pinned so
+    # a Railway DEFAULT_MIN_ODDS override cannot move them off it. Prices laid
+    # on the graded bets: spreads -160 to +125 (median -114), moneyline -200 to
+    # +3500 (median +230; 446 of 545 are underdogs).
+    "nba_live_spread_h1":        -200,
+    "nba_live_spread_q3":        -200,
+    "nba_live_moneyline":        -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2118,6 +2139,15 @@ MODEL_OWN_EV_FLOOR: dict = {
     # 2026-27 uplift (+0.0659), it removes one: NBA_2023-01-24_DEN_NOP, FanDuel
     # over 232.0, -0.012. The next smallest is +0.030, the median +0.090.
     "nba_total_luck":           0.00,
+    # NBA in-play models (2026-10-17, mike): the floor IS the cut. The loop
+    # applies it to EV with a push refunded (the lab's EV); the publishers'
+    # "good to" price reads p x decimal - 1, a push scored as a loss, which on
+    # a whole-number spread is the stricter of the two (73 of the 2,530 graded
+    # spread bets are under 0.05 that way), so on those the channel prints no
+    # range rather than a wrong one. Never a second cut.
+    "nba_live_spread_h1":       0.05,
+    "nba_live_spread_q3":       0.05,
+    "nba_live_moneyline":       0.08,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2249,6 +2279,12 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # what its floor was set on. It has no record, so its promoted map would
     # be the offset borrowed from other models.
     "nba_total_luck",
+    # 2026-10-17 (mike). The NBA in-play models decide on the state model's own
+    # P(win) at the offer's number, the probability their EV cuts were graded
+    # on; with no record, a promoted map would be another model's offset.
+    "nba_live_spread_h1",
+    "nba_live_spread_q3",
+    "nba_live_moneyline",
 })
 
 
@@ -2345,6 +2381,12 @@ SCORING_METHODS: dict = {
     # Per-lead logistic win probability, its own JSON artifact
     # (models/saved/nfl_live_leader_ml_wp.json), no registry row.
     "nfl_live_leader_ml":  "engine",  # nfl_live_leader/model.py
+    # The NBA in-play state model: its own artifact under models/saved/
+    # (models/nba_live_ingame.py, built by scripts/nba_live_ingame_build.py),
+    # no registry row, scored by the nba_live/ loop.
+    "nba_live_spread_h1":  "engine",
+    "nba_live_spread_q3":  "engine",
+    "nba_live_moneyline":  "engine",
     # Trained AND registered, but scored by models/live_scorer.py rather than
     # the generic path, so it falls out of MODELS/PROP_MODELS. It DOES carry a
     # registry artifact (models/saved/mlb_live_total_runs_*.pkl) and a missing
@@ -2393,6 +2435,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
+    "nba_live_spread_h1":       0.0,    # 2026-10-17 mike: cut is EV, in the loop; see ACTION_THRESHOLDS
+    "nba_live_spread_q3":       0.0,    # 2026-10-17 mike: cut is EV, in the loop; see ACTION_THRESHOLDS
+    "nba_live_moneyline":       0.0,    # 2026-10-17 mike: cut is EV, in the loop; see ACTION_THRESHOLDS
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_shots_on_goal":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -2482,6 +2527,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_prop_projection":      0.0,    # 2026-10-16 mike: cut is EV, per market; see ACTION_THRESHOLDS
     "nba_total_luck":           0.0,    # 2026-10-17 mike: cut is the gap, in the card; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
+    "nba_live_spread_h1":       0.0,    # 2026-10-17 mike: cut is EV, in the loop; see ACTION_THRESHOLDS
+    "nba_live_spread_q3":       0.0,    # 2026-10-17 mike: cut is EV, in the loop; see ACTION_THRESHOLDS
+    "nba_live_moneyline":       0.0,    # 2026-10-17 mike: cut is EV, in the loop; see ACTION_THRESHOLDS
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_shots_on_goal":   0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -2815,6 +2863,16 @@ LIVE_MODELS = {
     # are in-sample for it.
     "nfl_live_leader_ml":  ("NFL", "h2h", "engine",
                             "Late 4th-quarter leader (4-16) on the DraftKings live moneyline, per-lead win probability"),
+    # NBA in-play game-state models (nba_live/, scheduler job nba_live_ingame;
+    # models/nba_live_ingame.py). Registered here for SETTLEMENT on the full
+    # game, overtime included: spreads vs scored_line (the HOME number of the
+    # live spread bet), h2h vs home_win. models/live_scorer.py skips 'engine'.
+    "nba_live_spread_h1":  ("NBA", "spreads", "engine",
+                            "Live spread in the first half: game-state margin model vs the best of 8 books"),
+    "nba_live_spread_q3":  ("NBA", "spreads", "engine",
+                            "Live spread in the third quarter: game-state margin model vs the best of 8 books"),
+    "nba_live_moneyline":  ("NBA", "h2h", "engine",
+                            "Live moneyline in the third quarter: game-state win probability vs the best of 8 books"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
