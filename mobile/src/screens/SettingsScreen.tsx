@@ -364,7 +364,8 @@ export function SettingsScreen() {
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
   // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
   const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
-  const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
+  // Discord lives under Community, so it does not open an empty Account section.
+  const showAccountSection = AUTH_ENABLED || billingReady();
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -703,9 +704,8 @@ export function SettingsScreen() {
           }
         />
 
-        {/* Account + Subscription. Both are behind flags — while auth is dark
-            this is the ONLY sign-in entry point in the app, so the whole
-            section stays invisible until a flag flips. */}
+        {/* Account + Subscription, near the bottom (Matt, 2026-11-09). Both are
+            behind flags, so the whole section stays invisible until one flips. */}
         {showAccountSection ? <SectionHeader title="Account" /> : null}
 
         {AUTH_ENABLED ? (
@@ -821,8 +821,7 @@ export function SettingsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Gambling help and resources"
             accessibilityState={{ expanded: helpOpen }}
-            hitSlop={{ top: 8, bottom: 8 }}
-            style={({ pressed }) => [styles.bookRow, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.disclosureRow, pressed && styles.pressed]}
           >
             <Text style={[styles.cardLabel, styles.noMargin]}>Gambling help &amp; resources</Text>
             <Ionicons
@@ -1095,6 +1094,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.tint,
+  },
+  // The whole row toggles, at least 44pt tall (HIG), with no extra bottom gap.
+  disclosureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
   },
   helplineRow: {
     flexDirection: 'row',
