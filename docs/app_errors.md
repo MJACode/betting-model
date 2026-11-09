@@ -53,6 +53,14 @@ react-native's `Modal` (`tests/test_mobile_freeze_log.py`). Taps are counted at
 the root (`onTouchStart` on `GestureHandlerRootView`). Taps on the native
 header (the iOS Back button) are UIKit, so they may not reach it: unverified.
 
+**First catch, 2026-11-07 23:54Z** (iOS 27.2, PlayerStats). A `restart` with
+`open_modals` [] and 19 taps since the last screen change. AddLineSheet's open
+and close were both confirmed. This is the "Back does nothing" signature: JS
+alive, no layer over the screen, and the native pop refused. Response
+2026-11-08: arrow-only Back with no custom title (`tests/test_mobile_back_button.py`,
+`docs/sessions/2026-11.md`). Another such row after that ships means it was
+not the custom title.
+
 **Not verified on a phone before merge**: that iOS fires `onDismiss` on every
 close in this React Native version. If every close shows up as a
 `modal_stuck` `dismiss`, that is the callback, not a freeze.
