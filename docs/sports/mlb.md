@@ -43,10 +43,11 @@ converging on the same place from the other side.
   equal total, `BEST_LINE_BOOKMAKERS`, pin-lean only. INSERT off
   (`MLB_TOTAL_MARKET_PUBLISH` default 0). Pin-de-vig vs soft-de-vig May–Jun
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
-  A **separate** paper lane, `mlb_total_public_fade`, fades consensus OVER
+  A **separate** paper model, `mlb_total_public_fade`, fades consensus OVER
   tickets ≥70 (env; 80 supported) and bets UNDER. INSERT off
   (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Optional top-K
-  (`MAX_PER_SLATE` default 0; recommended 2 + `RANK=ticket`). Not an
+  (`MAX_PER_SLATE` default 0; recommended 2 + `RANK=ticket` on 2026-09-19,
+  red over the full season: 78 bets −1.4%, September −27.6% on 27). Not an
   unpause. `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
@@ -55,6 +56,13 @@ converging on the same place from the other side.
   at 1.8pp exists but INSERT is gated (`MLB_SPREAD_MARKET_PUBLISH` default 0).
   GROK Pin-vs-DK ≥2pp spreads ~−5% n≈200 — do not live-publish that construction.
   Not an unpause of this id. `docs/mlb_runline_ou_edge_search.md`.
+  2026-10-10: the 1.8-point rule month by month over the whole season is in
+  `docs/mlb_spread_market_2026.md`: +3.2% to +3.7% overall, April flat or red
+  and May red on every book list; the publish switch has been off since
+  2026-09-19 and the own-EV floor blocks it too (PR #761).
+  Rules built on public splits, line moves and Pinnacle gaps instead of the
+  trained model found nothing bettable, and every near miss lost in the 105
+  games after 2026-09-19 (PR #757, `docs/mlb_runline_edge_hunt.md`).
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
   three starts), shared by the daily ingest and the rebuild via
   `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored
@@ -105,6 +113,13 @@ slate guard. Optional under-juice **band**
 (`UNDER_ODDS_MIN`/`_MAX`, unset = no band; I24 is −110/−100).
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
+2026-10-10 (PR #760, PR #759): the narrow band (I24) is red on the live
+card's prices, 49 bets −12.6% to the end of the season; its +25% came from
+each game's first DraftKings quote, which the card does not use. Ticket top-2
+at 70% also turned red in September (78 bets −1.4% overall). Pre-game
+public coverage is now 255 games (Aug 0). `docs/mlb_total_public_fade.md`.
+The 2026-09-19 search for a second totals rule (PR #759) found none, and the
+full September made its closest misses worse: `docs/mlb_over_under_edge_hunt.md`.
 
 ## 11b5. The schedule gate (2026-10-20)
 
@@ -484,6 +499,8 @@ CalError is measured vs. synthetic lines. Those AUCs were also fit on leaked `ml
 **2026-09-15 (mike): the "DK does not carry these markets" disable was false.** DraftKings' Odds API feed still returns 0 rows for `totals_1st_5_innings` / `spreads_1st_5_innings` (re-queried that day). FanDuel, BetMGM and William Hill do — 18 of today's games, priced. Ingest already fetched all three F5 markets from every shopped book (`MLB_F5_MARKETS`). The scorer now prices F5 O/U and F5 RL off the first bettable book in `BEST_LINE_BOOKMAKERS` order (then shops the same line). No synthetic DK line for live BET. Historical `sbr_consensus` synthesizer rows stay for training features.
 
 **BET stays paused.** Artifacts are 2026-05-08, leak-mismatched, trained on synthetic lines, never swept on real F5 prices. Unpause path is a retrain on the as-of tables + real F5 quotes, then a §7 sweep. Scoring writes NONE rows so that sweep has a universe.
+
+**2026-09-19 first-five market search (no card; re-checked 2026-10-10).** Pinnacle first-five totals and spreads exist only from 2026-09-02; Pinnacle has no first-five moneyline; public splits are full-game only and August has none taken before first pitch. Closest miss: Pinnacle no-vig against a bettable soft book's no-vig on first-five totals at 1.5 points, 96 bets +9.92% from Sep 2 to 30. All of the plus is on the over side (54 bets +30.1%, against +4.8% for blind overs at the same book and line); under picks lost (42 bets −16.0%). One month, found in a many-cell search, so no card; the over side is the lead to re-check in 2027. `docs/mlb_f5_edge_search.md`.
 
 **Full-game `mlb_runline` / `mlb_over_under` stay paused independently.** Honest-era runline −6.93% both sides negative, 0.68 floor unreachable, no live-artifact §7 cut (3 settled at the pooled 0.70/0.08 cell). Over/under honest-era AUC 0.486, zero of six folds clearing 0.55. A human CLE −1.5 is a market/PCG handicap, not `mlb_runline` output.
 

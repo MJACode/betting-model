@@ -1419,6 +1419,35 @@ add it to `data/anon_readable.py`, and the page reads ~40 rows per team by
 `(sport, team)` and drops its NFL-only branch. One migration, one line in the
 daily refresh, first fill on the worker.
 
+## [ ] MLB pitcher prop models: re-run the pitcher-prop market check on 2027 prices before any unpause (added 2026-10-10)
+
+All five pitcher prop models are paused (strikeouts, outs and hits allowed
+since 2026-09-19, #764). The one market-price test of pitcher outs found
+August +2.0% on 52 bets and September 1-19 −9.7% on 28
+(`docs/mlb_prop_market_eval.md` §3). Before considering any unpause in
+2027, re-run that check on the new season's Pinnacle and DraftKings
+pitcher-prop prices; the commands are in §5 of the same file.
+
+## [ ] MLB first-five totals: re-check the Pinnacle-against-soft-book over side in May 2027 (added 2026-10-10)
+
+The 2026 search found no first-five card (`docs/mlb_f5_edge_search.md`).
+Its closest miss, Pinnacle no-vig against a bettable soft book's no-vig on
+first-five totals at 1.5 points, was 96 bets +9.92% from Sep 2 to 30, and
+all of it was on the over side: over picks 54 bets +30.1% against +4.8%
+for blind overs at the same book and line, under picks 42 bets −16.0%.
+Pinnacle first-five prices return with the 2027 season.
+
+- Re-check in May 2027, after one full regular-season month of Pinnacle
+  first-five totals.
+- Read over and under picks separately, and compare each with blind bets
+  at the same book and the same line.
+- The bettable books will be FanDuel, BetMGM and William Hill (Rebet was
+  dropped from the shopped books on 2026-09-20).
+- A rule built on the over side alone is the candidate, if it repeats.
+- If code is wanted, start from PR #762 (branch
+  `cursor/mlb-f5-edge-hunt-7ba7`, commit `b3a4aac`) and add a by-side
+  split; that sweep does not report one.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
@@ -1432,6 +1461,12 @@ After this merges: `mlb_runline_retrain_sweep` register=false. Worker job
 `mlb-over-under-retrain-sweep-2026-09-16`, #741) is the totals twin and
 consumes the same `FEATURE_MAP`. Do not flip `PAUSED_MODELS` or
 `MLB_*_MARKET_PUBLISH`.
+
+2026-10-10: the search for a run-line rule built on market data instead
+of a trained model (PR #757, 2026-09-19, never merged) found none: fading
+the public by tickets or money, the home underdog, reverse line movement,
+line moves and Pinnacle gaps. Every near miss lost in the 105 games played
+after it (`docs/mlb_runline_edge_hunt.md`).
 
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
 

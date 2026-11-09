@@ -28,8 +28,8 @@ It is not this card. Confirming it is **not** permission to flip
 
 | Market | Verdict |
 |---|---|
-| Totals | **Paper `mlb_total_market` at 2pp: Pin fair − soft implied, equal `total_line`, best soft book from `BEST_LINE_BOOKMAKERS`, pin-lean only (never fade Pinnacle).** GROK vs DK only: Apr–Jul ~+11% n≈103. Pin-de-vig vs bettable-soft-de-vig May–Jun 2pp **−11.13% / 79** is a sweep flag (`vs=devig`), not the card. INSERT off (`MLB_TOTAL_MARKET_PUBLISH` default 0). `mlb_over_under` stays paused. |
-| Run line | **Do not live-publish pure Pin-vs-soft spreads.** GROK Pin-open vs DK-open ≥2pp: ~**−5% n≈200**. Earlier same-day bettable-soft de-vig at **1.8pp** was +4.16% / 328 through Aug (both halves +) — a different construction, and GROK’s ≥2pp result is the one that says “more work.” Code for `mlb_spread_market` at 1.8pp remains; INSERT is gated off. `mlb_runline` stays paused. |
+| Totals | **Paper `mlb_total_market` at 2pp: Pin fair − soft implied, equal `total_line`, best soft book from `BEST_LINE_BOOKMAKERS`, pin-lean only (never fade Pinnacle).** GROK vs DK only: Apr–Jul ~+11% n≈103 (**2026-10-10:** not a lead; see the correction under Construction 2). Pin-de-vig vs bettable-soft-de-vig May–Jun 2pp **−11.13% / 79** is a sweep flag (`vs=devig`), not the card. INSERT off (`MLB_TOTAL_MARKET_PUBLISH` default 0). `mlb_over_under` stays paused. |
+| Run line | **Do not live-publish pure Pin-vs-soft spreads.** GROK Pin-open vs DK-open ≥2pp: ~**−5% n≈200**. Earlier same-day bettable-soft de-vig at **1.8pp** was +4.16% / 328 through Aug (both halves +) — a different construction, and GROK’s ≥2pp result is the one that says “more work.” Code for `mlb_spread_market` at 1.8pp remains; INSERT is gated off. `mlb_runline` stays paused. **2026-10-10:** the 1.8-point rule over the whole season, month by month, is in `docs/mlb_spread_market_2026.md` (PR #761): +3.2% to +3.7% over the regular season, but April flat or red and May red on every book list, so it is not month-stable. Rules built on public splits, line moves and Pinnacle gaps were also measured (PR #757, `docs/mlb_runline_edge_hunt.md`): none cleared, and every near miss lost in the 105 games after 2026-09-19. |
 | Hybrid | GROK on existing `mlb_over_under` BETs: disagree with Pin lean **−17.7u / 71**; agree any **−5.1u / 53**; agree ≥1.5pp **−0.5u / 8**. Stops the hemorrhage, is **not +EV**. Steam/public overlay stays **shadow** on the market cards. Live gate stays on the four predictive MLB game models. |
 | Retrain | **Not run here** (no `DATABASE_URL`). Next only if the worker totals 2pp cell is still negative. Commands at the bottom. |
 
@@ -131,6 +131,20 @@ they are GROK’s measurements, labelled as such.
 | Aug/Sep | still running | | |
 
 Apr–Jul combined ~+11.4u / ~103 ≈ **~+11% ROI**. Leading O/U replacement.
+
+**Correction (2026-10-10, from PR #759, never merged): this is not a lead.**
+PR #759 found that the gap came from pairing each book's latest quote with
+no limit on how far apart they were taken, so the two prices could be hours
+apart. Requiring both quotes within 300 seconds of each other on the same
+total, a gap of 1.5 points or more between Pinnacle's no-vig price and a
+soft book's raw price (with its margin) never occurred in June, July or
+Sep 16-18 (2026-09-19). The no-vig against no-vig version at 1.8 points or
+more, re-measured for every month on 2026-10-10: Apr −4.9% on 36, May
+−24.5% on 26, Jun +16.2% on 17, Jul +8.8% on 30, Aug −20.5% on 32, Sep
+−22.4% on 31. That is 172 bets and −16.25u for the season, red in four of
+six months, including the April and May the table above shows as +34.3%
+and −8.8%. June and July match PR #759. Detail and the query:
+`docs/mlb_over_under_edge_hunt.md`.
 
 **SPREADS** ≥2pp, equal line:
 
