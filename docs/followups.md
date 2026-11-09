@@ -1144,7 +1144,7 @@ production backtests were fixed in #895 (`scripts/nhl_prop_backtest.namesakes`).
 The lab was not. Apply the same drop before its merge, then treat every lab
 table in `docs/nhl_market_lab.md` dated before 2026-10-08 as unconfirmed.
 
-## [ ] NHL derivative totals: the grade has two defects — fixed in code, re-grade queued
+## [x] NHL derivative totals: the grade has two defects — fixed, re-graded 2026-11-09
 
 Found 2026-10-08. Team totals were graded on regulation goals, but every book
 prices full-game goals; on full-game goals the same unders lose (-1.78% at EV
@@ -1161,9 +1161,8 @@ full-game score only; the prices confirm it (no-vig over 0.5012 against 0.4948
 landed on the full game and 0.4612 on three periods, 39,515 quotes;
 `docs/nhl_derivative_totals.md`). The under's chance is P(goals < line) and
 expected value returns the stake on a push. The re-grade is the declared job
-`nhl-derivative-totals-regrade-2026-11-09`. **Open until its printout
-(`worker_jobs.result->>'stdout'`) has been read** and its numbers replace the
-model tables in `docs/nhl_derivative_totals.md`.
+`nhl-derivative-totals-regrade-2026-11-09`. Read 2026-11-09: nothing clears;
+the corrected tables are at the top of `docs/nhl_derivative_totals.md`.
 
 Also in that printout: PR #863's Pinnacle-against-a-bettable-book table. Its
 one cell clear of zero was first-period totals at 2% or more (+19.3% on 160
