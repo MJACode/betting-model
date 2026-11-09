@@ -841,13 +841,13 @@ export function PicksHomeScreen() {
           <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
           <Text style={styles.liveNote}>
             {liveWithPriceCount === 0
-              ? 'Bet at the book on each card · live price not shown, checked hourly'
+              ? 'Bet at the book on each card · live price not shown after the bet'
               : 'Bet at the book on each card · prices up to ~45s old'}
           </Text>
           <InfoTooltip
             title="Live pricing"
             body={
-              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books only once an hour, so its cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
+              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books once an hour and the NCAAB in-play models twice an hour, so their cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
             }
             accessibilityLabel="About live pricing"
           />

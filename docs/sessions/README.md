@@ -21,6 +21,7 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, NBA Stats tab: the 1st Basket board (tip, scored first, likely first scorers; free throws count; stats only) |
 | 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, Back button: iOS arrow only, no custom label (third "Back does nothing" report, iOS 27.2, after a pop-up; first one caught by the freeze trail) |
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB in-play models live (early live spread, late live spread, late live total), the best few a night: 2,533 bets +290.4u +10.1% walk-forward 2022-23..2025-26; ESPN play-by-play and 17,117 in-play snapshots stored |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, Player page: filter the chart by opponent defense toughness (Tough / Average / Soft over the last 3 seasons played, next opponent tagged; NBA, WNBA, NFL) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA in-play loop: the 15%-of-plan credit floor removed (only the 1,000-credit line stops it; mike: balance is not a reason to stop) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB spread and moneyline re-graded without betPARX: a tie goes to the bettable book (spread 405 bets +10.09%, moneyline 836 +4.27% on 2021-2025); a strictly-best betPARX quote is a no-bet that no longer fails the card |

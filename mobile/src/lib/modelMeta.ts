@@ -485,6 +485,35 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NCAAB in-play (models/ncaab_live_ig.py, 2026-11-07): the game-state
+  // model against the live spread or total, one bet per game and rule at the
+  // first fresh price, only its biggest edges, at most five a night across
+  // the three. Every bet SETTLES ON THE FULL GAME, so the names say when the
+  // bet is placed (Early: the first half; Late: halftime on), never a period.
+  // The chips follow the NBA in-play model's (Early Spread, mike 2026-11-05),
+  // and tell the two spread models apart. Their picks appear on the Live
+  // segment only.
+  ncaab_live_spread_h1: {
+    shortLabel: 'Early Spread',
+    longLabel: 'NCAAB Early Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaab_live_spread_h2: {
+    shortLabel: 'Late Spread',
+    longLabel: 'NCAAB Late Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaab_live_total_h2: {
+    shortLabel: 'Late O/U',
+    longLabel: 'NCAAB Late Live Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -1083,6 +1112,15 @@ const NBA_LIVE_TIMING: Readonly<Record<string, { when: string; settles: string }
   },
 };
 
+// The NCAAB in-play models (models/ncaab_live_ig.py): when each bets. The loop
+// checks games in progress every half hour (models/ncaab_live_loop.py) and
+// posts only the night's strongest few. Each bet is on the FULL game.
+const NCAAB_LIVE_TIMING: Readonly<Record<string, { when: string; market: string }>> = {
+  ncaab_live_spread_h1: { when: 'during the first half', market: 'spread' },
+  ncaab_live_spread_h2: { when: 'from halftime until two minutes are left', market: 'spread' },
+  ncaab_live_total_h2: { when: 'from halftime until two minutes are left', market: 'total' },
+};
+
 const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
 const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
 
@@ -1093,6 +1131,20 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
   // their bets are never listed there: the copy says where they are instead
   // of promising a pipeline refresh that will never fill the list.
   if (isLiveModel(modelId)) {
+    const ncaab = NCAAB_LIVE_TIMING[modelId];
+    if (ncaab) {
+      return {
+        title: 'Bets during the game',
+        body:
+          `This model checks NCAAB games in progress twice an hour, ${ncaab.when}, and bets each game at ` +
+          `most once, at the sportsbook with the best offer. It bets only its biggest edges, and stops after ` +
+          `five bets a night across the NCAAB in-play models. The bet is on the full-game ${ncaab.market}: it ` +
+          `settles on the final score, overtime included, not on the half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty:
+          `This model checks NCAAB games in progress twice an hour, ${ncaab.when}. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
     const nba = NBA_LIVE_TIMING[modelId];
     if (nba) {
       return {

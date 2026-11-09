@@ -111,6 +111,12 @@ EDGE_CAP: dict[str, float] = {
     "ncaab_moneyline_first_post": 0.40,
     "ncaab_first_half_spread": 0.60,
     "ncaab_first_half_total": 0.50,
+    # The in-play rules (2026-11-07): the largest edge over 61,019 graded
+    # decisions was 0.453 (99.9th percentile 0.266), so 0.50 is above every
+    # graded bet. A decision over it is a data error: declined, never bet.
+    "ncaab_live_spread_h1": 0.50,
+    "ncaab_live_spread_h2": 0.50,
+    "ncaab_live_total_h2": 0.50,
 }
 
 

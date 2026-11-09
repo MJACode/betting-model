@@ -242,6 +242,12 @@ RUN_NFL_LIVE_LEADER = (os.environ.get("RUN_NFL_LIVE_LEADER", "1").strip().lower(
 RUN_NBA_LIVE = (os.environ.get("RUN_NBA_LIVE", "1").strip().lower()
                 not in ("0", "false", "off", "no"))
 
+# NCAAB in-play loop (models/ncaab_live_loop.py): the three game-state rules,
+# the best few a night, LIVE 2026-11-07 (mike: "3-5 best per night"), so ON by
+# default; RUN_NCAAB_LIVE=0 stops it without a code change.
+RUN_NCAAB_LIVE = (os.environ.get("RUN_NCAAB_LIVE", "1").strip().lower()
+                  not in ("0", "false", "off", "no"))
+
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
 # do rather than three days later.
@@ -950,6 +956,8 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 # The NBA in-play loop: the same shape (free ESPN reads, one
                 # Odds API call per decision instant, writes Supabase only).
                 "nba_live",
+                # The NCAAB in-play loop: the same shape again.
+                "ncaab_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1092,6 +1100,23 @@ def run_nba_live() -> None:
         # A loop that dies on every launch (a bad import, a missing artifact,
         # the decision table not yet created) must not read as healthy.
         raise RuntimeError(f"nba-live loop exited {outcome}")
+
+
+def run_ncaab_live() -> None:
+    # The NCAAB in-play loop (models/ncaab_live_loop.py), the run_nba_live
+    # shape: free ESPN reads every 20 s, exits after a few idle ticks with no
+    # NCAAB game in progress, relaunched by this */10 cron (max_instances=1).
+    # Odds API credits are spent ONLY at a fetch moment (each :00 and :30
+    # minus 262 s, retried to +240 s) while a game in progress has a rule not
+    # yet decided: one bulk spreads + totals call for every game, 2 credits,
+    # capped per process by NCAAB_LIVE_CALL_CAP / NCAAB_LIVE_CREDIT_CAP and by
+    # the shared LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.ncaab_live_loop"],
+        "ncaab-live",
+    )
+    if outcome != "ok":
+        raise RuntimeError(f"ncaab-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -2963,6 +2988,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NBA_LIVE=0 — NBA in-play loop NOT scheduled.")
+
+    # NCAAB in-play loop. 11am to 2:50am ET: the earliest tips are around 11am
+    # ET on weekends and a late West tip ends after 1am; an idle launch reads
+    # ESPN's scoreboard and exits.
+    if RUN_NCAAB_LIVE:
+        sched.add_job(
+            run_ncaab_live,
+            CronTrigger(hour="0-2,11-23", minute="*/10", timezone=TIMEZONE),
+            id="ncaab_live",
+            name="NCAAB in-play loop supervisor (11am-2:50am ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NCAAB_LIVE=0 — NCAAB in-play loop NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(

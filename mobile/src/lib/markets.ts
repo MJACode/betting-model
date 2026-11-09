@@ -1050,6 +1050,10 @@ export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_l
  */
 export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   'nba_live_spread_q12',
+  // models/ncaab_live_loop.py reads the books at each :00 and :30 only.
+  'ncaab_live_spread_h1',
+  'ncaab_live_spread_h2',
+  'ncaab_live_total_h2',
 ]);
 
 /**
@@ -2026,6 +2030,18 @@ const NCAAB_MONEYLINE_MODELS: readonly string[] = [
   'ncaab_moneyline_first_post',
 ];
 
+/**
+ * The half an NCAAB live bet was placed in. Men's college basketball plays two
+ * halves; the loop stores the period (1, 2, then overtimes). A second-half
+ * model's bet stored with period 1 was placed at the halftime break (the state
+ * is the first half's last play, models/ncaab_live_ig.phase_of).
+ */
+export function ncaabLivePeriod(period: number, modelId: string | null | undefined): string {
+  if (period >= 3) return 'overtime';
+  if (period === 2) return '2nd half';
+  return (modelId ?? '').endsWith('_h2') ? 'halftime' : '1st half';
+}
+
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
   if (pick.signal_type !== 'BET') return null;
@@ -2041,13 +2057,16 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
 
   if (pick.is_live) {
     // `inning_at_pick` is the shared period column: the inning for MLB, the
-    // quarter for every other in-play sport (NCAAF, NFL, and NBA, whose loop
-    // writes the quarter there — models/nba_live_loop.build_pick).
+    // half for NCAAB (models/ncaab_live_loop.build_pick), the quarter for every
+    // other in-play sport (NCAAF, NFL, and NBA, whose loop writes the quarter
+    // there — models/nba_live_loop.build_pick).
     const period =
       pick.inning_at_pick != null
         ? pick.sport === 'MLB'
           ? ` · inning ${pick.inning_at_pick}`
-          : ` · Q${pick.inning_at_pick}`
+          : pick.sport === 'NCAAB'
+            ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
+            : ` · Q${pick.inning_at_pick}`
         : '';
     return {
       kind: 'live',
