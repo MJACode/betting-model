@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, the old `Downloads/nfl-model` folder deleted (mike); its 524 Open-Meteo files and 5 pre-port opener files stored in `nfl_research_data_backup` (`source LIKE 'downloads_nfl_model|%'`), its git history bundled to the local mirror |
 | 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, NBA Stats tab: the 1st Basket board (tip, scored first, likely first scorers; free throws count; stats only) |
 | 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, Back button: iOS arrow only, no custom label (third "Back does nothing" report, iOS 27.2, after a pop-up; first one caught by the freeze trail) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB in-play models live (early live spread, late live spread, late live total), the best few a night: 2,533 bets +290.4u +10.1% walk-forward 2022-23..2025-26; ESPN play-by-play and 17,117 in-play snapshots stored |
