@@ -109,6 +109,8 @@ MAX_SILENCE: dict = {
     # of ncaab_events, then return, all off-season), so 20 minutes is four
     # missed ticks: a stopped capture, and opener times going unrecorded.
     "ncaab_odds_capture": 20,
+    # The women's capture: the same cadence and the same bound.
+    "ncaabw_odds_capture": 20,
     # Every five minutes, 24x7. The tick beats when it returns, including the
     # ones that poll nothing because the cadence has not elapsed, so 20
     # minutes is four missed ticks: a stopped feed, not a quiet afternoon.
@@ -117,6 +119,8 @@ MAX_SILENCE: dict = {
     # ledger and first-total reads), so 20 minutes is four missed ticks: a
     # stopped card, and DraftKings' first totals going by unbet.
     "ncaab_total_card": 20,
+    # The women's card: the same cadence and the same bound.
+    "ncaabw_total_card": 20,
     # The same cadence: hourly at five past, 24x7 UTC, beating on the idle
     # hours too. It decides only in the 15:00 UTC hour, so a stopped card is
     # also caught by the next run's `missed` failure.

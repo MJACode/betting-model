@@ -70,7 +70,8 @@ had already broken the same claim (NFL_2026_06_ARI_LA
 player_pass_yds_alternate: williamhill_us holds 38 state rows, and only 2 of
 their source rows survive the prune).
 
-NBA and NCAAB keep their whole price path (NBA 2026-10-17, NCAAB 2026-10-26):
+NBA, NCAAB, NCAABW and NCAAF keep their whole price path (NBA 2026-10-17,
+NCAAB 2026-10-26, NCAABW 2026-11-09, NCAAF 2026-11-10):
 the two tiers skip every `PATH_KEPT_SPORTS` row, and `thin_repeats` deletes
 only the middle of an unchanged run, keeping the row where each book moved and
 the last row it held. The thinning never touches the books above either, nor a
@@ -302,7 +303,13 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # The re-bought in-play instants (2026-11-07,
                      # data/ingestors/ncaab_inplay_history.SOURCE): paid rows on
                      # past games, the NCAAB in-play model's graded market.
-                     "odds_api_ncaab_inplay_history")
+                     "odds_api_ncaab_inplay_history",
+                     # Women's college basketball (2026-11-09,
+                     # data/ingestors/ncaabw_odds_history.py): every 5-minute
+                     # snapshot the feed holds, pre-game (change-only) and in
+                     # play. Paid rows on past games.
+                     "odds_api_ncaabw_history",
+                     "odds_api_ncaabw_inplay_history")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
@@ -320,7 +327,20 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # NCAAB joins it for its first season (2026-10-26, first game 2026-11-01), so
 # that season keeps when each book moved and from what, as the NBA's does. A
 # season thinned to opener and close cannot be put back.
-PATH_KEPT_SPORTS = ("NBA", "NCAAB")
+#
+# NCAABW (women's college basketball) joins it from its first stored day
+# (2026-11-09): the same reason, and a thin board (a median 7 listed games a
+# game day), so the kept path is small.
+#
+# NCAAF joins it 2026-11-10 (the market audit, docs/ncaaf_market_audit.md).
+# Measured that day on the local copy of `odds`: a settled 2026 game held a
+# median of ONE full-game spread row at each book but DraftKings (two at
+# BetRivers and Rebet), against 92 to 121 on the games still to be played
+# (Rebet 17, on its one game). So nothing
+# that compares books during the week could be read forward on 2026, and the
+# 2023-2025 purchase (two pulls a day) is the only multi-book history there
+# is. The weeks already thinned cannot be put back.
+PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW", "NCAAF")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:

@@ -49,6 +49,9 @@ KNOWN_RULES = {
     # DraftKings' total (models/ncaab_total_blend.py); its artifact holds
     # parameters, not an estimator.
     "ncaab_total_blend",
+    # 2026-11-09 (mike): NCAABW totals, the women's twin of that model
+    # (models/ncaabw_total_blend.py); its artifact holds parameters too.
+    "ncaabw_total_blend",
     # 2026-11-02 (mike): NCAAB spreads, every bettable book priced at 15:00 UTC
     # against the books' median line (models/ncaab_spread_market.py); its
     # artifact holds the mean offset and the final-margin table.

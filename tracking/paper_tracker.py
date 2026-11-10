@@ -2514,6 +2514,9 @@ _RULE_MODEL_MARKETS = {
     # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
     # total; the stored final includes overtime, as books settle it.
     "ncaab_total_blend": "totals",
+    # NCAABW full-game totals (models/ncaabw_total_blend.py), the women's
+    # twin: scored_line is the total; the stored final includes overtime.
+    "ncaabw_total_blend": "totals",
     # NCAAB full-game spreads (models/ncaab_spread_market.py). scored_line is
     # the bet book's HOME number (section 4); the stored final includes
     # overtime, as books settle it.

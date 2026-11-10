@@ -913,6 +913,25 @@ ACTION_THRESHOLDS: dict = {
     # 2025-26 603 +29.01) and in both halves of the seasons (Nov-Dec 890
     # +18.04, Jan on 997 +109.27). Prices -160 to +115.
     "ncaab_first_half_total":   {"min_prob": 0.0, "min_edge": 0.025},
+    # NCAABW (women's college basketball) full-game totals (2026-11-09, mike:
+    # "Take everything we learned about building the NCAAB models and now build
+    # models for the womens NCAABW"): models/ncaabw_total_blend.py, written by
+    # scripts/ncaabw_total_card.py. The men's totals method on the women's
+    # games: ratings refit as of DraftKings' first posted total, a residual on
+    # as-of shooting luck and style rates, blended with that total; bet the
+    # side whose P(win | no push) beats DraftKings' implied probability by more
+    # than 0.05, only while the first post still stands. The cut is the
+    # women's own (docs/sports/ncaabw.md "Research"), not the men's copied.
+    # Two priced seasons exist (the feed's history starts 2024-11-12).
+    # 2025-26 on numbers fitted on 2024-25 only: 402 bets, 225-177, +29.96
+    # units, +6.77%, date-resampled 95% interval [-2.2, +15.1]. Each season on
+    # the other season's blend, pooled: 0.02 785 bets +6.72%; 0.03 644 +9.64%;
+    # 0.04 538 +11.02%; 0.05 453 bets, 264-189, +55.76 units, +11.18% [+2.7,
+    # +19.3]; 0.06 378 +12.03%; 0.08 286 +12.71%. Every cut positive. On the
+    # blend it runs on (both seasons, in sample): 374 bets, +75.73 units,
+    # 21.6% of priced games, prices -115 to -105. November was flat in both
+    # seasons; December on carried it. min_prob 0.0: the edge is the cut.
+    "ncaabw_total_blend":       {"min_prob": 0.0, "min_edge": 0.05},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -2248,6 +2267,11 @@ MODEL_MIN_ODDS: dict = {
     # 2,527 bets of the 2,529 (prices -160 to +155), so this is the second
     # guard. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
     "ncaab_first_half_total":    -200,
+    # NCAABW totals (2026-11-09, mike): it laid -115 to -105 on its 374
+    # replayed bets, and DraftKings' women's totals were priced -120 to -102
+    # on every pre-game row of 2024-25 to 2026-27 to date. Pinned so a Railway
+    # DEFAULT_MIN_ODDS override cannot move it.
+    "ncaabw_total_blend":        -200,
     # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
     # NFL in-play leader moneyline: -140 (mike, 2026-10-15 ET, "Floor is -140 for
     # this model", after a -980 bet on SEA @ DEN). It shipped at -5000 so the
@@ -2596,6 +2620,13 @@ MODEL_OWN_EV_FLOOR: dict = {
     # removes a bet the cut takes (0.042 would, at -150 and shorter). Was 0.03
     # at the 0.02 cut.
     "ncaab_first_half_total":   0.037,
+    # NCAABW totals (2026-11-09, mike). The cut is the edge (0.05, in
+    # MODEL_EDGE_THRESHOLDS), so this floor sits just under what that cut can
+    # admit: EV is edge x decimal odds, so an edge above 0.05 at -200 or
+    # longer is EV above 0.075. The smallest EV on its replayed bets is
+    # +0.0956 (374 bets, the blend it runs on; median +0.137). 0.07 never
+    # removes a bet the cut takes.
+    "ncaabw_total_blend":       0.07,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2773,6 +2804,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # push) from its own first-half total table, which its 0.02 cut was
     # measured on. No record either.
     "ncaab_first_half_total",
+    # 2026-11-09 (mike). NCAABW totals: its number is the blend's P(win | no
+    # push) at DraftKings' line, which its 0.05 cut was measured on. It has no
+    # record, so its map would be the offset borrowed from other models.
+    "ncaabw_total_blend",
 })
 
 
@@ -2968,6 +3003,10 @@ SCORING_METHODS: dict = {
     # The same shape: models/saved/ncaab_first_half_total_<season>.json holds
     # the first-half total's map, table sample and team term.
     "ncaab_first_half_total": "rule",
+    # The women's twin of ncaab_total_blend: a rule with a parameter artifact
+    # committed under models/saved/ (models/ncaabw_total_blend.py), loaded by
+    # scripts/ncaabw_total_card.py by its pinned path, never registered.
+    "ncaabw_total_blend":  "rule",
 }
 
 
@@ -3005,6 +3044,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_moneyline_first_post": 0.015,  # 2026-11-03 mike: THE cut, at a book's first moneyline post; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.025,  # 2026-11-02 mike, raised 2026-11-07 mike: THE cut, P(cover | no push) minus the bet book's implied; see ACTION_THRESHOLDS
     "ncaab_first_half_total":   0.025,  # 2026-11-03 mike, raised 2026-11-06 mike: THE cut, P(win | no push) minus the bet book's implied; see ACTION_THRESHOLDS
+    "ncaabw_total_blend":       0.05,   # 2026-11-09 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
@@ -3107,6 +3147,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaab_moneyline_first_post": 0.0,  # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_first_half_spread":  0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_first_half_total":   0.0,    # 2026-11-03 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ncaabw_total_blend":       0.0,    # 2026-11-09 mike: the cut is the edge; see ACTION_THRESHOLDS
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
@@ -5095,6 +5136,48 @@ NCAAB_INJURY_TEAM_MAP: dict = {}
 # on the roster; a value that is not is a miss, not a match. Empty until a
 # miss is confirmed by hand.
 NCAAB_INJURY_PLAYER_MAP: dict = {}
+
+# Women's college basketball (NCAABW): an odds-feed team name -> ESPN team id,
+# for the names data.ingestors.ncaabw_teams.resolve_team_name cannot place on
+# its own. The same shape as NCAAB_ODDS_API_MAP above, and its own map: the
+# feed names many women's teams by the men's mascot ("Oklahoma St Cowboys" for
+# ESPN's "Oklahoma State Cowgirls"), so a name here is a women's feed name.
+# ESPN gives a school's women's team the same id as its men's team.
+#
+# The entries below (2026-11-09) are the feed names no rule can place among
+# the 353 names on the 2,293 women's events the feed listed from 2024-11-12 to
+# 2026-04-05. Each count is that name's events. Each id is in ncaabw_teams
+# under the school named, and is the team ESPN's women's schedule plays
+# against the event's other team on its date (docs/sports/ncaabw.md, "Feed
+# team names").
+NCAABW_ODDS_API_MAP: dict = {
+    "GW Revolutionaries": 45,               # ESPN "George Washington Revolutionaries"; 6
+    "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 5
+    "Albany Great Danes": 399,              # ESPN "UAlbany Great Danes"; 5
+    "Tenn-Martin Skyhawks": 2630,           # ESPN "UT Martin Skyhawks" (not Tennessee, 2633); 4
+    "Seattle Redhawks": 2547,               # ESPN "Seattle U Redhawks"; 3
+    "Miss Valley St Delta Devilettes": 2400,  # ESPN "Mississippi Valley State Devilettes"; 3
+    "Arkansas-Little Rock Trojans": 2031,   # ESPN "Little Rock Trojans" (not Arkansas, 8); 2
+    "Long Beach St 49ers": 299,             # ESPN "Long Beach State Beach"; 2
+    "LIU Sharks": 112358,                   # ESPN "Long Island University Sharks"; 2
+    "Fort Wayne Mastodons": 2870,           # ESPN "Purdue Fort Wayne Mastodons"; 1
+    "New Orleans Privateers": 2443,         # ESPN "LSU New Orleans Privateers"; 1
+    "Appalachian St Mountaineers": 2026,    # ESPN "App State Mountaineers"; 1
+}
+
+# Women's college basketball: the books fetched and stored for NCAABW on top of
+# LINE_SHOP_BOOKMAKERS. None of them is a book a pick may name (they are not in
+# BEST_LINE_BOOKMAKERS); they are stored because the women's board is thin and
+# has no Pinnacle. Measured 2026-11-09 on 14 history snapshots, every region
+# the feed sells (219 pre-game events): the books pricing women's games were
+# DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers and these six;
+# Pinnacle, Bovada and betPARX priced none. betwhale is the seventh: it priced
+# 3 of the 5 games listed live that evening. Seventeen books in all, so a
+# women's bulk call bills two regions (the bookmakers param counts ten books
+# as one region): 6 credits live, 60 from history.
+NCAABW_EXTRA_BOOKMAKERS: list = [
+    "espnbet", "ballybet", "fliff", "betonlineag", "lowvig", "unibet", "betwhale",
+]
 
 # The Odds API team name → CFBD canonical school name.
 #

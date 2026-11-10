@@ -1512,6 +1512,47 @@ runs). Held out: the first-half total and the second-half moneyline (fail the
 bands), the first-half moneyline (passes; stale-soft-book signature). Go-live
 gate standing: 0 settled of 50.
 
+## NCAABW — `ncaabw_total_blend`, women's full-game totals (2026-11-09, mike)
+
+mike, 2026-11-09: *"Take everything we learned about building the NCAAB models
+and now build models for the womens NCAABW."* The men's totals method on the
+women's games (`models/ncaabw_total_blend.py`, `scripts/ncaabw_total_card.py`;
+the model, its evidence and what a straight copy got wrong are
+`docs/sports/ncaabw.md` "The totals model"). Live from 2026-11-10.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.05, the women's own grid, not the men's copied | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.05. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.07, on its own probability: an edge above 0.05 at -200 or longer is EV above 0.075, so it removes nothing the cut takes (the replay's smallest EV is +0.0956, 374 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; it laid -115 to -105 in its replay, and DraftKings priced every women's total -120 to -102 | `MODEL_MIN_ODDS` |
+| early season | no wait, as the evidence was graded | `models/ncaabw_total_blend.py` |
+| decision moment | DraftKings' first posted total (the earliest pre-game row, total 90-200, both prices), bet only while it is still DraftKings' standing number, else `first_post_gone` with no bet; the card every 5 minutes, 3 after each capture poll | `scripts/ncaabw_total_card.py` |
+| decided once | a row in `ncaabw_total_decisions`, bet or not | `scripts/ncaabw_total_card.py` |
+| stake | flat: one women's model, so no agreement sizing | no `stake_units` |
+
+**The neighbourhood** (every priced game at DraftKings' first posted total;
+date-resampled 95% interval). Two priced seasons exist, so walk-forward is one
+season; the second column pools it with 2024-25 graded on 2025-26's blend:
+
+| Cut | 2025-26 on 2024-25's numbers | ROI | interval | each season on the other's blend | ROI | interval |
+|---|---|---|---|---|---|---|
+| 0.03 | 516 bets, +26.33 units | +4.63% | [-3.7, +12.1] | 644 bets, +68.35 units | +9.64% | [+2.9, +16.1] |
+| 0.04 | 462 bets, +31.13 units | +6.12% | [-1.6, +14.1] | 538 bets, +65.23 units | +11.02% | [+3.9, +18.5] |
+| **0.05** | **402 bets, +29.96 units** | **+6.77%** | **[-2.2, +15.1]** | **453 bets, +55.76 units** | **+11.18%** | **[+2.7, +19.3]** |
+| 0.06 | 345 bets, +27.59 units | +7.26% | [-2.3, +16.8] | 378 bets, +50.09 units | +12.03% | [+2.4, +21.0] |
+| 0.08 | 276 bets, +32.16 units | +10.57% | [-0.1, +20.9] | 286 bets, +40.06 units | +12.71% | [+1.8, +22.9] |
+
+Every cut is positive in both columns. The one walk-forward season's own
+interval includes zero at every cut. 0.05 bets 21.6% of priced games on the
+blend it runs on, about what the men's cut does on a full slate.
+
+**What is not known.** One walk-forward season. The blend moved between the
+two seasons (beta 1.05 on 2024-25, 0.46 on 2025-26). The model claims more
+than it hits (claimed 0.599, won 0.571 on 198 games). November was flat in
+both seasons. No Pinnacle close exists for the women's games, so there is no
+sharp-close EV column.
+
 ## NBA — the in-play game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 mike, 2026-11-04: *"everything goes live now, that's why we do back testing ...

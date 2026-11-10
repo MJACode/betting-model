@@ -82,6 +82,8 @@ _SPORT_TOKENS = {
     # Men's college basketball (2026-27): the Odds API key, and ESPN's path
     # segment for its schedule and box scores.
     "basketball_ncaab": "NCAAB", "mens-college-basketball": "NCAAB",
+    # Women's college basketball (2026-11-09): the same two for NCAABW.
+    "basketball_wncaab": "NCAABW", "womens-college-basketball": "NCAABW",
 }
 
 # A request that never returns is the one failure mode this repo has no defence

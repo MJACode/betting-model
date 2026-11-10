@@ -1105,7 +1105,14 @@ function EmptyForView({
     return (
       <EmptyState
         title={`No ${sport} picks today`}
-        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`}
+        subtitle={
+          // The women's totals model posts when DraftKings opens a game's
+          // total, not on the refresh cadence, so the refresh times would
+          // send a member back at the wrong hour (UX review, 2026-11-10).
+          sport === 'NCAABW'
+            ? `No NCAABW picks have posted for ${date} yet. Picks post as DraftKings opens each game’s total, mostly on game day.`
+            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
       />
     );
   }
@@ -1129,7 +1136,14 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitle={
+            // Spelled out for the women's sport: the list of in-play sports
+            // names NCAAB, and "NCAAB ... NCAABW" in one sentence reads as a
+            // typo (UX review, 2026-11-10).
+            sport === 'NCAABW'
+              ? 'There is no in-play model for women’s college basketball. The All and Signals boards carry its pre-game picks.'
+              : `In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`
+          }
         />
       );
     }

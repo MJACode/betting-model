@@ -630,7 +630,9 @@ export function teamBoardSeason(sport: Sport, now: Date = new Date()): number {
   }).formatToParts(now);
   const year = Number(parts.find((p) => p.type === 'year')?.value);
   const month = Number(parts.find((p) => p.type === 'month')?.value);
-  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB') {
+  // NCAABW labels by the ending year like NCAAB (docs/sports/ncaabw.md). It
+  // has no Teams board; this keeps the answer right for every sport.
+  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB' || sport === 'NCAABW') {
     return month >= 10 ? year + 1 : year;
   }
   return year;
@@ -639,7 +641,7 @@ export function teamBoardSeason(sport: Sport, now: Date = new Date()): number {
 /** How the board names a season: "2026-27" for the leagues that straddle
  *  two years, else the year. */
 export function teamSeasonLabel(sport: Sport, season: number): string {
-  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB') {
+  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB' || sport === 'NCAABW') {
     return `${season - 1}-${String(season).slice(2)}`;
   }
   return String(season);

@@ -21,6 +21,119 @@
 
 ---
 
+## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
+
+Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
+cut at 0.05, settlement, the scheduler job, Discord and the app.
+`docs/sports/ncaabw.md` "The totals model".
+
+## [ ] NCAABW: load each season's schedule whole (every October)
+
+The totals model pools a team with fewer than 10 games on the stored
+schedule, and the daily step stores only 14 days ahead. 2026-27 was loaded
+by hand on 2026-11-10. Before the first game of 2027-28:
+`python -m data.ingestors.ncaabw_espn_ingestor --backfill 2027-11-01 2028-03-15`,
+then rebuild the artifact (`python -m scripts.ncaabw_total_blend_build
+--last-season 2027`, after the research cache is refreshed). The card fails
+its run and names the command if the schedule is short, so this cannot be
+missed silently; a step that loads it without a person would be better.
+
+## [ ] NCAABW: the build reads a cache on one PC
+
+`scripts/ncaabw_total_blend_build.py` reads the research cache
+(`~/ncaabw_research/cache`), which is a copy of what Supabase holds. Every row
+is in the database, but the build cannot run on the worker. Next season's
+rebuild should read the three tables directly.
+
+## [ ] Ten tests fail in the main checkout only because other checkouts sit inside it (2026-11-10)
+
+Full suite on `claude/ncaaf-market-audit` in the main checkout: 23 failed,
+11,521 passed, 107 skipped (1h19m, nothing else running). Thirteen are the
+fourteen listed below (the rules-split test passes where a `.env` exists).
+The other ten pass, or skip, on a clean copy of master and of that branch
+made outside the repo (`git worktree add --detach`, 153 and 154 passed).
+
+- Nine scan the repo and walk into `.claude/worktrees/` (two old checkouts
+  on this machine, `compassionate-galileo-faf01f` and `ncaabw`), then fail on
+  the old files there: `test_anon_readable` (two), `test_ddl_guard`,
+  the live-money wording scan (`tests/test_live_money_*.py`, one),
+  `test_nhl_goalie_guards` (two), `test_worker_deps` (three). The fix is for those scans to skip
+  `.claude/worktrees/`, or to remove the two checkouts once their branches
+  are merged.
+- `test_mobile_nhl_skater_stats::test_the_behavioural_checks_pass` fails in
+  the main checkout and is skipped on the clean copies. Not looked into.
+
+## [ ] Fourteen tests fail on master (measured 2026-11-10, master 93b032e3)
+
+`python -m pytest -q tests/` on this machine: 14 failed, 11,510 passed. None
+is from the work that found them; each was re-run on a clean copy of master.
+
+- Fail alone: `test_claude_rules_split` (`config-topology.md`; needs a
+  `.env`), `test_deploy_drain` (the forwarded SIGTERM),
+  `test_health_check_observe` and `test_model_quality` (both compare a line of
+  `run_pipeline.py` at four spaces of indent; master has eight),
+  `test_market_coverage_probe` (an all-line leg slip),
+  `test_mobile_board_season` (the grade legend), `test_multi_book_odds` (the
+  closing-line reads), `test_nhl_totals_card` (insert once under the model
+  lock), `test_picks_unique_row` (the card insert), `test_price_prefilter_rollback`
+  (two), `test_web_site` (the record math against the node suite; no node on
+  PATH here).
+- Fail only in a full run: `test_social_posts` and `test_social_profile`
+  (one test each). They call `scheduler.build_scheduler()` after a test that
+  reloaded the scheduler has left it in the pollers role. Reproduce:
+  `python -m pytest -q tests/test_daily_retry.py tests/test_nba_live_config.py
+  tests/test_ncaab_live_config.py tests/test_nfl_live_leader_config.py
+  tests/test_pipeline_watch.py tests/test_savant_freshness.py
+  tests/test_service_role_split.py tests/test_social_posts.py
+  tests/test_social_profile.py`.
+
+## [ ] App: ReBet is still a selectable sportsbook with no prices (2026-11-10)
+
+The feed stopped fetching ReBet on 2026-09-20 (its newest row in
+`latest_odds` is 2026-09-20T19:17Z), but the app's sportsbook picker still
+offers it. Read 2026-11-10: 4 of 28 stored book sets hold ReBet and none
+holds only ReBet, so nobody is stranded today; a member who picked only ReBet
+would see "Not offered at your books" on every pick. The fix is the one made
+for Bally Bet and Fliff on 2026-11-10: add it to `REFERENCE_ONLY_BOOKS`
+(`mobile/src/lib/markets.ts`) and update the two counts in
+`mobile/scripts/verify_book_lines.ts`. Found by the UX review of the NCAABW
+app change; it predates it.
+
+## [ ] App: the college basketball look-ahead read sits 40 rows under the cap
+
+`fetchUpcomingCollegeBasketballPicks` (`mobile/src/lib/queries.ts`) reads
+DraftKings' lines for 80 games a request across 12 markets: 960 rows against
+a 1,000-row response cap. A thirteenth market in `MAIN_GAME_ODDS_MARKETS`
+would pass it silently for both college basketball sports. Chunk at 64 or
+page the read. Found by the same review; it predates the women's sport.
+
+## [ ] NCAABW in play: finish the checks, then decide (2026-11-09)
+
+The second-half total made +8.75% [2.2, 15.7] on 698 bets in 2025-26 and
++12.84% on 305 in 2024-25 (`scripts/ncaabw_research/inplay.py`). Before it is
+anything more than a first look it needs what the men's in-play models
+passed: the blind same-side baseline, the bands below and above the cut, the
+placebo (each game given another game's model), and the stale-quote checks
+(quote age, time since the last score, a sharp-book split; the women's board
+has no Pinnacle, so BetOnline and LowVig stand in). The first week of 2026-27
+was negative on every rule.
+
+## [ ] NCAABW: ESPN's own odds are in a local cache only (2026-11-09)
+
+`scripts/ncaabw_research/espn_odds.py` read ESPN's stored odds for 2022-23 and
+2023-24 (11,694 games asked, a sportsbook line on 4,886 and 3,057) into a
+research cache. They are free and re-readable, but they took a run to fetch
+and they are evidence the totals model is cited on, so they belong in
+Supabase: an importer and a table, then the research reads the table.
+
+## [ ] NCAABW: the feed lists about one game in five (2026-11-09)
+
+The odds feed listed 2,293 women's games over two seasons against about
+12,000 played, and ESPN's stored odds show one sportsbook pricing 84% of
+2022-23's games. Whether books still price that many and the feed does not
+carry them, or the books stopped, is not known. `docs/odds_sources.md` lists
+the other providers; none has been asked about women's college basketball.
+
 ## [x] NBA first quarter: grade what was bought (2026-11-03) — DONE 2026-11-04
 
 Graded 2026-11-04, nothing built: first-quarter props 0 of 18 pass (run `2026-11-04-q1props`,

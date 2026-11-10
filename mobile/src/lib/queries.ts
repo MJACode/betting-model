@@ -214,13 +214,14 @@ const hasTeams = (teams: SlateTeams): teams is readonly string[] =>
  * cap, which returns an arbitrary 1,000 and says nothing.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  // No golf leaderboard (v1).
-  if (sport === 'GOLF') return [];
+  // No golf leaderboard (v1), and no NCAABW (women's college basketball)
+  // player stats in the app. Named, or the sport falls to the MLB read below.
+  if (sport === 'GOLF' || sport === 'NCAABW') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -289,7 +290,7 @@ const totalsRowKey = (r: SeasonTotalsRow): string =>
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -305,15 +306,16 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  // No golf leaderboard (v1).
-  if (sport === 'GOLF') return [];
+  // No golf leaderboard (v1), and no NCAABW player stats in the app. Named,
+  // or the sport falls to the MLB read below.
+  if (sport === 'GOLF' || sport === 'NCAABW') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -394,7 +396,7 @@ function pageRpc<T>(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
@@ -477,7 +479,7 @@ const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
@@ -598,7 +600,7 @@ function h2hSeasonCandidates(sport: string, season: number): number[] {
  * ask about, and an unnarrowed H2H read is the cross product.
  */
 export async function fetchH2HStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   matchups: H2HMatchups,
@@ -673,7 +675,7 @@ export async function fetchSeasonStarted(
  * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   seasons: number[],
   statKey: string,
   posGroup: string,
@@ -737,7 +739,7 @@ export async function fetchPositionVsOpponent(
  * names, never one picked by a variable (tests/test_anon_readable.py).
  */
 export async function fetchPlayerVsDefense(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   playerId: string,
   statKey: string,
   posGroup: string,
@@ -1826,25 +1828,37 @@ export async function fetchUpcomingNcaafPicks(
 }
 
 /**
- * Upcoming NCAAB picks AFTER `afterDate` through `throughDate`.
+ * Upcoming picks for one college basketball sport, NCAAB (men's) or NCAABW
+ * (women's), AFTER `afterDate` through `throughDate`.
  *
- * The NCAAB totals model decides minutes after DraftKings first posts a game's
- * total, usually the day before the game, so a same-day board would hide each
- * of its picks until game day. The window is
+ * Both totals models decide minutes after DraftKings first posts a game's
+ * total. For the men's that is usually the day before the game; for the
+ * women's it came 1 to 6 Eastern dates before the game's date in 155 of 1,772
+ * priced games (scripts/ncaabw_total_card.py SLATE_DAYS). A same-day board
+ * would hide each of those picks until game day. The window is
  * the NHL card's; the reads are not. A college basketball week is far bigger
- * than any other sport's: measured 2026-10-30 (read only), 182 games on
+ * than any other sport's: measured 2026-10-30 (read only), 182 men's games on
  * 2026-11-02, and over 2025-26 the biggest day held 4,417 main-market rows
  * across all books and the biggest seven days 10,424. Reading every game in
  * the window would be up to eleven 1,000-row pages per mount, for cards the
- * board never draws.
+ * board never draws. The women's schedule is nearly as big and mostly
+ * unpriced: read 2026-11-10 (read only), 415 women's games stored for
+ * 2026-11-10 to 11-17 and 163 on 2026-11-02 beside the men's 182, while the
+ * priced women's games of 2026-11-08 held 162 all-books rows over 12 games,
+ * 30 on the biggest.
  *
  * So the picks are read first, and every other read asks only for the games
  * those picks are on, 80 ids at a time. The picks read is drained on an order
  * the request names (signals first, then a unique key), so no row cap can
- * cost a BET. Per 80 games the DraftKings read is at most 720 rows (one per
- * game and main market), under the cap.
+ * cost a BET. Per 80 games the DraftKings read is at most 960 rows (one per
+ * game and main market, twelve markets), under the cap.
+ *
+ * The sport is matched on the picks' own `sport` column, never on a game-id
+ * prefix: LIKE 'NCAAB_%' also matches 'NCAABW_...', because the underscore is
+ * LIKE's any-one-character.
  */
-export async function fetchUpcomingNcaabPicks(
+export async function fetchUpcomingCollegeBasketballPicks(
+  sport: 'NCAAB' | 'NCAABW',
   afterDate: string,
   throughDate: string,
   onEnrichmentError?: (what: string, error: unknown) => void,
@@ -1854,7 +1868,7 @@ export async function fetchUpcomingNcaabPicks(
       supabase
         .from('picks')
         .select(PICK_COLUMNS)
-        .eq('sport', 'NCAAB')
+        .eq('sport', sport)
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('signal_type', { ascending: true })
@@ -1875,7 +1889,8 @@ export async function fetchUpcomingNcaabPicks(
   // The lines are read only for the games with a BET or AVOID: only signal
   // cards draw the line pill and the line shop (fetchPicksForDate's rule).
   // The NCAAB cards write a NONE row for every game they price and do not bet
-  // (2026-11-04), so the game list is most of the slate and the lines are not.
+  // (2026-11-04), and the NCAABW card does the same (2026-11-10), so the game
+  // list is most of the priced slate and the lines are not.
   const lineGameIds = Array.from(
     new Set(picks.filter((p) => p.signal_type !== 'NONE').map((p) => p.game_id)),
   );
@@ -1895,7 +1910,7 @@ export async function fetchUpcomingNcaabPicks(
       if (error) throw error;
       return (data ?? []) as unknown as GameRow[];
     }),
-    // Enrichment only: a failure shouldn't take down the NCAAB card, and is
+    // Enrichment only: a failure shouldn't take down the sport's card, and is
     // reported (the partial banner), not swallowed.
     eachChunk(lineGameIds, async (chunk) => {
       const { data, error } = await supabase
@@ -1906,7 +1921,7 @@ export async function fetchUpcomingNcaabPicks(
       if (error) throw error;
       return (data ?? []) as unknown as LatestDkOddsRow[];
     }).catch((e: unknown) => {
-      onEnrichmentError?.('the upcoming NCAAB lines', e);
+      onEnrichmentError?.(`the upcoming ${sport} lines`, e);
       return [] as LatestDkOddsRow[];
     }),
     eachChunk(lineGameIds, (chunk) =>
@@ -1924,7 +1939,7 @@ export async function fetchUpcomingNcaabPicks(
         (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
       ),
     ).catch((e: unknown) => {
-      onEnrichmentError?.('the upcoming NCAAB line shop', e);
+      onEnrichmentError?.(`the upcoming ${sport} line shop`, e);
       return [] as OddsByBookRow[];
     }),
   ]);
@@ -1945,6 +1960,24 @@ export async function fetchUpcomingNcaabPicks(
       ...bookEnrichment(pick, booksByGameMarket),
     };
   });
+}
+
+/** The men's look-ahead card (useTodayPicks NCAAB_AHEAD_DAYS). */
+export function fetchUpcomingNcaabPicks(
+  afterDate: string,
+  throughDate: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
+  return fetchUpcomingCollegeBasketballPicks('NCAAB', afterDate, throughDate, onEnrichmentError);
+}
+
+/** The women's look-ahead card (useTodayPicks NCAABW_AHEAD_DAYS). */
+export function fetchUpcomingNcaabwPicks(
+  afterDate: string,
+  throughDate: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
+  return fetchUpcomingCollegeBasketballPicks('NCAABW', afterDate, throughDate, onEnrichmentError);
 }
 
 /**
@@ -3234,11 +3267,12 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
  * Returns [] for sports with no teams (UFC, golf) rather than erroring.
  */
 export async function fetchTeamStats(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
 ): Promise<TeamSeasonStats> {
-  // NCAAB has no Teams board yet (teamStatCatalog BALL).
-  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB') return { season: null, rows: [] };
+  // NCAAB has no Teams board yet (teamStatCatalog BALL), and NCAABW has no
+  // team stats in the app at all.
+  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB' || sport === 'NCAABW') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without
