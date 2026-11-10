@@ -444,6 +444,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # spread and their flags (scripts/ncaab_moneyline_card.py, which creates
     # it on demand). Read by the card, never by the app.
     "ncaab_moneyline_decisions",
+    # The NCAAF moneyline card's decisions ledger: one row per game it has
+    # decided at 14:00 UTC, bet or not, with every book's moneyline and spread
+    # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
+    # demand). Read by the card, never by the app.
+    "ncaaf_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its

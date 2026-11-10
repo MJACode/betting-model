@@ -646,6 +646,19 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The live NCAAF moneyline model (models/ncaaf_moneyline_market.py
+  // MODEL_ID): the best moneyline against the win chance the books' consensus
+  // spread implies. It carries the paused classifier's name above, as the live
+  // and paused MLB Totals models share theirs; modelLongWithMark marks the
+  // paused one. The id has no 'spread' in it, so markets.ts reads it as a
+  // moneyline without a named line.
+  ncaaf_moneyline_market: {
+    shortLabel: 'ML',
+    longLabel: 'NCAAF Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   ncaaf_over_under: {
     shortLabel: 'O/U',
     longLabel: 'NCAAF Totals',

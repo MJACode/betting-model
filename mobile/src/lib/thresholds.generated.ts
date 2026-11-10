@@ -54,6 +54,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   ncaaf_live_total: { min_prob: 0.73, min_edge: 0.12, min_odds: -200 },
   ncaaf_live_win_prob: { min_prob: 0.5, min_edge: 0.16, min_odds: -200 },
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 },
+  ncaaf_moneyline_market: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   ncaaf_over_under: { min_prob: 0.65, min_edge: 0, min_odds: -200 },
   ncaaf_spread: { min_prob: 0.55, min_edge: 0, min_odds: -200 },
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 },
