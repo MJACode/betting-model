@@ -1049,6 +1049,50 @@ def step_ncaab_results(run_date: str) -> bool:
         return False
 
 
+def step_ncaabw_schedule(run_date: str) -> bool:
+    """
+    The NCAABW (women's college basketball) schedule from ESPN: the Division I
+    team list, then today and the next 14 ET dates
+    (data/ingestors/ncaabw_espn_ingestor.py). The women's twin of
+    step_ncaab_schedule: ESPN's schedule owns every NCAABW games row and the
+    odds feed only resolves onto them. Runs BEFORE ncaabw-results and the odds
+    step. False when any day or the team list failed.
+    """
+    try:
+        from data.ingestors.ncaabw_espn_ingestor import run_schedule_refresh
+        t = run_schedule_refresh(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAABW schedule (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAABW schedule (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAABW schedule failed: {exc}")
+        return False
+
+
+def step_ncaabw_results(run_date: str) -> bool:
+    """
+    NCAABW final scores from ESPN (data/ingestors/ncaabw_espn_ingestor.py).
+    Must run BEFORE settlement. Self-limiting: no ESPN call unless a started
+    NCAABW game in the last 14 days still lacks a score. A stored score is
+    never overwritten. False when a date failed to fetch or write.
+    """
+    try:
+        from data.ingestors.ncaabw_espn_ingestor import run_results
+        t = run_results(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAABW results (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAABW results (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAABW results failed: {exc}")
+        return False
+
+
 def step_ncaab_box(run_date: str) -> bool:
     """
     NCAAB team box scores and period scores from ESPN's game summary
@@ -2341,6 +2385,18 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         results["ncaab_results"] = step_ncaab_results(run_date)
         time.sleep(1)
 
+        # ── Step 0g3/0g4: the same two steps for women's college basketball ──────
+        # (NCAABW, data/ingestors/ncaabw_teams.py). Before settle and before the
+        # odds step, which resolves the women's feed onto these rows.
+        logger.info("Step 0g3: Refreshing the NCAABW schedule from ESPN...")
+        checkpoint("ncaabw_schedule")
+        results["ncaabw_schedule"] = step_ncaabw_schedule(run_date)
+        time.sleep(1)
+        logger.info("Step 0g4: Ingesting NCAABW finals from ESPN (pre-settle)...")
+        checkpoint("ncaabw_results")
+        results["ncaabw_results"] = step_ncaabw_results(run_date)
+        time.sleep(1)
+
         # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
         # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
         # fill it (4b the leaderboard columns, 4c the modelling columns; they parse
@@ -2877,6 +2933,7 @@ Examples:
                                  "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule", "ncaab-box",
+                                 "ncaabw-results", "ncaabw-schedule",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -2988,6 +3045,8 @@ Examples:
             "ncaab-results": lambda: step_ncaab_results(run_date),
             "ncaab-schedule": lambda: step_ncaab_schedule(run_date),
             "ncaab-box": lambda: step_ncaab_box(run_date),
+            "ncaabw-results": lambda: step_ncaabw_results(run_date),
+            "ncaabw-schedule": lambda: step_ncaabw_schedule(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),

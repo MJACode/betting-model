@@ -47,6 +47,11 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         latest_odds, so the hour an opener appeared, and at which book, is
         known to five minutes. No call when no NCAAB game tips within 36
         hours; RUN_NCAAB_ODDS_CAPTURE=0 stops it. Writes no picks.)
+  * NCAABW odds capture   every 5 min, 24x7     -> run_ncaabw_odds_capture
+        (scripts/ncaabw_odds_capture.py: the same capture for women's college
+        basketball, a minute after the men's. No call when no NCAABW game
+        tips within 36 hours; RUN_NCAABW_ODDS_CAPTURE=0 stops it. Writes no
+        picks.)
   * NCAAB injury feed     every 5 min, 24x7     -> run_ncaab_injury_feed
         (scripts/ncaab_injury_feed.py: RotoWire's public injury JSON about
         every 10 minutes, every 5 while a game tips within three hours;
@@ -918,6 +923,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes odds, not picks: a paid fetch beside the refresh
                   # passes' own NCAAB fetch, not a loop.
                   "ncaab_odds_capture",
+                  # The same for women's college basketball.
+                  "ncaabw_odds_capture",
                   # Writes injury tags, not picks.
                   "ncaab_injury_feed",
                   # Writes NCAAB totals picks through its own card, reading
@@ -1811,6 +1818,27 @@ def run_ncaab_odds_capture() -> None:
                    "ncaab-odds-capture", timeout=NCAAB_ODDS_CAPTURE_TIMEOUT_S)
     if outcome != "ok":
         raise RuntimeError(f"NCAAB odds capture did not finish: {outcome}")
+
+
+NCAABW_ODDS_CAPTURE_TIMEOUT_S = 120
+
+
+def run_ncaabw_odds_capture() -> None:
+    """One NCAABW odds capture tick (scripts/ncaabw_odds_capture.py).
+
+    The women's twin of run_ncaab_odds_capture: the women's college basketball
+    board every five minutes, stored only where a price or line moved. It
+    writes no picks, so it publishes nothing. The script returns without an
+    API call when no NCAABW game tips within 36 hours, or when
+    RUN_NCAABW_ODDS_CAPTURE=0. A run that fails or is killed raises, so the
+    heartbeat records "error" and the failure alerter reports it. That
+    includes a run in which the feed listed games and none resolved onto
+    ESPN's schedule (the script exits 1).
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaabw_odds_capture"],
+                   "ncaabw-odds-capture", timeout=NCAABW_ODDS_CAPTURE_TIMEOUT_S)
+    if outcome != "ok":
+        raise RuntimeError(f"NCAABW odds capture did not finish: {outcome}")
 
 
 NCAAB_INJURY_FEED_TIMEOUT_S = 90
@@ -3068,6 +3096,18 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/5", timezone=TIMEZONE),
         id="ncaab_odds_capture",
         name="NCAAB odds capture (every 5 min, 24x7: change-only, opener timing)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
+    # NCAABW odds capture -- every five minutes, 24x7, a minute after the
+    # men's so the two paid calls do not land together
+    # (run_ncaabw_odds_capture). The kill switch is in the script
+    # (RUN_NCAABW_ODDS_CAPTURE), so the job keeps beating while it is off.
+    sched.add_job(
+        run_ncaabw_odds_capture,
+        CronTrigger(minute="1-59/5", timezone=TIMEZONE),
+        id="ncaabw_odds_capture",
+        name="NCAABW odds capture (every 5 min, 24x7: change-only, opener timing)",
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 

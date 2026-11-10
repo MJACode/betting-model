@@ -36,6 +36,7 @@ from config import (
     ODDS_API_REGIONS,
     ODDS_HISTORY_BOOKMAKERS,
     LINE_SHOP_BOOKMAKERS,
+    NCAABW_EXTRA_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
@@ -73,6 +74,11 @@ SPORT_KEYS = {
     # READ-ONLY AGAINST `games` like the NFL, and stricter: see
     # NCAAB_GAMES_ARE_NOT_OURS below.
     "NCAAB": "basketball_ncaab",
+    # 2026-11-09: women's college basketball (NCAABW), the same shape as the
+    # men's: READ-ONLY AGAINST `games`, resolved onto ESPN's women's schedule
+    # (data/ingestors/ncaabw_teams.py). The feed lists a median 7 women's
+    # games a game day (2,293 events from 2024-11-12 to 2026-04-05).
+    "NCAABW": "basketball_wncaab",
 }
 
 # The NFL is the one sport here whose games this ingestor MUST NOT create.
@@ -109,12 +115,12 @@ NFL_GAMES_ARE_NOT_OURS = True
 # (the two historical entry points do), and turning that off is its own change
 # with its own backfills to check; NCAAB starts closed.
 NCAAB_GAMES_ARE_NOT_OURS = True
-RESOLVE_ONLY_SPORTS = frozenset({"NCAAB"})
+RESOLVE_ONLY_SPORTS = frozenset({"NCAAB", "NCAABW"})
 
 # The sports whose games come from a schedule another ingestor owns, so every
 # live caller builds a resolver before parsing and skips the sport (never
 # mints) when it cannot build one. See _schedule_resolver.
-SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB")
+SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW")
 
 # Sports stored even when DraftKings does not list the event yet.
 #
@@ -131,7 +137,34 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB")
 # games AFTER the target date only, so a same-day NCAAB game with no
 # DraftKings row reaches the models, and an NCAAB model must refuse to decide
 # without the reference price.
-DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB"})
+DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW"})
+
+# Books stored for ONE sport on top of LINE_SHOP_BOOKMAKERS, and asked for in
+# that sport's bulk call. Women's college basketball only (2026-11-09,
+# config.NCAABW_EXTRA_BOOKMAKERS says what was measured): its board is thin and
+# has no Pinnacle, so the six other books that price it are kept as the
+# consensus and the reference. None is a book a pick may name. Every other
+# sport's call and stored books are unchanged.
+SPORT_EXTRA_BOOKMAKERS: dict = {"NCAABW": tuple(NCAABW_EXTRA_BOOKMAKERS)}
+
+
+def sport_bookmakers_param(sport: str) -> str:
+    """The `bookmakers` value of a sport's bulk call: the line-shop books, plus
+    the sport's own extra books when it has any."""
+    extra = SPORT_EXTRA_BOOKMAKERS.get(sport, ())
+    if not extra:
+        return ODDS_API_BOOKMAKERS_PARAM
+    return ",".join(dict.fromkeys([*ODDS_API_BOOKMAKERS_PARAM.split(","), *extra]))
+
+
+_SPORT_OF_KEY: dict = {}
+
+
+def _bookmakers_for_key(sport_key: str) -> str:
+    """sport_bookmakers_param by the feed's sport key (what _get_odds is given)."""
+    if not _SPORT_OF_KEY:
+        _SPORT_OF_KEY.update({v: k for k, v in SPORT_KEYS.items()})
+    return sport_bookmakers_param(_SPORT_OF_KEY.get(sport_key, ""))
 
 # Sports whose LIVE pulls (the refresh pass and the 30-second pre-game poller)
 # label a row stamped after the event's start 'in_play' at write time, the
@@ -390,7 +423,7 @@ def _normalize_team(name: str, sport: str) -> str:
         # ncaaf_teams registry and falls back to the input unchanged.
         from data.ingestors.cfbd_ingestor import resolve_odds_api_school
         return resolve_odds_api_school(name)
-    if sport == "NCAAB":
+    if sport in ("NCAAB", "NCAABW"):
         # NCAAB never mints an id here (NCAAB_GAMES_ARE_NOT_OURS): the game id
         # comes from ESPN's schedule through the resolver, so this value is
         # never used. Returned untouched and silently, because the 3-letter
@@ -496,6 +529,20 @@ def _ncaab_resolver(conn, around_date: str):
         return None
 
 
+def _ncaabw_resolver(conn, around_date: str):
+    """The women's twin of _ncaab_resolver: data/ingestors/ncaabw_teams.py owns
+    the matching, the cached registry is dropped first, and anything that
+    stops the resolver being built returns None, so the caller skips NCAABW
+    for the pass and never mints an id."""
+    try:
+        from data.ingestors import ncaabw_teams
+        ncaabw_teams.reset_registry_cache()
+        return ncaabw_teams.make_resolver(conn, str(around_date)[:10], days_fwd=30)
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NCAABW: could not build the schedule resolver ({exc}); odds skipped")
+        return None
+
+
 def _schedule_resolver(sport: str, conn, around_date: str):
     """The resolver for a SCHEDULE_RESOLVED_SPORTS sport, or None.
 
@@ -509,6 +556,8 @@ def _schedule_resolver(sport: str, conn, around_date: str):
         return _nfl_resolver(conn, around_date)
     if sport == "NCAAB":
         return _ncaab_resolver(conn, around_date)
+    if sport == "NCAABW":
+        return _ncaabw_resolver(conn, around_date)
     return None
 
 
@@ -672,7 +721,7 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
         "markets":      ",".join(markets),
         # Multi-book for line shopping (game markets). Counts as ONE region on
         # The Odds API, so this does not increase credit cost vs DK-only.
-        "bookmakers":   ODDS_API_BOOKMAKERS_PARAM,
+        "bookmakers":   _bookmakers_for_key(sport_key),
         "oddsFormat":   "american",
         "includeLinks": "true",   # DK betslip deep links (no extra credit cost)
         "includeSids":  "true",   # bookmaker selection ids
@@ -1156,7 +1205,7 @@ def _season_label(sport: str, game_date: str) -> int:
         # two seasons — data/season_labels.py.
         from data.season_labels import nhl_season_label
         return nhl_season_label(game_date)
-    if sport in ("NBA", "NCAAB") and month >= 10:
+    if sport in ("NBA", "NCAAB", "NCAABW") and month >= 10:
         # Oct–Jun (NBA) and Nov–Apr (NCAAB), both labelled by the ENDING year:
         # ESPN calls 2026-27 college basketball season 2027. An NCAAB games
         # row is never minted here (NCAAB_GAMES_ARE_NOT_OURS), so the stored
@@ -1285,7 +1334,8 @@ def _process_events(events: list[dict], sport: str,
 
         for book in bookmakers:
             book_key = book.get("key")
-            if book_key not in LINE_SHOP_BOOKMAKERS:
+            if (book_key not in LINE_SHOP_BOOKMAKERS
+                    and book_key not in SPORT_EXTRA_BOOKMAKERS.get(sport, ())):
                 continue
 
             for mkt in book.get("markets", []):
@@ -1522,7 +1572,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     # back when unreadable, so it runs after every other sport's rows are
     # committed (see the commit before the resolver below).
     sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL",
-                                    "NCAAB"]
+                                    "NCAAB", "NCAABW"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -2114,7 +2164,7 @@ def get_latest_odds_for_game(conn: DBConnection,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
     parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF",
-                                            "NFL", "NCAAB"],
+                                            "NFL", "NCAAB", "NCAABW"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

@@ -350,6 +350,25 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "ncaab_events",
     "ncaab_teams",
     "ncaab_venues",
+    # Women's college basketball (NCAABW) identity, the same three tables on
+    # their own names (ESPN gives a school's women's team the men's team id).
+    # Created on demand by data/ingestors/ncaabw_teams.ensure_tables; never
+    # read by the app.
+    "ncaabw_events",
+    "ncaabw_teams",
+    "ncaabw_venues",
+    # The NCAABW odds history purchase: its ledger of every snapshot stored,
+    # every in-play quote of every snapshot, and the events it paid for and
+    # could not place on an ESPN game, kept raw. Created on demand by
+    # data/ingestors/ncaabw_odds_history.py; never read by the app.
+    "ncaabw_odds_snapshots",
+    "ncaabw_inplay_quotes",
+    "ncaabw_odds_unmatched",
+    # NCAABW history: NCAA's per-game team box scores and season player
+    # minutes from sportsdataverse's season files. Created on demand by
+    # data/ingestors/ncaabw_sdv_import.py; model input, never read by the app.
+    "ncaabw_team_game_stats",
+    "ncaabw_player_season",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

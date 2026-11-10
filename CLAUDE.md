@@ -647,7 +647,7 @@ to be known BEFORE deciding which file to open.
 | **Build Your Own Model, NFL facts (not picks)** | `docs/byom_nfl.md` |
 | **Build Your Own Model, NBA props (not picks)** | `docs/byom_nba.md` |
 
-**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab}.md` — each
+**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf,ncaab,ncaabw}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —
 carries that sport's models, data sources, load-bearing conventions, pipeline
 steps and first-time setup.
