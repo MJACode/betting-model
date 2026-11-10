@@ -45,6 +45,30 @@ missed silently; a step that loads it without a person would be better.
 is in the database, but the build cannot run on the worker. Next season's
 rebuild should read the three tables directly.
 
+## [ ] Fourteen tests fail on master (measured 2026-11-10, master 93b032e3)
+
+`python -m pytest -q tests/` on this machine: 14 failed, 11,510 passed. None
+is from the work that found them; each was re-run on a clean copy of master.
+
+- Fail alone: `test_claude_rules_split` (`config-topology.md`; needs a
+  `.env`), `test_deploy_drain` (the forwarded SIGTERM),
+  `test_health_check_observe` and `test_model_quality` (both compare a line of
+  `run_pipeline.py` at four spaces of indent; master has eight),
+  `test_market_coverage_probe` (an all-line leg slip),
+  `test_mobile_board_season` (the grade legend), `test_multi_book_odds` (the
+  closing-line reads), `test_nhl_totals_card` (insert once under the model
+  lock), `test_picks_unique_row` (the card insert), `test_price_prefilter_rollback`
+  (two), `test_web_site` (the record math against the node suite; no node on
+  PATH here).
+- Fail only in a full run: `test_social_posts` and `test_social_profile`
+  (one test each). They call `scheduler.build_scheduler()` after a test that
+  reloaded the scheduler has left it in the pollers role. Reproduce:
+  `python -m pytest -q tests/test_daily_retry.py tests/test_nba_live_config.py
+  tests/test_ncaab_live_config.py tests/test_nfl_live_leader_config.py
+  tests/test_pipeline_watch.py tests/test_savant_freshness.py
+  tests/test_service_role_split.py tests/test_social_posts.py
+  tests/test_social_profile.py`.
+
 ## [ ] App: ReBet is still a selectable sportsbook with no prices (2026-11-10)
 
 The feed stopped fetching ReBet on 2026-09-20 (its newest row in
