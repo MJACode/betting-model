@@ -67,3 +67,82 @@ def test_player_seasons_sum_by_team_and_folded_name():
 
 def test_player_key_folds_accents_case_and_punctuation():
     assert si.player_key("José O'Neal Jr.") == "jose oneal jr"
+
+
+# ── the daily read of this season's file (the totals model's second box source) ──
+
+class _BoxConn:
+    """The stored (contest, team) keys of a season, and what was inserted."""
+
+    def __init__(self, stored=()):
+        self.stored, self.inserted, self.commits, self.sql = set(stored), [], 0, []
+
+    def execute(self, sql, params=()):
+        self.sql.append(" ".join(sql.split()))
+        rows = sorted(self.stored) if sql.lstrip().startswith("SELECT contest_id, team") else []
+
+        class R:
+            def fetchall(self_inner):
+                return rows
+
+            def fetchone(self_inner):
+                return rows[0] if rows else None
+        return R()
+
+    def executemany(self, sql, rows):
+        assert "ON CONFLICT (contest_id, team) DO NOTHING" in sql
+        self.inserted += [(r["contest_id"], r["team"]) for r in rows]
+
+    def commit(self):
+        self.commits += 1
+
+
+def _file(*contests):
+    return pd.DataFrame([{"contest_id": c, "team": t, "home": "H" + c, "away": "A" + c,
+                          "o_poss": 66, "pts": 70, "to": 9}
+                         for c in contests for t in ("H" + c, "A" + c)])
+
+
+def test_the_daily_read_stores_only_contests_not_stored_yet(monkeypatch):
+    """A stored row is never rewritten: by March the file holds about 12,000
+    rows, and a daily update of every one of them would rewrite the season
+    each morning. A day with nothing new writes nothing."""
+    monkeypatch.setattr(si, "ensure_tables", lambda conn: None)
+    files = {si.TEAM_BOX_URL.format(season=2027): _file("1", "2", "3"),
+             si.SCHEDULE_URL.format(season=2027): pd.DataFrame(
+                 [{"contest_id": "3", "game_date": "11/09/2026"}])}
+    monkeypatch.setattr(si, "_fetch_parquet", lambda url: files.get(url))
+    conn = _BoxConn(stored=[("1", "H1"), ("1", "A1"), ("2", "H2"), ("2", "A2")])
+    out = si.refresh_season(conn, 2027)
+    assert out == {"season": 2027, "file_rows": 6, "new_rows": 2}
+    assert conn.inserted == [("3", "H3"), ("3", "A3")]
+    (read,) = [q for q in conn.sql if q.startswith("SELECT contest_id, team")]
+    assert "WHERE season = %s AND source = %s" in read
+    again = _BoxConn(stored=conn.stored | set(conn.inserted))
+    assert si.refresh_season(again, 2027)["new_rows"] == 0 and again.inserted == []
+
+
+def test_a_season_with_no_file_yet_is_not_an_error(monkeypatch):
+    monkeypatch.setattr(si, "_fetch_parquet", lambda url: None)
+    conn = _BoxConn()
+    assert si.refresh_season(conn, 2028) == {"season": 2028, "file_rows": 0, "new_rows": 0,
+                                             "team_missing": True}
+    assert conn.sql == [] and conn.inserted == []
+
+
+def test_the_daily_step_reads_the_season_the_date_falls_in(monkeypatch):
+    import run_pipeline
+    seen = []
+    monkeypatch.setattr(si, "refresh_season", lambda conn, season: seen.append(season) or {"season": season})
+
+    class C:
+        def close(self):
+            seen.append("closed")
+    assert si.run_refresh("2026-11-10", connect=lambda: C()) == {"season": 2027}
+    assert si.run_refresh("2027-03-01", connect=lambda: C()) == {"season": 2027}
+    assert seen == [2027, "closed", 2027, "closed"]
+    # the pipeline step: green on a read, red when it raises, never a crash
+    monkeypatch.setattr(si, "run_refresh", lambda run_date: {"season": 2027, "new_rows": 0})
+    assert run_pipeline.step_ncaabw_ncaa_box("2026-11-10") is True
+    monkeypatch.setattr(si, "run_refresh", lambda run_date: (_ for _ in ()).throw(RuntimeError("404")))
+    assert run_pipeline.step_ncaabw_ncaa_box("2026-11-10") is False

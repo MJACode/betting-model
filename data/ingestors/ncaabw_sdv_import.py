@@ -345,6 +345,59 @@ def import_season(conn, season: int, *, team: bool = True, players: bool = True)
     return out
 
 
+_TEAM_INSERT_NEW = (
+    "INSERT INTO ncaabw_team_game_stats (" + ", ".join(c for c in TEAM_COLS if c != "loaded_at")
+    + ") VALUES (" + ", ".join(f"%({c})s" for c in TEAM_COLS if c != "loaded_at")
+    + ") ON CONFLICT (contest_id, team) DO NOTHING")
+
+
+def refresh_season(conn, season: int) -> dict:
+    """The daily read of one season's team box file: store the contests that
+    are not stored yet, and leave every stored row alone.
+
+    The women's 2026-27 file is built in season (it held games through
+    2026-11-08 on 2026-11-09), and it is the second box source of the totals
+    model: on 2026-11-10 it held 5 of the 6 finals whose ESPN box the ESPN
+    feed refused. A stored row is never rewritten here (import_season with
+    --force does that), so a day with nothing new writes nothing.
+    -> {season, file_rows, new_rows, team_missing?}."""
+    out = {"season": int(season), "file_rows": 0, "new_rows": 0}
+    df = _fetch_parquet(TEAM_BOX_URL.format(season=season))
+    if df is None:
+        out["team_missing"] = True
+        return out
+    sched = _fetch_parquet(SCHEDULE_URL.format(season=season))
+    dates = schedule_dates(sched) if sched is not None else {}
+    rows = team_rows(df, int(season), dates)
+    out["file_rows"] = len(rows)
+    ensure_tables(conn)
+    have = {(r[0], r[1]) for r in conn.execute(
+        "SELECT contest_id, team FROM ncaabw_team_game_stats WHERE season = %s AND source = %s",
+        (int(season), SOURCE)).fetchall()}
+    new = [r for r in rows if (r["contest_id"], r["team"]) not in have]
+    for i in range(0, len(new), 2000):
+        conn.executemany(_TEAM_INSERT_NEW, new[i:i + 2000])
+    conn.commit()
+    out["new_rows"] = len(new)
+    return out
+
+
+def run_refresh(run_date: str | None = None, *, connect=None) -> dict:
+    """refresh_season for the season `run_date` (ET, default today) falls in."""
+    from datetime import date as _date
+
+    from data.ingestors import ncaabw_teams as nt
+    day = run_date or _date.today().isoformat()
+    season = nt.ncaabw_season_label(day)
+    if connect is None:
+        from data.db import get_connection as connect
+    conn = connect()
+    try:
+        return refresh_season(conn, season)
+    finally:
+        conn.close()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"),

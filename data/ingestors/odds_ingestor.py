@@ -1570,7 +1570,8 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     # NCAAB joined 2026-10-26 for the 2026-27 season, LAST on purpose: building
     # its resolver reads ncaab_teams / ncaab_events, which roll the connection
     # back when unreadable, so it runs after every other sport's rows are
-    # committed (see the commit before the resolver below).
+    # committed (see the commit before the resolver below). NCAABW (2026-11-09)
+    # follows it for the same reason, so the two run last, men's then women's.
     sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL",
                                     "NCAAB", "NCAABW"]
     snapshot_at = datetime.now(_ET).isoformat()

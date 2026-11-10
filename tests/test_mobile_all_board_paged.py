@@ -42,10 +42,13 @@ def test_the_days_picks_are_two_drained_reads_signals_required_none_enrichment()
 
 
 def test_the_ncaab_look_ahead_reads_lines_only_for_signal_games_and_reports_failures():
-    body = _code(_fn(_read(QUERIES), "fetchUpcomingNcaabPicks"))
+    # The read is shared with the women's sport from 2026-11-10: the men's
+    # fetch passes 'NCAAB', and a failed line read names the sport it was for.
+    body = _code(_fn(_read(QUERIES), "fetchUpcomingCollegeBasketballPicks"))
+    assert "fetchUpcomingCollegeBasketballPicks('NCAAB'," in _fn(_read(QUERIES), "fetchUpcomingNcaabPicks")
     assert "picks.filter((p) => p.signal_type !== 'NONE')" in body
     assert body.count("eachChunk(lineGameIds,") == 2
     assert "eachChunk(gameIds," in body
-    assert "onEnrichmentError?.('the upcoming NCAAB lines', e)" in body
-    assert "onEnrichmentError?.('the upcoming NCAAB line shop', e)" in body
+    assert "onEnrichmentError?.(`the upcoming ${sport} lines`, e)" in body
+    assert "onEnrichmentError?.(`the upcoming ${sport} line shop`, e)" in body
     assert ".catch(() =>" not in body

@@ -292,6 +292,8 @@ _BANNED_PICK_TAG = "#FreePicks"
 # NCAAB is not a live sport. The tag is here so a later id does not fall
 # through to no league tag. NCAAF stays #CFB.
 _SPORT_TAG["NCAAB"] = "#CBB"
+# Women's college basketball (the NCAABW totals model, 2026-11-10).
+_SPORT_TAG["NCAABW"] = "#WCBB"
 _SPORT_TAG["CBB"] = "#CBB"
 
 

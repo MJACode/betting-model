@@ -391,6 +391,8 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "nba_first_half_total_luck",
          # 2026-10-30 (mike): NCAAB totals; its blend's P(win, push left out).
          "ncaab_total_blend",
+         # 2026-11-09 (mike): NCAABW totals, the women's twin; the same number.
+         "ncaabw_total_blend",
          # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).

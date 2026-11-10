@@ -34,9 +34,12 @@ type Tab = 'builtin' | 'mine';
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 /** Sport a model belongs to, derived from its id prefix. */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL' {
+function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL' {
   if (modelId.startsWith('ufc')) return 'UFC';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  // The women's prefix first: every ncaabw_ id starts with 'ncaab' too, and
+  // would be listed on the men's tab (modelMeta sportOfModel, the same order).
+  if (modelId.startsWith('ncaabw')) return 'NCAABW';
   if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('golf')) return 'GOLF';

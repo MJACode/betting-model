@@ -21,26 +21,73 @@
 
 ---
 
-## [ ] NCAABW totals model: build it live (2026-11-09)
+## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
 
-The women's totals model passed its research (`docs/sports/ncaabw.md`,
-"Research"): the men's `ncaab_total_blend` method at DraftKings' first posted
-total. Nothing bets yet. To go live it needs, in order:
+Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
+cut at 0.05, settlement, the scheduler job, Discord and the app.
+`docs/sports/ncaabw.md` "The totals model".
 
-1. The in-season box feed: a women's fork of `data/ingestors/ncaab_espn_box.py`
-   (ESPN's summary after each final). Four quarters: overtime is a fifth
-   period, and the game's length is 40 minutes plus 5 per period past the
-   fourth. The card holds a game whose teams have a recent final with no box,
-   so without this feed every game waits.
-2. The model, card and build: forks of `models/ncaab_total_blend.py`,
-   `scripts/ncaab_total_card.py` and `scripts/ncaab_total_blend_build.py` on the
-   women's tables, with the blend fitted on 2024-25 and 2025-26.
-3. The cut. The research's middle of the plateau is 0.05 (each season on the
-   other's blend: 453 bets, +11.18% [2.7, 19.3]); its own EV floor, price
-   floor, and `Updated-By: mike` on the commit.
-4. Settlement, Discord (the #ncaabw channel exists), the scheduler job, and
-   the app: a sport chip, the model's label, and the seven extra books added
-   to the app's reference-only list.
+## [ ] NCAABW: load each season's schedule whole (every October)
+
+The totals model pools a team with fewer than 10 games on the stored
+schedule, and the daily step stores only 14 days ahead. 2026-27 was loaded
+by hand on 2026-11-10. Before the first game of 2027-28:
+`python -m data.ingestors.ncaabw_espn_ingestor --backfill 2027-11-01 2028-03-15`,
+then rebuild the artifact (`python -m scripts.ncaabw_total_blend_build
+--last-season 2027`, after the research cache is refreshed). The card fails
+its run and names the command if the schedule is short, so this cannot be
+missed silently; a step that loads it without a person would be better.
+
+## [ ] NCAABW: the build reads a cache on one PC
+
+`scripts/ncaabw_total_blend_build.py` reads the research cache
+(`~/ncaabw_research/cache`), which is a copy of what Supabase holds. Every row
+is in the database, but the build cannot run on the worker. Next season's
+rebuild should read the three tables directly.
+
+## [ ] Fourteen tests fail on master (measured 2026-11-10, master 93b032e3)
+
+`python -m pytest -q tests/` on this machine: 14 failed, 11,510 passed. None
+is from the work that found them; each was re-run on a clean copy of master.
+
+- Fail alone: `test_claude_rules_split` (`config-topology.md`; needs a
+  `.env`), `test_deploy_drain` (the forwarded SIGTERM),
+  `test_health_check_observe` and `test_model_quality` (both compare a line of
+  `run_pipeline.py` at four spaces of indent; master has eight),
+  `test_market_coverage_probe` (an all-line leg slip),
+  `test_mobile_board_season` (the grade legend), `test_multi_book_odds` (the
+  closing-line reads), `test_nhl_totals_card` (insert once under the model
+  lock), `test_picks_unique_row` (the card insert), `test_price_prefilter_rollback`
+  (two), `test_web_site` (the record math against the node suite; no node on
+  PATH here).
+- Fail only in a full run: `test_social_posts` and `test_social_profile`
+  (one test each). They call `scheduler.build_scheduler()` after a test that
+  reloaded the scheduler has left it in the pollers role. Reproduce:
+  `python -m pytest -q tests/test_daily_retry.py tests/test_nba_live_config.py
+  tests/test_ncaab_live_config.py tests/test_nfl_live_leader_config.py
+  tests/test_pipeline_watch.py tests/test_savant_freshness.py
+  tests/test_service_role_split.py tests/test_social_posts.py
+  tests/test_social_profile.py`.
+
+## [ ] App: ReBet is still a selectable sportsbook with no prices (2026-11-10)
+
+The feed stopped fetching ReBet on 2026-09-20 (its newest row in
+`latest_odds` is 2026-09-20T19:17Z), but the app's sportsbook picker still
+offers it. Read 2026-11-10: 4 of 28 stored book sets hold ReBet and none
+holds only ReBet, so nobody is stranded today; a member who picked only ReBet
+would see "Not offered at your books" on every pick. The fix is the one made
+for Bally Bet and Fliff on 2026-11-10: add it to `REFERENCE_ONLY_BOOKS`
+(`mobile/src/lib/markets.ts`) and update the two counts in
+`mobile/scripts/verify_book_lines.ts`. Found by the UX review of the NCAABW
+app change; it predates it.
+
+## [ ] App: the college basketball look-ahead read sits 40 rows under the cap
+
+`fetchUpcomingCollegeBasketballPicks` (`mobile/src/lib/queries.ts`) reads
+DraftKings' lines for 80 games a request across 12 markets: 960 rows against
+a 1,000-row response cap. A thirteenth market in `MAIN_GAME_ODDS_MARKETS`
+would pass it silently for both college basketball sports. Chunk at 64 or
+page the read. Found by the same review; it predates the women's sport.
 
 ## [ ] NCAABW in play: finish the checks, then decide (2026-11-09)
 

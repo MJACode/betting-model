@@ -212,8 +212,9 @@ export function yearET(): number {
 export function boardSeasonET(sport: string): number {
   const year = yearET();
   // NCAAB labels by the ending year too (ncaab_player_game_log.season): the
-  // 2026-27 season is 2027 from its November tip-off.
-  if (sport === 'NBA' || sport === 'NCAAB') return monthET() >= 10 ? year + 1 : year;
+  // 2026-27 season is 2027 from its November tip-off. NCAABW has the same
+  // label (docs/sports/ncaabw.md); no women's board reads a season yet.
+  if (sport === 'NBA' || sport === 'NCAAB' || sport === 'NCAABW') return monthET() >= 10 ? year + 1 : year;
   return year;
 }
 
@@ -460,6 +461,9 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   // tips start after 10pm ET with no live feed in the app, so this window is
   // all it has. 4h is twice the game.
   NCAAB: 4 * 3_600_000,
+  // Women's college basketball: four 10-minute quarters, about two hours on
+  // the clock like the men's, and no live feed in the app either.
+  NCAABW: 4 * 3_600_000,
   // Football, and the reason these two are named rather than left on the
   // default: they are the sports that play late and are NOT covered by the live
   // poller, so the blind window is all they have. Once the app's live board
@@ -746,6 +750,8 @@ const GAME_DURATION_HOURS: Record<string, number> = {
   // 40 minutes of play, about two hours on the clock. ESPN finals land on the
   // next refresh pass, which drops the game sooner when they do.
   NCAAB: 3,
+  // Women's: 40 minutes of play in four quarters, the same two hours.
+  NCAABW: 3,
   UFC: 6,
 };
 
