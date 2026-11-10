@@ -14,7 +14,7 @@ nothing over the closing line in this market.
 
 | Model ID | Kind | Rule | Status |
 |---|---|---|---|
-| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF | LIVE — walk-forward 55.9% / +6.7% at the gate, best in all 4 test seasons; CI does not clear breakeven, sized small |
+| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF. Refit 2026-11-10 (mike) as the **mean of eleven fits** (seeds 42 and 0-9, `models/seed_average.py`): fitted and committed, NOT yet registered, because a game with no weather forecast moves it past the gate (the 2026-11-10 section at the end of this file). The single fit of 2026-08-25 is still the one scoring | LIVE on the single fit. The mean of eleven, walk-forward 2022-2025 at the stored close: 235-191, 55.2%, +24.9 units (interval 50.4% to 59.9%, does not clear breakeven); seed 42 alone on the same games 244-230, 51.5%, -9.0 units. Sized small |
 | `ncaaf_spread` | `cross_book_opener` | Back the side Bovada's OPENER favours, at DraftKings' stale OPENING number. Three preconditions in the scorer, each `return []`: (1) both openers captured within 90 min (`OPENER_MAX_SKEW_MIN`), (2) DK still ON its opener, (3) \|dev\| ≥ gate | LIVE but STRUCTURALLY DORMANT on this feed (measured 2026-09-07, session 252). Backtest 1,050 bets 58.1% +10.9%, CLV 0.694 — but CFBD's `spreadOpen` carries no timestamp, so the +10.9% was never measured under precondition 1. In production the Odds API lists next week's games from Tuesday with DraftKings and FanDuel priced and NO sharp book: a paid historical snapshot at 2026-09-03T17:55Z (requesting only DK, Bovada and Pinnacle) showed 16 events for 09-12/13 with DK priced and Bovada and Pinnacle absent, while both sharp books covered that week's own slate. Bovada's first stored number lands the Sunday before, by which time DK has moved off its opener on 40 of 49 games. The only firing condition observed is a game that ENTERS the feed with both books already priced (FAU@Florida 2026-09-05, 1-minute skew — the one spread BET this season). Two pre-game BETs all season, both lost |
 | `ncaaf_spread_premium` | `cross_book_opener` | The SAME rule, band **[2.5, inf)** — the scorer's `d_threshold_max` on `ncaaf_spread` caps it at 2.5 so the two tiers are MUTUALLY EXCLUSIVE and a game fires exactly one | LIVE — 344 bets 60.5% +15.4%, positive all 3 seasons, CI [0.552,0.655] |
 | `ncaaf_moneyline` | — | — | PAUSED — classifier held out at AUC ~0.50 |
@@ -260,7 +260,7 @@ more verdicts, harnesses in `scripts/ncaaf_search/audit_2026_11/`:
 |---|---|---|
 | **Line shopping against the consensus** (the NCAAB spread, total and moneyline rules, unchanged; 2023-2025 stored pulls, 2,314 games, walk-forward tables) | `lab.py`, `spread_dd.py`, `sym.py` | NULL. The spread rule as built for NCAAB reads +8.2% on 338 bets [-1.2, +16.7] at the game-day morning pull, and 337 of the 338 are road teams: the fitted table's home/away tilt, not an off-market number. Every road team at the consensus lost 4.4%. Tilt removed: 22 bets at a 0.02 cut. A number 1.0+ points better than the consensus exists in 13.2% of games and lost 8.8% (269 bets). Totals: 48 bets at 0.02. Moneyline against the book's own spread: -0.5% on 386. Moneyline against the consensus spread: +7.8% on 311 at one read, negative at six of the other seven (the audit's `lab_results.csv`; this said five until 2026-11-10), -9.3 units without its 10 best dates. Built live anyway on mike's call, as `ncaaf_moneyline_market` (its section above) |
 | **College props, the second season** (the market-relative rule on 2026's three pulls a game day, and 2025 again; every book as a placebo) | `props/main.py` (`docs/ncaaf_market_audit_props.md`) | NULL. Pinnacle 2026 at 0.02: 42 bets -32.4%; consensus 2026 64 bets +2.3%; nothing reaches 150 bets in a season. The placebo fails again (FanDuel as the reference +13.5% on 111 in 2025). From the week of 2026-09-29 FanDuel and Hard Rock, the only two-way books in volume, stopped disagreeing at an equal line |
-| **The totals fit's random seed** (11 seeds, same data and settings) | `totals_seeds.py`, `totals_seeds_fc.py` | A FINDING, not a verdict. One game's prediction moves 1.49 points (sd) with the seed; 3 in 10 games at the 8-point gate change with it. At the stored close the walk-forward is 51.5% to 56.4% by seed (the published 55.9% was one draw). In the live shape (first morning DraftKings read that crosses, 2023-2025) every seed is positive, +4.1% to +10.6%, and the 11-seed average is 346 bets +35.06 units (+9.35%). 2026 does not separate the average from a single fit. The artifact is still the single fit of 2026-08-25 |
+| **The totals fit's random seed** (11 seeds, same data and settings) | `totals_seeds.py`, `totals_seeds_fc.py` | A FINDING, not a verdict. One game's prediction moves 1.49 points (sd) with the seed; 3 in 10 games at the 8-point gate change with it. At the stored close the walk-forward is 51.5% to 56.4% by seed (the published 55.9% was one draw). In the live shape (first morning DraftKings read that crosses, 2023-2025) every seed is positive, +4.1% to +10.6%, and the 11-seed average is 346 bets +35.06 units (+9.35%). 2026 does not separate the average from a single fit. Acted on 2026-11-10 (mike): the fit is now the mean of the eleven, fitted and not yet registered (the 2026-11-10 section at the end of this file) |
 
 **What this means:** the two live rules ARE the survivors. Do not re-mine
 features on this data; new edge requires new INFORMATION (an injury/news feed,
@@ -512,10 +512,146 @@ and models."* Three changes, all reading the stored schedule through one module
   existing `/games/players` fetch and adds none) and `step_ncaaf_results`
   pre-settle. Off-season
   the schedule pull returns nothing — that IS the gate.
-- Totals-regression refits: re-run `python -m scripts.ncaaf_margin_eval
-  --fit-totals` periodically in season so the artifact sees the current year;
-  the fit refuses to register if the walk-forward no longer clears the kill
-  line.
+- Totals-regression refits are two steps since 2026-11-10 (the section at the
+  end of this file). `python -m scripts.ncaaf_margin_eval --fit-totals` fits
+  the mean of eleven seeds and writes the artifact; it refuses to write one if
+  the average no longer clears the kill line at the gate, and it registers
+  nothing. `--register-totals VERSION` makes it the active model, and runs
+  only after the artifact is committed, merged and deployed. A refit is a
+  model update (`Updated-By:`).
+
+### First-half lines and team totals, 2023-2025 (built 2026-11-10)
+
+No first-half or team-total price has ever been stored for college football
+(`docs/ncaaf_market_audit.md`, section 7). mike approved buying them on
+2026-11-10 ("Buy all"). The code is built
+(`data/ingestors/ncaaf_derivative_history.py`); **nothing is bought until the
+job is run.**
+
+- **What is bought.** For every game of 2023, 2024 and 2025 that already
+  holds stored full-game historical prices: the first-half moneyline, spread
+  and total and the team totals, at the ten fetched books. One call a game.
+  The feed bills 10 credits per market it returns, so at most 40 a game. An
+  empty answer and a "not found" are free. Each date also costs one event
+  list (1 credit), which names each game's event.
+- **The two reads.** The stored full-game history was bought as two pulls a
+  day, asked for at 14:00 and 23:00 UTC and served at about 13:55 and 22:55.
+  The first-half lines are bought at the same two moments, so a first-half
+  line can be set beside the full-game line of the same moment.
+
+  | Read | Asked for | Games bought | Stored under source |
+  |---|---|---|---|
+  | `am` | 14:00 UTC on the game's Eastern date (game-day morning) | those with a stored full-game row from that morning's pull | `odds_api_ncaaf_derivative_am` |
+  | `pm` | 23:00 UTC on the Eastern date before (the evening before) | those with a stored full-game row from that evening's pull | `odds_api_ncaaf_derivative_pm` |
+
+  A game counts as holding a pull when it has a full-game row (source
+  `odds_api_historical`) stamped in the hour up to the time asked for. A game
+  is bought only if it kicks off more than five minutes after that time, so
+  no price bought here can be in play.
+- **A game stored twice is bought once.** Two things put one game in `games`
+  twice. A night game has the odds feed's Eastern-dated row, which holds the
+  prices, and CFBD's UTC-dated row, which holds the score ("Data /
+  conventions" above). And the stored full-game history was written on
+  2026-09-07, before the team registry held FCS schools: 245 of the games
+  with a morning pull sit under the feed's own team name ("Furman Paladins",
+  "Southern Mississippi Golden Eagles"), beside CFBD's row for the same game
+  under the school's name, which holds the final. Rows whose names resolve to
+  the same two schools, dated within a day of each other, are one game. It is
+  bought once and stored under the id that holds the stored pull; if both ids
+  hold it (35 games at the morning read), under the one with more stored
+  rows.
+- **Matching the feed to our games.** By the two team names (the same name
+  resolution the odds feed uses: `config.NCAAF_ODDS_API_MAP`, then the team
+  registry) and the kickoff time, within 24 hours of the stored kickoff. Each
+  name is tried as the school it resolves to today and as the feed's own
+  name, which is what a row written before the name resolved still holds. A
+  feed event that lands on no planned game is printed and skipped. A planned
+  game the feed's list does not name is printed and recorded as not listed.
+  Neither is guessed. A row stored under a wrong school by the old prefix
+  rule (Florida A&M at Miami stored as Florida at Miami) matches nothing and
+  is not bought. When the feed calls our away team home, the stored spread
+  is still our home team's number.
+- **Where it is stored.** In `odds`, in the shape the NCAAB purchase stores
+  the same four markets, so one reader fits both sports: markets `h2h_h1`,
+  `spreads_h1`, `totals_h1`, `team_totals_home` and `team_totals_away`;
+  `snapshot_type` `open`; `snapshot_at` the snapshot time the feed served.
+  Both sources are protected from the odds clean-up (`data/prune_odds.py`).
+- **Nothing is bought twice.** `ncaaf_derivative_fetches` holds one row per
+  game and read: the time asked for, the time served, the credits the call
+  billed, the rows stored and a status. The prices and that row are written
+  together. A rerun skips every game marked `stored` or `empty`. A game the
+  feed did not list, a "not found" and a failed call are recorded and asked
+  for again on a rerun; listing a date again costs 1 credit. The table is
+  read again just before each date is listed, so two runs at once do not
+  both buy a game.
+- **The most it can spend.** 40 credits a game plus 1 a date. Measured
+  2026-11-10 on the audit's extract of the local copy of the database, with
+  the purchase's own plan (not yet read from production):
+
+  | Read | Games | Dates | With a final | Most it can spend |
+  |---|---|---|---|---|
+  | `am` | 2,510 | 180 | 2,467 | 100,580 |
+  | `pm` | 2,435 | 186 | 2,405 | 97,586 |
+  | Both | | | | 198,166 |
+
+  **That is 12,636 credits above the 185,530 the audit stated for the two
+  reads.** The audit's "2,314 games on 205 dates, 92,765 credits" a read
+  counted games with any stored pull at any time, not either read. Its own
+  extract holds 2,257 games with a final on 180 dates at the morning read and
+  2,227 on 183 the evening before. The plan is larger than those because it
+  also takes the games stored under the feed's own team name: at the morning
+  read 210 more games get their final from CFBD's row, and 43 have no final
+  stored (FCS opponents CFBD spells another way, and rows under a wrong
+  school that no event will match). The dry run prints each read's own
+  count, by season, from production.
+- **The credit limits.** `--apply` needs `--max-credits` and `--floor`. The
+  run then tightens both from what the system measures: its limit is the
+  smaller of `--max-credits` and the plan's own most, and its floor is the
+  larger of `--floor` and 7 days of the median daily spend in
+  `odds_api_quota`. It refuses to start if it cannot read a daily spend or a
+  balance, or if the team registry (`ncaaf_teams`) is empty, because then no
+  feed name would land on a stored school and every date's list would be
+  paid for to match nothing. It stops before a call would cross the limit or
+  the floor. Newest date first, so a stop leaves the most recent season
+  stored. Calls run 6 at once (at most
+  10), each counted at 40 credits while it is waiting for its answer (the
+  NCAAB purchase's meter, `docs/sports/ncaab.md`, "Paid calls side by side").
+- **The test buy** (`--sample N`) buys N games a read, spread over the three
+  seasons and four kickoff times (before 3pm, 3-6pm, 6-9pm, 9pm or later,
+  Eastern). The games are picked by a fixed hash of the game id, so a rerun
+  picks the same ones. They are stored under the same sources and the same
+  table, so the full buy skips them. 50 games at one read cost at most 2,050
+  credits (2,033 on the local copy: the 50 fall on 33 dates). It answers
+  what is not known yet: whether the books had posted first-half lines and
+  team totals by those two times.
+- **What it prints.** The plan by season (games, dates, how many have a final
+  score, how many are already bought) and why other games are not planned.
+  After a run, read back from `odds`: for each book and market, how many of
+  the bought games hold a quote.
+- **Commands.** Without `--apply` nothing is called and nothing is written.
+  - The plan: `python -m data.ingestors.ncaaf_derivative_history --read both`
+  - Test buy, the plan: `python -m data.ingestors.ncaaf_derivative_history --read am --sample 50`
+  - Test buy: the same with `--apply --max-credits 2050 --floor 300000`
+  - Full buy: `python -m data.ingestors.ncaaf_derivative_history --read both --apply --max-credits 198166 --floor 300000`
+- **Worker job** (job type `ncaaf_derivative_history`, not a declared job, so
+  a merge buys nothing):
+
+  | Buy | Args |
+  |---|---|
+  | The plan, no call | `{"read": "both", "dry_run": true}` |
+  | Test buy, 50 games at the morning read | `{"read": "am", "sample": 50, "max_credits": 2050, "floor": 300000}` |
+  | Morning read | `{"read": "am", "max_credits": 100580, "floor": 300000}` |
+  | Evening read | `{"read": "pm", "max_credits": 97586, "floor": 300000}` |
+  | Both | `{"read": "both", "max_credits": 198166, "floor": 300000}` |
+
+  The job refuses a limit above these figures, which are the plan's most as
+  measured above. A job may ask for less: the run then stops at its limit
+  with the oldest games left, and a later run buys only those. If the dry
+  run against production prints a larger plan, the limit in
+  `tracking/job_queue.py` is the number to raise.
+- **Not stored by this purchase.** Half and quarter scores, which grade these
+  markets, are not stored for 2023 and 2024 (`ncaaf_plays` holds 2025 only).
+  Quarter lines and alternate lines are not bought.
 
 ### `ncaaf_live_total` — what has been tried, and the standing instructions
 
@@ -818,3 +954,226 @@ final. If the API still returns the ~0.18 scale, rebuild the 2026
 snapshots with `refresh_ncaaf_stats`. If the API returns the low number,
 the live scale has left the scale the artifact was fit on, and the prior
 should be pinned to the 2025-12-12 snapshot before anyone refits.
+
+### 2026-11-10 — the totals fit is the mean of eleven seeds; fitted, not yet registered
+
+mike was asked "Refit the totals model as an average of 11 fits?" and answered
+"yes" (2026-11-10, after `docs/ncaaf_market_audit.md` section 4).
+`Updated-By: mike`.
+
+**What changed.** The fit subsamples rows and columns, so one fit's
+prediction for a game moves about 1.5 points with its random seed, against
+a gate of 8. `--fit-totals` now fits the same regression eleven times (seeds
+42 and 0 to 9, every other setting as before) and the model is their mean
+(`models/seed_average.py`). The residuals the probability is read from, the
+record at the gate and the kill line all come from the mean's out-of-sample
+predictions. Same seasons as the live artifact: fitted on 2015-2019 and
+2021-2025, residuals from the 2025 holdout, no 2026 rows (so the 2026 PPA
+question above is untouched). The gate (8.0), the EV floor and the scorer are
+unchanged. Nothing about a pick that already exists changes.
+
+**Fitting and registering are now two steps.** `--fit-totals` writes the
+artifact and prints the registry row; it registers nothing.
+`--register-totals VERSION` switches the active row, after the artifact is
+committed, merged and deployed. Before, one command did both, so the worker
+was pointed at a file it did not have until the next deploy.
+
+**The evidence.** `python -m scripts.ncaaf_margin_eval --walk-forward-totals
+--frame <the cached frame>`: each season fitted on earlier seasons only, bet
+at 8+ points from the stored close, graded at -110, units to win one. Frame:
+7,574 games, built from production 2026-11-10.
+
+| Season | Mean of eleven | Seed 42 alone (the fit that is live) |
+|---|---|---|
+| 2022 | 70-66, 51.5%, -2.6 units | 71-72, 49.7%, -8.2 units |
+| 2023 | 76-62, 55.1%, +7.8 units | 78-73, 51.7%, -2.3 units |
+| 2024 | 50-30, 62.5%, +17.0 units | 50-38, 56.8%, +8.2 units |
+| 2025 | 39-33, 54.2%, +2.7 units | 45-47, 48.9%, -6.7 units |
+| Pooled | **235-191, 55.2%, +24.9 units** | 244-230, 51.5%, -9.0 units |
+
+These are the audit's records exactly. Single seeds run from seed 42 (-9.0
+units) to seed 4 (266-206, +39.4 units). One game's eleven predictions have
+a standard deviation of 1.49 points on average (95th percentile 2.38 over
+3,071 games; the audit printed 2.39). The pooled interval is 50.4% to 59.9%
+and does not clear the 52.38% breakeven. For the mean, 8 is the best gate in
+hindsight in 2024 and 2025 only, and 2022 is below breakeven at 8. The gate
+was not re-chosen.
+
+**2026 did not separate the mean from a single fit.** The audit's replay of
+2026 had the mean 45-44, -4.20 units, against the live artifact's 49-45,
+-1.14 units, on about 90 bets each. The case for the change is the four
+earlier seasons and the size of the seed noise, not this season.
+
+**The artifact.** `models/saved/ncaaf_over_under_20261110_161059.pkl`,
+18,975,013 bytes (the single fit is 1,726,409). Holdout record at the gate
+39-33 (54.2%, +2.7 units). 772 residuals, mean -0.584 (the single fit:
+-0.618). Seed-to-seed standard deviation on the holdout games 1.35 points
+(95th percentile 2.10). On the frame's 7,570 usable games its predictions
+average 0.05 points below the live artifact's (standard deviation of the
+difference 1.32, correlation 0.990).
+
+**The probability floor did not move: 0.65.** On the new residuals P(over)
+at +8 is 0.6554 and P(under) at -8 is 0.7098 (the single fit: 0.6503 and
+0.7098). The floor's job is to sit just under the weaker arm so it never
+suppresses a pick the gate admits, and 0.65 does that for both artifacts, so
+it also holds between the merge and a registration.
+`tests/test_ncaaf_totals_seed_fit.py` checks it against every totals artifact
+in the repo. At -110 the two arms at the gate are worth EV +0.251 and +0.355,
+over the model's 0.20 floor; an over exactly at the gate clears that floor at
+-120 or better, an under at -144 or better. The 0.20 stale-line cap writes no
+row once the DraftKings edge passes 0.20, so at -110 an over can be bet from
++8.0 to +10.9 points (the single fit: +11.3) and an under from -8.0 to -8.92
+(-8.85).
+
+**WHY IT IS NOT REGISTERED: a game with no weather forecast.** The weather
+step (`run_pipeline --step ncaaf-weather`) fetches forecasts for games up to
+7 days out, once a day. The totals rule scores any game DraftKings prices,
+with no lead limit. A game scored before its forecast exists is served with
+its three weather inputs missing, and a tree sends a missing value wherever
+its training rows taught it to. The frame this fit used has ONE game of
+7,570 with no weather, so nothing taught it: 91% to 93% of each new member's
+weather splits send a missing value to the high side, as if the wind, rain
+and heat were extreme. The fit of 2026-08-25 sends 61% there. (Both were
+fitted with the same xgboost, 3.4.1. The frame of 2026-08-25 was not kept, so
+whether it had more games without weather is not established.) Measured on
+the 768 games of 2025 that have every input:
+
+| Inputs missing | Live single fit | Mean of eleven |
+|---|---|---|
+| The three weather inputs | -1.89 points (sd 3.61); unders at the gate 51 to 78 | **-11.66 points (sd 4.39); unders at the gate 48 to 547**, overs 73 to 4 |
+| Venue elevation (dome and grass blanked too) | -2.57 points (sd 2.79); unders 51 to 123 | -2.05 points (sd 2.52); unders 48 to 103 |
+| Both | -4.48 points (sd 4.83); unders 51 to 187 | -15.02 points (sd 6.07); 640 of 768 games an under |
+
+Every one of the eleven members does it alone (-10.6 to -13.4), so this
+belongs to any fit on today's frame, not to averaging: a plain refit would
+have shipped it. Of the 547 games the mean puts at or past -8 with the
+weather missing, 35 are inside the stale-line cap at -110 and could be
+written as an under bet (a pick locks the first time the gate is crossed);
+the other 512 are past the cap and would get no row. So the fit now measures
+this and stores it in the artifact, and `--register-totals` refuses an
+artifact whose prediction moves as far as the gate when an input is missing.
+For the weather inputs one thing lifts the refusal: the scorer holding such a
+game undecided. Registration proves that by calling the hold
+(`models.scorer.totals_weather_hold`) on a game with each weather input
+missing; a scorer without it, or with one that does not hold, leaves the
+artifact refused. There is no flag that registers it anyway. So this artifact
+cannot go live without the hold and can once the hold has shipped (its venue
+shift, 2.05 points, is under the gate). NOT measured: how many 2026 games and bets were scored without
+a weather row. One query answers it: the bets of this model in `picks` whose
+`created_at` is more than 7 days before `game_date`.
+
+The size is an accident of the fit, not something learned. The four
+walk-forward fits, whose training seasons hold no game without weather at
+all, move 3.99 points on average when the weather is missing; the final fit,
+whose 2025 season holds the one such game, moves 11.66.
+
+**What the rule is worth with no forecast.** The same walk-forward
+(2022-2025, stored close, -110), every game scored as if its forecast did not
+exist yet:
+
+| Weather inputs | Record | Units | Mean shift |
+|---|---|---|---|
+| As stored (the true weather) | 235-191, 55.2% | +24.9 | |
+| Missing, as the scorer serves it | 486-450, 51.9% | -9.0 | -3.99 points |
+| Set to typical weather (the training seasons' medians: 70.7°F, 7 mph, no rain on the full frame) | 236-213, 52.6% | +1.7 | +0.59 points |
+
+By season with the weather missing: 118-113, 113-101, 130-122, 125-114.
+Without the weather the rule is about break-even over four seasons, however
+the gap is filled. The stored weather is the reanalysis (what happened), so
++24.9 is an upper bound on what a forecast is worth; the live model is served
+forecasts. No backtest in this file or in the audit grades a bet made before
+a forecast existed: the audit's live-shape run starts five days out.
+
+**The weather hold (mike, 2026-11-10: *"yes wait for a weather forecast"*).**
+It was built as one commit ahead of his answer and ships with the refit: the
+eleven-seed artifact cannot be registered without it. In practice it means no
+totals bet more than 7 days before kickoff: this season the 9 kept bets placed
+earlier than that went 4-5, -1.55 units, and none has been placed that early
+since the schedule hold of 2026-10-20 (read-only SQL on `picks`, 2026-11-10).
+While any of the
+three weather inputs is missing at scoring time, the totals model does not
+decide the game. Its rows are written NONE with "waiting for the weather
+forecast", 0.5 a side (the model is not asked for a number it cannot give),
+the way a schedule hold writes its rows (`models/scorer.py`,
+`totals_weather_hold`). A NONE row never locks, so the first pass after the
+forecast exists decides the game. A BET that is already locked is never
+scored again, so it is untouched. What the hold rests on, from the code:
+
+- *When the forecast arrives.* `run_pipeline.step_ncaaf_weather` calls
+  `ingest_upcoming(days_ahead=7)`: games dated today to 7 days out. It runs
+  once a day in the morning pipeline, before scoring. The hourly refresh pass
+  (`scripts/refresh_pass.sh`) does not run it. So a held game is decided the
+  first morning it is 7 days out, and a game first priced inside that window
+  during the day waits for the next morning. Adding the step to the refresh
+  pass would cut that wait to an hour; it was not added.
+- *Domes.* Training rows and the forecast step both give a dome 72°F, no
+  wind, no rain (312 of the 328 dome games in the training frame). So a dome
+  game with no weather row is served those values and decided: it has no
+  forecast to wait for, and one whose venue has no coordinates would never
+  get a row.
+- *Neutral sites.* Training has the weather at the game's own venue. The
+  forecast step uses that venue once it is known and the home team's usual
+  venue until then, so a neutral-site game gets a row like any other. A game
+  whose venue has no coordinates at all gets none, in training or at serve
+  time (one game of 7,570 in the frame), and is held until kickoff.
+- *This model only.* The three inputs are in the totals feature list and no
+  other NCAAF model's.
+
+The live fit has a smaller version of the same thing: a game with no
+forecast reads 1.9 points low and one with no known venue 2.6 low, which
+turns 51 unders at the gate into 78 and 123. That may be part of the 2026
+under lean measured on 2026-09-26. It has not been checked against the
+stored picks.
+
+**What it costs to run.** The scorer loads the artifact once per game
+(`models/scorer.score_game` calls `models/trainer.load_model`, which reads
+and unpickles the file every time) and then predicts one row. On this
+machine, with nothing else running: the load is 473 ms (the single fit: 36)
+and the first prediction after it was 62 ms (2.8). With other work running
+on the machine the load took up to 844 ms and the prediction up to 391.
+
+- *The prediction, fixed.* Each member was fitted with `n_jobs=-1` and
+  started a thread pool to predict one row, eleven times a game.
+  `models/seed_average.py` now sets every member to one thread when the model
+  is built or loaded. Timed in pairs in one process (15 fresh loads each
+  way): 155 ms as fitted, 40 ms on one thread; a second prediction on the
+  same object 67 ms and 23 ms. No predicted value changes: all 7,570 games of
+  the frame are identical to the last bit, largest difference 0.0.
+- *The load, not fixed.* About 0.5 seconds a game, nine tenths of what the
+  new artifact adds, is unpickling eleven sets of 700 trees. It is paid per
+  game because the loader does not keep what it has read. Keeping it (one
+  load per scoring process) is a change to the loader every model uses, so
+  it was left as a decision.
+
+**Other models.** `models/seed_average.py` holds any fitted regressors. The
+seed noise was measured for this model only. `fit_and_register` (the retired
+spread regression) still writes and registers in one step; it is unused and
+was left alone. The research harnesses under `scripts/ncaaf_search/` still
+fit one seed.
+
+**Steps, in order.**
+
+1. Decide what the totals model does with a game that has no weather
+   forecast yet (mike's call; it changes when the model bets). The measured
+   choices: hold the game as a watching row until its forecast exists, which
+   is the only regime any backtest covers and is what the hold commit does;
+   or price it with typical weather, which was 236-213, +1.7 units over four
+   seasons. The hold changes the live fit too, from the day it deploys: a
+   game more than 7 days out stops being bet until its forecast exists.
+   Without the hold commit, merging this branch changes no pick.
+2. Once the scorer holds such a game: merge, and wait for both services to
+   deploy. The hold has to be running on the worker before the new artifact
+   is active, so the order is hold deployed first, registration second.
+3. `python -m scripts.ncaaf_margin_eval --register-totals 20261110_161059`,
+   run from a checkout that has the same scorer the worker has (a production
+   write: it checks that scorer for the hold, copies the file into
+   `model_artifacts`, then switches the active `model_registry` row).
+4. `python -m data.threshold_sync` (the floor did not move, so this changes
+   nothing; it is the standing step after a model update).
+5. Read back `model_registry` for `ncaaf_over_under` (one active row, the new
+   path) and the next pass's `model_artifacts_load` health line.
+
+To go back after a registration: set the 2026-08-25 row active again in
+`model_registry` and the new one inactive. The old file stays in the repo
+for that reason. `--register-totals` cannot do it, because the old file
+carries no registry row of its own.

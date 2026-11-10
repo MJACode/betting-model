@@ -966,7 +966,12 @@ ACTION_THRESHOLDS: dict = {
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
     "ncaaf_live_win_prob": {"min_prob": 0.50, "min_edge": 0.16},  # 2026-09-19 mike: RE-SWEPT ON THE HONEST NUMBER WITH THE 0.30 FLOOR ON (scripts/live_honest_cut, the bought 2025 replay, fresh quotes, promoted map a=1 b=-0.270). Under the floor the old 0.65/0.10 takes ZERO bets: EV 0.30 at a favourite's price needs a calibrated ~0.70+ that the map no longer grants. What clears is the other end -- calibrated >= 0.50 at +160 or longer, edge >= 0.16: 43 bets 20-23 +38.6%, halves +26.4%/+50.2%, 5 positive neighbours; the widest surviving cell 0.50/0.02 is 73 bets +24.1% (+31.1%/+17.4%). A different population from the favourites the 2026 forward record was built on (25 bets, claimed 0.75). Previously (2026-09-12): RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
     "ncaaf_live_total":    {"min_prob": 0.73, "min_edge": 0.12},  # 2026-09-13 mike ("only the best of the best"): 0.72 x EV 0.22 -> 0.73 x EV 0.24, shipped WITH the FBS-only gate in ncaaf_live/serve.price. 2025 replay, first signal per game, FBS-vs-FBS: 39 bets +2.9% -> 17 bets +21.3% (0.097 -> 0.042 per game). Of those 17, 14 are first-half (+21.5%) and 3 second-half (+20.0%): the replay says NOT WORSE, it does not prove better, and there is no production evidence of profit yet. 0.735 flips negative on one second-half bet. A stricter cut, not a pause and not a cap
-    # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
+    # 0.65 sits just under P(over) at the +/-8.0 gate, the weaker of the two
+    # arms (--fit-totals prints both): 0.6503 on the single fit of
+    # 2026-08-25 and 0.6554 on the eleven-seed fit of 2026-11-10 (the under
+    # arm is 0.7098 on both). So the floor admits both arms exactly at the
+    # gate on either artifact and did not move with the refit
+    # (tests/test_ncaaf_totals_seed_fit.py pins it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
     # asymmetric gate (over at +8, under at ~-5) and ship a looser rule on the
@@ -3253,6 +3258,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     # (data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql). This
     # floor and the +/-8 gate are unchanged. Do not re-promote without a
     # new Updated-By.
+    # 2026-11-10 (mike: "Refit the totals model as an average of 11 fits?"
+    # "yes"): on the eleven-seed fit's residuals P(over) at +8 is 0.6554 and
+    # P(under) at -8 is 0.7098, so 0.65 still sits just under the weaker arm
+    # and is unchanged. docs/sports/ncaaf.md, the 2026-11-10 section.
     "ncaaf_over_under": 0.65,
     "ncaaf_moneyline":  0.62,
     "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS

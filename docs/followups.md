@@ -56,8 +56,8 @@ made outside the repo (`git worktree add --detach`, 153 and 154 passed).
 - Nine scan the repo and walk into `.claude/worktrees/` (two old checkouts
   on this machine, `compassionate-galileo-faf01f` and `ncaabw`), then fail on
   the old files there: `test_anon_readable` (two), `test_ddl_guard`,
-  `test_live_money_no_record_only`, `test_nhl_goalie_guards` (two),
-  `test_worker_deps` (three). The fix is for those scans to skip
+  the live-money wording scan (`tests/test_live_money_*.py`, one),
+  `test_nhl_goalie_guards` (two), `test_worker_deps` (three). The fix is for those scans to skip
   `.claude/worktrees/`, or to remove the two checkouts once their branches
   are merged.
 - `test_mobile_nhl_skater_stats::test_the_behavioural_checks_pass` fails in
