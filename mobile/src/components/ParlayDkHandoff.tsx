@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -32,6 +32,9 @@ interface Props {
   /** Bookmaker key to hand off to. Defaults to DraftKings. */
   book?: string;
   onClose: () => void;
+  /** Optional row under the open button — the Betslip puts the same-game
+   *  price entry here when this book's tile is an estimate. */
+  priceEntry?: React.ReactNode;
 }
 
 /**
@@ -45,7 +48,7 @@ interface Props {
  * linked leg is the bug Matt reported. Books we cannot combine still open the
  * first linked leg; the per-leg "Add to slip" row is how the rest get there.
  */
-export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: Props) {
+export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose, priceEntry }: Props) {
   const linked = legs.map((l) => l.betLink).filter((u): u is string => !!u && !!u.trim());
   const combined = combineBetslipLinks(linked);
   // A book we cannot join still opens the first linked leg — same as before
@@ -66,6 +69,9 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
     <Modal trackName="ParlayDkHandoff" visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       {/* Backdrop tap dismisses, as every other sheet in the app does — the X
           alone sits in the one corner a thumb cannot reach (UX review). */}
+      {/* Keeps the price entry's field above the keyboard. Outside the backdrop
+          View so the backdrop stays the sheet's sibling container (a11y test). */}
+      <KeyboardAvoidingView style={styles.kav} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.backdrop}>
         {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
             parent: an accessible Pressable groups everything inside it into
@@ -75,14 +81,14 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close DraftKings hand-off"
+          accessibilityLabel={`Close ${name} hand-off`}
         />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the rows unreachable. */}
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.header}>
             <Text style={styles.title}>Bet on {name}</Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close DraftKings hand-off">
+            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Close ${name} hand-off`}>
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -143,8 +149,13 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
             </Pressable>
           ) : null}
 
+          {priceEntry}
+
           <FlatList
             data={legs}
+            // A tap on "Add to slip" while the price field's keyboard is up
+            // should add, not only dismiss the keyboard.
+            keyboardShouldPersistTaps="handled"
             keyExtractor={(l) => l.key}
             style={styles.list}
             renderItem={({ item, index }) => (
@@ -179,11 +190,13 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
           />
         </Pressable>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  kav: { flex: 1 },
   backdrop: {
     flex: 1,
     backgroundColor: '#00000066',
