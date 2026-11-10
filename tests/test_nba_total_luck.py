@@ -963,3 +963,68 @@ def test_opening_night_declines_every_game_without_crashing(art):
                                   "home_score", "away_score"])
     bets, decisions, diag = tl.decide(t, q, box, games, times, art, scheduled=games)
     assert bets == [] and diag["early_season"] == 1, (decisions, diag)
+
+
+# ── every scored game in picks (Matt, 2026-11-10: "NBA all tab should have all
+#    bets. Not just signals") ─────────────────────────────────────────────────
+
+def _nones(decisions):
+    from scripts import nba_none_rows
+    return nba_none_rows.none_rows(decisions, model_id=tl.MODEL_ID, sport=tl.SPORT,
+                                   side=tl.SIDE, market=tl.MARKET, games=GAMES,
+                                   bankroll=1000.0, pause=None)
+
+
+def test_a_game_below_the_cut_is_a_none_row_at_the_market_fair_number(monkeypatch, art):
+    """RULE: a game the rule scored and did not bet is written as a NONE row:
+    the best over offer, no stake, and the market-fair probability with NO
+    uplift (the uplift is the bet bucket's, measured only on games over the
+    cut)."""
+    q = [("pinnacle", 224.5, -105, -115), ("draftkings", 224.5, -110, -110)]
+    bets, decisions, _ = _decide(art, q, gap=1.5, monkeypatch=monkeypatch)
+    assert bets == []
+    [d] = decisions
+    assert d.detail.startswith("gap_below_cut") and d.book == "draftkings" and d.line == 224.5
+    row = _nones(decisions)[d.game_id]
+    assert row["signal_type"] == "NONE" and row["pick_side"] == "over"
+    assert row["kelly_fraction"] == 0.0 and row["recommended_bet"] == 0.0
+    assert row["scored_line"] == 224.5 and row["dk_odds"] == -110 and row["line_book"] is None
+    assert row["model_probability"] == pytest.approx(round(d.p_fair, 4))
+    assert row["model_probability"] < d.p_model                  # no uplift claimed
+    assert row["edge"] == pytest.approx(row["model_probability"] - row["dk_implied_prob"], abs=1e-4)
+
+
+def test_a_game_never_scored_gets_no_none_row(monkeypatch, art):
+    """A game declined for missing inputs was not scored: its reason stays in
+    the ledger and nothing reaches picks."""
+    d = tl.Decision("NBA_2026-11-05_AWY_HOM", _et(2026, 11, 5, 18, 25), None, 0,
+                    "box_missing:1 (X)", book="draftkings", line=224.5, price=-110.0,
+                    p_fair=0.5, p_model=0.56)
+    assert _nones([d]) == {}
+
+
+def test_publish_writes_the_none_row_and_the_door_turns_a_bet_into_one(monkeypatch):
+    """The NONE row is written with its decision, and the ledger still counts no
+    bet. A bet the one-total-a-game door drops becomes a NONE row at the bet's
+    own number and probability."""
+    from scripts import nba_total_luck_card as card
+    import scripts.nfl_wind_publisher as pub
+    monkeypatch.setattr(pub, "_lock_model", lambda conn, key: None)
+    gid = "NBA_2026-11-05_AWY_HOM"
+    below = tl.Decision(gid, _et(2026, 11, 5, 18, 25), 1.2, 0, "gap_below_cut:1.20",
+                        book="fanduel", line=224.5, price=-105.0, p_fair=0.49, p_model=0.556)
+    conn = _Conn()
+    assert card.publish(conn, [], [below], {gid: 62.0}, {}, _nones([below])) == (0, 1)
+    [p] = conn.picks
+    assert p["signal_type"] == "NONE" and p["line_book"] == "fanduel" and p["dk_odds"] is None
+    assert conn.ledger[0]["n_bets"] == 0
+
+    b = _bet()
+    rows, refused = card.pick_rows([b], GAMES, 1000.0)
+    bet = tl.Decision(gid, b.fetch_at, 4.2, 1, "bet:fanduel 224.5 -110", book="fanduel",
+                      line=224.5, price=-110.0, p_fair=0.50, p_model=0.5659)
+    conn = _Conn(other_bets={gid: "nba_team_total_luck"})
+    assert card.publish(conn, rows, [bet], {gid: 62.0}, refused, _nones([bet])) == (0, 1)
+    [p] = conn.picks
+    assert p["signal_type"] == "NONE" and p["model_probability"] == pytest.approx(0.5659)
+    assert conn.ledger[0]["n_bets"] == 0

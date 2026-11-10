@@ -34,10 +34,13 @@ A PAUSED MODEL'S ROWS carry downgrade_reason = config.PAUSED_NOTE (models.scorer
 _pause_note, the marker every publisher and record query keys on), so a pick
 written while paused stays unannounced after an unpause.
 
-BET ROWS ONLY in picks. The scorer deletes every model's unsettled non-BET
-rows on each pass, so a "declined" row would not survive there. A decision
-with no bet lives in the ledger with its reason; the per-run diagnostic line
-in the worker log is how an empty card is told apart from a broken one.
+EVERY SCORED GAME in picks (Matt, 2026-11-10: "NBA all tab should have all
+bets. Not just signals"). A bet is a BET row; a game the rule scored and did
+not bet (below the cut, refused by a floor, or dropped by the one-total-a-game
+door) is a NONE row, no stake, written with its decision
+(scripts/nba_none_rows.py). A game declined for missing inputs was never
+scored: its reason lives only in the ledger. The scorer's no-bet clear touches
+only its own models' rows since 2026-11-06, so a NONE row survives to tip.
 
 ROW SHAPE: the NHL totals card's (scripts/nhl_totals_card.py). dk_odds /
 dk_implied_prob / edge are DraftKings' own over at this number in this fetch,
@@ -528,7 +531,8 @@ _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
 
 
 def publish(conn, rows: list[dict], decisions: list[tl.Decision], leads: dict[str, float],
-            refused: dict[str, str]) -> tuple[int, int]:
+            refused: dict[str, str],
+            nones: dict[str, dict] | None = None) -> tuple[int, int]:
     """Write each decided game once: its decision row and its bet in ONE
     transaction, under the shared NBA game-total lock and then the model's own,
     the ledger and the picks re-read inside them. A game another NBA game-total
@@ -556,16 +560,21 @@ def publish(conn, rows: list[dict], decisions: list[tl.Decision], leads: dict[st
             logger.info(f"{MODEL_ID}: {d.game_id} not written, {taken[d.game_id]} already bet it "
                         f"(one NBA game-total bet a game)")
             detail, row = f"{detail}; {door.reason(taken[d.game_id])}", None
+        if row is None:
+            # Scored, no bet written: its NONE row, so the All board shows it
+            # (scripts/nba_none_rows.py).
+            row = (nones or {}).get(d.game_id)
+        is_bet = row is not None and row["signal_type"] == "BET"
         got = conn.execute(_INSERT_DECISION, {
             "game_id": d.game_id, "fetch_at": pd.Timestamp(d.fetch_at).isoformat(),
             "lead_min": round(leads.get(d.game_id, float("nan")), 2),
             "gap_total": None if d.gap is None else round(float(d.gap), 3),
-            "n_bets": 1 if row is not None else 0, "detail": detail}).fetchone()
+            "n_bets": 1 if is_bet else 0, "detail": detail}).fetchone()
         if not got:
             continue
         n_decided += 1
         if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
-            n_bets += 1
+            n_bets += is_bet
     conn.commit()
     return n_bets, n_decided
 
@@ -692,9 +701,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 diag_all[k] += v
         published = n_decided = 0
         if do_publish and decisions_all:
-            from models.scorer import _get_current_bankroll
+            from models.scorer import _get_current_bankroll, _pause_note
+            from scripts import nba_none_rows
             rows, refused = pick_rows(bets_all, games, _get_current_bankroll(conn))
-            published, n_decided = publish(conn, rows, decisions_all, leads, refused)
+            nones = nba_none_rows.none_rows(
+                decisions_all, model_id=MODEL_ID, sport=SPORT, side=tl.SIDE,
+                market=tl.MARKET, games=games, bankroll=_get_current_bankroll(conn),
+                pause=_pause_note(MODEL_ID))
+            published, n_decided = publish(conn, rows, decisions_all, leads, refused, nones)
         logger.info("\n" + render(bets_all, {**diag_all, **timing},
                                   published if do_publish else None,
                                   n_decided if do_publish else None))

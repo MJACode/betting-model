@@ -65,6 +65,15 @@ def _run(clock, after_s=30):
     return card.run_card(do_publish=True, now=clock() + timedelta(seconds=after_s))
 
 
+
+def _one_none_row(db, model_id):
+    """Scored and not bet: exactly one NONE row, no stake (Matt, 2026-11-10:
+    the All tab shows every scored game; scripts/nba_none_rows.py)."""
+    rows = [r for r in db.rows["picks"] if r["model_id"] == model_id]
+    assert [r["signal_type"] for r in rows] == ["NONE"], rows
+    assert rows[0]["kelly_fraction"] == 0.0 and rows[0]["recommended_bet"] == 0.0
+    return rows[0]
+
 def test_a_game_with_no_draftkings_first_half_is_stored_decided_and_bet(monkeypatch):
     """RULE: DraftKings hung no first-half total; FanDuel's over is the best price
     at Pinnacle's fair line, so the bet is written there, with no DraftKings price
@@ -103,7 +112,8 @@ def test_a_game_the_team_total_model_already_bet_gets_no_first_half_bet(monkeypa
     feed.fetch_first_half([GID], "open", conn=db)
     out = _run(clock)
     assert out["published"] == 0 and out["decided"] == 1
-    assert [r["model_id"] for r in db.rows["picks"]] == ["nba_team_total_luck"]
+    assert [r["model_id"] for r in db.rows["picks"] if r["signal_type"] == "BET"] == ["nba_team_total_luck"]
+    _one_none_row(db, "nba_first_half_total_luck")
     [d] = db.rows[DECISIONS]
     assert d["n_bets"] == 0 and d["book"] == "fanduel" and d["gap_total"] == 2.5
     assert d["detail"].endswith("; one_total_a_game:nba_team_total_luck_already_bet")
@@ -126,7 +136,8 @@ def test_at_the_full_game_cut_the_game_is_decided_with_no_bet(monkeypatch):
     clock, db, f, _ = card_world(monkeypatch, gap=3.4)
     feed.fetch_first_half([GID], "open", conn=db)
     out = _run(clock)
-    assert out["published"] == 0 and out["decided"] == 1 and db.rows["picks"] == []
+    assert out["published"] == 0 and out["decided"] == 1
+    _one_none_row(db, "nba_first_half_total_luck")
     [d] = db.rows[DECISIONS]
     assert d["detail"] == "full_game_model_bets:3.40" and d["n_bets"] == 0 and d["gap_total"] == 3.4
     assert d["book"] == "fanduel"
@@ -148,7 +159,8 @@ def test_under_the_cut_writes_a_decision_and_no_bet(monkeypatch):
     clock, db, f, _ = card_world(monkeypatch, gap=1.5)
     feed.fetch_first_half([GID], "open", conn=db)
     out = _run(clock)
-    assert (out["published"], out["decided"]) == (0, 1) and db.rows["picks"] == []
+    assert (out["published"], out["decided"]) == (0, 1)
+    _one_none_row(db, "nba_first_half_total_luck")
     [d] = db.rows[DECISIONS]
     assert d["detail"].startswith("gap_below_cut") and d["book"] == "fanduel"
 
@@ -235,7 +247,8 @@ def test_a_bet_under_the_model_s_ev_floor_is_refused_and_the_game_still_decided(
     monkeypatch.setattr(fh, "uplift", lambda art, season: -0.30)
     feed.fetch_first_half([GID], "open", conn=db)
     out = _run(clock)
-    assert out["published"] == 0 and out["decided"] == 1 and db.rows["picks"] == []
+    assert out["published"] == 0 and out["decided"] == 1
+    _one_none_row(db, "nba_first_half_total_luck")
     [d] = db.rows[DECISIONS]
     assert d["n_bets"] == 0 and "refused ev_below_floor" in d["detail"]
 
