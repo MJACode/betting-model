@@ -755,6 +755,36 @@ the gap is filled. The stored weather is the reanalysis (what happened), so
 forecasts. No backtest in this file or in the audit grades a bet made before
 a forecast existed: the audit's live-shape run starts five days out.
 
+**The weather hold: built, not yet approved.** It is one commit, made ahead
+of mike's answer so it can be taken or left on its own. While any of the
+three weather inputs is missing at scoring time, the totals model does not
+decide the game. Its rows are written NONE with "waiting for the weather
+forecast", 0.5 a side (the model is not asked for a number it cannot give),
+the way a schedule hold writes its rows (`models/scorer.py`,
+`totals_weather_hold`). A NONE row never locks, so the first pass after the
+forecast exists decides the game. A BET that is already locked is never
+scored again, so it is untouched. What the hold rests on, from the code:
+
+- *When the forecast arrives.* `run_pipeline.step_ncaaf_weather` calls
+  `ingest_upcoming(days_ahead=7)`: games dated today to 7 days out. It runs
+  once a day in the morning pipeline, before scoring. The hourly refresh pass
+  (`scripts/refresh_pass.sh`) does not run it. So a held game is decided the
+  first morning it is 7 days out, and a game first priced inside that window
+  during the day waits for the next morning. Adding the step to the refresh
+  pass would cut that wait to an hour; it was not added.
+- *Domes.* Training rows and the forecast step both give a dome 72°F, no
+  wind, no rain (312 of the 328 dome games in the training frame). So a dome
+  game with no weather row is served those values and decided: it has no
+  forecast to wait for, and one whose venue has no coordinates would never
+  get a row.
+- *Neutral sites.* Training has the weather at the game's own venue. The
+  forecast step uses that venue once it is known and the home team's usual
+  venue until then, so a neutral-site game gets a row like any other. A game
+  whose venue has no coordinates at all gets none, in training or at serve
+  time (one game of 7,570 in the frame), and is held until kickoff.
+- *This model only.* The three inputs are in the totals feature list and no
+  other NCAAF model's.
+
 The live fit has a smaller version of the same thing: a game with no
 forecast reads 1.9 points low and one with no known venue 2.6 low, which
 turns 51 unders at the gate into 78 and 123. That may be part of the 2026
@@ -792,10 +822,11 @@ fit one seed.
 1. Decide what the totals model does with a game that has no weather
    forecast yet (mike's call; it changes when the model bets). The measured
    choices: hold the game as a watching row until its forecast exists, which
-   is the only regime any backtest covers; or price it with typical weather,
-   which was 236-213, +1.7 units over four seasons. Until that is settled,
-   stop here: the single fit of 2026-08-25 keeps scoring, and merging this
-   branch changes no pick.
+   is the only regime any backtest covers and is what the hold commit does;
+   or price it with typical weather, which was 236-213, +1.7 units over four
+   seasons. The hold changes the live fit too, from the day it deploys: a
+   game more than 7 days out stops being bet until its forecast exists.
+   Without the hold commit, merging this branch changes no pick.
 2. Once the scorer holds such a game: merge, and wait for both services to
    deploy. The hold has to be running on the worker before the new artifact
    is active, so the order is hold deployed first, registration second.

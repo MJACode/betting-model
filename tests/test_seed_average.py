@@ -218,7 +218,7 @@ def test_the_scorer_prices_the_average_through_its_total_regression_branch(monke
     residuals = sorted(float(v) for v in range(-20, 21))
     artifact = {"kind": "total_regression",
                 "model": SeedAverage([_Line(58.0), _Line(62.0), _Line(63.0)], seeds=[42, 0, 1]),
-                "feature_cols": ["home_points_per_game", "wx_wind_mph"],
+                "feature_cols": ["home_points_per_game", "venue_elevation_ft"],
                 "residuals": residuals, "d_threshold": 8.0}
     monkeypatch.setattr(sc, "load_model", lambda mid: artifact)
     monkeypatch.setattr(sc, "_get_dk_odds", lambda conn, gid, market: {
@@ -228,7 +228,9 @@ def test_the_scorer_prices_the_average_through_its_total_regression_branch(monke
                         lambda conn, gid, market, side: {
                             "public_bet_pct": None, "public_money_pct": None})
 
-    features = {"home_points_per_game": 31.0, "wx_wind_mph": None,
+    # One input missing, as a served row can be. Not a weather input: the
+    # scorer may hold a game whose weather is missing (the weather hold).
+    features = {"home_points_per_game": 31.0, "venue_elevation_ft": None,
                 "home_team": "Ohio State", "away_team": "Toledo",
                 "game_date": "2026-09-05"}
     picks = sc.score_game(None, "NCAAF_2026-09-05_toledo_ohio-state",
