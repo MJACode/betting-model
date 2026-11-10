@@ -45,6 +45,24 @@ missed silently; a step that loads it without a person would be better.
 is in the database, but the build cannot run on the worker. Next season's
 rebuild should read the three tables directly.
 
+## [ ] Ten tests fail in the main checkout only because other checkouts sit inside it (2026-11-10)
+
+Full suite on `claude/ncaaf-market-audit` in the main checkout: 23 failed,
+11,521 passed, 107 skipped (1h19m, nothing else running). Thirteen are the
+fourteen listed below (the rules-split test passes where a `.env` exists).
+The other ten pass, or skip, on a clean copy of master and of that branch
+made outside the repo (`git worktree add --detach`, 153 and 154 passed).
+
+- Nine scan the repo and walk into `.claude/worktrees/` (two old checkouts
+  on this machine, `compassionate-galileo-faf01f` and `ncaabw`), then fail on
+  the old files there: `test_anon_readable` (two), `test_ddl_guard`,
+  `test_live_money_no_record_only`, `test_nhl_goalie_guards` (two),
+  `test_worker_deps` (three). The fix is for those scans to skip
+  `.claude/worktrees/`, or to remove the two checkouts once their branches
+  are merged.
+- `test_mobile_nhl_skater_stats::test_the_behavioural_checks_pass` fails in
+  the main checkout and is skipped on the clean copies. Not looked into.
+
 ## [ ] Fourteen tests fail on master (measured 2026-11-10, master 93b032e3)
 
 `python -m pytest -q tests/` on this machine: 14 failed, 11,510 passed. None
