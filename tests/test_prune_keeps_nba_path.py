@@ -112,12 +112,14 @@ def test_a_dry_run_counts_and_deletes_nothing():
 def test_the_two_prune_tiers_never_select_a_path_kept_sport():
     params: dict = {}
     pred = po._unprotected(params, "odds")
-    # NCAAB joined 2026-10-26, for its first season (first game 2026-11-01).
-    assert "path_kept_sports" in pred and params["path_kept_sports"] == ("NBA", "NCAAB")
+    # NCAAB joined 2026-10-26, for its first season (first game 2026-11-01);
+    # NCAABW (women's college basketball) 2026-11-09, for the same reason.
+    assert "path_kept_sports" in pred and params["path_kept_sports"] == ("NBA", "NCAAB", "NCAABW")
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE odds (bookmaker, source, sport)")
     db.executemany("INSERT INTO odds VALUES (?, NULL, ?)",
-                   [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "MLB")])
+                   [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "NCAABW"),
+                    ("fanduel", "MLB")])
     # the predicate's own SQL, run: only the MLB line-shop row is prunable
     sql = pred
     for k, v in params.items():

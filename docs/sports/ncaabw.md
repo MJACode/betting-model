@@ -194,6 +194,15 @@ Commands (from a checkout with production settings):
     python -m data.ingestors.ncaabw_odds_history --seasons 2025 2027 --spool DIR
     python -m data.ingestors.ncaabw_odds_history --seasons 2025 2027 --spool DIR --fetch --store
 
+**Stored, checked 2026-11-10.** The ledger holds all 49,527 snapshots
+(2024-11-12 21:15Z to 2026-11-09 23:55Z). `odds` holds 147,268 pre-game rows
+under `odds_api_ncaabw_history` on 2,448 games, the spool's own count game by
+game, so the connection that dropped during the store wrote nothing twice.
+`ncaabw_inplay_quotes` holds 772,377 rows against 773,059 counted: in 28
+snapshots the feed listed an event twice, and the table's key (snapshot, game,
+book, market) keeps the first listing. 2,186 events matched no ESPN game and
+are kept raw in `ncaabw_odds_unmatched`.
+
 ## What runs, and where it lands
 
 | Piece | What | Where |
@@ -204,18 +213,154 @@ Commands (from a checkout with production settings):
 | Price-path retention | NCAABW keeps every book's whole price path | `data/prune_odds.py` (`PATH_KEPT_SPORTS`) |
 | Paid history | Every snapshot of 2024-25, 2025-26 and 2026-27 to date (above) | `data/ingestors/ncaabw_odds_history.py` |
 | Free history | NCAA possession box scores and season player minutes, 2010 to 2027 | `data/ingestors/ncaabw_sdv_import.py` |
+| Box scores, this season | ESPN's summary after each final on the hourly passes (step `ncaabw-box`); NCAA's file once a day (step `ncaabw-ncaa-box`, new contests only) | `data/ingestors/ncaabw_espn_box.py`, `ncaabw_sdv_import.refresh_season` |
+| Totals model card | Every 5 minutes, three after each capture tick: decides each game once at DraftKings' first posted total, bets only while it still stands, then publishes; `RUN_NCAABW_TOTAL_CARD=0` stops it | `scripts/ncaabw_total_card.py`, job `ncaabw_total_card` |
+
+## Box scores and period scores (ESPN, from 2026-27)
+
+`data/ingestors/ncaabw_espn_box.py`, a fork of the men's feed. After each
+final, ESPN's game summary gives the team box score (two rows in
+`ncaabw_team_game_stats`, source `espn_summary`, `contest_id`
+`espn:<ESPN event id>`) and the period scores (`ncaabw_period_scores`:
+**periods 1 to 4 are the quarters, 5 and later the overtimes**). Step
+`ncaabw-box` runs on the hourly refresh passes after `ncaabw-results`; a game
+it will not store gets a row in `ncaabw_box_misses`. The possession estimate,
+the refusals and the red-run rule are the men's (`docs/sports/ncaab.md`, "Box
+scores and period scores"). What differs: a game's length is 40 minutes plus 5
+for each period past the fourth, a regulation game must show four periods
+(two before 2015-16), and there is no women's player box.
+
+**Two sources, one game.** NCAA's rows (sportsdataverse) and ESPN's can both
+hold a game, and this season both do. Keep one source per game, both of its
+rows, NCAA's where it holds the game. **ESPN's game id cannot be the key.**
+NCAA's rows carry it in three seasons only (read 2026-11-10: 99.6% of 2023-24
+rows, 94.3% of 2024-25, 100% of 2025-26, none of any other season, and none
+of 2026-27's 958). A row with no id is placed on its game by the date and both
+team ids, then by the date within a day, one team and the exact score.
+`models.ncaabw_total_blend.place_box` does it, and the totals card and the
+build both read through it. On 2026-11-10 it placed all 1,996 stored 2026-27
+rows and kept 1,048: NCAA's for 479 games, ESPN's for 45.
+
+**The first real run** (the 2026-27 backfill, 2026-11-09): 525 finals due, 519
+stored, 6 refused (5 where the box's made shots do not add up to the final
+score, 1 with no shooting numbers). 2,085 period rows: four a game and nine
+overtime periods. NCAA's file held 5 of the 6 refused games, which is why the
+model reads both sources. `python -m scripts.ncaabw_research.box_coverage`
+prints the season's coverage the way the card reads it.
 
 ## Open items
 
 - **ESPN's own odds are not imported.** They would add one sportsbook's lines
   on most games of 2022-23 and the first weeks of 2023-24. One call a game to
   ESPN's core API, free.
-- **No in-season box feed yet.** The men's `ncaab_espn_box.py` (ESPN's summary
-  after each final) has no women's twin. sportsdataverse's 2027 file is being
-  built in season, which the men's never was; whether it keeps up is not
-  known.
-- **No app chip.** NCAABW is not on the app's sport list, so nothing of it
-  shows there. The seven extra books are not in the app's reference-only list.
+- **The season's schedule is loaded whole by hand.** The daily step stores 14
+  days ahead. 2026-27 was loaded to 2027-03-06 on 2026-11-10 (5,769 games).
+  Each October: `python -m data.ingestors.ncaabw_espn_ingestor --backfill
+  <first> <last>`. The totals card fails its run, by name, if it was not.
+- **NCAA's 2026-27 file is not updated every day.** It held games through
+  2026-11-08 on both 2026-11-09 and 2026-11-10.
+
+## The totals model: `ncaabw_total_blend` (live from 2026-11-10)
+
+mike, 2026-11-09: build the women's models from everything learned on the
+men's. The men's totals method on the women's games, at the women's own cut.
+
+| | | |
+|---|---|---|
+| model | ratings refit as of the quote, a correction on shooting luck and style, blended with DraftKings' total | `models/ncaabw_total_blend.py` |
+| card | decides each game once at DraftKings' first posted total, only while it still stands | `scripts/ncaabw_total_card.py` |
+| frozen numbers | `models/saved/ncaabw_total_blend_2027.json` | `scripts/ncaabw_total_blend_build.py` |
+| cut | edge above 0.05: P(win, push left out) minus DraftKings' implied probability | `config.MODEL_EDGE_THRESHOLDS` |
+| EV floor / price floor | 0.07 / -200 | `config.MODEL_OWN_EV_FLOOR`, `MODEL_MIN_ODDS` |
+| stake | the flat 1 unit to win, risk capped at 3 | no `stake_units` written |
+| decided once | a row in `ncaabw_total_decisions`, bet or not | the card |
+| settles as | full-game total, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
+| posts to | the NCAABW channel (`DISCORD_CHANNEL_NCAABW`, set on the worker) | `tracking/signal_publisher` |
+
+**The frozen numbers** (built 2026-11-10). Ratings settings: the men's,
+untouched. Stage 2 fitted on 2015-16 to 2025-26. Blend on the 1,730 priced
+games of 2024-25 and 2025-26: every game c +0.574, beta 0.677, sigma 15.92;
+December on (1,512 games) c +0.260, beta 0.760, sigma 15.81. November has 218
+priced games, under the 300 a fit needs, so a November game is priced with the
+every-game fit.
+
+**What the build proves.** It reproduces the research tables to the bet (402
+bets, 225-177, +29.96 units for 2025-26 on numbers from 2024-25; 453 and
++55.76 for each season on the other's blend; 374 and +75.73 on the blend it
+runs on). Then it replays the card's own decision code on all 903 priced games
+of 2025-26 with that season's numbers built as the artifact is: 402 bets, the
+same 402 games and sides as the replay, none held, none refused by a floor,
+largest edge difference 0.00000004. The artifact's `replay` block holds all of
+it (its intervals come from its own resample and differ from the tables below
+in the first decimal).
+
+**November against December on, at the 0.05 cut:**
+
+| | November | December on |
+|---|---|---|
+| Each season on the other's blend | 80 bets, 43-37, +2.30 units, +2.61% [-14.8, +19.3] | 373 bets, 221-152, +53.46 units, +13.01% [+3.6, +22.4] |
+| The blend it runs on (in sample) | 68 bets, 36-32, +0.77 units, +1.03% [-18.2, +20.4] | 306 bets, 196-110, +74.96 units, +22.25% [+12.0, +32.0] |
+
+November is flat, not losing, and the model bets it (no hold was graded as
+better).
+
+**Prices.** Every replayed bet was laid at -115 to -105. DraftKings priced
+every women's total it posted in 2024-25 to 2026-27 between -120 and -102.
+The floor is -200.
+
+**2026-27 to date, through the card's own reads** (2026-11-10, `python -m
+scripts.ncaabw_research.season_to_date`): 42 priced finals. At 0.05: 14 bets,
+7-7, -0.75 units. At 0.03: 22 bets, 10-12, -3.25 units. The line's error on
+those games is 15.95 points and the model's 15.95.
+
+### In the app (2026-11-10)
+
+NCAABW is a sport chip right after NCAAB on the Picks, Models and Stats tabs,
+and the model is "NCAABW Totals" (badge O/U). The Today board reads its picks
+7 days ahead, because DraftKings' first total came up to 6 dates before the
+game. There are no women's stats and no in-play model; the Stats, Live and
+Today boards each say so in words and point at where the picks are. VoiceOver
+says "Women's college basketball" wherever a control speaks the sport, so the
+men's and women's chips do not sound alike.
+
+- **The prefix trap.** `modelId.startsWith('ncaab')` is true for
+  `ncaabw_total_blend`, so both places that file a model under a sport test
+  the women's prefix first (`modelMeta.sportOfModel`, `ModelsScreen.sportOf`).
+  `tests/test_mobile_ncaabw_in_app.py` fails if a third prefix test appears.
+- **The seven extra books.** Bally Bet and Fliff moved to the app's
+  reference-only list for every sport, so neither is in the sportsbook picker
+  or on a line chip. The feed stopped fetching both on 2026-09-20; the only
+  newer prices at either are the women's. Read 2026-11-10: of 28 stored book
+  sets, none held only those two and 4 held one beside other books. BetOnline,
+  LowVig, Unibet and BetWhale were never selectable and now have display
+  names.
+- **The name on screen is "NCAABW"**, the Discord channel's name. The UX
+  review preferred "NCAAW" (ESPN's name), because the code reads as the men's
+  plus a letter. That choice is mike's.
+
+### What a straight copy of the men's card got wrong
+
+Each was found by running the fork on the stored women's tables before it
+went live, and each has a test.
+
+1. **Every team would have been pooled into one.** The model pools a team
+   with fewer than 10 games on the season's schedule. The men's schedule is
+   stored whole (6,009 games to 2027-03-07). The women's held 1,245 games to
+   2026-11-23, so no team had 10 and every game would have been priced off
+   one pooled rating. The season was loaded (5,769 games; 363 Division I
+   teams, fewest 25 games), and the card now refuses a game with a Division I
+   team under 10 stored games and fails its run (`schedule_short`).
+2. **Both box sources would have been counted.** See "Two sources, one game".
+3. **The blend had no November.** The men's artifact holds a fit per phase.
+   The women's November has 218 priced games, so the men's code would have
+   refused every November game as `no_blend`. `blend_for` falls back to the
+   every-game fit, as the research graded it.
+4. **The ranges were the men's.** Totals 90 to 200 (the men's 220; no women's
+   total stored is above 179.5) and spreads to 85 either way (the men's 60
+   would drop 274 real rows). The edge cap is 0.30: the largest edge over all
+   1,730 priced games is 0.2076.
+5. **A second stake.** The men's card sizes a bet up when an earlier NCAAB
+   bet agrees with it. There is one women's model, so every bet is flat.
 
 ## Research (2026-11-09)
 
@@ -235,9 +380,10 @@ the men's; none was tuned on the women's prices.
 
 **The rating model alone** (`totals_a`; 61,408 games from 2015-16, possessions
 on 61,146): mean absolute error of the predicted total 13.05 points over
-2016-17 to 2026-27, against 15.34 for last season's league average. The first
-week of 2026-27 reads 6.5 points low (487 games), the men's opening-week
-pattern.
+2016-17 to 2026-27, against 15.34 for last season's league average. Its 487
+games of 2026-27 were predicted with every team pooled into one (only the
+played games of the season were stored then, so no team had 10 on the
+schedule); nothing is read from them here.
 
 **Against lines it was never fitted to** (`totals_espn`; ESPN's stored
 sportsbook total, one provider, capture time unknown, no usable price, so this
@@ -298,8 +444,10 @@ sample for those three numbers:
 | 0.05 | 374 | +75.73 | +18.39% | [+9.3, +27.5] | 124, +38.0 | 250, +37.7 | 21.6% |
 | 0.06 | 283 | +76.96 | +24.69% | [+14.8, +34.6] | 88, +37.6 | 195, +39.4 | 16.4% |
 
-2026-27's first week on that blend: 30 bets at 0.03, 20-10, +9.03 units.
-Prices at 0.04: -118 to -105.
+Prices at 0.04: -118 to -105. This paragraph first quoted 2026-27's first
+week as 30 bets at 0.03, 20-10, +9.03 units. That was computed with every
+team pooled into one and is withdrawn; the season to date is under "The
+totals model" below.
 
 **Read before trusting it:**
 

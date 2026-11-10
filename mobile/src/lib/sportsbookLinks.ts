@@ -206,9 +206,11 @@ export async function openBookBetslip(
   link: string | null | undefined,
   opts?: { sameBookOnly?: boolean },
 ): Promise<boolean> {
-  // A control labelled for this book must not open another. Fliff is bettable
-  // and has no entry here; the fallback below is DraftKings, which is the
-  // right hand-off for an unnamed NFL quote and the wrong one for a Fliff row.
+  // A control labelled for this book must not open another. Fliff decided
+  // picks until 2026-09-20 (and is reference-only here from 2026-11-10,
+  // markets.ts) and has no entry here; the fallback below is DraftKings, which
+  // is the right hand-off for an unnamed NFL quote and the wrong one for a
+  // Fliff row.
   if (opts?.sameBookOnly && !BOOK_APPS[book]) {
     return openThisBooksLinkOnly(book, link);
   }

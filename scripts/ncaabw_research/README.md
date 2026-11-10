@@ -18,6 +18,14 @@ Run from the repo root, in this order:
 | 7 | `python -m scripts.ncaabw_research.market` | The men's spread and moneyline market rules on the women's boards |
 | 8 | `python -m scripts.ncaabw_research.inplay` | The in-play game-state model against every snapshot's in-play quotes (needs `pbp_<season>.parquet` in the cache: sportsdataverse's `espn_womens_college_basketball_pbp/play_by_play_<season>.parquet`) |
 
+Two more read production through the totals card's own reads (they need
+production settings, and write nothing). `box_coverage` prints this season's
+box coverage after one source is kept per game. `season_to_date` replays the
+card's decision on every priced game of the season so far, with the committed
+artifact. Read the caveat in `totals_a`'s section of the doc first: until
+2026-11-10 only the played games of 2026-27 were stored, so anything computed
+on that season before then had every team pooled into one.
+
 `check_tips` answers one question about the purchase: whether games with
 in-play quotes and no pre-game ones have an early stored tip (they do not).
 

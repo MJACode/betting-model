@@ -369,6 +369,16 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/ncaabw_sdv_import.py; model input, never read by the app.
     "ncaabw_team_game_stats",
     "ncaabw_player_season",
+    # NCAABW period scores (four quarters, then overtimes) and the ESPN
+    # box-score miss ledger. Created on demand by
+    # data/ingestors/ncaabw_espn_box.py; model input, never read by the app.
+    "ncaabw_period_scores",
+    "ncaabw_box_misses",
+    # The NCAABW totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaabw_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaabw_total_decisions",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

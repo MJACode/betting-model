@@ -1129,6 +1129,51 @@ def step_ncaab_box(run_date: str) -> bool:
         return False
 
 
+def step_ncaabw_ncaa_box(run_date: str) -> bool:
+    """
+    NCAA's team box scores for this NCAABW season from sportsdataverse's
+    release file (data/ingestors/ncaabw_sdv_import.refresh_season) into
+    ncaabw_team_game_stats (source 'sportsdataverse_ncaa'): the second box
+    source of the NCAABW totals model, which fills the finals ESPN's summary
+    has no usable box for. Daily. Two file downloads; only contests not stored
+    yet are written. A season with no file yet is not a failure.
+    """
+    try:
+        from data.ingestors.ncaabw_sdv_import import run_refresh
+        t = run_refresh(run_date)
+        logger.success(f"✓ NCAABW box scores (NCAA file): {t}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAABW box scores (NCAA file) failed: {exc}")
+        return False
+
+
+def step_ncaabw_box(run_date: str) -> bool:
+    """
+    NCAABW team box scores and period scores from ESPN's game summary
+    (data/ingestors/ncaabw_espn_box.py) into ncaabw_team_game_stats (source
+    'espn_summary') and ncaabw_period_scores. The women's twin of
+    step_ncaab_box, without a player box: AFTER ncaabw-results, on the HOURLY
+    refresh passes only, self-limiting (no ESPN call unless a final of the
+    last 3 ET dates has no ESPN box row; at most 80 games and about 150
+    seconds of fetching a pass). False when ESPN refused the worker, a fetch
+    or a write failed, or the newest 5 finals ESPN answered for were all
+    refused.
+    """
+    try:
+        from data.ingestors.ncaabw_espn_box import run_recent
+        t = run_recent(run_date)
+        summary = {k: (len(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if t["failed"]:
+            logger.error(f"✗ NCAABW box scores (ESPN): {summary}")
+            return False
+        logger.success(f"✓ NCAABW box scores (ESPN): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAABW box scores failed: {exc}")
+        return False
+
+
 def step_ncaaf_weather(run_date: str) -> bool:
     """
     Forecast weather for upcoming NCAAF games (next 7 days) into game_weather.
@@ -2396,6 +2441,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         checkpoint("ncaabw_results")
         results["ncaabw_results"] = step_ncaabw_results(run_date)
         time.sleep(1)
+        # ── Step 0g5: NCAA's box file for this NCAABW season, the totals
+        # model's second box source (the ESPN feed runs on the hourly passes).
+        logger.info("Step 0g5: Reading NCAA's NCAABW box score file...")
+        checkpoint("ncaabw_ncaa_box")
+        results["ncaabw_ncaa_box"] = step_ncaabw_ncaa_box(run_date)
+        time.sleep(1)
 
         # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
         # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
@@ -2933,7 +2984,8 @@ Examples:
                                  "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule", "ncaab-box",
-                                 "ncaabw-results", "ncaabw-schedule",
+                                 "ncaabw-results", "ncaabw-schedule", "ncaabw-box",
+                                 "ncaabw-ncaa-box",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -3047,6 +3099,8 @@ Examples:
             "ncaab-box": lambda: step_ncaab_box(run_date),
             "ncaabw-results": lambda: step_ncaabw_results(run_date),
             "ncaabw-schedule": lambda: step_ncaabw_schedule(run_date),
+            "ncaabw-box": lambda: step_ncaabw_box(run_date),
+            "ncaabw-ncaa-box": lambda: step_ncaabw_ncaa_box(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),

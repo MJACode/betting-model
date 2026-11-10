@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, NCAABW totals model built to go live (`ncaabw_total_blend`, cut 0.05): the women's box feed, the model, card and build, the app's NCAABW sport; five things a copy of the men's card got wrong (every team pooled on a schedule stored 14 days ahead, both box sources counted, no November blend, the men's ranges, agreement sizing); two research lines corrected |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, women's college basketball (NCAABW) started: ESPN identity and 61,431 games, the odds feed and capture wired, the whole odds history bought (49,527 snapshots, 2,971,620 credits), NCAA box scores; research: the men's totals model passes at DraftKings' first posted total, the spread and moneyline market rules fail, in play is a first look; nothing bets yet |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, Betslip same-game price entry moved from the yellow box into the book tile's sheet; the out-of-range warning is a ⚠ tooltip |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, Settings reordered by use (sportsbooks first, Account near the bottom, responsible gambling last and collapsible); "Your state" only fills three books' betslip links |

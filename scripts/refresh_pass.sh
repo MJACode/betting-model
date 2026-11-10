@@ -383,6 +383,9 @@ step refresh-outcomes
 # pass on, and nothing reads them sooner.
 if [ "$MODE" = "hourly" ]; then
   step ncaab-box
+  # The same for women's college basketball (NCAABW): the box scores the
+  # women's totals model's ratings are refit on. After ncaabw-results.
+  step ncaabw-box
 fi
 
 # Health check LAST, on every pass. It used to run only as the final step of the

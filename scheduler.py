@@ -63,6 +63,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         capture stores it, and only while that number still stands; then
         publishes. Three minutes after each capture tick, which has 120
         seconds to finish. RUN_NCAAB_TOTAL_CARD=0 stops it.)
+  * NCAABW totals card    every 5 min at :04/:09/.., 24x7 -> run_ncaabw_total_card
+        (scripts/ncaabw_total_card.py: the women's twin of the NCAAB totals
+        card. Three minutes after each NCAABW capture tick.
+        RUN_NCAABW_TOTAL_CARD=0 stops it.)
   * NCAAB spread card     hourly at :05, 24x7, UTC -> run_ncaab_spread_card
         (scripts/ncaab_spread_card.py: the NCAAB spread model decides each
         game once, in the 15:00Z hour on its date, on every bettable book's
@@ -930,6 +934,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAB totals picks through its own card, reading
                   # the odds the passes and the capture stored.
                   "ncaab_total_card",
+                  # The same for women's college basketball.
+                  "ncaabw_total_card",
                   # Writes NCAAB spread picks through its own card, reading the
                   # same stored odds.
                   "ncaab_spread_card",
@@ -1903,6 +1909,32 @@ def run_ncaab_total_card() -> None:
     _publish_new_signals("ncaab-total-card")
     if outcome != "ok":
         raise RuntimeError(f"NCAAB totals card did not finish: {outcome}")
+
+
+# The women's card: the same reads on a smaller board (the feed lists about
+# seven women's games a game day), so the men's bound holds.
+NCAABW_TOTAL_CARD_TIMEOUT_S = 600
+
+
+def run_ncaabw_total_card() -> None:
+    """One NCAABW totals card run (scripts/ncaabw_total_card.py), then publish.
+
+    The women's twin of run_ncaab_total_card: every five minutes, three after
+    each NCAABW odds capture tick. A game is decided at DraftKings' first
+    posted total, while that number still stands. The script returns at once
+    when RUN_NCAABW_TOTAL_CARD=0; the job still beats. A run that fails or is
+    killed raises AFTER publishing, so the heartbeat records "error" and the
+    failure alerter reports it, while a bet that was written still goes out.
+    The script exits 1 when a due game could not be decided for a reason that
+    will not clear by itself (an artifact for another season, a schedule not
+    stored whole, a season-long box hold, a missing blend), after writing
+    every game it could.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaabw_total_card", "--publish"],
+                   "ncaabw-total-card", timeout=NCAABW_TOTAL_CARD_TIMEOUT_S)
+    _publish_new_signals("ncaabw-total-card")
+    if outcome != "ok":
+        raise RuntimeError(f"NCAABW totals card did not finish: {outcome}")
 
 
 # The spread card reads the slate, the ledger and one hour of stored odds for
@@ -3134,6 +3166,20 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="3-59/5", timezone="UTC"),
         id="ncaab_total_card",
         name="NCAAB totals card (every 5 min, 3 after each odds capture: decide at "
+             "DraftKings' first posted total)",
+        max_instances=1, coalesce=True, misfire_grace_time=240,
+    )
+
+    # NCAABW totals card -- every five minutes (run_ncaabw_total_card), three
+    # minutes after each NCAABW odds capture tick (minute 1-59/5, 120 s
+    # timeout), so a DraftKings first total the capture stored is decided
+    # within about eight minutes of the poll that saw it. A minute after the
+    # men's card. Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_ncaabw_total_card,
+        CronTrigger(minute="4-59/5", timezone="UTC"),
+        id="ncaabw_total_card",
+        name="NCAABW totals card (every 5 min, 3 after each odds capture: decide at "
              "DraftKings' first posted total)",
         max_instances=1, coalesce=True, misfire_grace_time=240,
     )

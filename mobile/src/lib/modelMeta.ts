@@ -732,6 +732,22 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // ── NCAABW ────────────────────────────────────────────────────────────────
+  // Women's college basketball, full-game totals: the one women's model
+  // (2026-11-10). Named like the other totals ("NCAABW Totals", badge O/U).
+  // The open-picks view names each model as this file does, in this order
+  // (tests/test_open_picks_view.py), so the string must not vary. The id is
+  // the one the model writes its picks under (models/ncaabw_total_blend.py
+  // MODEL_ID). It starts with 'ncaab', so sportOfModel tests the women's
+  // prefix first, and it has no 'over_under' in it, so markets.ts names it
+  // for the totals rows.
+  ncaabw_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAABW Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -1040,6 +1056,23 @@ const FIRST_POST_TOTAL_MODELS: readonly string[] = [
   'ncaab_total_blend',
 ];
 
+// The women's totals card (scripts/ncaabw_total_card.py, every five minutes,
+// three after each women's odds capture poll; from 2026-11-10) decides the
+// same way: once, minutes after DraftKings first posts a game's total, and
+// only while that first total and its prices are still DraftKings' number.
+// It is not in the list above because its timing is not the men's, and the
+// page says the timing. DraftKings posted its first women's total 1 to 6
+// Eastern dates before the game's date in 155 of 1,772 priced games, never
+// more (that card's SLATE_DAYS); a first post is a pre-game quote, so the
+// other 1,617 came on the game's own date. That first total stood a median
+// 136 minutes in 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one
+// in ten changed within 10 minutes (the card's own header), so the page says
+// an opening total "can change within minutes", not the men's "often changes
+// within half an hour".
+const GAME_DAY_FIRST_POST_TOTAL_MODELS: readonly string[] = [
+  'ncaabw_total_blend',
+];
+
 // The models that decide each game once, on the morning of the game: the
 // NCAAB spread card (scripts/ncaab_spread_card.py) reads the spread at each
 // of the eight bettable books at 15:00 UTC on game day and posts its bets
@@ -1224,6 +1257,22 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       note: 'Posted at DraftKings’ opening total and never re-priced.',
     };
   }
+  if (GAME_DAY_FIRST_POST_TOTAL_MODELS.includes(modelId)) {
+    return {
+      title: 'Decided when the total opens',
+      body:
+        'This model decides each game once, at DraftKings’ opening total, usually within minutes of it ' +
+        'posting. DraftKings opens most totals on the day of the game, some up to six days before. It bets ' +
+        'at DraftKings, and only if DraftKings still offers that opening total at the same prices. If the ' +
+        'total or a price has moved, it skips the game. An opening total can change within minutes: check ' +
+        'DraftKings’ total and price before you bet. The pick is for the total and price shown, not a ' +
+        'later one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model bets only some games, usually on the day of each one, as DraftKings opens its totals. ' +
+        'Nothing has posted yet.',
+      note: 'Posted at DraftKings’ opening total and never re-priced.',
+    };
+  }
   if (GAME_MORNING_MODELS.includes(modelId)) {
     return {
       title: 'Decided the morning of the game',
@@ -1283,7 +1332,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -1298,6 +1347,9 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  // The women's prefix first: 'ncaabw_total_blend' starts with 'ncaab' too,
+  // so the men's test alone files every women's model under NCAAB.
+  if (modelId.startsWith('ncaabw')) return 'NCAABW';
   if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
@@ -1337,6 +1389,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NFL',
   'NCAAF',
   'NCAAB',
+  'NCAABW',
   'UFC',
   'NHL',
   'GOLF',
