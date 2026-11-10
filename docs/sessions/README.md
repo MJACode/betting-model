@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player Stats Back is a JS pill (system pill still dead after Compare odds on the 2026-11-07 bundle; empty stack replaces to Stats) |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, NBA All tab shows every scored game: the three game-total cards write a NONE row for each game scored and not bet |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, NCAAF market audit (mike): every market gridded; the four NCAAB market rules replayed on three seasons of NCAAF prices, nothing clears (the spread rule's +29.4 units was 337 road teams of 338, a table tilt); college props null a second season; a market-anchored in-play model does not beat DraftKings; the totals fit moves 1.5 points with its random seed and is positive under all 11 seeds in the live shape; the moneyline model loses at every cut; NCAAF now keeps every book's price path; no model changed |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, NCAABW totals model built to go live (`ncaabw_total_blend`, cut 0.05): the women's box feed, the model, card and build, the app's NCAABW sport; five things a copy of the men's card got wrong (every team pooled on a schedule stored 14 days ahead, both box sources counted, no November blend, the men's ranges, agreement sizing); two research lines corrected |

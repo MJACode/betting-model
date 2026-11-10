@@ -19,6 +19,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { PlayerStatsHeaderTitle } from '@/components/StackBackButton';
 import { GroupTabs } from '@/components/GroupTabs';
 import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
@@ -197,7 +198,12 @@ export function PlayerStatsScreen() {
   const [defensePicked, setDefensePicked] = useState<DefenseFilter | null>(null);
 
   useEffect(() => {
-    navigation.setOptions({ title: playerName });
+    navigation.setOptions({
+      title: playerName,
+      // One line, narrower than the gap around the Back pill. The native
+      // stack centers this label, and it would otherwise draw across Back.
+      headerTitle: (props) => <PlayerStatsHeaderTitle {...props} />,
+    });
   }, [navigation, playerName]);
 
   // Sport/player changed (the screen is reused across pushes) — reset to that
