@@ -329,14 +329,14 @@ men's and women's chips do not sound alike.
   `tests/test_mobile_ncaabw_in_app.py` fails if a third prefix test appears.
 - **The seven extra books.** Bally Bet and Fliff moved to the app's
   reference-only list for every sport, so neither is in the sportsbook picker
-  or on a line chip. The feed stopped fetching both on 2026-09-20; the only
+  or on a line chip (mike, 2026-11-10: *"get rid of bally and fliff"*). The feed stopped fetching both on 2026-09-20; the only
   newer prices at either are the women's. Read 2026-11-10: of 28 stored book
   sets, none held only those two and 4 held one beside other books. BetOnline,
   LowVig, Unibet and BetWhale were never selectable and now have display
   names.
 - **The name on screen is "NCAABW"**, the Discord channel's name. The UX
   review preferred "NCAAW" (ESPN's name), because the code reads as the men's
-  plus a letter. That choice is mike's.
+  plus a letter. mike, 2026-11-10: *"leave it"*.
 
 ### What a straight copy of the men's card got wrong
 
