@@ -321,6 +321,139 @@ and models."* Three changes, all reading the stored schedule through one module
   the fit refuses to register if the walk-forward no longer clears the kill
   line.
 
+### First-half lines and team totals, 2023-2025 (built 2026-11-10)
+
+No first-half or team-total price has ever been stored for college football
+(`docs/ncaaf_market_audit.md`, section 7). mike approved buying them on
+2026-11-10 ("Buy all"). The code is built
+(`data/ingestors/ncaaf_derivative_history.py`); **nothing is bought until the
+job is run.**
+
+- **What is bought.** For every game of 2023, 2024 and 2025 that already
+  holds stored full-game historical prices: the first-half moneyline, spread
+  and total and the team totals, at the ten fetched books. One call a game.
+  The feed bills 10 credits per market it returns, so at most 40 a game. An
+  empty answer and a "not found" are free. Each date also costs one event
+  list (1 credit), which names each game's event.
+- **The two reads.** The stored full-game history was bought as two pulls a
+  day, asked for at 14:00 and 23:00 UTC and served at about 13:55 and 22:55.
+  The first-half lines are bought at the same two moments, so a first-half
+  line can be set beside the full-game line of the same moment.
+
+  | Read | Asked for | Games bought | Stored under source |
+  |---|---|---|---|
+  | `am` | 14:00 UTC on the game's Eastern date (game-day morning) | those with a stored full-game row from that morning's pull | `odds_api_ncaaf_derivative_am` |
+  | `pm` | 23:00 UTC on the Eastern date before (the evening before) | those with a stored full-game row from that evening's pull | `odds_api_ncaaf_derivative_pm` |
+
+  A game counts as holding a pull when it has a full-game row (source
+  `odds_api_historical`) stamped in the hour up to the time asked for. A game
+  is bought only if it kicks off more than five minutes after that time, so
+  no price bought here can be in play.
+- **A game stored twice is bought once.** Two things put one game in `games`
+  twice. A night game has the odds feed's Eastern-dated row, which holds the
+  prices, and CFBD's UTC-dated row, which holds the score ("Data /
+  conventions" above). And the stored full-game history was written on
+  2026-09-07, before the team registry held FCS schools: 245 of the games
+  with a morning pull sit under the feed's own team name ("Furman Paladins",
+  "Southern Mississippi Golden Eagles"), beside CFBD's row for the same game
+  under the school's name, which holds the final. Rows whose names resolve to
+  the same two schools, dated within a day of each other, are one game. It is
+  bought once and stored under the id that holds the stored pull; if both ids
+  hold it (35 games at the morning read), under the one with more stored
+  rows.
+- **Matching the feed to our games.** By the two team names (the same name
+  resolution the odds feed uses: `config.NCAAF_ODDS_API_MAP`, then the team
+  registry) and the kickoff time, within 24 hours of the stored kickoff. Each
+  name is tried as the school it resolves to today and as the feed's own
+  name, which is what a row written before the name resolved still holds. A
+  feed event that lands on no planned game is printed and skipped. A planned
+  game the feed's list does not name is printed and recorded as not listed.
+  Neither is guessed. A row stored under a wrong school by the old prefix
+  rule (Florida A&M at Miami stored as Florida at Miami) matches nothing and
+  is not bought. When the feed calls our away team home, the stored spread
+  is still our home team's number.
+- **Where it is stored.** In `odds`, in the shape the NCAAB purchase stores
+  the same four markets, so one reader fits both sports: markets `h2h_h1`,
+  `spreads_h1`, `totals_h1`, `team_totals_home` and `team_totals_away`;
+  `snapshot_type` `open`; `snapshot_at` the snapshot time the feed served.
+  Both sources are protected from the odds clean-up (`data/prune_odds.py`).
+- **Nothing is bought twice.** `ncaaf_derivative_fetches` holds one row per
+  game and read: the time asked for, the time served, the credits the call
+  billed, the rows stored and a status. The prices and that row are written
+  together. A rerun skips every game marked `stored` or `empty`. A game the
+  feed did not list, a "not found" and a failed call are recorded and asked
+  for again on a rerun; listing a date again costs 1 credit. The table is
+  read again just before each date is listed, so two runs at once do not
+  both buy a game.
+- **The most it can spend.** 40 credits a game plus 1 a date. Measured
+  2026-11-10 on the audit's extract of the local copy of the database, with
+  the purchase's own plan (not yet read from production):
+
+  | Read | Games | Dates | With a final | Most it can spend |
+  |---|---|---|---|---|
+  | `am` | 2,510 | 180 | 2,467 | 100,580 |
+  | `pm` | 2,435 | 186 | 2,405 | 97,586 |
+  | Both | | | | 198,166 |
+
+  **That is 12,636 credits above the 185,530 the audit stated for the two
+  reads.** The audit's "2,314 games on 205 dates, 92,765 credits" a read
+  counted games with any stored pull at any time, not either read. Its own
+  extract holds 2,257 games with a final on 180 dates at the morning read and
+  2,227 on 183 the evening before. The plan is larger than those because it
+  also takes the games stored under the feed's own team name: at the morning
+  read 210 more games get their final from CFBD's row, and 43 have no final
+  stored (FCS opponents CFBD spells another way, and rows under a wrong
+  school that no event will match). The dry run prints each read's own
+  count, by season, from production.
+- **The credit limits.** `--apply` needs `--max-credits` and `--floor`. The
+  run then tightens both from what the system measures: its limit is the
+  smaller of `--max-credits` and the plan's own most, and its floor is the
+  larger of `--floor` and 7 days of the median daily spend in
+  `odds_api_quota`. It refuses to start if it cannot read a daily spend or a
+  balance, or if the team registry (`ncaaf_teams`) is empty, because then no
+  feed name would land on a stored school and every date's list would be
+  paid for to match nothing. It stops before a call would cross the limit or
+  the floor. Newest date first, so a stop leaves the most recent season
+  stored. Calls run 6 at once (at most
+  10), each counted at 40 credits while it is waiting for its answer (the
+  NCAAB purchase's meter, `docs/sports/ncaab.md`, "Paid calls side by side").
+- **The test buy** (`--sample N`) buys N games a read, spread over the three
+  seasons and four kickoff times (before 3pm, 3-6pm, 6-9pm, 9pm or later,
+  Eastern). The games are picked by a fixed hash of the game id, so a rerun
+  picks the same ones. They are stored under the same sources and the same
+  table, so the full buy skips them. 50 games at one read cost at most 2,050
+  credits (2,033 on the local copy: the 50 fall on 33 dates). It answers
+  what is not known yet: whether the books had posted first-half lines and
+  team totals by those two times.
+- **What it prints.** The plan by season (games, dates, how many have a final
+  score, how many are already bought) and why other games are not planned.
+  After a run, read back from `odds`: for each book and market, how many of
+  the bought games hold a quote.
+- **Commands.** Without `--apply` nothing is called and nothing is written.
+  - The plan: `python -m data.ingestors.ncaaf_derivative_history --read both`
+  - Test buy, the plan: `python -m data.ingestors.ncaaf_derivative_history --read am --sample 50`
+  - Test buy: the same with `--apply --max-credits 2050 --floor 300000`
+  - Full buy: `python -m data.ingestors.ncaaf_derivative_history --read both --apply --max-credits 198166 --floor 300000`
+- **Worker job** (job type `ncaaf_derivative_history`, not a declared job, so
+  a merge buys nothing):
+
+  | Buy | Args |
+  |---|---|
+  | The plan, no call | `{"read": "both", "dry_run": true}` |
+  | Test buy, 50 games at the morning read | `{"read": "am", "sample": 50, "max_credits": 2050, "floor": 300000}` |
+  | Morning read | `{"read": "am", "max_credits": 100580, "floor": 300000}` |
+  | Evening read | `{"read": "pm", "max_credits": 97586, "floor": 300000}` |
+  | Both | `{"read": "both", "max_credits": 198166, "floor": 300000}` |
+
+  The job refuses a limit above these figures, which are the plan's most as
+  measured above. A job may ask for less: the run then stops at its limit
+  with the oldest games left, and a later run buys only those. If the dry
+  run against production prints a larger plan, the limit in
+  `tracking/job_queue.py` is the number to raise.
+- **Not stored by this purchase.** Half and quarter scores, which grade these
+  markets, are not stored for 2023 and 2024 (`ncaaf_plays` holds 2025 only).
+  Quarter lines and alternate lines are not bought.
+
 ### `ncaaf_live_total` — what has been tried, and the standing instructions
 
 **STANDING INSTRUCTIONS (mike, 2026-09-12). Do not re-raise either of these.**
