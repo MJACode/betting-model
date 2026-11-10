@@ -698,7 +698,17 @@ def store_season(conn, snapshots: list[dict], resolver: EventResolver, tips: dic
         batch.clear()
 
         def _write():
+            # A replay after a dropped connection must not store a snapshot
+            # twice: `odds` has no unique key on a quote, and a connection
+            # that drops at the commit leaves it unknown whether the commit
+            # landed. A snapshot's rows and its ledger row are one
+            # transaction, so a ledger row means its rows are in.
+            done = {_utc(r[0]) for r in conn.execute(
+                f"SELECT snapshot_ts FROM {LEDGER} WHERE snapshot_ts = ANY(%s)",
+                ([part["served"] for _, part, _ in pending],)).fetchall()}
             for snap, part, lost in pending:
+                if part["served"] in done:
+                    continue
                 if part["pregame"]:
                     _insert_odds(conn, part["pregame"])
                 if part["inplay"]:

@@ -403,12 +403,21 @@ def test_an_event_no_espn_game_answers_to_is_kept_raw_and_counted_once():
 # ── step 2: the store ────────────────────────────────────────────────────────
 
 class _Conn:
-    def __init__(self):
-        self.statements, self.commits = [], 0
+    """Records what is written. `ledgered` is what the ledger already holds
+    when a batch asks (the store's own check before it writes)."""
+
+    def __init__(self, ledgered=()):
+        self.statements, self.commits, self.ledgered = [], 0, list(ledgered)
 
     def execute(self, sql, params=()):
+        if sql.lstrip().startswith("SELECT snapshot_ts"):
+            self._rows = [(ts,) for ts in self.ledgered if ts in params[0]]
+            return self
         self.statements.append((" ".join(sql.split())[:48], params))
         return self
+
+    def fetchall(self):
+        return self._rows
 
     def executemany(self, sql, rows):
         self.statements.append((" ".join(sql.split())[:48], list(rows)))
@@ -481,6 +490,21 @@ def test_a_rerun_writes_only_what_the_ledger_lacks_and_remembers_what_came_befor
     H.store_season(conn, snaps, _resolver(), TIPS, held, stats)
     assert conn.kinds() == ["INSERT INTO ncaabw_odds_snapshots"]
     assert stats["already_stored"] == 2 and stats["stored"] == 1 and stats["pregame_rows"] == 0
+
+
+def test_a_replayed_batch_does_not_store_a_snapshot_whose_commit_had_landed(tmp_path):
+    """The connection dropped at the commit and the batch is run again. The
+    first snapshot's ledger row is there, so its rows are too: only the others
+    are written. Without the check its quotes would sit in `odds` twice."""
+    snaps = _three_snapshots(tmp_path)
+    conn, stats = _Conn(ledgered=[_t("2026-01-24T16:00:37Z")]), _stats()
+    H.store_season(conn, snaps, _resolver(), TIPS, set(), stats)
+    assert conn.kinds() == [
+        "INSERT INTO ncaabw_odds_snapshots",     # 16:05:37, nothing moved
+        "INSERT INTO ncaabw_inplay_quotes",      # 17:10:37
+        "INSERT INTO ncaabw_odds_snapshots",
+    ]
+    assert "INSERT INTO odds" not in conn.kinds()
 
 
 def test_a_spool_file_that_holds_another_snapshot_stops_the_store(tmp_path):
