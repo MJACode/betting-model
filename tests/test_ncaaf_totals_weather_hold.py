@@ -17,8 +17,7 @@ touched. A dome game has no forecast to wait for: its weather is 72 F, no
 wind, no rain in training rows and at serve time alike, so that is what it is
 served. Only the totals model reads these inputs, so only it is held.
 
-BUILT AHEAD OF MIKE'S ANSWER (2026-11-10) and kept in one commit so it can be
-taken or left on its own.
+mike, 2026-11-10: "yes wait for a weather forecast".
 """
 
 from __future__ import annotations

@@ -1734,8 +1734,9 @@ def _schedule_hold(books: dict, sport: str, game_id: str, game_date: str,
 
 # ── The NCAAF totals weather hold ─────────────────────────────────────────────
 #
-# BUILT 2026-11-10 AHEAD OF MIKE'S ANSWER, in one commit, so it can be taken
-# or left on its own. docs/sports/ncaaf.md, the 2026-11-10 section.
+# mike, 2026-11-10, asked whether the totals model should wait for a game's
+# weather forecast before it can bet: "yes wait for a weather forecast".
+# docs/sports/ncaaf.md, the 2026-11-10 section.
 #
 # The forecast step (run_pipeline.step_ncaaf_weather) writes weather for games
 # up to 7 days out, once a day in the morning pipeline. The totals rule scores

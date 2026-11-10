@@ -888,8 +888,13 @@ the gap is filled. The stored weather is the reanalysis (what happened), so
 forecasts. No backtest in this file or in the audit grades a bet made before
 a forecast existed: the audit's live-shape run starts five days out.
 
-**The weather hold: built, not yet approved.** It is one commit, made ahead
-of mike's answer so it can be taken or left on its own. While any of the
+**The weather hold (mike, 2026-11-10: *"yes wait for a weather forecast"*).**
+It was built as one commit ahead of his answer and ships with the refit: the
+eleven-seed artifact cannot be registered without it. In practice it means no
+totals bet more than 7 days before kickoff: this season the 9 kept bets placed
+earlier than that went 4-5, -1.55 units, and none has been placed that early
+since the schedule hold of 2026-10-20 (read-only SQL on `picks`, 2026-11-10).
+While any of the
 three weather inputs is missing at scoring time, the totals model does not
 decide the game. Its rows are written NONE with "waiting for the weather
 forecast", 0.5 a side (the model is not asked for a number it cannot give),
