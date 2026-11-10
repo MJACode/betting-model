@@ -731,15 +731,22 @@ def _validate_ncaab_odds_history(args: dict) -> dict:
 # spread and total and the team totals on every 2023-2025 game that holds
 # stored full-game prices, at the two times those are stored at (`am` 14:00
 # UTC on the game's Eastern date, `pm` 23:00 UTC the Eastern date before).
-# Each limit is the figure the audit stated for it: 2,314 games on 205 dates a
-# read, at most 40 credits a game and 1 a date's event list, 92,765 credits.
-# A test buy of N games a read ({"sample": N}) is held to N games and N lists
-# (50 at one read: 2,050). The buyer cuts its own ceiling to its printed plan,
-# raises the floor to the measured reserve, and skips every game its ledger
-# holds, so a re-queue after a stop or a worker restart buys nothing twice.
+# Each limit is the buyer's own plan at its most (40 credits a game, 1 a
+# date's event list), measured on the local copy of the database on
+# 2026-11-10: 2,510 games on 180 dates at `am` (100,580 credits) and 2,435 on
+# 186 at `pm` (97,586). THAT IS ABOVE THE 92,765 A READ THE AUDIT STATED, which
+# was 2,314 games on 205 dates: the count of games with any stored pull, not
+# of either read. At the morning read the audit's own extract holds 2,257
+# games with a final on 180 dates; the plan adds 210 whose final sits on
+# CFBD's row under another spelling of the school, and 43 with no final
+# stored. A job may ask for less. A test buy of N games a read
+# ({"sample": N}) is held to N games and N lists (50 at one read: 2,050). The
+# buyer cuts its own ceiling to its printed plan, raises the floor to the
+# measured reserve, and skips every game its ledger holds, so a re-queue
+# after a stop or a worker restart buys nothing twice.
 # {"read": ..., "dry_run": true} prints the plan against production and makes
 # no call. NOT A DECLARED JOB: nothing is bought until a row is queued.
-NCAAF_DERIVATIVE_HISTORY_CAPS = {"am": 92_765, "pm": 92_765, "both": 185_530}
+NCAAF_DERIVATIVE_HISTORY_CAPS = {"am": 100_580, "pm": 97_586, "both": 198_166}
 NCAAF_DERIVATIVE_HISTORY_SEASONS = (2023, 2025)
 NCAAF_DERIVATIVE_HISTORY_GAME_COST = 40 + 1      # a game's call and, at most, its own date's list
 

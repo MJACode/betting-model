@@ -120,14 +120,15 @@ class Feed:
     def __init__(self):
         self.sent: list[tuple[str, dict]] = []
         self.balance = 11_900_000
+        self.listing = list(LISTING)
         self._lock = threading.Lock()
 
     def __call__(self, meter, url, params):
-        events = {e["id"]: e for e in LISTING}
+        events = {e["id"]: e for e in self.listing}
         served = params["date"].replace(":00:00Z", ":55:38Z").replace("T14:", "T13:").replace(
             "T23:", "T22:")
         if url.endswith("/events"):
-            r = Resp(body={"timestamp": served, "data": LISTING}, last="1")
+            r = Resp(body={"timestamp": served, "data": self.listing}, last="1")
         else:
             e = events[url.rsplit("/", 2)[-2]]
             r = Resp(body={"timestamp": served, "data": {"bookmakers": [
@@ -315,6 +316,43 @@ def test_the_purchase_stores_each_game_once_and_a_rerun_buys_nothing(world, monk
     assert _q(dsn, "SELECT count(*) FROM ncaaf_derivative_fetches") == [(5,)]
 
 
+def test_a_game_stored_under_the_feed_s_own_name_is_bought_once_under_that_id(world, monkeypatch,
+                                                                              capsys):
+    """The stored history was written before the registry held FCS schools:
+    Furman at Clemson sits under 'Furman Paladins', beside CFBD's row for the
+    same game under 'Furman', which has the final. With the registry's own
+    resolution: one game, with a final, bought under the id with the prices."""
+    raw_id, cfbd_id = "NCAAF_2025-09-06_furman-paladins_clemson", "NCAAF_2025-09-06_furman_clemson"
+    raw = psycopg2.connect(world["dsn"])
+    raw.autocommit = True
+    cur = raw.cursor()
+    cur.execute("INSERT INTO ncaaf_teams VALUES ('Furman', 'Paladins', NULL)")
+    cur.execute("INSERT INTO games VALUES (%s,'NCAAF',2025,'2025-09-06','Clemson',"
+                "'Furman Paladins',NULL,NULL,'2025-09-06T16:00:00Z')", (raw_id,))
+    cur.execute("INSERT INTO games VALUES (%s,'NCAAF',2025,'2025-09-06','Clemson','Furman',45,10,"
+                "'2025-09-06T16:00:00.000Z')", (cfbd_id,))
+    cur.execute("INSERT INTO odds (game_id, sport, market, bookmaker, snapshot_type, snapshot_at, "
+                "spread_home, source) VALUES (%s,'NCAAF','spreads','fanduel','open',"
+                "'2025-09-06T13:55:38Z',-38.5,'odds_api_historical')", (raw_id,))
+    raw.close()
+    world["feed"].listing.append({"id": "e-furman", "commence_time": "2025-09-06T16:00:00Z",
+                                  "home_team": "Clemson Tigers", "away_team": "Furman Paladins"})
+    monkeypatch.setattr("sys.argv", ["x", "--read", "am", "--apply", "--max-credits", "1000",
+                                     "--floor", "300000"])
+    h.main()
+    out = capsys.readouterr().out
+    # three games on two dates: the two of 08-30 and this one, all three with a final
+    assert next(line.split() for line in out.splitlines() if line.strip().startswith("2025")) == [
+        "2025", "3", "2", "3", "2", "0"]
+    bought = sorted(u.rsplit("/", 2)[-2] for u, p in world["feed"].sent if "/events/" in u)
+    assert bought == ["e-furman", "e-night", "e-noon"]
+    rows = _q(world["dsn"], "SELECT DISTINCT game_id FROM odds WHERE source = %s AND game_id LIKE %s",
+              ("odds_api_ncaaf_derivative_am", "%furman%"))
+    assert rows == [(raw_id,)]                                 # never CFBD's id
+    assert _q(world["dsn"], "SELECT game_id, status FROM ncaaf_derivative_fetches WHERE game_id "
+                            "LIKE %s", ("%furman%",)) == [(raw_id, "stored")]
+
+
 def test_a_purchase_with_no_team_registry_makes_no_call(world, monkeypatch, capsys):
     """An empty registry, or none at all: the purchase refuses before its
     first list, and the failed read is not left cached for the next job."""
@@ -336,6 +374,9 @@ def test_a_purchase_with_no_team_registry_makes_no_call(world, monkeypatch, caps
     h.main()                                    # the dry run still prints the plan, and says so
     out = capsys.readouterr().out
     assert "WOULD REFUSE: ncaaf_teams is empty or unreadable" in out and "to buy: 2 games" in out
+    # the plan was printed from the names as stored: the registry was not asked again, so no
+    # empty read is left cached for whatever runs next in this process
+    assert cfbd_ingestor._SCHOOL_CACHE is None
 
 
 def test_a_held_ledger_row_is_never_rewritten_and_an_unheld_one_is(world):

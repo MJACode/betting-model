@@ -31,14 +31,25 @@ The feed is asked for its snapshot at the instant (the historical endpoints
 take a `date` and answer with the snapshot at or before it), so the answer is
 the same snapshot the full-game pull was served.
 
-ONE REAL GAME, ONE PURCHASE, UNDER THE ID THAT HOLDS THE PRICES. A night game
-can sit in `games` twice: the odds feed's Eastern-dated row, which carries the
-prices, and CFBD's UTC-dated row, which carries the score
-(docs/sports/ncaaf.md, "Data / conventions"). Rows with the same two teams
-dated within a day of each other are one game (real_games). It is bought once
-and stored under the id that holds the stored pull at that read; when two ids
-of one game both hold it, under the one with more stored rows. `scored` in the
-plan means any row of the game has a final.
+ONE REAL GAME, ONE PURCHASE, UNDER THE ID THAT HOLDS THE PRICES. A game can sit
+in `games` twice. A night game has the odds feed's Eastern-dated row, which
+carries the prices, beside CFBD's UTC-dated row, which carries the score
+(docs/sports/ncaaf.md, "Data / conventions"). And the stored full-game history
+was written on 2026-09-07, before the team registry held FCS schools, so some
+of its rows carry the feed's own team name ("Furman Paladins") beside CFBD's
+row under the school's ("Furman"). Rows whose two names resolve to the same
+two schools, dated within a day of each other, are one game (real_games). It
+is bought once and stored under the id that holds the stored pull at that
+read; when two ids of one game both hold it, under the one with more stored
+rows. `scored` in the plan means any row of the game has a final.
+
+THE PLAN, MEASURED 2026-11-10 on the audit's extract of the local copy of the
+database (not production): 2,510 games on 180 dates at `am`, at most 100,580
+credits; 2,435 on 186 at `pm`, at most 97,586. At `am`, 2,467 have a final;
+210 of those get it from a CFBD row under another spelling of the school.
+The audit's "2,314 games on 205 dates" (92,765 credits a read) counted games
+with any stored pull, not either read: its own extract holds 2,257 games with
+a final on 180 dates at the morning read and 2,227 on 183 the evening before.
 
 THE CALLS. One historical event list per date and read names each game's event
 (1 credit). Then one historical event-odds call per game: the feed bills 10
@@ -50,8 +61,12 @@ the ceiling and the floor with the calls in flight counted at their most.
 MATCHING. A feed event is placed on one of our games by its two team names,
 through the repo's NCAAF name resolution (odds_ingestor._normalize_team:
 config.NCAAF_ODDS_API_MAP, then the ncaaf_teams registry), and its kickoff
-time (within MATCH_WINDOW of the stored kickoff). An event that lands on no
-planned game, or on two, is counted, printed and skipped, never guessed. When
+time (within MATCH_WINDOW of the stored kickoff). Each name is tried as the
+school it resolves to today and as the feed's own name, which is what a row
+written before the name resolved still holds (EventMatcher). An event that
+lands on no planned game, or on two, or whose home side cannot be told, is
+counted, printed and skipped, never guessed. A row stored under a wrong
+school by the old prefix rule (Florida A&M as Florida) matches nothing. When
 the feed calls our away team home, the names are swapped before the outcomes
 are read, so the stored spread is our home team's number (CLAUDE.md section 4).
 The registry is read fresh before the first call, and a purchase refuses to
@@ -91,7 +106,7 @@ ledger, not the ceiling.
     python -m data.ingestors.ncaaf_derivative_history --read both
     python -m data.ingestors.ncaaf_derivative_history --read am --sample 50
     python -m data.ingestors.ncaaf_derivative_history --read am --sample 50 --apply --max-credits 2050 --floor 300000
-    python -m data.ingestors.ncaaf_derivative_history --read both --apply --max-credits 185530 --floor 300000
+    python -m data.ingestors.ncaaf_derivative_history --read both --apply --max-credits 198166 --floor 300000
 """
 from __future__ import annotations
 
@@ -256,14 +271,32 @@ def stored_pulls(conn, game_ids: list[str]) -> dict[str, dict[datetime, int]]:
     return dict(out)
 
 
-def real_games(games: list[dict]) -> list[list[dict]]:
-    """`games` rows grouped into real games: rows with the same two teams
+def real_games(games: list[dict], school=None) -> list[list[dict]]:
+    """`games` rows grouped into real games: rows with the same two schools
     dated within TWIN_DAYS of each other are one game (the odds feed's
-    Eastern-dated row beside CFBD's UTC-dated one). Pure. A rematch weeks
-    later is its own game; a row with no readable date stands alone."""
+    Eastern-dated row beside CFBD's UTC-dated one). A rematch weeks later is
+    its own game; a row with no readable date stands alone.
+
+    A STORED NAME IS RESOLVED BEFORE IT IS COMPARED. The stored full-game
+    history was written on 2026-09-07, when the team registry held FBS
+    schools only and Southern Miss had no map entry, so those rows carry the
+    feed's own name ("Furman Paladins", "Southern Mississippi Golden Eagles")
+    where CFBD's row for the same game, the one with the final, says "Furman"
+    and "Southern Miss". Measured on the local copy of the database,
+    2026-11-10: 245 of the 2,545 games with a game-day morning pull are
+    stored that way. `school` is the name resolution (today's, by default);
+    a name it cannot place stays as it is."""
+    school = school or _school
+    keys: dict[str, str] = {}
+
+    def key(name: str) -> str:
+        if name not in keys:
+            keys[name] = _name_key(school(name or "")) or _name_key(name or "")
+        return keys[name]
+
     by_pair: dict[frozenset, list[dict]] = defaultdict(list)
     for g in games:
-        by_pair[frozenset((_name_key(g["home_team"]), _name_key(g["away_team"])))].append(g)
+        by_pair[frozenset((key(g["home_team"]), key(g["away_team"])))].append(g)
     out: list[list[dict]] = []
     for rows in by_pair.values():
         rows = sorted(rows, key=lambda g: (str(g["game_date"]), g["game_id"]))
@@ -295,16 +328,16 @@ class Planned:
 
 
 def plan_read(games: list[dict], pulls: dict[str, dict[datetime, int]],
-              read: str) -> tuple[list[Planned], Counter]:
+              read: str, school=None) -> tuple[list[Planned], Counter]:
     """The games one read buys, newest date first, and why the rest are not
-    bought. Pure, so the plan is testable.
+    bought.
 
     Each real game is taken once. Each of its rows is asked whether it holds
     a stored full-game row from the read's pull; the row that holds the most
     is the id the purchase is stored under."""
     plan: list[Planned] = []
     why: Counter = Counter()
-    for group in real_games(games):
+    for group in real_games(games, school):
         kicks = [k for k in (_utc(g.get("commence_time")) for g in group) if k is not None]
         holders = []
         for g in group:
@@ -464,6 +497,15 @@ def _school(name: str) -> str:
 class EventMatcher:
     """Feed events onto one read instant's planned games, by the two team
     names and the kickoff. `(game, flipped)` or None; never a guess.
+
+    A FEED NAME IS TRIED TWO WAYS: as the school it resolves to today, and as
+    the feed's own name. The second is what a row written on 2026-09-07 holds
+    for a school the registry could not place that day (real_games): the
+    event that row was stored from carries that same name, so equal names and
+    an equal kickoff are the same game, not a guess. A row stored under a
+    WRONG school (the old prefix rule turned "Florida A&M Rattlers" into
+    "Florida") matches neither way and is left alone.
+
     `schools` is the run's memory of resolved names, so a name is resolved
     (and an unresolved one warned about) once a run, not once a date."""
 
@@ -471,35 +513,40 @@ class EventMatcher:
         self.by_pair: dict[frozenset, list[Planned]] = defaultdict(list)
         for g in games:
             self.by_pair[frozenset((_name_key(g.home), _name_key(g.away)))].append(g)
-        self._schools: dict[str, str] = {} if schools is None else schools
+        self._schools: dict[str, tuple] = {} if schools is None else schools
 
-    def school(self, name: str) -> str:
+    def names(self, name: str) -> tuple[str, ...]:
+        """The folded names a stored row could carry for this feed name."""
         if name not in self._schools:
-            self._schools[name] = _name_key(_school(name))
+            both = (_name_key(_school(name)), _name_key(name))
+            self._schools[name] = tuple(dict.fromkeys(k for k in both if k))
         return self._schools[name]
 
     def __call__(self, ev: dict) -> tuple[Planned, bool] | None:
-        home, away = self.school(ev.get("home_team") or ""), self.school(ev.get("away_team") or "")
-        if not home or not away or home == away:
-            return None
+        homes = self.names(ev.get("home_team") or "")
+        aways = self.names(ev.get("away_team") or "")
         start = _utc(ev.get("commence_time"))
-        if start is None:
+        if not homes or not aways or start is None:
             return None
-        near = []
-        for g in self.by_pair.get(frozenset((home, away)), ()):
-            if g.kick is not None:
-                gap = abs(g.kick - start)
-                if gap <= MATCH_WINDOW:
-                    near.append((gap, g))
-            elif start.astimezone(ET).date().isoformat() == g.eastern_date:
-                near.append((timedelta(0), g))
+        near: dict[str, tuple] = {}
+        for pair in {frozenset((h, a)) for h in homes for a in aways if h != a}:
+            for g in self.by_pair.get(pair, ()):
+                if g.kick is not None:
+                    gap = abs(g.kick - start)
+                    if gap <= MATCH_WINDOW:
+                        near[g.game_id] = (gap, g)
+                elif start.astimezone(ET).date().isoformat() == g.eastern_date:
+                    near[g.game_id] = (timedelta(0), g)
         if not near:
             return None
-        near.sort(key=lambda x: (x[0], x[1].game_id))
-        if len(near) > 1 and near[0][0] == near[1][0]:
+        ranked = sorted(near.values(), key=lambda x: (x[0], x[1].game_id))
+        if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
             return None                     # two games equally near: not guessed
-        g = near[0][1]
-        return g, _name_key(g.home) != home
+        g = ranked[0][1]
+        ours = _name_key(g.home)
+        if (ours in homes) == (ours in aways):
+            return None                     # which side is our home team cannot be told
+        return g, ours not in homes
 
 
 # ── buying ───────────────────────────────────────────────────────────────────
@@ -784,13 +831,17 @@ class ReadPlan:
         return DERIV_EVENT_COST * len(todo) + LIST_COST * len({p.instant for p in todo})
 
 
-def build_plans(conn, first: int, last: int, reads, sample: int | None = None) -> dict:
-    """{read: ReadPlan}. Reads `games`, the stored pulls and the ledger."""
+def build_plans(conn, first: int, last: int, reads, sample: int | None = None,
+                school=None) -> dict:
+    """{read: ReadPlan}. Reads `games`, the stored pulls and the ledger.
+    `school` is the name resolution real_games groups by (today's, by
+    default; the dry run passes the names as stored when the registry cannot
+    be read)."""
     games = load_games(conn, first, last)
     pulls = stored_pulls(conn, [g["game_id"] for g in games])
     out = {}
     for read in reads:
-        plan, why = plan_read(games, pulls, read)
+        plan, why = plan_read(games, pulls, read, school)
         chosen = sample_games(plan, sample) if sample is not None else plan
         out[read] = ReadPlan(read, chosen, why, ledger_held(conn, [p.game_id for p in chosen], read),
                              len(plan))
@@ -842,7 +893,15 @@ def _budget(conn, plans: dict, a):
 def _dry_run(conn, a, reads, first: int, last: int) -> None:
     """The plan and the most it can cost, printed. Reads only: no meter is
     built, so no call can be made."""
-    plans = build_plans(conn, first, last, reads, a.sample)
+    problems: list[str] = []
+    school = None
+    try:
+        registry = f"team registry: {check_registry(conn):,} schools in ncaaf_teams"
+    except PreconditionError as exc:
+        # still print a plan, with the names as they are stored, and say why
+        # a purchase would not start
+        registry, school, problems = None, (lambda name: name), [str(exc)]
+    plans = build_plans(conn, first, last, reads, a.sample, school=school)
     print(f"dry run: NCAAF first-half lines and team totals, seasons {first}-{last}. "
           f"No call is made and nothing is written.")
     for read in reads:
@@ -855,18 +914,15 @@ def _dry_run(conn, a, reads, first: int, last: int) -> None:
                       f"{p.instant:%Y-%m-%d %H:%M}Z  {p.game_id}"
                       + ("  [bought]" if p.game_id in rp.held else ""))
             print(coverage(conn, rp.games, read))
-    most, (budget, problems) = _budget(conn, plans, a)
+    most, (budget, unmeasured) = _budget(conn, plans, a)
     _end_read(conn)
     print(f"all reads asked for: at most {most:,} credits")
-    try:
-        print(f"team registry: {check_registry(conn):,} schools in ncaaf_teams")
-    except PreconditionError as exc:
-        problems = [str(exc)] + list(problems)
-    _end_read(conn)
+    if registry:
+        print(registry)
     if most:
         print("credit guards, measured (data/ingestors/odds_quota.py):\n" + budget.describe())
-        for p in problems:
-            print("WOULD REFUSE:", p)
+    for p in problems + (list(unmeasured) if most else []):
+        print("WOULD REFUSE:", p)
     floor = max(MIN_FLOOR, budget.floor or 0)
     print(f"re-run with --apply --max-credits {most} --floor {floor}")
 
@@ -936,6 +992,12 @@ def main() -> None:
         raise SystemExit("ODDS_API_KEY is not set")
     conn = get_connection()
     try:
+        # first: the plan groups a game's rows by resolved names, and every
+        # event is placed by them
+        try:
+            print(f"team registry: {check_registry(conn):,} schools in ncaaf_teams")
+        except PreconditionError as exc:
+            raise SystemExit(f"refusing to start: {exc}") from exc
         ensure_ledger(conn)
         plans = build_plans(conn, first, last, reads, a.sample)
         for read in reads:
@@ -946,11 +1008,6 @@ def main() -> None:
         meter = None
         if most:
             print("credit guards, measured (data/ingestors/odds_quota.py):\n" + budget.describe())
-            try:
-                print(f"team registry: {check_registry(conn):,} schools in ncaaf_teams")
-            except PreconditionError as exc:
-                problems = [str(exc)] + list(problems)
-            _end_read(conn)
             if problems:
                 raise SystemExit("refusing to start: " + "; ".join(problems))
             floor = max(a.floor, budget.floor or 0)

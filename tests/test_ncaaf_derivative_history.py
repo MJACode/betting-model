@@ -30,14 +30,30 @@ def _t(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+# The schools this file's `games` rows name. A school resolves to itself,
+# as the registry's exact-school rule has it.
+SCHOOLS = {"Ohio State", "Texas", "Clemson", "LSU", "UNLV", "Idaho State", "Kansas State",
+           "Iowa State", "Mississippi State", "Southern Miss", "Furman", "Miami", "Florida",
+           "Florida A&M", "North Carolina"}
+MAPPED_NAMES = {"Southern Mississippi Golden Eagles": "Southern Miss",
+                "North Carolina Tar Heels": "North Carolina",
+                "North Carolina Central Eagles": "North Carolina Central"}
+
+
+def _resolve(name, sport="NCAAF"):
+    """The name resolution, without its database: a school is itself, one
+    name goes through a map the way config.NCAAF_ODDS_API_MAP sends 'Southern
+    Mississippi', and any other name loses its mascot."""
+    if name in SCHOOLS:
+        return name
+    return MAPPED_NAMES.get(name) or name.rsplit(" ", 1)[0]
+
+
 @pytest.fixture(autouse=True)
 def _no_db_school_lookup(monkeypatch):
     """The NCAAF name resolution reads the ncaaf_teams registry from the
-    database; here it strips the mascot itself, and one name goes through a
-    map the way config.NCAAF_ODDS_API_MAP sends 'Southern Mississippi'."""
-    names = {"Southern Mississippi Golden Eagles": "Southern Miss"}
-    monkeypatch.setattr(h, "_normalize_team",
-                        lambda name, sport: names.get(name) or name.rsplit(" ", 1)[0])
+    database; here _resolve stands in for it."""
+    monkeypatch.setattr(h, "_normalize_team", _resolve)
 
 
 # ── a small world ────────────────────────────────────────────────────────────
@@ -331,6 +347,76 @@ def test_an_event_that_cannot_be_matched_is_skipped_never_guessed():
     a = am[-1]
     twin = h.Planned(**{**a.__dict__, "game_id": a.game_id + "_x"})
     assert h.EventMatcher([a, twin])(E_NOON) is None
+
+
+# ── rows stored under the feed's own team name ───────────────────────────────
+# The stored full-game history was written on 2026-09-07, when the registry
+# held FBS schools only: an FCS opponent's row carries the feed's name, and
+# CFBD's row for the same game, the one with the final, the school's.
+
+RAW = _game("NCAAF_2025-09-06_furman-paladins_clemson", "Clemson", "Furman Paladins",
+            "2025-09-06T16:00:00Z")
+RAW_CFBD = _game("NCAAF_2025-09-06_furman_clemson", "Clemson", "Furman", "2025-09-06T16:00:00Z",
+                 score=45)
+RAW_AM = _t("2025-09-06T14:00:00Z")
+E_RAW = _listing("e-raw", "Clemson Tigers", "Furman Paladins", "2025-09-06T16:00:00Z")
+
+
+def test_a_row_stored_under_the_feed_s_own_name_is_one_game_with_cfbd_s_row():
+    pulls = {RAW["game_id"]: {RAW_AM: 20}}
+    (p,), why = h.plan_read([RAW, RAW_CFBD], pulls, "am")
+    assert p.game_id == RAW["game_id"] and p.away == "Furman Paladins"   # the id with the prices
+    assert p.scored is True and why["no_stored_pull"] == 0               # the final is its twin's
+    assert [sorted(g["game_id"] for g in grp) for grp in h.real_games([RAW, RAW_CFBD])] == [
+        sorted([RAW["game_id"], RAW_CFBD["game_id"]])]
+    # with the names taken as stored they are two games, and the priced one has no final
+    (q,), why = h.plan_read([RAW, RAW_CFBD], pulls, "am", school=lambda name: name)
+    assert q.scored is False and why["no_stored_pull"] == 1
+
+
+def test_an_event_lands_on_a_row_stored_under_the_feed_s_own_name():
+    (p,), _ = h.plan_read([RAW, RAW_CFBD], {RAW["game_id"]: {RAW_AM: 20}}, "am")
+    m = h.EventMatcher([p])
+    assert m(E_RAW) == (p, False)
+    flipped = {**E_RAW, "home_team": "Furman Paladins", "away_team": "Clemson Tigers"}
+    assert m(flipped) == (p, True)
+    assert m({**E_RAW, "commence_time": "2025-09-13T16:00:00Z"}) is None     # a week later
+    # and it is bought under that id, in our orientation
+    conn = Db()
+    feed = _feed([flipped], served="2025-09-06T13:55:38Z")
+    out = h.buy_read(conn, FakeMeter(feed), [p], "am")
+    assert out["events"] == 1 and out["flipped"] == 1 and out["left_unbought"] == 0
+    assert {r["game_id"] for r in conn.odds} == {RAW["game_id"]}
+    spread = next(r for r in conn.odds if r["market"] == "spreads_h1")
+    assert spread["spread_home"] == 2.5                    # Clemson, the feed's away team here
+
+
+def test_a_row_stored_under_a_wrong_school_is_never_matched():
+    """The old prefix rule stored Florida A&M at Miami as Florida at Miami.
+    Today's event names Florida A&M: it is not that row, by either name."""
+    wrong = _game("NCAAF_2024-09-07_florida_miami", "Miami", "Florida", "2024-09-07T22:00:00Z",
+                  season=2024)
+    (p,), _ = h.plan_read([wrong], {wrong["game_id"]: {_t("2024-09-07T14:00:00Z"): 9}}, "am")
+    famu = _listing("e-famu", "Miami Hurricanes", "Florida A&M Rattlers", "2024-09-07T22:00:00Z")
+    assert h.EventMatcher([p])(famu) is None
+    meter = FakeMeter(_feed([famu]))
+    out = h.buy_read(Db(), meter, [p], "am")
+    assert _bought(meter) == [] and out["games_not_listed"] == 1
+
+
+def test_an_event_whose_two_names_land_on_one_school_is_not_placed(monkeypatch):
+    """If the resolution gives both teams the same school, which side is our
+    home team cannot be told from the names: the event is skipped."""
+    stored = _game("NCAAF_2024-09-14_ncc_north-carolina", "North Carolina",
+                   "North Carolina Central Eagles", "2024-09-14T22:00:00Z", season=2024)
+    (p,), _ = h.plan_read([stored], {stored["game_id"]: {_t("2024-09-14T14:00:00Z"): 9}}, "am")
+    ev = _listing("e-ncc", "North Carolina Tar Heels", "North Carolina Central Eagles",
+                  "2024-09-14T22:00:00Z")
+    assert h.EventMatcher([p])(ev) == (p, False)           # resolved apart: placed
+    monkeypatch.setattr(h, "_normalize_team", lambda name, sport: "North Carolina")
+    assert h.EventMatcher([p])(ev) is None
+    assert h.EventMatcher([p])({**ev, "home_team": ev["away_team"],
+                                "away_team": ev["home_team"]}) is None
 
 
 def test_a_game_with_no_stored_kickoff_is_matched_on_its_eastern_date():
@@ -1003,11 +1089,11 @@ def test_the_registry_is_read_fresh_and_an_empty_read_is_not_left_for_the_next_j
 
 
 def test_a_feed_name_is_resolved_once_a_run_not_once_a_date(monkeypatch):
-    asked = []
-    monkeypatch.setattr(h, "_normalize_team",
-                        lambda name, sport: asked.append(name) or name.rsplit(" ", 1)[0])
     games, pulls = _slate(per=2)
     plan, _ = h.plan_read(games, pulls, "am")
+    asked = []
+    monkeypatch.setattr(h, "_normalize_team",
+                        lambda name, sport: asked.append(name) or _resolve(name))
     listing = [_listing("e-moose", "Mystery Moose", "Nobody Newts", "2025-09-06T16:00:00Z")]
     h.buy_read(Db(), FakeMeter(_feed(listing)), plan, "am")
     assert len(_lists_dates(plan)) > 1 and sorted(asked) == ["Mystery Moose", "Nobody Newts"]
@@ -1106,12 +1192,12 @@ def test_the_job_is_on_the_allowlist_and_runs_the_module_s_own_command_line():
 
 
 @pytest.mark.parametrize("args,want", [
-    ({"read": "am", "max_credits": 92_765, "floor": 300_000},
+    ({"read": "am", "max_credits": 100_580, "floor": 300_000},
      ["--read", "am", "--seasons", "2023", "2025", "--concurrency", "6", "--apply",
-      "--max-credits", "92765", "--floor", "300000"]),
-    ({"read": "both", "max_credits": 185_530, "floor": 300_000, "concurrency": 3},
+      "--max-credits", "100580", "--floor", "300000"]),
+    ({"read": "both", "max_credits": 198_166, "floor": 300_000, "concurrency": 3},
      ["--read", "both", "--seasons", "2023", "2025", "--concurrency", "3", "--apply",
-      "--max-credits", "185530", "--floor", "300000"]),
+      "--max-credits", "198166", "--floor", "300000"]),
     ({"read": "am", "sample": 50, "max_credits": 2_050, "floor": 300_000},
      ["--read", "am", "--seasons", "2023", "2025", "--sample", "50", "--concurrency", "6",
       "--apply", "--max-credits", "2050", "--floor", "300000"]),
@@ -1128,11 +1214,14 @@ def test_the_job_s_argv_parses_on_the_module_s_own_parser(monkeypatch, args, wan
     assert a.apply is not args.get("dry_run", False)
 
 
-def test_the_job_s_limits_are_the_figures_the_audit_put_in_front_of_mike():
-    """docs/ncaaf_market_audit.md section 7: 2,314 games on 205 dates a read,
-    92,765 credits; the 50-game test 2,050."""
-    assert jq.NCAAF_DERIVATIVE_HISTORY_CAPS == {"am": 92_765, "pm": 92_765, "both": 185_530}
-    assert jq.NCAAF_DERIVATIVE_HISTORY_CAPS["am"] == 2_314 * h.DERIV_EVENT_COST + 205 * h.LIST_COST
+def test_the_job_s_limits_are_the_plan_at_its_most_as_measured():
+    """The buyer's own plan on the local copy of the database, 2026-11-10:
+    2,510 games on 180 dates at the morning read, 2,435 on 186 the evening
+    before, 40 credits a game and 1 a date's list. The 50-game test: 2,050."""
+    caps = jq.NCAAF_DERIVATIVE_HISTORY_CAPS
+    assert caps["am"] == 2_510 * h.DERIV_EVENT_COST + 180 * h.LIST_COST == 100_580
+    assert caps["pm"] == 2_435 * h.DERIV_EVENT_COST + 186 * h.LIST_COST == 97_586
+    assert caps["both"] == caps["am"] + caps["pm"] == 198_166 and set(caps) == {"am", "pm", "both"}
     assert jq.NCAAF_DERIVATIVE_HISTORY_SEASONS == h.SEASONS == (2023, 2025)
     ok = jq._validate_ncaaf_derivative_history
     assert ok({"read": "am", "sample": 50, "max_credits": 2_050, "floor": 300_000})
@@ -1140,8 +1229,9 @@ def test_the_job_s_limits_are_the_figures_the_audit_put_in_front_of_mike():
 
 
 @pytest.mark.parametrize("args", [
-    {"read": "am", "max_credits": 92_766, "floor": 300_000},          # above what was stated
-    {"read": "both", "max_credits": 185_531, "floor": 300_000},
+    {"read": "am", "max_credits": 100_581, "floor": 300_000},         # above the plan's most
+    {"read": "pm", "max_credits": 97_587, "floor": 300_000},
+    {"read": "both", "max_credits": 198_167, "floor": 300_000},
     {"read": "am", "sample": 50, "max_credits": 2_051, "floor": 300_000},
     {"read": "am", "max_credits": 0, "floor": 300_000},
     {"read": "am", "max_credits": 1_000, "floor": 299_999},           # would let the feeds run dry
