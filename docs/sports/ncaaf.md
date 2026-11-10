@@ -722,9 +722,14 @@ weather missing, 35 are inside the stale-line cap at -110 and could be
 written as an under bet (a pick locks the first time the gate is crossed);
 the other 512 are past the cap and would get no row. So the fit now measures
 this and stores it in the artifact, and `--register-totals` refuses an
-artifact whose prediction moves as far as the gate when an input is missing
-(`--accept-missing-input-shift` overrides it, for when serving guarantees
-the inputs). NOT measured: how many 2026 games and bets were scored without
+artifact whose prediction moves as far as the gate when an input is missing.
+For the weather inputs one thing lifts the refusal: the scorer holding such a
+game undecided. Registration proves that by calling the hold
+(`models.scorer.totals_weather_hold`) on a game with each weather input
+missing; a scorer without it, or with one that does not hold, leaves the
+artifact refused. There is no flag that registers it anyway. So this artifact
+cannot go live without the hold and can once the hold has shipped (its venue
+shift, 2.05 points, is under the gate). NOT measured: how many 2026 games and bets were scored without
 a weather row. One query answers it: the bets of this model in `picks` whose
 `created_at` is more than 7 days before `game_date`.
 
@@ -756,11 +761,25 @@ turns 51 unders at the gate into 78 and 123. That may be part of the 2026
 under lean measured on 2026-09-26. It has not been checked against the
 stored picks.
 
-**What it costs to run.** The scorer loads the artifact once per game. On
-this machine, measured twice (the second time under load), a load took 0.60
-and 0.84 seconds (the single fit: 0.04 and 0.06) and a one-row prediction
-0.12 and 0.39 seconds (0.01 and 0.04): about 0.7 to 1.1 seconds more per game
-scored. Nothing was changed to cache it.
+**What it costs to run.** The scorer loads the artifact once per game
+(`models/scorer.score_game` calls `models/trainer.load_model`, which reads
+and unpickles the file every time) and then predicts one row. On this
+machine, with nothing else running: the load is 473 ms (the single fit: 36)
+and the first prediction after it was 62 ms (2.8). With other work running
+on the machine the load took up to 844 ms and the prediction up to 391.
+
+- *The prediction, fixed.* Each member was fitted with `n_jobs=-1` and
+  started a thread pool to predict one row, eleven times a game.
+  `models/seed_average.py` now sets every member to one thread when the model
+  is built or loaded. Timed in pairs in one process (15 fresh loads each
+  way): 155 ms as fitted, 40 ms on one thread; a second prediction on the
+  same object 67 ms and 23 ms. No predicted value changes: all 7,570 games of
+  the frame are identical to the last bit, largest difference 0.0.
+- *The load, not fixed.* About 0.5 seconds a game, nine tenths of what the
+  new artifact adds, is unpickling eleven sets of 700 trees. It is paid per
+  game because the loader does not keep what it has read. Keeping it (one
+  load per scoring process) is a change to the loader every model uses, so
+  it was left as a decision.
 
 **Other models.** `models/seed_average.py` holds any fitted regressors. The
 seed noise was measured for this model only. `fit_and_register` (the retired
@@ -777,11 +796,13 @@ fit one seed.
    which was 236-213, +1.7 units over four seasons. Until that is settled,
    stop here: the single fit of 2026-08-25 keeps scoring, and merging this
    branch changes no pick.
-2. Once that is built and a fitted artifact passes the check: merge, and
-   wait for both services to deploy.
-3. `python -m scripts.ncaaf_margin_eval --register-totals <version>` (a
-   production write: it copies the file into `model_artifacts`, then switches
-   the active `model_registry` row).
+2. Once the scorer holds such a game: merge, and wait for both services to
+   deploy. The hold has to be running on the worker before the new artifact
+   is active, so the order is hold deployed first, registration second.
+3. `python -m scripts.ncaaf_margin_eval --register-totals 20261110_161059`,
+   run from a checkout that has the same scorer the worker has (a production
+   write: it checks that scorer for the hold, copies the file into
+   `model_artifacts`, then switches the active `model_registry` row).
 4. `python -m data.threshold_sync` (the floor did not move, so this changes
    nothing; it is the standing step after a model update).
 5. Read back `model_registry` for `ncaaf_over_under` (one active row, the new

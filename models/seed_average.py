@@ -25,6 +25,29 @@ from __future__ import annotations
 import numpy as np
 
 
+def _predict_on_one_thread(members) -> None:
+    """Set each boosted-tree member to predict on one thread.
+
+    The scorer predicts ONE row per game, and a member fitted with `n_jobs=-1`
+    starts a thread pool for that one row, once per member per game. Measured
+    2026-11-10 on the eleven-member NCAAF totals artifact, first predict after
+    a load: 62 ms as fitted, 17 ms on one thread. It cannot change a value:
+    threads split ROWS between them, and one row's prediction is the same sum
+    over its trees either way (tests/test_seed_average.py compares to the last
+    bit). The fit is not affected: this runs after the members are fitted.
+
+    A member with no `get_booster` (anything that is not xgboost) is left alone.
+    """
+    for member in members:
+        get_booster = getattr(member, "get_booster", None)
+        if get_booster is None:
+            continue
+        try:
+            get_booster().set_param({"nthread": 1})
+        except Exception:                      # noqa: BLE001 - a speed setting only
+            continue
+
+
 class SeedAverage:
     """N fitted regressors whose `predict` is the mean of the members'.
 
@@ -44,6 +67,13 @@ class SeedAverage:
                 f"{len(seeds)} seeds for {len(members)} members: one seed per member")
         self.members = members
         self.seeds = seeds
+        _predict_on_one_thread(self.members)
+
+    def __setstate__(self, state: dict) -> None:
+        """Unpickling. Applies the one-thread setting to artifacts pickled
+        before it existed, whose members still carry the fit's `n_jobs=-1`."""
+        self.__dict__.update(state)
+        _predict_on_one_thread(self.members)
 
     def __len__(self) -> int:
         return len(self.members)

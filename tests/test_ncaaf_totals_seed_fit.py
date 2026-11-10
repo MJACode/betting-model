@@ -44,6 +44,7 @@ F0 = ev.TOTAL_FEATURES[0]
 
 
 WIND = ev.TOTAL_FEATURES.index("wx_wind_mph")
+ELEV = ev.TOTAL_FEATURES.index("venue_elevation_ft")
 
 
 class _Stub:
@@ -54,6 +55,7 @@ class _Stub:
     by the tests about a game that has no weather forecast yet."""
 
     NAN_WIND_DROP = 0.0
+    NAN_ELEV_DROP = 0.0          # the same, for a missing venue elevation
 
     def __init__(self, seed: int):
         self.seed = seed
@@ -61,7 +63,8 @@ class _Stub:
     def predict(self, X):
         A = X.to_numpy(dtype=float) if hasattr(X, "to_numpy") else np.asarray(X, dtype=float)
         return (55.0 + 12.0 * A[:, 0] + SEED_STEP * self.seed
-                - self.NAN_WIND_DROP * np.isnan(A[:, WIND]))
+                - self.NAN_WIND_DROP * np.isnan(A[:, WIND])
+                - self.NAN_ELEV_DROP * np.isnan(A[:, ELEV]))
 
 
 def _frame(seasons=(2021, 2022, 2023, 2024), n=200, flip=(), line="stale"):
@@ -415,23 +418,87 @@ def test_a_fit_that_ignores_missing_weather_measures_no_shift(tmp_path, stub_fit
         assert group["mean"] == pytest.approx(0.0, abs=1e-9)
 
 
+# What unlocks such an artifact is the scorer refusing to DECIDE a game whose
+# weather is missing (models.scorer.totals_weather_hold). Registration proves
+# it by calling it, so these tests put a hold in the scorer or take it out,
+# whichever this checkout has.
+
+def _a_working_hold(feature_cols, features):
+    import math
+    for c in ("wx_temp_f", "wx_wind_mph", "wx_precip_mm"):
+        v = features.get(c)
+        if c in feature_cols and (v is None or (isinstance(v, float) and math.isnan(v))):
+            return "waiting for the weather forecast"
+    return None
+
+
+def _scorer_hold(monkeypatch, hold):
+    import models.scorer as sc
+    if hold is None:
+        monkeypatch.delattr(sc, "totals_weather_hold", raising=False)
+    else:
+        monkeypatch.setattr(sc, "totals_weather_hold", hold, raising=False)
+
+
 def test_register_refuses_a_model_a_missing_forecast_moves_past_the_gate(
         tmp_path, monkeypatch, registry):
     monkeypatch.setattr(_Stub, "NAN_WIND_DROP", 11.0)
     res, out = _fitted(tmp_path, monkeypatch)
+    _scorer_hold(monkeypatch, None)                     # a scorer with no hold
     with pytest.raises(SystemExit) as exc:
         ev.register_totals(res["version"], saved_dir=out)
     assert "weather" in str(exc.value) and "11.0" in str(exc.value)
     assert registry.events == [], "a refused registration still wrote something"
 
-    # Said out loud, it registers: the flag is for when serving guarantees the input.
-    ev.register_totals(res["version"], saved_dir=out, accept_missing_input_shift=True)
+
+def test_the_same_model_registers_once_the_scorer_holds_such_a_game(
+        tmp_path, monkeypatch, registry):
+    monkeypatch.setattr(_Stub, "NAN_WIND_DROP", 11.0)
+    res, out = _fitted(tmp_path, monkeypatch)
+    _scorer_hold(monkeypatch, _a_working_hold)
+    ev.register_totals(res["version"], saved_dir=out)
     assert [e[0] for e in registry.events] == ["store", "sql", "sql"]
+
+
+@pytest.mark.parametrize("broken", [
+    lambda feature_cols, features: None,                           # never holds
+    lambda feature_cols, features: "waiting",                      # holds everything
+    lambda feature_cols, features: (                               # holds on wind only
+        "waiting" if features.get("wx_wind_mph") is None else None),
+], ids=["never holds", "holds every game", "ignores temperature and rain"])
+def test_a_hold_that_does_not_do_the_job_unlocks_nothing(tmp_path, monkeypatch, registry, broken):
+    """Registration calls the hold; a function with the right name is not proof."""
+    monkeypatch.setattr(_Stub, "NAN_WIND_DROP", 11.0)
+    res, out = _fitted(tmp_path, monkeypatch)
+    _scorer_hold(monkeypatch, broken)
+    with pytest.raises(SystemExit):
+        ev.register_totals(res["version"], saved_dir=out)
+    assert registry.events == []
+
+
+def test_the_weather_hold_does_not_excuse_a_venue_shift(tmp_path, monkeypatch, registry):
+    """The hold covers a missing forecast. A model that a missing VENUE alone
+    moves past the gate is still refused."""
+    monkeypatch.setattr(_Stub, "NAN_ELEV_DROP", 9.0)
+    res, out = _fitted(tmp_path, monkeypatch)
+    _scorer_hold(monkeypatch, _a_working_hold)
+    with pytest.raises(SystemExit) as exc:
+        ev.register_totals(res["version"], saved_dir=out)
+    assert "venue" in str(exc.value)
+    assert registry.events == []
+
+
+def test_there_is_no_flag_that_registers_it_anyway():
+    import inspect as _inspect
+    assert "accept_missing_input_shift" not in _inspect.signature(ev.register_totals).parameters
+    with pytest.raises(SystemExit):
+        ev._build_parser().parse_args(["--register-totals", "v", "--accept-missing-input-shift"])
 
 
 def test_register_passes_a_shift_smaller_than_the_gate(tmp_path, monkeypatch, registry):
     monkeypatch.setattr(_Stub, "NAN_WIND_DROP", 7.9)
     res, out = _fitted(tmp_path, monkeypatch)
+    _scorer_hold(monkeypatch, None)
     ev.register_totals(res["version"], saved_dir=out)
     assert [e[0] for e in registry.events] == ["store", "sql", "sql"]
 
@@ -639,22 +706,40 @@ def test_the_newest_totals_artifact_is_the_eleven_seed_average():
     assert 50.0 < float(art["model"].predict(x)[0]) < 65.0
 
 
-def test_registering_the_newest_artifact_follows_its_own_missing_forecast_measurement(registry):
-    """The real file through the real check. Whatever the newest artifact
-    measured, registering it agrees: refused when a missing forecast moves the
-    average game as far as the gate, registered when it does not."""
+def test_the_newest_artifact_registers_only_with_the_weather_hold_in_the_scorer(
+        monkeypatch, registry):
+    """The real file through the real check, both ways. A missing forecast
+    moves the eleven-seed fit 11.66 points, so it must be refused by a scorer
+    with no hold and accepted by one that holds such a game. Its venue shift
+    (2.05) is under the gate, so the hold is all it needs."""
     path, art = _shipped()
     shift = art["missing_input_shift"]
     assert shift["rows"] > 700, "measured on too few games to mean anything"
-    worst = max(abs(g["mean"]) for g in shift["groups"].values())
-    if worst >= art["d_threshold"]:
-        with pytest.raises(SystemExit) as exc:
-            ev.register_totals(art["version"])
-        assert "weather" in str(exc.value) or "venue" in str(exc.value)
-        assert registry.events == []
-    else:
+    assert abs(shift["groups"]["weather"]["mean"]) >= art["d_threshold"]
+    assert abs(shift["groups"]["venue"]["mean"]) < art["d_threshold"]
+
+    _scorer_hold(monkeypatch, None)
+    with pytest.raises(SystemExit) as exc:
+        ev.register_totals(art["version"])
+    assert "weather" in str(exc.value)
+    assert registry.events == []
+
+    _scorer_hold(monkeypatch, _a_working_hold)
+    ev.register_totals(art["version"])
+    assert [e[0] for e in registry.events] == ["store", "sql", "sql"]
+
+
+def test_this_checkouts_own_scorer_decides_whether_it_registers(registry):
+    """No stand-ins: whatever models/scorer.py is in this checkout. With the
+    weather hold shipped the artifact registers; without it, it is refused."""
+    path, art = _shipped()
+    if ev._scorer_holds_missing_weather():
         ev.register_totals(art["version"])
         assert [e[0] for e in registry.events] == ["store", "sql", "sql"]
+    else:
+        with pytest.raises(SystemExit):
+            ev.register_totals(art["version"])
+        assert registry.events == []
 
 
 def test_the_probability_floor_admits_both_arms_exactly_at_the_gate():

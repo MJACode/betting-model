@@ -103,8 +103,8 @@ models/saved/wnba_spread_20260719_113238.pkl
   mean of eleven fits (`models/seed_average.py`, fitted by
   `python -m scripts.ncaaf_margin_eval --fit-totals`; mike, 2026-11-10),
   committed with the class its pickle names. NOT registered, and
-  `--register-totals 20261110_161059` refuses it as it stands: a game with no
-  weather forecast moves its prediction 11.7 points
+  `--register-totals 20261110_161059` refuses it unless the scorer holds a
+  game whose weather is missing: such a game moves its prediction 11.7 points
   (`docs/sports/ncaaf.md`, the 2026-11-10 section). Until a version is
   registered `ncaaf_over_under_20260825_204305.pkl` is the active row and
   stays on this list. Drop the old one (steps 3-4 below) once a new row is

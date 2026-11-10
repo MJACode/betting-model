@@ -133,6 +133,72 @@ def test_real_fitted_regressors_average_and_survive_a_pickle():
     assert np.array_equal(back.predict(probe), model.predict(probe))
 
 
+def _booster_threads(member) -> str:
+    import json
+    return json.loads(member.get_booster().save_config())["learner"]["generic_param"]["nthread"]
+
+
+def _three_real_members(n_jobs=-1):
+    from xgboost import XGBRegressor
+
+    rng = np.random.default_rng(5)
+    X = rng.normal(size=(300, 5))
+    y = 50 + 6 * X[:, 0] - 3 * X[:, 1] + rng.normal(0, 3, 300)
+    members = []
+    for seed in (42, 0, 1):
+        m = XGBRegressor(n_estimators=40, max_depth=4, subsample=0.8,
+                         colsample_bytree=0.8, n_jobs=n_jobs, random_state=seed)
+        m.fit(X, y)
+        members.append(m)
+    probe = rng.normal(size=(64, 5))
+    probe[::7, 3] = np.nan
+    return members, probe
+
+
+def test_predicting_runs_each_member_on_one_thread_and_changes_no_value():
+    """The scorer predicts ONE row per game. A fit made with n_jobs=-1 starts a
+    thread pool for that one row, eleven times a game; measured 2026-11-10 that
+    was most of a 62 ms predict. One thread per member is 3 to 4 times faster
+    on one row and cannot change a number: threads split rows, not the sum of
+    one row's trees. So the values are compared to the last bit."""
+    from models.seed_average import SeedAverage
+
+    members, probe = _three_real_members()
+    want_each = np.array([np.asarray(m.predict(probe), dtype=float) for m in members])
+    assert {_booster_threads(m) for m in members} != {"1"}, "fixture is already single-threaded"
+
+    model = SeedAverage(members, seeds=[42, 0, 1])
+    assert {_booster_threads(m) for m in model.members} == {"1"}
+    assert np.array_equal(model.member_predictions(probe), want_each)
+    assert np.array_equal(model.predict(probe), want_each.mean(axis=0))
+    one_by_one = np.array([model.predict(probe[i:i + 1])[0] for i in range(len(probe))])
+    assert np.array_equal(one_by_one, want_each.mean(axis=0))
+
+
+def test_an_artifact_pickled_before_this_change_is_single_threaded_once_loaded():
+    """The committed artifact was pickled with its members as fitted. Loading
+    it has to apply the same setting, or only refits would get it."""
+    from models.seed_average import SeedAverage
+
+    members, probe = _three_real_members()
+    want = np.array([np.asarray(m.predict(probe), dtype=float) for m in members]).mean(axis=0)
+    old_style = SeedAverage.__new__(SeedAverage)           # as pickle rebuilt it before
+    old_style.__dict__.update({"members": members, "seeds": [42, 0, 1]})
+    blob = pickle.dumps(old_style)
+    assert {_booster_threads(m) for m in members} != {"1"}
+
+    back = pickle.loads(blob)
+    assert {_booster_threads(m) for m in back.members} == {"1"}
+    assert np.array_equal(back.predict(probe), want)
+
+
+def test_members_that_are_not_boosted_trees_are_left_alone():
+    from models.seed_average import SeedAverage
+
+    model = SeedAverage([_Line(40.0), _Line(50.0)], seeds=[42, 0])
+    assert pickle.loads(pickle.dumps(model)).predict(np.zeros((1, 1)))[0] == pytest.approx(45.0)
+
+
 def test_the_scorer_prices_the_average_through_its_total_regression_branch(monkeypatch):
     """End to end through `score_game`, unchanged: the probability must be the
     residual ECDF at (AVERAGE prediction - DraftKings total).

@@ -940,9 +940,10 @@ def fit_totals(train_seasons: list[int], holdout: int, frame_path=None,
     worst_name, worst = _worst_missing_input(shift)
     refused = abs(worst["mean"]) >= T_THRESHOLD
     if refused:
-        print(f"  REGISTRATION WILL BE REFUSED: with the {worst_name} inputs missing the "
-              f"prediction moves{nl}  {worst['mean']:+.1f} points, as far as the "
-              f"{T_THRESHOLD} gate, so a missing input alone reads as a bet.")
+        print(f"  With the {worst_name} inputs missing the prediction moves "
+              f"{worst['mean']:+.1f} points, as far as{nl}  the {T_THRESHOLD} gate, so a "
+              f"missing input alone reads as a bet. --register-totals{nl}  refuses that "
+              f"unless the scorer holds a game whose weather is missing.")
     reg = artifact["registry"]
     print(f"{nl}NOT registered. --register-totals {version} would deactivate the "
           f"active row and write:")
@@ -957,9 +958,8 @@ def fit_totals(train_seasons: list[int], holdout: int, frame_path=None,
           f"models/saved/MANIFEST.md),{nl}merge and let the worker deploy, and only then "
           f"run --register-totals {version}.")
     if refused:
-        print("As it stands that last step refuses this artifact (above): settle what "
-              f"the model does{nl}with a game that has no weather forecast or venue yet "
-              "before it can go live.")
+        print("That last step checks the scorer it is run beside: the weather hold "
+              f"has to be in{nl}it (see above), or this artifact is refused.")
     return {"version": version, "path": out, "artifact": artifact, "gate": gate}
 
 
@@ -984,8 +984,27 @@ def _tracked_by_git(path: Path) -> bool | None:
     return False if proc.returncode == 1 else None
 
 
-def register_totals(version: str, saved_dir=None,
-                    accept_missing_input_shift: bool = False) -> str:
+def _scorer_holds_missing_weather() -> bool:
+    """True only when the scorer in THIS checkout refuses to decide a totals
+    game whose weather is missing: `models.scorer.totals_weather_hold` exists
+    and, called here, gives a reason for each weather input when it alone is
+    missing and for a game with none of them, and no reason for a game that
+    has all three. A function with the right name that does not do that is
+    not the hold, and anything that fails while asking counts as no hold."""
+    weather = list(MISSING_INPUT_GROUPS["weather"])
+    complete = {c: 1.0 for c in weather}
+    try:
+        import models.scorer as scorer
+        hold = getattr(scorer, "totals_weather_hold", None)
+        if hold is None or hold(weather, complete) is not None:
+            return False
+        return (bool(hold(weather, {}))
+                and all(hold(weather, {**complete, c: None}) for c in weather))
+    except Exception:                                  # noqa: BLE001 - see docstring
+        return False
+
+
+def register_totals(version: str, saved_dir=None) -> str:
     """
     Make a fitted totals artifact the active `ncaaf_over_under`. A PRODUCTION
     WRITE, and a model update: it changes which file scores.
@@ -1000,9 +1019,13 @@ def register_totals(version: str, saved_dir=None,
     measurement (missing_input_shift) says that with its weather or venue
     inputs missing the prediction moves, on average, as far as the gate. The
     scorer serves a game that way when it has no weather forecast yet, and a
-    pick locks the first time the gate is crossed. `accept_missing_input_shift`
-    registers it anyway, for when serving has been changed so the model never
-    sees such a row; an artifact that never measured it is refused the same way.
+    pick locks the first time the gate is crossed. What lifts the refusal for
+    the WEATHER inputs is the scorer holding such a game undecided
+    (_scorer_holds_missing_weather calls the hold to prove it), so an artifact
+    like the eleven-seed fit registers once that hold has shipped and cannot
+    be registered without it. There is no flag that registers it anyway. A
+    shift that large on the venue inputs has nothing to lift it, and an
+    artifact that never measured it is refused the same way.
 
     The bytes are copied into `model_artifacts` BEFORE the row that names them
     is written, the same order models/trainer._register_model uses, so the
@@ -1029,26 +1052,35 @@ def register_totals(version: str, saved_dir=None,
         raise SystemExit(f"{path.name} is not tracked by git. The worker deploys from "
                          "git, so a registry row naming it would point at a file the "
                          "worker does not have. Commit, merge and deploy it first.")
-    if not accept_missing_input_shift:
-        shift = artifact.get("missing_input_shift")
-        gate = float(artifact.get("d_threshold") or 0.0)
-        if not shift or not shift.get("groups"):
-            raise SystemExit(
-                f"{path.name} did not measure what a missing weather or venue input "
-                "does to its prediction — refusing to register it. Refit it with "
-                "--fit-totals, which measures it.")
-        name, worst = _worst_missing_input(shift)
-        if abs(worst["mean"]) >= gate:
-            raise SystemExit(
-                f"{path.name}: with the {name} inputs missing its prediction moves "
-                f"{worst['mean']:+.1f} points on average ({worst['at_gate_before']} -> "
-                f"{worst['at_gate_after']} of {shift['rows']} holdout games at the "
-                f"{gate} gate). The scorer serves a game that way when it has no "
-                "weather forecast or no known venue yet, so a missing input alone "
-                "would read as a bet, and a pick locks at the first crossing. "
-                "Refusing to register. Settle what the model does with such a game "
-                "first (docs/sports/ncaaf.md), or pass --accept-missing-input-shift "
-                "if serving now guarantees those inputs.")
+    shift = artifact.get("missing_input_shift")
+    gate = float(artifact.get("d_threshold") or 0.0)
+    if not shift or not shift.get("groups"):
+        raise SystemExit(
+            f"{path.name} did not measure what a missing weather or venue input "
+            "does to its prediction — refusing to register it. Refit it with "
+            "--fit-totals, which measures it.")
+    weather = set(MISSING_INPUT_GROUPS["weather"])
+    held = _scorer_holds_missing_weather()
+    # A group is a risk when its absence moves the average game as far as the
+    # gate, unless it includes a weather input and the scorer never decides a
+    # game that is missing one.
+    at_risk = {name: g for name, g in shift["groups"].items()
+               if abs(g["mean"]) >= gate and not (held and weather & set(g["features"]))}
+    if at_risk:
+        name, worst = max(at_risk.items(), key=lambda kv: abs(kv[1]["mean"]))
+        why = ("The scorer in this checkout holds a game whose weather is missing, "
+               "but this shift does not need the weather to be missing."
+               if held else
+               "The scorer in this checkout does not hold a game whose weather is "
+               "missing (models.scorer.totals_weather_hold): ship that hold first.")
+        raise SystemExit(
+            f"{path.name}: with the {name} inputs missing its prediction moves "
+            f"{worst['mean']:+.1f} points on average ({worst['at_gate_before']} -> "
+            f"{worst['at_gate_after']} of {shift['rows']} holdout games at the "
+            f"{gate} gate). The scorer serves a game that way when it has no "
+            "weather forecast or no known venue yet, so a missing input alone "
+            "would read as a bet, and a pick locks at the first crossing. "
+            f"Refusing to register. {why} (docs/sports/ncaaf.md)")
 
     reg = artifact["registry"]
     model_path = f"models/saved/{path.name}"
@@ -1103,11 +1135,6 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Make a fitted totals artifact the active model. A "
                          "production write: run it after the artifact is "
                          "committed, merged and deployed")
-    ap.add_argument("--accept-missing-input-shift", action="store_true",
-                    help="With --register-totals: register an artifact whose "
-                         "prediction moves as far as the gate when its weather or "
-                         "venue inputs are missing. Only once serving guarantees "
-                         "the model never sees such a game")
     ap.add_argument("--walk-forward-totals", nargs="*", type=int, metavar="SEASON",
                     help="Totals only: the mean of eleven seeds against each "
                          "single seed, each season fitted on PRIOR seasons "
@@ -1132,8 +1159,7 @@ if __name__ == "__main__":
     if args.frame and not (args.fit_totals or args.walk_forward_totals is not None):
         ap.error("--frame is read by --fit-totals and --walk-forward-totals only")
     if args.register_totals:
-        register_totals(args.register_totals,
-                        accept_missing_input_shift=args.accept_missing_input_shift)
+        register_totals(args.register_totals)
         sys.exit(0)
     if args.walk_forward_totals is not None:
         tests = args.walk_forward_totals or [2022, 2023, 2024, 2025]
