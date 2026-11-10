@@ -264,6 +264,14 @@ first-half line can be set beside the full-game line of the same moment.
 The figure is 40 credits for every game plus one event list a date; a game
 the feed does not list costs nothing.
 
+**In-play prices for more seasons** (every book, spreads included) at the
+NCAAB cadence, one bulk snapshot at each :00 and :30 with a lined game in
+progress (kickoff to four hours after), 30 credits a snapshot: 2021-2025 is
+6,191 snapshots, 185,730 credits (1,179 to 1,314 a season; counted from the
+stored kickoff times, not bought or dry-run). It is only worth buying with
+play-by-play whose clock times are real: CFBD's 2025 wallclocks are
+last-edited stamps (§6 report), and no other source has been probed.
+
 Balance on 2026-11-10 16:11 UTC: 11,932,481 credits (`odds_api_quota`).
 Half and quarter scores come free from CFBD's game records through a worker
 job. Nothing is bought until mike says so.
