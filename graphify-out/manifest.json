@@ -24,9 +24,9 @@
     "semantic_hash": ""
   },
   "config.py": {
-    "mtime": 1794325385.7024915,
-    "seen": 1794331575.0013144,
-    "ast_hash": "b38399e1e0f65e4616eba1c046dbe273",
+    "mtime": 1794350449.4817984,
+    "seen": 1794352336.041188,
+    "ast_hash": "b72503a229da2ee5df48f845993944f9",
     "semantic_hash": ""
   },
   "dashboard/__init__.py": {
@@ -48,9 +48,9 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "data/anon_readable.py": {
-    "mtime": 1794325385.7085907,
-    "seen": 1794331575.0013363,
-    "ast_hash": "bdd129671ffa7eec9d0489365c334cdb",
+    "mtime": 1794350442.5701935,
+    "seen": 1794352336.041213,
+    "ast_hash": "baa5c62ca81fc99f84cd8c1c0f900190",
     "semantic_hash": ""
   },
   "data/db.py": {
@@ -1104,9 +1104,9 @@
     "semantic_hash": ""
   },
   "data/prune_odds.py": {
-    "mtime": 1794329213.1471956,
-    "seen": 1794331575.0034497,
-    "ast_hash": "709f4485cea32b6102832a36e898a0b5",
+    "mtime": 1794350442.5764048,
+    "seen": 1794352336.0430703,
+    "ast_hash": "1d9f205904b0a74044d61a0913f0e095",
     "semantic_hash": ""
   },
   "data/season_labels.py": {
@@ -1194,9 +1194,9 @@
     "semantic_hash": ""
   },
   "features/ncaaf_feature_engine.py": {
-    "mtime": 1792603477.167978,
-    "seen": 1794331575.0035787,
-    "ast_hash": "994c91577150a588e1820de98ebbbb5f",
+    "mtime": 1794350449.6025753,
+    "seen": 1794352336.0431633,
+    "ast_hash": "ebc1d4c3c8086064337fea82a41ca883",
     "semantic_hash": ""
   },
   "features/nfl_prop_feature_engine.py": {
@@ -3102,9 +3102,9 @@
     "semantic_hash": ""
   },
   "models/scorer.py": {
-    "mtime": 1794325386.302356,
-    "seen": 1794331575.0066252,
-    "ast_hash": "b794fdb77b992996e1cf47f93b1519f9",
+    "mtime": 1794350477.0355666,
+    "seen": 1794352336.0458884,
+    "ast_hash": "469645c066219d485a1eb9754818a02b",
     "semantic_hash": ""
   },
   "models/slate_concentration.py": {
@@ -4266,9 +4266,9 @@
     "semantic_hash": ""
   },
   "scripts/ncaaf_margin_eval.py": {
-    "mtime": 1792159424.6847854,
-    "seen": 1794331575.0088,
-    "ast_hash": "89f0abeefcf910ec27ba842ce1333e8b",
+    "mtime": 1794350449.9425433,
+    "seen": 1794352336.0482671,
+    "ast_hash": "1700e2f0583202dc3f2c7cf92b5b1ae9",
     "semantic_hash": ""
   },
   "scripts/ncaaf_prop_market_sweep.py": {
@@ -7464,9 +7464,9 @@
     "semantic_hash": ""
   },
   "tracking/job_queue.py": {
-    "mtime": 1793995005.4359832,
-    "seen": 1794331575.0156662,
-    "ast_hash": "e5610d6bdc9a1c5bce03b96c0fd84f11",
+    "mtime": 1794350442.599043,
+    "seen": 1794352336.0539498,
+    "ast_hash": "d89a1ed0c50b472fb8b4f91a06018a29",
     "semantic_hash": ""
   },
   "tracking/live_calibration.py": {
@@ -7788,9 +7788,9 @@
     "semantic_hash": ""
   },
   "docs/followups.md": {
-    "mtime": 1794325385.7639973,
-    "seen": 1794331575.0163534,
-    "ast_hash": "25db02b492a0f675e0a37307e8b01bea",
+    "mtime": 1794341583.9445004,
+    "seen": 1794352336.0544577,
+    "ast_hash": "66fef8f432d36d9db4beaf3bb07f2ad1",
     "semantic_hash": ""
   },
   "docs/game_injury_gate.md": {
@@ -8148,9 +8148,9 @@
     "semantic_hash": ""
   },
   "docs/sports/ncaaf.md": {
-    "mtime": 1794330997.7927287,
-    "seen": 1794331575.0356812,
-    "ast_hash": "74007e1cf0d1f145aafea437040f309b",
+    "mtime": 1794350479.9463534,
+    "seen": 1794352336.0658848,
+    "ast_hash": "368e06e6d6f527c99d1eaab8cc47b30f",
     "semantic_hash": ""
   },
   "docs/sports/nfl.md": {
@@ -8994,8 +8994,8 @@
     "semantic_hash": ""
   },
   "tests/test_prune_keeps_nba_path.py": {
-    "mtime": 1794329150.3364193,
-    "seen": 1794331575.0140479,
+    "mtime": 1794341585.5019064,
+    "seen": 1794352336.0531776,
     "ast_hash": "364baa39f58e2bffb201c100f0bee46e",
     "semantic_hash": ""
   },
@@ -9558,9 +9558,9 @@
     "semantic_hash": ""
   },
   "tests/test_nba_team_total_odds.py": {
-    "mtime": 1794051530.6476245,
-    "seen": 1794331575.0129485,
-    "ast_hash": "2ec9bedf099de15593e5807a58fb1e04",
+    "mtime": 1794350442.5900445,
+    "seen": 1794352336.0518012,
+    "ast_hash": "4c0ae163d4fbcd588bbb5233736ea451",
     "semantic_hash": ""
   },
   "tests/test_push_line_change_alerts.py": {
@@ -12948,213 +12948,255 @@
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/extract_ncaaf.py": {
-    "mtime": 1794329075.8607306,
-    "seen": 1794331575.0088246,
-    "ast_hash": "8e62b0b248dce25f64752f72098f4681",
+    "mtime": 1794341585.0115478,
+    "seen": 1794352336.0482852,
+    "ast_hash": "8d59582887dbc13616bb73cb297e6906",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/fwd_2026.py": {
-    "mtime": 1794329045.480525,
-    "seen": 1794331575.0088382,
-    "ast_hash": "f474e54390045848489c22fadc4de966",
+    "mtime": 1794341585.0609753,
+    "seen": 1794352336.0482914,
+    "ast_hash": "b4e84cdbac2bcbb57f7967fe5744ffc1",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/grade_2026.py": {
-    "mtime": 1794329075.864751,
-    "seen": 1794331575.0088441,
-    "ast_hash": "0c4a163057184068d6b706fa2813e74f",
+    "mtime": 1794341585.1157668,
+    "seen": 1794352336.0482965,
+    "ast_hash": "e76e49e37275339b45fc678736a48ad5",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/diag.py": {
-    "mtime": 1794330930.0400958,
-    "seen": 1794331575.0088484,
-    "ast_hash": "6396cf7ee78cf8cb8bd38580dae61ff1",
+    "mtime": 1794341585.1197906,
+    "seen": 1794352336.0483022,
+    "ast_hash": "3ffd6ab28734822e5612762c865ce430",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/facts.py": {
-    "mtime": 1794330930.049734,
-    "seen": 1794331575.0088522,
-    "ast_hash": "be52b825f95cd7b83169a6771583dd71",
+    "mtime": 1794341585.1253202,
+    "seen": 1794352336.0483067,
+    "ast_hash": "a2f37073cc7591f000aa52d2788a676c",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/grid.py": {
-    "mtime": 1794330930.0811737,
-    "seen": 1794331575.008864,
-    "ast_hash": "f3b5db26fbc8c89cec1126f8215853ae",
+    "mtime": 1794341585.1333704,
+    "seen": 1794352336.0483117,
+    "ast_hash": "9649749580734b307d59a2294e41316a",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/make_report.py": {
-    "mtime": 1794330930.112177,
-    "seen": 1794331575.0088713,
-    "ast_hash": "194abfb379bec14fde23f91007fe8083",
+    "mtime": 1794341585.144647,
+    "seen": 1794352336.0483172,
+    "ast_hash": "f72a9babf7b9b70b641521d7c1f99e39",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/night.py": {
-    "mtime": 1794330930.1204653,
-    "seen": 1794331575.0088801,
-    "ast_hash": "5bf58fc8998c0b136324a9408bca8b88",
+    "mtime": 1794341585.1797023,
+    "seen": 1794352336.0483222,
+    "ast_hash": "424b9bee538dd1323655549d8ffaab12",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/picks_record.py": {
-    "mtime": 1794330930.1236558,
-    "seen": 1794331575.0088856,
-    "ast_hash": "5c664b0b1ad4d24a85f6ac807c164de1",
+    "mtime": 1794341585.2135417,
+    "seen": 1794352336.0483274,
+    "ast_hash": "8eab268119deff7428fc196382d8627d",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/prep.py": {
-    "mtime": 1794330930.1463265,
-    "seen": 1794331575.0088892,
-    "ast_hash": "9e7200491cebccf27adaa1d0e6500a22",
+    "mtime": 1794341585.2155519,
+    "seen": 1794352336.0483327,
+    "ast_hash": "ace326a5d298829a76a6daa18e9e750b",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/variants.py": {
-    "mtime": 1794330930.155591,
-    "seen": 1794331575.008893,
-    "ast_hash": "795e9fdbae587a5f8a916be59685e1a5",
+    "mtime": 1794341585.2172272,
+    "seen": 1794352336.0483382,
+    "ast_hash": "e6f4c6caccef1ff0ba7a20a548ef7443",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/inplay/verify.py": {
-    "mtime": 1794330930.1631453,
-    "seen": 1794331575.008897,
-    "ast_hash": "629f2fe99e39b5a94b1abee7bcb87868",
+    "mtime": 1794341585.2177367,
+    "seen": 1794352336.0483444,
+    "ast_hash": "3df508d99c5caa65747ade6886e95eb6",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/lab.py": {
-    "mtime": 1794329075.8677828,
-    "seen": 1794331575.0089006,
-    "ast_hash": "02df7e4f7e4209fadc18186aae479d99",
+    "mtime": 1794341585.2212627,
+    "seen": 1794352336.0483494,
+    "ast_hash": "2381fa8ad0463667cec488897fd4ab26",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/paths.py": {
-    "mtime": 1794329708.194978,
-    "seen": 1794331575.0089047,
-    "ast_hash": "78ca9ea0f384aa543571dc960d0c6c6a",
+    "mtime": 1794341585.2503734,
+    "seen": 1794352336.0483553,
+    "ast_hash": "b8f77907c3e62cafb0eb4082cc6ae829",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/prep.py": {
-    "mtime": 1794329075.8677828,
-    "seen": 1794331575.00891,
-    "ast_hash": "092034b7b4204111850fa2498dd764bf",
+    "mtime": 1794341585.2570841,
+    "seen": 1794352336.0483613,
+    "ast_hash": "1a5a7dec4252048a425b7a256e9ae321",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/alt.py": {
-    "mtime": 1794330929.7789226,
-    "seen": 1794331575.008915,
-    "ast_hash": "99d34beb855eb891c37bf744e78f5a44",
+    "mtime": 1794341585.266705,
+    "seen": 1794352336.048367,
+    "ast_hash": "d475026dc47088d90763f336d19fefd1",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/alt_monotone.py": {
-    "mtime": 1794330929.784569,
-    "seen": 1794331575.0089192,
-    "ast_hash": "49da5042f424e60d291ba4cce5469b5d",
+    "mtime": 1794341585.268794,
+    "seen": 1794352336.0483723,
+    "ast_hash": "7696e6865884b2e4b461d3bb2b28532a",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/alt_report.py": {
-    "mtime": 1794330929.7951317,
-    "seen": 1794331575.0089235,
-    "ast_hash": "ee02de7a971cb5806744b2fbb759e612",
+    "mtime": 1794341585.274833,
+    "seen": 1794352336.0483778,
+    "ast_hash": "2392c8c676642bb9ff30fb0af4c7aefb",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/crosscheck.py": {
-    "mtime": 1794330929.8019898,
-    "seen": 1794331575.008928,
-    "ast_hash": "4023e6589c52c343e3b2ee0168e02caa",
+    "mtime": 1794341585.33055,
+    "seen": 1794352336.0483828,
+    "ast_hash": "9860f921f620a07f34b7c1171384d2e9",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/gen_report.py": {
-    "mtime": 1794330929.8339055,
-    "seen": 1794331575.0089316,
-    "ast_hash": "2158b98e437e5acc06199db6cd854469",
+    "mtime": 1794341585.4073746,
+    "seen": 1794352336.0483878,
+    "ast_hash": "ca0e6cd4ca73735e2cf47320e1233b3e",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/main.py": {
-    "mtime": 1794330953.4877653,
-    "seen": 1794331575.0089357,
-    "ast_hash": "44ce17ef1939f0eadadfb25602fb92c0",
+    "mtime": 1794341585.4241571,
+    "seen": 1794352336.0483932,
+    "ast_hash": "9fccd4ca6343afcbabe9949e27bbbbaf",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/main_v1_as_first_run.py": {
-    "mtime": 1794330953.5179577,
-    "seen": 1794331575.0089397,
-    "ast_hash": "a5ed9b4ec430381c323400ee00d8e234",
+    "mtime": 1794341585.431445,
+    "seen": 1794352336.0483985,
+    "ast_hash": "5226d60bedfd3c56681d197fccf25323",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/props/verdict.py": {
-    "mtime": 1794330929.916809,
-    "seen": 1794331575.0089443,
-    "ast_hash": "e8ded17433cd85def7abe3b233be113f",
+    "mtime": 1794341585.4334543,
+    "seen": 1794352336.0484042,
+    "ast_hash": "bb9f22dd036f60dc8470024030c75c19",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/spread_dd.py": {
-    "mtime": 1794329043.873412,
-    "seen": 1794331575.0089486,
+    "mtime": 1794341585.4392345,
+    "seen": 1794352336.0484097,
     "ast_hash": "28d43d57a781bf7549a96e65eb1d49ed",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/sym.py": {
-    "mtime": 1794329044.049656,
-    "seen": 1794331575.008957,
-    "ast_hash": "92298bda76302962f0d1a0df12894fa3",
+    "mtime": 1794341585.442256,
+    "seen": 1794352336.048415,
+    "ast_hash": "ff16674d8cc8cb59a7f036fc381d0505",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/totals_2026_bag.py": {
-    "mtime": 1794329075.8723817,
-    "seen": 1794331575.008968,
-    "ast_hash": "6ece277340480878ab8faf5262c51a2f",
+    "mtime": 1794341585.4442675,
+    "seen": 1794352336.048421,
+    "ast_hash": "f1b7eff1b93841da7d6ca81e84d53e78",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/totals_2026_replay.py": {
-    "mtime": 1794329045.319035,
-    "seen": 1794331575.0089774,
-    "ast_hash": "09f0da39278a3de850fe72ad368dfbf8",
+    "mtime": 1794341585.4477577,
+    "seen": 1794352336.048426,
+    "ast_hash": "64fdded4b33a288268abfe67b214c545",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/totals_opt.py": {
-    "mtime": 1794329044.599162,
-    "seen": 1794331575.0089822,
-    "ast_hash": "fe68860477340597b95358141bf0aecb",
+    "mtime": 1794341585.4497693,
+    "seen": 1794352336.048431,
+    "ast_hash": "12a4139df003125d43c9f49ba133a864",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/totals_seeds.py": {
-    "mtime": 1794329075.8759735,
-    "seen": 1794331575.0089867,
-    "ast_hash": "72314536655b646e11ee7ceb7dd4afef",
+    "mtime": 1794341585.4522913,
+    "seen": 1794352336.048436,
+    "ast_hash": "b0a9e4c64d325c283eadeab0d2bee2a0",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/totals_seeds_fc.py": {
-    "mtime": 1794329044.9226735,
-    "seen": 1794331575.0089915,
-    "ast_hash": "d59cb5d5d159118cf153cd6d776316bd",
+    "mtime": 1794341585.4650047,
+    "seen": 1794352336.0484416,
+    "ast_hash": "64f328d552620af94591823adab9f5d9",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/totals_wf.py": {
-    "mtime": 1794329075.8789544,
-    "seen": 1794331575.0089958,
-    "ast_hash": "18b73ab224e64278555d4c3d16d1bb22",
+    "mtime": 1794341585.4775903,
+    "seen": 1794352336.0484464,
+    "ast_hash": "069cd6bfa8cae45d0af153cba6e515f1",
     "semantic_hash": ""
   },
   "scripts/ncaaf_search/audit_2026_11/view.py": {
-    "mtime": 1794329075.8811607,
-    "seen": 1794331575.0090003,
-    "ast_hash": "b839fb958249905df5ffdd1d46164fcc",
+    "mtime": 1794341585.494689,
+    "seen": 1794352336.0484512,
+    "ast_hash": "e0c79fc66152ac0a979767299bb3cbc1",
     "semantic_hash": ""
   },
   "docs/ncaaf_market_audit.md": {
-    "mtime": 1794332025.664325,
-    "seen": 1794332235.9309795,
-    "ast_hash": "154b868581fda4f1ea267d1c671afc0f",
+    "mtime": 1794341583.9465308,
+    "seen": 1794352336.0656016,
+    "ast_hash": "03a28036f0aab974d5dc14cb17f5a3ad",
     "semantic_hash": ""
   },
   "docs/ncaaf_market_audit_inplay.md": {
-    "mtime": 1794330988.2280161,
-    "seen": 1794331575.0351536,
-    "ast_hash": "5ab168f860db8aa7bb6cb394d1fc6648",
+    "mtime": 1794341583.9518573,
+    "seen": 1794352336.0656095,
+    "ast_hash": "391083227e323573e26fc4bd76c85343",
     "semantic_hash": ""
   },
   "docs/ncaaf_market_audit_props.md": {
-    "mtime": 1794330988.1856537,
-    "seen": 1794331575.0351658,
-    "ast_hash": "a91d035b447f8ae95044d496268199cd",
+    "mtime": 1794341583.9659927,
+    "seen": 1794352336.0656161,
+    "ast_hash": "2be4afa49b96fc169d058e5703b92666",
+    "semantic_hash": ""
+  },
+  "data/ingestors/ncaaf_derivative_history.py": {
+    "mtime": 1794350442.5722077,
+    "seen": 1794352336.0416136,
+    "ast_hash": "368a9fb6a3fed0a2afe8e82babe3fd83",
+    "semantic_hash": ""
+  },
+  "models/seed_average.py": {
+    "mtime": 1794350449.9327376,
+    "seen": 1794352336.0458941,
+    "ast_hash": "2d0a53457add96b86109c1b53ac8f552",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaaf_derivative_history.py": {
+    "mtime": 1794350442.5920546,
+    "seen": 1794352336.0521293,
+    "ast_hash": "404edb869924437e2da13a859f5ee985",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaaf_derivative_history_pg.py": {
+    "mtime": 1794350442.5930638,
+    "seen": 1794352336.052135,
+    "ast_hash": "79de5bac90e564eb74fd9f0a7834e6cf",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaaf_totals_seed_fit.py": {
+    "mtime": 1794350449.948048,
+    "seen": 1794352336.0522351,
+    "ast_hash": "ec68d0ca2dfe6517b6263d2716b624bb",
+    "semantic_hash": ""
+  },
+  "tests/test_ncaaf_totals_weather_hold.py": {
+    "mtime": 1794350482.1407998,
+    "seen": 1794352336.0522397,
+    "ast_hash": "a04f124f9437c6afb1efc4893cdf82eb",
+    "semantic_hash": ""
+  },
+  "tests/test_seed_average.py": {
+    "mtime": 1794350449.95921,
+    "seen": 1794352336.0534906,
+    "ast_hash": "e2a89e9c4867f5fdd0c0373e9aa47168",
     "semantic_hash": ""
   }
 }
