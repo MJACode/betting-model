@@ -275,6 +275,8 @@ export function SettingsScreen() {
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { name: stateName } = useBettingState();
   const [statePickerOpen, setStatePickerOpen] = useState(false);
+  // Responsible gambling starts collapsed; it sits last on the screen.
+  const [helpOpen, setHelpOpen] = useState(false);
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
   const feedbackUnread = useFeedbackUnread();
@@ -362,7 +364,8 @@ export function SettingsScreen() {
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
   // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
   const updateReady = useSyncExternalStore(subscribeUpdateReady, isUpdateReady);
-  const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
+  // Discord lives under Community, so it does not open an empty Account section.
+  const showAccountSection = AUTH_ENABLED || billingReady();
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -376,112 +379,6 @@ export function SettingsScreen() {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
-
-        {/* Account + Subscription. Both are behind flags — while auth is dark
-            this is the ONLY sign-in entry point in the app, so the whole
-            section stays invisible until a flag flips. */}
-        {showAccountSection ? <SectionHeader title="Account" /> : null}
-
-        {AUTH_ENABLED ? (
-          signedIn ? (
-            <>
-            <View style={styles.card}>
-              <View
-                accessible
-                accessibilityLabel={`Signed in as ${authEmail ?? 'your account'}`}
-                style={styles.bookRow}
-              >
-                <Text style={[styles.cardLabel, styles.flexShrink]} numberOfLines={1}>
-                  {authEmail ?? 'Signed in'}
-                </Text>
-                <View style={styles.bookPill}>
-                  <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>Signed in</Text>
-                </View>
-              </View>
-              <Text style={styles.sub}>
-                Your models and tracked bets stay on this device.
-              </Text>
-              <Pressable
-                onPress={confirmSignOut}
-                accessibilityRole="button"
-                accessibilityLabel="Sign out"
-                style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.signOutText}>Sign out</Text>
-              </Pressable>
-            </View>
-            <Pressable
-              onPress={() => navigation.navigate('DeleteAccount')}
-              accessibilityRole="button"
-              accessibilityLabel="Delete account"
-              accessibilityHint="Opens a screen that explains what is deleted."
-              style={({ pressed }) => [styles.deleteRow, pressed && styles.pressed]}
-            >
-              <Text style={styles.deleteText}>Delete account</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-            </Pressable>
-            </>
-          ) : (
-            // Deliberately does NOT promise cross-device sync — auth is
-            // session-only today. Update when account-scoped data lands.
-            <LinkRow
-              label="Sign in"
-              sub="An account is needed to start a trial, subscribe and restore purchases. Your models and tracked bets stay on this device."
-              onPress={() => navigation.navigate('SignIn')}
-              right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
-            />
-          )
-        ) : null}
-
-        {/* Subscription renders only when billing is live AND auth is on —
-            billingReady() enforces that pairing, since a subscription with no
-            account behind it can't survive a reinstall. */}
-        {billingReady() ? (
-          <View style={styles.card}>
-            <View style={styles.bookRow}>
-              <Text style={styles.cardLabel}>Plan</Text>
-              {planHold ? null : planStatus.badge === 'Free' ? (
-                <View style={styles.freePill}>
-                  <Text style={styles.freePillText}>{planStatus.badge}</Text>
-                </View>
-              ) : (
-                <View style={styles.bookPill}>
-                  <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>{planStatus.badge}</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.sub}>{planStatus.line}</Text>
-            {planHold ? null : planStatus.badge === 'Free' ? (
-              <Pressable
-                onPress={() => navigation.navigate('Paywall')}
-                accessibilityRole="button"
-                accessibilityLabel="Upgrade to Premium"
-                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.manageText}>Upgrade to Premium</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={onManage}
-                accessibilityRole="button"
-                accessibilityLabel="Manage subscription"
-                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.manageText}>Manage subscription</Text>
-              </Pressable>
-            )}
-            <Pressable
-              onPress={onRestore}
-              accessibilityRole="button"
-              accessibilityLabel="Restore purchases"
-              style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
-            >
-              <Text style={styles.restoreText}>Restore purchases</Text>
-            </Pressable>
-          </View>
-        ) : null}
 
         <SectionHeader title="Betting" />
 
@@ -578,33 +475,10 @@ export function SettingsScreen() {
           }
         />
 
-        {/* Display only: units in the member's dollars. The daily exposure
-            limit below is unchanged and does not read it. */}
+        {/* Display only: units in the member's dollars. Nothing is sized off it. */}
         <SectionHeader title="Bankroll" />
 
         <BankrollCard />
-
-        <SectionHeader title="Staying in control" />
-
-        {/* The daily exposure limit card that sat above this was removed on
-            2026-09-26 (Matt), with the Picks banner it drove. The helpline
-            stays: it is the one support resource in the app. */}
-        <View style={styles.card}>
-          <Pressable
-            onPress={openHelpline}
-            accessibilityRole="link"
-            accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
-            // The row's top padding is inside the card's divider; slop below
-            // brings a one-line wrap up to 44pt without moving the rule (M9).
-            hitSlop={{ top: 0, bottom: 12, left: 0, right: 0 }}
-            style={styles.helplineRow}
-          >
-            <Ionicons name="call-outline" size={15} color={colors.tint} />
-            <Text style={styles.helplineText}>
-              Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
-            </Text>
-          </Pressable>
-        </View>
 
         <SectionHeader title="Alerts" />
 
@@ -829,6 +703,150 @@ export function SettingsScreen() {
             ) : undefined
           }
         />
+
+        {/* Account + Subscription, near the bottom (Matt, 2026-11-09). Both are
+            behind flags, so the whole section stays invisible until one flips. */}
+        {showAccountSection ? <SectionHeader title="Account" /> : null}
+
+        {AUTH_ENABLED ? (
+          signedIn ? (
+            <>
+            <View style={styles.card}>
+              <View
+                accessible
+                accessibilityLabel={`Signed in as ${authEmail ?? 'your account'}`}
+                style={styles.bookRow}
+              >
+                <Text style={[styles.cardLabel, styles.flexShrink]} numberOfLines={1}>
+                  {authEmail ?? 'Signed in'}
+                </Text>
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Signed in</Text>
+                </View>
+              </View>
+              <Text style={styles.sub}>
+                Your models and tracked bets stay on this device.
+              </Text>
+              <Pressable
+                onPress={confirmSignOut}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
+                style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.signOutText}>Sign out</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={() => navigation.navigate('DeleteAccount')}
+              accessibilityRole="button"
+              accessibilityLabel="Delete account"
+              accessibilityHint="Opens a screen that explains what is deleted."
+              style={({ pressed }) => [styles.deleteRow, pressed && styles.pressed]}
+            >
+              <Text style={styles.deleteText}>Delete account</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </Pressable>
+            </>
+          ) : (
+            // Deliberately does NOT promise cross-device sync — auth is
+            // session-only today. Update when account-scoped data lands.
+            <LinkRow
+              label="Sign in"
+              sub="An account is needed to start a trial, subscribe and restore purchases. Your models and tracked bets stay on this device."
+              onPress={() => navigation.navigate('SignIn')}
+              right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
+            />
+          )
+        ) : null}
+
+        {/* Subscription renders only when billing is live AND auth is on —
+            billingReady() enforces that pairing, since a subscription with no
+            account behind it can't survive a reinstall. */}
+        {billingReady() ? (
+          <View style={styles.card}>
+            <View style={styles.bookRow}>
+              <Text style={styles.cardLabel}>Plan</Text>
+              {planHold ? null : planStatus.badge === 'Free' ? (
+                <View style={styles.freePill}>
+                  <Text style={styles.freePillText}>{planStatus.badge}</Text>
+                </View>
+              ) : (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>{planStatus.badge}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.sub}>{planStatus.line}</Text>
+            {planHold ? null : planStatus.badge === 'Free' ? (
+              <Pressable
+                onPress={() => navigation.navigate('Paywall')}
+                accessibilityRole="button"
+                accessibilityLabel="Upgrade to Premium"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Upgrade to Premium</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={onManage}
+                accessibilityRole="button"
+                accessibilityLabel="Manage subscription"
+                style={({ pressed }) => [styles.manageBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Manage subscription</Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={onRestore}
+              accessibilityRole="button"
+              accessibilityLabel="Restore purchases"
+              style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.restoreText}>Restore purchases</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* Last, and collapsed (Matt, 2026-11-09). It is still the one support
+            resource in the app, so the row is always shown and one tap opens
+            it. The daily exposure limit card that once sat here was removed on
+            2026-09-26 (Matt). */}
+        <SectionHeader title="Responsible gambling" />
+
+        <View style={styles.card}>
+          <Pressable
+            onPress={() => setHelpOpen((o) => !o)}
+            accessibilityRole="button"
+            accessibilityLabel="Gambling help and resources"
+            accessibilityState={{ expanded: helpOpen }}
+            style={({ pressed }) => [styles.disclosureRow, pressed && styles.pressed]}
+          >
+            <Text style={[styles.cardLabel, styles.noMargin]}>Gambling help &amp; resources</Text>
+            <Ionicons
+              name={helpOpen ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={colors.textTertiary}
+            />
+          </Pressable>
+          {helpOpen ? (
+            <Pressable
+              onPress={openHelpline}
+              accessibilityRole="link"
+              accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
+              // The row's top padding is inside the card's divider; slop below
+              // brings a one-line wrap up to 44pt without moving the rule (M9).
+              hitSlop={{ top: 0, bottom: 12, left: 0, right: 0 }}
+              style={styles.helplineRow}
+            >
+              <Ionicons name="call-outline" size={15} color={colors.tint} />
+              <Text style={styles.helplineText}>
+                Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
 
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
@@ -1076,6 +1094,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.tint,
+  },
+  // The whole row toggles, at least 44pt tall (HIG), with no extra bottom gap.
+  disclosureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
   },
   helplineRow: {
     flexDirection: 'row',
