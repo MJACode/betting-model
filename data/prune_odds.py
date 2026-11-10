@@ -302,7 +302,13 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # The re-bought in-play instants (2026-11-07,
                      # data/ingestors/ncaab_inplay_history.SOURCE): paid rows on
                      # past games, the NCAAB in-play model's graded market.
-                     "odds_api_ncaab_inplay_history")
+                     "odds_api_ncaab_inplay_history",
+                     # Women's college basketball (2026-11-09,
+                     # data/ingestors/ncaabw_odds_history.py): every 5-minute
+                     # snapshot the feed holds, pre-game (change-only) and in
+                     # play. Paid rows on past games.
+                     "odds_api_ncaabw_history",
+                     "odds_api_ncaabw_inplay_history")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md
@@ -320,7 +326,11 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
 # NCAAB joins it for its first season (2026-10-26, first game 2026-11-01), so
 # that season keeps when each book moved and from what, as the NBA's does. A
 # season thinned to opener and close cannot be put back.
-PATH_KEPT_SPORTS = ("NBA", "NCAAB")
+#
+# NCAABW (women's college basketball) joins it from its first stored day
+# (2026-11-09): the same reason, and a thin board (a median 7 listed games a
+# game day), so the kept path is small.
+PATH_KEPT_SPORTS = ("NBA", "NCAAB", "NCAABW")
 
 
 def _unprotected(params: dict, table: str | None = None) -> str:

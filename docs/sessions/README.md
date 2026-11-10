@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, women's college basketball (NCAABW) started: ESPN identity and 61,431 games, the odds feed and capture wired, the whole odds history bought (49,527 snapshots, 2,971,620 credits), NCAA box scores; research: the men's totals model passes at DraftKings' first posted total, the spread and moneyline market rules fail, in play is a first look; nothing bets yet |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, Betslip same-game price entry moved from the yellow box into the book tile's sheet; the out-of-range warning is a ⚠ tooltip |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, Settings reordered by use (sportsbooks first, Account near the bottom, responsible gambling last and collapsible); "Your state" only fills three books' betslip links |
 | 2026-11-09 | [2026-11](./2026-11.md) | 2026-11-09, NHL derivative totals re-graded with both fixes: nothing clears; the five totals models that bet whole-number unders checked, none gives the push to the under |

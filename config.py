@@ -5096,6 +5096,48 @@ NCAAB_INJURY_TEAM_MAP: dict = {}
 # miss is confirmed by hand.
 NCAAB_INJURY_PLAYER_MAP: dict = {}
 
+# Women's college basketball (NCAABW): an odds-feed team name -> ESPN team id,
+# for the names data.ingestors.ncaabw_teams.resolve_team_name cannot place on
+# its own. The same shape as NCAAB_ODDS_API_MAP above, and its own map: the
+# feed names many women's teams by the men's mascot ("Oklahoma St Cowboys" for
+# ESPN's "Oklahoma State Cowgirls"), so a name here is a women's feed name.
+# ESPN gives a school's women's team the same id as its men's team.
+#
+# The entries below (2026-11-09) are the feed names no rule can place among
+# the 353 names on the 2,293 women's events the feed listed from 2024-11-12 to
+# 2026-04-05. Each count is that name's events. Each id is in ncaabw_teams
+# under the school named, and is the team ESPN's women's schedule plays
+# against the event's other team on its date (docs/sports/ncaabw.md, "Feed
+# team names").
+NCAABW_ODDS_API_MAP: dict = {
+    "GW Revolutionaries": 45,               # ESPN "George Washington Revolutionaries"; 6
+    "UMKC Kangaroos": 140,                  # ESPN "Kansas City Roos"; 5
+    "Albany Great Danes": 399,              # ESPN "UAlbany Great Danes"; 5
+    "Tenn-Martin Skyhawks": 2630,           # ESPN "UT Martin Skyhawks" (not Tennessee, 2633); 4
+    "Seattle Redhawks": 2547,               # ESPN "Seattle U Redhawks"; 3
+    "Miss Valley St Delta Devilettes": 2400,  # ESPN "Mississippi Valley State Devilettes"; 3
+    "Arkansas-Little Rock Trojans": 2031,   # ESPN "Little Rock Trojans" (not Arkansas, 8); 2
+    "Long Beach St 49ers": 299,             # ESPN "Long Beach State Beach"; 2
+    "LIU Sharks": 112358,                   # ESPN "Long Island University Sharks"; 2
+    "Fort Wayne Mastodons": 2870,           # ESPN "Purdue Fort Wayne Mastodons"; 1
+    "New Orleans Privateers": 2443,         # ESPN "LSU New Orleans Privateers"; 1
+    "Appalachian St Mountaineers": 2026,    # ESPN "App State Mountaineers"; 1
+}
+
+# Women's college basketball: the books fetched and stored for NCAABW on top of
+# LINE_SHOP_BOOKMAKERS. None of them is a book a pick may name (they are not in
+# BEST_LINE_BOOKMAKERS); they are stored because the women's board is thin and
+# has no Pinnacle. Measured 2026-11-09 on 14 history snapshots, every region
+# the feed sells (219 pre-game events): the books pricing women's games were
+# DraftKings, FanDuel, BetMGM, Caesars, Fanatics, BetRivers and these six;
+# Pinnacle, Bovada and betPARX priced none. betwhale is the seventh: it priced
+# 3 of the 5 games listed live that evening. Seventeen books in all, so a
+# women's bulk call bills two regions (the bookmakers param counts ten books
+# as one region): 6 credits live, 60 from history.
+NCAABW_EXTRA_BOOKMAKERS: list = [
+    "espnbet", "ballybet", "fliff", "betonlineag", "lowvig", "unibet", "betwhale",
+]
+
 # The Odds API team name → CFBD canonical school name.
 #
 # LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD

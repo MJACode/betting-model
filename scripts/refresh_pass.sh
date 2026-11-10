@@ -332,6 +332,7 @@ step push-notifications
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
 #   ncaab-results    no ESPN call unless a started NCAAB game in the last 14
 #                    days is unscored; then one scoreboard call per such date
+#   ncaabw-results   the same for women's college basketball (NCAABW)
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
 par game-log-today
@@ -340,6 +341,7 @@ par nhl-results
 par ufc-results-poll
 par nba-results
 par ncaab-results
+par ncaabw-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute

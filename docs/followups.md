@@ -21,6 +21,54 @@
 
 ---
 
+## [ ] NCAABW totals model: build it live (2026-11-09)
+
+The women's totals model passed its research (`docs/sports/ncaabw.md`,
+"Research"): the men's `ncaab_total_blend` method at DraftKings' first posted
+total. Nothing bets yet. To go live it needs, in order:
+
+1. The in-season box feed: a women's fork of `data/ingestors/ncaab_espn_box.py`
+   (ESPN's summary after each final). Four quarters: overtime is a fifth
+   period, and the game's length is 40 minutes plus 5 per period past the
+   fourth. The card holds a game whose teams have a recent final with no box,
+   so without this feed every game waits.
+2. The model, card and build: forks of `models/ncaab_total_blend.py`,
+   `scripts/ncaab_total_card.py` and `scripts/ncaab_total_blend_build.py` on the
+   women's tables, with the blend fitted on 2024-25 and 2025-26.
+3. The cut. The research's middle of the plateau is 0.05 (each season on the
+   other's blend: 453 bets, +11.18% [2.7, 19.3]); its own EV floor, price
+   floor, and `Updated-By: mike` on the commit.
+4. Settlement, Discord (the #ncaabw channel exists), the scheduler job, and
+   the app: a sport chip, the model's label, and the seven extra books added
+   to the app's reference-only list.
+
+## [ ] NCAABW in play: finish the checks, then decide (2026-11-09)
+
+The second-half total made +8.75% [2.2, 15.7] on 698 bets in 2025-26 and
++12.84% on 305 in 2024-25 (`scripts/ncaabw_research/inplay.py`). Before it is
+anything more than a first look it needs what the men's in-play models
+passed: the blind same-side baseline, the bands below and above the cut, the
+placebo (each game given another game's model), and the stale-quote checks
+(quote age, time since the last score, a sharp-book split; the women's board
+has no Pinnacle, so BetOnline and LowVig stand in). The first week of 2026-27
+was negative on every rule.
+
+## [ ] NCAABW: ESPN's own odds are in a local cache only (2026-11-09)
+
+`scripts/ncaabw_research/espn_odds.py` read ESPN's stored odds for 2022-23 and
+2023-24 (11,694 games asked, a sportsbook line on 4,886 and 3,057) into a
+research cache. They are free and re-readable, but they took a run to fetch
+and they are evidence the totals model is cited on, so they belong in
+Supabase: an importer and a table, then the research reads the table.
+
+## [ ] NCAABW: the feed lists about one game in five (2026-11-09)
+
+The odds feed listed 2,293 women's games over two seasons against about
+12,000 played, and ESPN's stored odds show one sportsbook pricing 84% of
+2022-23's games. Whether books still price that many and the feed does not
+carry them, or the books stopped, is not known. `docs/odds_sources.md` lists
+the other providers; none has been asked about women's college basketball.
+
 ## [x] NBA first quarter: grade what was bought (2026-11-03) — DONE 2026-11-04
 
 Graded 2026-11-04, nothing built: first-quarter props 0 of 18 pass (run `2026-11-04-q1props`,
