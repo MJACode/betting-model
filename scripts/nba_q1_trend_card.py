@@ -144,15 +144,18 @@ def newest_fetch(conn, games: dict[str, dict], now: datetime) -> dict[str, datet
     return {gid: t for gid, t in got.items() if pd.Timestamp(t) < pd.Timestamp(games[gid]["tip"])}
 
 
-def _quote_rows(conn, game_ids: list[str], sources, since: datetime | None = None) -> pd.DataFrame:
+def _quote_rows(conn, game_ids: list[str], sources, since: datetime | None = None,
+                markets=(q1.MARKET,)) -> pd.DataFrame:
+    """Stored pre-game first-quarter rows of these games. `markets`: this model's spread unless given; the
+    moneyline card (scripts/nba_q1_trend_ml_card.py) reads the spread and the moneyline."""
     cols = list(q1.QUOTE_ROW_COLS)
-    bound, params = "", [list(game_ids), q1.MARKET, list(READ_BOOKS), list(sources)]
+    bound, params = "", [list(game_ids), list(markets), list(READ_BOOKS), list(sources)]
     if since is not None:
         bound = "AND created_at::timestamptz >= %s"
         params.append(since.astimezone(timezone.utc).isoformat())
     rows = conn.execute(f"""
         SELECT {', '.join(cols)} FROM odds
-        WHERE game_id = ANY(%s) AND market = %s AND snapshot_type = 'open'
+        WHERE game_id = ANY(%s) AND market = ANY(%s) AND snapshot_type = 'open'
           AND bookmaker = ANY(%s) AND source = ANY(%s) {bound}
     """, tuple(params)).fetchall()
     return pd.DataFrame(rows, columns=cols)

@@ -1426,7 +1426,7 @@ def _close_rows_only(game_id: str, market: str) -> bool:
         return True
     # The NBA first-quarter spread (data/ingestors/nba_first_quarter_odds.py) files its closing snapshot 'close',
     # as the NBA first half does.
-    if market == "spreads_q1":
+    if market in ("spreads_q1", "h2h_q1"):
         return True
     return market in _NCAAB_HALF_MARKETS and not _ncaab_first_half_market(game_id, market)
 
@@ -2412,6 +2412,18 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "away":
             won = (home_win == 0)
 
+    elif market == "h2h_q1":
+        # The first quarter's moneyline (models/nba_q1_trend_ml.py): the caller passes the FIRST QUARTER's points as
+        # the two scores (_first_quarter_points). A level quarter is a PUSH: a two-way first-quarter moneyline voids
+        # a tie at every book, and the graded record counts it so (46-35-6). Never NO_ACTION, which the full-game
+        # h2h arm above returns for a missing home_win.
+        if margin == 0:
+            return "PUSH", 0.0, 0.0
+        if pick_side == "home":
+            won = margin > 0
+        elif pick_side == "away":
+            won = margin < 0
+
     elif market == "h2h_3way":
         # Regulation only. Undetermined regulation outcome → NO_ACTION rather
         # than a fabricated loss (a draw still settles off went_to_ot).
@@ -2511,6 +2523,10 @@ _RULE_MODEL_MARKETS = {
     # number; it settles on period 1 of nba_period_scores (_first_quarter_points), overtime never counted. NEVER
     # "spreads": that grades the full-game margin.
     "nba_q1_trend": "spreads_q1",
+    # NBA first quarter's moneyline, the same hot team (models/nba_q1_trend_ml.py). scored_line is NULL; it settles
+    # on period 1 of nba_period_scores (_first_quarter_points), a level quarter a PUSH. NEVER "h2h": that grades the
+    # full-game winner.
+    "nba_q1_trend_ml": "h2h_q1",
     # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
     # total; the stored final includes overtime, as books settle it.
     "ncaab_total_blend": "totals",
@@ -3000,7 +3016,7 @@ def _settle_game_picks(
                 continue  # stays pending: no period rows, no result
             settle_home, settle_away = first_half
             settle_home_win = None
-        elif market == "spreads_q1":
+        elif market in ("spreads_q1", "h2h_q1"):
             first_quarter = _first_quarter_points(conn, game_id, home_score, away_score)
             if first_quarter is None:
                 continue  # stays pending: no period rows, no result
