@@ -544,14 +544,21 @@ check('picks stay a flat 1u to win, whatever the Kelly',
 
 // ── 8. Settings: the card, and what it leaves alone ────────────────────────
 const settings = read('screens/SettingsScreen.tsx');
+const settingsHome = read('lib/settingsHome.ts');
 {
-  const books = settings.indexOf('label="Connected books"');
-  const bank = settings.indexOf('<SectionHeader title="Bankroll" />');
-  const alerts = settings.indexOf('<SectionHeader title="Alerts" />');
-  check('a "Bankroll" section sits right after Betting, above Alerts', books > 0 && books < bank && bank < alerts &&
-    /<SectionHeader title="Bankroll" \/>\s*<BankrollCard \/>/.test(settings));
+  const ids = ['sportsbooks', 'bankroll', 'notifications', 'explore', 'community', 'account', 'legal'];
+  let at = -1;
+  for (const id of ids) {
+    const i = settingsHome.indexOf(`'${id}'`);
+    check(`home section ${id} stays in order`, i > at, String(i));
+    at = i;
+  }
+  check('the bankroll drill-in still renders the card',
+    /function BankrollSection\(\) \{[\s\S]*?<BankrollCard \/>/.test(settings));
+  const homeFn = settings.split('export function SettingsScreen(')[1]?.split('export function SettingsSectionScreen')[0] ?? '';
+  check('the bankroll control is not on the home grid', !homeFn.includes('<BankrollCard'));
 }
-check('the section is "Bankroll", not "Bankroll & limits"', !settings.includes('Bankroll & limits'));
+check('the section is "Bankroll", not "Bankroll & limits"', !settings.includes('Bankroll & limits') && !settingsHome.includes('Bankroll & limits'));
 eq('card copy', BANKROLL_CARD_COPY, 'Only used to show your units in dollars. Nothing is sized off it, and it stays on this device.');
 eq('footer copy, word for word', BANKROLL_FOOTER_COPY,
   'A unit is your standard bet. As a starting point, we suggest 1 unit = 1% of your bankroll. Change it to fit your budget, and only bet what you can afford to lose.');
@@ -591,8 +598,9 @@ check('no font-size literals in Settings', !/fontSize:\s*\d/.test(settings));
 // Picks banner it drove (#838, 2026-09-26). This PR must not bring any back.
 check('Settings: no daily exposure card (removed on master in #838)',
   !/Daily exposure limit|exposureCap|useResponsibleGambling|toggleRgCap|rgDraft/.test(settings));
-check('Settings: the helpline stays, last, under "Responsible gambling"',
-  /<SectionHeader title="Responsible gambling" \/>[\s\S]{0,1600}onPress=\{openHelpline\}/.test(settings));
+check('Settings: the helpline stays on Legal & support',
+  /function LegalSection\(\) \{[\s\S]*?onPress=\{openHelpline\}/.test(settings) &&
+    settingsHome.includes("'legal'"));
 check('useResponsibleGambling stays deleted',
   !readdirSync(join(SRC, 'hooks')).includes('useResponsibleGambling.ts'));
 const picks = read('screens/PicksHomeScreen.tsx');

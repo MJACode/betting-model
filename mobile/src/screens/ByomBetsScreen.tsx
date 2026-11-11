@@ -37,7 +37,7 @@ import { byomFilters } from '@/lib/byomFilters';
 import { propMarketLabel, type ByomSeasonScope, byomStartWord } from '@/lib/byomRecord';
 import { unitsSpeech } from '@/lib/a11y';
 import { errorText, isAbortError } from '@/lib/errors';
-import { formatAmerican, formatDayTimeET, formatSigned } from '@/lib/format';
+import { formatAmerican, formatGameDateET, formatSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -63,13 +63,8 @@ const RESULT_TEXT: Record<ByomBet['result'], string> = {
   '': '—',
 };
 
-function gameDay(iso: string): string {
-  // "Sun 10/26, 8:20 PM ET" -> "Sun 10/26". One formatter, the day half.
-  return formatDayTimeET(iso).split(',')[0] ?? '';
-}
-
-function BetRow({ bet, timing, first, last }: {
-  bet: ByomBet; timing: ByomTiming; first: boolean; last: boolean;
+function BetRow({ bet, withYear, first, last }: {
+  bet: ByomBet; withYear: boolean; first: boolean; last: boolean;
 }) {
   // Two decimals, so the rows add up to the card (UX_REVIEW §7).
   const units = bet.units == null ? '—' : formatSigned(bet.units, 2, 'u');
@@ -77,16 +72,17 @@ function BetRow({ bet, timing, first, last }: {
   const matchup = `${bet.away_team} @ ${bet.home_team}`;
   const price = bet.price == null ? '—' : formatAmerican(bet.price);
   const result = RESULT_TEXT[bet.result];
-  const locked = timing === 'official' && bet.locked_at ? formatDayTimeET(bet.locked_at) : null;
+  // The game's date, not when the line locked (Matt, 2026-11-11). First on
+  // the line, so a long row cuts the team names, not the date.
+  const played = formatGameDateET(bet.commence_time, { withYear });
   const a11y = [
     bet.label,
+    played,
     market,
+    matchup,
     bet.price == null ? 'no price' : price,
     bet.result === '' ? 'no result' : result,
     bet.units == null ? 'no result' : unitsSpeech(units),
-    matchup,
-    gameDay(bet.commence_time),
-    locked ? `official ${locked}` : null,
   ].filter(Boolean).join(', ');
   return (
     <View style={[styles.row, first && styles.rowFirst, last && styles.rowLast]} accessible accessibilityLabel={a11y}>
@@ -98,11 +94,10 @@ function BetRow({ bet, timing, first, last }: {
       </View>
       <View style={styles.rowTop}>
         <Text style={styles.meta} numberOfLines={1}>
-          {market ? `${market} · ` : ''}{matchup} · {gameDay(bet.commence_time)}
+          {played ? `${played} · ` : ''}{market ? `${market} · ` : ''}{matchup}
         </Text>
         <Text style={styles.meta}>{price} · {result}</Text>
       </View>
-      {locked ? <Text style={styles.locked}>Official {locked}</Text> : null}
     </View>
   );
 }
@@ -194,7 +189,7 @@ export function ByomBetsScreen() {
           data={shown.bets}
           keyExtractor={(bet) => bet.key}
           renderItem={({ item, index }) => (
-            <BetRow bet={item} timing={shown.timing}
+            <BetRow bet={item} withYear={shown.scope === 'all'}
               first={index === 0} last={index === shown.bets.length - 1} />
           )}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
@@ -254,11 +249,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-  },
-  locked: {
-    marginTop: 2,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
   },
   // One grouped list: hairlines between rows, not a card per bet.
   sep: {

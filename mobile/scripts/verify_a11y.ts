@@ -173,7 +173,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SavedParlaysScreen.tsx', 'editBtn,pressed', 1], // 40.0pt
   ['src/screens/SavedParlaysScreen.tsx', 'newBtn,pressed', 1], // 43.0pt
   ['src/screens/SettingsScreen.tsx', 'bookPickRow', 2], // 41.8, 41.8pt
-  ['src/screens/SettingsScreen.tsx', 'helplineRow', 1], // 39.5pt
   ['src/screens/SettingsScreen.tsx', 'pressed', 1], // 38.3pt
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
   ['src/screens/SignInScreen.tsx', '', 2], // 17.8, 39.5pt — legal links are 44pt
@@ -681,7 +680,12 @@ check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exp
   /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
 check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in units"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
 const settings = read('src/screens/SettingsScreen.tsx');
-check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
+check(
+  'M9: helpline row is 44pt from its own padding, not slop under the next row',
+  /helplineRow: \{[^}]*minHeight: 44/.test(settings) &&
+    /helplineRow: \{[^}]*paddingBottom: spacing\.md/.test(settings) &&
+    !/hitSlop=\{\{ top: 0, bottom: 12/.test(settings),
+);
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
 const errorState = read('src/components/ErrorState.tsx');
 check('ErrorState speaks retryAccessibilityLabel, not "Try again loading"',

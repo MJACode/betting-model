@@ -37,3 +37,16 @@ export function playerTitleMaxWidth(windowWidth: number, fontScale: number): num
   const side = 16 + pill + 8;
   return Math.max(80, Math.floor(windowWidth - side * 2));
 }
+
+/**
+ * How wide a Settings section title may be before it reaches the same Back pill.
+ *
+ * The player name reserves 4em for "Back", which is wider than the word, so
+ * "Legal & support" ellipsizes. This reserves the chevron plus about 2.6em.
+ */
+export function settingsTitleMaxWidth(windowWidth: number, fontScale: number): number {
+  const scale = Math.min(Math.max(fontScale, 1), 2);
+  const pill = 22 * scale + 17 * scale * 2.6;
+  const side = 16 + pill + 8;
+  return Math.max(120, Math.floor(windowWidth - side * 2));
+}
