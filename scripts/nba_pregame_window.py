@@ -56,6 +56,7 @@ import scripts.nba_first_half_total_luck_card as h1card  # noqa: E402
 import scripts.nba_first_half_total_luck_window as h1w  # noqa: E402
 import scripts.nba_prop_market_card as rule_card  # noqa: E402
 import scripts.nba_q1_trend_card as q1card  # noqa: E402
+import scripts.nba_q1_trend_ml_card as q1mlcard  # noqa: E402
 import scripts.nba_q1_trend_window as q1w  # noqa: E402
 import scripts.nba_team_total_luck_card as ttcard  # noqa: E402
 import scripts.nba_team_total_luck_window as ttw  # noqa: E402
@@ -79,7 +80,8 @@ class PregamePlan:
     team_total: ttw.Plan = field(default_factory=ttw.Plan)
     # nba_first_half_total_luck: the same two lists.
     first_half: ttw.Plan = field(default_factory=ttw.Plan)
-    # nba_q1_trend (the first-quarter spread): the same two lists.
+    # nba_q1_trend (the first-quarter spread) and nba_q1_trend_ml (the first-quarter moneyline), which decide on
+    # one fetch: the same two lists, for both.
     first_quarter: ttw.Plan = field(default_factory=ttw.Plan)
     # {model id: the error} for a model whose plan raised this tick.
     errors: dict[str, str] = field(default_factory=dict)
@@ -127,7 +129,8 @@ UNDECIDED_LOOKBACK_HOURS = 24.0
 DECIDED_BY = (("nba_total_luck", tlcard.decided_games),
               ("nba_team_total_luck", ttcard.decided_games),
               ("nba_first_half_total_luck", h1card.decided_games),
-              ("nba_q1_trend", q1card.decided_games))
+              ("nba_q1_trend", q1card.decided_games),
+              ("nba_q1_trend_ml", q1mlcard.decided_games))
 
 
 def undecided_games(conn, now: datetime,

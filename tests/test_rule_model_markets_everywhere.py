@@ -152,19 +152,25 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         # nba_q1_trend into clv_game_market WITHOUT a new comment: clv_game_market('nba_q1_trend')
         # returned 'h2h' (read-only query, 2026-11-07 14:10Z).
         "clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post",
-        # nba_q1_trend's, which production holds before ncaabw_total_blend (the women's college
-        # basketball totals model, 2026-11-10) names itself as totals.
+        # nba_q1_trend's (#1216), which production holds from 2026-11-07, before
+        # ncaabw_total_blend (the women's college basketball totals model, 2026-11-10)
+        # names itself as totals.
         "clv-standard-v2-power-80-0.05-12-nba-q1-trend",
+        # ncaabw_total_blend's, which production holds before nba_q1_trend_ml names
+        # itself as h2h_q1 and joins the NBA close-only markets. The function body
+        # still names ncaabw_total_blend as totals.
+        "clv-standard-v2-power-80-0.05-12-ncaabw-total-blend",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (ncaabw_total_blend) after production may have "
+        "clv_game_market changed (nba_q1_trend_ml, keeping ncaabw_total_blend) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 
 # The mapping's own text, pinned to the comment that ships it. #1214 edited the mapping and kept the comment, so
 # production never re-created the function: the guard above could not see it, because it reads only the comment.
 # Editing clv_game_market now fails here until the comment is bumped AND this hash is set to the new body's.
-GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-ncaabw-total-blend": "95f353f72b6d648a"}
+# The hash is the merged body: ncaabw_total_blend from master and nba_q1_trend_ml from this branch.
+GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-nba-q1-trend-ml": "5ef76d1e2c14d033"}
 
 
 def test_an_edit_to_the_market_map_bumps_the_comment():
