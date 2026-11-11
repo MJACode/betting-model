@@ -63,7 +63,7 @@ export function DiscordJoinModal({
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                 >
-                  <Ionicons name="checkmark" size={18} color={colors.bet} />
+                  <Ionicons name="checkmark" size={18} color={colors.tint} />
                   <Text style={styles.bullet}>{line}</Text>
                 </View>
               ))}
