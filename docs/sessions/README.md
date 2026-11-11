@@ -19,18 +19,12 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-<<<<<<< HEAD
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NHL schedule branch brought up to date after #1218: session entries kept; the schedule step still follows NHL finals and the game-log step still precedes settlement |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NHL schedule branch brought up to date with master: the daily run still refreshes the NHL API schedule after finals, and still pulls NHL game logs before settlement |
-=======
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAF moneyline branch brought up to date after #1218: CLV and open_picks keep the moneyline and the first-quarter moneyline; the applied-migration stamps move again so the next pass recreates them |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAF totals: #1238 merged and the eleven-fit file switched on at 14:25 UTC (mike: "merge 1238"); the worker opened it (health check OK, 43 files) and its first pass re-scored 48 games with no new bet; why the 11-11 backup to mike's PC did not run |
-<<<<<<< HEAD
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAB stacking study brought up to date after #1218: session entries kept; one bet a game and EV-third sizing stay unadopted; agreement sizing stays 2u |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAB stacking study brought up to date with master: one bet a game and EV-third sizing stay unadopted; agreement sizing stays 2u |
-=======
->>>>>>> origin/master
->>>>>>> origin/master
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, nba_q1_trend_ml branch brought up to date with master: CLV and open_picks keep both the first-quarter moneyline and master's NCAABW / NCAAB live names; the applied-migration stamps move so the next pass recreates them |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, X pick posts and the daily, weekly, and monthly recaps carry no hashtags; the tag budget goes back to the text, still within 280 weighted characters |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player Stats Back is a JS pill (system pill still dead after Compare odds on the 2026-11-07 bundle; empty stack replaces to Stats) |
