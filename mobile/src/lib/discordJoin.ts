@@ -117,6 +117,22 @@ export function confirmedTrial(input: {
 }
 
 /**
+ * The only way `sawTrial` becomes true. A loading row, a missing row, and an
+ * active row leave the record alone. The membership fallback tier is not an input.
+ */
+export function noteSubscription(
+  record: DiscordJoinRecord,
+  observation: {
+    subLoading: boolean;
+    status: string | null | undefined;
+    periodEntitled: boolean;
+  },
+): DiscordJoinRecord {
+  if (!confirmedTrial(observation)) return record;
+  return observeDiscordTier(record, 'trial');
+}
+
+/**
  * A trial observation sticks. A later paid tier does not clear it: that is
  * how a conversion is told apart from a Weekly checkout.
  */
@@ -168,6 +184,8 @@ export interface DiscordJoinGate {
   surfaceClear: boolean;
   /** A signed-in account. The flag is stored per account. */
   hasAccount: boolean;
+  /** The subscription read has settled. While it is loading, do not pick 02 or 02b. */
+  subscriptionReady: boolean;
 }
 
 export function discordJoinOffer(gate: DiscordJoinGate): {
@@ -179,7 +197,8 @@ export function discordJoinOffer(gate: DiscordJoinGate): {
     !gate.discordPaid ||
     gate.seen ||
     !gate.onboardingFinished ||
-    !gate.surfaceClear
+    !gate.surfaceClear ||
+    !gate.subscriptionReady
   ) {
     return { show: false, variant: null };
   }
@@ -214,7 +233,7 @@ export function discordOnboardingSlide(
     body: !discordPaid
       ? 'Paid plans include a private community, plus extra bets shared beyond the models. It unlocks when a paid plan is active, after any free trial.'
       : joinSeen
-        ? 'Your plan includes a private community, plus extra bets shared beyond the models. Join anytime in Settings → Community.'
+        ? 'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join anytime in Settings.'
         : 'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join after this intro — or anytime in Settings.',
   };
 }

@@ -41,6 +41,8 @@ export function useMembership() {
       status: subscription?.status,
       periodEntitled: isEntitled(subscription),
     }),
+    /** The subscription read has settled, including a failed one. */
+    subscriptionReady: !subLoading,
     subscription,
     entitled: resolved ? entitled : false,
     access,

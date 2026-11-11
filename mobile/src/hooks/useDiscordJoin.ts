@@ -1,8 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
-  DISCORD_JOIN_STORAGE_KEY,
   discordJoinBlocksRecap,
   discordJoinOffer,
   discordJoinVisible,
@@ -19,6 +17,7 @@ import {
   type DiscordJoinStore,
   type DiscordJoinVariant,
 } from '@/lib/discordJoin';
+import { readDiscordJoinRaw, writeDiscordJoinStore } from '@/lib/discordJoinStore';
 
 /**
  * Once-only Join screen, per account, on this device.
@@ -31,6 +30,8 @@ export function useDiscordJoin(input: {
   userId: string | null;
   /** A loaded trialing row. Not the fallback tier. */
   trialConfirmed: boolean;
+  /** False while the subscription read is still in flight. */
+  subscriptionReady: boolean;
   discordPaid: boolean;
   comped: boolean;
   onboardingFinished: boolean;
@@ -55,7 +56,7 @@ export function useDiscordJoin(input: {
   useEffect(() => {
     let mounted = true;
     const gen = ++readGen.current;
-    AsyncStorage.getItem(DISCORD_JOIN_STORAGE_KEY)
+    readDiscordJoinRaw()
       .then((raw) => {
         if (!mounted || gen !== readGen.current) return;
         const parsed = parseDiscordJoinStore(raw);
@@ -108,7 +109,7 @@ export function useDiscordJoin(input: {
     }
     if (serial === loaded.current) return;
     loaded.current = serial;
-    AsyncStorage.setItem(DISCORD_JOIN_STORAGE_KEY, serial).catch((err) => {
+    writeDiscordJoinStore(store).catch((err) => {
       console.warn('[discordJoin] save failed', err);
     });
   }, [store, ready, loadFailed]);
@@ -133,6 +134,7 @@ export function useDiscordJoin(input: {
     onboardingFinished: input.onboardingFinished,
     surfaceClear: input.surfaceClear,
     hasAccount: input.userId != null,
+    subscriptionReady: input.subscriptionReady,
   });
   const show = discordJoinVisible({
     ready,
@@ -146,7 +148,7 @@ export function useDiscordJoin(input: {
     joinSeen: ready && !loadFailed && record.seen,
     blocking: discordJoinBlocksRecap({
       storageReady: ready,
-      membershipHold: input.membershipHold,
+      membershipHold: input.membershipHold || !input.subscriptionReady,
       show,
     }),
     choose,

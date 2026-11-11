@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -25,6 +25,8 @@ export function DiscordJoinModal({
   discordPaid: boolean;
   onChoose: (choice: DiscordJoinChoice) => void;
 }) {
+  const { fontScale } = useWindowDimensions();
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
   const copy = variant ? discordJoinCopy(variant) : null;
   const onJoin = () => {
     onChoose('join');
@@ -49,7 +51,7 @@ export function DiscordJoinModal({
             <Text style={styles.title} accessibilityRole="header">
               {copy.headline}
             </Text>
-            <Text style={styles.text}>{copy.body}</Text>
+            <Text style={[styles.text, { lineHeight: Math.round(24 * scale) }]}>{copy.body}</Text>
             <View
               style={styles.bullets}
               accessible
@@ -64,7 +66,7 @@ export function DiscordJoinModal({
                   importantForAccessibility="no-hide-descendants"
                 >
                   <Ionicons name="checkmark" size={18} color={colors.tint} />
-                  <Text style={styles.bullet}>{line}</Text>
+                  <Text style={[styles.bullet, { lineHeight: Math.round(22 * scale) }]}>{line}</Text>
                 </View>
               ))}
             </View>
@@ -86,7 +88,7 @@ export function DiscordJoinModal({
             >
               <Text style={styles.laterText}>{copy.secondary}</Text>
             </Pressable>
-            <Text style={styles.note}>{copy.note}</Text>
+            <Text style={[styles.note, { lineHeight: Math.round(18 * scale) }]}>{copy.note}</Text>
           </View>
         </SafeAreaView>
       ) : null}

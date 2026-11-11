@@ -35,6 +35,7 @@ const {
   discordOnboardingSlide,
   markDiscordJoinChosen,
   mergeDiscordJoinStores,
+  noteSubscription,
   observeDiscordTier,
   parseDiscordJoinStore,
   paywallDiscordBullet,
@@ -51,6 +52,7 @@ type Gate = {
   onboardingFinished: boolean;
   surfaceClear: boolean;
   hasAccount: boolean;
+  subscriptionReady: boolean;
 };
 
 function gate(over: Partial<Gate> = {}): Gate {
@@ -62,6 +64,7 @@ function gate(over: Partial<Gate> = {}): Gate {
     onboardingFinished: true,
     surfaceClear: true,
     hasAccount: true,
+    subscriptionReady: true,
     ...over,
   };
 }
@@ -95,9 +98,13 @@ eq(
   'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join after this intro — or anytime in Settings.',
 );
 eq(
-  'replay after join points at settings',
+  'replay after join drops the after-intro clause',
   perk.discordOnboardingSlide(true, true).body,
-  'Your plan includes a private community, plus extra bets shared beyond the models. Join anytime in Settings → Community.',
+  'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join anytime in Settings.',
+);
+check(
+  'replay does not promise the join screen is next',
+  !perk.discordOnboardingSlide(true, true).body.includes('after this intro'),
 );
 eq(
   'a free replay does not use the paid sentence',
@@ -235,9 +242,41 @@ eq('entitled with no row is not a trial', perk.confirmedTrial({ subLoading: fals
 eq('an active row is not a trial', perk.confirmedTrial({ subLoading: false, status: 'active', periodEntitled: true }), false);
 eq('an expired trial row is not a trial', perk.confirmedTrial({ subLoading: false, status: 'trialing', periodEntitled: false }), false);
 {
-  const untouched = observeDiscordTier(EMPTY_DISCORD_JOIN_RECORD, 'paid');
-  eq('a paid observation does not remember a trial', untouched.sawTrial, false);
-  eq('only a confirmed trial sticks', observeDiscordTier(untouched, 'trial').sawTrial, true);
+  // Cold start. my_access is entitled and the subscription row has not
+  // loaded. membershipTier reports 'trial' for that shape. This path does not.
+  let record = noteSubscription(EMPTY_DISCORD_JOIN_RECORD, {
+    subLoading: true,
+    status: null,
+    periodEntitled: false,
+  });
+  eq('a loading row does not remember a trial', record.sawTrial, false);
+  eq(
+    'the screen waits while the row is loading',
+    shown({ discordPaid: true, sawTrial: false, subscriptionReady: false }).show,
+    false,
+  );
+  record = noteSubscription(record, { subLoading: false, status: null, periodEntitled: true });
+  eq('entitled with no row still is not a trial', record.sawTrial, false);
+  record = noteSubscription(record, { subLoading: false, status: 'active', periodEntitled: true });
+  eq('the landed active row does not invent a trial', record.sawTrial, false);
+  const offer = shown({ discordPaid: true, sawTrial: record.sawTrial, subscriptionReady: true });
+  eq('a long-time payer sees 02', offer.show && offer.variant === 'firstPaid', true);
+}
+{
+  let record = noteSubscription(EMPTY_DISCORD_JOIN_RECORD, {
+    subLoading: false,
+    status: 'trialing',
+    periodEntitled: true,
+  });
+  eq('a loaded trialing row is remembered', record.sawTrial, true);
+  eq(
+    'a later read in flight does not pick 02b yet',
+    shown({ discordPaid: true, sawTrial: true, subscriptionReady: false }).show,
+    false,
+  );
+  record = noteSubscription(record, { subLoading: false, status: 'active', periodEntitled: true });
+  const offer = shown({ sawTrial: record.sawTrial, subscriptionReady: true });
+  eq('the same account sees 02b after the row is active', offer.show && offer.variant === 'converted', true);
 }
 eq('a failed read stays hidden', perk.discordJoinVisible({ ready: true, loadFailed: true, offerShow: true }), false);
 eq('a good read can show', perk.discordJoinVisible({ ready: true, loadFailed: false, offerShow: true }), true);
@@ -299,7 +338,11 @@ check('both buttons choose', modal.includes("onChoose('join')") && modal.include
 check('back is maybe later', modal.includes("onRequestClose={() => onChoose('later')}"));
 
 const hook = read('src/hooks/useDiscordJoin.ts');
-check('the flag is stored', hook.includes('DISCORD_JOIN_STORAGE_KEY') && hook.includes('AsyncStorage'));
+check(
+  'the flag is stored',
+  read('src/lib/discordJoinStore.ts').includes('DISCORD_JOIN_STORAGE_KEY') &&
+    read('src/lib/discordJoinStore.ts').includes('AsyncStorage'),
+);
 check('both choices go through the same mark', hook.includes('markDiscordJoinChosen'));
 
 const app = read('App.tsx');
@@ -333,16 +376,26 @@ check(
   read('src/lib/socialLinks.ts').includes('opts?.revealUrl === false'),
 );
 
+const storeSrc = read('src/lib/discordJoinStore.ts');
 check(
   'account deletion drops one user, not the whole map',
   !read('src/lib/deleteAccountHelpers.ts').includes('DISCORD_JOIN_STORAGE_KEY') &&
-    read('src/lib/deleteAccount.ts').includes('withoutUserDiscordJoinRecord') &&
-    read('src/lib/deleteAccount.ts').includes('notifyDiscordJoinUserForgotten') &&
+    read('src/lib/deleteAccount.ts').includes('forgetDiscordJoinUser') &&
+    storeSrc.includes('withoutUserDiscordJoinRecord') &&
+    storeSrc.includes('notifyDiscordJoinUserForgotten') &&
     perk.DISCORD_JOIN_STORAGE_KEY === 'discord.join.v1',
 );
+check(
+  'reads and writes share one queue',
+  storeSrc.includes('let tail: Promise<void>') &&
+    hook.includes('readDiscordJoinRaw') &&
+    hook.includes('writeDiscordJoinStore'),
+);
+check('line height follows the text size', read('src/components/DiscordJoinModal.tsx').includes('Math.round(24 * scale)'));
 const membership = read('src/hooks/useMembership.ts');
 check('a trial is confirmed from the loaded row', membership.includes('confirmedTrial({'));
 check('the join hook does not watch the fallback tier', hook.includes('trialConfirmed') && !hook.includes('input.tier'));
+check('the screen waits for the subscription read', hook.includes('subscriptionReady'));
 check('a failed read does not show or save', hook.includes('setLoadFailed(true)') && hook.includes('if (!ready || loadFailed) return'));
 
 if (failures === 0) console.log('ALL PASS');
