@@ -15,9 +15,15 @@ not given a result. A pending or needs_review leg holds that day's recap.
 The Oct 18 and Oct 20 posts are the grammar the tests pin: a sport/date
 header, `All 1U` as the message stake, and `60 Minute ML` as `h2h_3way`.
 A date with no sport (`Friday Oct. 22`) and `Player (TEAM) O5.5 Receptions`
-parse too. A Discord mention is not a line. `U47.5` is a total, and `/`
-between two teams is a matchup. A line that still does not parse is
-needs_review, and the recap waits.
+parse too. A bare sport line (`NCAAB`, `NCAABW`) is a header, not a bet.
+`Syracuse/Indiana U146.5` is a total, and the school names match the same
+way a college moneyline does. `Anthony Black (ORL)` on its own line is the
+player for the `O14.5 Points` lines under it. `.5U` is half a unit.
+`Virginia Tech 1st Half +3.5` is a first-half spread. NBA and NCAAB grade
+that from the period scores. A sport with no first-half source stays
+needs_review. The full-game score is not the half. A Discord mention is
+not a line. `U47.5` is a total, and `/` between two teams is a matchup.
+A line that still does not parse is needs_review, and the recap waits.
 
 A line that is a parlay header (`PARLAY +450 1u`, `3 leg parlay`) is one
 bet at that price and stake. The lines under it are legs. The parlay row
@@ -130,7 +136,9 @@ _LOG_STAT = {
 }
 _STAT_ALT = "|".join(sorted(_PROP_STATS, key=len, reverse=True))
 _PRICE_RE = re.compile(r"(?<![\d.])([+-]\d{3,})(?!\d)")
-_STAKE_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*u(?:nits?)?\b", re.I)
+# `.5U` is half a unit. The dot is not part of a price or a total.
+_STAKE_RE = re.compile(
+    r"(?<![\d.])(\d*\.\d+|\d+(?:\.\d+)?)\s*u(?:nits?)?\b", re.I)
 _SPREAD_RE = re.compile(r"(?<![\d.])([+-]\d{1,2}(?:\.\d+)?)(?!\d)")
 _LINE_NUM_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?!\d)")
 _EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D✅❌✔✖]+")
@@ -139,7 +147,7 @@ _REG_RE = re.compile(
     r"\b(?:60\s*min(?:ute)?s?\s*ml|reg(?:ulation)?\s*ml|3\s*[- ]?way(?:\s*ml)?)\b",
     re.I)
 _SLATE_RE = re.compile(
-    r"^(?P<sport>nhl|nfl|mlb|nba|wnba|ncaaf|ufc)\b"
+    r"^(?P<sport>nhl|nfl|mlb|nba|wnba|ncaabw|ncaab|ncaaf|ufc)\b"
     r"(?:\s+(?P<weekday>[A-Za-z]+day))?"
     r"(?:\s+(?P<mon>[A-Za-z]+)\.?\s+(?P<day>\d{1,2}))?"
     r"\s*$",
@@ -173,6 +181,15 @@ _MENTION_RE = re.compile(
 # "/" is the separator on the 2026-10-29 total (`Panthers/GB`), with or
 # without spaces around it.
 _MATCHUP_SEP = r"(?:\s+(?:@|vs\.?|at)\s+|\s*/\s*)"
+# "Anthony Black (ORL)" with no number under it is the player for the
+# stat lines that follow. A line that already has the bet stays a bet.
+_PLAYER_HEADER_RE = re.compile(
+    r"^(?P<player>[A-Za-z].{0,60}?)\s*"
+    r"\((?P<team>[A-Za-z0-9][^)]{0,24})\)\s*$")
+# "1st Half" / "first half" is not part of the team name.
+_HALF_RE = re.compile(r"\b(?:1st|first)\s+half\b", re.I)
+# Period scores the settler already trusts. NCAAF is not one of them.
+_HALF_SPORTS = {"NBA", "NCAAB"}
 
 
 class Capper:
@@ -498,6 +515,25 @@ def _start_broken_parlay(raw: str, n: int, default_stake: float,
     }
 
 
+def _clear_player(context: dict | None) -> None:
+    if not context:
+        return
+    context.pop("player_name", None)
+    context.pop("player_team", None)
+
+
+def _player_header(raw: str) -> dict | None:
+    """A name and a team, and nothing else. The stat lines are below it."""
+    m = _PLAYER_HEADER_RE.match((raw or "").strip())
+    if not m:
+        return None
+    player = " ".join(m.group("player").split())
+    team = " ".join(m.group("team").split())
+    if not player or not team:
+        return None
+    return {"player": player, "team": team}
+
+
 def parse_message(body: str, posted_at: datetime | None = None
                   ) -> tuple[list[dict], list[dict]]:
     """(legs, reviews). A review is a line that was not turned into a bet.
@@ -515,14 +551,43 @@ def parse_message(body: str, posted_at: datetime | None = None
     A Discord mention (`<@id>`, `<@!id>`, `<@&id>`, `<#id>`, `@everyone`,
     `@here`) is removed first. A line that is only a mention creates no
     row. The other lines keep the numbers they had.
+
+    `Player (TEAM)` with no bet is the player for the stat lines under it
+    (`O14.5 Points`). Those lines are props. The name line is not a second
+    bet. A name that nothing under it uses stays needs_review.
     """
     legs: list[dict] = []
     reviews: list[dict] = []
     context: dict | None = None
     default_stake = 1.0
     parlay: dict | None = None
+    open_name: dict | None = None
     lines = [_strip_emoji(ln).strip() for ln in (body or "").splitlines()]
     lines = [ln for ln in lines if ln and not ln.startswith("#")]
+
+    def _drop_open_name() -> None:
+        nonlocal open_name, context
+        if open_name is None:
+            return
+        reviews.append({
+            "line_no": open_name["line_no"],
+            "raw": open_name["raw"],
+            "reason": "unparsed",
+        })
+        open_name = None
+        _clear_player(context)
+
+    def _keep_player(leg) -> None:
+        """A bare stat line used the name above it. Any other line did not."""
+        nonlocal open_name
+        if leg is not None and leg.pop("used_player_context", False):
+            open_name = None
+            return
+        if open_name is not None:
+            _drop_open_name()
+        elif leg is not None and leg.get("market") != "prop":
+            _clear_player(context)
+
     if not lines:
         reviews.append({"line_no": 1, "raw": body or "", "reason": "empty"})
         return legs, reviews
@@ -532,6 +597,8 @@ def parse_message(body: str, posted_at: datetime | None = None
             continue
         slate = _slate_header(raw, posted_at)
         if slate:
+            _drop_open_name()
+            _clear_player(context)
             _finish_parlay(parlay, reviews)
             parlay = None
             context = dict(context or {})
@@ -539,16 +606,22 @@ def parse_message(body: str, posted_at: datetime | None = None
             continue
         all_stake = _ALL_STAKE_RE.match(raw.strip())
         if all_stake:
+            _drop_open_name()
+            _clear_player(context)
             _finish_parlay(parlay, reviews)
             parlay = None
             default_stake = float(all_stake.group(1))
             continue
         if _ROUND_ROBIN_RE.search(raw):
+            _drop_open_name()
+            _clear_player(context)
             _finish_parlay(parlay, reviews)
             parlay = _start_broken_parlay(raw, n, default_stake, context)
             continue
         header = _parlay_header(raw, default_stake)
         if header:
+            _drop_open_name()
+            _clear_player(context)
             _finish_parlay(parlay, reviews)
             header["line_no"] = n
             header["sport_hint"] = (context or {}).get("sport")
@@ -559,6 +632,8 @@ def parse_message(body: str, posted_at: datetime | None = None
             stripped, price, _stake = _price_and_stake(
                 _strip_bullet(raw), parlay["stake_units"])
             leg = _parse_line(stripped, price, parlay["stake_units"], context, raw)
+            if leg is not None:
+                leg.pop("used_player_context", None)
             if leg is None:
                 reviews.append({"line_no": n, "raw": raw, "reason": "unparsed"})
                 parlay["broken"] = True
@@ -570,13 +645,24 @@ def parse_message(body: str, posted_at: datetime | None = None
             parlay["legs"].append(leg)
             legs.append(leg)
             continue
+        named = _player_header(raw)
+        if named:
+            _drop_open_name()
+            context = dict(context or {})
+            context["player_name"] = named["player"]
+            context["player_team"] = named["team"]
+            open_name = {"line_no": n, "raw": raw}
+            continue
         stripped, price, stake = _price_and_stake(raw, default_stake)
         header = _matchup_header(stripped)
         if header and price is None and not _STAKE_RE.search(raw):
+            _drop_open_name()
+            _clear_player(context)
             context = dict(context or {})
             context.update(header)
             continue
         leg = _parse_line(stripped, price, stake, context, raw)
+        _keep_player(leg)
         if leg is None:
             reviews.append({"line_no": n, "raw": raw, "reason": "unparsed"})
             continue
@@ -584,6 +670,7 @@ def parse_message(body: str, posted_at: datetime | None = None
         leg["sport_hint"] = (context or {}).get("sport")
         leg["slate_date"] = (context or {}).get("slate_date")
         legs.append(leg)
+    _drop_open_name()
     _finish_parlay(parlay, reviews)
     return legs, reviews
 
@@ -631,6 +718,27 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
             "team_text": team, "away_text": (context or {}).get("away_text"),
             "home_text": (context or {}).get("home_text"), "raw": raw,
         }
+    # "O14.5 Points" under "Anthony Black (ORL)". No player on this line.
+    # The name line is the player. Without that name this stays a total.
+    bare = re.match(
+        rf"^(?P<side>over|under|o|u)\s*(?P<line>\d+(?:\.\d+)?)\s+"
+        rf"(?P<stat>{_STAT_ALT})\b\s*$",
+        text, re.I)
+    named = ((context or {}).get("player_name") or "").strip()
+    if bare and named:
+        stat = bare.group("stat").lower()
+        kind, col, market = _PROP_STATS[stat]
+        side = bare.group("side").lower()
+        side = {"o": "over", "u": "under"}.get(side, side)
+        team = ((context or {}).get("player_team") or "").strip() or None
+        return {
+            "market": "prop", "side": side, "line": float(bare.group("line")),
+            "price": price, "stake_units": stake, "player_name": named,
+            "prop_stat": col, "prop_kind": kind, "prop_market": market,
+            "team_text": team, "away_text": (context or {}).get("away_text"),
+            "home_text": (context or {}).get("home_text"), "raw": raw,
+            "used_player_context": True,
+        }
     # "U47.5" has no space after the side. "Over 8.5" still has one.
     ou = re.match(
         r"^(?:(?P<pre>.+?)\s+)?(?P<side>over|under|o|u)\s*(?P<line>\d+(?:\.\d+)?)\b\s*(?P<post>.*)$",
@@ -669,8 +777,14 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
         }
     rest, spread = _spread_number(text)
     if spread is not None and abs(spread) < 100:
+        market = "spreads"
+        if _HALF_RE.search(rest):
+            # The half is the market. It is not part of the school name, and
+            # it is not the full-game spread.
+            rest = " ".join(_HALF_RE.sub(" ", rest).split())
+            market = "spreads_h1"
         return {
-            "market": "spreads", "side": None, "line": spread, "price": price,
+            "market": market, "side": None, "line": spread, "price": price,
             "stake_units": stake, "player_name": None, "prop_stat": None,
             "prop_kind": None, "prop_market": None, "team_text": rest,
             "away_text": (context or {}).get("away_text"),
@@ -1142,7 +1256,8 @@ def _insert_parlay_parent(conn, message_id, header, posted, capper, status,
 def _match_leg(conn, leg: dict, posted: datetime) -> tuple[dict | None, str | None]:
     away_text, home_text = leg.get("away_text"), leg.get("home_text")
     team_text = leg.get("team_text")
-    if leg["market"] in ("h2h", "h2h_3way", "spreads") and not (team_text or "").strip():
+    if (leg["market"] in ("h2h", "h2h_3way", "spreads", "spreads_h1")
+            and not (team_text or "").strip()):
         return None, "no_team"
     if leg["market"] == "totals" and not (away_text and home_text):
         return None, "no_matchup"
@@ -1162,9 +1277,9 @@ def _match_leg(conn, leg: dict, posted: datetime) -> tuple[dict | None, str | No
         return None, "team_not_in_game"
     chosen = dict(chosen)
     chosen["side"] = side
-    if leg["market"] == "spreads":
+    if leg["market"] in ("spreads", "spreads_h1"):
         # The number in the post is that team's spread. Settlement wants the
-        # HOME number (CLAUDE.md §4).
+        # HOME number (CLAUDE.md §4). The first half uses the same sign.
         team_line = float(leg["line"])
         chosen_line = team_line if side == "home" else -team_line
         leg["line"] = chosen_line
@@ -1231,15 +1346,18 @@ def _candidate_games(conn, leg, posted: datetime) -> list[dict]:
         pairs = _pair_teams(away_text, home_text)
         if leg.get("sport_hint"):
             pairs = [p for p in pairs if p[0] == leg["sport_hint"]]
-        if not pairs:
-            return []
-        rows = []
-        for sport, away, home in pairs:
-            rows.extend(_fetch_games(
-                conn,
-                f"sport = %s AND home_team = %s AND away_team = %s AND {window}",
-                (sport, home, away, start, end), slate))
-        return [_game_dict(r) for r in rows]
+        if pairs:
+            rows = []
+            for sport, away, home in pairs:
+                rows.extend(_fetch_games(
+                    conn,
+                    f"sport = %s AND home_team = %s AND away_team = %s AND {window}",
+                    (sport, home, away, start, end), slate))
+            return [_game_dict(r) for r in rows]
+        # "Syracuse/Indiana" is not in the pro alias map. The moneyline path
+        # matches a school name exactly. A total of two schools does the same.
+        return _school_matchup(conn, away_text, home_text, leg.get("sport_hint"),
+                               window, start, end, slate)
     hits = _teams_in(leg.get("team_text") or "")
     sport_hint = leg.get("sport_hint")
     if sport_hint:
@@ -1270,6 +1388,24 @@ def _candidate_games(conn, leg, posted: datetime) -> list[dict]:
         return []
     where = f"(lower(home_team) = lower(%s) OR lower(away_team) = lower(%s)) AND {window}"
     params: tuple = (text, text, start, end)
+    if sport_hint:
+        where = "sport = %s AND " + where
+        params = (sport_hint,) + params
+    return [_game_dict(r) for r in _fetch_games(conn, where, params, slate)]
+
+
+def _school_matchup(conn, away_text, home_text, sport_hint, window, start, end,
+                    slate):
+    """Exact school names, away then home, the order `/` already parsed."""
+    away = (away_text or "").strip()
+    home = (home_text or "").strip()
+    if not away or not home:
+        return []
+    where = (
+        f"lower(away_team) = lower(%s) AND lower(home_team) = lower(%s) "
+        f"AND {window}"
+    )
+    params: tuple = (away, home, start, end)
     if sport_hint:
         where = "sport = %s AND " + where
         params = (sport_hint,) + params
@@ -1418,12 +1554,28 @@ def _grade_one(conn, row, capper: Capper = EGGZ) -> bool:
         return _grade_regulation(conn, pid, game_id, side, price, stake,
                                  commence or commence_db, home_win_reg, went_to_ot,
                                  capper)
+    half = market == "spreads_h1"
+    if half:
+        # NBA quarters and NCAAB halves are the stored first-half scores.
+        # Anything else, including NCAAF, has no half source here. The final
+        # is not a stand-in. The leg stays needs_review and holds the recap.
+        if sport not in _HALF_SPORTS:
+            _mark_review(conn, pid, "no_first_half_score", capper)
+            return True
+        from tracking.paper_tracker import first_half_points
+        scored = first_half_points(conn, game_id, home_score, away_score)
+        if scored is None:
+            return False
+        home_score, away_score = scored
+        home_win = None
     if home_win is None and home_score is not None and away_score is not None:
         if float(home_score) > float(away_score):
             home_win = 1
         elif float(home_score) < float(away_score):
             home_win = 0
-    spread_home = float(line) if market == "spreads" and line is not None else None
+    spread_home = (
+        float(line) if market in ("spreads", "spreads_h1") and line is not None
+        else None)
     total_line = float(line) if market == "totals" and line is not None else None
     result, _flat, _kelly = _compute_result(
         side or "", market, float(home_score), float(away_score),
@@ -1433,8 +1585,12 @@ def _grade_one(conn, row, capper: Capper = EGGZ) -> bool:
         _mark_review(conn, pid, "ungraded", capper)
         return True
     profit, risked = units_for_result(stake, price, result)
-    clv, close_px, beat = _game_clv(
-        conn, game_id, market, side, line, price, commence or commence_db)
+    # A first-half spread has no full-game close. Leave CLV empty.
+    if half:
+        clv, close_px, beat = None, None, None
+    else:
+        clv, close_px, beat = _game_clv(
+            conn, game_id, market, side, line, price, commence or commence_db)
     _write_grade(conn, pid, result, profit, risked, clv, close_px, beat)
     return True
 
