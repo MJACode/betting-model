@@ -54,7 +54,11 @@ def test_each_market_has_its_measured_range():
                            "ncaab_first_half_total": 0.50,
                            # the opening moneyline model (models/ncaab_moneyline_first_post.py):
                            # its replay's bets reached 0.2416, so not 0.25
-                           "ncaab_moneyline_first_post": 0.40}
+                           "ncaab_moneyline_first_post": 0.40,
+                           # the in-play rules (models/ncaab_live_ig.py): the largest edge
+                           # over 61,019 graded decisions was 0.453
+                           "ncaab_live_spread_h1": 0.50, "ncaab_live_spread_h2": 0.50,
+                           "ncaab_live_total_h2": 0.50}
 
 
 def test_a_typo_is_a_data_error_and_the_extremes_history_holds_are_not():

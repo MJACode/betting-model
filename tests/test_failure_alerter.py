@@ -379,7 +379,7 @@ class NbaConn(FakeConn):
     table not in `tables` does not exist yet."""
 
     ALL = ("nba_total_luck_decisions", "nba_team_total_luck_decisions",
-           "nba_first_half_total_luck_decisions")
+           "nba_first_half_total_luck_decisions", "nba_q1_trend_decisions")
 
     def __init__(self, games=(), decisions=None, bets=(), tables=ALL, health=(), boom=False,
                  rule_decided=None, listed=(), sched=(), open_bets=(), other_rows=(), watch_boom=False):
@@ -448,7 +448,8 @@ def _decided_by(*tables):
 class TestAModelThatLostAGame:
     def test_a_tipped_game_with_no_team_total_decision_is_critical_and_names_the_game(self):
         conn = NbaConn([TIPPED], _decided_by("nba_total_luck_decisions",
-                                             "nba_first_half_total_luck_decisions"))
+                                             "nba_first_half_total_luck_decisions",
+                                             "nba_q1_trend_decisions"))
         out = fa._conditions(conn, NOW)
         assert [k for k in out if k.startswith("undecided:")] == ["undecided:nba_team_total_luck"]
         sev, title, detail = out["undecided:nba_team_total_luck"]
@@ -458,8 +459,8 @@ class TestAModelThatLostAGame:
     def test_each_model_is_named_on_its_own(self):
         out = fa._conditions(NbaConn([TIPPED]), NOW)
         assert sorted(k for k in out if k.startswith("undecided:")) == [
-            "undecided:nba_first_half_total_luck", "undecided:nba_team_total_luck",
-            "undecided:nba_total_luck"]
+            "undecided:nba_first_half_total_luck", "undecided:nba_q1_trend",
+            "undecided:nba_team_total_luck", "undecided:nba_total_luck"]
 
     def test_a_game_all_three_decided_says_nothing(self):
         out = fa._conditions(NbaConn([TIPPED], _decided_by(*NbaConn.ALL)), NOW)
@@ -475,7 +476,8 @@ class TestAModelThatLostAGame:
             "undecided:nba_first_half_total_luck"]
 
     def test_a_bet_with_no_decision_row_counts_as_decided_as_the_plan_reads_it(self):
-        tables = ("nba_total_luck_decisions", "nba_first_half_total_luck_decisions")
+        tables = ("nba_total_luck_decisions", "nba_first_half_total_luck_decisions",
+                  "nba_q1_trend_decisions")
         conn = NbaConn([TIPPED], _decided_by(*tables), bets=[("nba_team_total_luck", GAME)])
         assert not [k for k in fa._conditions(conn, NOW) if k.startswith("undecided:")]
 

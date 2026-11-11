@@ -448,6 +448,8 @@ export interface TeamPickRecords {
   teamTotals: number;
   /** First-half bets (a first half's total or spread): in `settled`, in no tile. */
   firstHalves: number;
+  /** First-quarter bets (a first quarter's spread): in `settled`, in no tile. */
+  firstQuarters: number;
   /** A ledger read failed. Unknown stamps stayed in the counts. */
   ledgerUnread: boolean;
 }
@@ -480,7 +482,7 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
   const byId = new Map(games.map((g) => [g.game_id, g] as const));
   const out: TeamPickRecords = {
     on: emptyRecord(), against: emptyRecord(), over: emptyRecord(), under: emptyRecord(),
-    settled: 0, teamTotals: 0, firstHalves: 0, ledgerUnread: false,
+    settled: 0, teamTotals: 0, firstHalves: 0, firstQuarters: 0, ledgerUnread: false,
   };
   for (const p of picks) {
     const g = byId.get(p.game_id);
@@ -521,6 +523,14 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     if (h1 === 'totals_h1' || h1 === 'spreads_h1') {
       if (p.discordPublish === 'unknown') out.ledgerUnread = true;
       out.firstHalves += 1;
+      out.settled += 1;
+      continue;
+    }
+    // A first quarter's spread (nba_q1_trend): a different number from the
+    // game's spread, on a quarter of it.
+    if (h1 === 'spreads_q1') {
+      if (p.discordPublish === 'unknown') out.ledgerUnread = true;
+      out.firstQuarters += 1;
       out.settled += 1;
       continue;
     }

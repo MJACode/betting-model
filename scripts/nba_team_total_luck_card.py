@@ -33,7 +33,8 @@ fetches up to 70 minutes before the decision fetch. Each book's MAIN number
 only: the fetch files the other rungs under team_totals_home_alternate. The
 closing snapshot ('close') is never read here.
 
-EVERY GAME PRESENT, REGULAR SEASON ONLY, A PAUSED MODEL'S ROWS, BET ROWS ONLY:
+EVERY GAME PRESENT, REGULAR SEASON ONLY, A PAUSED MODEL'S ROWS,
+EVERY SCORED GAME IN PICKS (a NONE row for a game scored and not bet):
 exactly as the full-game card (its docstring).
 
 ROW SHAPE: the full-game card's. pick_side 'under'; scored_line is the home
@@ -282,16 +283,24 @@ def _num(x, nd):
 
 
 def publish(conn, rows: list[dict], decisions: list[tt.TeamTotalDecision],
-            leads: dict[str, float], refused: dict[str, str]) -> tuple[int, int]:
+            leads: dict[str, float], refused: dict[str, str],
+            nones: dict[str, dict] | None = None) -> tuple[int, int]:
     """Write each decided game once: its decision row and its bet in ONE
-    transaction, under the model's lock, the ledger and the picks re-read
-    inside it. -> (bets written, decisions written)."""
+    transaction, under the shared NBA game-total lock and then the model's own,
+    the ledger and the picks re-read inside them. A game another NBA game-total
+    model has already bet gets its decision row and no bet
+    (scripts/nba_game_totals_door.py). -> (bets written, decisions written)."""
     if not decisions:
         return 0, 0
+    from scripts import nba_game_totals_door as door
     from scripts.nfl_wind_publisher import _lock_model
+    door.lock(conn)              # first: the lock the three NBA game-total cards share
     _lock_model(conn, MODEL_ID)
     gids = sorted({d.game_id for d in decisions})
     done = decided_games(conn, gids)
+    # One NBA game-total bet a game (scripts/nba_game_totals_door.py): a game another
+    # of the three models has bet is decided here with no bet, the reason on its row.
+    taken = door.other_bets(conn, gids, MODEL_ID)
     by_game = {r["game_id"]: r for r in rows}
     n_bets = n_decided = 0
     for d in sorted(decisions, key=lambda x: x.game_id):
@@ -299,11 +308,20 @@ def publish(conn, rows: list[dict], decisions: list[tt.TeamTotalDecision],
             continue
         row = by_game.get(d.game_id)
         detail = d.detail if d.game_id not in refused else f"{d.detail}; refused {refused[d.game_id]}"
+        if row is not None and d.game_id in taken:
+            logger.info(f"{MODEL_ID}: {d.game_id} not written, {taken[d.game_id]} already bet it "
+                        f"(one NBA game-total bet a game)")
+            detail, row = f"{detail}; {door.reason(taken[d.game_id])}", None
+        if row is None:
+            # Scored, no bet written: its NONE row, so the All board shows it
+            # (scripts/nba_none_rows.py).
+            row = (nones or {}).get(d.game_id)
+        is_bet = row is not None and row["signal_type"] == "BET"
         got = conn.execute(_INSERT_DECISION, {
             "game_id": d.game_id, "fetch_at": pd.Timestamp(d.fetch_at).isoformat(),
             "lead_min": round(leads.get(d.game_id, float("nan")), 2),
             "home_part": _num(d.home_part, 3), "gap_total": _num(d.gap_total, 3),
-            "n_bets": 1 if row is not None else 0, "detail": detail,
+            "n_bets": 1 if is_bet else 0, "detail": detail,
             "book": d.book, "line": d.line, "price": d.price,
             "p_fair": _num(d.p_fair, 4), "p_model": _num(d.p_model, 4),
             "fair_ref": d.fair_ref, "fair_mu": _num(d.fair_mu, 2),
@@ -313,7 +331,7 @@ def publish(conn, rows: list[dict], decisions: list[tt.TeamTotalDecision],
             continue
         n_decided += 1
         if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
-            n_bets += 1
+            n_bets += is_bet
     conn.commit()
     return n_bets, n_decided
 
@@ -444,9 +462,14 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                 diag_all[k] += v
         published = n_decided = 0
         if do_publish and decisions_all:
-            from models.scorer import _get_current_bankroll
+            from models.scorer import _get_current_bankroll, _pause_note
+            from scripts import nba_none_rows
             rows, refused = pick_rows(bets_all, games, _get_current_bankroll(conn))
-            published, n_decided = publish(conn, rows, decisions_all, leads, refused)
+            nones = nba_none_rows.none_rows(
+                decisions_all, model_id=MODEL_ID, sport=SPORT, side=tt.SIDE,
+                market=tt.MARKET, games=games, bankroll=_get_current_bankroll(conn),
+                pause=_pause_note(MODEL_ID))
+            published, n_decided = publish(conn, rows, decisions_all, leads, refused, nones)
         logger.info("\n" + render(bets_all, {**diag_all, **timing},
                                   published if do_publish else None,
                                   n_decided if do_publish else None))

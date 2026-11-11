@@ -41,14 +41,28 @@ function check(name: string, cond: boolean, detail = '') {
 const books = (qs: { bookmaker: string }[]) => qs.map((q) => q.bookmaker).join(',');
 
 // ── Book list mirrors config.py ─────────────────────────────────────────────
-// config.LINE_SHOP_BOOKMAKERS (13) and BEST_LINE_EXCLUDE_BOOKMAKERS (3).
+// Measured 2026-11-06: config fetches 10 books (LINE_SHOP_BOOKMAKERS) and decides
+// at 7 (BEST_LINE_BOOKMAKERS); BEST_LINE_EXCLUDE_BOOKMAKERS is 4 since betparx
+// joined (config.STATE_LIMITED_BOOKMAKERS). The app still lists 14 and 10:
+// ballybet, rebet, fliff (no price since 2026-09-20) and espnbet were never cut
+// here, so the fetched-count check below stays red until that list is.
+// 2026-11-10: the women's college basketball feed stores ballybet and fliff
+// again, for its games only and as reference prices
+// (config.NCAABW_EXTRA_BOOKMAKERS), so those two joined the reference-only
+// list: 6 reference-only, 8 bettable. rebet is still listed as bettable.
 check('13 books fetched', LINE_SHOP_BOOKS.length === 13, `${LINE_SHOP_BOOKS.length}`);
-check('3 reference-only books', REFERENCE_ONLY_BOOKS.length === 3);
-check('10 bettable books', BETTABLE_BOOKS.length === 10, `${BETTABLE_BOOKS.length}`);
+check('6 reference-only books', REFERENCE_ONLY_BOOKS.length === 6, `${REFERENCE_ONLY_BOOKS.length}`);
+check('8 bettable books', BETTABLE_BOOKS.length === 8, `${BETTABLE_BOOKS.length}`);
 check('DraftKings is bettable', isBettableBook(MODEL_BOOK));
 check('Pinnacle is not', !isBettableBook('pinnacle'));
 check('Bovada is not', !isBettableBook('bovada'));
 check('ESPN BET is not (mike, 2026-09-03)', !isBettableBook('espnbet'));
+check('betPARX is not: a few states only (mike, 2026-11-06)', !isBettableBook('betparx'));
+check('Bally Bet and Fliff are not: women\'s college basketball reference prices (2026-11-10)',
+  !isBettableBook('ballybet') && !isBettableBook('fliff'));
+check('the four women\'s-only reference books are named and not bettable',
+  ['betonlineag', 'lowvig', 'unibet', 'betwhale'].every((b) => !isBettableBook(b) && bookName(b) !== b),
+  ['betonlineag', 'lowvig', 'unibet', 'betwhale'].map((b) => bookName(b)).join(', '));
 check('an unknown key is not bettable', !isBettableBook('somebook'));
 check(
   'every book has a real name and a short label',

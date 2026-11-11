@@ -353,8 +353,7 @@ def x_tweets(monkeypatch):
     monkeypatch.setattr(x_publisher, "_x_pick_gap_open", lambda conn, clock: True)
     monkeypatch.setattr(x_publisher, "_already_sent", lambda conn, key, kind: False)
     monkeypatch.setattr(x_publisher, "_game_already_started", lambda pick, clock: False)
-    monkeypatch.setattr(x_publisher, "_college_mascots", lambda conn, picks: {})
-    monkeypatch.setattr(x_publisher, "render_pick", lambda pick, mascots=None: pick["label"])
+    monkeypatch.setattr(x_publisher, "render_pick", lambda pick: pick["label"])
     monkeypatch.setattr(x_publisher, "_deliver_tweet", deliver)
     return tweets
 

@@ -15,7 +15,7 @@ wait for it.
       Prices the stored projections against the game's newest prop fetch from
       inside the decision window. Both NBA prop cards then write through ONE
       door (scripts/nba_props_card.publish_across_models): one bet a game
-      across both models and four a night, strongest first (each bet's EV
+      across both models and six a night, strongest first (each bet's EV
       percentile within its own model); each decided game's
       ledger row (nba_prop_projection_decisions) and its bets in one
       transaction, under both models' locks.

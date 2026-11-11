@@ -584,10 +584,11 @@ export function PicksHomeScreen() {
     return { total: todayData.length, bet, paused };
   }, [todayData, thresholdsRevision]);
 
-  // Signals / Live views: exposure of the recommended stakes on screen.
+  // Signals / Live views: exposure of the recommended stakes on screen, each
+  // at the pick's own stake_units when it carries one (the card's stake).
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick)), 0);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick), d.pick.stake_units), 0);
   }, [filtered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
@@ -840,13 +841,13 @@ export function PicksHomeScreen() {
           <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
           <Text style={styles.liveNote}>
             {liveWithPriceCount === 0
-              ? 'Bet at the book on each card · live price not shown, checked hourly'
+              ? 'Bet at the book on each card · live price not shown after the bet'
               : 'Bet at the book on each card · prices up to ~45s old'}
           </Text>
           <InfoTooltip
             title="Live pricing"
             body={
-              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books only once an hour, so its cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
+              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books once an hour and the NCAAB in-play models twice an hour, so their cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
             }
             accessibilityLabel="About live pricing"
           />
@@ -1104,7 +1105,14 @@ function EmptyForView({
     return (
       <EmptyState
         title={`No ${sport} picks today`}
-        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`}
+        subtitle={
+          // The women's totals model posts when DraftKings opens a game's
+          // total, not on the refresh cadence, so the refresh times would
+          // send a member back at the wrong hour (UX review, 2026-11-10).
+          sport === 'NCAABW'
+            ? `No NCAABW picks have posted for ${date} yet. Picks post as DraftKings opens each game’s total, mostly on game day.`
+            : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
+        }
       />
     );
   }
@@ -1128,7 +1136,14 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitle={
+            // Spelled out for the women's sport: the list of in-play sports
+            // names NCAAB, and "NCAAB ... NCAABW" in one sentence reads as a
+            // typo (UX review, 2026-11-10).
+            sport === 'NCAABW'
+              ? 'There is no in-play model for women’s college basketball. The All and Signals boards carry its pre-game picks.'
+              : `In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`
+          }
         />
       );
     }

@@ -29,7 +29,8 @@ first-half fetch an hour before each tip:
      best is chosen, so the next book takes the game (the research's -200
      floor test, after_fact.py AF1). The single best eligible quote is the one
      with the largest edge, ties to the alphabetically first book key. The game
-     is bet there when that edge is above 0.02 (config.MODEL_EDGE_THRESHOLDS);
+     is bet there when that edge is above the cut, 0.025 from 2026-11-06
+     (0.02 before; config.MODEL_EDGE_THRESHOLDS);
      otherwise it is decided with no bet. One decision a game, ever (CLAUDE.md
      1c).
 

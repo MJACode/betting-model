@@ -18,6 +18,7 @@ This Privacy Policy explains how Signal Base LLC ("Signal Base LLC," "we," "us")
 **Information collected automatically**
 - **Device and app data:** an app-generated device identifier, platform, OS and app version.
 - **Crash and error logs:** error details, the screen involved, and app/device version, used to fix bugs.
+- **Crash and diagnostic reports:** Sentry (Functional Software, Inc.) processes crash and diagnostic reports on our behalf. Those reports include crash data, performance and hang data, and an anonymous device ID. We do not send your email address or IP address to Sentry.
 - **Push notification token,** if you allow notifications, plus your notification preferences.
 - **Website data:** signalbase-ai.com does not use cookies or analytics. Our hosting keeps standard server logs (such as IP address, browser type, and pages requested) for security and to keep the site running.
 
@@ -30,7 +31,7 @@ To provide and operate the Service; to save and sync your custom models and sett
 
 ## 3. How we share information
 We share information only with:
-- **Service providers** who process it on our behalf: Supabase (database, authentication, hosting of backend functions); Railway (backend hosting and data processing); our website host; Expo (app updates and push notifications); Apple and Google (sign-in, app distribution, push, payments); RevenueCat (in-app subscriptions); Whop and Stripe (payments); Discord (community and membership roles); SharpSports (optional sportsbook linking).
+- **Service providers** who process it on our behalf: Supabase (database, authentication, hosting of backend functions); Railway (backend hosting and data processing); our website host; Expo (app updates and push notifications); Apple and Google (sign-in, app distribution, push, payments); RevenueCat (in-app subscriptions); Whop and Stripe (payments); Discord (community and membership roles); SharpSports (optional sportsbook linking); Sentry (Functional Software, Inc.) (crash and diagnostic reports).
 - **Legal and safety:** when required by law or to protect rights, safety, and the Service.
 - **Business transfers:** in a merger, acquisition, or sale of assets.
 - **With your consent.**

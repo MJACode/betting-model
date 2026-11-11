@@ -73,10 +73,22 @@ def test_copy_is_word_for_word():
 
 def test_section_placement_and_scope():
     settings = _read(SETTINGS)
-    assert (
-        '<SectionHeader title="Bankroll" />\n\n        <BankrollCard />\n\n'
-        '        <SectionHeader title="Staying in control" />' in settings
-    )
+    # Order set by Matt, 2026-11-09: Betting (sportsbooks first), Bankroll,
+    # Alerts, Explore, Community, Account, then Responsible gambling last.
+    assert '<SectionHeader title="Bankroll" />\n\n        <BankrollCard />\n\n' in settings
+    order = [
+        '<SectionHeader title="Betting" />',
+        '<SectionHeader title="Bankroll" />',
+        '<SectionHeader title="Alerts" />',
+        '<SectionHeader title="Explore" />',
+        '<SectionHeader title="Community" />',
+        '<SectionHeader title="Account" />',
+        '<SectionHeader title="Responsible gambling" />',
+    ]
+    at = [settings.index(h) for h in order]
+    assert at == sorted(at)
+    assert settings.index('<Text style={styles.cardLabel}>Your sportsbooks</Text>') < settings.index('<SectionHeader title="Bankroll" />')
+    assert 'Staying in control' not in settings
     assert "Bankroll & limits" not in settings
     for gone in ("Daily limit:", "Presets", "Show $ next to units", "24 hours"):
         assert gone not in settings

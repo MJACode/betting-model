@@ -467,8 +467,10 @@ export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null
  *               1u; at +150, 0.67u to win 1u. Without this the same "2u" label
  *               meant wildly different money at -300 and at +200.
  *
- * The conviction scale is Kelly rescaled so the server's 5% Kelly cap lands on
- * exactly 3u — Kelly is still the ranking signal, only the denominator moved.
+ * The conviction is FLAT 1u (convictionFor) unless the pick carries its own
+ * stake: picks.stake_units, 1..3 units to win, written by the card that decided
+ * it (pickConviction; NCAAB agreement sizing, mike 2026-11-06). The Kelly tier
+ * scale that used to set it is retired; see convictionFor.
  *
  * RISK IS HARD-CAPPED AT MAX_RISK_UNITS ON ONE EVENT. Un-capped, "3 units to
  * win" at the median -135 lays 4.05u and 30% of the book would risk over 3u
@@ -481,9 +483,11 @@ export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null
  * settlement uses, but that is a GRADING convention and is deliberately not
  * asserted as a price on the card.
  *
- * Mirrors stake_for()/conviction_for() in tracking/discord_notifier.py — the
- * app and the Discord channel show the SAME numbers, which is the point of
- * publishing in units at all. Nothing here is per-user, so they cannot drift.
+ * Mirrors stake_for()/pick_conviction()/conviction_for() in
+ * tracking/discord_notifier.py — the app and the Discord channel show the SAME
+ * numbers, which is the point of publishing in units at all. Nothing here is
+ * per-user (stake_units is the pick's, the same row for every viewer), so they
+ * cannot drift.
  *
  * Deliberately derived from kelly, never from bankroll: the compounded paper
  * bankroll has decayed to ~$107, so a dollar stake off it says nothing about
@@ -492,7 +496,7 @@ export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null
  */
 export const UNIT_KELLY_FRACTION = 0.01;  // legacy: 1u == 1% of roll
 export const MAX_CONVICTION = 3;          // ceiling of the (currently unused) tier scale
-export const FLAT_CONVICTION = 1;        // every pick, until a tier survives a time split
+export const FLAT_CONVICTION = 1;        // every pick without its own stake_units
 export const MIN_CONVICTION = 1;          // lowest
 export const MAX_RISK_UNITS = 3;          // never lay more than this on one event
 const DEFAULT_UNITS = 1;                  // kelly absent/zero (prob-only picks)
@@ -513,7 +517,8 @@ export function decimalOdds(american: number | null | undefined): number | null 
 }
 
 /**
- * Conviction in UNITS TO WIN. Currently FLAT 1u for every pick.
+ * Conviction in UNITS TO WIN from the model's Kelly. FLAT 1u for every pick;
+ * a pick's own stake_units overrides it in pickConviction, not here.
  *
  * Mirrors tracking/discord_notifier.conviction_for -- the app and the channel
  * must publish the same number, and scripts/verify_units_parity.ts pins that.
@@ -535,12 +540,36 @@ export function convictionFor(
   return FLAT_CONVICTION;
 }
 
-/** Conviction plus the price-aware risk/win pair. See the block comment above. */
+/**
+ * The conviction a pick publishes: its own `stake_units` (picks.stake_units,
+ * units to win) when that is a finite number from 1 to 3, else the flat unit.
+ *
+ * Mirrors tracking/discord_notifier.pick_conviction. Coerced with Number()
+ * because PostgREST can send a NUMERIC as a string, and Python's float()
+ * reads one too; null, a blank, NaN, Infinity and anything outside 1..3 are
+ * the flat 1u on both sides.
+ */
+export function pickConviction(
+  serverKellyFraction: number | null | undefined,
+  stakeUnits?: number | null,
+): number {
+  if (stakeUnits == null) return convictionFor(serverKellyFraction);
+  const u = Number(stakeUnits);
+  if (Number.isFinite(u) && u >= MIN_CONVICTION && u <= MAX_CONVICTION) return u;
+  return convictionFor(serverKellyFraction);
+}
+
+/**
+ * Conviction plus the price-aware risk/win pair. See the block comment above.
+ * `stakeUnits` is the pick's own stake (picks.stake_units); leave it out, or
+ * pass null, for the usual 1u to win.
+ */
 export function stakeFor(
   serverKellyFraction: number | null | undefined,
   dkOdds: number | null | undefined,
+  stakeUnits?: number | null,
 ): UnitStake {
-  const conviction = convictionFor(serverKellyFraction);
+  const conviction = pickConviction(serverKellyFraction, stakeUnits);
   const dec = decimalOdds(dkOdds);
   if (dec == null || dec <= 1) {
     // No price to gross up against — publish the bare conviction.
@@ -562,31 +591,35 @@ export function stakeFor(
 
 /**
  * Units LAID on a pick — what exposure sums should add up. Price-aware, so at
- * -110 a 1u-conviction play returns 1.1.
+ * -110 a 1u-conviction play returns 1.1. `stakeUnits` as in stakeFor.
  */
 export function unitsFor(
   serverKellyFraction: number | null | undefined,
   dkOdds: number | null | undefined = null,
+  stakeUnits?: number | null,
 ): number {
-  return stakeFor(serverKellyFraction, dkOdds).risk;
+  return stakeFor(serverKellyFraction, dkOdds, stakeUnits).risk;
 }
 
 /**
  * Units won or lost, and units risked, at the posted stake.
  *
  * The same pair as `published_pick_unit_profit` / `published_pick_unit_risked`
- * and `tracking.published_units`. `stakeFor` is the price math; this only
- * applies the result. A win pays `stake.win` (1, unless the 3u cap bound).
- * A loss costs `stake.risk`. A push, a void, and an ungraded pick risk
- * nothing. A missing price is 1 unit, not a made-up −110.
+ * (the three-argument pair, pick_stake_units_2026_11_06.sql) and
+ * `tracking.published_units`. `stakeFor` is the price math; this only applies
+ * the result. A win pays `stake.win` (the pick's stake_units, else 1, unless
+ * the 3u cap bound). A loss costs `stake.risk`. A push, a void, and an
+ * ungraded pick risk nothing. A missing price is the bare stake, not a
+ * made-up −110. A row without `stake_units` is the usual 1u.
  */
 export function postedPickUnits(p: {
   kelly_fraction?: number | null;
   dk_odds?: number | null;
   decision_odds?: number | null;
   result?: string | null;
+  stake_units?: number | null;
 }): { units: number; risked: number } {
-  const stake = stakeFor(p.kelly_fraction, decisionOdds(p));
+  const stake = stakeFor(p.kelly_fraction, decisionOdds(p), p.stake_units);
   if (p.result === 'WIN') return { units: stake.win, risked: stake.risk };
   if (p.result === 'LOSS') return { units: -stake.risk, risked: stake.risk };
   return { units: 0, risked: 0 };
@@ -596,6 +629,22 @@ export function postedPickUnits(p: {
 export function formatStake(stake: UnitStake): string {
   if (!stake.priced) return formatUnits(stake.conviction);
   return `${formatUnits(stake.risk)} to win ${formatUnits(stake.win)}`;
+}
+
+/**
+ * Why a pick is staked above the usual 1u, for the line under its stake: the
+ * pick's own `stake_reason` (picks.stake_reason), shown only while the stake
+ * it explains is in force, i.e. the conviction stakeFor settled on is above
+ * the flat unit. A 1u pick, a stake_units outside 1..3 (which stakeFor reads
+ * as 1u), and a blank reason all show nothing.
+ */
+export function stakeReasonLine(
+  stake: Pick<UnitStake, 'conviction'>,
+  reason: string | null | undefined,
+): string | null {
+  if (!(stake.conviction > FLAT_CONVICTION)) return null;
+  const text = typeof reason === 'string' ? reason.trim() : '';
+  return text || null;
 }
 
 // formatUnits lives in lib/format (one copy of its half-up rounding, shared

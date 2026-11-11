@@ -86,7 +86,7 @@ def board(dsn):
         c.execute(f"DO $$ BEGIN CREATE ROLE {role} NOLOGIN; "
                   f"EXCEPTION WHEN duplicate_object THEN NULL; END $$;")
     c.execute("DROP TABLE IF EXISTS ncaab_total_decisions, picks, odds, games")
-    c.execute("CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, "
+    c.execute("CREATE TABLE picks (pick_id SERIAL PRIMARY KEY, condition_status TEXT, "
               + ", ".join(f"{col} TEXT" for col in _COLS) + ")")
     c.execute("CREATE TABLE games (game_id TEXT PRIMARY KEY, sport TEXT, season INTEGER, "
               "game_date TEXT, commence_time TEXT, home_team TEXT, away_team TEXT)")

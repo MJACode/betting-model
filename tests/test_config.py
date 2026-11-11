@@ -216,6 +216,9 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # 2026-10-30 (mike, "Yes to the totals model"): NCAAB totals; its 0.04
          # cut was measured on its own P(win | no push), and it has no record.
          "ncaab_total_blend",
+         # 2026-11-09 (mike): NCAABW totals, the women's twin; its 0.05 cut was
+         # measured on its own P(win | no push), and it has no record.
+         "ncaabw_total_blend",
          # 2026-11-02 (mike): NCAAB spreads; its 0.03 cut was measured on its
          # own P(win | no push) at the bet book's line, and it has no record.
          "ncaab_spread_market",
@@ -235,7 +238,13 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
          # 2026-11-04 (mike): the NBA in-play quarters 1-2 spread; IG-2's own
          # game-state probability, which its EV >= 0.05 cut was graded on, and
          # it has no record. The quarter-3 models are held out.
-         "nba_live_spread_q12"}
+         "nba_live_spread_q12",
+         # 2026-11-07 (mike: "I WANT THAT MODEL"): the NBA first-quarter spread; market-fair P(cover)
+         # plus the graded cell's uplift, which its rule was graded on.
+         "nba_q1_trend",
+         # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's
+         # own probability, which their EV cuts were graded on; no record.
+         "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2"}
     )
 
 
@@ -346,6 +355,7 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "nba_team_total_luck",      # market-fair P(under) + the walk-forward uplift
         "nba_first_half_total_luck",  # 2026-10-30 (mike): market-fair P(over) + the walk-forward uplift
         "ncaab_total_blend",        # 2026-10-30 (mike): its blend's P(win, push left out)
+        "ncaabw_total_blend",       # 2026-11-09 (mike): the women's twin, the same number
         "ncaab_spread_market",      # 2026-11-02 (mike): the margin table's P(win, push left out)
         "ncaab_moneyline_own_spread",  # 2026-11-02 (mike): the margin table's P(side wins) at the book's own spread
         "ncaab_moneyline_first_post",  # 2026-11-03 (mike): the same, at the book's first moneyline post
@@ -353,5 +363,9 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
         "ncaab_first_half_total",   # 2026-11-03 (mike): its first-half total table's P(win, push left out)
         # 2026-11-04 (mike): the NBA in-play quarters 1-2 spread; IG-2's own game-state probability.
         "nba_live_spread_q12",
+        # 2026-11-07 (mike): the NBA first-quarter spread; market-fair P(cover) + the graded cell's uplift.
+        "nba_q1_trend",
+        # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's own probability.
+        "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2",
     }
     assert not not_named_here

@@ -404,6 +404,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # v_public_track_record. Sits with the other display reads, before the
     # posted-stake pair. Guards each piece so the DDL fires once.
     "position_defense_ranks_nfl_2026_10_18.sql",
+    # 2026-11-07 (Matt): the player page's defense-toughness filter. One
+    # player's games over his last 3 seasons played, each with that season's
+    # rank of the opponent's defense (1 = toughest), plus the next
+    # opponent's rank. NBA, WNBA, NFL. Display only. Does not rewrite
+    # v_public_track_record. Guards on all three existing, so the DDL fires
+    # once. Needs player_positions (above).
+    "add_player_vs_defense_rpcs_2026_11_07.sql",
     # 2026-10-19: the member's own sportsbooks (onboarding + Settings).
     # Display only: one new table behind two device-scoped RPCs. No model,
     # pick or record view reads it. Returns on a catalog read once applied.
@@ -519,6 +526,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # marker comment exist. Does not rewrite picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_nba_team_q1_2026_10_28.sql",
+    # 2026-11-08 (Matt): NBA first-basket stats on the Stats tab. Two
+    # tables written by data/ingestors/nba_first_basket.py, SELECT policies,
+    # and two security_invoker season views. Returns on a catalog read once
+    # both tables, both policies and both views' marker comments exist.
+    # Does not rewrite picks, odds or the record. Sits before the
+    # posted-stake pair so those two stay adjacent.
+    "add_nba_first_basket_2026_11_08.sql",
     # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
     # One table, written by data/ingestors/live_scoreboard.py, with a
     # SELECT policy and a SELECT-only grant. Returns on a catalog read once
@@ -582,6 +596,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "nba_live_decisions_2026_11_04.sql",
+    # 2026-11-07 (mike): the NCAAB in-play loop's decision ledger, one row per
+    # game and in-play rule (models/ncaab_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "ncaab_live_decisions_2026_11_07.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
@@ -590,6 +610,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # it waits (a NOTICE, not an error) until the pair below has run. Does
     # not write picks, push_sent or the record. Sits before the pair.
     "open_picks_view_2026_11_04.sql",
+    # 2026-11-06 (mike): a pick can carry its own stake, picks.stake_units
+    # (units to win, 1..3; NULL is 1u). The two columns (picks and
+    # picks_log, and the audit trigger), the three-argument stake functions,
+    # and open_picks switched to pass it. After open_picks' owner above;
+    # before the pair below, whose view patch calls the three-argument
+    # functions. A NULL row grades exactly as before.
+    "pick_stake_units_2026_11_06.sql",
     # 2026-10-17: the posted-stake functions, committed on their own.
     # The view patch is the next file. A failure there must not roll
     # these back, or settlement's query names a function that does not
@@ -599,8 +626,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # The two record views gain units and risked from the functions
     # above. Both sums keep WIN/LOSS/PUSH only. profit_flat stays.
     # Reads the live view, so it runs after every owner above, including
-    # the CLV stamp. Does not rewrite snapshots, picks, or push_sent,
-    # and does not post. This file stays last.
+    # the CLV stamp. Since 2026-11-06 it passes each pick's stake_units
+    # (the three-argument pair, from pick_stake_units_2026_11_06.sql) and
+    # switches a view that still calls the two-argument pair. Does not
+    # rewrite snapshots, picks, or push_sent, and does not post. This file
+    # stays last.
     "published_record_units_2026_10_16.sql",
 ]
 

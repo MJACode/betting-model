@@ -122,7 +122,8 @@ def test_the_tracked_grader_books_the_posted_stake_not_profit_flat():
         assert re.search(r"\.profit_flat\b", code) is None, rel
         assert "() => 100" not in code, f"{rel} keeps a hidden 1u-risked default"
     stake = _code(_read(SRC / "lib/trackedStake.ts"))
-    assert "stakeFor(p.kelly_fraction, decisionOdds(p))" in stake
+    # The pick's own stake rides along (picks.stake_units, 2026-11-06).
+    assert "stakeFor(p.kelly_fraction, decisionOdds(p), p.stake_units)" in stake
     hook = _code(_read(SRC / "hooks/useTrackedBetResults.ts"))
     assert "trackedStakeFor(stakes.mode, stakes.customStakes)" in hook
     assert "FLAT_STAKE" not in hook

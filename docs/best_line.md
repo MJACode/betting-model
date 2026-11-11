@@ -158,6 +158,13 @@ hits the per-event fetch and the prop fetch. Against ~35k credits/day and a
 The marginal cost of books 2-5 is **zero** — once one `us2` book is on the list
 the second region is paid for — so this is all-or-nothing, not a dial.
 
+**betparx left the offered set on 2026-11-06** (mike: *"remove betparx from
+sports books for recommeding betting lines in picks only niche avaialble in a
+few states"*). It is licensed in Maryland, Pennsylvania and New Jersey only.
+It is still fetched, and it is now in `config.STATE_LIMITED_BOOKMAKERS`, which no
+environment override of `BEST_LINE_BOOKMAKERS` or `BETTABLE_BOOKS` can put back.
+Evidence and the volume it cost: `docs/rules_evidence.md`, §6 entry.
+
 ---
 
 ## 3. Stage 1 — shipped in this change (no model behaviour changes)

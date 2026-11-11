@@ -37,10 +37,17 @@ import os
 BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,"
                      # espnbet, ballybet, rebet and fliff left 2026-09-20
                      # with the fourteen-to-ten cut (config.LINE_SHOP_BOOKMAKERS).
+                     # betparx left 2026-11-06 (mike: only a few states can
+                     # bet it -- config.STATE_LIMITED_BOOKMAKERS).
                      # This list is a COPY of config.BETTABLE_BOOKS for the
                      # standalone path, and a copy that drifts is a copy that
                      # lies -- the test pins them equal.
-                     "fanatics,betrivers,hardrockbet,betparx")
+                     "fanatics,betrivers,hardrockbet")
+
+# A COPY of config.STATE_LIMITED_BOOKMAKERS for the standalone path: fetched,
+# never a placement venue, and no BETTABLE_BOOKS override puts one back.
+# tests/test_betparx_never_a_pick_book.py pins the two equal.
+STATE_LIMITED = frozenset({"betparx"})
 
 
 def bettable_books() -> set[str]:
@@ -53,9 +60,11 @@ def bettable_books() -> set[str]:
     """
     env = os.environ.get("BETTABLE_BOOKS")
     if env:
-        return {b.strip().lower() for b in env.split(",") if b.strip()}
-    try:
-        from config import BETTABLE_BOOKS as _cfg
-        return {b.strip().lower() for b in _cfg}
-    except Exception:                                          # noqa: BLE001
-        return {b.strip().lower() for b in BETTABLE_FALLBACK.split(",")}
+        books = {b.strip().lower() for b in env.split(",") if b.strip()}
+    else:
+        try:
+            from config import BETTABLE_BOOKS as _cfg
+            books = {b.strip().lower() for b in _cfg}
+        except Exception:                                      # noqa: BLE001
+            books = {b.strip().lower() for b in BETTABLE_FALLBACK.split(",")}
+    return books - STATE_LIMITED

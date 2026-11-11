@@ -321,8 +321,10 @@ def test_an_ncaab_first_half_close_is_a_later_pre_tip_row():
     assert sql.count(
         "s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
     assert sql.count("o.snapshot_at::timestamptz > s.created_at") == 3
+    # The NBA close-only rule also names the first-quarter spread (models/nba_q1_trend.py); the NCAAB rule above
+    # is unchanged.
     assert sql.count(
-        "s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
+        "s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1')") == 3
 
 
 # ── the card's rows ──────────────────────────────────────────────────────────
@@ -381,15 +383,20 @@ def test_the_card_bets_only_at_books_config_still_lists(monkeypatch):
 
 
 def test_the_model_s_books_are_bettable_today():
-    assert set(fh.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
+    # betparx stays in the fitted consensus set and is never a betting book
+    # (config.STATE_LIMITED_BOOKMAKERS, mike 2026-11-06).
+    assert set(fh.BOOKS) - config.STATE_LIMITED_BOOKMAKERS <= set(config.BEST_LINE_BOOKMAKERS)
+    from scripts.ncaab_first_half_spread_card import bet_books
+    assert "betparx" in fh.BOOKS and "betparx" not in bet_books()
 
 
 # ── registration ─────────────────────────────────────────────────────────────
 
 def test_it_is_registered_where_every_rule_card_is():
     mid = fh.MODEL_ID
-    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.02}
-    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.02 and config.MODEL_PROB_THRESHOLDS[mid] == 0.0
+    # The cut moved 0.02 -> 0.025 on 2026-11-07 (mike: fewer picks).
+    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.025}
+    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.025 and config.MODEL_PROB_THRESHOLDS[mid] == 0.0
     assert config.min_odds_for(mid) == -200 and config.min_ev_for(mid) == 0.03
     assert mid in config.MODELS_ON_OWN_PROBABILITY and config.scoring_method(mid) == "rule"
     assert mid not in config.PAUSED_MODELS and mid not in config.RETIRED_MODELS

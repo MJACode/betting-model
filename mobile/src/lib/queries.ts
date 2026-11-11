@@ -11,10 +11,15 @@ import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
   LOG_TABLE,
+  dnpEntries,
   logFetchLimit,
+  mergePlayedAndDnp,
+  minutesPlayed,
   normalizeLogRow,
+  sportTracksMinutes,
   attachGameSides,
   type GameSidesRow,
+  type LoggedMinute,
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
@@ -38,6 +43,14 @@ import {
 } from './markets';
 import { normalizePlayerName } from './playerNews';
 import { NBA_Q1_FETCH_GAMES, NBA_Q1_SEASON_COLUMNS, type NbaQ1Game, type NbaQ1SeasonRow } from './nbaQ1';
+import {
+  NBA_FB_PLAYER_COLUMNS,
+  NBA_FB_TEAM_COLUMNS,
+  normalizePlayerRow,
+  normalizeTeamRow,
+  type NbaFbPlayerRow,
+  type NbaFbTeamRow,
+} from './nbaFirstBasket';
 import {
   DUPLICATE_STATUS,
   isDuplicateCopy,
@@ -88,6 +101,7 @@ import type {
   RecentGameRow,
   SavantStatsRow,
   H2HStatValuesRow,
+  PlayerVsDefenseRow,
   PositionVsOpponentRow,
   PositionDefenseRankRow,
   SeasonStatValuesRow,
@@ -205,13 +219,14 @@ const hasTeams = (teams: SlateTeams): teams is readonly string[] =>
  * cap, which returns an arbitrary 1,000 and says nothing.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  // No golf leaderboard (v1).
-  if (sport === 'GOLF') return [];
+  // No golf leaderboard (v1), and no NCAABW (women's college basketball)
+  // player stats in the app. Named, or the sport falls to the MLB read below.
+  if (sport === 'GOLF' || sport === 'NCAABW') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -280,7 +295,7 @@ const totalsRowKey = (r: SeasonTotalsRow): string =>
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -296,15 +311,16 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  // No golf leaderboard (v1).
-  if (sport === 'GOLF') return [];
+  // No golf leaderboard (v1), and no NCAABW player stats in the app. Named,
+  // or the sport falls to the MLB read below.
+  if (sport === 'GOLF' || sport === 'NCAABW') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -385,7 +401,7 @@ function pageRpc<T>(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
@@ -468,7 +484,7 @@ const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
@@ -589,7 +605,7 @@ function h2hSeasonCandidates(sport: string, season: number): number[] {
  * ask about, and an unnarrowed H2H read is the cross product.
  */
 export async function fetchH2HStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   matchups: H2HMatchups,
@@ -664,7 +680,7 @@ export async function fetchSeasonStarted(
  * NFL, MLB, NBA, WNBA and NCAAF; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   seasons: number[],
   statKey: string,
   posGroup: string,
@@ -706,6 +722,63 @@ export async function fetchPositionVsOpponent(
     return fetchAllPages<PositionVsOpponentRow>(
       (from, to) =>
         supabase.rpc('position_vs_opponent_ncaaf', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  return [];
+}
+
+/**
+ * One player's games over his last three seasons PLAYED, each with that
+ * season's rank of the opponent's defense (1 = toughest), plus one row
+ * (game_id null) for the next opponent's rank. Backs the player page's
+ * defense-toughness filter (Matt, 2026-11-07).
+ *
+ * ROW COUNT, measured on production 2026-11-07 by running the function body
+ * read-only: Kyrie Irving points (NBA, 3 seasons) 116 rows in 385 ms;
+ * Ja'Marr Chase receiving yards (NFL) 41 rows. A full three NBA seasons is
+ * ~250 rows at most. Paged anyway: the 1,000-row cap is a property of every
+ * read (.claude/rules/frontend.md), on an order the REQUEST names.
+ *
+ * NBA, WNBA and NFL; other sports return [] without a request. Literal .rpc()
+ * names, never one picked by a variable (tests/test_anon_readable.py).
+ */
+export async function fetchPlayerVsDefense(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
+  playerId: string,
+  statKey: string,
+  posGroup: string,
+  seasons: number[],
+  seasonCount: number,
+  nextOpponent: string | null,
+): Promise<PlayerVsDefenseRow[]> {
+  const args = {
+    p_player_id: playerId,
+    p_stat: statKey,
+    p_pos_group: posGroup,
+    p_seasons: seasons,
+    p_season_count: seasonCount,
+    p_next_opponent: nextOpponent,
+  };
+  const key = (r: PlayerVsDefenseRow) => `${r.season}:${r.game_id ?? 'next'}:${r.game_date ?? ''}`;
+  if (sport === 'NBA') {
+    return fetchAllPages<PlayerVsDefenseRow>(
+      (from, to) =>
+        supabase.rpc('player_vs_defense_nba', args).order('season').order('game_date').order('game_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'WNBA') {
+    return fetchAllPages<PlayerVsDefenseRow>(
+      (from, to) =>
+        supabase.rpc('player_vs_defense_wnba', args).order('season').order('game_date').order('game_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'NFL') {
+    return fetchAllPages<PlayerVsDefenseRow>(
+      (from, to) =>
+        supabase.rpc('player_vs_defense_nfl', args).order('season').order('game_date').order('game_id').range(from, to),
       key,
     );
   }
@@ -762,17 +835,21 @@ const PICK_COLUMNS =
   'clv_captured_at, clv_method, clv_close_book, clv_bet_book, ' +
   'market_clv_pct, market_clv_pp, market_clv_method, pinnacle_close_odds, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
+  // The pick's own stake (2026-11-06): units to win, NULL = 1u, and why.
+  // Columns on `picks` only. open_picks and the record views do not carry them.
+  'stake_units, stake_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
 // with SettledPickKey — and bump the cache key in settledPickCache.ts when it
-// changes, or cached rows will be missing the new column.
+// changes, or cached rows will be missing the new column. stake_units is the
+// one exception, and settledPickCache.ts says why.
 const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
   'public_bet_pct, injury_flag, clv_pct, clv_method, decision_book, decision_odds, decision_edge, ' +
-  'is_live, downgrade_reason, player_key, prop_market';
+  'is_live, downgrade_reason, player_key, prop_market, stake_units';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -1001,6 +1078,8 @@ const MAIN_GAME_ODDS_MARKETS = [
   'team_totals_away',
   'totals_h1',
   'spreads_h1',
+  // The NBA first quarter's spread (nba_q1_trend).
+  'spreads_q1',
 ] as const;
 
 /**
@@ -1754,25 +1833,37 @@ export async function fetchUpcomingNcaafPicks(
 }
 
 /**
- * Upcoming NCAAB picks AFTER `afterDate` through `throughDate`.
+ * Upcoming picks for one college basketball sport, NCAAB (men's) or NCAABW
+ * (women's), AFTER `afterDate` through `throughDate`.
  *
- * The NCAAB totals model decides minutes after DraftKings first posts a game's
- * total, usually the day before the game, so a same-day board would hide each
- * of its picks until game day. The window is
+ * Both totals models decide minutes after DraftKings first posts a game's
+ * total. For the men's that is usually the day before the game; for the
+ * women's it came 1 to 6 Eastern dates before the game's date in 155 of 1,772
+ * priced games (scripts/ncaabw_total_card.py SLATE_DAYS). A same-day board
+ * would hide each of those picks until game day. The window is
  * the NHL card's; the reads are not. A college basketball week is far bigger
- * than any other sport's: measured 2026-10-30 (read only), 182 games on
+ * than any other sport's: measured 2026-10-30 (read only), 182 men's games on
  * 2026-11-02, and over 2025-26 the biggest day held 4,417 main-market rows
  * across all books and the biggest seven days 10,424. Reading every game in
  * the window would be up to eleven 1,000-row pages per mount, for cards the
- * board never draws.
+ * board never draws. The women's schedule is nearly as big and mostly
+ * unpriced: read 2026-11-10 (read only), 415 women's games stored for
+ * 2026-11-10 to 11-17 and 163 on 2026-11-02 beside the men's 182, while the
+ * priced women's games of 2026-11-08 held 162 all-books rows over 12 games,
+ * 30 on the biggest.
  *
  * So the picks are read first, and every other read asks only for the games
  * those picks are on, 80 ids at a time. The picks read is drained on an order
  * the request names (signals first, then a unique key), so no row cap can
- * cost a BET. Per 80 games the DraftKings read is at most 720 rows (one per
- * game and main market), under the cap.
+ * cost a BET. Per 80 games the DraftKings read is at most 960 rows (one per
+ * game and main market, twelve markets), under the cap.
+ *
+ * The sport is matched on the picks' own `sport` column, never on a game-id
+ * prefix: LIKE 'NCAAB_%' also matches 'NCAABW_...', because the underscore is
+ * LIKE's any-one-character.
  */
-export async function fetchUpcomingNcaabPicks(
+export async function fetchUpcomingCollegeBasketballPicks(
+  sport: 'NCAAB' | 'NCAABW',
   afterDate: string,
   throughDate: string,
   onEnrichmentError?: (what: string, error: unknown) => void,
@@ -1782,7 +1873,7 @@ export async function fetchUpcomingNcaabPicks(
       supabase
         .from('picks')
         .select(PICK_COLUMNS)
-        .eq('sport', 'NCAAB')
+        .eq('sport', sport)
         .gt('game_date', afterDate)
         .lte('game_date', throughDate)
         .order('signal_type', { ascending: true })
@@ -1803,7 +1894,8 @@ export async function fetchUpcomingNcaabPicks(
   // The lines are read only for the games with a BET or AVOID: only signal
   // cards draw the line pill and the line shop (fetchPicksForDate's rule).
   // The NCAAB cards write a NONE row for every game they price and do not bet
-  // (2026-11-04), so the game list is most of the slate and the lines are not.
+  // (2026-11-04), and the NCAABW card does the same (2026-11-10), so the game
+  // list is most of the priced slate and the lines are not.
   const lineGameIds = Array.from(
     new Set(picks.filter((p) => p.signal_type !== 'NONE').map((p) => p.game_id)),
   );
@@ -1823,7 +1915,7 @@ export async function fetchUpcomingNcaabPicks(
       if (error) throw error;
       return (data ?? []) as unknown as GameRow[];
     }),
-    // Enrichment only: a failure shouldn't take down the NCAAB card, and is
+    // Enrichment only: a failure shouldn't take down the sport's card, and is
     // reported (the partial banner), not swallowed.
     eachChunk(lineGameIds, async (chunk) => {
       const { data, error } = await supabase
@@ -1834,7 +1926,7 @@ export async function fetchUpcomingNcaabPicks(
       if (error) throw error;
       return (data ?? []) as unknown as LatestDkOddsRow[];
     }).catch((e: unknown) => {
-      onEnrichmentError?.('the upcoming NCAAB lines', e);
+      onEnrichmentError?.(`the upcoming ${sport} lines`, e);
       return [] as LatestDkOddsRow[];
     }),
     eachChunk(lineGameIds, (chunk) =>
@@ -1852,7 +1944,7 @@ export async function fetchUpcomingNcaabPicks(
         (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
       ),
     ).catch((e: unknown) => {
-      onEnrichmentError?.('the upcoming NCAAB line shop', e);
+      onEnrichmentError?.(`the upcoming ${sport} line shop`, e);
       return [] as OddsByBookRow[];
     }),
   ]);
@@ -1873,6 +1965,24 @@ export async function fetchUpcomingNcaabPicks(
       ...bookEnrichment(pick, booksByGameMarket),
     };
   });
+}
+
+/** The men's look-ahead card (useTodayPicks NCAAB_AHEAD_DAYS). */
+export function fetchUpcomingNcaabPicks(
+  afterDate: string,
+  throughDate: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
+  return fetchUpcomingCollegeBasketballPicks('NCAAB', afterDate, throughDate, onEnrichmentError);
+}
+
+/** The women's look-ahead card (useTodayPicks NCAABW_AHEAD_DAYS). */
+export function fetchUpcomingNcaabwPicks(
+  afterDate: string,
+  throughDate: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
+  return fetchUpcomingCollegeBasketballPicks('NCAABW', afterDate, throughDate, onEnrichmentError);
 }
 
 /**
@@ -2655,12 +2765,27 @@ export async function fetchPlayerGameLog(
   q = playerId ? q.eq('player_id', playerId) : q.ilike('player_name', playerName!);
   const { data, error } = await q;
   if (error) throw error;
-  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
+  let rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
     normalizeLogRow(sport, r),
   );
+  // NBA did-not-play rows live in nba_player_dnp, not the game log. Merged
+  // here so the chart and the recent-games list can draw them. A failure
+  // (the read grant is a migration that is not applied until Matt says so)
+  // leaves the played log on screen. WNBA and NCAAB have no such table.
+  if (sport === 'NBA') {
+    const id = playerId || rows[0]?.player_id;
+    if (id) {
+      try {
+        const oldest = rows.length ? rows[rows.length - 1]!.game_date : null;
+        const dnp = await fetchNbaDnp(id, beforeDate, oldest);
+        rows = mergePlayedAndDnp(rows, dnp);
+      } catch (err) {
+        console.warn('[playerLog] DNP lookup failed', err);
+      }
+    }
+  }
   // Opponent and home/away for every sport (the chart labels "@CHI · 10/26").
-  // At most logFetchLimit ids (50), so one bounded read. A failure costs the
-  // labels, never the log.
+  // The id list is the loaded log plus any DNP rows inside that date span.
   const ids = [...new Set(rows.map((r) => r.game_id).filter(Boolean))];
   if (ids.length === 0) return rows;
   try {
@@ -2674,6 +2799,58 @@ export async function fetchPlayerGameLog(
     console.warn('[playerLog] opponent lookup failed', err);
     return rows;
   }
+}
+
+/** NBA did-not-play rows inside the loaded log's date span. */
+async function fetchNbaDnp(
+  playerId: string,
+  beforeDate: string,
+  oldest: string | null,
+): Promise<PlayerLogEntry[]> {
+  let q = supabase
+    .from('nba_player_dnp')
+    .select('game_id, player_id, player_name, team, game_date, season')
+    .eq('player_id', playerId)
+    .lt('game_date', beforeDate)
+    .order('game_date', { ascending: false })
+    .limit(logFetchLimit('NBA'));
+  if (oldest) q = q.gte('game_date', oldest);
+  const { data, error } = await q;
+  if (error) throw error;
+  return dnpEntries((data ?? []) as unknown as Parameters<typeof dnpEntries>[0]);
+}
+
+/**
+ * Minutes for chart games outside the loaded window. Defense rows are asked
+ * by game_id. Head-to-head rows have a date and no game_id, so those are
+ * asked by date. Both read the sport's own game log, not a wider "last N".
+ */
+export async function fetchPlayerMinutes(
+  sport: PlayerLogSport,
+  playerId: string,
+  spec: { gameIds: readonly string[]; dates: readonly string[] },
+): Promise<LoggedMinute[]> {
+  if (!sportTracksMinutes(sport) || !playerId) return [];
+  const out: LoggedMinute[] = [];
+  const take = async (column: 'game_id' | 'game_date', values: readonly string[]) => {
+    if (values.length === 0) return;
+    const { data, error } = await supabase
+      .from(LOG_TABLE[sport])
+      .select('game_id, game_date, minutes')
+      .eq('player_id', playerId)
+      .in(column, [...values]);
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as { game_id: string; game_date: string; minutes: unknown }[]) {
+      out.push({
+        game_id: String(row.game_id),
+        game_date: String(row.game_date),
+        minutes: minutesPlayed(row),
+      });
+    }
+  };
+  await take('game_id', spec.gameIds);
+  await take('game_date', spec.dates);
+  return out;
 }
 
 export async function fetchPlayerByName(
@@ -3162,11 +3339,12 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
  * Returns [] for sports with no teams (UFC, golf) rather than erroring.
  */
 export async function fetchTeamStats(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
 ): Promise<TeamSeasonStats> {
-  // NCAAB has no Teams board yet (teamStatCatalog BALL).
-  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB') return { season: null, rows: [] };
+  // NCAAB has no Teams board yet (teamStatCatalog BALL), and NCAABW has no
+  // team stats in the app at all.
+  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB' || sport === 'NCAABW') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without
@@ -3843,4 +4021,41 @@ export async function logSgpPrice(e: SgpPriceEntry): Promise<void> {
     p_app_version: e.appVersion,
   });
   if (error) throw error;
+}
+
+/**
+ * The 1st Basket board's team rows for the slate's teams (src/lib/nbaFirstBasket.ts).
+ * One row per team per season, so at most 30: under the row cap.
+ */
+export async function fetchNbaFirstBasketTeams(teams: string[], season: number): Promise<NbaFbTeamRow[]> {
+  if (teams.length === 0) return [];
+  const { data, error } = await supabase
+    .from('v_nba_first_basket_team_season')
+    .select(NBA_FB_TEAM_COLUMNS)
+    .eq('season', season)
+    .in('team', teams);
+  if (error) throw error;
+  return ((data ?? []) as unknown as NbaFbTeamRow[]).map(normalizeTeamRow);
+}
+
+/**
+ * The 1st Basket board's player rows for the slate's teams. One row per player
+ * under his LATEST team, so `.in('team', ...)` filters the same rows the board
+ * groups by (frontend rule: narrow only where the row means the same thing).
+ * Measured 2026-11-08: 457 players in all of 2026-27 so far; paged anyway.
+ */
+export async function fetchNbaFirstBasketPlayers(teams: string[], season: number): Promise<NbaFbPlayerRow[]> {
+  if (teams.length === 0) return [];
+  const rows = await fetchAllPages<NbaFbPlayerRow>(
+    (from, to) =>
+      supabase
+        .from('v_nba_first_basket_player_season')
+        .select(NBA_FB_PLAYER_COLUMNS)
+        .eq('season', season)
+        .in('team', teams)
+        .order('espn_id', { ascending: true })
+        .range(from, to),
+    (r) => String(r.espn_id),
+  );
+  return rows.map(normalizePlayerRow);
 }

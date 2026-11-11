@@ -1671,5 +1671,14 @@
     "args": {
       "apply": true
     }
+  },
+  {
+    "key": "nhl-derivative-totals-regrade-2026-11-09",
+    "job_type": "nhl_research",
+    "requested_by": "mike",
+    "note": "mike, 2026-11-09: 'rebuild NHL grading fix on current master'. The derivative-totals grade (team totals, alternate totals, first period) again with both fixes: team totals settle on the full-game score only, and on a whole-number line the model's chance of a push no longer counts as an under win (expected value returns the stake on a push). Adds the Pinnacle-against-a-bettable-book table. Read-only, writes nothing, uses no API credits. Result: worker_jobs.result->>'stdout'.",
+    "args": {
+      "script": "nhl_derivative_totals_backtest"
+    }
   }
 ]

@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost/db")
 
+import config  # noqa: E402
 import data.ingestors.ncaab_first_half_odds as feed  # noqa: E402
 import models.ncaab_first_half_total as ft  # noqa: E402
 from data.anon_readable import API_ROLES  # noqa: E402
@@ -200,6 +201,53 @@ def test_the_tip_minus_60_fetch_decides_once_and_writes_the_bet(world):
         assert card.first_decision(conn) is not None
     finally:
         conn.close()
+
+
+def _earlier_bet(raw, gid, model_id, side, status=None, signal="BET"):
+    with raw.cursor() as cur:
+        cur.execute("INSERT INTO picks (game_id, model_id, sport, pick_side, pick_label, signal_type, "
+                    "condition_status, model_probability, dk_implied_prob, edge) "
+                    "VALUES (%s, %s, 'NCAAB', %s, %s, %s, %s, 0.6, 0.5, 0.1)",
+                    (gid, model_id, side, f"Kansas vs Duke {side.title()} 140.5", signal, status))
+    raw.commit()
+
+
+def _first_half_stake(raw, gid):
+    return q(raw, "SELECT stake_units, stake_reason FROM picks WHERE game_id = %s AND model_id = %s",
+             (gid, ft.MODEL_ID))
+
+
+def test_a_bet_an_earlier_full_game_total_agrees_with_is_two_units(world):
+    """mike, 2026-11-06: the higher-confidence pick gets more units. The card
+    bets the first-half Under; the full-game total model bet the Under first."""
+    gid, raw = world["gid"], world["raw"]
+    _earlier_bet(raw, gid, "ncaab_total_blend", "under")
+    feed.fetch_first_half([gid])
+    assert card.run_card(do_publish=True)["published"] == 1
+    [(units, reason)] = _first_half_stake(raw, gid)
+    assert float(units) == config.NCAAB_AGREEMENT_STAKE_UNITS == 2.0
+    assert reason == "Two models agree: NCAAB Totals also bet Kansas vs Duke Under 140.5"
+
+
+@pytest.mark.parametrize("side, status, signal", [
+    ("over", None, "BET"),         # the other side is not agreement
+    ("under", "VOID", "BET"),      # a voided pick does not count
+    ("under", None, "NONE"),       # priced, not bet, does not count
+])
+def test_a_bet_nothing_earlier_agrees_with_stays_one_unit(world, side, status, signal):
+    gid, raw = world["gid"], world["raw"]
+    _earlier_bet(raw, gid, "ncaab_total_blend", side, status, signal)
+    feed.fetch_first_half([gid])
+    assert card.run_card(do_publish=True)["published"] == 1
+    assert _first_half_stake(raw, gid) == [(None, None)]
+
+
+def test_a_side_bet_is_not_agreement_for_a_total(world):
+    gid, raw = world["gid"], world["raw"]
+    _earlier_bet(raw, gid, "ncaab_spread_market", "under")    # wrong family, even with the same word
+    feed.fetch_first_half([gid])
+    assert card.run_card(do_publish=True)["published"] == 1
+    assert _first_half_stake(raw, gid) == [(None, None)]
 
 
 def test_a_dry_run_writes_nothing(world):

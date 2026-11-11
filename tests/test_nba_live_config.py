@@ -235,7 +235,8 @@ def test_an_nba_live_pick_is_announced_only_while_its_game_is_in_progress():
         "mat_pub.paused = FALSE", "mat_pub.paused = 0")
     got = {r[0] for r in c.execute(sql).fetchall()}
     assert got == {"NBA_live", "MLB_done"}
-    assert config.LIVE_ANNOUNCE_WHILE_IN_PROGRESS == frozenset({"NBA"})
+    # NBA, and NCAAB since 2026-11-07 (its final is written only at the final)
+    assert "NBA" in config.LIVE_ANNOUNCE_WHILE_IN_PROGRESS
 
 
 def test_a_pickem_spread_is_labelled_pk():

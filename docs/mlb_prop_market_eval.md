@@ -111,6 +111,21 @@ a per-market opportunity: it is four markets sliced after the fact from a
 negative pool, which is exactly how §5b's tackles result was manufactured. If
 anyone wants to pursue `pitcher_outs`, it needs its own pre-registered test.
 
+**That test ran 2026-09-19** (PR #763, not merged; carried here
+2026-10-10). Pitcher outs only. Pinnacle no-vig price against DraftKings
+no-vig price, same line, using each book's latest quote before first
+pitch. 3-point edge floor. August: **+2.0% on 52 bets**. September 1-19:
+**−9.7% on 28 bets**. The flat month did not hold up in the next one.
+Not a card; `mlb_prop_market` stays unwired. These two figures are the
+PR's own and were not re-run on 2026-10-10: the sweep needs a direct
+database connection.
+
+*Later (2026-10-10):* the three live pitcher prop models (strikeouts, outs,
+hits allowed) were paused the same day, 2026-09-19 (#764). All five
+pitcher prop models were still paused in `model_action_thresholds` on
+2026-10-10, and the regular season is over, so the next pitcher-prop
+prices to test on arrive with the 2027 season.
+
 ---
 
 ## 4. What was NOT done, deliberately
@@ -131,6 +146,17 @@ The measurement is reproducible in one command:
 ```bash
 python -m scripts.mlb_prop_market_sweep --start 2026-04-01 --end 2026-09-05
 ```
+
+To re-check the pitcher-outs result in §3 with no new code, run the same
+script twice, once with `--start 2026-08-01 --end 2026-08-31` and once with
+`--start 2026-09-01 --end 2026-09-19`. On the 3% row, read the `p_outs`
+entry, printed as bets/units; ROI is units divided by bets. A full run is
+enough: the rule has no limit across markets, so the pitcher-outs slice of
+a full run is the same as a pitcher-outs-only run. The script and the
+quote loader have not changed since 2026-09-19 (`git log` on
+`scripts/mlb_prop_market_sweep.py`, `models/mlb_prop_market.py` and
+`models/market_relative.py`), but the stored prices may have, so treat
+the §3 figures as measured that day.
 
 The history is in `player_prop_odds` and stays there — it is paid data and
 CLAUDE.md §1b says extracted data lives in Supabase. Re-running the backfill

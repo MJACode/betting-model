@@ -504,17 +504,20 @@ def test_a_play_by_play_error_fails_the_step_rebuilds_and_reaches_pipeline_log(m
     import data.db as db
     import data.ingestors.nba_period_scores as ps
     import data.ingestors.nba_team_q1 as q1
+    import data.ingestors.nba_first_basket as fb
     import run_pipeline
     monkeypatch.setattr(db, "get_connection", lambda: conn)
     monkeypatch.setattr(ps, "run", lambda *a, **k: {"rows": 1})
     rebuilt = []
     monkeypatch.setattr(q1, "rebuild", lambda *a, **k: rebuilt.append(1) or {"rows": 4})
+    # The step's fourth part (2026-11-08) runs after the play-by-play fill too.
+    monkeypatch.setattr(fb, "rebuild", lambda *a, **k: rebuilt.append(2) or {"games": 2, "players": 20})
     monkeypatch.setattr(nb, "fill_gaps", lambda *a, **k: {
         "errors": 1, "filled": 2,
         "first_error": "NBA_2026-10-20_BOS_DET: RuntimeError: 429 from summary"})
     ok = run_pipeline._timed_step(
         "nba-quarters", lambda: run_pipeline.step_nba_quarters("2026-10-30"), "2026-10-30")
-    assert ok is False and rebuilt == [1]
+    assert ok is False and rebuilt == [1, 2]
     sql, params = conn.sqls[-1]
     assert "INSERT INTO pipeline_log" in sql
     assert params[1] == "dispatch:nba-quarters" and "429 from summary" in params[-1]

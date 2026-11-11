@@ -41,7 +41,8 @@ _LATERAL = re.compile(r"LEFT JOIN LATERAL \(.*?\) pk ON TRUE", re.S)
 # the quoted price was taken at. None of them decide which signal qualifies.
 _DISPLAY_ONLY = ("LEFT JOIN (SELECT NULL AS created_at, NULL AS best_book, "
                  "NULL AS best_odds, NULL AS prop_market, "
-                 "NULL AS decision_book, NULL AS decision_odds) pk ON 1 = 1")
+                 "NULL AS decision_book, NULL AS decision_odds, "
+                 "NULL AS stake_units) pk ON 1 = 1")
 
 
 class _Conn:

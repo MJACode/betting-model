@@ -43,7 +43,6 @@ import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { useEnteredSgpPrices, useSgpHaircuts } from '@/hooks/useSgpHaircuts';
 import type { SgpHaircuts } from '@/lib/sgpPricing';
-import { SgpPriceEntry } from '@/components/SgpPriceEntry';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   isValidCombo,
@@ -1132,15 +1131,16 @@ function SlipBody({
           />
         ) : null}
 
-        <SgpPriceEntry
+        {/* Same-game price entry lives in each estimated tile's sheet (Matt,
+            2026-11-09: the yellow box here took too much room). */}
+        <BetslipBooksRow
           legs={pricedLegs}
+          sgpFits={sgpFits}
+          enteredPrices={enteredPrices}
           sgpGroups={metrics.sgpGroups}
-          entered={enteredPrices}
-          onEntered={onSgpEntered}
-          onCleared={onSgpCleared}
+          onSgpEntered={onSgpEntered}
+          onSgpCleared={onSgpCleared}
         />
-
-        <BetslipBooksRow legs={pricedLegs} sgpFits={sgpFits} enteredPrices={enteredPrices} />
 
         <LineShopRow lineShop={lineShopParlay(pricedLegs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 

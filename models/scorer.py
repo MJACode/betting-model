@@ -255,6 +255,17 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         spread = line if pick_side == "home" else -line
         sign = "+" if spread > 0 else ""
         return f"{away_team} @ {home_team} — First Half {team} {sign}{spread:.1f}"
+    elif market == "spreads_q1":
+        # The first quarter's spread: "DEN @ LAC — First Quarter DEN +1.5" (models/nba_q1_trend.py). The matchup
+        # leads, as the first half's does, so the label cannot be read as the full-game spread; the signed number is
+        # the side's own (the HOME number, negated for an away pick). tracking/pick_integrity refuses a
+        # first-quarter label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        if line is None:
+            return f"{away_team} @ {home_team} — First Quarter {team} Spread"
+        spread = line if pick_side == "home" else -line
+        sign = "+" if spread > 0 else ""
+        return f"{away_team} @ {home_team} — First Quarter {team} {sign}{spread:.1f}"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -379,6 +390,18 @@ def score_game(conn: DBConnection,
     x = np.array([_feature_value(feat.get(c)) for c in feat_cols],
                   dtype=float).reshape(1, -1)
 
+    # THE WEATHER HOLD (NCAAF totals; see totals_weather_hold). A dome game is
+    # served the dome's own weather first, so the only game held is one that
+    # is really waiting for a forecast.
+    weather_wait = None
+    if artifact.get("kind") in _WEATHER_HELD_KINDS:
+        dome = _dome_weather(feat_cols, feat)
+        if dome:
+            feat = {**feat, **dome}
+            x = np.array([_feature_value(feat.get(c)) for c in feat_cols],
+                         dtype=float).reshape(1, -1)
+        weather_wait = totals_weather_hold(feat_cols, feat)
+
     home_team = features.get("home_team", "")
     away_team = features.get("away_team", "")
     game_date = features.get("game_date", "")
@@ -408,7 +431,19 @@ def score_game(conn: DBConnection,
     no_signal: str | None = None
 
     # Get model probability
-    if artifact.get("kind") == "margin_regression":
+    if weather_wait:
+        # No forecast yet: the model's number for this game is not a
+        # prediction, so it is not asked for one and none is stored. The row
+        # is still written (0.5 a side, DraftKings' number, the reason) the
+        # way a schedule hold's is, and a NONE row never locks, so the first
+        # pass after the forecast exists decides the game. No DraftKings total
+        # means no row, as in the totals branch below.
+        w_odds = _get_dk_odds(conn, game_id, market)
+        if not w_odds or w_odds.get("total_line") is None:
+            return []
+        home_prob = away_prob = 0.5
+        schedule_hold = schedule_hold or weather_wait
+    elif artifact.get("kind") == "margin_regression":
         # NCAAF spread margin artifact (scripts/ncaaf_margin_eval --fit): the
         # model predicts the MARGIN from fundamentals — the market number is
         # deliberately not in its feature list — and the probability is the
@@ -1695,6 +1730,62 @@ def _schedule_hold(books: dict, sport: str, game_id: str, game_date: str,
         logger.error(f"  {game_id}: schedule check failed ({exc!r})\n"
                      + traceback.format_exc())
         return SCHEDULE_UNREADABLE
+
+
+# ── The NCAAF totals weather hold ─────────────────────────────────────────────
+#
+# mike, 2026-11-10, asked whether the totals model should wait for a game's
+# weather forecast before it can bet: "yes wait for a weather forecast".
+# docs/sports/ncaaf.md, the 2026-11-10 section.
+#
+# The forecast step (run_pipeline.step_ncaaf_weather) writes weather for games
+# up to 7 days out, once a day in the morning pipeline. The totals rule scores
+# any game DraftKings prices. A game scored before its forecast exists is
+# served with its three weather inputs missing, and a tree sends a missing
+# value wherever its training rows happened to teach it: of the 7,570 games in
+# the training frame ONE has no weather. Measured on the 2025 games, a game
+# with no forecast reads 1.9 points low on the fit of 2026-08-25 and 11.7 low
+# on the eleven-seed fit, against a gate of 8. Over 2022-2025 the rule with
+# no weather was 486-450, -9.0 units; with the true weather 235-191, +24.9.
+#
+# So while any of the three is missing the game is not decided: its rows are
+# written NONE with WEATHER_HOLD, like a schedule hold. A NONE row never
+# locks, so the first pass after the forecast exists decides it. A BET that
+# is already locked is never scored again, so nothing here can touch it.
+# Only the totals model reads these inputs (features.feature_engine
+# .NCAAF_TOTALS_FEATURES), so only it is held.
+#
+# A DOME game is not waiting for anything: its weather is DOME_WEATHER in
+# training rows and at serve time alike, so that is what it is served when it
+# has no row (a dome more than 7 days out, or one whose venue has no
+# coordinates and so never gets a row).
+_WEATHER_HELD_KINDS = ("total_regression",)
+WEATHER_HOLD = "waiting for the weather forecast"
+
+
+def totals_weather_hold(feature_cols, features: dict) -> str | None:
+    """Why a totals regression may not decide this game yet, or None.
+
+    WEATHER_HOLD when any weather input the model reads is missing (None or
+    NaN; a real 0.0 is weather). scripts/ncaaf_margin_eval.register_totals
+    calls this to prove a game with missing weather cannot be decided before
+    it lets an artifact that swings on missing weather go live.
+    """
+    from features.ncaaf_feature_engine import DOME_WEATHER
+    for col in DOME_WEATHER:
+        if col in feature_cols and numeric_feature_value(features.get(col)) is None:
+            return WEATHER_HOLD
+    return None
+
+
+def _dome_weather(feature_cols, features: dict) -> dict:
+    """The weather inputs a DOME game is missing, at the dome's own values.
+    Empty for an outdoor game and for a dome that has its weather row."""
+    from features.ncaaf_feature_engine import DOME_WEATHER
+    if numeric_feature_value(features.get("is_dome_game")) != 1.0:
+        return {}
+    return {col: value for col, value in DOME_WEATHER.items()
+            if col in feature_cols and numeric_feature_value(features.get(col)) is None}
 
 
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
@@ -3493,6 +3584,7 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_total_luck' OR p.model_id = 'mlb_total_market'
                 OR p.model_id = 'mlb_total_public_fade' OR p.model_id = 'nfl_wind_totals'
                 OR p.model_id = 'ncaab_total_blend'
+                OR p.model_id = 'ncaabw_total_blend'
                 THEN 'totals'
               -- The home team's own points, not the game total.
               WHEN p.model_id = 'nba_team_total_luck' THEN 'team_totals_home'
@@ -3500,6 +3592,8 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'nba_first_half_total_luck' THEN 'totals_h1'
               -- The first half's spread, not the game's.
               WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
+              -- The first quarter's spread, not the game's.
+              WHEN p.model_id = 'nba_q1_trend' THEN 'spreads_q1'
               -- The NCAAB first half's points, not the game total.
               WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'

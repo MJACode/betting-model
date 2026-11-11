@@ -148,10 +148,35 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         # ncaab_first_half_total's (#1137), which production holds once that
         # model merges, before ncaab_moneyline_first_post names itself as h2h.
         "clv-standard-v2-power-80-0.05-12-ncaab-first-half-total",
+        # ncaab_moneyline_first_post's, which production held on 2026-11-07 after #1214 merged
+        # nba_q1_trend into clv_game_market WITHOUT a new comment: clv_game_market('nba_q1_trend')
+        # returned 'h2h' (read-only query, 2026-11-07 14:10Z).
+        "clv-standard-v2-power-80-0.05-12-ncaab-moneyline-first-post",
+        # nba_q1_trend's, which production holds before ncaabw_total_blend (the women's college
+        # basketball totals model, 2026-11-10) names itself as totals.
+        "clv-standard-v2-power-80-0.05-12-nba-q1-trend",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (ncaab_moneyline_first_post) after production may have "
+        "clv_game_market changed (ncaabw_total_blend) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
+
+
+# The mapping's own text, pinned to the comment that ships it. #1214 edited the mapping and kept the comment, so
+# production never re-created the function: the guard above could not see it, because it reads only the comment.
+# Editing clv_game_market now fails here until the comment is bumped AND this hash is set to the new body's.
+GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-ncaabw-total-blend": "95f353f72b6d648a"}
+
+
+def test_an_edit_to_the_market_map_bumps_the_comment():
+    import hashlib
+    sql = CLV_MIG.read_text(encoding="utf-8")
+    declared = re.search(r"fn_comment text := '([^']+)'", sql).group(1)
+    i = sql.index("FUNCTION public.clv_game_market(model_id text)")
+    body = sql[i:sql.index("$body$;", i)].replace("\r\n", "\n")
+    got = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    assert GAME_MARKET_BODY.get(declared) == got, (
+        f"clv_game_market's text is {got} under the comment {declared!r}: bump fn_comment and the "
+        f"COMMENT ON FUNCTION literal, add the old comment to stamped_before, and pin the new hash here")
 
 
 @pytest.mark.parametrize("model_id", RULE_IDS)

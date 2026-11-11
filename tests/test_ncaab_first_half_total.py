@@ -216,18 +216,20 @@ def test_the_replay_matched_the_research_game_by_game_and_its_maps_are_the_resea
     assert abs(maps[2026]["a"] - -1.9748874924167727) < 1e-9
     assert abs(maps[2026]["b"] - 0.4855872048552734) < 1e-9 and maps[2026]["n"] == 26343
     assert abs(maps[2024]["a"] - -1.2958745940175829) < 1e-9 and maps[2024]["n"] == 14853
-    for key, bets, units in (("without_floor", 2529, 125.78), ("with_floor", 2527, 123.78)):
-        r = rp[key]
-        assert r["pooled"]["bets"] == bets and r["pooled"]["units"] == units, key
-        vs = r["vs_research"]
-        assert vs["identical_game_side_book_line_price"] == bets, key
-        assert vs["n_only_research"] == 0 and vs["n_only_replay"] == 0, key
-        assert vs["max_edge_gap"] < 1e-12, key
-    assert rp["without_floor"]["pooled"]["ci95"] == [0.57, 8.12]
-    assert rp["with_floor"]["pooled"]["ci95"] == [0.45, 8.05]
+    # The replay is graded at the live cut (config, 0.025 from 2026-11-06; it
+    # was 2,527 bets / +123.78 at 0.02). The research's own -200 version, cut
+    # at the same 0.025, matches it game by game.
+    assert rp["cut"] == config.MODEL_EDGE_THRESHOLDS[ft.MODEL_ID] == 0.025
     w = rp["with_floor"]
-    assert (w["2024"]["units"], w["2025"]["units"], w["2026"]["units"]) == (67.27, 41.03, 15.48)
+    assert w["pooled"]["bets"] == 1887 and w["pooled"]["units"] == 127.31
+    vs = w["vs_research"]
+    assert vs["identical_game_side_book_line_price"] == 1887
+    assert vs["n_only_research"] == 0 and vs["n_only_replay"] == 0
+    assert vs["max_edge_gap"] < 1e-12
+    assert w["pooled"]["ci95"] == [1.51, 10.33]
+    assert (w["2024"]["units"], w["2025"]["units"], w["2026"]["units"]) == (54.28, 44.03, 29.01)
     assert w["pooled"]["price_min"] >= -200
+    assert rp["without_floor"]["pooled"]["bets"] == 1887
 
 
 def test_the_artifact_for_another_season_is_refused():
@@ -450,9 +452,20 @@ def test_the_alerter_names_a_game_either_first_half_model_lost(monkeypatch):
 
 def test_it_is_registered_where_every_rule_card_is():
     mid = ft.MODEL_ID
-    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.02}
-    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.02 and config.MODEL_PROB_THRESHOLDS[mid] == 0.0
-    assert config.min_odds_for(mid) == -200 and config.min_ev_for(mid) == 0.03
+    # The cut moved 0.02 -> 0.025 on 2026-11-06 (mike); the EV floor 0.03 -> 0.037.
+    assert config.ACTION_THRESHOLDS[mid] == {"min_prob": 0.0, "min_edge": 0.025}
+    assert config.MODEL_EDGE_THRESHOLDS[mid] == 0.025 and config.MODEL_PROB_THRESHOLDS[mid] == 0.0
+    assert config.min_odds_for(mid) == -200 and config.min_ev_for(mid) == 0.037
+
+
+def test_the_ev_floor_never_removes_a_bet_the_cut_takes():
+    """EV = edge x decimal. At the shortest price the model may lay (-200,
+    decimal 1.5) an edge just over the cut is EV just over cut x 1.5. The
+    floor must sit at or under that, or it removes bets the cut admitted,
+    silently (the GLOBAL_MIN_EV failure, CLAUDE.md §1b)."""
+    for mid in (ft.MODEL_ID, "ncaab_first_half_spread", "ncaab_total_blend"):
+        shortest = 1 + 100 / abs(config.min_odds_for(mid))
+        assert config.min_ev_for(mid) <= config.MODEL_EDGE_THRESHOLDS[mid] * shortest, mid
     assert mid in config.MODELS_ON_OWN_PROBABILITY and config.scoring_method(mid) == "rule"
     assert mid not in config.PAUSED_MODELS and mid not in config.RETIRED_MODELS
     assert mid not in config.MODELS
@@ -467,7 +480,11 @@ def test_its_ledger_is_worker_only_and_its_rows_are_kept_by_the_prune():
 
 
 def test_the_model_s_books_are_bettable_today():
-    assert set(ft.BOOKS) <= set(config.BEST_LINE_BOOKMAKERS)
+    # betparx stays in the fitted consensus set and is never a betting book
+    # (config.STATE_LIMITED_BOOKMAKERS, mike 2026-11-06).
+    assert set(ft.BOOKS) - config.STATE_LIMITED_BOOKMAKERS <= set(config.BEST_LINE_BOOKMAKERS)
+    from scripts.ncaab_first_half_total_card import bet_books
+    assert "betparx" in ft.BOOKS and "betparx" not in bet_books()
 
 
 def test_a_game_priced_below_the_cut_is_a_none_row_and_one_with_no_quote_is_no_row():

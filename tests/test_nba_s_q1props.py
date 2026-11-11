@@ -420,6 +420,11 @@ def test_full_refuses_a_checkout_whose_books_or_floor_are_not_the_registered_one
     import config
     for v, val in ((Q.GO_ENV, "1"), (Q.RESULTS_ENV, str(tmp_path)), (Q.BETS_ENV, str(tmp_path))):
         monkeypatch.setenv(v, val)
+    # The registered books are the research's (betparx included); the live
+    # deciding list dropped betparx on 2026-11-06, so a full re-run is refused
+    # today -- which is the guard working. Check the pass case on the registered set.
+    monkeypatch.setattr(config, "BEST_LINE_BOOKMAKERS", list(Q.REGISTERED_BOOKS))
+    monkeypatch.setattr(H, "BETTABLE", tuple(Q.REGISTERED_BOOKS))
     assert not any("deciding books" in x or "price floor" in x for x in Q.refuse_full(tmp_path, tmp_path))
     monkeypatch.setattr(config, "BEST_LINE_BOOKMAKERS", ["draftkings", "fanduel"])
     assert any("deciding books" in x for x in Q.refuse_full(tmp_path, tmp_path))

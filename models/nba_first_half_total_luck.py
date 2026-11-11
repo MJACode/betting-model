@@ -46,7 +46,19 @@ THE RULE, per regular-season game:
      "No 10-game wait"). Every scheduled game of the season before the date must be
      scored and boxed, else the game is declined.
   2. THE CUT: gap_total >= 2.0 (GAP_CUT, this model's own; nba_total_luck's 3.0
-     is its own and does not change).
+     is its own and does not change), AND below the full-game model's cut
+     (FULL_GAME_GAP_CUT, nba_total_luck's GAP_CUT, 3.0) from 2026-11-04 (mike:
+     "Only select the highest EV one"). At 3.0 or more the full-game over bets
+     the same game on the same gap, so this bet would be its twin. On 2023-24 ..
+     2025-26 every first-half bet at 3.0 or more had that twin (323 of 323) and
+     none below 3.0 did (0 of 272). The twins returned +12.76 units, +3.7%
+     (90% interval -5.0% to +12.7%), the full-game bets on the same games +35.58,
+     +10.2%, the pair's outcomes correlated 0.5. The bets this keeps, gap 2.0 to
+     3.0: 272, +37.73 units, +12.7%. A game at 3.0 or more is still decided and
+     recorded (detail full_game_model_bets), with no bet. Across the three NBA
+     game-total models one bet a game holds as well (scripts/
+     nba_game_totals_door.py); this ceiling settles this pair in the model, in
+     whatever order the cards run. docs/nba_models_2026.md section 14.
   3. THE QUOTES (models/nba_book_numbers.py, the lab's own code): each book's
      MAIN number per fetch; each book's newest fetch at or before the decision
      instant T, no older than 60 minutes by the FETCH instant; then no deciding
@@ -157,6 +169,10 @@ SPORT = "NBA"
 MARKET = "totals_h1"
 SIDE = "over"
 GAP_CUT = 2.0
+# The ceiling (THE RULE, 2): at the full-game over's own cut, that model bets the
+# game, so this one does not. Read from it, so the two cannot drift apart.
+FULL_GAME_GAP_CUT = tl.GAP_CUT
+DIAG_KEYS = (*tl.DIAG_KEYS, "full_game_model_bets")
 REFERENCE_BOOK = "draftkings"
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -305,11 +321,14 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
            final_games: pd.DataFrame, times: pd.DataFrame, art: dict, *,
            scheduled: pd.DataFrame,
            books=None, min_odds: float | None = None, gap_cut: float = GAP_CUT,
+           gap_ceiling: float | None = FULL_GAME_GAP_CUT,
            bucket_uplift: float | None = None, min_games: int = LIVE_MIN_GAMES
            ) -> tuple[list[FirstHalfBet], list[FirstHalfDecision], dict]:
     """The rule on frames. Pure given its inputs, so the card and the replay of
     the lab run the same code. The arguments are
-    models.nba_team_total_luck.decide's; `quotes` holds totals_h1 rows."""
+    models.nba_team_total_luck.decide's; `quotes` holds totals_h1 rows.
+    `gap_ceiling` is THE RULE's step 2 ceiling; None is the graded cell without
+    it (the replay of the lab passes None)."""
     from scripts import nba_game_harness as H
     diag = dict.fromkeys(DIAG_KEYS, 0)
     diag["presumed_unplayed"] = []
@@ -382,6 +401,10 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
         if gap < gap_cut:
             diag["gap_below_cut"] += 1
             record(0, f"gap_below_cut:{gap:.2f}")
+            continue
+        if gap_ceiling is not None and gap >= gap_ceiling:
+            diag["full_game_model_bets"] += 1
+            record(0, f"full_game_model_bets:{gap:.2f}")
             continue
         if fr is None:
             diag["no_fair_line"] += 1

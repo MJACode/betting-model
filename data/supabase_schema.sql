@@ -994,6 +994,9 @@ CREATE TABLE IF NOT EXISTS picks (
     market_clv_pp      NUMERIC,            -- that comparison in probability points
     market_clv_method  TEXT,               -- power | power_3way | zero_vig
     pinnacle_close_odds NUMERIC,           -- Pinnacle American on our side, same line
+    stake_units        NUMERIC CHECK (stake_units IS NULL OR (stake_units >= 1 AND stake_units <= 3)),
+                                          -- the pick's own units TO WIN; NULL is 1u (2026-11-06)
+    stake_reason       TEXT,               -- why stake_units is above 1u
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)

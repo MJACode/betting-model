@@ -103,6 +103,13 @@ def test_this_model_s_cut_is_its_own_and_the_full_game_cut_does_not_move():
     assert tl.GAP_CUT == 3.0
 
 
+def test_the_ceiling_is_the_full_game_model_s_own_cut():
+    """RULE (mike, 2026-11-04): at the full-game over's cut that model bets the
+    game, so this one does not. Read from it, never copied."""
+    assert fh.FULL_GAME_GAP_CUT is tl.GAP_CUT
+    assert "full_game_model_bets" in fh.DIAG_KEYS
+
+
 # ── the signal: the full-game gap itself, unscaled ──────────────────────────
 
 def test_the_signal_is_the_lab_s_first_half_signal():
@@ -119,10 +126,10 @@ def test_the_signal_is_the_lab_s_first_half_signal():
     assert got.loc[["G1", "G2"]].tolist() == lab.loc[["G1", "G2"]].tolist() == [2.25, -4.5]
 
 
-@pytest.mark.parametrize("gap,bets", [(6.0, True), (2.5, True), (2.0, True),
+@pytest.mark.parametrize("gap,bets", [(2.99, True), (2.5, True), (2.0, True),
                                       (1.99, False), (0.0, False), (-2.5, False), (-6.0, False)])
-def test_the_over_is_bet_when_the_gap_is_two_or_more(monkeypatch, art, gap, bets):
-    """RULE: bet the first-half OVER when gap_total >= 2.0, never the under,
+def test_the_over_is_bet_when_the_gap_is_two_or_more_and_below_three(monkeypatch, art, gap, bets):
+    """RULE: bet the first-half OVER when 2.0 <= gap_total < 3.0, never the under,
     however good its price, and nothing under the cut."""
     q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, +130, -150),
          ("fanduel", 112.5, -150, +130)]
@@ -135,6 +142,29 @@ def test_the_over_is_bet_when_the_gap_is_two_or_more(monkeypatch, art, gap, bets
         assert decisions[0].detail.startswith("gap_below_cut") and diag["gap_below_cut"] == 1
 
 
+@pytest.mark.parametrize("gap", [3.0, 3.01, 4.5, 6.0, 10.0])
+def test_no_bet_where_the_full_game_over_bets_the_same_game(monkeypatch, art, gap):
+    """RULE (mike, 2026-11-04, "Only select the highest EV one"): at the full-game
+    model's cut (3.0) or more, the full-game over bets this game on the same gap,
+    so the first half does not. The game is still decided and recorded, with its
+    gap and its best over offer, so the ceiling can be swept on live data."""
+    q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, +130, -150),
+         ("fanduel", 112.5, -150, +130)]
+    got, decisions, diag = _decide(art, q, gap, monkeypatch)
+    assert got == [] and diag["full_game_model_bets"] == 1 and diag["bets"] == 0
+    d = decisions[0]
+    assert d.n_bets == 0 and d.detail == f"full_game_model_bets:{gap:.2f}" and d.gap_total == gap
+    assert (d.book, d.price) == ("draftkings", 130.0)
+
+
+def test_without_the_ceiling_the_graded_cell_bets_above_three(monkeypatch, art):
+    """The replay of the lab reproduces the graded cell (gap >= 2.0, no ceiling) by
+    passing gap_ceiling=None; the live default is the ceiling."""
+    q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, +130, -150)]
+    got, _, _ = _decide(art, q, 4.5, monkeypatch, gap_ceiling=None)
+    assert len(got) == 1 and got[0].gap_total == 4.5
+
+
 # ── the offer ────────────────────────────────────────────────────────────────
 
 def test_the_offer_is_the_best_ev_over_under_the_market_fair_line(monkeypatch, art):
@@ -144,7 +174,7 @@ def test_the_offer_is_the_best_ev_over_under_the_market_fair_line(monkeypatch, a
     q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, -110, -110),
          ("fanduel", 112.5, -105, -115), ("betmgm", 111.5, -118, -102),
          ("williamhill_us", 113.5, +105, -125)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     assert len(bets) == 1
     b = bets[0]
     sig = {(2027, fh.MARKET): fh.pricing_dist(art, 2027)}
@@ -165,7 +195,7 @@ def test_the_offer_is_the_best_ev_over_under_the_market_fair_line(monkeypatch, a
 def test_a_tie_goes_to_the_earlier_book(monkeypatch, art):
     q = [("pinnacle", 112.5, -110, -110), ("betrivers", 112.5, -105, -115),
          ("fanduel", 112.5, -105, -115)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     order = config.BEST_LINE_BOOKMAKERS
     assert order.index("fanduel") < order.index("betrivers")
     assert bets[0].book == "fanduel"
@@ -174,14 +204,14 @@ def test_a_tie_goes_to_the_earlier_book(monkeypatch, art):
 def test_without_pinnacle_the_fair_line_is_the_deciding_books_median(monkeypatch, art):
     q = [("draftkings", 112.5, -110, -110), ("fanduel", 113.5, -115, -105),
          ("betmgm", 112.5, -105, -115)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     assert bets and bets[0].fair_ref == "consensus"
 
 
 def test_pinnacle_and_bovada_are_never_the_book_taken(monkeypatch, art):
     q = [("pinnacle", 112.5, +120, -140), ("bovada", 108.5, +150, -180),
          ("draftkings", 112.5, -110, -110)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     assert bets[0].book == "draftkings"
 
 
@@ -193,10 +223,10 @@ def test_an_over_worse_than_minus_200_is_never_taken_even_when_the_platform_floo
     monkeypatch.setattr(H, "PRICE_FLOOR", -1000.0)
     q = [("pinnacle", 112.5, -110, -110), ("draftkings", 111.5, -210, +170),
          ("fanduel", 112.5, -110, -110)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     assert bets and bets[0].book == "fanduel" and bets[0].price >= -200
     only = [("pinnacle", 112.5, -110, -110), ("draftkings", 111.5, -210, +170)]
-    bets, decisions, _ = _decide(art, only, 3.0, monkeypatch)
+    bets, decisions, _ = _decide(art, only, 2.5, monkeypatch)
     assert not bets and decisions[0].detail == "no_offer"
 
 
@@ -208,7 +238,7 @@ def test_a_rung_more_than_a_point_off_the_deciding_books_is_never_taken(
     alternate line, never an offer, however good the over looks there."""
     q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, -110, -110),
          ("fanduel", 112.5, -110, -110), ("betmgm", line, -110, -110)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     assert (bets[0].book == "betmgm") is taken, bets
 
 
@@ -217,7 +247,7 @@ def test_the_draftkings_reference_is_its_over(monkeypatch, art):
     (price_a / link_a), and the taken link is the over's too."""
     q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, +105, -125),
          ("fanduel", 112.5, +110, -130)]
-    bets, _, _ = _decide(art, q, 3.0, monkeypatch)
+    bets, _, _ = _decide(art, q, 2.5, monkeypatch)
     b = bets[0]
     assert b.book == "fanduel" and b.link == "https://fanduel/over"
     assert b.dk_price == 105.0 and b.dk_link == "https://draftkings/over"
@@ -259,7 +289,7 @@ def test_the_probability_is_market_fair_plus_the_walk_forward_uplift(monkeypatch
     with pytest.raises(ValueError, match="no graded bucket season before 2024"):
         fh.uplift(art, 2024)
     q = [("pinnacle", 112.5, -110, -110), ("draftkings", 112.5, -110, -110)]
-    b = _decide(art, q, 3.0, monkeypatch)[0][0]
+    b = _decide(art, q, 2.5, monkeypatch)[0][0]
     assert b.p_model == pytest.approx(b.p_fair + up) and b.uplift == pytest.approx(up)
 
 
@@ -337,7 +367,7 @@ def test_staleness_is_judged_on_the_fetch_instant_and_each_book_s_age_is_kept(mo
     rows = pd.concat([_rows(GID, fetch, [("pinnacle", 112.5, -110, -110)]),
                       _rows(GID, fetch, [("draftkings", 112.5, +105, -125)], book_age_min=120)],
                      ignore_index=True)
-    bets, decisions, _ = _decide(art, None, 3.0, monkeypatch, rows=rows)
+    bets, decisions, _ = _decide(art, None, 2.5, monkeypatch, rows=rows)
     assert bets[0].book == "draftkings"
     assert decisions[0].book_ages["draftkings"] == 120.0
 

@@ -104,9 +104,9 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 72% | 11% | 2026-07-04 FINAL: REVERTED to the v20260413 model + tightened to its proven live pocket — 2026 full-outcome 27 bets 21-6 +29.5% (0.70-0.72 x 0.11-0.12 corner all +10..+31%). The 07-04 retrain stays registered inactive (its 0.60/0.10 +25% 2025-OOS plateau grades -7.8% on the year's old-model picks — no green-2026 overlap). Old model now scores with fixed bullpen inputs. Re-evaluate the new model spring 2027 |
 | `mlb_over_under` | **PAUSED** (cut kept 59%/7%) | | **2026-07-14 RE-PAUSED (Matt: "total runs model is 3-8").** The under-skew watch item materialized. Honest-era live record (>= 07-05) 3-8 / -529u on 11 picks, and it's not variance: mean model P(over) 0.454 vs realized 0.500, avg actual total 9.32 vs 8.59 line — the active model v20260704 was trained through June only and is anchored to a lower run environment than summer. NOT a threshold problem (0.59/0.07 is on the 2025-OOS plateau). Fix = retrain incl. settled July data (2019-2024+2026, holdout 2025); paused meanwhile. Unpause after retrain + fresh 2025 OOS sweep. |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 2026-06-28 loosen to 0.55/0.10 ("48-41 +14.9% plateau") was computed on a sign bug in `v_model_full_outcome_record` (away picks graded with +home_spread instead of −home_spread — flips every one-run game). Corrected (validated 30/31 vs settlements): 0.55/0.10 = 35-56 **-20.6%**; every prob floor <0.68 negative at volume. Corrected optimum **0.68/0.11 = 19 bets 13-6 +20.0%** (pocket 0.68-0.70 × 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95%); cut carried over UNVALIDATED (2025 has no RL prices, 2026 now in-sample; in-sample check 5-0 all away +1.5). Expect ~1-2 picks/month. **2026-08-21 DORMANT (not paused — cannot reach its own floor).** Max live prob across ALL of Aug 2026 = 0.625; last BET 2026-07-19. Weekly max_p 0.757 (wk 06-29) → 0.554 (wk 07-06) — a cliff at the 07-04 bullpen catch-up + 07-05 NaN-line fix, i.e. the pre-July probs this cut was chosen on were inflated by broken live inputs. Honest era (≥07-05, 354 graded, real prices; grading validated 63/63 matview + 138/138 sign convention) = **-6.93%**, both sides negative (away -6.5%/199, home -7.5%/155). No plateau anywhere in the 0.45-0.68 × 0.00-0.20 grid (best 0.51/0.02 = 34 bets 17-17 +8.6%, neighbours flip negative) → **do not loosen; retrain.** **Paused 2026-08-31 (mike).** 2026-09-15: a human CLE −1.5 is a market/PCG handicap, not `mlb_runline` output. Publish path is paper-gated `mlb_spread_market` (`MLB_SPREAD_MARKET_PUBLISH` default 0), not an unpause. `docs/mlb_runline_ou_edge_search.md`. |
-| `mlb_spread_market` | 0% | 1.8% | **2026-09-15 PAPER-GATED rule.** De-vig Pinnacle, bet a bettable soft book at the same ±1.5. INSERT off until `MLB_SPREAD_MARKET_PUBLISH=1`. `mlb_runline` stays paused. `docs/mlb_runline_ou_edge_search.md`. |
+| `mlb_spread_market` | 0% | 1.8% | **2026-09-15 PAPER-GATED rule.** De-vig Pinnacle, bet a bettable soft book at the same ±1.5. INSERT off until `MLB_SPREAD_MARKET_PUBLISH=1`. `mlb_runline` stays paused. `docs/mlb_runline_ou_edge_search.md`. 2026-10-10: the season at 1.8 points is +3.2% to +3.7% but April flat or red and May red on every book list, so not month-stable; live record 29 rows, 13-12, +1.24u, nothing since 2026-09-19. No cut changed. `docs/mlb_spread_market_2026.md` (PR #761). |
 | `mlb_total_market` | 0% | 2.0% | **2026-09-15 PAPER rule.** Pin fair − soft implied ≥2pp, equal `total_line`, best soft book from `BEST_LINE_BOOKMAKERS`, pin-lean only (never fade Pinnacle). INSERT gated by `MLB_TOTAL_MARKET_PUBLISH` default 0. `mlb_over_under` stays paused. Do not resurrect 0.50/0.06. `docs/mlb_runline_ou_edge_search.md`. |
-| `mlb_total_public_fade` | 0% | 0% | **2026-09-16 PAPER rule.** Fade consensus OVER tickets ≥70 (env `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`; 80 supported), bet UNDER at best DK/FD/MGM/WH open (fallback DK). INSERT gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0. Optional top-K: `MAX_PER_SLATE` default 0 = all-pass; recommended `2` + `RANK=ticket` (2026-09-19 holdout: t70 top-2 +11.2% / 48 vs all-pass +5.9% / 101; gap/juice/EV-floor failed). Optional I24 juice **band** `UNDER_ODDS_MIN`/`_MAX` unset = no band; I24 is −110/−100 (n=38 +9.51u +25%; #751 floors failed; steam_cap2 Sep −23.6%/5). Ticket% is the cut; stored edge is (tickets−50)/100, not a calibrated probability. `mlb_over_under` stays paused. `docs/mlb_total_public_fade.md`. |
+| `mlb_total_public_fade` | 0% | 0% | **2026-09-16 PAPER rule.** Fade consensus OVER tickets ≥70 (env `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`; 80 supported), bet UNDER at best DK/FD/MGM/WH open (fallback DK). INSERT gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0. Optional top-K: `MAX_PER_SLATE` default 0 = all-pass; recommended `2` + `RANK=ticket` (2026-09-19 holdout: t70 top-2 +11.2% / 48 vs all-pass +5.9% / 101; gap/juice/EV-floor failed). 2026-10-10: with all of September and October, t70 top-2 is 78 bets −1.11u −1.4% (Sep −27.6% on 27), so it is no longer a recommendation (`docs/mlb_total_public_fade.md`). Optional I24 juice **band** `UNDER_ODDS_MIN`/`_MAX` unset = no band; I24 is −110/−100 (#751 floors failed; steam_cap2 Sep −23.6%/5). **2026-10-10 correction:** the n=38 +9.51u +25% once quoted here was each game's first DraftKings quote with no daily limit, not the prices the card uses; on the live card's construction I24 is 49 bets −6.19u −12.6% through 2026-10-10 (PR #760; query in `docs/mlb_total_public_fade.md`). No cut changed; the write switch has been off since 2026-09-19. Ticket% is the cut; stored edge is (tickets−50)/100, not a calibrated probability. `mlb_over_under` stays paused. `docs/mlb_total_public_fade.md`. |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | **PAUSED** — scoring path on (real FanDuel/BetMGM F5 totals; DK Odds API still 0 rows). Artifact 2026-05-08 leak-era + synthetic-line trained. Retrain before BET. |
 | `mlb_f5_runline` | 65% | 15% | **PAUSED** — same as F5 O/U, for F5 spreads. A human CLE −1.5 is not `mlb_runline` and is not an unpause. |
@@ -130,9 +130,9 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 72% | 11% | 2026-07-04 FINAL: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live |
 | `mlb_over_under` | **PAUSED** (cut kept 59%/7%) | | 2026-07-14 RE-PAUSED — summer run-environment drift (live 3-8/-529u; model anchored low vs a 9.32-run summer). Retraining incl. July data; unpause after retrain + fresh 2025 OOS sweep (see BET-signal table above) |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-07-04: model swapped to v20260704_121650, cut carried over unvalidated (very low expected volume). **2026-08-21: DORMANT — max live prob in Aug was 0.625 so the 0.68 floor is unreachable; honest-era record -6.93%. Cut held pending the 2019-2025 / holdout-2026 retrain + `scripts/mlb_runline_sweep.py`.** 2026-09-15: a human CLE −1.5 is a market/PCG handicap, not this model; pause remains. Paper-gated `mlb_spread_market` (`MLB_SPREAD_MARKET_PUBLISH` default 0) is the publish path, not an unpause. |
-| `mlb_spread_market` | 0% | 1.8% | **2026-09-15 PAPER-GATED rule.** Pinnacle vs bettable soft, equal ±1.5. INSERT off until `MLB_SPREAD_MARKET_PUBLISH=1`. `docs/mlb_runline_ou_edge_search.md`. |
+| `mlb_spread_market` | 0% | 1.8% | **2026-09-15 PAPER-GATED rule.** Pinnacle vs bettable soft, equal ±1.5. INSERT off until `MLB_SPREAD_MARKET_PUBLISH=1`. `docs/mlb_runline_ou_edge_search.md`. 2026-10-10: not month-stable over the season (April flat or red, May red); `docs/mlb_spread_market_2026.md`. |
 | `mlb_total_market` | 0% | 2.0% | **2026-09-15 PAPER rule.** Pin fair − soft implied ≥2pp, equal total, `BEST_LINE_BOOKMAKERS`, pin-lean. INSERT off until `MLB_TOTAL_MARKET_PUBLISH=1`. `docs/mlb_runline_ou_edge_search.md`. |
-| `mlb_total_public_fade` | 0% | 0% | **2026-09-16 PAPER rule.** Fade public OVER ≥70 tickets (env; 80 supported), bet UNDER. INSERT off until `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1`. Optional top-K flag `MAX_PER_SLATE` (recommended 2 / `RANK=ticket`). Optional I24 juice band `UNDER_ODDS_MIN`/`_MAX` (unset = no band). `docs/mlb_total_public_fade.md`. |
+| `mlb_total_public_fade` | 0% | 0% | **2026-09-16 PAPER rule.** Fade public OVER ≥70 tickets (env; 80 supported), bet UNDER. INSERT off until `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1`. Optional top-K flag `MAX_PER_SLATE` (recommended 2 / `RANK=ticket` on 2026-09-19; red in September, 78 bets −1.4% through 2026-10-10). Optional I24 juice band `UNDER_ODDS_MIN`/`_MAX` (unset = no band). `docs/mlb_total_public_fade.md`. |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_f5_over_under` | 65% | 15% | **PAUSED** — scoring on real multi-book F5 totals; BET waits leak-era retrain. |
 | `mlb_f5_runline` | 65% | 15% | **PAUSED** — same, F5 spreads. |
@@ -546,7 +546,7 @@ every bar are in `docs/nba_models_2026.md` 4.3).
 | prob / edge cut | 0.0 / 0.0 — the cut is EV | `ACTION_THRESHOLDS`, both threshold dicts |
 | EV floor | 0.00, on Pinnacle's proportional no-vig under | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
-| caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
+| caps | one bet a game across both NBA prop models and at most 6 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`; 4 from 2026-10-20 to 2026-11-04), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule; six from 2026-11-04, "we can go slightly more than 4"). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
 | decided once | the first look 45-57 min before tip whose newest fetch holds Pinnacle; a row in `nba_prop_market_decisions` (whether or not its bet survived the cap; `detail` names what the cap dropped), never looked at again | `scripts/nba_prop_market_card.py`, `scripts/nba_props_card.py` |
 | looks | every refresh pass, plus a five-minute job 24x7 fetching the games 40-62 min from tip | `scheduler.run_nba_prop_window` |
 | stale soft quote | refused when its clock is > 10 min behind Pinnacle's | same |
@@ -623,7 +623,8 @@ GROUP BY 1, 2;
 NHL").** Opening night wrote 36 NBA prop bets on one game (all VOIDed). The rule
 for BOTH NBA prop models, this one and `nba_prop_projection`:
 
-- one bet a game across the two models, and at most 4 a night;
+- one bet a game across the two models, and at most 4 a night (6 from 2026-11-04,
+  below);
 - the night fills in tip order, as the per-game decision windows produce it;
   inside one look the strongest goes first;
 - "strongest" is the bet's EV percentile within its OWN model's graded EVs,
@@ -669,6 +670,44 @@ Units are one unit to win; seasons are 2023-24 / 2024-25 / 2025-26:
   matched the grade's exact-percentile result to +0.2 units (4 of 1,867 bets
   differ).
 
+**Six a night, 2026-11-04 (mike: "props seems to be coming fro earlier games only
+recently? because we articidially limit to 4 ... we can go slightly more than 4 if we
+need to cause the picks are that good").** Re-graded from the cap grade's own lists
+(exact percentiles, so 4 a night is +153.6 here against +153.8 above):
+
+- **The early-game lean is real.** Live, 2026-10-21..11-04, every night with more than
+  four games took its four props from the first five or six tips (11-02: 15 games,
+  props from tips 1, 2, 3 and 6). In the grade, 20% of the 4-a-night bets came from
+  the later half of a night's tips.
+- **But the early games were where the money was.** On nights of six or more games,
+  the first four tips' bets: 1,730, +118.6 units, +8.0% (+8.7 / +8.1 / +7.4% by
+  season); the rest 1,465, +25.4 units, +2.0% (-1.7 / +2.9 / +4.8%). By Eastern tip
+  time: before 7:30pm +7.4%, 7:30-8:29 +9.2%, 8:30-9:29 +3.5%, 9:30 or later +0.7%
+  on 674 bets. This is in-sample and not used as a rule.
+- **Ranking the whole night by EV is worse.** The best four of each night by
+  percentile (which live cannot know, the later games' props are not priced yet):
+  +102.5 units, +6.65%, against +153.6 in tip order. The highest percentiles return
+  the least: one a game, 0.80-0.90 +10.1%, 0.90-0.95 +8.9%, 0.95-0.98 +5.0%,
+  0.98-1.00 +4.7%. Any "only the top X%" floor graded below tip order at every X from
+  the top 20% to the top 1%.
+- **Six a night is where the units stop.** In tip order: 4 +153.6, 5 +161.9, 6 +183.7
+  (+8.17%, 90% range +4.6 to +11.7, +62.7 / +61.4 / +59.6 by season), 8 +182.8. The
+  5th and 6th bets of a night: 772, +30.0 units, +4.55% (90% range -1.6% to +11.0%;
+  -6.5 / +21.9 / +14.7 by season). The 7th and 8th: 551, -0.8 units. About 5.4 bets a
+  night; three nights in four use all six.
+- **Prices laid at 6 a night:** -194 to +380, 5th percentile -125, median +120, 95th
+  +185, 78% plus money.
+- **Not shipped:** taking each game's best bet below its model's top 2% graded better
+  at 6 a night (+203.3) and 8 (+238.5), but skipping the top 1.5% or the top 2.5%
+  instead did not hold up (+177.4 and +194.9 at 6), so it is a peak, not a plateau
+  (CLAUDE.md section 7), and every paired 90% range includes zero.
+- **The units are in volume, not in the top picks.** In tip order: one a game, no
+  night limit +200.0 units (7.5 a night, +6.4%); two a game, no night limit +357.3
+  (15.0 a night, +5.6%, 90% range +3.5 to +7.7, every season positive); three a game
+  +562.7 (22.5 a night, +5.7%); every proposition +3,174.1 (187 a night, +3.4%). Each
+  game's second-best bet alone: 3,656 bets, +157.3 units, +4.8%. The night limit is a
+  choice of how many picks to send, not a filter that finds better ones.
+
 The figures below are each model's own uncapped population.
 
 Graded on 2023-24..2025-26 at the best bettable price: every proposition
@@ -694,6 +733,22 @@ other), the lead 87% of the graded bets were decided at
 Closing-line value is measured from the first night: each bet game gets a `'close'` prop snapshot 12-25
 minutes before tip (`data/ingestors/nba_prop_close_ingestor.py`).
 
+**Its top 2% by EV returns nothing, measured 2026-11-05 (mike; `docs/nba_models_2026.md`
+section 16).** On its whole list (24,572 bets, 2023-24..2025-26), its claims track its
+returns from the 70th to the 98th percentile of its EV. The top 2% claims +10.5% and returned
+-1.6% (492 bets, 90% range -9.1 to +5.9), against +6.4% for the 90th-98th percentile. The gap
+points the same way in every season and both halves of each season, but every 90% range includes
+zero. That is all of its over-claim at the door: its door bets below the 98th percentile claim
++6.3% and returned +8.2%; at the 98th and up they claim +10.9% and returned -1.8% (277 bets). In
+the 778 door games it wins while the projection model also had a bet, the projection bets it
+displaced returned +6.3% against its +5.2% (-2.6 units, 90% range -61.8 to +59.2). So no way of
+counting its bets for less at the door clears. Lowering its percentile by 0.01 to 0.50 moves -7.3
+to +9.6 units against today's +183.7. Capping it loses at every cap tried (-2.5 to -27.0). Ranking
+its top 3% last in their game gains +28.4. That is a peak (+4.5 at the top 4%, +8.3 at the top 1%), it
+falls all in the early half, and half of it comes from swaps to its own next-best bet. Walk-forward
+it is +14.0 (-23.5 to +52.0). None of these rules tilts to favourites: those that hand games to
+the projection model risk up to 4.6% less. Nothing changed.
+
 ## NBA — `nba_prop_projection`, the projection model (2026-10-16, mike)
 
 Each player's projected count (minutes × per-minute rate, a negative-binomial
@@ -708,7 +763,7 @@ search and every check are in `docs/nba_models_2026.md` §5).
 | the cells | steals over+under 0.02; rebounds under 0.01; blocks+steals over+under 0.05; blocks under 0.02; rebounds+assists under 0.04; threes over+under 0.04 | `models/nba_prop_projection.CARD` |
 | EV floor | 0.01 (the lowest cell's), each cell's own floor on top; on its own calibrated probability | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned | `MODEL_MIN_ODDS` |
-| caps | one bet a game across both NBA prop models and at most 4 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
+| caps | one bet a game across both NBA prop models and at most 6 a night (`scripts/nba_props_card.MAX_NBA_PROP_BETS_PER_NIGHT`; 4 from 2026-10-20 to 2026-11-04), ranked by each bet's EV percentile within its own model, the bets already written counted (a VOIDed one excepted) (mike, 2026-10-20: "Only the strongest picks need to be sent, like NHL"; replaces 2026-10-16's no-cap rule; six from 2026-11-04, "we can go slightly more than 4"). The grade is under `nba_prop_market` | `scripts/nba_props_card.py`, `models/nba_prop_rank.py` |
 | decided once | the first look 45-57 min before tip, in the same look as `nba_prop_market` (or alone from 50 min out); a row in `nba_prop_projection_decisions` (whether or not its bet survived the cap) | `scripts/nba_prop_projection_card.py`, `scripts/nba_props_card.py` |
 | stale quote | refused when its clock is > 10 min behind the freshest book's for the same market in the same fetch | `models/nba_prop_projection.py` |
 | stored and shown probability | games from 2026-11-07: p' = implied + 0.325 (p − implied) at the decision price, so the shown EV and edge are 0.325 × the decided ones; display only, the bet is decided on p (mike, 2026-11-06: "Yes, ship it") | `MODEL_PROB_SHRINK`, `docs/nba_models_2026.md` §5 |
@@ -731,6 +786,24 @@ search; +1.45% at the second-best book).
 +3000; 64% plus money, 9% at -150 or shorter; the +1,600..+3,000 tail is threes
 overs at 0.5 from one book. The probability shown is an upper bound (claimed
 0.533, won 0.501 in the band bet).
+
+**Its EV claims about three times what it returns, measured 2026-11-04 (mike;
+`docs/nba_models_2026.md` section 15).** Walk-forward on 2024-25 and 2025-26 (each
+season mapped by a fit on the seasons before it), every eighth of its EV
+over-claims, not only the top: the top eighth claims +23.2% and returned +6.9%,
+the bottom +2.5% and +1.4%. One factor fixes all eight: EV x 0.30 to 0.325 (the
+fit on each fold) lands inside the 90% range of what was returned in every
+eighth, early and late. Because it multiplies every EV by one number it changes
+no bet and no ranking, so nothing was shipped and the stored probability is still
+the uncorrected one. Above about the 80th percentile of its EV the return is flat
+(+5% to +8%), and no map tried (a blend with the price, the blend per market,
+isotonic, banded) ranks that top better. At the door, ranking the night by a
+corrected EV still loses to tip order: best six of the night -29.4 units against
+today (walk-forward -21.8). The rules that won more units did it by betting
+favourites, risking 27-40% more at the same return per unit risked. Putting more units
+on a higher corrected EV does not beat flat either, at flat's risk (best +180.9
+units against +183.7). The reversed scale's lead halves (+195.9) but does not go
+away, and its 90% range includes zero.
 
 ## NBA — `nba_total_luck`, full-game totals, overs (2026-10-17, mike)
 
@@ -999,6 +1072,27 @@ does not end just before, and that run fails, so the window job reports an error
 on every tick until the artifact is refitted (and buys the game again each
 tick in its window).
 
+## NBA — `nba_q1_trend`, first-quarter spreads, the hot team (2026-11-07, mike)
+
+mike's own first-quarter method, as he described it on 2026-10-28, the eighth search's "bump it out to L10" step with
+his season-average check (`docs/nba_models_2026.md` section 12; `models/nba_q1_trend.py`,
+`scripts/nba_q1_trend_card.py`). **Live on mike's instruction (2026-11-07: "I WANT THAT MODEL"), not on the house
+standard**: it failed the 200-bet bar. `docs/sports/nba.md`, "First quarter", has the record and what it failed.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | the rule: last-5 venue cover net 3 or more against an opponent at -1 or -2, then k = min(the hot team's last-10 net, minus the opponent's) at least 2, and the hot team's projected first-quarter margin covering its number (both teams 5+ games) | `models/nba_q1_trend.K_CUT`, `signals`; the lab's `step_k`, `last_n`, `season_averages` |
+| prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
+| price floor | -200, pinned. It laid -125 to +118 on its 88 graded bets, median -110 | `config.MODEL_MIN_ODDS` |
+| EV floor | 0.00 on the fair probability plus the uplift (+0.1526 for 2026-27), a push scored as a loss. It removes none of the 88: their smallest EV is +0.19, the median +0.26 | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
+| the game's number | Pinnacle's coherent main first-quarter spread (the HOME number) at the decision fetch, else the deciding books' median, to the nearest half point | `scripts/nba_game8_q1_trends.game_numbers` |
+| the fair line | Pinnacle's no-vig first-quarter spread when it quotes coherently, else the deciding books' consensus, priced through the first quarter's margin around a + b × Pinnacle's full-game close, fitted on 2020-21 .. 2025-26 (7,230 games) | `models/nba_q1_trend.pricing_dist` |
+| the offer | the hot side with the highest expected value under that fair line, at a deciding book, each at its own main number | `scripts/nba_game_harness.choose` |
+| decided once | on this model's own first-quarter fetch 45-66 minutes before tip, at most 5 minutes old, planned 45-56 minutes out; a row in `nba_q1_trend_decisions`, bet or not | `scripts/nba_q1_trend_window.py`, `scheduler.run_nba_total_luck_window` |
+| settlement | period 1 of `nba_period_scores` against the HOME number, a level quarter a push; untrusted periods: pending | `tracking/paper_tracker._first_quarter_points` |
+| closing line | one more call 12-25 minutes before tip, only for bet games, stored as `close` | `scripts/nba_q1_trend_window.py` |
+| artifact | the pricing rows and the cell's 88 graded bets | `models/saved/nba_q1_trend_20261107.pkl` |
+
 ## NBA — `nba_first_half_total_luck`, first-half totals, overs (2026-10-30, mike)
 
 The same shooting luck, read on the first half's line. When both defences have
@@ -1014,6 +1108,8 @@ that passed."
 | Setting | Value | Where |
 |---|---|---|
 | the cut | the full-game gap (`nba_total_luck`'s number, unscaled), at least 2.0 points; overs only. `nba_total_luck`'s own cut of 3.0 is unchanged | `models/nba_first_half_total_luck.GAP_CUT`, `signal` |
+| the ceiling | from 2026-11-04 (mike: "Only select the highest EV one"), the gap must be BELOW `nba_total_luck`'s 3.0: at 3.0 or more that model bets the same game on the same gap, so this bet was its twin. The game is still decided and recorded (`full_game_model_bets`), with no bet. Evidence below, "One bet a game across the NBA game totals" | `models/nba_first_half_total_luck.FULL_GAME_GAP_CUT` |
+| one a game | a game another NBA game-total model has bet gets no bet here, and the reverse; the first model to write a game keeps it, the reason on the decision row (`one_total_a_game:...`) | `scripts/nba_game_totals_door.py` |
 | prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
 | price floor | -200, pinned. It laid -130 to +114 across all books, -118 to +105 at the four books whose rows look like main numbers (`docs/nba_models_2026.md` 8.4) | `config.MODEL_MIN_ODDS` |
 | EV floor | 0.00 on the fair probability plus the walk-forward uplift, a push scored as a loss. It removes 2 of the 595 graded bets, both wins | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
@@ -1047,6 +1143,59 @@ endpoint bills per market returned (`odds_ingestor._get_event_odds`, measured
 made before this model, so the ledger's `credits_last` is the measurement. Closing-line
 value reads the close from `close` rows only, as the team total's does.
 
+**One bet a game across the NBA game totals (2026-11-04, mike: "Betting Game Over
+Under AND individual team totals AND 1H over under seems duplicitiave ... ONly selected
+the highest EV one").** On 2023-24..2025-26, the three NBA game-total models' graded
+bets (this model 595, `nba_total_luck` 323, `nba_team_total_luck` 349) fall on 942
+games:
+
+| Games where | Games | What each returned there |
+|---|---|---|
+| only the home team total under bet | 347 | +62.72 units, +16.2% |
+| only the first-half over bet (gap 2.0-3.0) | 271 | +38.78 units, +13.2% |
+| the full-game over AND the first-half over bet (gap 3.0 or more) | 322 | full game +35.58 units, +10.2%; first half +12.76 units, +3.7% |
+| the team total under and an over both bet | 2 | 1 with both overs, 1 with the first half |
+
+| Rule | Bets | Units | Return | Units by season |
+|---|---|---|---|---|
+| every bet of all three (until 2026-11-04) | 1,267 | +152.79 | +11.05% | +37.6 / +70.3 / +44.9 |
+| one a game, the highest model EV | 942 | +124.40 | +12.07% | +16.5 / +57.3 / +50.6 |
+| one a game, the full-game over first (live) | 942-944 | +139.03 to +139.08 | +13.43% | +26.7 / +61.9 / +50.5 |
+| one a game, the first-half over first | 942 | +114.21 | +11.07% | +30.5 / +46.5 / +37.2 |
+
+- **The pair was one bet twice.** Every first-half bet at a gap of 3.0 or more had a
+  full-game twin (323 of 323), and none below 3.0 did (0 of 272). The two results were
+  correlated 0.5 (both won 138, both lost 100, split 81). The twins: +3.7%, 90% range
+  -5.0% to +12.7% by night. Per game, the pair averaged +0.156 units with a standard
+  deviation of 1.785; the full-game bet alone +0.113 with 1.029.
+- **What it costs:** +13.76 units over the three seasons, about 4.6 a season, if the
+  twins' +3.7% is real; about 107 fewer bets a season.
+- **The highest EV is not the better bet.** Each model's probability is the market-fair
+  price plus one fixed uplift (+0.0659 full game, +0.1022 team total, +0.0572 first
+  half), so its EV on a game is that constant plus the price. Choosing by it graded
+  14.7 units worse than the full game first.
+- **No "exceptionally strong" tier exists to allow both.** The twins by gap: 3.0-3.5
+  +10.0%, 3.5-4.0 -4.6%, 4.0-5.0 +24.1%, 5.0 or more -12.9% (the full-game bet: +17.1%,
+  -1.9%, +26.0%, +0.8%). A bigger gap did not win more.
+- **The uplift is unchanged** (+0.0572, fitted on all 595 bets). The 272 bets kept
+  realised +12.7% against +8.0% for all 595, but refitting on a subset chosen after the
+  grade would raise the stated probability on in-sample evidence. A lower stated
+  probability can only drop a bet at the 0.00 EV floor, never add one.
+- Built 2026-11-04 from the three lab bet files the replays read and the lab's own
+  gaps (`scripts/nba_first_half_total_luck_replay.lab_gaps`); temp folder
+  `nba_game_edge/volume1104`.
+
+**On the live population (no 10-game wait, 2026-11-02),** each model's live `decide` at the lab's
+decision instants (the replay that reproduces `docs/sports/nba.md`'s no-wait table: 450 / 429 /
+745 bets), 1,162 bet games: every full-game bet had a first-half twin (450 of 450, none below a
+gap of 3.0); the twins returned +17.89 units, +3.7% (90% range -3.5% to +10.9%), outcomes
+correlated 0.50. Every bet of all three: 1,624 bets, +156.27 units, +8.82%. The live rule (the
+first-half ceiling, then one a game with the full game first): 1,162 bets, +136.74 units, +10.75%
+(+16.7 / +77.7 / +42.4 by season). The team total under met an over on 12 games here (9 with both
+overs); putting it first would have made +142.95, a +6.2-unit difference on those 9 games, too few
+to build a rule on. The first-half bets by gap: 2.0-3.0 +10.5%, 3.0-3.5 +7.0%, 3.5-4.0 -3.6%,
+4.0-5.0 +26.2%, 5.0 or more -6.1%. Script: `nba_game_edge/volume1104/nowait_overlap.py`.
+
 **The replay** (`tests/test_nba_first_half_total_luck_replay.py`,
 `scripts/nba_first_half_total_luck_replay.py`): the live code, run on the research
 cache at the lab's decision instants, with the archived purchase rows passed through
@@ -1068,16 +1217,17 @@ refuses a season it does not end just before.
 mike, 2026-10-30: *"Yes to the totals model."* Team ratings refit as of
 DraftKings' total, a correction for shooting luck and playing style, blended
 with DraftKings' total; bet the side whose chance of winning (a push left out)
-beats DraftKings' implied chance by more than 0.04, with no games-played wait
+beats DraftKings' implied chance by more than 0.05 (0.04 until 2026-11-07,
+mike: fewer picks), with no games-played wait
 (mike, 2026-11-02), at DraftKings' first posted total (mike, 2026-11-03)
 (`models/ncaab_total_blend.py`, `scripts/ncaab_total_card.py`; the model, its
 evidence and its risks are `docs/sports/ncaab.md` "The models").
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.04 | `MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.04. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
-| EV floor | 0.07, on its own probability. The smallest EV the 0.04 cut admitted in the first-post replay of 2022-2026 was +0.0734 (2,436 bets; +0.0743 on the quotes it shipped on); an edge above 0.04 at -120 or longer is EV above 0.073, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| the cut | edge > 0.05 (0.04 until 2026-11-07) | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.05. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.07, on its own probability, unchanged at the 0.05 cut: an edge above 0.05 at -200 or longer is EV above 0.075, so the floor removes nothing the cut takes (the first-post replay's smallest EV at 0.05 is +0.0936; at 0.04 it was +0.0734, 2,436 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned; it laid -120 to +110 (median -110) | `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02: *"we do not need to wait 10 games, I never approved that"*). With no wait the replay is 1,513 bets, +5.66% on 2022-2026, against 1,157 bets, +7.06% with it; the 356 bets it adds are +1.13%, interval [-10.1, 12.1]. `docs/sports/ncaab.md` has the table | `models/ncaab_total_blend.decide` |
 | decision moment | from 2026-11-03 (mike): DraftKings' first posted total (the earliest pre-game row, total 90-220, both prices), bet only while it is still DraftKings' standing number, else `first_post_gone` with no bet; the card every 5 minutes, 3 after each capture poll. It replaced 22:00 UTC the evening before / 15:00 UTC on the day, which at its own instant made 1,563 bets, +3.90%, interval [-0.50, 8.00] on 2022-2026 | `scripts/ncaab_total_card.py`, `scheduler.run_ncaab_total_card` |
@@ -1245,17 +1395,17 @@ mike, 2026-11-02: *"we need to build 1H and game lines ML and Spread no matter
 what"*. About ten minutes before tip: the bettable books' full-game consensus
 spread, mapped to a first-half mean, plus a heavily shrunk team first-half
 tendency; every bettable book's first-half spread priced through a table of
-past first-half margins; bet the single best quote when its edge is above 0.02.
-No games-played wait (`models/ncaab_first_half_spread.py`,
+past first-half margins; bet the single best quote when its edge is above 0.025
+(0.02 until 2026-11-07, mike: fewer picks). No games-played wait (`models/ncaab_first_half_spread.py`,
 `scripts/ncaab_first_half_spread_card.py`; the model, its evidence and its risks
 are `docs/sports/ncaab.md` "The models"). **It did not clear the research bar:**
 the pooled interval's lower bound is below zero.
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.02 | `MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.02. model_probability is the same P(cover, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
-| EV floor | 0.03, on its own probability. The smallest EV the 0.02 cut admitted in the replay was +0.0346 (median +0.0552, 1,253 bets); an edge above 0.02 at -140 or longer is EV above 0.034, so the floor removes nothing the evidence took | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| the cut | edge > 0.025 (0.02 until 2026-11-07; this row said 0.025 from 11-06 by mistake, a doc slip in #1207) | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.025. model_probability is the same P(cover, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.03, on its own probability, unchanged at the 0.025 cut: an edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes (the replay's smallest EV at 0.025 is +0.0436; at 0.02 it was +0.0346, 1,253 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price floor | -200, pinned; it laid -140 to +125 | `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). With the old 10-game rule the same cut made +6.87 units on 698 bets (+0.90%) | the card |
 | decided once | on the tip-minus-10 first-half fetch (or its retries, 5 to 10.5 minutes before tip); a row in `ncaab_first_half_spread_decisions`, bet or not | `scripts/ncaab_first_half_spread_card.py`, `scheduler.run_ncaab_first_half_window` |
@@ -1287,16 +1437,17 @@ done and go live now"*. At the fetch an hour before tip: the bettable books'
 full-game consensus total, mapped to a first-half mean, plus the two teams'
 shrunk first-half scoring tendencies; every bettable book's first-half total
 priced through a table of past first-half totals; a side shorter than -200 set
-aside; bet the single best quote when its edge is above 0.02. No games-played
+aside; bet the single best quote when its edge is above 0.025 (0.02 until
+2026-11-06, mike: fewer picks; see `docs/sports/ncaab.md` for the re-cut). No games-played
 wait (`models/ncaab_first_half_total.py`, `scripts/ncaab_first_half_total_card.py`;
 the model, its evidence and its risks are `docs/sports/ncaab.md` "The models").
 It cleared the research bar, narrowly: the pooled lower bound is +0.57%.
 
 | Setting | Value | Where |
 |---|---|---|
-| the cut | edge > 0.02 | `MODEL_EDGE_THRESHOLDS` |
-| prob / edge filter | 0.0 / 0.02. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
-| EV floor | 0.03, on its own probability. The smallest EV the 0.02 cut admitted in the replay with the -200 limit was +0.0343 (median +0.059, 2,527 bets); an edge above 0.02 at -200 or longer is EV above 0.03, so the floor removes nothing the cut takes | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| the cut | edge > 0.025 (0.02 until 2026-11-06) | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.025. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.037 (0.03 until 2026-11-06), on its own probability. An edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay with the -200 limit was +0.0426 (median +0.068, 1,887 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen (2,527 of the research's 2,529 bets; prices -160 to +155), and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). November alone made +35.91 units on 690 bets | the card |
 | decided once | on the tip-minus-60 first-half fetch (or its retries, 55 to 60.5 minutes before tip); a row in `ncaab_first_half_total_decisions`, bet or not | `scripts/ncaab_first_half_total_card.py`, `scheduler.run_ncaab_first_half_window` |
@@ -1329,6 +1480,78 @@ the 2026-10-30 copy its evidence read), the same tip-minus-10 rule at 0.02
 makes 1,143 bets, +74.40 units, +5.90%, [0.71, 11.69]: it now clears the bar it
 missed. No earlier fetch time beats tip minus 10 on the same games (research
 round 5 `h2h.csv`). `docs/sports/ncaab.md` has the seasons.
+
+## NCAAB — in play: three game-state models, the best few a night (2026-11-07, mike)
+
+mike: *"3-5 best per night"*. Evidence and the full grid: `docs/sports/ncaab.md`,
+"In play". Every bet settles on the full game.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | EV, per NIGHT: the EV the graded decisions exceeded 4 times per expected decision on a slate that size, never under the rule's floor; at most 5 bets a slate night, first come, best EV first within a fetch | `models/ncaab_live_ig.night_cut`, `NIGHT_TARGET`, `NIGHT_CAP` |
+| the rule floors | `ncaab_live_spread_h1` 0.02, `ncaab_live_spread_h2` 0.05, `ncaab_live_total_h2` 0.02: each rule's lowest cut that passed the house standard | `MODEL_OWN_EV_FLOOR`, `models/ncaab_live_ig.RULES` |
+| prob / edge filter | 0.0 / 0.0: neither binds beyond the cut | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS`, `MODEL_EDGE_THRESHOLDS` |
+| probability | their own (P(win given no push) at the deciding price); no calibration map | `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, as graded, pinned | `MODEL_MIN_ODDS` |
+| data-error cap | edge 0.50 (largest graded edge 0.453) | `models/ncaab_quote_bounds.EDGE_CAP` |
+| decided once | per game and rule, a row in `ncaab_live_decisions`, bet or not | `models/ncaab_live_loop.py` |
+
+**Graded on the night's selection, walk-forward 2022-23 to 2025-26** (half-hour
+purchase; each season's model and night table from earlier seasons only):
+
+| Model | Bets | Units | Return | Status | Prices (min / median / max) |
+|---|---|---|---|---|---|
+| all three | 2,533 on 588 nights (4.3 a night) | +290.4 | +10.1% (95% +6.4 .. +13.8) | **LIVE** | -145 / -115 / +185 |
+| `ncaab_live_spread_h1` | 834 | +93.8 | +9.9% | **LIVE** | |
+| `ncaab_live_spread_h2` | 834 | +113.0 | +11.9% | **LIVE** | |
+| `ncaab_live_total_h2` | 865 | +83.7 | +8.5% | **LIVE** | |
+
+Every season positive (+8.2% to +13.0%), both halves of the period (+9.0% /
++11.1%), DraftKings alone +9.0% on 658, the placebo's 95th percentile -1.1% (200
+runs). Held out: the first-half total and the second-half moneyline (fail the
+bands), the first-half moneyline (passes; stale-soft-book signature). Go-live
+gate standing: 0 settled of 50.
+
+## NCAABW — `ncaabw_total_blend`, women's full-game totals (2026-11-09, mike)
+
+mike, 2026-11-09: *"Take everything we learned about building the NCAAB models
+and now build models for the womens NCAABW."* The men's totals method on the
+women's games (`models/ncaabw_total_blend.py`, `scripts/ncaabw_total_card.py`;
+the model, its evidence and what a straight copy got wrong are
+`docs/sports/ncaabw.md` "The totals model"). Live from 2026-11-10.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.05, the women's own grid, not the men's copied | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.05. model_probability is the same P(win, push left out) the cut was measured on, so decision_edge equals the card's edge | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.07, on its own probability: an edge above 0.05 at -200 or longer is EV above 0.075, so it removes nothing the cut takes (the replay's smallest EV is +0.0956, 374 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, pinned; it laid -115 to -105 in its replay, and DraftKings priced every women's total -120 to -102 | `MODEL_MIN_ODDS` |
+| early season | no wait, as the evidence was graded | `models/ncaabw_total_blend.py` |
+| decision moment | DraftKings' first posted total (the earliest pre-game row, total 90-200, both prices), bet only while it is still DraftKings' standing number, else `first_post_gone` with no bet; the card every 5 minutes, 3 after each capture poll | `scripts/ncaabw_total_card.py` |
+| decided once | a row in `ncaabw_total_decisions`, bet or not | `scripts/ncaabw_total_card.py` |
+| stake | flat: one women's model, so no agreement sizing | no `stake_units` |
+
+**The neighbourhood** (every priced game at DraftKings' first posted total;
+date-resampled 95% interval). Two priced seasons exist, so walk-forward is one
+season; the second column pools it with 2024-25 graded on 2025-26's blend:
+
+| Cut | 2025-26 on 2024-25's numbers | ROI | interval | each season on the other's blend | ROI | interval |
+|---|---|---|---|---|---|---|
+| 0.03 | 516 bets, +26.33 units | +4.63% | [-3.7, +12.1] | 644 bets, +68.35 units | +9.64% | [+2.9, +16.1] |
+| 0.04 | 462 bets, +31.13 units | +6.12% | [-1.6, +14.1] | 538 bets, +65.23 units | +11.02% | [+3.9, +18.5] |
+| **0.05** | **402 bets, +29.96 units** | **+6.77%** | **[-2.2, +15.1]** | **453 bets, +55.76 units** | **+11.18%** | **[+2.7, +19.3]** |
+| 0.06 | 345 bets, +27.59 units | +7.26% | [-2.3, +16.8] | 378 bets, +50.09 units | +12.03% | [+2.4, +21.0] |
+| 0.08 | 276 bets, +32.16 units | +10.57% | [-0.1, +20.9] | 286 bets, +40.06 units | +12.71% | [+1.8, +22.9] |
+
+Every cut is positive in both columns. The one walk-forward season's own
+interval includes zero at every cut. 0.05 bets 21.6% of priced games on the
+blend it runs on, about what the men's cut does on a full slate.
+
+**What is not known.** One walk-forward season. The blend moved between the
+two seasons (beta 1.05 on 2024-25, 0.46 on 2025-26). The model claims more
+than it hits (claimed 0.599, won 0.571 on 198 games). November was flat in
+both seasons. No Pinnacle close exists for the women's games, so there is no
+sharp-close EV column.
 
 ## NBA — the in-play game-state model's quarters 1-2 spread (2026-11-04, mike)
 

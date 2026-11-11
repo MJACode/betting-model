@@ -114,7 +114,8 @@ def test_its_prices_are_read_with_the_main_game_markets():
 
 def test_the_mobile_threshold_is_generated_from_config():
     src = (LIB / "thresholds.generated.ts").read_text(encoding="utf-8")
-    assert "ncaab_first_half_spread: { min_prob: 0, min_edge: 0.02, min_odds: -200 }," in src
+    # 0.025 from 2026-11-07 (mike); the mirror is regenerated from config.
+    assert "ncaab_first_half_spread: { min_prob: 0, min_edge: 0.025, min_odds: -200 }," in src
 
 
 # ── the NCAAB first half's total (ncaab_first_half_total) ────────────────────
@@ -177,4 +178,5 @@ eq(modelProbabilityNote('ncaab_first_half_total').includes('first half'), true, 
 
 def test_the_first_half_total_threshold_is_generated_from_config():
     src = (LIB / "thresholds.generated.ts").read_text(encoding="utf-8")
-    assert "ncaab_first_half_total: { min_prob: 0, min_edge: 0.02, min_odds: -200 }," in src
+    # The bar moved 0.02 -> 0.025 on 2026-11-06 (mike); the mirror is regenerated from config.
+    assert "ncaab_first_half_total: { min_prob: 0, min_edge: 0.025, min_odds: -200 }," in src

@@ -1424,6 +1424,10 @@ def _close_rows_only(game_id: str, market: str) -> bool:
     """
     if market.startswith("team_totals"):
         return True
+    # The NBA first-quarter spread (data/ingestors/nba_first_quarter_odds.py) files its closing snapshot 'close',
+    # as the NBA first half does.
+    if market == "spreads_q1":
+        return True
     return market in _NCAAB_HALF_MARKETS and not _ncaab_first_half_market(game_id, market)
 
 
@@ -2446,7 +2450,7 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "under":
             won = (team_pts < total_line)
 
-    elif market in ("spreads", "spreads_1st_5_innings", "spreads_h1"):
+    elif market in ("spreads", "spreads_1st_5_innings", "spreads_h1", "spreads_q1"):
         # spreads_h1: the caller passes the FIRST HALF's points as the two
         # scores (_ncaab_first_half_points); a level half on a whole number is a
         # push, as books settle it. Never reach this with the full-game final.
@@ -2503,9 +2507,16 @@ _RULE_MODEL_MARKETS = {
     # nba_period_scores (_first_half_points). NEVER "totals": that sums the two
     # finals and grades every over a win.
     "nba_first_half_total_luck": "totals_h1",
+    # NBA first quarter's spread, the hot team (models/nba_q1_trend.py). scored_line is the first quarter's HOME
+    # number; it settles on period 1 of nba_period_scores (_first_quarter_points), overtime never counted. NEVER
+    # "spreads": that grades the full-game margin.
+    "nba_q1_trend": "spreads_q1",
     # NCAAB full-game totals (models/ncaab_total_blend.py). scored_line is the
     # total; the stored final includes overtime, as books settle it.
     "ncaab_total_blend": "totals",
+    # NCAABW full-game totals (models/ncaabw_total_blend.py), the women's
+    # twin: scored_line is the total; the stored final includes overtime.
+    "ncaabw_total_blend": "totals",
     # NCAAB full-game spreads (models/ncaab_spread_market.py). scored_line is
     # the bet book's HOME number (section 4); the stored final includes
     # overtime, as books settle it.
@@ -2636,6 +2647,25 @@ def _first_half_points(conn: DBConnection, game_id: str,
         logger.warning(f"{game_id}: its period scores do not add up to the final "
                        f"({away_score}-{home_score}) or a period is missing: "
                        f"{sorted(tuple(r) for r in rows)}. Its first-half picks stay pending.")
+    return points
+
+
+def _first_quarter_points(conn: DBConnection, game_id: str,
+                          home_score, away_score) -> tuple[int, int] | None:
+    """(home, away) points in an NBA first quarter, or None when the game has no period rows this settlement can
+    trust (data/ingestors/nba_period_scores.first_quarter_from_periods: the first search's check, the one the graded
+    bets were settled on). Then the pick stays PENDING: no result, never the full-game score."""
+    from data.ingestors.nba_period_scores import first_quarter_from_periods
+    rows = conn.execute(
+        "SELECT period, home_points, away_points FROM nba_period_scores WHERE game_id = %s",
+        (game_id,)).fetchall()
+    if not rows:
+        return None
+    points = first_quarter_from_periods(rows, home_score, away_score)
+    if points is None:
+        logger.warning(f"{game_id}: its period scores do not add up to the final "
+                       f"({away_score}-{home_score}) or a period is missing: "
+                       f"{sorted(tuple(r) for r in rows)}. Its first-quarter picks stay pending.")
     return points
 
 
@@ -2969,6 +2999,12 @@ def _settle_game_picks(
             if first_half is None:
                 continue  # stays pending: no period rows, no result
             settle_home, settle_away = first_half
+            settle_home_win = None
+        elif market == "spreads_q1":
+            first_quarter = _first_quarter_points(conn, game_id, home_score, away_score)
+            if first_quarter is None:
+                continue  # stays pending: no period rows, no result
+            settle_home, settle_away = first_quarter
             settle_home_win = None
         else:
             settle_home = home_score

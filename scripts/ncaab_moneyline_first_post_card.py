@@ -87,6 +87,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import ncaab_stake  # noqa: E402
 import models.ncaab_book_quotes as bq  # noqa: E402
 import models.ncaab_moneyline_first_post as fp  # noqa: E402
 from data.anon_readable import API_ROLES, lock_down  # noqa: E402
@@ -532,7 +533,9 @@ def publish(conn, rows: list[dict], decisions: list[fp.PostDecision], instant: d
         if not got:
             continue
         n_decided += 1
-        if row is not None and conn.execute(_INSERT, {c: row.get(c) for c in _COLS}).fetchone():
+        # A bet an earlier NCAAB bet on this game and side agrees with is
+        # staked at NCAAB_AGREEMENT_STAKE_UNITS (models/ncaab_stake.py).
+        if row is not None and conn.execute(_INSERT, ncaab_stake.stamp(conn, row, _COLS)).fetchone():
             n_bets += 1
             own_bet.add(d.game_id)
     conn.commit()

@@ -405,7 +405,12 @@ def build_pick(ctx: GameCtx, rule: M.Rule, d: M.Decision, state: dict, links: di
     """One `picks` row from one BET (the NFL live loop's dict shape; every key
     _insert_picks binds by name present). model_probability is P(win | no
     push); the DraftKings columns keep their reference meaning (DraftKings'
-    own quote on the same side at the same number in this fetch, else NULL)."""
+    own quote on the same side at the same number in this fetch). With no
+    such quote, dk_odds is NULL and dk_implied_prob and edge are 0.0, the
+    scorer's line_book convention (models/scorer.py): picks.dk_implied_prob
+    is NOT NULL in production, and a NULL there lost UTA +5.5 at Hard Rock
+    on the 2026-11-06 slate (the insert failed, so neither the pick nor its
+    ledger row was written)."""
     from models.scorer import _confidence_tier, quarter_kelly
     p = d.pick
     side, book, price = p["side"], p["book"], float(p["price"])
@@ -430,7 +435,7 @@ def build_pick(ctx: GameCtx, rule: M.Rule, d: M.Decision, state: dict, links: di
         "game_date": ctx.game_date, "game_time": ctx.tip.isoformat(),
         "pick_side": side, "pick_label": M.pick_label(rule, side, line, ctx.home, ctx.away),
         "model_probability": round(prob, 4),
-        "dk_implied_prob": None if dk_implied is None else round(dk_implied, 4),
+        "dk_implied_prob": 0.0 if dk_implied is None else round(dk_implied, 4),
         "edge": round(edge, 4), "dk_odds": dk_odds,
         "scored_line": line,                      # the HOME number (CLAUDE.md section 4)
         "kelly_fraction": kf, "recommended_bet": rec, "bankroll_at_pick": bankroll,

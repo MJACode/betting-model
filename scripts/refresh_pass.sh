@@ -232,9 +232,9 @@ step nhl-over-under
 # 65 minutes before tip) IN THE PROP FETCH `par nba-prop-odds` JUST STORED. They
 # decide only games whose tip is 45-57 minutes away, so they run here, minutes
 # after the fetch, rather than in the scoring group. ONE step: the two cards'
-# candidates meet in one choice, one bet a game across both models and at most 4
+# candidates meet in one choice, one bet a game across both models and at most 6
 # a night, ranked by each model's own EV percentile (scripts/nba_props_card.py;
-# mike, 2026-10-20). SEQUENTIAL,
+# mike, 2026-10-20, six from 2026-11-04). SEQUENTIAL,
 # like every writer to picks; each game decided once per model under both
 # models' locks. The five-minute window job (scheduler.run_nba_prop_window)
 # runs this same step for the tip times these passes cannot reach.
@@ -332,6 +332,7 @@ step push-notifications
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
 #   ncaab-results    no ESPN call unless a started NCAAB game in the last 14
 #                    days is unscored; then one scoreboard call per such date
+#   ncaabw-results   the same for women's college basketball (NCAABW)
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
 par game-log-today
@@ -340,6 +341,7 @@ par nhl-results
 par ufc-results-poll
 par nba-results
 par ncaab-results
+par ncaabw-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
@@ -381,6 +383,9 @@ step refresh-outcomes
 # pass on, and nothing reads them sooner.
 if [ "$MODE" = "hourly" ]; then
   step ncaab-box
+  # The same for women's college basketball (NCAABW): the box scores the
+  # women's totals model's ratings are refit on. After ncaabw-results.
+  step ncaabw-box
 fi
 
 # Health check LAST, on every pass. It used to run only as the final step of the

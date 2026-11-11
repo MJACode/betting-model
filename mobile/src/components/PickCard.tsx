@@ -12,7 +12,6 @@ import {
   bestHandoffForPick,
   handoffQuotesForPick,
   bookLabel,
-  bookLabelShort,
   bookName,
   currentLineQuotes,
   formatSideLine,
@@ -33,7 +32,7 @@ import {
   type Movement,
 } from '@/lib/markets';
 import { modelHistoryMark, modelLongWithMark, isPropModel } from '@/lib/modelMeta';
-import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
+import { stakeFor, stakeReasonLine, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
 import { pnlTone, roundedAt, signalDisplayName } from '@/lib/tone';
@@ -240,15 +239,20 @@ export function PickCard({
   const noEdgeAtMine = myView?.status === 'mine' && (myView.edge ?? 0) <= 0;
   // One short line on a scanned board (UX review): where the model found it,
   // and that the record is kept there. The longer sentence is on Pick Detail.
-  const myBooksNote = myQuote && modelPrice != null
-    ? `${foundAtText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))}${
-        noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
-      }`
-    : notAtMyBooks
-      ? pick.is_live === true && modelPrice != null
-        ? liveNotAtMyBooksText(bookLabelShort(storedQuoteBook(pick)), formatAmerican(modelPrice))
-        : NOT_AT_MY_BOOKS
-      : null;
+  // The caption is not a pill slot, so it takes the full short label (PARX,
+  // not the pill's clipped PAR), and the spoken copy takes the book's name.
+  const myBooksNoteWith = (book: string) =>
+    myQuote && modelPrice != null
+      ? `${foundAtText(book, formatAmerican(modelPrice))}${
+          noEdgeAtMine ? ' · No edge at your books' : ` · ${recordNoteShortFor(pick.model_id)}`
+        }`
+      : notAtMyBooks
+        ? pick.is_live === true && modelPrice != null
+          ? liveNotAtMyBooksText(book, formatAmerican(modelPrice))
+          : NOT_AT_MY_BOOKS
+        : null;
+  const myBooksNote = myBooksNoteWith(bookLabel(storedQuoteBook(pick)));
+  const myBooksNoteSpoken = myBooksNoteWith(bookName(storedQuoteBook(pick)));
   // Green only when the edge on screen is one they can take: at their price
   // it may be gone, and off their books there is nothing to take.
   const myEdgeGone = (myView?.status === 'mine' && (myView.edge ?? 0) <= 0) || notAtMyBooks;
@@ -302,8 +306,9 @@ export function PickCard({
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
   // On 'mine' the risk is grossed up at their price, so "Bet 0.95u · Win 1u"
-  // is what that book takes to win the same unit.
-  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick));
+  // is what that book takes to win the same unit. The units to win are the
+  // pick's own stake_units when it carries one (2u: "Bet 2.2u · Win 2u").
+  const stake = stakeFor(pick.kelly_fraction, myQuote ? myQuote.price : decisionOdds(pick), pick.stake_units);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
@@ -407,6 +412,9 @@ export function PickCard({
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
         : formatUnits(stake.conviction);
+  // A stake above the usual 1u says why, once, in a caption under the stake
+  // (picks.stake_reason). Only where a stake is shown; nothing on a 1u pick.
+  const stakeReason = stakeCaption ? stakeReasonLine(stake, pick.stake_reason) : null;
   const caption = [
     `Model ${formatPct(pick.model_probability)}`,
     flagged ? 'EV —' : ev == null ? null : `EV ${formatPctSigned(ev)}`,
@@ -549,7 +557,7 @@ export function PickCard({
         })
       : (heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null);
   const signalsStakeSpoken = signalsStakeShown
-    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}`
+    ? `Stake, ${signalsStakeSpeech(signalsRiskUnits, signalsWinUnits)}${stakeReason ? `. ${stakeReason}` : ''}`
     : 'Stake unavailable';
   const statusSpeech = gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time));
   // The first spoken word is the chip on the card. A paused or preview row
@@ -570,7 +578,7 @@ export function PickCard({
         edge: flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         modelChance: `Model chance ${formatPct(pick.model_probability)}`,
         expectedReturn: flagged || ev == null ? 'Expected return unavailable' : `Expected return ${formatPctSigned(ev)}`,
-        stake: myBooksNote ? `${signalsStakeSpoken}. ${myBooksNote}` : signalsStakeSpoken,
+        stake: myBooksNoteSpoken ? `${signalsStakeSpoken}. ${myBooksNoteSpoken}` : signalsStakeSpoken,
         modelName: `${markedModel} model`,
         posted: timing?.label ?? null,
         paused: null,
@@ -593,7 +601,9 @@ export function PickCard({
         flagged ? priceCheckSpeech(check, heroPrice) : `Edge ${edgeText}`,
         heroPrice ? heroPriceSpeech(heroPrice, cta.priceTag) : null,
         stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
-        myBooksNote,
+        // Why the stake is above 1u, spoken once, right after it.
+        stakeReason,
+        myBooksNoteSpoken,
         timing ? timing.label : null,
         startedSpoken,
       ]);
@@ -764,6 +774,22 @@ export function PickCard({
         <Text style={styles.captionLine} numberOfLines={2}>
           {caption}
         </Text>
+      ) : null}
+      {stakeReason ? (
+        // A sized-up pick (picks.stake_units > 1) says why, with a glyph so it
+        // reads as its own line on a full board (UX review, 2026-11-06). Same
+        // row shape as the books note; textSecondary, never the BET green.
+        <View style={styles.stakeReasonRow}>
+          <Ionicons
+            name="layers-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
       ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
@@ -1060,6 +1086,22 @@ export function PickCard({
       <Text style={[styles.stakeRow, signalsStakeShown == null ? styles.metricMuted : null]}>
         {signalsStakeShown ?? '—'}
       </Text>
+      {stakeReason ? (
+        // A sized-up pick (picks.stake_units > 1) says why, with a glyph so it
+        // reads as its own line on a full board (UX review, 2026-11-06). Same
+        // row shape as the books note; textSecondary, never the BET green.
+        <View style={styles.stakeReasonRow}>
+          <Ionicons
+            name="layers-outline"
+            size={13}
+            color={colors.textSecondary}
+            style={styles.extraIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
+          <Text style={styles.stakeReasonText}>{trueMinus(stakeReason)}</Text>
+        </View>
+      ) : null}
       {myBooksNote ? (
         <View style={styles.myBooksRow}>
           <Ionicons
@@ -1331,6 +1373,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.caption,
     color: colors.textTertiary,
+  },
+  stakeReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.xs,
+  },
+  stakeReasonText: {
+    flex: 1,
+    marginLeft: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
   },
   card: {
     // Declared tap floor (verify_a11y); the card is already ~150pt, so this
