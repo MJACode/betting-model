@@ -13,7 +13,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ActivityIndicator, View } from 'react-native';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
@@ -67,6 +67,7 @@ import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
 import { addDays, todayET } from '@/lib/format';
 import { ToastHost } from '@/components/Toast';
 import { BetslipBar } from '@/components/BetslipBar';
+import { PlayerStatsBackButton } from '@/components/StackBackButton';
 import {
   FALLBACK_TAB_BAR_HEIGHT,
   setTabBarHeight,
@@ -342,7 +343,7 @@ function App() {
   return (
     // onTouchStart only records the tap (freezeLog); it never claims it.
     <GestureHandlerRootView style={{ flex: 1 }} onTouchStart={noteTouch}>
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
     <AppErrorBoundary onReset={resetNav}>
       <OnboardingModal
         visible={ready && (!seen || needsBooks) && (!AUTH_ENABLED || signedIn) && !holdIntro}
@@ -430,10 +431,27 @@ function App() {
             component={GatedByomBets}
             options={{ title: 'Bets' }}
           />
+          {/* JS Back pill, not UIKit's. On iOS 27 the system "< Back" pill
+              stops popping after a modal on this screen (Compare odds).
+              react-native-screens 4.16 also measures that pill from the
+              pre-iOS 26 button frame, so it sits under the status bar.
+              This screen's left slot is our pressable, in the header the
+              stack already insets (SafeAreaProvider is seeded with
+              initialWindowMetrics so that inset is not 0 on the first frame).
+              gestureEnabled is the edge swipe. Full-screen swipe stays off:
+              the stat and range rows are horizontal scrolls. */}
           <Stack.Screen
             name="PlayerStats"
             component={GatedPlayerStats}
-            options={{ title: 'Player Stats' }}
+            options={{
+              title: 'Player Stats',
+              headerShown: true,
+              headerTransparent: false,
+              headerBackVisible: false,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: false,
+              headerLeft: () => <PlayerStatsBackButton />,
+            }}
           />
           <Stack.Screen
             name="TeamStats"

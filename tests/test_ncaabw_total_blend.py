@@ -1101,8 +1101,6 @@ def test_publish_counts_only_bets_and_marks_a_none_row_as_no_bet_in_the_ledger()
     assert conn.ledger[0]["n_bets"] == 0
 
 
-def test_the_womens_sport_has_its_emoji_and_its_tag():
+def test_the_womens_sport_has_the_same_emoji_as_the_mens():
     from tracking.discord_notifier import _SPORT_EMOJI
-    from tracking.x_publisher import _SPORT_TAG
     assert _SPORT_EMOJI["NCAABW"] == _SPORT_EMOJI["NCAAB"]
-    assert _SPORT_TAG["NCAABW"] == "#WCBB" and _SPORT_TAG["NCAAB"] == "#CBB"

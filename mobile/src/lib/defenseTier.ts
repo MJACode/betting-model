@@ -58,6 +58,8 @@ export function tierOfRank(rank: number | null | undefined, teamsRanked: number 
 export interface TieredGame {
   season: number;
   gameDate: string;
+  /** The log's game_id, so minutes outside the loaded window can be fetched. */
+  gameId: string;
   opponent: string;
   isHome: boolean | null;
   value: number;
@@ -106,6 +108,7 @@ export function splitDefenseRows(rows: readonly PlayerVsDefenseRow[]): PlayerDef
     games.push({
       season: Number(r.season),
       gameDate: String(r.game_date ?? ''),
+      gameId: String(r.game_id),
       opponent: String(r.opponent ?? ''),
       isHome: r.is_home == null ? null : Boolean(r.is_home),
       value: v,
@@ -149,6 +152,8 @@ export function tierChartGames(
     out.push({
       value: g.value,
       date: dateWithYear(g.gameDate),
+      iso: g.gameDate,
+      gameId: g.gameId,
       opp: `${at}${g.opponent}`,
       oppFull: `${g.isHome === false ? '@ ' : at}${g.opponent}`,
       rank: g.rank,
