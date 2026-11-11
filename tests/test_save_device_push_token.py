@@ -33,11 +33,16 @@ def test_the_migration_is_hand_applied_and_returns_nothing():
     assert code.count("$mig$") == 2
     assert code.count("$fn$") == 2
     assert "SECURITY DEFINER" in code
-    assert "SET search_path = public, pg_temp" in code
+    assert "SET search_path = ''" in code
+    assert "OWNER TO postgres" in code
     assert "RETURNS void" in code
     assert "ON CONFLICT (token) DO UPDATE" in code
+    assert "pg_catalog.now()::text" in code
     assert "CREATE POLICY" not in code.upper()
     assert "FOR SELECT" not in code.upper()
+    assert "REVOKE INSERT, UPDATE ON public.device_push_tokens FROM anon, authenticated" in code
+    assert 'DROP POLICY IF EXISTS "anon insert device token"' in code
+    assert 'DROP POLICY IF EXISTS "anon update device token"' in code
     assert "REVOKE ALL ON FUNCTION public.save_device_push_token" in code
     assert "FROM PUBLIC, anon, authenticated" in code
     assert (
@@ -128,15 +133,14 @@ def test_direct_upsert_is_refused_and_the_function_is_not_a_read():
         cur.execute(SQL)
 
         cur.execute("SET ROLE anon")
-        with pytest.raises(psycopg2.Error) as still:
+        with pytest.raises(psycopg2.Error) as plain:
             cur.execute(
                 "INSERT INTO public.device_push_tokens "
                 "(token, platform, device_id, enabled, last_seen) "
-                "VALUES (%s, 'ios', %s, true, %s) "
-                "ON CONFLICT (token) DO UPDATE SET enabled = EXCLUDED.enabled",
+                "VALUES (%s, 'ios', %s, true, %s)",
                 (OTHER, DEVICE, SEEN),
             )
-        assert still.value.pgcode == "42501"
+        assert plain.value.pgcode == "42501"
 
         cur.execute(
             "SELECT public.save_device_push_token(%s, %s, 'ios', true, %s)",
@@ -148,12 +152,19 @@ def test_direct_upsert_is_refused_and_the_function_is_not_a_read():
         )
         cur.execute("SELECT count(*) FROM public.device_push_tokens")
         assert cur.fetchone()[0] == 0
-        with pytest.raises(psycopg2.Error) as bad:
+        for junk in ("short", "not-a-real-expo-token-stringxx"):
+            with pytest.raises(psycopg2.Error) as bad:
+                cur.execute(
+                    "SELECT public.save_device_push_token(%s, %s, 'ios', true, %s)",
+                    (junk, DEVICE, SEEN),
+                )
+            assert bad.value.pgcode == "22023"
+        with pytest.raises(psycopg2.Error) as web:
             cur.execute(
-                "SELECT public.save_device_push_token(%s, %s, 'ios', true, %s)",
-                ("short", DEVICE, SEEN),
+                "SELECT public.save_device_push_token(%s, %s, 'web', true, %s)",
+                (OTHER, DEVICE, SEEN),
             )
-        assert bad.value.pgcode == "22023"
+        assert web.value.pgcode == "22023"
         cur.execute("RESET ROLE")
 
         cur.execute("SET ROLE authenticated")
@@ -164,22 +175,31 @@ def test_direct_upsert_is_refused_and_the_function_is_not_a_read():
         cur.execute("RESET ROLE")
 
         cur.execute(
-            "SELECT token, device_id, platform, enabled, last_seen "
+            "SELECT token, device_id, platform, enabled, last_seen, "
+            "last_seen::timestamptz <= clock_timestamp() "
+            "AND last_seen::timestamptz > clock_timestamp() - interval '5 minutes' "
             "FROM public.device_push_tokens ORDER BY token"
         )
-        assert cur.fetchall() == [
-            (TOKEN, DEVICE, "android", True, "2026-11-11T02:00:00Z"),
-            (OTHER, DEVICE, "ios", False, "2026-11-11T01:00:00Z"),
+        rows = cur.fetchall()
+        assert [(r[0], r[1], r[2], r[3]) for r in rows] == [
+            (TOKEN, DEVICE, "android", True),
+            (OTHER, DEVICE, "ios", False),
         ]
+        assert all(r[4] != SEEN and r[5] for r in rows)
         cur.execute(
-            "SELECT prosecdef, proconfig FROM pg_proc "
-            "WHERE proname = 'save_device_push_token'"
+            "SELECT p.prosecdef, p.proconfig, r.rolname "
+            "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
+            "WHERE p.proname = 'save_device_push_token'"
         )
-        secdef, config = cur.fetchone()
+        secdef, config, owner = cur.fetchone()
         assert secdef is True
-        assert config is not None and any(
-            item == "search_path=public, pg_temp" for item in config
-        )
+        assert owner == "postgres"
+        assert config is not None
+        normalized = [item.replace('"', "") for item in config]
+        assert any(
+            item.startswith("search_path=") and "public" not in item
+            for item in normalized
+        ), config
         sig = "public.save_device_push_token(text, text, text, boolean, text)"
         cur.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE')", (sig,))
         assert cur.fetchone()[0] is True

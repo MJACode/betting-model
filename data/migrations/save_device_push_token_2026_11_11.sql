@@ -28,8 +28,11 @@
 -- token = ... as anon matches 0 rows (no error): the existing opt-out write
 -- cannot see its row either.
 --
--- This function runs as the owner, who bypasses RLS, and returns nothing.
--- Re-running it replaces the function and re-asserts the grants.
+-- This function runs as the table owner, who bypasses RLS, and returns nothing.
+-- The same statement revokes anon/authenticated INSERT and UPDATE and drops
+-- the two write policies. A plain INSERT as anon succeeded under WITH CHECK
+-- (true), so those checks were skippable until the direct path was closed.
+-- Re-running replaces the function and re-asserts the grants and the revoke.
 
 DO $mig$
 BEGIN
@@ -42,40 +45,43 @@ BEGIN
   ) RETURNS void
   LANGUAGE plpgsql
   SECURITY DEFINER
-  SET search_path = public, pg_temp
+  SET search_path = ''
   AS $fn$
   BEGIN
+    -- p_last_seen stays in the signature so a shipped client still matches.
+    -- The stored clock is the server's. A device clock is not a staleness source.
     IF p_token IS NULL
-       OR length(p_token) < 20
-       OR length(p_token) > 200
-       OR p_token <> btrim(p_token)
-       OR position(' ' IN p_token) > 0 THEN
+       OR p_token !~ '^Expo(nent)?PushToken\[[A-Za-z0-9_-]{10,100}\]$' THEN
       RAISE EXCEPTION 'save_device_push_token: bad token' USING ERRCODE = '22023';
     END IF;
     IF p_device_id IS NOT NULL AND p_device_id !~ '^[A-Za-z0-9-]{8,64}$' THEN
       RAISE EXCEPTION 'save_device_push_token: bad device id' USING ERRCODE = '22023';
     END IF;
-    IF p_platform IS NOT NULL AND p_platform !~ '^[a-z]{2,16}$' THEN
+    IF p_platform IS NOT NULL AND p_platform NOT IN ('ios', 'android') THEN
       RAISE EXCEPTION 'save_device_push_token: bad platform' USING ERRCODE = '22023';
     END IF;
     IF p_enabled IS NULL THEN
       RAISE EXCEPTION 'save_device_push_token: enabled is required' USING ERRCODE = '22023';
     END IF;
-    IF p_last_seen IS NULL OR length(p_last_seen) > 40 THEN
-      RAISE EXCEPTION 'save_device_push_token: bad last_seen' USING ERRCODE = '22023';
-    END IF;
 
+    -- Any caller who already knows the token can disable it, re-enable it,
+    -- or rebind device_id. Tokens cannot be listed. Accepted until sign-in
+    -- lets auth.uid() own the row; binding the update to the stored device_id
+    -- would reject a reinstall that keeps the Expo token and mints a new id.
     INSERT INTO public.device_push_tokens
         (token, device_id, platform, enabled, last_seen)
     VALUES
-        (p_token, p_device_id, p_platform, p_enabled, p_last_seen)
+        (p_token, p_device_id, p_platform, p_enabled, pg_catalog.now()::text)
     ON CONFLICT (token) DO UPDATE
-      SET device_id = COALESCE(EXCLUDED.device_id, device_push_tokens.device_id),
-          platform  = COALESCE(EXCLUDED.platform, device_push_tokens.platform),
+      SET device_id = COALESCE(EXCLUDED.device_id, public.device_push_tokens.device_id),
+          platform  = COALESCE(EXCLUDED.platform, public.device_push_tokens.platform),
           enabled   = EXCLUDED.enabled,
-          last_seen = EXCLUDED.last_seen;
+          last_seen = pg_catalog.now()::text;
   END
   $fn$;
+
+  ALTER FUNCTION public.save_device_push_token(text, text, text, boolean, text)
+    OWNER TO postgres;
 
   -- PUBLIC holds EXECUTE by default. Revoking only the named roles leaves it
   -- callable. Revoke PUBLIC first, then grant the two roles the app uses.
@@ -83,5 +89,12 @@ BEGIN
     FROM PUBLIC, anon, authenticated;
   GRANT EXECUTE ON FUNCTION public.save_device_push_token(text, text, text, boolean, text)
     TO anon, authenticated;
+
+  -- A plain INSERT as anon succeeded while the write policies were
+  -- WITH CHECK (true), so the checks above were optional. Close that path
+  -- in this same statement.
+  REVOKE INSERT, UPDATE ON public.device_push_tokens FROM anon, authenticated;
+  DROP POLICY IF EXISTS "anon insert device token" ON public.device_push_tokens;
+  DROP POLICY IF EXISTS "anon update device token" ON public.device_push_tokens;
 END
 $mig$;
