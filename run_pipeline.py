@@ -683,6 +683,36 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
+def step_nhl_schedule(run_date: str) -> bool:
+    """
+    The NHL season stored ahead in `games`, from the NHL's own API
+    (data/ingestors/nhl_schedule_refresh.py): every remaining scheduled game,
+    keyed exactly as the odds feed keys it, so the feed's later upsert lands on
+    the same row. Until this step a game reached `games` only when a book
+    listed it, about a day ahead. Inserts only games that have not started;
+    never a score, never a row the odds feed or the results step wrote. It
+    removes only its own rows a book has not listed: a twin of a book's row,
+    a game postponed or cancelled, a game whose start passed unlisted, or one
+    no longer listed (capped). Runs after `nhl-results`, so a game the league
+    played is scored before this step looks at it. Fail-open: an API that does
+    not answer leaves `games` as it is; the step returns False so
+    pipeline_runs names it, and the health check nhl_schedule_refresh goes
+    STALE after 36 hours without a confirmed row.
+    """
+    try:
+        from data.ingestors.nhl_schedule_refresh import refresh, step_ok
+        t = refresh(run_date)
+        summary = {k: v for k, v in t.items() if k != "plan"}
+        if not step_ok(t):
+            logger.error(f"✗ NHL schedule (NHL API): {summary}")
+            return False
+        logger.success(f"✓ NHL schedule (NHL API): {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL schedule failed: {exc}")
+        return False
+
+
 def step_nhl_game_logs(run_date: str) -> bool:
     """Per-game NHL logs from the stats API. Must run BEFORE settlement: a goalie
     prop grades only on a goalie flagged as the starter, and this is the pull that
@@ -1910,6 +1940,25 @@ def step_nba_q1_trend(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_q1_trend_ml(dry_run: bool = False) -> bool:
+    """NBA first-quarter moneyline, the hot team (`nba_q1_trend_ml`): nba_q1_trend's rule, bet on the first-quarter
+    moneyline.
+
+    Decides each regular-season game once, on the same first-quarter fetch as the spread card, right after it
+    (scripts/nba_q1_trend_ml_card.py). LIVE, no write switch (mike, 2026-11-07, "Build it anyway"). Runs only in the
+    NBA pre-game window job, under a time limit there (scheduler.run_nba_total_luck_window).
+    """
+    try:
+        from scripts.nba_q1_trend_ml_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA first-quarter moneyline card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA first-quarter moneyline card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -2351,6 +2400,18 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         logger.info("Step 0b: Ingesting NHL final scores...")
         checkpoint("nhl_results")
         results["nhl_results"] = step_nhl_results(run_date)
+        time.sleep(1)
+
+        # ── Step 0b1: NHL schedule via the NHL API ───────────────────────────
+        # The rest of the season stored ahead (data/ingestors/nhl_schedule_refresh.
+        # py). Before this a game reached `games` only once a book listed it, about
+        # a day out. The readers that bet or buy skip a row no book has listed yet.
+        # After nhl-results (a played game is scored first) and before settle,
+        # nhl_stats and the health check, so a row for a game that did not happen
+        # is gone before the recap, the goalie rows and the missing-finals check.
+        logger.info("Step 0b1: Refreshing the NHL schedule from the NHL API...")
+        checkpoint("nhl_schedule")
+        results["nhl_schedule"] = step_nhl_schedule(run_date)
         time.sleep(1)
 
         # ── Step 0c: Golf results (must precede settlement) ─────────────────────
@@ -2978,10 +3039,11 @@ Examples:
                                  "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
+                                 "nba-q1-trend-ml",
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
-                                 "nhl-results", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
+                                 "nhl-results", "nhl-schedule", "wnba-results", "nba-results", "nba-quarters", "alt-game-lines", "nba-schedule", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "ncaabw-results", "ncaabw-schedule", "ncaabw-box",
@@ -3082,9 +3144,11 @@ Examples:
             "nba-team-total-luck": lambda: step_nba_team_total_luck(dry_run=args.dry_run),
             "nba-first-half-total-luck": lambda: step_nba_first_half_total_luck(dry_run=args.dry_run),
             "nba-q1-trend": lambda: step_nba_q1_trend(dry_run=args.dry_run),
+            "nba-q1-trend-ml": lambda: step_nba_q1_trend_ml(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
+            "nhl-schedule": lambda: step_nhl_schedule(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nba-results":  lambda: step_nba_results(run_date),
             "nba-quarters": lambda: step_nba_quarters(run_date),

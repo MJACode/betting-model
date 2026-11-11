@@ -105,6 +105,7 @@ models/saved/*_????????_??????.pkl
 !models/saved/mlb_runline_20260823_105841.pkl
 !models/saved/nba_first_half_total_luck_20261031_095356.pkl
 !models/saved/nba_q1_trend_20261107.pkl
+!models/saved/nba_q1_trend_ml_20261107.pkl
 !models/saved/nba_prop_projection_20261016_091702.pkl
 !models/saved/nba_team_total_luck_20261031_095356.pkl
 !models/saved/nba_total_luck_20261031_095356.pkl

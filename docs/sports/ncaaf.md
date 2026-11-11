@@ -14,10 +14,11 @@ nothing over the closing line in this market.
 
 | Model ID | Kind | Rule | Status |
 |---|---|---|---|
-| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF. Refit 2026-11-10 (mike) as the **mean of eleven fits** (seeds 42 and 0-9, `models/seed_average.py`): fitted and committed, NOT yet registered, because a game with no weather forecast moves it past the gate (the 2026-11-10 section at the end of this file). The single fit of 2026-08-25 is still the one scoring | LIVE on the single fit. The mean of eleven, walk-forward 2022-2025 at the stored close: 235-191, 55.2%, +24.9 units (interval 50.4% to 59.9%, does not clear breakeven); seed 42 alone on the same games 244-230, 51.5%, -9.0 units. Sized small |
+| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF. Refit 2026-11-10 (mike) as the **mean of eleven fits** (seeds 42 and 0-9, `models/seed_average.py`): the active file since 2026-11-11 14:25 UTC, switched on once the weather hold was deployed, because a game with no weather forecast moves it past the gate (the 2026-11-10 section at the end of this file). The single fit of 2026-08-25 is the file to switch back to | LIVE on the mean of eleven. Walk-forward 2022-2025 at the stored close: 235-191, 55.2%, +24.9 units (interval 50.4% to 59.9%, does not clear breakeven); seed 42 alone on the same games 244-230, 51.5%, -9.0 units. Sized small |
 | `ncaaf_spread` | `cross_book_opener` | Back the side Bovada's OPENER favours, at DraftKings' stale OPENING number. Three preconditions in the scorer, each `return []`: (1) both openers captured within 90 min (`OPENER_MAX_SKEW_MIN`), (2) DK still ON its opener, (3) \|dev\| ≥ gate | LIVE but STRUCTURALLY DORMANT on this feed (measured 2026-09-07, session 252). Backtest 1,050 bets 58.1% +10.9%, CLV 0.694 — but CFBD's `spreadOpen` carries no timestamp, so the +10.9% was never measured under precondition 1. In production the Odds API lists next week's games from Tuesday with DraftKings and FanDuel priced and NO sharp book: a paid historical snapshot at 2026-09-03T17:55Z (requesting only DK, Bovada and Pinnacle) showed 16 events for 09-12/13 with DK priced and Bovada and Pinnacle absent, while both sharp books covered that week's own slate. Bovada's first stored number lands the Sunday before, by which time DK has moved off its opener on 40 of 49 games. The only firing condition observed is a game that ENTERS the feed with both books already priced (FAU@Florida 2026-09-05, 1-minute skew — the one spread BET this season). Two pre-game BETs all season, both lost |
 | `ncaaf_spread_premium` | `cross_book_opener` | The SAME rule, band **[2.5, inf)** — the scorer's `d_threshold_max` on `ncaaf_spread` caps it at 2.5 so the two tiers are MUTUALLY EXCLUSIVE and a game fires exactly one | LIVE — 344 bets 60.5% +15.4%, positive all 3 seasons, CI [0.552,0.655] |
 | `ncaaf_moneyline` | — | — | PAUSED — classifier held out at AUC ~0.50 |
+| `ncaaf_moneyline_market` | `rule` | The best moneyline among the deciding books against the win chance the ten books' middle spread implies; bet when the gap is above 0.02 with three other books in the consensus; decided once, at 14:00 UTC on game day | LIVE from 2026-11-10 (mike: "ML model yes"). It did NOT clear: 2023-2025 311 bets, +14.70 units, interval -4.7% to +21.6%, one profitable season. Its own section, below |
 
 Thresholds: over_under 0.65/0.0, spread 0.55/0.0 (the spread floor sits under
 the rule's ~0.58 flat validated prob ON PURPOSE — the gate IS the filter, the
@@ -34,6 +35,201 @@ what makes the tier ADDITIVE rather than a re-slice — if the remainder band ha
 collapsed, the right move would have been to tighten the single gate instead.
 Re-derive with `opener_strategy.py --experiment bands`; register with
 `register_opener.py --bands`.
+
+### The NCAAF moneyline model (`ncaaf_moneyline_market`), live from 2026-11-10
+
+mike, 2026-11-10, asked after the market audit (`docs/ncaaf_market_audit.md`)
+whether he wanted a moneyline model live although nothing measured clears:
+*"ML model yes"*. Real money, like every model (CLAUDE.md §2). Code:
+`models/ncaaf_moneyline_market.py` (the rule),
+`scripts/ncaaf_moneyline_card.py` (the card that writes its picks),
+`scripts/ncaaf_moneyline_market_build.py` (the frozen numbers and the replay),
+`models/saved/ncaaf_moneyline_market_2026.json` (those numbers for the 2026
+season). It uses the NCAAB cards' quote read (`models/ncaab_book_quotes.py`)
+and final-margin distribution (`models/ncaab_margin_dist.py`) unchanged. The
+classifier `ncaaf_moneyline` is a different model and stays paused.
+
+**It did not clear.** Say so whenever its record is quoted. On 2023-2025 its
+95% interval runs from -4.7% to +21.6%, so it includes losing; all of its
+profit is the 2024 season; and the same rule lost at six of the seven other
+times the audit read it (-5.2%, +5.0%, -6.6%, -2.0%, -0.4%, -7.5%, -3.9%).
+The rule is the audit's research code ported as written. Nothing in it was
+tuned after the result.
+
+**What it bets.** A moneyline that is cheaper than the books' spreads say it
+should be. The spreads of the ten fetched books give one middle number for the
+game, and that number gives each team a chance of winning. The model takes the
+best moneyline among the seven books a pick may name, and bets it when the
+team's chance is more than **0.02** above the chance its price implies. It
+never lays a price shorter than -200. On the three replayed seasons every bet
+was an underdog, priced +110 to +430 (median +146). The rule itself has no
+upper limit on the price.
+
+**How a side is priced, step by step:**
+
+1. **Each book's quotes** are its newest pre-game full-game moneyline (both
+   prices) and full-game spread (home line, both prices) stamped in the hour
+   up to 14:00 UTC. Ten books are read: DraftKings, FanDuel, BetMGM, Caesars,
+   Fanatics, BetRivers, Hard Rock, Bovada, Pinnacle and betPARX
+   (`config.LINE_SHOP_BOOKMAKERS`).
+2. **The consensus.** A spread counts when its line and both prices are there,
+   the line is within 70 points, and its two implied chances add up to
+   between 1.00 and 1.15. The consensus is the middle (median) home line over
+   the spreads that count.
+3. **Which moneylines are priced.** A moneyline is priced when both prices are
+   there and its two implied chances add up to between 1.00 and 1.15. It is
+   dropped when its favourite differs from the favourite at every other book
+   (two or more others).
+4. **The fair chance.** The expected home margin is minus the consensus, plus
+   a fitted offset (-0.138 points for 2026). The home team's chance of
+   winning is the chance of a positive final margin at that expected margin,
+   from the final-margin distribution. Football has no ties.
+5. **The edge** of a side is its fair chance minus the implied chance of its
+   price, vig included. Only the seven deciding books' prices are considered
+   (`config.BEST_LINE_BOOKMAKERS`: the ten less Bovada, Pinnacle and betPARX),
+   and every side priced shorter than -200 is removed first.
+6. **The bet** is the largest edge in the game, over every deciding book and
+   both sides, when it is above 0.02 and at least three other books are in
+   the consensus. A tie goes to the longer price, then the book's name.
+7. **The distribution and the offset** for a season are fitted on every
+   earlier season's scored games and their CFBD closing spreads (2014-2025
+   for 2026: 10,123 games). The offset is the average of final margin plus
+   closing spread: how far home teams finished from the number.
+
+**When a game is decided: at 14:00 UTC on its Eastern date, once.** That is
+9 a.m. ET in winter and 10 a.m. ET in summer time. The card runs hourly at
+five past (UTC) and only the run in the 14:00 hour decides. The decision goes
+into `ncaaf_moneyline_decisions` with every book's moneyline and spread and
+its flags, bet or not, and the game is never decided again (CLAUDE.md §1c). A
+game kicking off less than five minutes after 14:00 UTC, or already under way,
+is not bet. A missed 14:00 is recorded as `missed` with no bet and fails the
+run; every due game with no deciding book's moneyline in the hour, an artifact
+for another season, and a best side at a book `config.BEST_LINE_BOOKMAKERS` no
+longer lists fail it too. The research read the stored 13:55 UTC pull. The
+session that commissioned this build measured production on 2026-11-10: the
+hourly refresh stores every book's NCAAF moneyline and spread at :16-:17 past
+each hour, 63-64 of 64 listed games per book.
+
+**Which games.** NCAAF rows of `games` that kick off (Eastern time) today,
+after 14:00 UTC, and that one of the ten books had priced by then. The
+kickoff decides the day, not `game_date`: a night game can be stored twice
+(Data / conventions, below), and the card decides the odds feed's row, which
+carries the prices and takes the pick. CFBD's row of the same game has no
+prices and is never the card's. Where two priced rows are one game (the same
+two teams, kicking off within a day), the row with more quotes in the hour is
+decided and the other is recorded as `duplicate_game`. A game first priced
+after 14:00 UTC is not the card's and is not `missed`.
+
+**One game never carries two bets that cannot both win.** A game on which the
+opening spread model (`ncaaf_spread`, `ncaaf_spread_premium`) already holds a
+bet is recorded as `other_model_bet` and not priced. The check runs before the
+card prices the game and again inside the write. A voided spread bet holds
+nothing. The other direction is not checked: the scorer does not look for this
+model's bet before it writes a spread bet (its check covers NHL only). Those
+two models bet at the opening number, days before, so in practice they come
+first.
+
+**The bet row.** A moneyline: `scored_line` and `line_book` are empty. The
+label is the platform's ("Ohio State ML"), checked against the side before it
+is written. `decision_*` and `best_*` are the bet book's price. When
+DraftKings had a priced moneyline at 14:00 UTC, `dk_odds` / `dk_implied_prob`
+/ `edge` are DraftKings' own price on that side, the reference; otherwise
+`dk_odds` is empty and the other two 0.0. `model_probability` is the bet
+side's fair chance, the number the 0.02 cut was measured on, so the
+publishers' edge filter agrees with the card. The stake is the flat one unit
+to win (no `stake_units`). A game priced and not bet (below the cut, or with
+too few books) is a row with no stake, as the NCAAB cards write. Settlement:
+full-game moneyline, overtime included (`games.home_win`, which the odds
+feed's row takes from CFBD's).
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.02 (fair chance from the consensus spread minus the bet price's implied chance) | `config.MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.02: the edge filter IS the card's cut | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| consensus | the median home line over the ten books' spreads that count; a bet needs three other books in it | `models/ncaaf_moneyline_market.py` |
+| price floor | -200: sides shorter than -200 removed before the pick, and pinned again | `models/ncaaf_moneyline_market.MIN_PRICE`, `MODEL_MIN_ODDS` |
+| EV floor | 0.04, just under the smallest EV the cut admitted in the replay (+0.0437; median +0.0816). It can remove a bet priced shorter than +100; the replay had none | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| decision instant | 14:00 UTC on the game's Eastern date; quotes stamped 13:00-14:00 UTC | `models/ncaaf_moneyline_market.py` |
+| decided once | a row in `ncaaf_moneyline_decisions`, bet or not | `scripts/ncaaf_moneyline_card.py` |
+| stake | flat, one unit to win | no `stake_units` |
+| settlement | full-game moneyline, overtime included | `tracking/paper_tracker._RULE_MODEL_MARKETS` |
+| kill switch | `RUN_NCAAF_MONEYLINE_CARD=0` | the card |
+| frozen numbers | the 2014-2025 distribution (10,123 games) and the offset -0.138 | `models/saved/ncaaf_moneyline_market_2026.json` |
+
+**The evidence: the card's own code, replayed** (2026-11-10,
+`scripts/ncaaf_moneyline_market_build.py` on the audit's two extracts of
+`games` and `odds`; each season priced with the distribution and offset
+fitted on the seasons before it; one unit to win, risk capped at 3; units).
+The replay runs the card's read and decision at 14:00 UTC on each game's
+Eastern date, on the stored game-day morning pull. It matched all 311 of the
+research's bets game by game: the same game, side, book and price on all 311,
+and the same edge to the last digit (largest difference 0.0). No research bet
+was missing and the replay added none.
+
+| Season | Bets | Record | Units | Return | Without the 10 best dates |
+|---|---|---|---|---|---|
+| 2023 | 140 | 49-91 | -2.77 | -3.3% | -13.79 units |
+| 2024 | 78 | 38-40 | +16.66 | +36.7% | -4.42 units |
+| 2025 | 93 | 35-58 | +0.81 | +1.4% | -11.56 units |
+| **2023-2025** | **311** | **122-189** | **+14.70** | **+7.8%** | **-9.26 units** |
+
+188.76 units were risked. The 95% interval, resampling game dates, is -4.7%
+to +21.6% as the audit printed it; the build's own resample, a different
+random draw, prints -5.1% to +22.0%. Prices laid: +110 to +430 (median +146),
+no favourites. EV at the bet price: +0.0437 to +0.2789 (median +0.0816). The
+largest edge was 0.0611. The distribution for each season was fitted on 7,521
+(2023), 8,370 (2024) and 9,193 (2025) games, with offsets -0.385, -0.358 and
+-0.268. The read held 2,257 games; 2,197 had a side to price. Each season
+split at its middle bet date: the early halves made +5.29 units on 149 bets,
+the late halves +9.40 on 162. Neighbouring cuts on the same replay: 0.01 made
++13.78 units on 601 bets (+4.1%; it lays prices from -108 to +3500); 0.03
+made +10.27 on 136 (+11.7%); 0.04 made +5.45 on 43 (+19.4%); 0.05 lost 1.96
+on 11.
+
+**The risks, plainly:**
+
+- **It did not clear.** The interval is -4.7% to +21.6%. A rule that loses
+  money is inside it.
+- **Its profit is one season.** 2024 made +16.66 units; 2023 lost 2.77 and
+  2025 made 0.81.
+- **It is a bet on road underdogs, and that is the fitted offset at work.**
+  294 of the 311 bets are road teams. The offset says home teams finished
+  behind the closing spread by 0.27 to 0.39 points in the seasons each table
+  was fitted on, which tilts every fair chance toward the road team. With the
+  offset set to zero the same cut is 212 bets and -9.22 units (116 road
+  teams). The offset fitted for 2026 is smaller, -0.138. What that does to
+  the mix of bets has not been measured.
+- **Road underdogs at these prices made money with no rule at all.** Every
+  road team whose best deciding-book moneyline at the same read was +110 to
+  +430: 813 bets, 275-538, +6.94 units. The rule's 294 road bets come from
+  that group. What the rule adds is choosing which of them to bet, and three
+  seasons do not show that the choice will keep paying.
+- **It leans on a few dates.** Without its 10 best dates it is -9.26 units
+  (-9.3), and each season is negative without its own 10 best dates.
+- **One read only.** The same rule at the seven other stored reads lost at
+  six of them (the audit's `lab_results.csv`: the evening before made +5.0%,
+  the other six lost 0.4% to 7.5%).
+- **No 2026 read exists.** A settled 2026 game kept only each book's opener
+  and close until 2026-11-10 (`docs/ncaaf_market_audit.md` §8), so the rule
+  could not be read on this season before going live.
+- **The live read is not the research's read to the minute.** The research
+  priced the stored 13:55 UTC pull, where every quote was stamped 4 to 19
+  minutes before 14:00 UTC (the build prints it). Live, a quote is the hourly
+  refresh's, stamped about 13:16 UTC. A price can move in those 40 minutes.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: at least 50
+settled picks, positive flat-bet ROI, calibration within 5%). Read beside the
+return: how many bets were road teams, and how often the bet book's price was
+still up when the pick posted (the ledger keeps every book's 14:00 quote).
+
+**Before the 2027 season** rebuild the frozen numbers
+(`python -m scripts.ncaaf_moneyline_market_build --cache <the two extracts>
+--last-season 2026`): the card refuses an artifact for another season. The
+build reads `ncaaf_games.parquet` and `ncaaf_odds.parquet`, every NCAAF row of
+`games` and `odds`, as `scripts/ncaaf_search/audit_2026_11/extract_ncaaf.py`
+takes them from the local copy of the database. In 2026 a night game's final
+is on both of its rows, so check the count of games the 2027 table is fitted
+on against the count of distinct games before trusting it.
 
 ### The model search is CLOSED (2026-08-27) — every lever tested, verdicts pinned
 
@@ -62,7 +258,7 @@ more verdicts, harnesses in `scripts/ncaaf_search/audit_2026_11/`:
 
 | Lever | Harness | Verdict |
 |---|---|---|
-| **Line shopping against the consensus** (the NCAAB spread, total and moneyline rules, unchanged; 2023-2025 stored pulls, 2,314 games, walk-forward tables) | `lab.py`, `spread_dd.py`, `sym.py` | NULL. The spread rule as built for NCAAB reads +8.2% on 338 bets [-1.2, +16.7] at the game-day morning pull, and 337 of the 338 are road teams: the fitted table's home/away tilt, not an off-market number. Every road team at the consensus lost 4.4%. Tilt removed: 22 bets at a 0.02 cut. A number 1.0+ points better than the consensus exists in 13.2% of games and lost 8.8% (269 bets). Totals: 48 bets at 0.02. Moneyline against the book's own spread: -0.5% on 386. Moneyline against the consensus spread: +7.8% on 311 at one read, negative at five of the other seven, -9.3 units without its 10 best dates |
+| **Line shopping against the consensus** (the NCAAB spread, total and moneyline rules, unchanged; 2023-2025 stored pulls, 2,314 games, walk-forward tables) | `lab.py`, `spread_dd.py`, `sym.py` | NULL. The spread rule as built for NCAAB reads +8.2% on 338 bets [-1.2, +16.7] at the game-day morning pull, and 337 of the 338 are road teams: the fitted table's home/away tilt, not an off-market number. Every road team at the consensus lost 4.4%. Tilt removed: 22 bets at a 0.02 cut. A number 1.0+ points better than the consensus exists in 13.2% of games and lost 8.8% (269 bets). Totals: 48 bets at 0.02. Moneyline against the book's own spread: -0.5% on 386. Moneyline against the consensus spread: +7.8% on 311 at one read, negative at six of the other seven (the audit's `lab_results.csv`; this said five until 2026-11-10), -9.3 units without its 10 best dates. Built live anyway on mike's call, as `ncaaf_moneyline_market` (its section above) |
 | **College props, the second season** (the market-relative rule on 2026's three pulls a game day, and 2025 again; every book as a placebo) | `props/main.py` (`docs/ncaaf_market_audit_props.md`) | NULL. Pinnacle 2026 at 0.02: 42 bets -32.4%; consensus 2026 64 bets +2.3%; nothing reaches 150 bets in a season. The placebo fails again (FanDuel as the reference +13.5% on 111 in 2025). From the week of 2026-09-29 FanDuel and Hard Rock, the only two-way books in volume, stopped disagreeing at an equal line |
 | **The totals fit's random seed** (11 seeds, same data and settings) | `totals_seeds.py`, `totals_seeds_fc.py` | A FINDING, not a verdict. One game's prediction moves 1.49 points (sd) with the seed; 3 in 10 games at the 8-point gate change with it. At the stored close the walk-forward is 51.5% to 56.4% by seed (the published 55.9% was one draw). In the live shape (first morning DraftKings read that crosses, 2023-2025) every seed is positive, +4.1% to +10.6%, and the 11-seed average is 346 bets +35.06 units (+9.35%). 2026 does not separate the average from a single fit. Acted on 2026-11-10 (mike): the fit is now the mean of the eleven, fitted and not yet registered (the 2026-11-10 section at the end of this file) |
 
@@ -759,7 +955,7 @@ snapshots with `refresh_ncaaf_stats`. If the API returns the low number,
 the live scale has left the scale the artifact was fit on, and the prior
 should be pinned to the 2025-12-12 snapshot before anyone refits.
 
-### 2026-11-10 — the totals fit is the mean of eleven seeds; fitted, not yet registered
+### 2026-11-10 — the totals fit is the mean of eleven seeds; registered 2026-11-11
 
 mike was asked "Refit the totals model as an average of 11 fits?" and answered
 "yes" (2026-11-10, after `docs/ncaaf_market_audit.md` section 4).
@@ -981,3 +1177,13 @@ To go back after a registration: set the 2026-08-25 row active again in
 `model_registry` and the new one inactive. The old file stays in the repo
 for that reason. `--register-totals` cannot do it, because the old file
 carries no registry row of its own.
+
+**2026-11-11: registered.** #1238 merged at 14:17 UTC, both services
+deployed by 14:24, and the steps above were run at 14:25:35 UTC
+(`Updated-By: mike`, "merge 1238"). `model_registry` holds
+20261110_161059 active and 20260825_204305 inactive. The worker opened the
+file: its health check at 14:30 UTC read `model_artifacts_load` OK across
+all 43 active files, and its first scoring pass re-scored 48 games with no
+new bet and none waiting for a forecast. The August file's bytes are in
+`model_artifacts` too, so going back works even after that file leaves git.
+Detail: `docs/sessions/2026-11.md`, the 2026-11-11 entry.

@@ -224,8 +224,14 @@ check('an active batter prop is still a bet type you can build on',
     MODEL_META.nba_first_half_total_luck?.type === 'game' && betSlotForModel('nba_first_half_total_luck', 'game') === null);
   check('the NBA projection model is titled with its long name',
     betTypeLabel('nba_prop_projection') === 'NBA Projected Props', betTypeLabel('nba_prop_projection'));
-  check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
-    row('NCAAF').join(',') === 'Spread|Spread line');
+  // The live NCAAF moneyline model (ncaaf_moneyline_market, 2026-11-10, mike)
+  // gives NCAAF an ML row. The paused classifier ncaaf_moneyline is not in it.
+  // Until that model, NCAAF was Spread only.
+  check('NCAAF is ML and Spread — it has no prop model',
+    row('NCAAF').join(',') === 'ML|Moneyline,Spread|Spread line', row('NCAAF').join(','));
+  const ncaafMl = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'ml');
+  check('NCAAF ML writes the live moneyline model only, not the paused classifier',
+    ncaafMl?.modelIds.join(',') === 'ncaaf_moneyline_market', ncaafMl?.modelIds.join(','));
   const ncaafLine = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'line');
   check('NCAAF Spread maps to ncaaf_spread only, not the premium band',
     ncaafLine?.modelIds.join(',') === 'ncaaf_spread');

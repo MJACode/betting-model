@@ -544,6 +544,7 @@ INSTRUMENTED_ENTRYPOINTS = [
     "scripts/ncaabw_total_card.py",
     "scripts/ncaab_spread_card.py",
     "scripts/ncaab_moneyline_card.py",
+    "scripts/ncaaf_moneyline_card.py",
     "scripts/ncaab_moneyline_first_post_card.py",
     "scripts/ncaab_first_half_window.py",
     "scripts/ncaab_first_half_spread_card.py",

@@ -1519,6 +1519,100 @@ links stay empty. **NONE rows of games that started before the restore ran
 are not in picks.** For grading every scored pick (CLAUDE.md §7), NCAAB NONE
 rows from 2026-11-04 to the fix are incomplete; picks_log holds them all.
 
+### Two bets on one game, and unit sizing: measured 2026-11-06, nothing changed
+
+mike, 2026-11-06: *"Betting Game Over Under AND individual team totals AND 1H
+over under seems duplicative - too many picks. Only select the highest EV one,
+unless it's exceptionally high"*, and *"college basketball sounds like a
+market where we can unit max on a 1-3 unit spread"*. The goal he set: units
+won and closing value, nothing else.
+
+**There is no NCAAB team-total model.** The six pregame models in this
+measurement are the full-game total, the first-half total, the full-game
+spread, the two moneylines and the first-half spread. The in-play models are
+not in it. Team totals are bought and stored (the section "First-half
+lines and team totals at three game-day times" below), not bet. The NBA has
+all three totals models. PR #1176 merged on 2026-11-06 and limits them to one
+game-total bet a game.
+
+**How it was graded.** Every model's own walk-forward replay, the bets each
+build writes with `--bets-out` (the same builds that reproduce the live cards
+bet for bet), joined by game over 2023-24 to 2025-26, the three seasons all six
+cover. 6,555 bets. 1u to win, risk capped at 3u. 95% intervals resample game
+dates. `python -m scripts.ncaab_stacking_check` prints every table below.
+The closing-value lines are not in it. They came from a one-off pass over
+the first-half build's quote cache (each book's last pre-tip first-half
+total) and Pinnacle's stored full-game totals in `odds`.
+
+**Volume.** 15.2 bets a game day on average, 34 at the 90th percentile, 63 at
+most. 4,716 games got one bet, 797 two, 79 three, 2 four. The first-half total
+model is the largest source: 2,527 of the 6,555 bets (39%).
+
+**Totals: the full-game and first-half totals rarely meet, and when they do
+their results are unrelated.** They bet the same game 270 times in three
+seasons (about 90 a season). Same direction 143, opposite 127. Win correlation
+-0.01. They read different things: the full-game model prices the total
+itself, the first-half model takes the market's full-game total as given and
+prices how it splits between the halves.
+
+| Rule (totals) | Bets | Units | ROI | 95% interval |
+|---|---|---|---|---|
+| **Every bet (live)** | **4,382** | **+233.39** | **+4.78%** | **[1.9, 7.6]** |
+| One a game, highest EV | 4,112 | +216.59 | +4.73% | [1.8, 7.5] |
+| One a game, full game first (the order the cards decide in) | 4,112 | +200.54 | +4.38% | [1.5, 7.4] |
+| Highest EV, plus the other when its EV is 0.06 or more | 4,241 | +225.29 | +4.77% | [1.9, 7.7] |
+| The 270 bets "highest EV" drops | 270 | +16.80 | +5.52% | [-4.7, 15.7] |
+
+The first-half bets on games the full-game model also bet made +32.85 units
+(+10.83%). Skipping them after a full-game bet unless their EV clears a bar
+costs 8.09 units at a bar of 0.06, 20.62 at 0.08 and 25.85 at 0.15. A
+"first-half first" row grades better (+244.48) but cannot be run: the
+full-game total decides at DraftKings' first post, hours or a day before the
+first-half total's hour-before-tip call, and a pick already written stands
+(CLAUDE.md §1c). "Highest EV" cannot be run as written for the same reason;
+the rows above are what it would have made with hindsight.
+
+Closing value does not separate them either. Full-game total bets beat
+Pinnacle's last pre-tip line by 1.38 points on stacked games and 1.33 alone.
+First-half total bets: the same book's line moved toward the bet by 0.11
+points stacked and 0.15 alone (over all of its bets, the line moved toward
+the bet 19% of the time, stayed 75%, moved away 6%).
+
+**Sides: the same, more so.** "One a game, highest EV" across the full-game
+spread, both moneylines and the first-half spread made +137.13 units against
++172.35 for every bet; the 127 bets it drops made +35.23 (+21.51%, [6.2,
+37.2]). The one literal duplicate in the card is the two moneyline models on
+the same team: 37 of the 42 games both bet, win correlation 0.73. Those
+stacked bets made +17.75% (15:00 UTC model) and +22.28% (first-post model).
+
+**All six together.** Every bet +405.74 units; one a game by highest EV
++332.39; the 961 bets it drops made +73.35 (+6.50%, [0.4, 12.6]). No EV bar
+for a second bet recovers the difference (the best, 0.06, makes +357.00).
+
+**Unit sizing by EV does not work on these models.** Each model's bets were
+split into thirds by EV, the cutoffs taken from that model's earlier seasons
+only. All six together: lowest third +6.08%, middle +4.56%, top +7.74%, not a
+ranking. By model the top third is the best in some seasons and the worst in
+others (the 15:00 UTC moneyline's top third lost 1.57% over five seasons).
+On the same bets, 1u / 2u / 3u to win by third returns +6.32% per unit risked
+against +6.07% flat, with 1.8 times the risk: 852.5 units instead of 455.7,
+almost all of it from betting bigger, not from betting better. This is the
+same finding that made sizing flat across the repo on 2026-08-29
+(`tracking/discord_notifier.conviction_for`). A bigger unit for all NCAAB bets
+would scale units and swings together; that is a bankroll choice, not
+something the record decides.
+
+**What would cut volume, and its price.** The first-half total model at a cut
+of 0.03 instead of the 0.02 this measurement used: 2,529 bets and +125.78 units
+become 1,369 and +76.86. That is about 46% fewer bets from the largest source,
+for about 16 units a season. The live cut is 0.025, raised on 2026-11-06 (its
+section above); moving on to 0.03 was not done. It is the model with the
+thinnest record (2025-26 +1.65% as it runs) and the weakest closing value.
+
+One bet a game, and 1u/2u/3u by an EV third, were not adopted. The next section
+is the sizing rule that did ship: a later NCAAB bet that agrees with an earlier
+NCAAB bet on the same game and the same side is 2u to win.
+
 ### Agreement sizing: 2u when a second model agrees (2026-11-06, mike)
 
 mike, 2026-11-06: *"I want a pick that has a higher confidence and higher long

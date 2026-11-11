@@ -393,6 +393,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "ncaab_total_blend",
          # 2026-11-09 (mike): NCAABW totals, the women's twin; the same number.
          "ncaabw_total_blend",
+         # 2026-11-10 (mike): NCAAF moneylines; the margin table's fair chance
+         # at the books' consensus spread.
+         "ncaaf_moneyline_market",
          # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).
@@ -408,6 +411,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-07 (mike: "I WANT THAT MODEL"): the NBA first-quarter spread; market-fair P(cover)
          # plus the graded cell's uplift, which its rule was graded on.
          "nba_q1_trend",
+         # 2026-11-07 (mike: "Build it anyway"): the NBA first-quarter moneyline; market-fair P(win | not level)
+         # plus the graded cell's uplift.
+         "nba_q1_trend_ml",
          # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's own probability.
          "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2"}
     )

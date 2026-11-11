@@ -367,12 +367,23 @@ this). Numbers stored as Postgres `numeric` are kept as exact text, and every
 other type that has no exact Parquet equivalent (json, uuid, arrays) is kept
 as its Postgres text.
 
-### The proposed schedule: NOT registered
+### The schedule: daily at 00:30, registered 2026-11-03
 
-mike has not approved a recurring task. Nothing below has been run. The
-proposal is daily at 00:30 local time (05:30 UTC in winter, 04:30 in summer).
-That is after the evening games, with about five hours before the 6am ET
-pipeline window, which the run waits through if it is still going.
+The task `BettingModel\LocalMirror` exists on mike's PC (read from Task
+Scheduler on 2026-11-11: registered 2026-11-03 18:37, one daily trigger at
+00:30 local time, which is 05:30 UTC in winter and 04:30 in summer). That is
+after the evening games, with about five hours before the 6am ET pipeline
+window, which the run waits through if it is still going. It ran every night
+from 2026-11-04 to 2026-11-10, about 75 minutes a night
+(`logs\supabase_*.log`).
+
+**It runs only while mike is signed in to Windows, and nothing starts a
+night it missed.** On 2026-11-10 Windows Update restarted the PC at 10:29pm
+and again at 10:35pm ET; nobody was signed in from 10:29pm until 8:17am
+(System log, Winlogon events 7002 and 7001), so the 00:30 run of 2026-11-11
+never started, and signing in did not start it either. It was started by
+hand at 8:39am (`schtasks /Run`). The task has no sign-in trigger and does
+not wake the PC. Adding a sign-in trigger is mike's call (asked 2026-11-11).
 
 ```bat
 :: Register (runs as you, only while you are logged on):
