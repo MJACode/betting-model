@@ -17,6 +17,8 @@ import {
   loadTodayBoard,
   loadTodayBoardOnForeground,
   setTodayBoardReader,
+  todayBoardIsStale,
+  todayPicksDateKey,
   subscribeTodayBoard,
   todayBoardSnapshot,
   type TodayBoardRead,
@@ -232,6 +234,20 @@ export function useTodayPicks(date?: string) {
   const loadGen = useRef(0);
 
   useEffect(() => {
+    const day = todayPicksDateKey({
+      explicit: date,
+      held: target,
+      today: todayET(),
+      heldIsStale: todayBoardIsStale(target),
+      refresh: false,
+    });
+    // The cached read for the day this screen is holding has aged out, and
+    // the Eastern date has moved. Switch before subscribing, so the effect
+    // runs again on today instead of refreshing yesterday.
+    if (day !== target) {
+      setLiveDay(day);
+      return;
+    }
     let alive = true;
     const token = ++loadGen.current;
     const current = todayBoardSnapshot<EnrichedPick>(target);
@@ -245,7 +261,7 @@ export function useTodayPicks(date?: string) {
       alive = false;
       stop();
     };
-  }, [target]);
+  }, [target, date]);
 
   // Coming back to the app: re-read only when the shared board is stale, and
   // switch to the new Eastern date after midnight. Same AppState hook as
@@ -268,10 +284,18 @@ export function useTodayPicks(date?: string) {
   const refresh = useCallback(() => {
     const token = ++loadGen.current;
     setLoading(true);
-    return loadTodayBoard(target, true).finally(() => {
+    const day = todayPicksDateKey({
+      explicit: date,
+      held: target,
+      today: todayET(),
+      heldIsStale: todayBoardIsStale(target),
+      refresh: true,
+    });
+    if (date == null) setLiveDay((prev) => (prev === day ? prev : day));
+    return loadTodayBoard(day, true).finally(() => {
       if (loadGen.current === token) setLoading(false);
     });
-  }, [target]);
+  }, [date, target]);
 
   return {
     data: board.data,

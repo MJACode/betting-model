@@ -62,6 +62,8 @@ def test_single_flight_and_refresh_invalidation():
     assert "four concurrent callers start one read" in proc.stdout
     assert "refresh after a finished read starts another" in proc.stdout
     assert "a stale foreground re-reads once" in proc.stdout
+    assert "pull-to-refresh after midnight ET reads the new date" in proc.stdout
+    assert "a stale mount after midnight ET rolls forward" in proc.stdout
     assert "the staleness age is five minutes" in proc.stdout
     assert "Infinity: a later mount does not re-read" in proc.stdout
     assert "ALL PASS" in proc.stdout

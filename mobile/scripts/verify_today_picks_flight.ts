@@ -19,7 +19,9 @@ import {
   setTodayPicksStaleMsForTests,
   subscribeTodayBoard,
   TODAY_PICKS_STALE_MS,
+  todayBoardIsStale,
   todayBoardSnapshot,
+  todayPicksDateKey,
   type TodayBoardRead,
 } from '../src/lib/todayPicksFlight';
 
@@ -193,6 +195,74 @@ async function ageWindow(): Promise<void> {
   check('four stale callers still made one read', calls === 4, `calls=${calls}`);
 }
 
+function midnightEt(): void {
+  const yesterday = '2026-11-11';
+  const today = '2026-11-12';
+  check(
+    'pull-to-refresh after midnight ET reads the new date',
+    todayPicksDateKey({
+      held: yesterday,
+      today,
+      heldIsStale: false,
+      refresh: true,
+    }) === today,
+  );
+  check(
+    'a mount inside the staleness window keeps the date it is holding',
+    todayPicksDateKey({
+      held: yesterday,
+      today,
+      heldIsStale: false,
+      refresh: false,
+    }) === yesterday,
+  );
+  check(
+    'a stale mount after midnight ET rolls forward',
+    todayPicksDateKey({
+      held: yesterday,
+      today,
+      heldIsStale: true,
+      refresh: false,
+    }) === today,
+  );
+  check(
+    'an explicit date is not rolled at midnight',
+    todayPicksDateKey({
+      explicit: yesterday,
+      held: yesterday,
+      today,
+      heldIsStale: true,
+      refresh: true,
+    }) === yesterday,
+  );
+}
+
+async function midnightEtWithAStaleRead(): Promise<void> {
+  resetTodayBoardForTests();
+  let t = 1_000_000;
+  setTodayBoardClockForTests(() => t);
+  const seen: string[] = [];
+  setTodayBoardReader(async (date: string) => {
+    seen.push(date);
+    return ok(seen.length);
+  });
+  await loadTodayBoard('2026-11-11', false);
+  t += TODAY_PICKS_STALE_MS;
+  check('the held day is stale once the age has passed', todayBoardIsStale('2026-11-11'));
+  const day = todayPicksDateKey({
+    held: '2026-11-11',
+    today: '2026-11-12',
+    heldIsStale: todayBoardIsStale('2026-11-11'),
+    refresh: true,
+  });
+  await loadTodayBoard(day, true);
+  check(
+    'the re-read after midnight ET asks for the new date',
+    seen[seen.length - 1] === '2026-11-12',
+    seen.join(','),
+  );
+}
+
 async function infinityIsForegroundOnly(): Promise<void> {
   resetTodayBoardForTests();
   setTodayPicksStaleMsForTests(Number.POSITIVE_INFINITY);
@@ -359,6 +429,8 @@ async function main(): Promise<void> {
   await failedRefreshKeepsRows();
   await datesDoNotShare();
   await ageWindow();
+  midnightEt();
+  await midnightEtWithAStaleRead();
   await infinityIsForegroundOnly();
   await aQuietDateIsDropped();
   await listenersSeeTheRead();

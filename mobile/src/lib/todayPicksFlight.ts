@@ -85,6 +85,35 @@ function readIsFresh(slot: Slot<unknown>): boolean {
   return nowMs() - slot.fetchedAt < age;
 }
 
+/** True when this date has no successful read inside the staleness age.
+ *  Does not create a slot. */
+export function todayBoardIsStale(date: string): boolean {
+  const slot = slots.get(date) as Slot<unknown> | undefined;
+  if (!slot) return true;
+  return !readIsFresh(slot);
+}
+
+/**
+ * Which Eastern date to read.
+ *
+ * An explicit date stays. A refresh always rolls forward to `today`, so a
+ * pull after midnight ET does not re-read the day the screen mounted on.
+ * A mount rolls forward only when the day it is holding is older than
+ * TODAY_PICKS_STALE_MS. Inside that window it keeps the held day.
+ */
+export function todayPicksDateKey(opts: {
+  explicit?: string;
+  held: string;
+  today: string;
+  heldIsStale: boolean;
+  refresh: boolean;
+}): string {
+  if (opts.explicit != null) return opts.explicit;
+  if (opts.refresh) return opts.today;
+  if (opts.held !== opts.today && opts.heldIsStale) return opts.today;
+  return opts.held;
+}
+
 export function emptyTodayBoard<Row>(): TodayBoardSnapshot<Row> {
   return {
     data: [],
