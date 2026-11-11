@@ -157,20 +157,23 @@ def test_the_closing_line_functions_are_recreated_when_they_change():
         # names itself as totals.
         "clv-standard-v2-power-80-0.05-12-nba-q1-trend",
         # ncaabw_total_blend's, which production holds before nba_q1_trend_ml names
-        # itself as h2h_q1 and joins the NBA close-only markets. The function body
-        # still names ncaabw_total_blend as totals.
+        # itself as h2h_q1 and joins the NBA close-only markets.
         "clv-standard-v2-power-80-0.05-12-ncaabw-total-blend",
+        # nba_q1_trend_ml's (#1218). The function body still names it as h2h_q1
+        # and still names ncaabw_total_blend as totals. ncaaf_moneyline_market
+        # names itself as h2h on top of that.
+        "clv-standard-v2-power-80-0.05-12-nba-q1-trend-ml",
     }
     assert declared not in stamped_before, (
-        "clv_game_market changed (nba_q1_trend_ml, keeping ncaabw_total_blend) after production may have "
+        "clv_game_market changed (ncaaf_moneyline_market, keeping nba_q1_trend_ml) after production may have "
         "stamped this comment; without a new comment the guard never re-creates it")
 
 
 # The mapping's own text, pinned to the comment that ships it. #1214 edited the mapping and kept the comment, so
 # production never re-created the function: the guard above could not see it, because it reads only the comment.
 # Editing clv_game_market now fails here until the comment is bumped AND this hash is set to the new body's.
-# The hash is the merged body: ncaabw_total_blend from master and nba_q1_trend_ml from this branch.
-GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-nba-q1-trend-ml": "5ef76d1e2c14d033"}
+# The hash is the merged body: nba_q1_trend_ml from #1218 and ncaaf_moneyline_market from this branch.
+GAME_MARKET_BODY = {"clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market": "c74a56de71fb074a"}
 
 
 def test_an_edit_to_the_market_map_bumps_the_comment():

@@ -660,6 +660,19 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The live NCAAF moneyline model (models/ncaaf_moneyline_market.py
+  // MODEL_ID): the best moneyline against the win chance the books' consensus
+  // spread implies. It carries the paused classifier's name above, as the live
+  // and paused MLB Totals models share theirs; modelLongWithMark marks the
+  // paused one. The id has no 'spread' in it, so markets.ts reads it as a
+  // moneyline without a named line.
+  ncaaf_moneyline_market: {
+    shortLabel: 'ML',
+    longLabel: 'NCAAF Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   ncaaf_over_under: {
     shortLabel: 'O/U',
     longLabel: 'NCAAF Totals',
@@ -1027,6 +1040,12 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaab_moneyline_first_post:
     'The chance this side wins according to the spread at the book we bet, when that book first posted ' +
     'its moneyline. Edge is how much higher that is than the chance the moneyline price implies.',
+  // The win chance the books' middle spread implies
+  // (models/ncaaf_moneyline_market.py); the edge is that minus the bet price's
+  // implied chance (UX review, 2026-11-10).
+  ncaaf_moneyline_market:
+    'The chance this side wins according to the middle point spread across the sportsbooks we check. ' +
+    'Edge is how much higher that is than the chance the moneyline price implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -1112,9 +1131,14 @@ const GAME_DAY_FIRST_POST_TOTAL_MODELS: readonly string[] = [
 // sportsbook picker lists more books than it (UX review, 2026-11-03).
 // The NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decides at the
 // same instant and posts in the same batch; its body says what it compares.
+// The NCAAF moneyline card (scripts/ncaaf_moneyline_card.py) decides the same
+// way an hour earlier, at 14:00 UTC: 10am ET until the clocks go back in early
+// November, 9am ET after. Its body says its own times; the shared empty state
+// ("by noon ET") covers both.
 const GAME_MORNING_MODELS: readonly string[] = [
   'ncaab_moneyline_own_spread',
   'ncaab_spread_market',
+  'ncaaf_moneyline_market',
 ];
 
 // The moneyline model's page body (UX review, 2026-11-02): it bets the book
@@ -1128,6 +1152,15 @@ const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
     'book’s spread implies. It bets only some games, each at the one book where that gap is largest, ' +
     'which may not be DraftKings. It never lays more than -200. It skips a game the NCAAB Opening ' +
     'Moneyline model has already bet. A posted bet is never re-priced: it stays at the price it posted at.',
+  // The NCAAF moneyline model (UX review, 2026-11-10): the best moneyline on
+  // offer against the win chance the books' middle spread implies
+  // (models/ncaaf_moneyline_market.py). Never shorter than -200.
+  ncaaf_moneyline_market:
+    'This model decides each game once, at 10am ET on game day (9am ET from early November). It bets a ' +
+    'moneyline only when the best price on offer beats the chance of winning implied by the middle point ' +
+    'spread across the sportsbooks we check. That book may not be DraftKings. It never lays more than ' +
+    '-200. It skips a game an NCAAF Spreads model has already bet. A posted bet is never re-priced: it ' +
+    'stays at the price it posted at.',
 };
 // The model that bets a book's moneyline minutes after the book first posts
 // it (scripts/ncaab_moneyline_first_post_card.py, every minute, on the
