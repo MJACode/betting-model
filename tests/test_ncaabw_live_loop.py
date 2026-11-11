@@ -113,6 +113,13 @@ class Db:
         self.credits: list = []
         self.prices: list = []
         self.standing = standing or []
+        self.spread_bet = None                 # a standing spread bet's label, when the game holds one
+
+    def paired(self, side):
+        """What models.cbb_pairs.clash says: an under beside a big favourite's spread bet."""
+        if self.spread_bet and side == "under":
+            return f"paired_with:{self.spread_bet} (a big favourite's spread on the same game)"
+        return None
 
     def outcomes(self, kind):
         return [r for r in self.notes if r["outcome"] == kind]
@@ -146,6 +153,7 @@ class Db:
         monkeypatch.setattr(LP, "insert_ledger", insert_ledger)
         monkeypatch.setattr(LP, "write_bet", write_bet)
         monkeypatch.setattr(LP, "standing_totals", lambda conn, gid: list(db.standing))
+        monkeypatch.setattr(LP, "paired_bet", lambda conn, gid, mid, side, line: db.paired(side))
         monkeypatch.setattr(LP, "under_daily_cap", lambda conn, cost: True)
         monkeypatch.setattr(LP, "record_credits", lambda conn, c: db.credits.append(c))
         import data.ingestors.live_price_log as lpl
