@@ -322,6 +322,11 @@ def _fh_wire(monkeypatch, quotes, fetch_at, fg=None, total=False):
                         lambda conn, ids, now, **kw: {GID: (fetch_at, {})})
     monkeypatch.setattr(card, "decision_quotes", lambda conn, cuts: quotes)
     monkeypatch.setattr(card, "fg_consensus", lambda conn, cuts: {GID: fg})
+    # The pair rule's two reads (2026-11-11): no first-half spread was quoted,
+    # and the game holds no other bet. Neither is what these tests are about.
+    if total:
+        monkeypatch.setattr(card, "favourite_lays", lambda conn, cuts: {})
+    monkeypatch.setattr(card.cbb_pairs, "clash", lambda conn, game_id, model_id, side, line: None)
     monkeypatch.setattr(card, "artifact", lambda season: art)
     tg = pd.DataFrame(columns=list(spread_card.TEAM_COLS))
     sg = pd.DataFrame({"game_id": pd.Series(dtype=object), "home_team": pd.Series(dtype=object),
