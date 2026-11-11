@@ -59,6 +59,11 @@ check(
 
 const pill = read('src/components/StackBackButton.tsx');
 check('the pill is labelled Back', /accessibilityLabel="Back"/.test(pill));
+const titleStyle = /title:\s*\{([^}]+)\}/.exec(pill)?.[1] ?? '';
+check(
+  'the player name is textPrimary, not the header tint',
+  /color:\s*colors\.textPrimary/.test(titleStyle) && !/color:\s*tintColor/.test(code(pill)),
+);
 check('the pill is at least 44pt wide and tall', /minWidth:\s*44/.test(pill) && /minHeight:\s*44/.test(pill));
 check(
   'the pill has hitSlop inside the bar, not down into the player name',

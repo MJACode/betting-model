@@ -11,9 +11,9 @@ import type { RootStackParamList } from '@/types';
 /** Centered player name. One line, and no wider than the gap between the pills. */
 export function PlayerStatsHeaderTitle({
   children,
-  tintColor,
 }: {
   children?: React.ReactNode;
+  /** Passed by the stack. On iOS it is the header tint (the link colour). The name is not a link. */
   tintColor?: string;
 }) {
   const { width, fontScale } = useWindowDimensions();
@@ -21,7 +21,7 @@ export function PlayerStatsHeaderTitle({
     <Text
       numberOfLines={1}
       maxFontSizeMultiplier={2}
-      style={[styles.title, { color: tintColor, maxWidth: playerTitleMaxWidth(width, fontScale) }]}
+      style={[styles.title, { maxWidth: playerTitleMaxWidth(width, fontScale) }]}
     >
       {children}
     </Text>
@@ -70,6 +70,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     textAlign: 'center',
+    color: colors.textPrimary,
   },
   pill: {
     flexDirection: 'row',
