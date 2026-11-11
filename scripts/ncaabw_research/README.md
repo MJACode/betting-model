@@ -17,6 +17,8 @@ Run from the repo root, in this order:
 | 6 | `python -m scripts.ncaabw_research.totals_b`, then `totals_c` | The totals model at DraftKings' first posted total: the replay, then the cut, calibration and splits |
 | 7 | `python -m scripts.ncaabw_research.market` | The men's spread and moneyline market rules on the women's boards |
 | 8 | `python -m scripts.ncaabw_research.inplay` | The in-play game-state model against every snapshot's in-play quotes (needs `pbp_<season>.parquet` in the cache: sportsdataverse's `espn_womens_college_basketball_pbp/play_by_play_<season>.parquet`) |
+| 9 | `python -m scripts.ncaabw_research.inplay_checks` | The halftime total's and halftime spread's four checks (blind sides, claimed-EV bands, a placebo, stale prices), on the priced quotes step 8 leaves in the cache |
+| 10 | `python -m scripts.ncaabw_research.sides`, then `sides grid` | Spread and moneyline off the totals model's team ratings at DraftKings' first posted line; the same with the ratings' settings moved |
 
 Two more read production through the totals card's own reads (they need
 production settings, and write nothing). `box_coverage` prints this season's
@@ -25,6 +27,12 @@ card's decision on every priced game of the season so far, with the committed
 artifact. Read the caveat in `totals_a`'s section of the doc first: until
 2026-11-10 only the played games of 2026-27 were stored, so anything computed
 on that season before then had every team pooled into one.
+
+Steps 8 and 9 take `NCAABW_INPLAY_STATE=max`: the score read as the highest
+logged so far, the reading the halftime model uses (`models/ncaabw_live_ht.py`;
+ESPN logs corrections late with an old running score). Without it they
+reproduce the first tables of 2026-11-09 and 2026-11-11. The model's own
+replay is `python -m scripts.build_ncaabw_live_ht_artifact`.
 
 `check_tips` answers one question about the purchase: whether games with
 in-play quotes and no pre-game ones have an early stored tip (they do not).

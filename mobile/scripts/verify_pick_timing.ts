@@ -262,6 +262,20 @@ function mkPick(over: Partial<Pick>): Pick {
   );
   check('NCAAB late live shows the second half', Boolean(ncaabLate?.label.includes('· 2nd half')), ncaabLate?.label);
 
+  // The NCAABW loop bets during the halftime break only and stores quarter 2
+  // (ncaabw_live_loop.build_pick): the card says halftime, never "Q2".
+  const ncaabwHalf = pickTimingInfo(
+    mkPick({ sport: 'NCAABW', model_id: 'ncaabw_live_total_ht', is_live: true, inning_at_pick: 2 }),
+  );
+  check('an NCAABW live bet says halftime, not a quarter',
+    Boolean(ncaabwHalf?.label.includes('· halftime')) && !ncaabwHalf?.label.includes('Q2'), ncaabwHalf?.label);
+  check('its note says the bet is on the full game and when the price was read',
+    Boolean(ncaabwHalf?.note.includes('on the full-game total'))
+    && Boolean(ncaabwHalf?.note.includes('read during the break, shortly before the time above'))
+    && !ncaabwHalf?.note.includes('Locked the moment this crossed'), ncaabwHalf?.note);
+  check('every other live pick keeps the general note',
+    Boolean(nbaLive?.note.includes('Locked the moment this crossed')), nbaLive?.note);
+
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(
     'live without a period still stamps the time',

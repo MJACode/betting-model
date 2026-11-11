@@ -344,6 +344,18 @@ pick is announced only while its game is in progress.
 
 ---
 
+## NCAABW in play: the full-game total at halftime (2026-11-11, mike)
+
+The full story and the evidence are in `docs/sports/ncaabw.md`, "In play: the
+halftime total". One model, `ncaabw_live_total_ht`: the full-game total, bet
+once a game during the halftime break at EV >= 0.05, on a model of the points
+still to come from the pre-game total and the first half's surprise. Replayed
+on the loop's own code: 669 bets, +89.96 units, +11.84% (95% +5.1 .. +18.1) on
+2025-26 with a model fitted on 2024-25, and 298 bets, +42.10 units, +12.35%
+(+0.6 .. +23.7) on 2024-25 the other way round; it laid -148 to +200. The loop
+(`models/ncaabw_live_loop.py`, pollers) reads the books every five minutes
+while a game is at the half and posts to the women's live channel only.
+
 ## NCAAB in play: three game-state models, the best few a night (2026-11-07, mike)
 
 The full story and the evidence are in `docs/sports/ncaab.md`, "In play". Three

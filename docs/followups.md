@@ -39,6 +39,7 @@ its run and names the command if the schedule is short, so this cannot be
 missed silently; a step that loads it without a person would be better.
 
 ## [ ] NCAABW: the build reads a cache on one PC
+<!-- the halftime total's build has the same item, further down -->
 
 `scripts/ncaabw_total_blend_build.py` reads the research cache
 (`~/ncaabw_research/cache`), which is a copy of what Supabase holds. Every row
@@ -63,22 +64,24 @@ made outside the repo (`git worktree add --detach`, 153 and 154 passed).
 - `test_mobile_nhl_skater_stats::test_the_behavioural_checks_pass` fails in
   the main checkout and is skipped on the clean copies. Not looked into.
 
-## [ ] Fourteen tests fail on master (measured 2026-11-10, master 93b032e3)
+## [ ] Sixteen tests fail on master (measured 2026-11-11, master 553ce191)
 
-`python -m pytest -q tests/` on this machine: 14 failed, 11,510 passed. None
-is from the work that found them; each was re-run on a clean copy of master.
+`python -m pytest -q tests/` on this machine, on a branch holding that master:
+17 failed, 11,906 passed. One was the branch's own and was fixed. The other
+sixteen were re-run on a clean copy of master, alone, and fail the same way.
 
-- Fail alone: `test_claude_rules_split` (`config-topology.md`; needs a
+- Fail alone (14): `test_claude_rules_split` (`config-topology.md`; needs a
   `.env`), `test_deploy_drain` (the forwarded SIGTERM),
   `test_health_check_observe` and `test_model_quality` (both compare a line of
   `run_pipeline.py` at four spaces of indent; master has eight),
   `test_market_coverage_probe` (an all-line leg slip),
-  `test_mobile_board_season` (the grade legend), `test_multi_book_odds` (the
-  closing-line reads), `test_nhl_totals_card` (insert once under the model
-  lock), `test_picks_unique_row` (the card insert), `test_price_prefilter_rollback`
-  (two), `test_web_site` (the record math against the node suite; no node on
+  `test_mobile_board_season` (the grade legend),
+  `test_mobile_player_stat_groups` (the tab's opening stat),
+  `test_multi_book_odds` (the closing-line reads), `test_ncaab_first_half_odds`
+  (four: the purchase and its ledger), `test_picks_unique_row` (the card
+  insert), `test_web_site` (the record math against the node suite; no node on
   PATH here).
-- Fail only in a full run: `test_social_posts` and `test_social_profile`
+- Fail only in a full run (2): `test_social_posts` and `test_social_profile`
   (one test each). They call `scheduler.build_scheduler()` after a test that
   reloaded the scheduler has left it in the pollers role. Reproduce:
   `python -m pytest -q tests/test_daily_retry.py tests/test_nba_live_config.py
@@ -86,6 +89,9 @@ is from the work that found them; each was re-run on a clean copy of master.
   tests/test_pipeline_watch.py tests/test_savant_freshness.py
   tests/test_service_role_split.py tests/test_social_posts.py
   tests/test_social_profile.py`.
+- Since 2026-11-10: `test_nhl_totals_card` and `test_price_prefilter_rollback`
+  no longer fail; `test_mobile_player_stat_groups` and the four
+  `test_ncaab_first_half_odds` tests are new.
 
 ## [ ] App: ReBet is still a selectable sportsbook with no prices (2026-11-10)
 
@@ -107,16 +113,40 @@ a 1,000-row response cap. A thirteenth market in `MAIN_GAME_ODDS_MARKETS`
 would pass it silently for both college basketball sports. Chunk at 64 or
 page the read. Found by the same review; it predates the women's sport.
 
-## [ ] NCAABW in play: finish the checks, then decide (2026-11-09)
+## [x] NCAABW in play: finish the checks, then decide (2026-11-09, done 2026-11-11)
 
-The second-half total made +8.75% [2.2, 15.7] on 698 bets in 2025-26 and
-+12.84% on 305 in 2024-25 (`scripts/ncaabw_research/inplay.py`). Before it is
-anything more than a first look it needs what the men's in-play models
-passed: the blind same-side baseline, the bands below and above the cut, the
-placebo (each game given another game's model), and the stale-quote checks
-(quote age, time since the last score, a sharp-book split; the women's board
-has no Pinnacle, so BetOnline and LowVig stand in). The first week of 2026-27
-was negative on every rule.
+The checks were run and the halftime total was built (`ncaabw_live_total_ht`,
+`docs/sports/ncaabw.md` "In play: the halftime total"). The halftime spread
+does not clear.
+
+## [ ] NCAABW halftime total: measure ESPN's publishing lag on the women's game (2026-11-11)
+
+The loop waits 90 seconds after a price read and 60 more before it decides,
+the lag measured on the men's game. `ncaabw_live_decisions.play_lag_s` stores
+the seconds between ESPN's newest play and each read. After a week of slates,
+read it: if the women's plays arrive as fast, the bet can post sooner after
+its price was read (`NCAABW_LIVE_PBP_WAIT_SEC`, `NCAABW_LIVE_PBP_RECHECK_SEC`).
+
+## [ ] NCAABW halftime spread: re-test on this season's stored halftime prices (2026-11-11)
+
+On the corrected reading it is +8.48% [-1.9, +18.2] walk-forward and 11-17
+this season. The halftime loop stores every book's spread at every read in
+the break (source `ncaabw_live_loop`), so the third season builds itself.
+Re-run `NCAABW_INPLAY_STATE=max python -m scripts.ncaabw_research.inplay` on
+them in January.
+
+## [ ] NCAABW halftime total: the build reads a cache on one PC (2026-11-11)
+
+`scripts/build_ncaabw_live_ht_artifact.py` reads the research cache, like the
+totals build above. Every input is in Supabase (`games`, `odds`,
+`ncaabw_inplay_quotes`, `ncaabw_pbp`). Next season's rebuild should read them.
+
+## [ ] The app reads the moneyline market for one in-play total model (2026-11-11)
+
+`gameMarketForModel('ncaab_live_total_h2')` in `mobile/src/lib/markets.ts`
+falls through to `'h2h'`, and `marketClassForModel` to `'other'`: the id has
+neither `over_under` nor an explicit line. The women's halftime model has its
+own two lines. Check what the men's card and a parlay with it read.
 
 ## [ ] NCAABW: ESPN's own odds are in a local cache only (2026-11-09)
 

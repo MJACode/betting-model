@@ -35,6 +35,15 @@ DECISION, two ways:
 
 Stake: one unit to win, risk capped at 3, at the quote's price. 95% interval
 resampled by ET date.
+
+TWO READINGS OF THE PLAY LIST (2026-11-11). The state at an instant was first
+read as "the last play ESPN logged": its running score. ESPN logs corrections
+late with the score of the moment they belong to, so that reading gave some
+states a score from earlier in the game (54 of the halftime total's 689 bets
+of 2025-26). NCAABW_INPLAY_STATE=max reads the score as the highest logged so
+far, as models/ncaabw_live_ht.py does, and writes inplay_priced_max_<season>
+beside the first reading's inplay_priced_<season>. The default is the first
+reading, so the tables of 2026-11-09 can be reproduced.
 """
 import os
 import sys
@@ -50,6 +59,8 @@ import config  # noqa: E402
 from data.ingestors.ncaabw_teams import regulation_periods  # noqa: E402
 
 BETTABLE = set(config.BEST_LINE_BOOKMAKERS)
+STATE_MAX = os.environ.get("NCAABW_INPLAY_STATE", "").strip().lower() == "max"
+PRICED = "inplay_priced_max" if STATE_MAX else "inplay_priced"
 RNG = np.random.default_rng(20261109)
 REG_S = 2400.0
 CUTS = (0.02, 0.05, 0.08, 0.12)
@@ -129,10 +140,14 @@ def load_states(g, wanted):
             if ok.sum() < 50:
                 continue
             gs = np.maximum.accumulate(gs[ok])          # the clock never runs backwards
+            h, a = h[ok], a[ok]
+            scored = x["scoring_play"].fillna(False).astype(bool).values[ok]
+            if STATE_MAX:                               # nor does the score
+                h, a = np.maximum.accumulate(h), np.maximum.accumulate(a)
+                scored = np.concatenate([[False], np.diff(h + a) > 0])
             out[row["game_id"]] = {
                 "wall": x["wall"].values[ok].astype("datetime64[ns]").astype("int64"),
-                "gs": gs, "h": h[ok], "a": a[ok],
-                "scored": x["scoring_play"].fillna(False).astype(bool).values[ok]}
+                "gs": gs, "h": h, "a": a, "scored": scored}
     return out
 
 
@@ -318,7 +333,7 @@ if __name__ == "__main__":
         Q = price_quotes(Q0[Q0["season"] == te_s], model)
         print(f"  quotes in a phase {len(Q):,}; eligible {int(Q['eligible'].sum()):,} "
               f"on {Q[Q['eligible']]['game_id'].nunique():,} games")
-        Q.to_parquet(CACHE / f"inplay_priced_{te_s}.parquet", index=False)
+        Q.to_parquet(CACHE / f"{PRICED}_{te_s}.parquet", index=False)
         for how in ("first-eligible", "first-crossing"):
             print(f" {how}:")
             for rule in ("spread_h1", "spread_h2", "total_h2", "total_h1"):

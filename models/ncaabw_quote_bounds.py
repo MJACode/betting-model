@@ -47,8 +47,14 @@ MAX_ABS_PRICE = 100_000.0       # beyond +/-100000 is a typo; -100000 itself is 
 #   ncaabw_total_blend   0.2076 over the 1,730 priced games of 2024-25 and
 #                        2025-26 on the two-season blend (99.9th percentile
 #                        0.1977; scripts/ncaabw_research/totals_c.py), so 0.30.
+#   ncaabw_live_total_ht 0.371 over the 967 replayed halftime bets of 2024-25
+#                        and 2025-26 (median 0.062; two above 0.30, both
+#                        won), so 0.40. The bets the research made on a wrong
+#                        halftime score reached 0.48 (models/ncaabw_live_ht.
+#                        states_from_rows tells that story).
 EDGE_CAP: dict[str, float] = {
     "ncaabw_total_blend": 0.30,
+    "ncaabw_live_total_ht": 0.40,
 }
 
 

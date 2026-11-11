@@ -51,7 +51,9 @@ the channel ids `DISCORD_CHANNEL_LIVE_NBA`, `DISCORD_CHANNEL_LIVE_NCAAB` and
 `DISCORD_CHANNEL_LIVE_NCAABW`, so the NBA and NCAAB in-play loops, which run
 there, open #nba-live and #ncaab-live through the bot. NBA and NCAAB live picks
 post only to their own live channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`),
-never the shared live or the pre-game channel. A live post from a service
+never the shared live or the pre-game channel. The same holds for NCAABW from
+2026-11-11: its halftime loop (`models/ncaabw_live_loop.py`) runs on `pollers`
+and posts to #ncaabw-live only. A live post from a service
 without the bot token cannot open a channel id; it needs the token (Manage
 Webhooks) and the channel id, or a `DISCORD_WEBHOOK_LIVE_{SPORT}` URL. The notifier logs that once per sport
 and skips the pick. The channel probe (`worker_jobs` kind `discord_probe`)

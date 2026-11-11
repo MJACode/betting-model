@@ -263,6 +263,12 @@ RUN_NBA_LIVE = (os.environ.get("RUN_NBA_LIVE", "1").strip().lower()
 RUN_NCAAB_LIVE = (os.environ.get("RUN_NCAAB_LIVE", "1").strip().lower()
                   not in ("0", "false", "off", "no"))
 
+# NCAABW halftime loop (models/ncaabw_live_loop.py): the full-game total, bet
+# during the halftime break, LIVE 2026-11-11 (mike), so ON by default;
+# RUN_NCAABW_LIVE=0 stops it without a code change.
+RUN_NCAABW_LIVE = (os.environ.get("RUN_NCAABW_LIVE", "1").strip().lower()
+                   not in ("0", "false", "off", "no"))
+
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
 # do rather than three days later.
@@ -980,6 +986,9 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 "nba_live",
                 # The NCAAB in-play loop: the same shape again.
                 "ncaab_live",
+                # The NCAABW halftime loop: the same shape, and pollers holds
+                # its live channel (DISCORD_CHANNEL_LIVE_NCAABW) and the bot token.
+                "ncaabw_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1139,6 +1148,23 @@ def run_ncaab_live() -> None:
     )
     if outcome != "ok":
         raise RuntimeError(f"ncaab-live loop exited {outcome}")
+
+
+def run_ncaabw_live() -> None:
+    # The NCAABW halftime loop (models/ncaabw_live_loop.py), the run_ncaab_live
+    # shape: free ESPN reads every 15 s, exits after a few idle ticks with no
+    # women's game in progress, relaunched by this */10 cron (max_instances=1).
+    # Odds API credits are spent ONLY at a read instant (each five-minute mark
+    # plus 37 s) while an undecided game is around its halftime break: one bulk
+    # moneyline + spread + total call for every game, 6 credits, capped per
+    # process by NCAABW_LIVE_CALL_CAP / NCAABW_LIVE_CREDIT_CAP and by the
+    # shared LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.ncaabw_live_loop"],
+        "ncaabw-live",
+    )
+    if outcome != "ok":
+        raise RuntimeError(f"ncaabw-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -3103,6 +3129,21 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NCAAB_LIVE=0 — NCAAB in-play loop NOT scheduled.")
+
+    # NCAABW halftime loop. The same hours: the earliest women's tips are
+    # around 11am ET and a late West tip's half comes after midnight; an idle
+    # launch reads ESPN's scoreboard and exits. Five minutes after the men's
+    # launch so the two loops do not start in the same second.
+    if RUN_NCAABW_LIVE:
+        sched.add_job(
+            run_ncaabw_live,
+            CronTrigger(hour="0-2,11-23", minute="5-59/10", timezone=TIMEZONE),
+            id="ncaabw_live",
+            name="NCAABW halftime loop supervisor (11am-2:55am ET, every 10 min)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NCAABW_LIVE=0 — NCAABW halftime loop NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(

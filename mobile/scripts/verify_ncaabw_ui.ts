@@ -9,7 +9,8 @@
  * the MEN'S sport: 'ncaabw_total_blend'.startsWith('ncaab') is true.
  *
  * One model, `ncaabw_total_blend` (models/ncaabw_total_blend.py MODEL_ID), and
- * nothing else: no player stats, no Teams board, no in-play model.
+ * nothing else: no player stats, no Teams board. Its one in-play model is the
+ * halftime total (2026-11-11).
  */
 
 import { SPORTS, type Sport } from '../src/hooks/useSportFilter';
@@ -29,7 +30,7 @@ import { supportsPlayerDetail } from '../src/lib/playerLog';
 import { boardSegmentsFor, segmentsForSport } from '../src/lib/statSegments';
 import { ALL_SPORTS } from '../src/lib/dailyResults';
 import { teamScoreUnit } from '../src/lib/teamForm';
-import { hasLiveModel } from '../src/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle } from '../src/lib/liveSports';
 import { isGameOver } from '../src/lib/format';
 
 let failures = 0;
@@ -65,8 +66,8 @@ check('the men\'s ids are unchanged',
   sportOfModel('ncaab_total_blend') === 'NCAAB' && sportOfModel('ncaab_live_spread_h1') === 'NCAAB'
     && sportOfModel('ncaaf_over_under') === 'NCAAF');
 const womensLabelled = Object.keys(MODEL_META).filter((id) => sportOfModel(id) === 'NCAABW');
-check('the app labels exactly one women\'s model', JSON.stringify(womensLabelled) === JSON.stringify([TOTALS]),
-  womensLabelled.join(','));
+check('the app labels exactly the two women\'s models',
+  JSON.stringify(womensLabelled) === JSON.stringify([TOTALS, 'ncaabw_live_total_ht']), womensLabelled.join(','));
 check('no women\'s model is listed with the men\'s',
   !Object.keys(MODEL_META).some((id) => id.startsWith('ncaabw') && sportOfModel(id) === 'NCAAB'));
 
@@ -184,7 +185,17 @@ check('NCAABW has no Teams board', !supportsTeamBoard(NCAABW));
 check('NCAABW has no player page', !supportsPlayerDetail(NCAABW));
 check('NCAABW draws no segment row',
   segmentsForSport(NCAABW).length < 2 && boardSegmentsFor(NCAABW).length < 2, segmentsForSport(NCAABW).join(','));
-check('NCAABW has no in-play model', !hasLiveModel('NCAABW'));
+// The halftime total (models/ncaabw_live_ht.py, 2026-11-11) is the women's
+// in-play model: the Live board says when it bets, and the model resolves to
+// the game's total everywhere a price is looked up.
+check('NCAABW has an in-play model', hasLiveModel('NCAABW'));
+check('the empty Live board says the model bets at halftime',
+  liveEmptySubtitle('NCAABW').includes('during its halftime break')
+  && liveEmptySubtitle('NCAABW').includes('at most once'), liveEmptySubtitle('NCAABW'));
+check('the halftime model belongs to NCAABW, not NCAAB', sportOfModel('ncaabw_live_total_ht') === 'NCAABW');
+check('the halftime model has its own name',
+  MODEL_META.ncaabw_live_total_ht?.longLabel === 'NCAABW Live Totals'
+  && MODEL_META.ncaabw_live_total_ht?.shortLabel === 'LIVE O/U');
 check('an NCAABW form strip reads PTS', teamScoreUnit('NCAABW') === 'PTS');
 // ESPN labels the women's season by its ending year: 2026-27 is 2027.
 check('an NCAABW season is labelled by its ending year',
