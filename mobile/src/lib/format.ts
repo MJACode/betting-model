@@ -402,6 +402,35 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
   }
 }
 
+/**
+ * "Sun 11/8": the ET date a game was played, on any day, today included.
+ * A game from another calendar year carries the year: "Sun 11/10/24".
+ *
+ * Built from the parts, not by cutting a formatted string at a comma: the
+ * phone writes "Sun, 11/8", so a split on ',' kept only "Sun" (Matt,
+ * 2026-11-11, the Build Your Own Model bet list).
+ */
+export function formatGameDateET(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return '';
+  try {
+    const d = parseStamp(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+      year: '2-digit',
+    }).formatToParts(d);
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    const sameYear = etDate(d).slice(0, 4) === etDate(now).slice(0, 4);
+    const date = `${part('month')}/${part('day')}${sameYear ? '' : `/${part('year')}`}`;
+    return `${part('weekday')} ${date}`;
+  } catch {
+    return '';
+  }
+}
+
 export type InningHalf = 'top' | 'bottom';
 
 export type GameStatus =
