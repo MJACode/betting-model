@@ -183,9 +183,13 @@ _MENTION_RE = re.compile(
 _MATCHUP_SEP = r"(?:\s+(?:@|vs\.?|at)\s+|\s*/\s*)"
 # "Anthony Black (ORL)" with no number under it is the player for the
 # stat lines that follow. A line that already has the bet stays a bet.
+# The team is an abbreviation, not a stake or a price: "(1U)" and "(1.5U)"
+# are the stake on the bet in front of them.
 _PLAYER_HEADER_RE = re.compile(
     r"^(?P<player>[A-Za-z].{0,60}?)\s*"
     r"\((?P<team>[A-Za-z0-9][^)]{0,24})\)\s*$")
+_PAREN_STAKE_RE = re.compile(
+    r"^[+-]?\d*\.?\d+\s*u(?:nits?)?$", re.I)
 # "1st Half" / "first half" is not part of the team name.
 _HALF_RE = re.compile(r"\b(?:1st|first)\s+half\b", re.I)
 # Period scores the settler already trusts. NCAAF is not one of them.
@@ -523,13 +527,30 @@ def _clear_player(context: dict | None) -> None:
 
 
 def _player_header(raw: str) -> dict | None:
-    """A name and a team, and nothing else. The stat lines are below it."""
-    m = _PLAYER_HEADER_RE.match((raw or "").strip())
+    """A name and a team, and nothing else. The stat lines are below it.
+
+    A price, a stake, ML, a spread, or an over/under on the line is a bet.
+    `(1U)` is that stake, not a team. The bet parses the way it did before
+    a player block existed.
+    """
+    text = (raw or "").strip()
+    m = _PLAYER_HEADER_RE.match(text)
     if not m:
         return None
     player = " ".join(m.group("player").split())
     team = " ".join(m.group("team").split())
     if not player or not team:
+        return None
+    _rest, price, _stake = _price_and_stake(text)
+    if price is not None or _STAKE_RE.search(text):
+        return None
+    if _PAREN_STAKE_RE.match(team):
+        return None
+    if re.search(r"\b(?:ml|moneyline|over|under)\b", player, re.I):
+        return None
+    if re.search(r"\b[ou]\d", player, re.I):
+        return None
+    if _SPREAD_RE.search(player) or _LINE_NUM_RE.search(player):
         return None
     return {"player": player, "team": team}
 
@@ -690,7 +711,9 @@ def _matchup_header(text: str) -> dict | None:
     if not parts:
         return None
     a, b = parts
-    if _teams_in(a) and _teams_in(b) and not re.search(r"\b(over|under|ml)\b", text, re.I):
+    if (_teams_in(a) and _teams_in(b)
+            and not re.search(r"\b(over|under|ml)\b", text, re.I)
+            and not _HALF_RE.search(text)):
         return {"away_text": a, "home_text": b, "raw": text}
     return None
 
@@ -739,6 +762,11 @@ def _parse_line(text: str, price, stake, context, raw: str) -> dict | None:
             "home_text": (context or {}).get("home_text"), "raw": raw,
             "used_player_context": True,
         }
+    # "Lakers 1st Half ML" and "GB/CHI 1st Half U21.5" are not the full game.
+    # A half spread is the only half this grader settles. The others stay
+    # needs_review, so a pro alias cannot grade them on the final.
+    if _HALF_RE.search(text) and _spread_number(text)[1] is None:
+        return None
     # "U47.5" has no space after the side. "Over 8.5" still has one.
     ou = re.match(
         r"^(?:(?P<pre>.+?)\s+)?(?P<side>over|under|o|u)\s*(?P<line>\d+(?:\.\d+)?)\b\s*(?P<post>.*)$",

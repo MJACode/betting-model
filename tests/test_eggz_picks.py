@@ -2107,6 +2107,8 @@ _NOV6_HALF = (
 )
 _NOV8_NCAAB = "Sunday Nov. 8\n\nNCAAB\nNevada ML (-125) 1U✅"
 _NOV9_TOTAL = "Monday Nov. 9\n\nNCAAB\nSyracuse/Indiana U146.5 (-108) 1U🗑️"
+
+
 def _sqlite_pg():
     """SQLite that can run the game lookup. The cast is Postgres-only."""
     db, _Conn = _sqlite()
@@ -2207,6 +2209,46 @@ def test_a_player_block_is_two_point_props():
     assert alone_reviews[0]["raw"] == "Anthony Black (ORL)"
 
 
+def test_a_parenthetical_stake_stays_a_bet():
+    """`(1U)` is the stake. It is not a team, and the line is not a player."""
+    legs, reviews = eg.parse_message("Ravens ML -150 (1U)")
+    assert reviews == []
+    assert len(legs) == 1
+    ravens = legs[0]
+    assert ravens["market"] == "h2h" and ravens["team_text"] == "Ravens"
+    assert ravens["price"] == -150 and ravens["stake_units"] == 1
+
+    legs, reviews = eg.parse_message("Duke -3.5 (1.5U)")
+    assert reviews == []
+    duke = legs[0]
+    assert duke["market"] == "spreads" and duke["team_text"] == "Duke"
+    assert duke["line"] == -3.5 and duke["stake_units"] == 1.5
+    assert duke["price"] is None
+
+    legs, reviews = eg.parse_message("Celtics ML (-150) (2U)")
+    assert reviews == []
+    assert legs[0]["market"] == "h2h" and legs[0]["team_text"] == "Celtics"
+    assert legs[0]["price"] == -150 and legs[0]["stake_units"] == 2
+
+    legs, reviews = eg.parse_message("Jets/Bills U40.5 (-110) (1u)")
+    assert reviews == []
+    total = legs[0]
+    assert total["market"] == "totals" and total["side"] == "under"
+    assert total["line"] == 40.5 and total["price"] == -110
+    assert total["stake_units"] == 1
+    assert total["away_text"] == "Jets" and total["home_text"] == "Bills"
+
+    legs, reviews = eg.parse_message("Chiefs ML (1U)")
+    assert reviews == []
+    assert legs[0]["market"] == "h2h" and legs[0]["team_text"] == "Chiefs"
+    assert legs[0]["stake_units"] == 1 and legs[0]["price"] is None
+
+    legs, reviews = eg.parse_message("Over 8.5 (Max)")
+    assert reviews == []
+    assert legs[0]["market"] == "totals" and legs[0]["side"] == "over"
+    assert legs[0]["line"] == 8.5
+
+
 def test_a_first_half_spread_is_not_graded_on_the_final(monkeypatch):
     """NCAAF has no first-half score source. The final is not the half."""
     monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_OPS", "")
@@ -2283,6 +2325,74 @@ def test_an_ncaab_first_half_spread_grades_from_the_half():
     assert abs(units - profit) < 1e-9
     assert abs(profit + risked) < 1e-9
     assert clv is None
+
+
+def test_an_nba_first_half_spread_grades_from_the_quarters():
+    """Q1+Q2 is the half. The final would have been the other result."""
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT, commence_time TEXT, game_date TEXT)""")
+    db.execute("""CREATE TABLE nba_period_scores (
+        game_id TEXT, period INT, home_points INT, away_points INT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, review_reason TEXT, result TEXT,
+        units REAL, risked REAL, clv_pct REAL, closing_price REAL,
+        clv_beat_close INT, graded_at TEXT)""")
+    gid = "NBA_2026-11-05_BOS_LAL"
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?)",
+        (gid, 110, 100, 1, 1, 0, "2026-11-06T00:00:00+00:00", "2026-11-05"))
+    db.execute(
+        "INSERT INTO nba_period_scores VALUES "
+        "(?,?,?,?), (?,?,?,?), (?,?,?,?), (?,?,?,?)",
+        (gid, 1, 20, 30, gid, 2, 15, 25, gid, 3, 40, 20, gid, 4, 35, 25))
+    db.execute("INSERT INTO capper_picks (id, status) VALUES (1, 'pending')")
+    assert eg._grade_one(Conn(), (
+        1, gid, "spreads_h1", "home", 3.5, -110, 1,
+        None, None, None, "2026-11-06T00:00:00+00:00", "NBA",
+    ))
+    status, reason, result, clv = db.execute(
+        "SELECT status, review_reason, result, clv_pct FROM capper_picks "
+        "WHERE id = 1").fetchone()
+    assert status == "graded" and reason is None and result == "LOSS"
+    assert clv is None
+
+
+def test_a_first_half_moneyline_or_total_is_not_the_full_game():
+    """A half that is not a spread stays needs_review. The final is not used."""
+    for line in (
+        "Lakers 1st Half ML",
+        "Lakers 1st Half ML (-110)",
+        "GB/CHI 1st Half U21.5",
+        "GB/CHI 1st Half U21.5 (-110)",
+        "Lakers first half ML",
+    ):
+        legs, reviews = eg.parse_message(line)
+        assert legs == []
+        assert reviews[0]["reason"] == "unparsed"
+        assert reviews[0]["raw"] == line
+
+
+def test_two_school_sports_are_not_a_guess():
+    """The same two names in two sports is not the first row."""
+    legs, reviews = eg.parse_message(
+        "Monday Nov. 9\nSyracuse/Indiana U146.5", _POSTED_NOV9)
+    assert reviews == []
+    assert legs[0]["sport_hint"] is None
+    db, Conn = _sqlite_pg()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT, home_team TEXT, away_team TEXT,
+        commence_time TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT)""")
+    for sport in ("NCAAB", "NCAABW"):
+        db.execute(
+            "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (f"{sport}_2026-11-09_syracuse_indiana", sport, "2026-11-09",
+             "Indiana", "Syracuse", "2026-11-09T23:30:00+00:00",
+             80, 70, 1, 1, 0))
+    game, reason = eg._match_leg(Conn(), legs[0], _POSTED_NOV9)
+    assert game is None and reason == "ambiguous_team"
 
 
 def test_grade_pending_reparses_the_november_posts(monkeypatch):
