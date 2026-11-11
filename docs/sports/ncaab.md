@@ -344,10 +344,15 @@ above; the rest are from the evidence it shipped on):
   end-of-season scoring, which has sat under the next November's: 145.2 against
   152.3 in 2025-26, and 148.4 for 2026-27. Model minus DraftKings' first total on
   each first full slate: +1.20, -1.06, +0.23, +0.24, -2.86 (2022-2026), and -4.45
-  on the 106 games decided by 2026-11-02. In those past slates, 21 games had the
-  model 7+ under the line, and the result beat the line in 15 of them (mean +7.14
-  points). So early unders are the thinnest bets it makes; its November unders
-  were 10-6-1 on 17 bets.
+  on the 106 games decided by 2026-11-02 before that slate's first finals. In
+  those past slates, 21 games had the model 7+ under the line, and the result
+  beat the line in 15 of them (mean +7.14 points). So early unders are the
+  thinnest bets it makes; its November unders were 10-6-1 on 17 bets.
+- **A season's first finals move every total.** The ratings' league average has
+  a light prior, so the first finals of 2026-11-02 lifted the model totals about
+  3.8 points (six games compared, +3.7 to +4.0). The slate then read -1.59, and
+  none of the 98 games the 21:05 UTC card decided cleared the cut (best edge
+  +0.0347, the card's log line: below_cut=98 bets=0).
 - **The cut was chosen on the seasons it is graded on**, though the returns
   form a plateau (+5.18% to +10.45% across 0.02-0.06), not a peak.
 - **Pinnacle had posted no 2026-27 NCAAB totals** when this shipped (seven
