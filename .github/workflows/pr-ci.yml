@@ -101,12 +101,13 @@ jobs:
       # A service container would not put those binaries on PATH. Ubuntu noble's
       # postgresql metapackage is Postgres 16, the tree those finders already
       # search. Hosted runners fail DNS for azure.archive.ubuntu.com and one
-      # apt then dies before pytest (run 43033373680). Each hung apt is about
-      # seven minutes, so an uncapped retry burns the 20-minute job. Cap each
-      # attempt, retry, retarget archive.ubuntu.com, then install the
-      # embedded-postgres wheel (Postgres 18, requirements-test.txt) on PATH.
-      # Still fail the step if initdb is missing, so the scratch tests cannot
-      # skip quietly.
+      # apt then dies before pytest (run 43033373680). A hostname that does not
+      # resolve within 3s is skipped: no second try of the same mirror. If
+      # archive.ubuntu.com also fails that probe, the step installs the
+      # embedded-postgres 18.x wheel on PATH instead of waiting out apt.
+      # Each apt command is timeout -k 5 90, and update && install, because
+      # set -e does not fire inside `if`. The step still fails if initdb is
+      # missing, so the scratch tests cannot skip quietly.
       - name: Install Postgres for scratch-cluster tests
         run: |
           sudo tee /etc/apt/apt.conf.d/99-ci-retries >/dev/null <<'EOF'
@@ -121,37 +122,51 @@ jobs:
             sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
               /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
           }
+          # `if apt_install` suppresses set -e for the whole function, so a
+          # failed update must not fall through into the install.
           apt_install() {
-            sudo timeout 90 apt-get update -qq
-            sudo timeout 90 apt-get install -y -qq postgresql
+            sudo timeout -k 5 90 apt-get update -qq \
+              && sudo timeout -k 5 90 apt-get install -y -qq postgresql
+          }
+          # Same resolver apt uses. A miss is terminal for that hostname.
+          mirror_resolves() {
+            timeout -k 2 3 getent hosts "$1" >/dev/null 2>&1
           }
 
           provisioned=""
-          for attempt in 1 2; do
+          if mirror_resolves azure.archive.ubuntu.com; then
             if apt_install; then
               provisioned="apt"
-              break
+            else
+              echo "apt against azure.archive.ubuntu.com failed; not retrying that host"
+              release_apt
             fi
-            echo "apt attempt ${attempt} failed"
-            release_apt
-            sleep 5
-          done
+          else
+            echo "azure.archive.ubuntu.com did not resolve; skipping apt"
+          fi
 
           if [ -z "$provisioned" ]; then
-            echo "azure mirror still unreachable; pointing apt at archive.ubuntu.com"
-            sudo find /etc/apt -type f \
-              \( -name 'sources.list' -o -name '*.sources' -o -name '*.list' -o -name 'apt-mirrors.txt' \) \
-              -exec sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' {} +
-            release_apt
-            if apt_install; then
-              provisioned="archive.ubuntu.com"
+            if mirror_resolves archive.ubuntu.com; then
+              echo "pointing apt at archive.ubuntu.com"
+              sudo find /etc/apt -type f \
+                \( -name 'sources.list' -o -name '*.sources' -o -name '*.list' -o -name 'apt-mirrors.txt' \) \
+                -exec sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' {} +
+              release_apt
+              if apt_install; then
+                provisioned="archive.ubuntu.com"
+              else
+                echo "apt against archive.ubuntu.com failed; not retrying that host"
+                release_apt
+              fi
+            else
+              echo "archive.ubuntu.com did not resolve; skipping apt retarget"
             fi
           fi
 
           if [ -z "$provisioned" ]; then
             echo "apt cannot reach an Ubuntu mirror; installing embedded-postgres"
             release_apt
-            python -m pip install "embedded-postgres>=18"
+            python -m pip install "embedded-postgres>=18,<19"
             bin_dir="$(python -c 'import warnings; warnings.filterwarnings("ignore"); import embedded_postgres, pathlib; print(pathlib.Path(embedded_postgres.__file__).resolve().parent / "pginstall" / "bin")')"
             if [ ! -x "$bin_dir/initdb" ] || [ ! -x "$bin_dir/pg_ctl" ]; then
               echo "embedded-postgres has no initdb/pg_ctl in ${bin_dir}" >&2
