@@ -63,8 +63,8 @@ const RESULT_TEXT: Record<ByomBet['result'], string> = {
   '': '—',
 };
 
-function BetRow({ bet, first, last }: {
-  bet: ByomBet; first: boolean; last: boolean;
+function BetRow({ bet, withYear, first, last }: {
+  bet: ByomBet; withYear: boolean; first: boolean; last: boolean;
 }) {
   // Two decimals, so the rows add up to the card (UX_REVIEW §7).
   const units = bet.units == null ? '—' : formatSigned(bet.units, 2, 'u');
@@ -72,16 +72,17 @@ function BetRow({ bet, first, last }: {
   const matchup = `${bet.away_team} @ ${bet.home_team}`;
   const price = bet.price == null ? '—' : formatAmerican(bet.price);
   const result = RESULT_TEXT[bet.result];
-  // The game's date, not when the line locked (Matt, 2026-11-11).
-  const played = formatGameDateET(bet.commence_time);
+  // The game's date, not when the line locked (Matt, 2026-11-11). First on
+  // the line, so a long row cuts the team names, not the date.
+  const played = formatGameDateET(bet.commence_time, { withYear });
   const a11y = [
     bet.label,
+    played,
     market,
+    matchup,
     bet.price == null ? 'no price' : price,
     bet.result === '' ? 'no result' : result,
     bet.units == null ? 'no result' : unitsSpeech(units),
-    matchup,
-    played,
   ].filter(Boolean).join(', ');
   return (
     <View style={[styles.row, first && styles.rowFirst, last && styles.rowLast]} accessible accessibilityLabel={a11y}>
@@ -93,7 +94,7 @@ function BetRow({ bet, first, last }: {
       </View>
       <View style={styles.rowTop}>
         <Text style={styles.meta} numberOfLines={1}>
-          {market ? `${market} · ` : ''}{matchup}{played ? ` · ${played}` : ''}
+          {played ? `${played} · ` : ''}{market ? `${market} · ` : ''}{matchup}
         </Text>
         <Text style={styles.meta}>{price} · {result}</Text>
       </View>
@@ -188,7 +189,7 @@ export function ByomBetsScreen() {
           data={shown.bets}
           keyExtractor={(bet) => bet.key}
           renderItem={({ item, index }) => (
-            <BetRow bet={item}
+            <BetRow bet={item} withYear={shown.scope === 'all'}
               first={index === 0} last={index === shown.bets.length - 1} />
           )}
           ItemSeparatorComponent={() => <View style={styles.sep} />}

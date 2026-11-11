@@ -403,14 +403,18 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
 }
 
 /**
- * "Sun 11/8": the ET date a game was played, on any day, today included.
- * A game from another calendar year carries the year: "Sun 11/10/24".
+ * "Sun, 11/8": the ET date a game was played, on any day, today included.
+ * The same text `gameDayLabelET` prints. `withYear` adds the year
+ * ("Sun, 11/10/24"), for a list that spans seasons.
  *
  * Built from the parts, not by cutting a formatted string at a comma: the
- * phone writes "Sun, 11/8", so a split on ',' kept only "Sun" (Matt,
- * 2026-11-11, the Build Your Own Model bet list).
+ * day label itself carries a comma, so a split on ',' kept only "Sun"
+ * (Matt, 2026-11-11, the Build Your Own Model bet list).
  */
-export function formatGameDateET(iso: string | null | undefined, now: Date = new Date()): string {
+export function formatGameDateET(
+  iso: string | null | undefined,
+  { withYear = false }: { withYear?: boolean } = {},
+): string {
   if (!iso) return '';
   try {
     const d = parseStamp(iso);
@@ -423,9 +427,8 @@ export function formatGameDateET(iso: string | null | undefined, now: Date = new
       year: '2-digit',
     }).formatToParts(d);
     const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-    const sameYear = etDate(d).slice(0, 4) === etDate(now).slice(0, 4);
-    const date = `${part('month')}/${part('day')}${sameYear ? '' : `/${part('year')}`}`;
-    return `${part('weekday')} ${date}`;
+    const date = `${part('month')}/${part('day')}${withYear ? `/${part('year')}` : ''}`;
+    return `${part('weekday')}, ${date}`;
   } catch {
     return '';
   }
