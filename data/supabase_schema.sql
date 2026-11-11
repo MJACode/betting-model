@@ -2102,9 +2102,12 @@ CREATE POLICY "anon read parlay_track_record" ON parlay_track_record
 
 -- ── PUSH NOTIFICATIONS ───────────────────────────────────────────────────────
 -- Applied via migration add_push_notifications. device_push_tokens holds opted-in
--- Expo tokens (anon INSERT/UPDATE only — no SELECT, so tokens can't be enumerated);
--- push_sent is the ledger preventing double-notification. Pipeline writes push_sent
--- + reads tokens via service-role DATABASE_URL.
+-- Expo tokens. There is no SELECT policy, so the anon key cannot list tokens.
+-- The app writes through save_device_push_token() (SECURITY DEFINER,
+-- data/migrations/save_device_push_token_2026_11_11.sql, hand-applied, not in
+-- ACTIVE_MIGRATIONS). A direct upsert is rejected by RLS without a SELECT
+-- policy. push_sent is the ledger preventing double-notification. The pipeline
+-- writes push_sent and reads tokens via service-role DATABASE_URL.
 CREATE TABLE IF NOT EXISTS device_push_tokens (
     token       TEXT PRIMARY KEY,
     platform    TEXT,

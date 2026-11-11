@@ -625,7 +625,8 @@ def test_every_declared_write_verb_has_a_call_site_that_needs_it():
     """A declared verb must be one the app DEMONSTRABLY USES, not one it happens
     to hold. Each of these was read off the call site:
 
-        device_push_tokens   .upsert(onConflict) -> INSERT + UPDATE, no DELETE
+        device_push_tokens   rpc('save_device_push_token'), SECURITY DEFINER
+                             -> no table grant. A direct upsert is rejected by RLS.
         tracked_bets         .insert() .delete() -> INSERT + DELETE, no UPDATE
         feedback             rpc('feedback_submit'), SECURITY DEFINER -> nothing
 
@@ -647,12 +648,21 @@ def test_every_declared_write_verb_has_a_call_site_that_needs_it():
     assert "UPDATE" not in ANON_WRITABLE["tracked_bets"], (
         "tracked_bets declares UPDATE, but the app only inserts and deletes")
 
-    # device_push_tokens: upsert needs INSERT+UPDATE; nothing deletes a token
-    assert "device_push_tokens" in src and "upsert" in src
-    assert set(ANON_WRITABLE["device_push_tokens"]) == {"INSERT", "UPDATE"}, (
-        "an upsert needs exactly INSERT and UPDATE")
-    assert "DELETE" not in ANON_WRITABLE["device_push_tokens"], (
-        "nothing in the app deletes a push token")
+    # device_push_tokens: the hook calls the definer function and does not
+    # upsert. Putting the table back in ANON_WRITABLE would not make the
+    # upsert succeed — Postgres rejects ON CONFLICT DO UPDATE with no SELECT
+    # policy — and a SELECT policy would expose every Expo token.
+    hook = (root / "mobile" / "src" / "hooks" / "usePushNotifications.ts").read_text(
+        encoding="utf-8")
+    hook_code = re.sub(r"/\*.*?\*/", "", hook, flags=re.S)
+    hook_code = "\n".join(
+        ln for ln in hook_code.splitlines() if not ln.strip().startswith("//"))
+    assert "rpc('save_device_push_token'" in hook_code
+    assert ".upsert(" not in hook_code
+    assert ".from('device_push_tokens')" not in hook_code
+    assert "device_push_tokens" not in ANON_WRITABLE, (
+        "save_device_push_token is SECURITY DEFINER and acts with the owner's "
+        "rights — anon needs no table grant, and a direct upsert 403s")
 
     # feedback: the RPC is SECURITY DEFINER, so the table needs no anon grant
     assert "rpc('feedback_submit'" in src
