@@ -1,10 +1,44 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 
 import { fetchSubscription } from '@/lib/billing';
 import { isEntitled, type SubscriptionRow } from '@/lib/billingHelpers';
 import { billingReady } from '@/lib/billingConfig';
 import { errorText, isAbortError } from '@/lib/errors';
+import { createSubscriptionStore, type SubscriptionSnapshot } from '@/lib/subscriptionFetch';
 import { useAuth } from './useAuth';
+
+/**
+ * One subscription row for every mounted reader.
+ *
+ * Settings home and a Settings section are both mounted, and each used to
+ * keep its own copy. A refresh in the section (Unlock Discord early) then
+ * left the home tile on the old plan. The row lives in lib/subscriptionStore,
+ * so one fetch serves every reader and a refresh updates all of them.
+ *
+ * The cache is the user id, not "signed in". A fetch that finishes after
+ * sign-out is dropped, and the next account still loads its own row.
+ */
+const listeners = new Set<(s: SubscriptionSnapshot<SubscriptionRow>) => void>();
+let foregroundBound = false;
+
+const store = createSubscriptionStore<SubscriptionRow>({
+  fetchRow: () => fetchSubscription() as Promise<SubscriptionRow | null>,
+  billingOn: billingReady,
+  isAbort: isAbortError,
+  errorText,
+  onChange: (next) => listeners.forEach((fn) => fn(next)),
+});
+
+function bindForegroundRefresh() {
+  if (foregroundBound) return;
+  foregroundBound = true;
+  AppState.addEventListener('change', (next) => {
+    const id = store.currentUserId();
+    if (next !== 'active' || !id) return;
+    void store.load(id, true);
+  });
+}
 
 /**
  * The signed-in user's subscription + whether they're entitled.
@@ -31,38 +65,37 @@ export interface UseSubscription {
 }
 
 export function useSubscription(): UseSubscription {
-  const { signedIn, status: authStatus } = useAuth();
+  const { signedIn, status: authStatus, user } = useAuth();
   const enabled = billingReady();
-
-  const [subscription, setSubscription] = useState<SubscriptionRow | null>(null);
-  const [loading, setLoading] = useState<boolean>(enabled);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!enabled || !signedIn) {
-      setSubscription(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const row = await fetchSubscription();
-      setSubscription((row as SubscriptionRow | null) ?? null);
-      setError(null);
-    } catch (e) {
-      // Keep the previous row — see the note above about not paywalling on a blip.
-      if (!isAbortError(e)) setError(errorText(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [enabled, signedIn]);
+  // A signed-in session can render one frame before `user` is on it. Treating
+  // that as signed-out would clear the row and bump the generation.
+  const userPending = signedIn && !user?.id;
+  const userId = userPending ? null : signedIn ? (user?.id ?? null) : null;
+  const [snap, setSnap] = useState<SubscriptionSnapshot<SubscriptionRow>>(store.get());
 
   useEffect(() => {
-    if (authStatus === 'loading') return;
-    void load();
-  }, [load, authStatus]);
+    bindForegroundRefresh();
+    const listener = (next: SubscriptionSnapshot<SubscriptionRow>) => setSnap(next);
+    listeners.add(listener);
+    setSnap(store.get());
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
 
-  const entitled = !enabled ? true : isEntitled(subscription);
+  useEffect(() => {
+    if (authStatus === 'loading' || userPending) return;
+    void store.load(userId);
+  }, [authStatus, userId, userPending]);
 
-  return { subscription, entitled, loading, error, refresh: load };
+  const refresh = useCallback(() => store.load(userId, true), [userId]);
+  const entitled = !enabled ? true : isEntitled(snap.subscription);
+
+  return {
+    subscription: snap.subscription,
+    entitled,
+    loading: enabled ? snap.loading : false,
+    error: snap.error,
+    refresh,
+  };
 }
