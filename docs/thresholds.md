@@ -1093,6 +1093,26 @@ standard**: it failed the 200-bet bar. `docs/sports/nba.md`, "First quarter", ha
 | closing line | one more call 12-25 minutes before tip, only for bet games, stored as `close` | `scripts/nba_q1_trend_window.py` |
 | artifact | the pricing rows and the cell's 88 graded bets | `models/saved/nba_q1_trend_20261107.pkl` |
 
+## NBA — `nba_q1_trend_ml`, first-quarter moneylines, the hot team (2026-11-07, mike)
+
+`nba_q1_trend`'s rule exactly, bet on the hot team's first-quarter moneyline (`models/nba_q1_trend_ml.py`,
+`scripts/nba_q1_trend_ml_card.py`; search `docs/nba_search_q1mt.md`, family Q1M). **Live on mike's instruction
+(2026-11-07: "Build it anyway"), not on the house standard**: it failed the 200-bet bar. `docs/sports/nba.md`, "First
+quarter", has the record and its overlap with the spread model.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | `nba_q1_trend`'s rule, imported: the game's number is still the first-quarter SPREAD | `models/nba_q1_trend.signals`, `K_CUT` |
+| prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
+| price floor | -200, pinned. It laid -192 to +360 on its 87 graded bets, median +130 | `config.MODEL_MIN_ODDS` |
+| EV floor | 0.00 on the fair probability plus the uplift (+0.1416 for 2026-27). Swept on its own 87: every floor from 0.00 to 0.15 keeps all 87 (the smallest EV is +0.182), 0.20 drops 7 | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
+| the fair price | Pinnacle's no-vig first-quarter moneyline when it quotes coherently, else the deciding books' median no-vig; P(win given the quarter is not level) | `scripts/nba_game_harness.market_fair` |
+| the offer | the hot side's moneyline with the highest expected value under that fair price, at a deciding book | `scripts/nba_s_q1mt.ml_cand`, `scripts/nba_game_harness.choose` |
+| decided once | on the spread model's fetch (one call, both markets), 45-66 minutes before tip, at most 5 minutes old; a row in `nba_q1_trend_ml_decisions`, bet or not | `scripts/nba_q1_trend_window.py`, `scheduler.run_nba_total_luck_window` (step after `nba-q1-trend`) |
+| settlement | period 1 of `nba_period_scores`: the hot team ahead wins, a level quarter a push; untrusted periods: pending | `tracking/paper_tracker._compute_result` (`h2h_q1`) |
+| closing line | the first-quarter close (12-25 minutes before tip) holds the moneyline too, stored as `close` | `scripts/nba_q1_trend_window.py` |
+| artifact | the cell's per-season counts (its uplift) and the 87 graded bets | `models/saved/nba_q1_trend_ml_20261107.pkl` |
+
 ## NBA — `nba_first_half_total_luck`, first-half totals, overs (2026-10-30, mike)
 
 The same shooting luck, read on the first half's line. When both defences have

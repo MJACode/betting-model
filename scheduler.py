@@ -1772,9 +1772,11 @@ def run_nba_total_luck_window() -> None:
             ("nba-total-luck",
              [sys.executable, "run_pipeline.py", "--step", "nba-total-luck"], t["card"])]
 
-    def per_event_steps(name, module, step, due, t):
+    def per_event_steps(name, module, step, due, t, also=()):
         """A per-event model's steps: its own fetch of the due games, its card, its
-        closing snapshot of the bet games owed one."""
+        closing snapshot of the bet games owed one. `also`: further cards that decide
+        on the same fetch, run after the first in order (the first quarter's
+        moneyline after its spread)."""
         steps = []
         if due.decide:
             log.info("NBA totals window: %s deciding %s", name, due.decide)
@@ -1782,6 +1784,7 @@ def run_nba_total_luck_window() -> None:
                 (f"{step}-fetch", [sys.executable, "-m", module, "--fetch", *due.decide],
                  t["fetch"]),
                 (step, [sys.executable, "run_pipeline.py", "--step", step], t["card"])]
+            steps += [(s, [sys.executable, "run_pipeline.py", "--step", s], t["card"]) for s in also]
         if due.close:
             log.info("NBA totals window: %s closing snapshot for %s", name, due.close)
             steps.append((f"{step}-close", [sys.executable, "-m", module, "--close", *due.close],
@@ -1795,10 +1798,12 @@ def run_nba_total_luck_window() -> None:
         per_event_steps("first-half totals", "scripts.nba_first_half_total_luck_window",
                         "nba-first-half-total-luck", plan.first_half,
                         NBA_FIRST_HALF_WINDOW_TIMEOUT_S),
-        # nba_q1_trend, the first-quarter spread (mike, 2026-11-07): its own spreads_q1 fetch, its card, its
-        # closing snapshot, the first half's limits.
-        per_event_steps("first-quarter spreads", "scripts.nba_q1_trend_window", "nba-q1-trend",
-                        plan.first_quarter, NBA_Q1_TREND_WINDOW_TIMEOUT_S)])
+        # nba_q1_trend, the first-quarter spread (mike, 2026-11-07): its own first-quarter fetch, its card, its
+        # closing snapshot, the first half's limits. nba_q1_trend_ml, the first-quarter moneyline (mike,
+        # 2026-11-07, "Build it anyway"), decides on the SAME fetch right after it, as the graded bets of both were
+        # decided on one purchase.
+        per_event_steps("first quarter", "scripts.nba_q1_trend_window", "nba-q1-trend",
+                        plan.first_quarter, NBA_Q1_TREND_WINDOW_TIMEOUT_S, also=("nba-q1-trend-ml",))])
     if outcomes:
         _publish_new_signals("nba-total-luck-window")
     bad = {k: v for k, v in outcomes.items() if v != "ok"}

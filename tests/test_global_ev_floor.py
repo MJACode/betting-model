@@ -411,6 +411,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          # 2026-11-07 (mike: "I WANT THAT MODEL"): the NBA first-quarter spread; market-fair P(cover)
          # plus the graded cell's uplift, which its rule was graded on.
          "nba_q1_trend",
+         # 2026-11-07 (mike: "Build it anyway"): the NBA first-quarter moneyline; market-fair P(win | not level)
+         # plus the graded cell's uplift.
+         "nba_q1_trend_ml",
          # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's own probability.
          "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2"}
     )

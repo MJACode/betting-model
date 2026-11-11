@@ -17,6 +17,7 @@
 | `nba_total_luck` | The full-game OVER, when the projected total with the opponents' three-point and free-throw shooting luck taken out is at least 3 points above the plain projected total. At the best bettable price under the market's fair line; each game decided once, on a fetch 60-66 minutes before tip made by its own one-minute job; regular-season games only (the NBA Cup final never counts); each team needs one game (no 10-game wait, 2026-11-02). One NBA game-total bet a game: it decides first, so the first-half over and the home team total under stand aside on a game it bets (`scripts/nba_game_totals_door.py`, mike 2026-11-04). | **LIVE** (rule with a parameter artifact — `models/nba_total_luck.py`, card `scripts/nba_total_luck_card.py`, step `nba-total-luck`, job `nba_total_luck_window`) |
 | `nba_first_half_total_luck` | The FIRST-HALF total OVER, when the full-game shooting-luck gap (`nba_total_luck`'s number, unscaled) is at least 2 points and below 3 (from 2026-11-04, mike: at 3 or more `nba_total_luck` bets the same game on the same gap, so this was its twin; `docs/thresholds.md`). At the best bettable price under the market's fair line; each game decided once, on this model's own first-half fetch 45-66 minutes before tip, made by the same one-minute job; settled on Q1 + Q2 points; a game with no trustworthy quarter scores stays pending; regular-season games only; each team needs one game (no 10-game wait, 2026-11-02). One NBA game-total bet a game (`scripts/nba_game_totals_door.py`). | **LIVE** (rule with a parameter artifact — `models/nba_first_half_total_luck.py`, card `scripts/nba_first_half_total_luck_card.py`, step `nba-first-half-total-luck`, job `nba_total_luck_window`) |
 | `nba_q1_trend` | The FIRST-QUARTER spread of the hot team: mike's cover-record trend, the "bump it out to L10" step with his season-average check. A team 4-1 or 5-0 against the first-quarter spread over its last 5 games at tonight's venue, against an opponent 2-3 or 1-3 over its last 5 there, both teams' last 10 agreeing by k >= 2, and the hot team's projected first-quarter margin from both teams' season averages covering its number. Each game decided once on this model's own first-quarter fetch 45-66 minutes before tip, at the deciding book with the best EV under the first-quarter market's fair line, -200 floor; settled on period 1 against the HOME number; regular season only. Did NOT pass the house standard (the 200-bet bar): 88 bets, +27.4%. Section "First quarter" below. | **LIVE 2026-11-07** (mike: "I WANT THAT MODEL"; rule with a parameter artifact `models/saved/nba_q1_trend_20261107.pkl`, `models/nba_q1_trend.py`, card `scripts/nba_q1_trend_card.py`, step `nba-q1-trend`, job `nba_total_luck_window`) |
+| `nba_q1_trend_ml` | The FIRST-QUARTER MONEYLINE of the same hot team: `nba_q1_trend`'s rule exactly, bet on the first-quarter moneyline. Decided on the same fetch (one call holds both markets), at the deciding book with the best EV under the moneyline's no-vig fair price, -200 floor; settled on period 1, a level quarter a push; regular season only. Did NOT pass the house standard (the 200-bet bar): 87 bets, +25.8%. It bets the same team in the same games as `nba_q1_trend`. Section "First quarter" below. | **LIVE 2026-11-07** (mike: "Build it anyway"; rule with a parameter artifact `models/saved/nba_q1_trend_ml_20261107.pkl`, `models/nba_q1_trend_ml.py`, card `scripts/nba_q1_trend_ml_card.py`, step `nba-q1-trend-ml`, job `nba_total_luck_window`) |
 | `nba_team_total_luck` | The HOME team total UNDER, when the home team's own part of that shooting-luck gap is at least 2 points toward the under (the away defence's luck, in the home team's points). At the best bettable price under the market's fair line; each game decided once, on this model's own team-total fetch 45-66 minutes before tip, made by the same one-minute job; settled on the home team's final score, overtime included; regular-season games only; each team needs one game (no 10-game wait, 2026-11-02). One NBA game-total bet a game (`scripts/nba_game_totals_door.py`). | **LIVE** (rule with a parameter artifact — `models/nba_team_total_luck.py`, card `scripts/nba_team_total_luck_card.py`, step `nba-team-total-luck`, job `nba_total_luck_window`) |
 | `nba_live_spread_q12` | IN PLAY. The game-state model (IG-2) against the live spread in quarters 1-2: per game, the first fetch holding a fresh quote decides, at the best of the eight deciding books, -200 floor, when the model's EV is 0.05 or better; the fetches are the archive's hourly purchase moments, each hour minus 264 seconds. Settled on the full-game score at the HOME number. The quarter-3 moneyline and spread (`nba_live_ml_q3`, `nba_live_spread_q3`) are held out: they fail the house standard on those fetches. Section "In play" below. | **LIVE 2026-11-04** (artifact `models/saved/nba_live_ig2_2027.json`, `models/nba_live_ig2.py`, loop `models/nba_live_loop.py`, job `nba_live`) |
 | `nba_prop_market` | The UNDER on points, rebounds, assists, threes or PRA, at the best bettable book whose line equals Pinnacle's in the same fetch, when Pinnacle's no-vig under makes that price +EV. Each game decided once, 45-57 minutes before tip. One bet a game across both NBA prop models, at most six a night (four until 2026-11-04), each bet ranked by its EV percentile within its own model (`scripts/nba_props_card.py`, mike 2026-10-20 and 2026-11-04). The only NBA model that bets the play-in, the playoffs and the Cup final (below). | **LIVE** (rule — `models/nba_prop_market.py`, card `scripts/nba_prop_market_card.py`, step `nba-props`) |
@@ -155,6 +156,39 @@ call). First-quarter scores from `nba_period_scores` through the first search's 
 **A game played while the live fetch is down has no number**, and drops out of both teams' records, as an unpriced
 game did in the lab. `nba_odds_history._buy_per_event(..., ["spreads_q1"], ...)` at tip minus 60 fills such a game from
 the history endpoint; a re-run buys only what is missing.
+
+### The first-quarter moneyline, the same bet on another ticket (mike, 2026-11-07)
+
+**`nba_q1_trend_ml` is live on mike's instruction ("Build it anyway"), not on the house standard.** The first-quarter
+moneyline / total search (`docs/nba_search_q1mt.md`, run `2026-11-07-q1mt`) put the spread model's rule on the
+first-quarter moneyline. It cleared five of six bars and failed the 200-bet bar, as the spread model did. The search
+recommended against shipping it: it is the same signal on another ticket.
+
+| | Bets | Units | Return | 95% interval |
+|---|---|---|---|---|
+| 2023-24 .. 2025-26 pooled | 87 (46-35-6) | +17.78 | +25.8% | +1.7% to +50.0% |
+| 2023-24 / 2024-25 / 2025-26 | 20 / 31 / 36 | +5.49 / +10.96 / +1.32 | +39.3% / +45.5% / +4.3% | |
+
+**It doubles the stake on one signal.** It takes the same team as `nba_q1_trend` in 87 of that model's 88 games and in
+no other game. On those games the spread made +26.33 units (+27.4%) and the moneyline +17.78 (+25.8%).
+
+**Prices it laid:** -192 to +360, median +130 (5th to 95th percentile -155 to +275); 66 of the 87 at plus money, since
+the hot team is getting points in most spread bets. Books: DraftKings 31, BetRivers 15, Hard Rock 13, FanDuel 11,
+Caesars 10, BetMGM 6, Fanatics 1. 63 of the 87 on the away team.
+
+**The replay** (`python -m scripts.nba_q1_trend_ml_replay`): the live `decide()` on the archive reproduces all 87
+graded bets, same game, side, book and price, on the books the search graded with (today's deciding books; betPARX had
+already left them). With betPARX allowed, 4 of the 87 move to a betPARX price.
+
+**The probability:** the market's no-vig P(win | the quarter is not level) plus the cell's uplift, +0.1416 for 2026-27:
+46 wins of the 81 decided bets against a mean fair probability of 0.4263. A push is in neither part, since the
+moneyline's fair probability already leaves a tie out. Every graded bet's EV under it is +0.18 or more.
+
+**The fetch:** the first-quarter call asks for `spreads_q1,h2h_q1` (`data/ingestors/nba_first_quarter_odds.py`), so
+both models decide on one fetch instant, as the graded purchase held both markets. Measured 2026-11-07 before it
+shipped: the two-market call answered 200 with both markets from 9 books and billed 2 credits a call (8 calls
+that day, 16 credits). The window fetches a game while either model has not decided it, and closes a game holding either
+model's bet.
 
 ## In play: the game-state model's quarters 1-2 spread (mike, 2026-11-04)
 
