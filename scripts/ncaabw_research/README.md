@@ -28,6 +28,12 @@ artifact. Read the caveat in `totals_a`'s section of the doc first: until
 2026-11-10 only the played games of 2026-27 were stored, so anything computed
 on that season before then had every team pooled into one.
 
+Steps 8 and 9 take `NCAABW_INPLAY_STATE=max`: the score read as the highest
+logged so far, the reading the halftime model uses (`models/ncaabw_live_ht.py`;
+ESPN logs corrections late with an old running score). Without it they
+reproduce the first tables of 2026-11-09 and 2026-11-11. The model's own
+replay is `python -m scripts.build_ncaabw_live_ht_artifact`.
+
 `check_tips` answers one question about the purchase: whether games with
 in-play quotes and no pre-game ones have an early stored tip (they do not).
 

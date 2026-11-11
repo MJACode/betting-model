@@ -522,7 +522,8 @@ def test_the_empty_boards_say_where_the_womens_picks_are():
     # in-play model" sentence is left for it.
     assert "There is no in-play model for women" not in picks
     # the sports list is spoken by name for VoiceOver, and the live-pricing note names the sport
-    assert "subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSpoken()}" in picks
+    assert ("subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}"
+            in picks)
     assert "the NCAABW in-play model only during a game’s halftime break" in picks
     markets = _read(SRC / "lib" / "markets.ts")
     assert "pick.model_id === NCAABW_HALFTIME_MODEL" in markets and "pick.sport === 'NCAABW'" not in markets

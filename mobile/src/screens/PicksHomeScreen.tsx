@@ -142,12 +142,7 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import {
-  hasLiveModel,
-  liveEmptySubtitle,
-  liveModelSportsSentence,
-  liveModelSportsSpoken,
-} from '@/lib/liveSports';
+import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
@@ -1143,7 +1138,7 @@ function EmptyForView({
         <EmptyState
           title={`No live model for ${sport} yet`}
           subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
-          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSpoken()}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
+          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSentence(sportSpokenName)}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }

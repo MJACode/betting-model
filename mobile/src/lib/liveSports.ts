@@ -18,8 +18,6 @@
  * ADD A SPORT HERE WHEN ITS IN-PLAY MODEL SHIPS — the test will tell you.
  */
 
-import { sportSpokenName } from './loadState';
-
 /** Sports with at least one in-play model writing `is_live` picks. */
 // Ordered so the two college basketball codes close the sentence ("... NCAAB
 // and NCAABW"): side by side in the middle of a list they read as one word
@@ -31,17 +29,11 @@ export function hasLiveModel(sport: string): boolean {
   return LIVE_MODEL_SPORTS.has(sport);
 }
 
-/** "MLB, NBA, NCAAF and NFL" — for copy that names the sports with an in-play model. */
-export function liveModelSportsSentence(): string {
-  const s = [...LIVE_MODEL_SPORTS];
-  if (s.length <= 1) return s.join('');
-  return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
-}
-
-/** The same list for VoiceOver, each sport by its spoken name, so it never
- *  reads "NCAAB" then "NCAABW". */
-export function liveModelSportsSpoken(): string {
-  const s = [...LIVE_MODEL_SPORTS].map(sportSpokenName);
+/** "MLB, NBA, NFL, NCAAF, NCAAB and NCAABW" — for copy that names the sports
+ *  with an in-play model. Pass `name` to say each sport another way: VoiceOver
+ *  reads them through sportSpokenName, so it never spells "NCAAB" then "NCAABW". */
+export function liveModelSportsSentence(name: (sport: string) => string = (sport) => sport): string {
+  const s = [...LIVE_MODEL_SPORTS].map(name);
   if (s.length <= 1) return s.join('');
   return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
 }
