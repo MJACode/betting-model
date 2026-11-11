@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchPicksForDate,
   fetchUpcomingUfcPicks,
@@ -12,6 +12,14 @@ import { addDays, isGameOver, todayET } from '@/lib/format';
 import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
 import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
 import { errorText, isAbortError } from '@/lib/errors';
+import {
+  loadTodayBoard,
+  setTodayBoardReader,
+  subscribeTodayBoard,
+  todayBoardSnapshot,
+  type TodayBoardRead,
+  type TodayBoardSnapshot,
+} from '@/lib/todayPicksFlight';
 import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
@@ -78,9 +86,14 @@ const NCAAB_AHEAD_DAYS = 7;
  */
 const NCAABW_AHEAD_DAYS = 7;
 
-export function useTodayPicks(date?: string) {
-  const target = date ?? todayET();
-  const [data, setData] = useState<EnrichedPick[]>([]);
+/**
+ * The seven-sport read, once. The flight cache (lib/todayPicksFlight.ts) is
+ * what makes a second mount wait instead of starting it again. The split
+ * below is unchanged: `data` is what every consumer except the All board
+ * sees, and `pausedData` is the All board's paused rows.
+ */
+export async function readTodayBoard(target: string): Promise<TodayBoardRead<EnrichedPick>> {
+  let data: EnrichedPick[] = [];
   // PAUSED models' rows, kept apart from `data` (Matt, 2026-09-26: "NFL is only
   // showing tackle bets. It should be all bets"). Eleven of twelve NFL prop
   // models are paused, so hiding them left the NFL board a tackles board. Only
@@ -91,101 +104,162 @@ export function useTodayPicks(date?: string) {
   // Stats pills, the betslip) still sees `data` alone, so the 2026-09-19 rule
   // holds everywhere else. passesActionFilter already refuses a paused model,
   // so none of these rows can be counted or drawn as a bet.
-  const [pausedData, setPausedData] = useState<EnrichedPick[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  let pausedData: EnrichedPick[] = [];
+  let error: string | null = null;
   // At least one load has SUCCEEDED. Until then a count is unknown ("—"), not
   // zero: `loading` alone can't say it, because every refresh sets it too
   // (lib/loadState countsKnown, Designer #845).
-  const [loaded, setLoaded] = useState(false);
+  let loaded = false;
   // Reads that failed WITHOUT taking the board down: the odds views behind the
   // line pills, or one sport's look-ahead card. What failed, deduped, plus the
   // FIRST reason (the 2026-09-04 failure took three reads down with the same
   // statement timeout; three copies of one Postgres sentence is not a
   // message), so the screen can say "Couldn't load today's lines" rather than
   // show an empty pill (Matt, 2026-09-05: "fix it").
-  const [partial, setPartial] = useState<{ whats: string[]; reason: string } | null>(null);
+  let partial: { whats: string[]; reason: string } | null = null;
+  const setData = (rows: EnrichedPick[]) => {
+    data = rows;
+  };
+  const setPausedData = (rows: EnrichedPick[]) => {
+    pausedData = rows;
+  };
+  // The shared flight publishes loading. This read only fills the rows.
+  const setLoading = (_next: boolean) => {};
+  const setError = (next: string | null) => {
+    error = next;
+  };
+  const setLoaded = (next: boolean) => {
+    loaded = next;
+  };
+  const setPartial = (next: { whats: string[]; reason: string } | null) => {
+    partial = next;
+  };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const whats: string[] = [];
-    let reason: string | null = null;
-    const note = (what: string) => (e: unknown) => {
-      // A cancel is not a missing section: no partial banner for it.
-      if (isAbortError(e)) return;
-      if (!whats.includes(what)) whats.push(what);
-      if (reason == null) reason = errorText(e);
-      console.warn(`[useTodayPicks] ${what} failed`, e);
-    };
-    const swallow = (what: string) => (e: unknown) => {
-      note(what)(e);
-      return [] as EnrichedPick[];
-    };
-    try {
-      // Today's picks (all sports) plus each look-ahead card. UFC, NFL and
-      // NCAAF have had one; NHL joined the scorer's 7-day game window
-      // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
-      // slate dated inside that window never reached the chip or the board.
-      // NCAAB joined with its totals model, which usually decides the day before.
-      // NCAABW joined with its own (2026-11-10), which decides up to six days before.
-      // The look-ahead fetches are enrichment — don't fail the whole feed on
-      // them, but record each failure in `partial`.
-      const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, ncaabwRows, nhlRows] = await Promise.all([
-        fetchPicksForDate(target, (what, e) => note(what)(e)),
-        fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
-        fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
-        fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
-        fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS), (what, e) =>
-          note(what)(e),
-        ).catch(swallow('the upcoming NCAAB card')),
-        fetchUpcomingNcaabwPicks(target, addDays(target, NCAABW_AHEAD_DAYS), (what, e) =>
-          note(what)(e),
-        ).catch(swallow('the upcoming NCAABW card')),
-        fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
-      ]);
-      // Drop games that have already finished — once a game ends it shouldn't
-      // linger on the board for the rest of the day. A retired or paused
-      // model's picks are dropped here too (Matt, 2026-09-02 / 2026-09-19:
-      // catalog and today's board show only active models). This hook feeds
-      // the Today/Signals board, the sport-toggle counts, the Models cards'
-      // live lists, the filter Market chips and the Stats odds pills, so one
-      // filter at the source keeps all of them in agreement — before this, the
-      // board drew a retired BET as a green, stakeable card while the header
-      // count excluded it. The rows stay in the DB as the record of what was
-      // published (§1c).
-      //
-      // A VOID the channel does not still show is dropped here, not only in
-      // passesActionFilter (2026-09-09). Five surfaces read this hook without
-      // that filter — the Today segment, both model screens, the Stats odds
-      // pill and the betslip hand-off. A VOID Discord already posted stays:
-      // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
-      // that split. passesActionFilter is the Signals / green-bet half.
-      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...ncaabwRows, ...nhlRows];
-      const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
-      const byId = new Map(stamped.map((p) => [p.pick_id, p]));
-      const all = merged.map((d) => ({
-        ...d,
-        pick: byId.get(d.pick.pick_id) ?? d.pick,
-      })).filter(
-        (d) => !isGameOver(d.game, d.pick.sport)
-          && !isModelRetired(d.pick.model_id)
-          && !voidHiddenFromBoard(d.pick),
-      );
-      setData(all.filter((d) => !isPausedForDisplay(d.pick)));
-      setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
-      setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
-      setLoaded(true);
-    } catch (e: unknown) {
-      if (!isAbortError(e)) setError(errorText(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [target]);
+  setLoading(true);
+  setError(null);
+  const whats: string[] = [];
+  let reason: string | null = null;
+  const note = (what: string) => (e: unknown) => {
+    // A cancel is not a missing section: no partial banner for it.
+    if (isAbortError(e)) return;
+    if (!whats.includes(what)) whats.push(what);
+    if (reason == null) reason = errorText(e);
+    console.warn(`[useTodayPicks] ${what} failed`, e);
+  };
+  const swallow = (what: string) => (e: unknown) => {
+    note(what)(e);
+    return [] as EnrichedPick[];
+  };
+  try {
+    // Today's picks (all sports) plus each look-ahead card. UFC, NFL and
+    // NCAAF have had one; NHL joined the scorer's 7-day game window
+    // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
+    // slate dated inside that window never reached the chip or the board.
+    // NCAAB joined with its totals model, which usually decides the day before.
+    // NCAABW joined with its own (2026-11-10), which decides up to six days before.
+    // The look-ahead fetches are enrichment — don't fail the whole feed on
+    // them, but record each failure in `partial`.
+    const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, ncaabwRows, nhlRows] = await Promise.all([
+      fetchPicksForDate(target, (what, e) => note(what)(e)),
+      fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
+      fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
+      fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
+      fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS), (what, e) =>
+        note(what)(e),
+      ).catch(swallow('the upcoming NCAAB card')),
+      fetchUpcomingNcaabwPicks(target, addDays(target, NCAABW_AHEAD_DAYS), (what, e) =>
+        note(what)(e),
+      ).catch(swallow('the upcoming NCAABW card')),
+      fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
+    ]);
+    // Drop games that have already finished — once a game ends it shouldn't
+    // linger on the board for the rest of the day. A retired or paused
+    // model's picks are dropped here too (Matt, 2026-09-02 / 2026-09-19:
+    // catalog and today's board show only active models). This hook feeds
+    // the Today/Signals board, the sport-toggle counts, the Models cards'
+    // live lists, the filter Market chips and the Stats odds pills, so one
+    // filter at the source keeps all of them in agreement — before this, the
+    // board drew a retired BET as a green, stakeable card while the header
+    // count excluded it. The rows stay in the DB as the record of what was
+    // published (§1c).
+    //
+    // A VOID the channel does not still show is dropped here, not only in
+    // passesActionFilter (2026-09-09). Five surfaces read this hook without
+    // that filter — the Today segment, both model screens, the Stats odds
+    // pill and the betslip hand-off. A VOID Discord already posted stays:
+    // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
+    // that split. passesActionFilter is the Signals / green-bet half.
+    const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...ncaabwRows, ...nhlRows];
+    const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
+    const byId = new Map(stamped.map((p) => [p.pick_id, p]));
+    const all = merged.map((d) => ({
+      ...d,
+      pick: byId.get(d.pick.pick_id) ?? d.pick,
+    })).filter(
+      (d) => !isGameOver(d.game, d.pick.sport)
+        && !isModelRetired(d.pick.model_id)
+        && !voidHiddenFromBoard(d.pick),
+    );
+    setData(all.filter((d) => !isPausedForDisplay(d.pick)));
+    setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
+    setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
+    setLoaded(true);
+  } catch (e: unknown) {
+    if (!isAbortError(e)) setError(errorText(e));
+  } finally {
+    setLoading(false);
+  }
+  return { data, pausedData, loaded, error, partial };
+}
+
+setTodayBoardReader(readTodayBoard);
+
+export function useTodayPicks(date?: string) {
+  const target = date ?? todayET();
+  const [board, setBoard] = useState<TodayBoardSnapshot<EnrichedPick>>(() => todayBoardSnapshot<EnrichedPick>(target));
+  // The rows are shared. The spinner is not. A pull on Picks must not turn the
+  // betslip's resolving state back on, or replace a model screen's known empty
+  // list with a spinner, just because this hook is mounted there too.
+  const [loading, setLoading] = useState(() => !todayBoardSnapshot<EnrichedPick>(target).loaded);
+  // A newer load must not be cleared by an older one's finally.
+  const loadGen = useRef(0);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let alive = true;
+    const token = ++loadGen.current;
+    const current = todayBoardSnapshot<EnrichedPick>(target);
+    setBoard(current);
+    setLoading(!current.loaded);
+    const stop = subscribeTodayBoard<EnrichedPick>(target, setBoard);
+    void loadTodayBoard(target, false).finally(() => {
+      if (alive && loadGen.current === token) setLoading(false);
+    });
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [target]);
 
-  return { data, pausedData, loading, loaded, error, partial, refresh: load, date: target };
+  // Pull-to-refresh, and any other caller of `refresh`, skips the finished
+  // read. A refresh during an in-flight read waits for one follow-up.
+  // Only this caller spins: the shared read updates every other mount's rows
+  // without flipping their loading flag.
+  const refresh = useCallback(() => {
+    const token = ++loadGen.current;
+    setLoading(true);
+    return loadTodayBoard(target, true).finally(() => {
+      if (loadGen.current === token) setLoading(false);
+    });
+  }, [target]);
+
+  return {
+    data: board.data,
+    pausedData: board.pausedData,
+    loading,
+    loaded: board.loaded,
+    error: board.error,
+    partial: board.partial,
+    refresh,
+    date: target,
+  };
 }

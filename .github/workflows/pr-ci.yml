@@ -85,6 +85,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_player_log.ts
 
+      # Today's board: one in-flight read shared by every mount, and a
+      # refresh starts another. Also counts the picks/odds/games requests.
+      - name: Today picks flight
+        working-directory: mobile
+        run: npx tsx scripts/verify_today_picks_flight.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
