@@ -987,6 +987,29 @@ ACTION_THRESHOLDS: dict = {
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
+    # NCAAF full-game moneylines against the books' consensus spread
+    # (2026-11-10, mike, asked after the market audit whether he wanted a
+    # moneyline model live although nothing measured clears: "ML model yes"):
+    # models/ncaaf_moneyline_market.py, written by
+    # scripts/ncaaf_moneyline_card.py. At 14:00 UTC on the game's Eastern
+    # date, the best deciding-book moneyline against the win chance the ten
+    # books' median spread implies through the final-margin distribution;
+    # sides shorter than -200 are removed before the pick; the largest edge
+    # of the game is bet when above 0.02 with 3+ other books in the consensus.
+    # The classifier above (ncaaf_moneyline) stays paused and is a different
+    # model. The build's replay of the card's own path matched all 311
+    # research bets (scripts/ncaaf_moneyline_market_build.py). 2023-2025:
+    # 311 bets, 122-189, +14.70 units, +7.8%, 95% interval -4.7% to +21.6%;
+    # by season -2.8, +16.7, +0.8 units. IT DID NOT CLEAR: the interval
+    # reaches below zero, the profit is one season, 294 of the 311 are road
+    # teams (the fitted home/away offset at work), and without its 10 best
+    # dates it is -9.3 units. Neighbour cuts: 0.01 601 bets +13.78 units,
+    # 0.03 136 bets +10.27, 0.04 43 bets +5.45. Prices laid on the replay:
+    # +110 to +430 (median +146), no favourites. docs/sports/ncaaf.md.
+    # model_probability is the bet side's fair chance and decision_edge that
+    # minus the bet price's implied, so every publisher agrees with the card.
+    # min_prob 0.0: the edge is the cut.
+    "ncaaf_moneyline_market": {"min_prob": 0.0, "min_edge": 0.02},
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -2221,6 +2244,13 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NCAAF moneylines against the consensus spread (2026-11-10, mike). The
+    # card removes every side shorter than -200 BEFORE it picks
+    # (models/ncaaf_moneyline_market step 5, the research's rule), so this is
+    # the second guard, pinned so a Railway DEFAULT_MIN_ODDS override cannot
+    # move it. It laid +110 to +430 on its 311 replayed bets (median +146);
+    # the rule itself has no upper price limit.
+    "ncaaf_moneyline_market":    -200,
     # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
@@ -2646,6 +2676,15 @@ MODEL_OWN_EV_FLOOR: dict = {
     # +0.0956 (374 bets, the blend it runs on; median +0.137). 0.07 never
     # removes a bet the cut takes.
     "ncaabw_total_blend":       0.07,
+    # NCAAF moneylines against the consensus spread (2026-11-10, mike). The
+    # cut is the edge (0.02, in MODEL_EDGE_THRESHOLDS), so this floor sits
+    # just under the smallest EV that cut admitted in the replay of
+    # 2023-2025: fair chance x decimal - 1 = +0.0437 (311 bets; median
+    # +0.0816). EV is edge x decimal, so an edge above 0.02 at -200 or longer
+    # is EV above 0.03: at 0.04 this floor can remove a bet the cut takes at
+    # a price shorter than +100, and the replay laid none (its shortest price
+    # was +110).
+    "ncaaf_moneyline_market":   0.04,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2829,6 +2868,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # push) at DraftKings' line, which its 0.05 cut was measured on. It has no
     # record, so its map would be the offset borrowed from other models.
     "ncaabw_total_blend",
+    # 2026-11-10 (mike). NCAAF moneylines: its number is the bet side's fair
+    # chance from the books' consensus spread through the final-margin
+    # distribution, which its 0.02 cut was measured on. It has no record, so
+    # its map would be the offset borrowed from other models.
+    "ncaaf_moneyline_market",
 })
 
 
@@ -3030,6 +3074,11 @@ SCORING_METHODS: dict = {
     # committed under models/saved/ (models/ncaabw_total_blend.py), loaded by
     # scripts/ncaabw_total_card.py by its pinned path, never registered.
     "ncaabw_total_blend":  "rule",
+    # The same shape: the NCAAF moneyline rule's artifact holds the fitted
+    # offset and the final-margin table (models/ncaaf_moneyline_market.py),
+    # loaded by scripts/ncaaf_moneyline_card.py by its pinned path, never
+    # registered. Not in MODELS, which the scorer and the trainer iterate.
+    "ncaaf_moneyline_market": "rule",
 }
 
 
@@ -3115,6 +3164,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
+    "ncaaf_moneyline_market": 0.02,  # 2026-11-10 mike: THE cut, the bet side's fair chance minus the bet price's implied; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -3234,6 +3284,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # and is unchanged. docs/sports/ncaaf.md, the 2026-11-10 section.
     "ncaaf_over_under": 0.65,
     "ncaaf_moneyline":  0.62,
+    "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
