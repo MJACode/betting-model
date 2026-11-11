@@ -70,6 +70,8 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'nba_total_luck') return 'totals';
   // The NCAAB totals model (models/ncaab_total_blend.py): same trap.
   if (modelId === 'ncaab_total_blend') return 'totals';
+  // The NCAABW totals model (models/ncaabw_total_blend.py), the women's: the same.
+  if (modelId === 'ncaabw_total_blend') return 'totals';
   // The NBA home team total (unders): the home team's own points, stored
   // under its own market, never the game's 'totals' rows.
   if (modelId === 'nba_team_total_luck') return 'team_totals_home';
@@ -283,6 +285,7 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'game_total';
   if (modelId === 'nba_total_luck') return 'game_total';
   if (modelId === 'ncaab_total_blend') return 'game_total';
+  if (modelId === 'ncaabw_total_blend') return 'game_total';
   // One team's points move with the game total, so the nearest class.
   if (modelId === 'nba_team_total_luck') return 'game_total';
   // The first half's points move with the game total too.
@@ -378,7 +381,25 @@ export function linkForSide(
  *                         MD, PA, NJ), so it is never the book a pick names
  *                         (config.STATE_LIMITED_BOOKMAKERS).
  * The picker and the per-pick line chips read BETTABLE_BOOKS; the All-books
- * table on the detail screen reads everything.
+ * table on the detail screen is passed the member's own books.
+ *
+ * Women's college basketball stores seven more books for its games
+ * (config.NCAABW_EXTRA_BOOKMAKERS: espnbet, ballybet, fliff, betonlineag,
+ * lowvig, unibet, betwhale). They are reference prices: none is a book a pick
+ * may name, so none is a book a member is sent to (2026-11-10). Read in
+ * production that day, v_latest_odds_all_books held rows at all seven for the
+ * women's games of 2026-11-08 to 11-10.
+ *   - betonlineag, lowvig, unibet and betwhale are not in LINE_SHOP_BOOKS, and
+ *     BETTABLE_BOOKS is built from it, so they were never offered. They have
+ *     a name and a label below as a guard: Pick Detail passes the member's
+ *     own books to the All-books table, so these four draw only in the frame
+ *     before that set loads, or in a table that is ever shown unfiltered.
+ *   - ballybet and fliff were still listed as bettable here, though no pick
+ *     has been decided at either since the fetch list dropped them on
+ *     2026-09-20 (config.LINE_SHOP_BOOKMAKERS). Over the games of 2026-11-07
+ *     to 11-10 the only prices at either newer than 2026-09-05 were on
+ *     women's games. They are reference-only now, like espnbet: out of the
+ *     sportsbook picker and off the line chips.
  */
 export const MODEL_BOOK = 'draftkings' as const;
 
@@ -415,8 +436,9 @@ export const LINE_SHOP_BOOKS: BookKey[] = [
   'fliff',
 ];
 
-/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS. */
-export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet', 'betparx'];
+/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS, plus
+ *  the two women's college basketball reference books listed above. */
+export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet', 'betparx', 'ballybet', 'fliff'];
 
 /** Books a member can be sent to — mirrors config.BEST_LINE_BOOKMAKERS. */
 export const BETTABLE_BOOKS: BookKey[] = LINE_SHOP_BOOKS.filter(
@@ -442,6 +464,13 @@ const BOOK_LABELS: Record<string, string> = {
   ballybet: 'BALLY',
   betparx: 'PARX',
   rebet: 'REBET',
+  fliff: 'FLIFF',
+  // Women's college basketball reference books. The fallback clips the key to
+  // four letters, which read BETO, LOWV, UNIB and BETW.
+  betonlineag: 'BOL',
+  lowvig: 'LV',
+  unibet: 'UNI',
+  betwhale: 'WHALE',
 };
 
 const BOOK_NAMES: Record<string, string> = {
@@ -460,6 +489,11 @@ const BOOK_NAMES: Record<string, string> = {
   fliff: 'Fliff',
   betparx: 'betPARX',
   rebet: 'ReBet',
+  // Women's college basketball reference books (config.NCAABW_EXTRA_BOOKMAKERS).
+  betonlineag: 'BetOnline',
+  lowvig: 'LowVig',
+  unibet: 'Unibet',
+  betwhale: 'BetWhale',
 };
 
 export function bookLabel(key: string): string {
@@ -1056,6 +1090,10 @@ export const LIVE_PRICE_STOPS_AT_BET: ReadonlySet<string> = new Set(['nfl_live_l
  */
 export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   'nba_live_spread_q12',
+  // models/ncaab_live_loop.py reads the books at each :00 and :30 only.
+  'ncaab_live_spread_h1',
+  'ncaab_live_spread_h2',
+  'ncaab_live_total_h2',
 ]);
 
 /**
@@ -2034,6 +2072,18 @@ const POSTED_MONEYLINE_MODELS: readonly string[] = [
   'nba_q1_trend_ml',
 ];
 
+/**
+ * The half an NCAAB live bet was placed in. Men's college basketball plays two
+ * halves; the loop stores the period (1, 2, then overtimes). A second-half
+ * model's bet stored with period 1 was placed at the halftime break (the state
+ * is the first half's last play, models/ncaab_live_ig.phase_of).
+ */
+export function ncaabLivePeriod(period: number, modelId: string | null | undefined): string {
+  if (period >= 3) return 'overtime';
+  if (period === 2) return '2nd half';
+  return (modelId ?? '').endsWith('_h2') ? 'halftime' : '1st half';
+}
+
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
   if (pick.signal_type !== 'BET') return null;
@@ -2049,13 +2099,16 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
 
   if (pick.is_live) {
     // `inning_at_pick` is the shared period column: the inning for MLB, the
-    // quarter for every other in-play sport (NCAAF, NFL, and NBA, whose loop
-    // writes the quarter there — models/nba_live_loop.build_pick).
+    // half for NCAAB (models/ncaab_live_loop.build_pick), the quarter for every
+    // other in-play sport (NCAAF, NFL, and NBA, whose loop writes the quarter
+    // there — models/nba_live_loop.build_pick).
     const period =
       pick.inning_at_pick != null
         ? pick.sport === 'MLB'
           ? ` · inning ${pick.inning_at_pick}`
-          : ` · Q${pick.inning_at_pick}`
+          : pick.sport === 'NCAAB'
+            ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
+            : ` · Q${pick.inning_at_pick}`
         : '';
     return {
       kind: 'live',
@@ -2100,6 +2153,12 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
   // about an hour before tip. The NCAAB opening-moneyline card
   // (scripts/ncaab_moneyline_first_post_card.py) bets a game at most once,
   // the moment a book first posts its moneyline, and never re-prices.
+  // The NCAABW totals card (scripts/ncaabw_total_card.py), the women's,
+  // decides like the men's totals card: once, at DraftKings' first posted
+  // total, and never re-prices. Its first total stood a median 136 minutes in
+  // 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one in ten changed
+  // within 10 minutes (the card's own header), so its note says "can change
+  // within minutes", not the men's "often changes within half an hour".
   const nbaPosted = NBA_POSTED_PROP_MODELS.includes(pick.model_id);
   if (
     pick.model_id.startsWith('nhl_prop_') ||
@@ -2110,6 +2169,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_q1_trend' ||
     pick.model_id === 'nba_q1_trend_ml' ||
     pick.model_id === 'ncaab_total_blend' ||
+    pick.model_id === 'ncaabw_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
     pick.model_id === 'ncaab_moneyline_own_spread' ||
     pick.model_id === 'ncaab_moneyline_first_post' ||
@@ -2134,6 +2194,10 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           : '') +
         (pick.model_id === 'ncaab_total_blend'
           ? ' An opening total often changes within half an hour: check DraftKings’ total and price before you bet.'
+          : '') +
+        (pick.model_id === 'ncaabw_total_blend'
+          ? ' An opening total can change within minutes: check DraftKings’ total and price before you bet.' +
+            ' This pick is for the total and price shown, not a later one.'
           : '') +
         (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : '') +
         (nbaPosted ? ' Void if the player doesn’t play.' : ''),

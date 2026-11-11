@@ -33,6 +33,7 @@ crons had).
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
 | NCAAB totals card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_total_card()` → `python -m scripts.ncaab_total_card --publish`, then publish. Decides each game once, at 22:00 UTC the evening before its date, else at 15:00 UTC on the day and each hour to tip, on DraftKings' standing total. Kill switch: `RUN_NCAAB_TOTAL_CARD=0` (the job still beats). A run that cannot decide a due game for a reason that will not clear by itself (an artifact for another season, a team missing two or more old box scores, a missing blend) exits 1 after writing the rest: the heartbeat records `error` and the failure alerter reports it. Added 2026-10-30; `docs/sports/ncaab.md` |
+| NCAABW totals card (live, real money) | every 5 minutes at :04/:09/.., 24x7, UTC | `run_ncaabw_total_card()` → `python -m scripts.ncaabw_total_card --publish`, then publish. The women's twin of the NCAAB totals card: decides each game once at DraftKings' first posted total, three minutes after each NCAABW capture tick, only while that number still stands. Exits 1 (heartbeat "error") when a due game cannot be decided: an artifact for another season, a season schedule not stored whole, a team missing two box scores, a missing blend, an edge above the data-error cap. `RUN_NCAABW_TOTAL_CARD=0` stops it. |
 | NCAAB spread card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_spread_card()` → `python -m scripts.ncaab_spread_card --publish`, then publish. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's spread stamped 14:00-15:00 UTC; every other hour reads the slate and the ledger only. A later run that finds one of the day's games undecided writes it as `missed` (no bet) and exits 1, as does a run where no due game has any quote, or the best quote is at a book no longer in `BEST_LINE_BOOKMAKERS`. Kill switch: `RUN_NCAAB_SPREAD_CARD=0` (the job still beats; switched back on, that day's undecided games are written as `missed` and the run fails once). Added 2026-11-02; `docs/sports/ncaab.md` |
 | NCAAB moneyline card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_moneyline_card()` → `python -m scripts.ncaab_moneyline_card --publish`, then publish. Its own job beside the spread card's, so each model keeps its own kill switch and failure. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's moneyline and the same book's spread stamped 14:00-15:00 UTC (Pinnacle's and Bovada's moneylines read for the favourite check only); every other hour reads the slate and the ledger only. Fails the run in the same three cases as the spread card. Kill switch: `RUN_NCAAB_MONEYLINE_CARD=0`. Added 2026-11-02; `docs/sports/ncaab.md` |
 | NCAAB opening moneyline card (live, real money) | every minute, 24x7 | `run_ncaab_moneyline_first_post()` → one planning read in the scheduler (the bettable (game, book) pairs with a moneyline in `latest_odds` that the card's ledger has never seen, for NCAAB games tipping in the next seven days); only when there is one, `python -m scripts.ncaab_moneyline_first_post_card --publish`, then publish. Decides each book's FIRST moneyline post once, within the minute after the capture or a refresh pass stored it, priced off the same book's spread at that moment; one bet a game across this model and the 15:00 UTC moneyline card. A first post the card first sees more than 15 minutes after it was stored is written `missed` (no bet) and the run exits 1, as does a pick at a book no longer in `BEST_LINE_BOOKMAKERS`. Its first run writes every post already up as `pre_model`. The capture's next poll after each bet writes the fill check on the bet's ledger row. No Odds API call of its own. Kill switch: `RUN_NCAAB_MONEYLINE_FIRST_POST=0` (the job still beats; posts stored while it is off are written `missed` when it is back on, and that run fails once). Added 2026-11-03; `docs/sports/ncaab.md` |
@@ -306,6 +307,27 @@ is not scored; the check was added in the same deploy as the loop.
 | `NBA_LIVE_POLL_SEC` / `NBA_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
 
 `--dry-run` makes no Odds API call and writes nothing.
+
+### NCAAB in-play loop (added 2026-11-07)
+
+`models/ncaab_live_loop.py`, job `ncaab_live` on `pollers`, every 10 minutes
+11am-2:50am ET as a supervisor (one launch runs a whole slate and exits after 3
+idle ticks). The models and their evidence: `docs/sports/ncaab.md`, "In play".
+It beats `job_heartbeats` every 5 minutes while a slate runs
+(`tracking/job_heartbeat.ACTIVE_HOURS_ET`). The decision ledger
+`ncaab_live_decisions` is created by `data/migrations/ncaab_live_decisions_2026_11_07.sql`
+(applied by `data.view_migrations`); the loop refuses to start without it.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NCAAB_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NCAAB` or `DISCORD_WEBHOOK_LIVE_NCAAB` | the channel id is set (2026-11-07) | Where NCAAB live picks post. **Required**: no fallback to the shared live or #ncaab channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`); with neither set the loop decides nothing and exits 3 while a game is in progress. A channel id resolves through `DISCORD_BOT_TOKEN`, set on pollers |
+| `NCAAB_LIVE_FETCH_OFFSET_SEC` | `262` | Fetch at each :00 and :30 minus this (the purchase served the market 261-263 s before each instant, 2022-23 on) |
+| `NCAAB_LIVE_FETCH_WINDOW_SEC` / `NCAAB_LIVE_RETRY_GAP_SEC` | `240` / `60` | How long after that instant an attempt may start, and the seconds between attempts |
+| `NCAAB_LIVE_PBP_WAIT_SEC` / `NCAAB_LIVE_PBP_RECHECK_SEC` | `90` / `60` | ESPN's summary is read this long after the fetch and again this much later (scoring plays served a median 37 s after their wallclock, longest 58 s, 2026-11-07) |
+| `NCAAB_LIVE_HEADER_RECHECK_SEC` / `NCAAB_LIVE_PLAY_LAG_MAX_SEC` | `20` / `120` | Header score ahead of the plays: re-read after this; refuse when the newest play is older than the second while the clock runs |
+| `NCAAB_LIVE_CALL_CAP` / `NCAAB_LIVE_CREDIT_CAP` | `200` / `600` | Per-process ceilings (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
+| `NCAAB_LIVE_POLL_SEC` / `NCAAB_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
 
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 

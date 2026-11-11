@@ -42,6 +42,8 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { showToast } from '@/components/Toast';
 import { StatsSportButton } from '@/components/StatsSportButton';
 import { TeamsBoard } from '@/components/TeamsBoard';
+import { NbaFirstBasketBoard } from '@/components/NbaFirstBasketBoard';
+import { InjuryChip } from '@/components/InjuryChip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
@@ -181,6 +183,8 @@ import {
 } from '@/lib/statCatalog';
 import {
   boardSegmentsFor,
+  supportsFirstBasketBoard,
+  type BoardSegment,
   chipsForSegment,
   defaultSegmentFor,
   emptiedByPosition,
@@ -293,7 +297,7 @@ type Nav = CompositeNavigationProp<
 type StatsRoute = RouteProp<TabParamList, 'Stats'>;
 type Basis = 'total' | 'perGame';
 /** Which half of the Stats tab is showing. */
-type BoardMode = 'players' | 'teams';
+type BoardMode = BoardSegment;
 type Mode = 'totals' | 'hitRate';
 const MODES: Mode[] = ['hitRate', 'totals'];
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
@@ -345,6 +349,8 @@ const ODDS_W = 62;
  * never returns at all (see the slate effect).
  */
 const SLATE_GATE_MS = 4000;
+/** How long the 1st Basket board waits on a slate read before calling it failed (review L4). */
+const SLATE_FAIL_MS = 12000;
 
 /** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
 const EMPTY_ROWS: never[] = [];
@@ -591,6 +597,11 @@ export function StatsScreen() {
   // changes (midnight, or a resume via useNow), so a board left open overnight
   // does not keep yesterday's teams under "Playing today".
   const [slateReload, setSlateReload] = useState(0);
+  // Whether the slate READ itself has returned for a sport, and failed. The
+  // release timer below settles `slateFor` without a read, which is right for
+  // the leaderboard (it fails open to the whole league) and wrong for the 1st
+  // Basket board, which is nothing but the slate (UX review, 2026-11-08).
+  const [slateRead, setSlateRead] = useState<{ sport: string; failed: boolean } | null>(null);
   // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
   // grade a spot off the probable starter or the lineup; every other sport had
   // a column of dashes, so a toughness filter over it would have filtered
@@ -620,6 +631,7 @@ export function StatsScreen() {
     setSlate(EMPTY_SLATE);
     setSlateGames([]);
     setSlateFor(null);
+    setSlateRead(null);
   }
   // Every book's latest line for the selected stat's market on the slate date.
   const [propLines, setPropLines] = useState<{
@@ -643,7 +655,9 @@ export function StatsScreen() {
     ? segmentPick
     : defaultSegmentFor(sport);
   const activeSegment: StatSegment =
-    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams' : segment;
+    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams'
+    : boardMode === 'firstBasket' && supportsFirstBasketBoard(sport) ? 'firstBasket'
+    : segment;
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -685,12 +699,15 @@ export function StatsScreen() {
     }
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
+    // 1st Basket is NBA only: leaving the NBA on it lands on Players.
+    if (!supportsFirstBasketBoard(sport)) setBoardMode((m) => (m === 'firstBasket' ? 'players' : m));
     // Drop the previous sport's slate in the same commit as the chip reset.
     // Until the new read lands, hasSlate would still be true and the
     // Availability label would name the outgoing slate.
     setSlate(EMPTY_SLATE);
     setSlateGames([]);
     setSlateFor(null);
+    setSlateRead(null);
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -740,16 +757,25 @@ export function StatsScreen() {
     const release = setTimeout(() => {
       if (!cancelled) setSlateFor(sport);
     }, SLATE_GATE_MS);
+    // A read with no fetch timeout can hang for good, so the 1st Basket board
+    // is told it failed and shows Retry rather than spin, but only after
+    // SLATE_FAIL_MS: a slow, healthy read at the 4 s gate is not a failure
+    // (review L4, 2026-11-08). A late answer overwrites it in then/catch.
+    const failAfter = setTimeout(() => {
+      if (!cancelled) setSlateRead((r) => (r?.sport === sport ? r : { sport, failed: true }));
+    }, SLATE_FAIL_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
         if (cancelled) return;
         setSlate(buildTonightSlate(games, sport, from));
         setSlateGames(games.filter((g) => g.sport === sport));
+        setSlateRead({ sport, failed: false });
       })
       .catch(() => {
         if (cancelled) return;
         setSlate(EMPTY_SLATE);
         setSlateGames([]);
+        setSlateRead({ sport, failed: true });
       })
       .finally(() => {
         if (!cancelled) setSlateFor(sport);
@@ -757,6 +783,7 @@ export function StatsScreen() {
     return () => {
       cancelled = true;
       clearTimeout(release);
+      clearTimeout(failAfter);
     };
   }, [slateKey, etDay, sport, slateReload]);
 
@@ -1087,8 +1114,8 @@ export function StatsScreen() {
    * Keeping the column keeps the line the user was reading, too.
    */
   const pickSegment = (next: StatSegment) => {
-    if (next === 'teams') {
-      setBoardMode('teams');
+    if (next === 'teams' || next === 'firstBasket') {
+      setBoardMode(next);
       return;
     }
     setBoardMode('players');
@@ -2192,9 +2219,10 @@ export function StatsScreen() {
   const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
   // A Players board that can never carry a line (NCAAB: no college props,
   // Matt 2026-11-03) does not name a book whose lines it will not show.
+  // Neither does NCAABW, which has no board at all (2026-11-10).
   const showHeaderBookLine =
     (boardMode === 'teams' && supportsTeamBoard(sport)) ||
-    (sport !== 'NCAAB' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
+    (sport !== 'NCAAB' && sport !== 'NCAABW' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
   // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
   // stack grow by the overhang and pull the same amount back with a negative
   // margin. The typing field reports overhang 0 and the pad matches it.
@@ -2590,6 +2618,39 @@ export function StatsScreen() {
     );
   }
 
+  // 1st Basket board (NBA only, Matt 2026-11-08): one card per game on the
+  // slate. Ahead of the empty-catalog guard, like Teams.
+  if (boardMode === 'firstBasket' && supportsFirstBasketBoard(sport)) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleCluster}>
+              <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Stats
+              </Text>
+              <StatsSportButton />
+            </View>
+            <SettingsButton />
+          </View>
+        </View>
+        <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
+        <NbaFirstBasketBoard
+          games={slate.date ? slateGames.filter((g) => g.game_date === slate.date) : []}
+          slateLabel={slateLabel}
+          slateSettled={slateRead?.sport === sport}
+          slateFailed={slateRead?.sport === sport && slateRead.failed}
+          injuryFor={injuries.lookup}
+          nowMs={now}
+          onRefresh={() => {
+            setSlateReload((n) => n + 1);
+            setInjuryReload((n) => n + 1);
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
+
   // A sport whose catalog is empty. Golf is no longer a chip. NHL is not this
   // branch: it has a skater board, and its Teams/Goalies view is the Players |
   // Teams segment above, which returns before this guard.
@@ -2610,8 +2671,15 @@ export function StatsScreen() {
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <EmptyState
-          title="No player leaderboard"
-          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
+          title={sport === 'NCAABW' ? 'No stats for NCAABW' : 'No player leaderboard'}
+          subtitle={
+            // The women's sport has one model and no stats board planned, so
+            // it says where its picks are instead of "yet" (UX review,
+            // 2026-11-10).
+            sport === 'NCAABW'
+              ? 'There are no player or team stats for women’s college basketball. Its totals picks are on the Picks tab.'
+              : `Player stat leaderboards aren't available for ${sport} yet.`
+          }
         />
       </SafeAreaView>
     );
@@ -4434,24 +4502,30 @@ function StatSegmentRow({
   onChange,
 }: {
   sport: Sport;
-  /** 'teams' while the Teams board is on, else the player segment. */
+  /** 'teams' / 'firstBasket' while that board is on, else the player segment. */
   active: StatSegment;
   /** The player segment last picked, kept while Teams is on. */
   segment: StatSegment;
   onChange: (s: StatSegment) => void;
 }) {
   const positions = positionSegmentsFor(sport);
-  const onTeams = active === 'teams';
+  // The top row's board: Teams and 1st Basket are their own boards; any other
+  // segment is the Players board.
+  const board: BoardSegment = active === 'teams' || active === 'firstBasket' ? active : 'players';
   return (
     <>
       <SegmentTabs
         items={boardSegmentsFor(sport)}
-        active={onTeams ? 'teams' : 'players'}
-        onChange={(next) => onChange(next === 'teams' ? 'teams' : positions.length ? segment : 'players')}
+        active={board}
+        onChange={(next) => onChange(next === 'players' ? (positions.length ? segment : 'players') : next)}
         labelFor={segmentLabel}
+        accessibilityLabelFor={segmentAccessibilityLabel}
         tight
+        // Three tabs on the NBA (Players | Teams | 1st Basket): about 96pt each
+        // at 320pt, so labels shrink rather than truncate (UX review, 2026-11-08).
+        fit
       />
-      {!onTeams ? (
+      {board === 'players' ? (
         <SegmentTabs
           items={positions}
           active={segment}
@@ -4949,24 +5023,6 @@ function injurySpoken(injury: InjuryTag | null | undefined): string {
  * soft grounds (theme.ts). Hidden from VoiceOver -- the row's label already
  * says the status in words, and "I R" read out letter by letter does not.
  */
-function InjuryChip({ tag }: { tag: InjuryTag }) {
-  const out = tag.tone === 'out';
-  return (
-    <View
-      style={[styles.injuryChip, { backgroundColor: out ? colors.avoidSoft : colors.medSoft }]}
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-    >
-      <Text
-        style={[styles.injuryChipText, { color: out ? colors.avoidInk : colors.medInk }]}
-        maxFontSizeMultiplier={1.4}
-      >
-        {tag.label}
-      </Text>
-    </View>
-  );
-}
-
 function LeaderRow({
   rank,
   row,
@@ -6294,17 +6350,6 @@ const styles = StyleSheet.create({
   // textTertiary is 4.69:1 on bg (AA at 13pt semibold); textSecondary read
   // as barely different from a playing row (UX review, 2026-10-23).
   rowNameSidelined: { color: colors.textTertiary },
-  injuryChip: {
-    borderRadius: radii.xs,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 1,
-    flexShrink: 0,
-  },
-  injuryChipText: {
-    fontSize: font.size.micro,
-    fontWeight: font.weight.bold,
-    letterSpacing: 0.3,
-  },
   rowTeam: {
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,

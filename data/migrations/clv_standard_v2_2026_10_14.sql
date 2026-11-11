@@ -220,6 +220,7 @@ BEGIN
         WHEN 'ncaab_moneyline_first_post' THEN 'h2h'
         WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
         WHEN 'ncaab_first_half_total' THEN 'totals_h1'
+        WHEN 'ncaabw_total_blend' THEN 'totals'
         ELSE 'h2h'
       END
     $body$;

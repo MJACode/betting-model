@@ -50,6 +50,7 @@ models/saved/nba_team_total_luck_20261031_095356.pkl
 models/saved/nba_total_luck_20261031_095356.pkl
 models/saved/ncaaf_moneyline_20260821_113517.pkl
 models/saved/ncaaf_over_under_20260825_204305.pkl
+models/saved/ncaaf_over_under_20261110_161059.pkl
 models/saved/ncaaf_spread_20260828_103438.pkl
 models/saved/ncaaf_spread_premium_20260828_103439.pkl
 models/saved/nfl_prop_anytime_td_20260907_034919.pkl
@@ -98,6 +99,17 @@ models/saved/wnba_spread_20260719_113238.pkl
   (`scripts/nhl_moneyline_anchored_train.py --register --from-file`); until
   then `nhl_moneyline_20260920_131606.pkl` is the active row and stays on this
   list. Drop the old one (steps 3-4 below) once the new row is active.
+
+- `ncaaf_over_under_20261110_161059.pkl` — the NCAAF totals regression as the
+  mean of eleven fits (`models/seed_average.py`, fitted by
+  `python -m scripts.ncaaf_margin_eval --fit-totals`; mike, 2026-11-10),
+  committed with the class its pickle names. NOT registered, and
+  `--register-totals 20261110_161059` refuses it unless the scorer holds a
+  game whose weather is missing: such a game moves its prediction 11.7 points
+  (`docs/sports/ncaaf.md`, the 2026-11-10 section). Until a version is
+  registered `ncaaf_over_under_20260825_204305.pkl` is the active row and
+  stays on this list. Drop the old one (steps 3-4 below) once a new row is
+  active; drop this one if it is replaced before it is ever registered.
 
 - `nba_prop_projection_20261016_091702.pkl` — the NBA projection model
   (`models/nba_prop_projection.py`, fitted by `scripts/nba_prop_projection_train.py`

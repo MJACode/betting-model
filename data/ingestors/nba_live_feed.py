@@ -318,9 +318,18 @@ def below_floor(remaining: int | None, used: int | None = None) -> bool:
 
 
 class LiveOddsFeed:
-    """One bulk call per decision instant. Never returns a cached payload."""
+    """One bulk call per decision instant. Never returns a cached payload.
 
-    def __init__(self, call_cap: int, credit_cap: int, session=None):
+    The URL, markets, books and log label default to the NBA loop's; the
+    NCAAB in-play loop passes its own (data/ingestors/ncaab_live_feed.py), so
+    both loops share one fetch, one credit accounting and one quota floor."""
+
+    def __init__(self, call_cap: int, credit_cap: int, session=None, *, url: str | None = None,
+                 markets: tuple | None = None, books=None, label: str = "NBA"):
+        self.url = url or ODDS_URL
+        self.markets = tuple(markets or MARKETS)
+        self._books = books
+        self.label = label
         self.call_cap, self.credit_cap = int(call_cap), int(credit_cap)
         self.calls = 0
         self.credits_used = 0
@@ -329,28 +338,32 @@ class LiveOddsFeed:
         self.used: int | None = None
         self._session = session
 
+    def books(self) -> list[str]:
+        return list(self._books() if callable(self._books) else (self._books or feed_books()))
+
     def fetch(self) -> Fetch | None:
+        lab = self.label
         if below_floor(self.remaining, self.used):
-            log.error("NBA live odds: %s credits left of %s - under the quota floor, not fetching",
-                      self.remaining, (self.used or 0) + (self.remaining or 0))
+            log.error("%s live odds: %s credits left of %s - under the quota floor, not fetching",
+                      lab, self.remaining, (self.used or 0) + (self.remaining or 0))
             return None
         if self.calls >= self.call_cap:
-            log.error("NBA live odds: call cap %d reached - not fetching", self.call_cap)
+            log.error("%s live odds: call cap %d reached - not fetching", lab, self.call_cap)
             return None
         if self.credits_used >= self.credit_cap:
-            log.error("NBA live odds: credit cap %d reached (%d used) - not fetching",
-                      self.credit_cap, self.credits_used)
+            log.error("%s live odds: credit cap %d reached (%d used) - not fetching",
+                      lab, self.credit_cap, self.credits_used)
             return None
         key = _api_key()
         if not key:
-            log.error("NBA live odds: no ODDS_API_KEY set")
+            log.error("%s live odds: no ODDS_API_KEY set", lab)
             return None
         import requests
         s = self._session or requests
         self.calls += 1
         try:
-            r = s.get(ODDS_URL, params={"apiKey": key, "regions": "us", "markets": ",".join(MARKETS),
-                                        "bookmakers": ",".join(feed_books()), "oddsFormat": "american",
+            r = s.get(self.url, params={"apiKey": key, "regions": "us", "markets": ",".join(self.markets),
+                                        "bookmakers": ",".join(self.books()), "oddsFormat": "american",
                                         "includeLinks": "true", "includeSids": "true"},
                       timeout=30)
             fetched_at = datetime.now(timezone.utc)
@@ -370,17 +383,19 @@ class LiveOddsFeed:
                 self.credits_used += credits
                 if self.first_credits is None:
                     self.first_credits = credits
-                    log.info("NBA live odds: FIRST CALL COST x-requests-last=%s (markets %s, %d books); "
-                             "x-requests-remaining=%s", credits, ",".join(MARKETS), len(feed_books()), remaining)
+                    log.info("%s live odds: FIRST CALL COST x-requests-last=%s (markets %s, %d books); "
+                             "x-requests-remaining=%s", lab, credits, ",".join(self.markets),
+                             len(self.books()), remaining)
             r.raise_for_status()
             payload = r.json()
-            log.info("NBA live odds: %d events, x-requests-last=%s, remaining=%s (process %d credits, %d calls)",
-                     len(payload) if isinstance(payload, list) else -1, last, rem, self.credits_used, self.calls)
+            log.info("%s live odds: %d events, x-requests-last=%s, remaining=%s (process %d credits, %d calls)",
+                     lab, len(payload) if isinstance(payload, list) else -1, last, rem, self.credits_used,
+                     self.calls)
             if not isinstance(payload, list):
                 return None
             return Fetch(payload, fetched_at, credits, remaining)
         except Exception as exc:  # noqa: BLE001
-            log.warning("NBA live odds fetch failed: %s", exc)
+            log.warning("%s live odds fetch failed: %s", lab, exc)
             return None
 
 

@@ -344,6 +344,38 @@ pick is announced only while its game is in progress.
 
 ---
 
+## NCAAB in play: three game-state models, the best few a night (2026-11-07, mike)
+
+The full story and the evidence are in `docs/sports/ncaab.md`, "In play". Three
+models are live, `ncaab_live_spread_h1`, `ncaab_live_spread_h2` and
+`ncaab_live_total_h2`, each passing the house standard on the half-hour in-play
+purchase (2021-22 to 2025-26), and they post only the night's best few: at most
+five a night across the three (mike: *"3-5 best per night"*). Graded
+walk-forward on that selection, 2022-23 to 2025-26: 2,533 bets on 588 nights,
++290.4 units, +10.1% (95% +6.4 .. +13.8), every season positive, laying -145 /
+-115 / +185.
+
+```
+ESPN Division I scoreboard every 20 s (free)       -> which games are in progress
+at each :00 and :30 minus 262 s (the purchase's served time; retried to +240 s)
+   -> ONE bulk Odds API call: spreads + totals, the ten books the history was bought at (2 credits)
+   -> rows to odds as in_play (source ncaab_live_loop), credits to live_credit_telemetry
+   -> ESPN summary per game at +90 s, again at +150 s (fail closed on a late play,
+      a header score ahead of the plays, or a stopped play list under a running clock)
+   -> models/ncaab_live_ig: state, freshness, phase, the decision, the night's cut
+   -> ncaab_live_decisions (one row per game and rule), then picks (is_live),
+      then push and #ncaab-live (no fallback)
+```
+
+`python -m models.ncaab_live_loop` (scheduler job `ncaab_live`, pollers, 11am
+to 2:50am ET every 10 minutes; `RUN_NCAAB_LIVE=0` stops it; `--dry-run` makes
+no paid call). Like the NBA loop it fetches only at the purchase's moments, has
+no BookMoveClock (one quote per book per half hour), and decides each game and
+rule once. Unlike it: no Pinnacle pairing (in-play NCAAB Pinnacle quotes too
+few games), a night's cut and cap of 5, and an EV floor per rule (0.02 / 0.05 /
+0.02). Cost: 2 credits a fetch moment while a game has an undecided rule.
+
+
 ## Cutoffs, and why they are re-derived every pass (2026-08-30)
 
 **A live cutoff decays in a way a pre-game one does not.** A pre-game model is

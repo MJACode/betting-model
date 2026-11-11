@@ -499,6 +499,35 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NCAAB in-play (models/ncaab_live_ig.py, 2026-11-07): the game-state
+  // model against the live spread or total, one bet per game and rule at the
+  // first fresh price, only its biggest edges, at most five a night across
+  // the three. Every bet SETTLES ON THE FULL GAME, so the names say when the
+  // bet is placed (Early: the first half; Late: halftime on), never a period.
+  // The chips follow the NBA in-play model's (Early Spread, mike 2026-11-05),
+  // and tell the two spread models apart. Their picks appear on the Live
+  // segment only.
+  ncaab_live_spread_h1: {
+    shortLabel: 'Early Spread',
+    longLabel: 'NCAAB Early Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaab_live_spread_h2: {
+    shortLabel: 'Late Spread',
+    longLabel: 'NCAAB Late Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaab_live_total_h2: {
+    shortLabel: 'Late O/U',
+    longLabel: 'NCAAB Late Live Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
@@ -713,6 +742,22 @@ export const MODEL_META: Record<string, ModelMeta> = {
     // 1H O/U, as the NBA first half's total. The side is in the pick label.
     shortLabel: '1H O/U',
     longLabel: 'NCAAB First Half Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // ── NCAABW ────────────────────────────────────────────────────────────────
+  // Women's college basketball, full-game totals: the one women's model
+  // (2026-11-10). Named like the other totals ("NCAABW Totals", badge O/U).
+  // The open-picks view names each model as this file does, in this order
+  // (tests/test_open_picks_view.py), so the string must not vary. The id is
+  // the one the model writes its picks under (models/ncaabw_total_blend.py
+  // MODEL_ID). It starts with 'ncaab', so sportOfModel tests the women's
+  // prefix first, and it has no 'over_under' in it, so markets.ts names it
+  // for the totals rows.
+  ncaabw_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAABW Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -1037,6 +1082,23 @@ const FIRST_POST_TOTAL_MODELS: readonly string[] = [
   'ncaab_total_blend',
 ];
 
+// The women's totals card (scripts/ncaabw_total_card.py, every five minutes,
+// three after each women's odds capture poll; from 2026-11-10) decides the
+// same way: once, minutes after DraftKings first posts a game's total, and
+// only while that first total and its prices are still DraftKings' number.
+// It is not in the list above because its timing is not the men's, and the
+// page says the timing. DraftKings posted its first women's total 1 to 6
+// Eastern dates before the game's date in 155 of 1,772 priced games, never
+// more (that card's SLATE_DAYS); a first post is a pre-game quote, so the
+// other 1,617 came on the game's own date. That first total stood a median
+// 136 minutes in 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one
+// in ten changed within 10 minutes (the card's own header), so the page says
+// an opening total "can change within minutes", not the men's "often changes
+// within half an hour".
+const GAME_DAY_FIRST_POST_TOTAL_MODELS: readonly string[] = [
+  'ncaabw_total_blend',
+];
+
 // The models that decide each game once, on the morning of the game: the
 // NCAAB spread card (scripts/ncaab_spread_card.py) reads the spread at each
 // of the eight bettable books at 15:00 UTC on game day and posts its bets
@@ -1109,6 +1171,15 @@ const NBA_LIVE_TIMING: Readonly<Record<string, { when: string; settles: string }
   },
 };
 
+// The NCAAB in-play models (models/ncaab_live_ig.py): when each bets. The loop
+// checks games in progress every half hour (models/ncaab_live_loop.py) and
+// posts only the night's strongest few. Each bet is on the FULL game.
+const NCAAB_LIVE_TIMING: Readonly<Record<string, { when: string; market: string }>> = {
+  ncaab_live_spread_h1: { when: 'during the first half', market: 'spread' },
+  ncaab_live_spread_h2: { when: 'from halftime until two minutes are left', market: 'spread' },
+  ncaab_live_total_h2: { when: 'from halftime until two minutes are left', market: 'total' },
+};
+
 const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
 const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
 
@@ -1119,6 +1190,20 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
   // their bets are never listed there: the copy says where they are instead
   // of promising a pipeline refresh that will never fill the list.
   if (isLiveModel(modelId)) {
+    const ncaab = NCAAB_LIVE_TIMING[modelId];
+    if (ncaab) {
+      return {
+        title: 'Bets during the game',
+        body:
+          `This model checks NCAAB games in progress twice an hour, ${ncaab.when}, and bets each game at ` +
+          `most once, at the sportsbook with the best offer. It bets only its biggest edges, and stops after ` +
+          `five bets a night across the NCAAB in-play models. The bet is on the full-game ${ncaab.market}: it ` +
+          `settles on the final score, overtime included, not on the half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty:
+          `This model checks NCAAB games in progress twice an hour, ${ncaab.when}. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
     const nba = NBA_LIVE_TIMING[modelId];
     if (nba) {
       return {
@@ -1218,6 +1303,22 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
       note: 'Posted at DraftKings’ opening total and never re-priced.',
     };
   }
+  if (GAME_DAY_FIRST_POST_TOTAL_MODELS.includes(modelId)) {
+    return {
+      title: 'Decided when the total opens',
+      body:
+        'This model decides each game once, at DraftKings’ opening total, usually within minutes of it ' +
+        'posting. DraftKings opens most totals on the day of the game, some up to six days before. It bets ' +
+        'at DraftKings, and only if DraftKings still offers that opening total at the same prices. If the ' +
+        'total or a price has moved, it skips the game. An opening total can change within minutes: check ' +
+        'DraftKings’ total and price before you bet. The pick is for the total and price shown, not a ' +
+        'later one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model bets only some games, usually on the day of each one, as DraftKings opens its totals. ' +
+        'Nothing has posted yet.',
+      note: 'Posted at DraftKings’ opening total and never re-priced.',
+    };
+  }
   if (GAME_MORNING_MODELS.includes(modelId)) {
     return {
       title: 'Decided the morning of the game',
@@ -1277,7 +1378,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -1292,6 +1393,9 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  // The women's prefix first: 'ncaabw_total_blend' starts with 'ncaab' too,
+  // so the men's test alone files every women's model under NCAAB.
+  if (modelId.startsWith('ncaabw')) return 'NCAABW';
   if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
@@ -1331,6 +1435,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NFL',
   'NCAAF',
   'NCAAB',
+  'NCAABW',
   'UFC',
   'NHL',
   'GOLF',

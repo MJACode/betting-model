@@ -66,6 +66,11 @@ ANON_READABLE: tuple[str, ...] = (
     "parlay_track_record",
     "picks",
     "player_game_log",
+    # ESPN did-not-play list for the NBA player page. RLS stays on; the
+    # SELECT policy is data/migrations/anon_read_nba_player_dnp_2026_11_11.sql,
+    # which is not applied until Matt says so. The results ingestor must not
+    # lock_down this table or the next run revokes the grant.
+    "nba_player_dnp",
     "player_handedness",
     # Each player's current injury tag on the Stats board (2026-10-23).
     # data/migrations/add_injury_status_current_2026_10_23.sql.
@@ -142,6 +147,11 @@ ANON_READABLE: tuple[str, ...] = (
     # view is security_invoker over it (add_nba_team_q1_2026_10_28.sql).
     "nba_team_q1_games",
     "v_nba_team_q1_season",
+    # NBA Stats tab, 1st Basket board (Matt, 2026-11-08): the two season
+    # views, security_invoker over the tables in VIEW_BASE_TABLES below
+    # (add_nba_first_basket_2026_11_08.sql).
+    "v_nba_first_basket_team_season",
+    "v_nba_first_basket_player_season",
     # Betslip game-line edit (Matt, 2026-10-29): the current alternate
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
@@ -270,6 +280,11 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "nhl_goalie_game_log",
     "nhl_skater_game_log",
     "nhl_team_game_log",
+    # security_invoker bases of the NBA 1st Basket views, written by
+    # data/ingestors/nba_first_basket.py (RLS on, SELECT policy;
+    # add_nba_first_basket_2026_11_08.sql). The app reads only the views.
+    "nba_first_basket_games",
+    "nba_first_basket_players",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────
@@ -334,12 +349,47 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # The NCAAF first-half and team-total history purchase's ledger: one row
+    # per game and read, with what was asked for, what the feed served, the
+    # credits billed and the rows stored, so nothing is bought twice. Created
+    # on demand by data/ingestors/ncaaf_derivative_history.py; never read by
+    # the app.
+    "ncaaf_derivative_fetches",
     # Men's college basketball identity: the ESPN team registry, the ESPN
     # event <-> game_id map the odds join reads, and the venues. Created on
     # demand by data/ingestors/ncaab_teams.ensure_tables; never read by the app.
     "ncaab_events",
     "ncaab_teams",
     "ncaab_venues",
+    # Women's college basketball (NCAABW) identity, the same three tables on
+    # their own names (ESPN gives a school's women's team the men's team id).
+    # Created on demand by data/ingestors/ncaabw_teams.ensure_tables; never
+    # read by the app.
+    "ncaabw_events",
+    "ncaabw_teams",
+    "ncaabw_venues",
+    # The NCAABW odds history purchase: its ledger of every snapshot stored,
+    # every in-play quote of every snapshot, and the events it paid for and
+    # could not place on an ESPN game, kept raw. Created on demand by
+    # data/ingestors/ncaabw_odds_history.py; never read by the app.
+    "ncaabw_odds_snapshots",
+    "ncaabw_inplay_quotes",
+    "ncaabw_odds_unmatched",
+    # NCAABW history: NCAA's per-game team box scores and season player
+    # minutes from sportsdataverse's season files. Created on demand by
+    # data/ingestors/ncaabw_sdv_import.py; model input, never read by the app.
+    "ncaabw_team_game_stats",
+    "ncaabw_player_season",
+    # NCAABW period scores (four quarters, then overtimes) and the ESPN
+    # box-score miss ledger. Created on demand by
+    # data/ingestors/ncaabw_espn_box.py; model input, never read by the app.
+    "ncaabw_period_scores",
+    "ncaabw_box_misses",
+    # The NCAABW totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaabw_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaabw_total_decisions",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
@@ -364,13 +414,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
     # research control input, never read by the app.
     "nba_public_splits",
-    # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
-    # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
+    # NBA quarter scores (data/ingestors/nba_period_scores.py) and the
     # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
     # on demand by their writers; model and settlement input, never read by the
-    # app.
+    # app. nba_player_dnp left this list when the player page started reading
+    # it (anon_read_nba_player_dnp_2026_11_11.sql).
     "nba_period_scores",
-    "nba_player_dnp",
     "nba_schedule",
     # Free ESPN play-by-play (sportsdataverse release), its box scores, the
     # ESPN -> NBA.com player id map and the lineup segments derived from them.

@@ -1,6 +1,10 @@
 # Environment / secrets — never commit
 .env
 *.env
+# Any copy of the env file (.env.bak-<date>, .env.local, ...). The repo is
+# public; only the templates are tracked.
+.env.*
+!.env.example
 
 # SQLite database (rebuilt from source data)
 data/betting_model.db
@@ -107,6 +111,7 @@ models/saved/*_????????_??????.pkl
 !models/saved/nba_total_luck_20261031_095356.pkl
 !models/saved/ncaaf_moneyline_20260821_113517.pkl
 !models/saved/ncaaf_over_under_20260825_204305.pkl
+!models/saved/ncaaf_over_under_20261110_161059.pkl
 !models/saved/ncaaf_spread_20260828_103438.pkl
 !models/saved/ncaaf_spread_premium_20260828_103439.pkl
 !models/saved/nfl_prop_anytime_td_20260907_034919.pkl

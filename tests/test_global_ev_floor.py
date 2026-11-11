@@ -391,6 +391,8 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "nba_first_half_total_luck",
          # 2026-10-30 (mike): NCAAB totals; its blend's P(win, push left out).
          "ncaab_total_blend",
+         # 2026-11-09 (mike): NCAABW totals, the women's twin; the same number.
+         "ncaabw_total_blend",
          # 2026-11-02 (mike): NCAAB spreads; the margin table's P(win, push left out).
          "ncaab_spread_market",
          # 2026-11-02 (mike): NCAAB moneylines; the margin table's P(side wins).
@@ -408,7 +410,9 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
          "nba_q1_trend",
          # 2026-11-07 (mike: "Build it anyway"): the NBA first-quarter moneyline; market-fair P(win | not level)
          # plus the graded cell's uplift.
-         "nba_q1_trend_ml"}
+         "nba_q1_trend_ml",
+         # 2026-11-07 (mike): the NCAAB in-play rules; their game-state model's own probability.
+         "ncaab_live_spread_h1", "ncaab_live_spread_h2", "ncaab_live_total_h2"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

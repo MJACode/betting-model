@@ -235,7 +235,9 @@ class TestTheDraftKingsGate:
         assert len(games) == 1
 
     def test_the_exemption_is_a_named_constant(self):
-        assert oi.DK_GATE_EXEMPT_SPORTS == frozenset({"NCAAB"})
+        # NCAABW (women's college basketball) joined 2026-11-09 with the same
+        # reason: a book other than DraftKings often posts a game first.
+        assert oi.DK_GATE_EXEMPT_SPORTS == frozenset({"NCAAB", "NCAABW"})
 
 
 # ── names, seasons, keys ─────────────────────────────────────────────────────
@@ -395,7 +397,7 @@ class TestTheRealResolver:
     def test_the_dispatcher(self):
         assert oi._schedule_resolver("NCAAB", _CatalogConn(), "2026-11-10") is not None
         assert oi._schedule_resolver("MLB", _CatalogConn(), "2026-11-10") is None
-        assert oi.SCHEDULE_RESOLVED_SPORTS == ("NFL", "NCAAB")
+        assert oi.SCHEDULE_RESOLVED_SPORTS == ("NFL", "NCAAB", "NCAABW")
 
 
 # ── the three callers ────────────────────────────────────────────────────────
@@ -436,8 +438,11 @@ class TestRunOddsIngestor:
         monkeypatch.setattr(oi, "get_connection", lambda: _CatalogConn())
         monkeypatch.setattr(oi, "_get_odds", lambda key, markets: called.append(key) or [])
         result = oi.run_odds_ingestor()
-        assert "NCAAB" in result["sports"]
-        assert called[-1] == "basketball_ncaab"
+        assert "NCAAB" in result["sports"] and "NCAABW" in result["sports"]
+        # The two college basketball sports run last, the men's then the
+        # women's (2026-11-09): each builds a resolver that can roll the
+        # connection back, so every other sport's rows are committed first.
+        assert called[-2:] == ["basketball_ncaab", "basketball_wncaab"]
         # The NFL is still pulled too: its path is unchanged.
         assert "americanfootball_nfl" in called
 

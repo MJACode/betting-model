@@ -344,43 +344,86 @@ def test_the_smoke_test_never_prints_a_secret():
     assert "{val}" not in main, "a full credential value would reach the logs"
 
 
-# ── reach ─────────────────────────────────────────────────────────────────────
+# ── no hashtags ───────────────────────────────────────────────────────────────
+# mike, 2026-11-10: X was treating the account as spam. Pick posts and the
+# daily, weekly, and monthly recaps carry no tags, whatever X_HASHTAG_POOL is.
 
-def test_never_more_than_two_hashtags():
-    """
-    Not a style rule. 1-2 tags carry about +21% engagement on the 2026
-    algorithm; THREE OR MORE trips spam filters and cuts reach below what the
-    post would get with none. So the cap has to be enforced, not advised.
-    """
-    # Asserted against the LITERAL 2, not against xp.MAX_HASHTAGS. Comparing a
-    # constant to itself is not a test: raising the constant to 3 moved the
-    # goalposts and this passed cleanly, which is exactly the change that would
-    # cost reach.
-    assert xp.MAX_HASHTAGS == 2, (
-        "1-2 hashtags is the evidenced optimum; 3+ trips spam filters")
-    for sport in ("MLB", "WNBA", "NCAAF", "UFC", None, "CRICKET"):
-        assert xp.hashtags_for(sport).count("#") <= 2
+def test_rendered_picks_and_recaps_contain_no_hashtags(monkeypatch):
+    monkeypatch.setenv(
+        "X_HASHTAG_POOL",
+        "GamblingTwitter,FreePicks,MLB,Yankees,CustomTag")
+    picks = [
+        xp.render_pick({
+            "sport": "MLB", "label": "NYY ML", "dk_odds": -115,
+            "home": "NYY", "away": "BOS", "side": "home",
+            "commence": "2026-10-20T23:10:00+00:00"}),
+        xp.render_pick({
+            "sport": "MLB", "label": "NYY vs BOS Over 8.5", "dk_odds": -110,
+            "home": "NYY", "away": "BOS", "side": "over"}),
+        xp.render_pick({
+            "sport": "NFL", "label": "SF -3.5", "dk_odds": -110,
+            "home": "SF", "away": "SEA", "side": "home"}),
+        xp.render_pick({
+            "sport": "MLB", "label": "Aaron Judge Over 1.5 Hits",
+            "dk_odds": -110, "home": "BOS", "away": "NYY", "side": "over",
+            "prop_market": "player_hits",
+            "commence": "2026-10-21T02:10:00+00:00"}),
+        xp.render_pick({
+            "sport": "NCAAF", "label": "Ohio State -7.5", "dk_odds": -110,
+            "home": "Ohio State", "away": "Michigan", "side": "home"}),
+    ]
+    recaps = [
+        xp.render_results(
+            {"wins": 12, "losses": 9, "pushes": 1, "units": 2.4,
+             "risked": 22.0, "clv": "48% beat close (10/21)",
+             "by_sport": [{"sport": "MLB", "wins": 8, "losses": 5},
+                          {"sport": "NFL", "wins": 4, "losses": 4, "pushes": 1}]},
+            "2026-10-18"),
+        xp.render_results(
+            {"wins": 10, "losses": 8, "pushes": 1, "units": 3.2, "risked": 25.8,
+             "by_sport": [{"sport": "MLB", "wins": 6, "losses": 4},
+                          {"sport": "NFL", "wins": 4, "losses": 4, "pushes": 1}]},
+            "2026-10-12", heading="Week of Oct 12-18 results"),
+        xp.render_results(
+            {"wins": 40, "losses": 35, "pushes": 2, "units": -4.5,
+             "risked": 90.0, "clv": "55% beat close (11/20)", "by_sport": []},
+            "2026-09-01", heading="September results"),
+    ]
+    for text in picks + recaps:
+        assert "#" not in text, text
+        assert xp.weighted_len(text) <= xp.MAX_TWEET
+        for tag in ("GamblingTwitter", "FreePicks", "CustomTag"):
+            assert tag not in text
 
 
-def test_the_sport_tag_is_specific_not_generic():
-    """
-    Generic tags are the ones the ranker treats as noise, and they compete with
-    the whole platform instead of reaching people who follow the subject.
-    """
-    assert "#MLB" in xp.hashtags_for("MLB")
-    assert "#CFB" in xp.hashtags_for("NCAAF")
-    for generic in ("#betting", "#sports", "#gambling ", "#picks"):
-        assert generic not in xp.hashtags_for("MLB").lower()
+def test_a_full_post_stops_at_280_weighted_characters():
+    """The leading emoji is two weighted characters. A Python slice of 280
+    would be one over the limit X enforces."""
+    text = xp.render_pick({"sport": "MLB", "label": "X" * 400, "dk_odds": -110})
+    assert xp.weighted_len(text) == xp.MAX_TWEET
+    assert len(text) == xp.MAX_TWEET - 1
+    assert "#" not in text
 
 
-def test_an_unknown_sport_still_gets_the_community_tag():
-    assert xp.hashtags_for("KABADDI") == xp._COMMUNITY_TAG
-    assert xp.hashtags_for(None) == xp._COMMUNITY_TAG
-
-
-def test_tags_are_inside_the_character_budget():
-    pick = {"sport": "MLB", "label": "X" * 300, "dk_odds": -110}
-    assert len(xp.render_pick(pick)) <= xp.MAX_TWEET
+def test_the_sport_split_keeps_the_characters_the_tags_used_to_take():
+    """The recap used to reserve #GamblingTwitter and the newline in front
+    of it. That room belongs to the sport line, and the post still stops
+    at 280 weighted characters."""
+    head = xp.render_results(
+        {"wins": 1, "losses": 0, "pushes": 0, "units": 1.0, "risked": 1.1,
+         "by_sport": []}, "2026-09-01")
+    room = xp.MAX_TWEET - xp.weighted_len(head) - 1
+    old_room = room - len("#GamblingTwitter") - 1
+    filler = "S" * (room - len(" 1-0"))
+    text = xp.render_results(
+        {"wins": 1, "losses": 0, "pushes": 0, "units": 1.0, "risked": 1.1,
+         "by_sport": [{"sport": filler, "wins": 1, "losses": 0}]},
+        "2026-09-01")
+    assert filler in text
+    assert "more" not in text
+    assert "#" not in text
+    assert xp.weighted_len(text) == xp.MAX_TWEET
+    assert len(filler) + len(" 1-0") > old_room
 
 
 def test_a_reply_carries_the_parent_id(monkeypatch):
@@ -607,8 +650,10 @@ def test_the_tweet_carries_the_days_clv_line_like_the_embed():
                       {"sport": "NFL", "wins": 2, "losses": 1, "pushes": 0}]},
         "2026-09-09")
     assert "38% beat close (3/8)" in text
-    assert text.index("NFL 2-1") < text.index("38% beat close") < text.index("#")
-    assert len(text) <= xp.MAX_TWEET
+    assert text.index("NFL 2-1") < text.index("38% beat close")
+    assert text.endswith("38% beat close (3/8)")
+    assert "#" not in text
+    assert xp.weighted_len(text) <= xp.MAX_TWEET
 
 
 def test_a_day_with_nothing_graded_carries_no_clv_line():
@@ -771,9 +816,9 @@ def test_a_split_that_cannot_fit_says_how_many_it_dropped():
     text = xp.render_results(
         {"wins": 112, "losses": 112, "pushes": 8, "units": -3.0,
          "risked": 240.0, "by_sport": long_ones}, "2026-09-01")
-    assert len(text) <= xp.MAX_TWEET
+    assert xp.weighted_len(text) <= xp.MAX_TWEET
     assert "more" in text, "sports were dropped without saying so"
-    assert text.endswith(xp.hashtags_for(None)), "the tags were truncated away"
+    assert "#" not in text
 
 
 # ── 6. every released pick, one format, posted once ──────────────────────────
@@ -881,14 +926,11 @@ def test_every_pick_post_uses_the_same_format():
     for text in (side, total):
         assert "Free pick" not in text
         assert "More in Discord" not in text
-        assert "#FreePicks" not in text
-        assert text.count("#") <= xp.MAX_PICK_HASHTAGS
-        assert len(text) <= xp.MAX_TWEET
+        assert "#" not in text
+        assert xp.weighted_len(text) <= xp.MAX_TWEET
         xp._assert_no_link(text)
-    assert "#Yankees" in side and "#MLB" in side and "#GamblingX" in side
-    assert "#RedSox" not in side
-    assert "#Yankees" in total and "#RedSox" in total and "#MLB" in total
-    assert "#GamblingX" in total
+    assert "NYY ML" in side and "-115" in side
+    assert "Over 8.5" in total
 
 
 def test_a_pick_shows_the_event_date_in_et_and_a_prop_shows_the_matchup():
@@ -902,8 +944,8 @@ def test_a_pick_shows_the_event_date_in_et_and_a_prop_shows_the_matchup():
     assert "Tue 10/20" in prop
     assert "NYY @ BOS" in prop
     assert prop.index("NYY @ BOS") < prop.index("Tue 10/20")
-    assert "#Yankees" in prop and "#RedSox" in prop
-    assert len(prop) <= xp.MAX_TWEET
+    assert "#" not in prop
+    assert xp.weighted_len(prop) <= xp.MAX_TWEET
 
 
 def test_a_side_that_omits_the_opponent_gains_the_matchup_when_it_fits():
@@ -915,9 +957,8 @@ def test_a_side_that_omits_the_opponent_gains_the_matchup_when_it_fits():
     })
     assert "NYY ML" in text
     assert "NYY @ BOS" in text
-    assert "Tue 10/20" in text
-    assert "#Yankees" in text and "#RedSox" not in text
-    assert text.index("Tue 10/20") < text.index("#Yankees")
+    assert text.endswith("Tue 10/20")
+    assert "#" not in text
 
 
 def test_a_total_that_already_names_both_clubs_does_not_repeat_the_matchup():
@@ -932,40 +973,26 @@ def test_a_total_that_already_names_both_clubs_does_not_repeat_the_matchup():
     assert "Tue 10/20" in text
 
 
-def test_a_long_post_drops_reach_tags_before_the_date_and_the_matchup():
-    body = "X" * 250
-    text = xp.assemble_text(
-        body, ["#Yankees", "#RedSox"],
-        ["#MLB", "#GamblingX", "#BettingTips"],
-        keep=["NYY @ BOS", "Tue 10/20"])
-    assert len(text) <= xp.MAX_TWEET
-    assert "NYY @ BOS" in text and "Tue 10/20" in text
-    assert text.index("Tue 10/20") < text.index("#Yankees")
-    for dropped in ("#MLB", "#GamblingX", "#BettingTips"):
-        assert dropped not in text
+def test_a_long_post_keeps_the_date_and_the_matchup_and_gives_the_rest_to_the_body():
+    """The date and the matchup stay whole. Nothing is reserved for tags,
+    so the body runs up to them, and the post stops at 280 weighted."""
+    text = xp.assemble_text("X" * 400, keep=["NYY @ BOS", "Tue 10/20"])
+    assert text.endswith("NYY @ BOS Tue 10/20")
+    assert "#" not in text
+    assert xp.weighted_len(text) == xp.MAX_TWEET
+    body, _, pinned = text.rpartition(" ")
+    assert pinned == "10/20"
+    assert set(body.split("NYY @ BOS")[0].strip()) == {"X"}
 
 
-def test_a_long_post_drops_reach_tags_before_team_tags():
-    body = "X" * 270
-    text = xp.assemble_text(
-        body, ["#Yankees", "#RedSox"], ["#MLB", "#GamblingX", "#BettingTips"])
-    assert len(text) <= xp.MAX_TWEET
-    assert text.endswith("#Yankees #RedSox")
-    for dropped in ("#MLB", "#GamblingX", "#BettingTips"):
-        assert dropped not in text
-
-
-def test_freepicks_in_the_pool_is_dropped(monkeypatch):
-    monkeypatch.setenv("X_HASHTAG_POOL", "FreePicks,CustomTag")
-    pick = {"sport": "MLB", "home": "NYY", "away": "BOS", "side": "home"}
-    _teams, reach = xp.pick_hashtags(pick)
-    assert "#CustomTag" in reach
-    assert "#FreePicks" not in reach
-    assert "#GamblingX" not in reach
+def test_the_hashtag_pool_does_not_reach_a_pick(monkeypatch):
+    monkeypatch.setenv("X_HASHTAG_POOL", "FreePicks,CustomTag,GamblingTwitter")
     text = xp.render_pick(
         {"sport": "MLB", "label": "NYY ML", "dk_odds": -115,
          "home": "NYY", "away": "BOS", "side": "home"})
-    assert "#FreePicks" not in text and "#CustomTag" in text
+    assert "#" not in text
+    for tag in ("FreePicks", "CustomTag", "GamblingTwitter", "GamblingX"):
+        assert tag not in text
 
 
 def _afternoon():
@@ -984,11 +1011,11 @@ def test_all_released_picks_are_posted_once_in_one_format(monkeypatch):
     assert post_at(start + timedelta(minutes=30)) == 0
     assert len(posted) == 3, posted
     assert all("Free pick" not in t and "More in Discord" not in t
-               and "#FreePicks" not in t for t in posted)
+               and "#" not in t for t in posted)
     assert sum("NYY ML" in t for t in posted) == 1
-    assert any("NYY ML" in t and "#Yankees" in t and "#MLB" in t for t in posted)
-    assert any("Over 8.5" in t and "#Yankees" in t and "#RedSox" in t for t in posted)
-    assert any("SF -3.5" in t and "#49ers" in t and "#NFL" in t for t in posted)
+    assert any("NYY ML" in t for t in posted)
+    assert any("Over 8.5" in t for t in posted)
+    assert any("SF -3.5" in t for t in posted)
     assert {row[0] for row in ledgered} == {"k-free", "k-total", "k-nfl"}
     assert [row[0] for row in ledgered] == ["k-free", "k-total", "k-nfl"]
     assert all(kind == "x_pick" for _key, kind, _id in ledgered)

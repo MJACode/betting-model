@@ -526,6 +526,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # marker comment exist. Does not rewrite picks, odds or the record.
     # Sits before the posted-stake pair so those two stay adjacent.
     "add_nba_team_q1_2026_10_28.sql",
+    # 2026-11-08 (Matt): NBA first-basket stats on the Stats tab. Two
+    # tables written by data/ingestors/nba_first_basket.py, SELECT policies,
+    # and two security_invoker season views. Returns on a catalog read once
+    # both tables, both policies and both views' marker comments exist.
+    # Does not rewrite picks, odds or the record. Sits before the
+    # posted-stake pair so those two stay adjacent.
+    "add_nba_first_basket_2026_11_08.sql",
     # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
     # One table, written by data/ingestors/live_scoreboard.py, with a
     # SELECT policy and a SELECT-only grant. Returns on a catalog read once
@@ -589,6 +596,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Returns on a catalog read once it exists. The loop refuses to decide
     # until it does.
     "nba_live_decisions_2026_11_04.sql",
+    # 2026-11-07 (mike): the NCAAB in-play loop's decision ledger, one row per
+    # game and in-play rule (models/ncaab_live_loop.py). A new table, RLS on,
+    # anon and authenticated revoked; touches no view, pick or function.
+    # Returns on a catalog read once it exists. The loop refuses to decide
+    # until it does.
+    "ncaab_live_decisions_2026_11_07.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
