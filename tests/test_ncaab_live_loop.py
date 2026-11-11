@@ -105,6 +105,7 @@ class Db:
         self.prices: list = []
         self.standing = standing or []
         self.night, self.slate = night, slate
+        self.paired = None                     # what models.cbb_pairs.clash would say
 
     @property
     def skips(self):
@@ -147,6 +148,7 @@ class Db:
         monkeypatch.setattr(LP, "insert_ledger", insert_ledger)
         monkeypatch.setattr(LP, "write_bet", write_bet)
         monkeypatch.setattr(LP, "standing_bets", lambda conn, gid: list(db.standing))
+        monkeypatch.setattr(LP, "paired_bet", lambda conn, gid, mid, side, line: db.paired)
         monkeypatch.setattr(LP, "under_daily_cap", lambda conn, cost: True)
         monkeypatch.setattr(LP, "record_credits", lambda conn, c: db.credits.append(c))
         import data.ingestors.live_price_log as lpl

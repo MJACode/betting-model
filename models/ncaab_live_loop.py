@@ -79,6 +79,7 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd  # noqa: E402
 
+from models import cbb_pairs  # noqa: E402
 from models import ncaab_live_ig as M  # noqa: E402
 
 log = logging.getLogger("models.ncaab_live_loop")
@@ -334,6 +335,17 @@ def standing_bets(conn, game_id: str) -> list[dict]:
         release_read(conn)
     return [{"model_id": m, "market": M.RULE_BY_ID[m].market, "side": s,
              "line": None if ln is None else float(ln), "label": lb} for m, s, ln, lb in rows]
+
+
+def paired_bet(conn, game_id: str, model_id: str, side: str, line: float) -> str | None:
+    """Why this bet would sit beside its opposite number on the game (an under
+    beside a big favourite's spread bet, either order; models.cbb_pairs), or
+    None. One read of `picks`, released."""
+    from data.db import release_read
+    try:
+        return cbb_pairs.clash(conn, game_id, model_id, side, line)
+    finally:
+        release_read(conn)
 
 
 def build_pick(ctx: GameCtx, rule: M.Rule, pick: dict, offers: pd.DataFrame, state: dict, links: dict,
@@ -830,8 +842,16 @@ class Loop:
                     standing_cache[c.game_id] = [] if self.dry_run else standing_bets(self.c(), c.game_id)
                 held = next((s for s in standing_cache[c.game_id] + this_pass.get(c.game_id, [])
                              if M.cannot_both_win(mine, s)), None)
+                # An under beside a big favourite's spread bet (models/cbb_pairs.py; mike,
+                # 2026-11-11), from any NCAAB model. `picks` is read fresh each time, and a
+                # bet of this pass is written before the next decision is taken, so two
+                # decisions of one fetch see each other.
+                paired = None if (held is not None or self.dry_run) else paired_bet(
+                    self.c(), c.game_id, rule.model_id, b["side"], float(b["line"]))
                 if held is not None:
                     outcome, reason = "declined", f"cannot both win with {held.get('label') or held['model_id']}"
+                elif paired:
+                    outcome, reason = "declined", paired
                 else:
                     if self.bankroll is None and not self.dry_run:
                         try:

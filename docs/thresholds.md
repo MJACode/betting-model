@@ -1470,6 +1470,7 @@ It cleared the research bar, narrowly: the pooled lower bound is +0.57%.
 | EV floor | 0.037 (0.03 until 2026-11-06), on its own probability. An edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay with the -200 limit was +0.0426 (median +0.068, 1,887 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen (2,527 of the research's 2,529 bets; prices -160 to +155), and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). November alone made +35.91 units on 690 bets | the card |
+| big favourite | no UNDER when the favourite lays 12 or more in the first half (mike, 2026-11-11): 331 replayed bets, 171-159, -8.50 units; the game is recorded `big_favourite` and written as a NONE row. `docs/sports/ncaab.md`, "An under beside a big favourite" | `models/ncaab_first_half_total.UNDER_BIG_FAVOURITE` |
 | decided once | on the tip-minus-60 first-half fetch (or its retries, 55 to 60.5 minutes before tip); a row in `ncaab_first_half_total_decisions`, bet or not | `scripts/ncaab_first_half_total_card.py`, `scheduler.run_ncaab_first_half_window` |
 
 **The neighbourhood** (the research's round 5 grid, every game, 2023-24..2025-26,

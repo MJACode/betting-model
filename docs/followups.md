@@ -119,6 +119,28 @@ The checks were run and the halftime total was built (`ncaabw_live_total_ht`,
 `docs/sports/ncaabw.md` "In play: the halftime total"). The halftime spread
 does not clear.
 
+## [ ] NCAAB first-half spread model bets big favourites far more than its replay did (2026-11-11)
+
+Where the favourite lays 12 or more in the half, the replay of 2023-24 to
+2025-26 bet the favourite 37 times and the underdog 485 times; from
+2026-11-03 to 11-10 the live model bet the favourite 15 times (11-4) and the
+underdog 10 (4-6). The books' first-half number for a favourite of 25 or more
+is 0.55 to 0.56 of the full-game number this season against a median 0.59 in
+the replay seasons, so the model's number is at or above the book's where it
+used to sit below. Find out which moved: the books' first-half numbers, the
+full-game consensus the model reads at tip minus 10, or the model's map for
+spreads this large (the fit has few of them). Until then its record on these
+bets is a population the replay barely holds. Queries: `docs/sports/ncaab.md`,
+"An under beside a big favourite".
+
+## [ ] NCAAB first-half unders: the 6 to 12 band is flat too (2026-11-11)
+
+The rule stops unders at 12 or more points (mike's "big favourite"). Unders
+with the favourite laying 6 to 12 in the half went 198-180, -5.64 units on
+379 replayed bets (-7.20, -3.12, +4.67 by season). Moving the bar to 6 is
+mike's call; it was put to him on 2026-11-11. The NONE rows the rule writes
+(`big_favourite`) let the 12-and-up unders be graded live: read them at 100.
+
 ## [ ] NCAABW halftime total: measure ESPN's publishing lag on the women's game (2026-11-11)
 
 The loop waits 90 seconds after a price read and 60 more before it decides,
