@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAF moneyline model merged (mike: "merge 1240") and its card running: first run 19:05 UTC wrote six missed rows and no bet, first decisions 9am ET 11-12; the nightly backup to mike's PC also starts at sign-in ("yes on backup") |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAABW halftime total built (`ncaabw_live_total_ht`): the full-game total bet once a game at the break; the research's game state carried a wrong score in 54 of 689 bets, fixed (the score is the highest logged so far): 669 bets, +11.84% walk-forward; women's play-by-play (5.0M plays) into Supabase; the halftime spread still does not clear |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAABW research after the totals model went live (PR #1236, 2026-11-10): spread and moneyline off the team ratings clear nothing (the first spread already holds what the ratings know); the in-play second-half total is a halftime total and passes its four checks (689 bets, +8.50% walk-forward); the halftime spread does not clear |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, Build Your Own Model bet list shows the game date ("Sun, 11/8") instead of the official lock time; the 8/31 locks were the season's first DraftKings snapshot |
