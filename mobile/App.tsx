@@ -35,7 +35,7 @@ import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
-import { SettingsScreen } from '@/screens/SettingsScreen';
+import { SettingsScreen, SettingsSectionScreen } from '@/screens/SettingsScreen';
 import { DeleteAccountScreen } from '@/screens/DeleteAccountScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
@@ -67,7 +67,12 @@ import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
 import { addDays, todayET } from '@/lib/format';
 import { ToastHost } from '@/components/Toast';
 import { BetslipBar } from '@/components/BetslipBar';
-import { PlayerStatsBackButton } from '@/components/StackBackButton';
+import {
+  PlayerStatsBackButton,
+  SettingsSectionBackButton,
+  SettingsSectionHeaderTitle,
+} from '@/components/StackBackButton';
+import { SETTINGS_SECTION_TITLE } from '@/lib/settingsHome';
 import {
   FALLBACK_TAB_BAR_HEIGHT,
   setTabBarHeight,
@@ -472,6 +477,26 @@ function App() {
             name="Settings"
             component={SettingsScreen}
             options={{ title: 'Settings' }}
+          />
+          {/* Chevron + "Back" (#1239), same pill as Player Stats. Settings
+              itself keeps the arrow-only system back from screenOptions. */}
+          <Stack.Screen
+            name="SettingsSection"
+            component={SettingsSectionScreen}
+            options={({ route }) => {
+              const section = route.params?.section;
+              const title =
+                section && section in SETTINGS_SECTION_TITLE
+                  ? SETTINGS_SECTION_TITLE[section]
+                  : 'Settings';
+              return {
+                title,
+                headerBackVisible: false,
+                gestureEnabled: true,
+                headerTitle: (props) => <SettingsSectionHeaderTitle {...props} />,
+                headerLeft: () => <SettingsSectionBackButton />,
+              };
+            }}
           />
           <Stack.Screen
             name="DeleteAccount"

@@ -1,6 +1,7 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { DiscordPublish } from '@/lib/discordPublish';
 import type { PlayerLogSport } from '@/lib/playerLog';
+import type { SettingsSectionId } from '@/lib/settingsHome';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
 export type ConfidenceTier = 'HIGH' | 'MED' | 'LOW' | null;
@@ -635,6 +636,8 @@ export type RootStackParamList = {
   Paywall: { autoCloseIfEntitled?: boolean } | undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
+  /** One section of Settings, pushed from the home grid. */
+  SettingsSection: { section: SettingsSectionId };
   // Account deletion. Reachable from Settings only while signed in.
   DeleteAccount: undefined;
   // In-app feedback: the composer + your past conversations, and one thread.

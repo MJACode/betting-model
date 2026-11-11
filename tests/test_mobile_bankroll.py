@@ -73,21 +73,29 @@ def test_copy_is_word_for_word():
 
 def test_section_placement_and_scope():
     settings = _read(SETTINGS)
-    # Order set by Matt, 2026-11-09: Betting (sportsbooks first), Bankroll,
-    # Alerts, Explore, Community, Account, then Responsible gambling last.
-    assert '<SectionHeader title="Bankroll" />\n\n        <BankrollCard />\n\n' in settings
+    home = _read(MOBILE / "src/lib/settingsHome.ts")
+    # Option B home order: Sportsbooks, Bankroll, Notifications, Explore,
+    # Community, Account (flag-gated), then Legal & support full width.
     order = [
-        '<SectionHeader title="Betting" />',
-        '<SectionHeader title="Bankroll" />',
-        '<SectionHeader title="Alerts" />',
-        '<SectionHeader title="Explore" />',
-        '<SectionHeader title="Community" />',
-        '<SectionHeader title="Account" />',
-        '<SectionHeader title="Responsible gambling" />',
+        "'sportsbooks'",
+        "'bankroll'",
+        "'notifications'",
+        "'explore'",
+        "'community'",
+        "'account'",
+        "'legal'",
     ]
-    at = [settings.index(h) for h in order]
+    at = [home.index(h) for h in order]
     assert at == sorted(at)
-    assert settings.index('<Text style={styles.cardLabel}>Your sportsbooks</Text>') < settings.index('<SectionHeader title="Bankroll" />')
+    assert "function BankrollSection()" in settings
+    assert "<BankrollCard />" in settings
+    assert settings.index("Your sportsbooks") < settings.index("<BankrollCard />")
+    home_fn = settings.split("export function SettingsScreen(", 1)[1].split(
+        "export function SettingsSectionScreen", 1
+    )[0]
+    assert "<BankrollCard" not in home_fn
+    assert "<NotificationsCard" not in home_fn
+    assert "navigate('SettingsSection'" in home_fn
     assert 'Staying in control' not in settings
     assert "Bankroll & limits" not in settings
     for gone in ("Daily limit:", "Presets", "Show $ next to units", "24 hours"):
@@ -139,11 +147,12 @@ def test_error_text_uses_the_text_safe_red():
 
 def test_keyboard_never_covers_the_field():
     settings = _read(SETTINGS)
-    assert (
-        "<ScrollView\n        contentContainerStyle={styles.list}\n"
-        '        keyboardShouldPersistTaps="handled"\n'
-        "        automaticallyAdjustKeyboardInsets\n      >" in settings
-    )
+    # One scroll wrapper serves the home and every drill-in, including the
+    # bankroll field. The props are what keep the field above the keyboard.
+    assert 'contentContainerStyle={styles.list}' in settings
+    assert 'keyboardShouldPersistTaps="handled"' in settings
+    assert "automaticallyAdjustKeyboardInsets" in settings
+    assert "<BetslipBarSpacer />" in settings
 
 
 def test_setters_merge_into_the_latest_value():

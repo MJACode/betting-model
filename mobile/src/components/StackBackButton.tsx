@@ -4,9 +4,36 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { PLAYER_DETAIL_PARENT, playerTitleMaxWidth, stackBackDecision } from '@/lib/stackBack';
+import {
+  PLAYER_DETAIL_PARENT,
+  playerTitleMaxWidth,
+  settingsTitleMaxWidth,
+  stackBackDecision,
+} from '@/lib/stackBack';
 import { colors, font } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+
+/** Same type as the player title, sized for a short section name such as "Legal & support". */
+export function SettingsSectionHeaderTitle({
+  children,
+}: {
+  children?: React.ReactNode;
+  /** Passed by the stack. On iOS it is the header tint. The title is not a link. */
+  tintColor?: string;
+}) {
+  const { width, fontScale } = useWindowDimensions();
+  return (
+    <Text
+      numberOfLines={1}
+      adjustsFontSizeToFit
+      minimumFontScale={0.8}
+      maxFontSizeMultiplier={2}
+      style={[styles.title, { maxWidth: settingsTitleMaxWidth(width, fontScale) }]}
+    >
+      {children}
+    </Text>
+  );
+}
 
 /** Centered player name. One line, and no wider than the gap between the pills. */
 export function PlayerStatsHeaderTitle({
@@ -41,14 +68,10 @@ export function PlayerStatsHeaderTitle({
  * width is what keeps a long name off it — the title is a UIKit label, and
  * a React zIndex does not paint over that.
  */
-export function PlayerStatsBackButton() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+/** The #1239 pill: 22pt chevron, "Back" at 17pt, 44pt target, hitSlop inside the bar. */
+function BackPill({ onPress }: { onPress: () => void }) {
   const { fontScale } = useWindowDimensions();
   const icon = Math.round(22 * Math.min(Math.max(fontScale, 1), 2));
-  const onPress = () => {
-    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else navigation.replace(PLAYER_DETAIL_PARENT.name, { screen: PLAYER_DETAIL_PARENT.screen });
-  };
   return (
     <Pressable
       onPress={onPress}
@@ -63,6 +86,28 @@ export function PlayerStatsBackButton() {
       </Text>
     </Pressable>
   );
+}
+
+export function PlayerStatsBackButton() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const onPress = () => {
+    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
+    else navigation.replace(PLAYER_DETAIL_PARENT.name, { screen: PLAYER_DETAIL_PARENT.screen });
+  };
+  return <BackPill onPress={onPress} />;
+}
+
+/**
+ * The same pill on a Settings section. An empty stack returns to Settings.
+ * The player screen's empty-stack parent stays the Stats tab.
+ */
+export function SettingsSectionBackButton() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const onPress = () => {
+    if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
+    else navigation.replace('Settings');
+  };
+  return <BackPill onPress={onPress} />;
 }
 
 const styles = StyleSheet.create({

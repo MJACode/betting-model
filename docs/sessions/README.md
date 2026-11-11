@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, Settings home is the Option B tile grid; each section's existing controls moved onto a drill-in with the #1239 Back pill |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, X pick posts and the daily, weekly, and monthly recaps carry no hashtags; the tag budget goes back to the text, still within 280 weighted characters |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player Stats Back is a JS pill (system pill still dead after Compare odds on the 2026-11-07 bundle; empty stack replaces to Stats) |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player detail minutes for NBA, WNBA, and NCAAB: Avg MIN, under-bar labels, Low MIN at 70% of the window average, a context-only Minutes chip after PRA, DNP when the log row has no minutes and no stat |
