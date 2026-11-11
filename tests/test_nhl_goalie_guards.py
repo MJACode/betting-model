@@ -571,6 +571,7 @@ ALLOWED = {
     "scripts/nba_prop_market_card.py": "NBA player props only",
     "scripts/nba_total_luck_card.py": "NBA full-game totals only",
     "scripts/ncaab_total_card.py": "NCAAB full-game totals only",
+    "scripts/ncaabw_total_card.py": "NCAABW (women's college basketball) full-game totals only",
     "scripts/ncaab_spread_card.py": "NCAAB full-game spreads only",
     "scripts/ncaab_moneyline_card.py": "NCAAB full-game moneylines only",
     "scripts/ncaab_first_half_spread_card.py": "NCAAB first-half spreads only",

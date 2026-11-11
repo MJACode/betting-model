@@ -43,11 +43,13 @@ models/saved/mlb_prop_pitcher_outs_20260903_233111.pkl
 models/saved/mlb_prop_pitcher_walks_20260620_164336.pkl
 models/saved/mlb_runline_20260823_105841.pkl
 models/saved/nba_first_half_total_luck_20261031_095356.pkl
+models/saved/nba_q1_trend_20261107.pkl
 models/saved/nba_prop_projection_20261016_091702.pkl
 models/saved/nba_team_total_luck_20261031_095356.pkl
 models/saved/nba_total_luck_20261031_095356.pkl
 models/saved/ncaaf_moneyline_20260821_113517.pkl
 models/saved/ncaaf_over_under_20260825_204305.pkl
+models/saved/ncaaf_over_under_20261110_161059.pkl
 models/saved/ncaaf_spread_20260828_103438.pkl
 models/saved/ncaaf_spread_premium_20260828_103439.pkl
 models/saved/nfl_prop_anytime_td_20260907_034919.pkl
@@ -97,6 +99,17 @@ models/saved/wnba_spread_20260719_113238.pkl
   then `nhl_moneyline_20260920_131606.pkl` is the active row and stays on this
   list. Drop the old one (steps 3-4 below) once the new row is active.
 
+- `ncaaf_over_under_20261110_161059.pkl` — the NCAAF totals regression as the
+  mean of eleven fits (`models/seed_average.py`, fitted by
+  `python -m scripts.ncaaf_margin_eval --fit-totals`; mike, 2026-11-10),
+  committed with the class its pickle names. NOT registered, and
+  `--register-totals 20261110_161059` refuses it unless the scorer holds a
+  game whose weather is missing: such a game moves its prediction 11.7 points
+  (`docs/sports/ncaaf.md`, the 2026-11-10 section). Until a version is
+  registered `ncaaf_over_under_20260825_204305.pkl` is the active row and
+  stays on this list. Drop the old one (steps 3-4 below) once a new row is
+  active; drop this one if it is replaced before it is ever registered.
+
 - `nba_prop_projection_20261016_091702.pkl` — the NBA projection model
   (`models/nba_prop_projection.py`, fitted by `scripts/nba_prop_projection_train.py`
   through 2025-26), committed with the code that reads it and registered with
@@ -114,6 +127,11 @@ models/saved/wnba_spread_20260719_113238.pkl
   `scripts/nba_first_half_total_luck_build.py` from 2020-21 .. 2025-26). Read by
   the model's own `load_artifact`, not `model_registry`; committed with the code
   that reads it. A new model id: no older file to drop.
+
+- `nba_q1_trend_20261107.pkl` — the NBA first-quarter spread rule's pricing rows (2020-21 .. 2025-26), its
+  graded cell's per-season bet counts and the 88 graded bets' keys and prices (`models/nba_q1_trend.py`, built by
+  `scripts/nba_q1_trend_build.py`). Read by the model's own `load_artifact`, not `model_registry`; committed
+  with the code that reads it. A new model id: no older file to drop.
 
 - `nba_total_luck_`, `nba_team_total_luck_` and `nba_first_half_total_luck_` of
   2026-10-31 are the files of 2026-10-17, 10-18 and 10-30 with one key added, the

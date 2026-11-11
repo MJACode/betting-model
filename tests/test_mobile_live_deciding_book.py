@@ -138,7 +138,7 @@ import { MODEL_META, modelPageTiming } from './modelMeta.ts';
 import { liveEmptySubtitle } from './liveSports.ts';
 const names = ['nba_live_spread_q12']
   .map((id) => [MODEL_META[id].longLabel, MODEL_META[id].shortLabel]);
-eq(names, [['NBA Early Live Spreads', 'LIVE Spread']], 'names');
+eq(names, [['NBA Early Live Spreads', 'Early Spread']], 'names');
 // The quarter-3 moneyline and spread are held out of the live list
 // (models/nba_live_ig2.HELD_OUT_RULES): no label until they ship.
 eq([MODEL_META['nba_live_spread_q3'], MODEL_META['nba_live_ml_q3']], [undefined, undefined], 'held out');

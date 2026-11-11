@@ -99,6 +99,22 @@ export function sportChipsAvailable(available: Set<string>, known: boolean): Set
   return known ? available : undefined;
 }
 
+/**
+ * How VoiceOver names a sport whose chip code sounds like another's. "NCAABW"
+ * beside "NCAAB" is the same run of letters until the last one, and the two
+ * sports share school names (UX review, 2026-11-10). The chip still shows the
+ * code, which is also the Discord channel's name.
+ */
+const SPOKEN_SPORT: Record<string, string> = {
+  NCAABW: 'Women’s college basketball',
+};
+
+/** The sport's name for an accessibility label: every control that speaks a
+ *  sport reads it through here, so no screen reads "NCAAB" then "NCAABW". */
+export function sportSpokenName(sport: string): string {
+  return SPOKEN_SPORT[sport] ?? sport;
+}
+
 /** One sport chip's muted state and VoiceOver label (SportToggle). */
 export function sportChipState(o: {
   sport: string;
@@ -110,7 +126,7 @@ export function sportChipState(o: {
 }): { muted: boolean; label: string } {
   const muted = o.available != null && !o.available.has(o.sport) && !o.active;
   const label = [
-    o.sport,
+    sportSpokenName(o.sport),
     o.count > 0 ? `${o.count} signal${o.count === 1 ? '' : 's'}` : null,
     o.live ? 'in play now' : null,
     o.count === 0 && !o.live && muted ? 'no picks today' : null,

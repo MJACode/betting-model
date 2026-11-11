@@ -19,6 +19,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { PlayerStatsHeaderTitle } from '@/components/StackBackButton';
 import { GroupTabs } from '@/components/GroupTabs';
 import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
@@ -31,6 +32,7 @@ import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
+import { fetchPlayerMinutes } from '@/lib/queries';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -47,8 +49,18 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  attachMinuteRows,
+  averageAndMedian,
   chartGames,
+  minutesStillNeeded,
+  isMinutesContextStat,
+  lookupLogMinutes,
+  minutesPlayed,
   opponentLabel,
+  scoredChartValues,
+  sportTracksMinutes,
+  windowAverageMinutes,
+  withLowMinutes,
   shortGameDate,
   openingChip,
   pagePlayerId,
@@ -58,9 +70,11 @@ import {
   stepLineFrom,
   stepperRowLayout,
   windowOptionsFor,
+  type ChartGame,
   type GameWindow,
   type PlayerLogEntry,
   type PlayerLogSport,
+  type StepperRowLayout,
 } from '@/lib/playerLog';
 import { propMarketForStat, propModelForStat } from '@/lib/statCatalog';
 import type { StatDef } from '@/lib/statCatalog';
@@ -112,6 +126,18 @@ import {
 import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
 import { ordinal } from '@/lib/teamDetail';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import {
+  DEFENSE_SEASONS_PLAYED,
+  DEFENSE_TIERS,
+  groupNoun,
+  nextDefenseLine,
+  openingDefenseFilter,
+  tierChartGames,
+  tierCounts,
+  tierLabel,
+  tierPips,
+  type DefenseFilter,
+} from '@/lib/defenseTier';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
@@ -132,7 +158,6 @@ export function PlayerStatsScreen() {
   // still fits through Accessibility Large (2.143). From Accessibility Extra
   // Large (2.643) the mode control takes the line above − / field / +.
   const { fontScale } = useWindowDimensions();
-  const stepperLayout = stepperRowLayout(fontScale);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
@@ -179,9 +204,18 @@ export function PlayerStatsScreen() {
   // was showing, so the card cannot open on the complement of the row tapped.
   const [mode, setMode] = useState<HitMode>(requestedMode);
   const [modeOpen, setModeOpen] = useState(false);
+  // Defense-toughness filter (Matt, 2026-11-07). Until the reader taps a
+  // chip, the page follows the next opponent's tier (openingDefenseFilter);
+  // after a tap it keeps theirs.
+  const [defensePicked, setDefensePicked] = useState<DefenseFilter | null>(null);
 
   useEffect(() => {
-    navigation.setOptions({ title: playerName });
+    navigation.setOptions({
+      title: playerName,
+      // One line, narrower than the gap around the Back pill. The native
+      // stack centers this label, and it would otherwise draw across Back.
+      headerTitle: (props) => <PlayerStatsHeaderTitle {...props} />,
+    });
   }, [navigation, playerName]);
 
   // Sport/player changed (the screen is reused across pushes) — reset to that
@@ -189,6 +223,7 @@ export function PlayerStatsScreen() {
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
+    setDefensePicked(null);
     // The board's window when this screen offers that span (Stats L3 → L3
     // here, H2H → H2H); else this screen's own default. 'Season' has no
     // equivalent span here, so it falls back rather than guess one.
@@ -242,6 +277,18 @@ export function PlayerStatsScreen() {
     if (picked && chips.some((c) => c.key === picked.key && c.group === picked.group)) return picked;
     return openingChip(chips, filled);
   }, [picked, chips, filled]);
+  // Minutes is context: no line, no Bet, no betslip. Avg MIN is the third
+  // figure on every other basketball stat, so the stepper takes its own row
+  // even at the default type size — three figures do not fit beside it.
+  const minutesContext = isMinutesContextStat(stat);
+  const showAvgMin = sportTracksMinutes(sport) && !minutesContext;
+  const measuredLayout = stepperRowLayout(fontScale);
+  const cardLayout: StepperRowLayout =
+    showAvgMin && measuredLayout === 'inline' ? 'stacked' : measuredLayout;
+  const [outlinedGameId, setOutlinedGameId] = useState<string | null>(null);
+  const onChartSelect = useCallback((game: ChartGame, _index: number, fromUser: boolean) => {
+    setOutlinedGameId(fromUser ? game.gameId ?? null : null);
+  }, []);
 
   // Charted off the rows already in hand, for the stat resolved above — never
   // a second fetch, so the numbers and the label they sit under always belong
@@ -432,29 +479,100 @@ export function PlayerStatsScreen() {
   }, [range, gameWindow]);
   const isH2H = range === 'h2h';
 
+  // The toughness filter applies to the L5 / L10 / L20 / All spans, never to
+  // H2H (one opponent is one tier). Offered once the read has tiered games.
+  const defenseGames = detail.defenseGames;
+  const defenseCounts = useMemo(
+    () => (defenseGames ? tierCounts(defenseGames.games) : null),
+    [defenseGames],
+  );
+  const defenseOffered =
+    !isH2H && defenseCounts != null && defenseCounts.tough + defenseCounts.avg + defenseCounts.soft > 0;
+  const defenseFilter: DefenseFilter = !defenseOffered
+    ? 'all'
+    : defensePicked ?? openingDefenseFilter(defenseGames);
+  const defenseNoun = detail.defenseGroup ? groupNoun(detail.defenseGroup) : '';
+
   // The windowed games, most recent first, each with its date and opponent so
   // every bar on the chart says which game it is (Matt, 2026-10-28). A number
   // or All slices the log. H2H charts the meetings, newest first — the same
   // rows the head-to-head card lists. That row has a date and a value and no
   // venue, so the label is the bare opponent name: opponentLabel will not
   // print "vs" without a home game it can vouch for.
-  const windowedGames = useMemo(() => {
+  const baseGames = useMemo(() => {
+    // A toughness tier charts the player's games against that tier over his
+    // last three seasons played, newest first, cut to the same span chips.
+    // Those rows carry no minutes; the loaded log fills them when it has the day.
+    if (range !== 'h2h' && defenseFilter !== 'all' && defenseGames) {
+      return lookupLogMinutes(tierChartGames(defenseGames.games, defenseFilter, range), games, sport);
+    }
     if (range === 'h2h') {
       const row = { opponent: h2hOpponent, venue: null };
-      return (detail.h2hMeetings ?? []).map((m) => ({
+      const meetings = (detail.h2hMeetings ?? []).map((m) => ({
         value: m.value,
         date: shortGameDate(m.date),
+        iso: m.date,
         opp: opponentLabel(row, true, ncaafAbbrevs, sport === 'NCAAB'),
         oppFull: opponentLabel(row, false),
       }));
+      return lookupLogMinutes(meetings, games, sport);
     }
-    const all = chartGames(games, (r) => logStatValue(r, stat), ncaafAbbrevs, sport === 'NCAAB');
+    const all = chartGames(
+      games,
+      (r) => logStatValue(r, stat),
+      ncaafAbbrevs,
+      sport === 'NCAAB',
+      sport,
+    );
     return range === 'all' ? all : all.slice(0, range);
-  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs]);
+  }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs, defenseFilter, defenseGames, sport]);
+  // H2H and defense-tier games older than the loaded log. Asked by game_id
+  // when the row has one, otherwise by date. Not a wider "last N".
+  const missingMinutes = useMemo(
+    () => (showAvgMin ? minutesStillNeeded(baseGames) : { gameIds: [] as string[], dates: [] as string[] }),
+    [showAvgMin, baseGames],
+  );
+  const [fetchedMinutes, setFetchedMinutes] = useState<Awaited<ReturnType<typeof fetchPlayerMinutes>>>([]);
+  const minuteIdKey = missingMinutes.gameIds.join('|');
+  const minuteDateKey = missingMinutes.dates.join('|');
+  useEffect(() => {
+    setFetchedMinutes([]);
+  }, [sport, pageId]);
+  useEffect(() => {
+    if (!pageId || (missingMinutes.gameIds.length === 0 && missingMinutes.dates.length === 0)) return;
+    let cancelled = false;
+    fetchPlayerMinutes(sport, pageId, missingMinutes)
+      .then((rows) => {
+        if (!cancelled) setFetchedMinutes(rows);
+      })
+      .catch((err) => {
+        console.warn('[playerLog] minutes lookup failed', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport, pageId, minuteIdKey, minuteDateKey, missingMinutes]);
+  const builtGames = useMemo(
+    () => attachMinuteRows(baseGames, fetchedMinutes),
+    [baseGames, fetchedMinutes],
+  );
+  const scored = useMemo(() => scoredChartValues(builtGames), [builtGames]);
+  const { avg, median } = useMemo(() => averageAndMedian(scored), [scored]);
+  // Avg MIN only when every played game in the window has minutes. Games
+  // outside the loaded log are filled by fetchPlayerMinutes; a game that
+  // read does not return stays blank.
+  const avgMin = useMemo(
+    () => (showAvgMin ? windowAverageMinutes(builtGames) : null),
+    [showAvgMin, builtGames],
+  );
+  const windowedGames = useMemo(
+    () => withLowMinutes(builtGames, minutesContext, minutesContext ? avg : avgMin),
+    [builtGames, minutesContext, avg, avgMin],
+  );
   // The values ARE the labelled games' values, so the chart's bars and labels
-  // cannot fall out of step (review, 2026-10-28).
+  // cannot fall out of step (review, 2026-10-28). DNP slots stay in this list
+  // so the bar and the "DNP" label share an index; averages use `scored`.
   const windowed = useMemo(() => windowedGames.map((g) => g.value), [windowedGames]);
-  const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
   // Auto-pick a sensible starting line (the median, snapped onto the stepper's
@@ -528,7 +646,7 @@ export function PlayerStatsScreen() {
     sport,
     team: games[0]?.team ?? null,
     playerName,
-    market: line == null ? null : market,
+    market: minutesContext || line == null ? null : market,
     line: selection.line,
     side: selection.side,
     books,
@@ -560,8 +678,8 @@ export function PlayerStatsScreen() {
   // card's side — so an under card counts unders instead of silently counting
   // overs, and the count agrees with the chart bar for bar.
   const { hits, total: hitTotal, pct: hitPct } = useMemo(
-    () => (line == null ? { hits: 0, total: 0, pct: 0 } : computeHitRate(windowed, selection.line, selection.side)),
-    [windowed, line, selection],
+    () => (line == null || minutesContext ? { hits: 0, total: 0, pct: 0 } : computeHitRate(scored, selection.line, selection.side)),
+    [scored, line, selection, minutesContext],
   );
   // This player has no number at all for the charted stat in the loaded
   // window — a never-filled chip inside a surviving tab, or the position
@@ -571,13 +689,18 @@ export function PlayerStatsScreen() {
   // same stat is untouched: 25 of 25 is a real answer to a real question.
   const noEvidence =
     stat != null && (filled.get(chipKey(stat)) ?? 0) === 0 && hitTotal > 0 && hits === 0;
+  // A window of did-not-play rows has nothing to hit. A red 0% would read as
+  // a cold streak. Real logs omit these rows; the chart still has to say so.
+  const nonePlayed = !minutesContext && hitTotal === 0 && windowedGames.some((g) => g.dnp);
   // The stat keeps its own capitalisation: lower-casing a label that is half
   // acronym renders "No rush+rec tds in 10 games", which reads as a typo on
   // the one sentence a reader who tapped that stat came for (UX review).
   const noEvidenceText = isH2H
     ? `No ${statLabel} in ${hitTotal} games vs ${h2hOpponent}`
-    : `No ${statLabel} in the last ${hitTotal} games`;
-  const hitColor = noEvidence
+    : defenseFilter !== 'all'
+      ? `No ${statLabel} in ${hitTotal} games vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : `No ${statLabel} in the last ${hitTotal} games`;
+  const hitColor = noEvidence || nonePlayed
     ? colors.none
     : hitPct >= HIT_RATE_GOOD
       ? colors.bet
@@ -613,7 +736,25 @@ export function PlayerStatsScreen() {
 
   const windowLabel = isH2H
     ? `vs ${h2hOpponent} · last 2 seasons`
-    : range === 'all' ? `${windowed.length} games` : `last ${range}`;
+    : defenseFilter !== 'all'
+      ? `vs ${tierLabel(defenseFilter).toLowerCase()} defenses · ${
+        range === 'all' ? `${windowed.length} games` : `last ${windowed.length}`
+      }`
+      : range === 'all' ? `${windowed.length} games` : `last ${range}`;
+  const playingTitle = isH2H
+    ? `Playing time vs ${h2hOpponent}`
+    : defenseFilter !== 'all'
+      ? `Playing time vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : range === 'all'
+        ? `Playing time, ${scored.length} games`
+        : `Playing time, last ${range} games`;
+  const avgMinWindow = isH2H
+    ? `head to head with ${h2hOpponent}`
+    : defenseFilter !== 'all'
+      ? `games vs ${tierLabel(defenseFilter).toLowerCase()} defenses`
+      : range === 'all'
+        ? 'all games'
+        : `last ${range} games`;
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
@@ -647,11 +788,13 @@ export function PlayerStatsScreen() {
   const statReachAbove = groups.length === 1 && groupsOfChips(allChips).length > 1 ? 6 : 0;
   const statReach = reachFrame(statReachAbove);
   // The range chips reach 6pt down over the next sibling, raised so it is
-  // hit-tested first: the hit card's 8pt top margin, the empty card's 16pt
-  // padding or the spinner's margin — never the ErrorBanner, whose Retry
-  // starts at its top edge.
+  // hit-tested first: the defense row's label when that row is drawn, else
+  // the hit card's 8pt top margin, the empty card's 16pt padding or the
+  // spinner's margin — never the ErrorBanner, whose Retry starts at its top
+  // edge. The defense chips reach the same 6pt over what follows them.
   const rangeReachBelow = error ? 0 : 6;
   const rangeReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
+  const defenseReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -770,7 +913,7 @@ export function PlayerStatsScreen() {
                     // was paid.
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
-                    accessibilityLabel={`${c.label} bets`}
+                    accessibilityLabel={isMinutesContextStat(c) ? c.label : `${c.label} bets`}
                     style={[styles.windowChip, active && styles.windowChipActive]}
                   >
                     <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
@@ -818,6 +961,76 @@ export function PlayerStatsScreen() {
           })}
         </ScrollView>
 
+        {/* Defense-toughness filter (Matt, 2026-11-07): how this player does
+            against defenses like the next one. The next opponent's tier is
+            tagged NEXT and is where the page opens. */}
+        {defenseOffered && defenseCounts ? (
+          <View style={styles.defenseBlock}>
+            <Text style={styles.defenseLabel} accessibilityRole="header">
+              Vs defenses that are
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={defenseReach.frame}
+              contentContainerStyle={[styles.defenseRow, defenseReach.content]}
+            >
+              {(['all', ...DEFENSE_TIERS] as DefenseFilter[]).map((f) => {
+                const active = f === defenseFilter;
+                const isNext = f !== 'all' && defenseGames?.next?.tier === f;
+                const count = f === 'all' ? null : defenseCounts[f];
+                const name = f === 'all' ? 'All' : tierLabel(f);
+                return (
+                  <Pressable
+                    key={f}
+                    onPress={() => setDefensePicked(f)}
+                    hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={
+                      f === 'all'
+                        ? 'All defenses'
+                        : `${name} defenses, ${count} game${count === 1 ? '' : 's'}${
+                          isNext ? `, next opponent ${defenseGames?.next?.opponent} is in this tier` : ''
+                        }`
+                    }
+                    style={[styles.windowChip, styles.defenseChip, active && styles.windowChipActive]}
+                  >
+                    {f !== 'all' ? (
+                      <View style={styles.pips} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                        {[0, 1, 2].map((i) => (
+                          <View
+                            key={i}
+                            style={[
+                              styles.pip,
+                              { backgroundColor: active ? colors.textInverse : colors.textSecondary },
+                              i >= tierPips(f) && styles.pipOff,
+                            ]}
+                          />
+                        ))}
+                      </View>
+                    ) : null}
+                    <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                      {count != null ? `${name} ${count}` : name}
+                    </Text>
+                    {isNext ? (
+                      <View style={styles.nextTag}>
+                        <Text style={styles.nextTagText}>NEXT</Text>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Text style={styles.defenseNote}>
+              {defenseGames?.next
+                ? `${nextDefenseLine(defenseGames.next, defenseNoun)}. `
+                : ''}
+              Last {DEFENSE_SEASONS_PLAYED} seasons played.{defenseFilter !== 'all' ? ' #1 = toughest.' : ''}
+            </Text>
+          </View>
+        ) : null}
+
         {error ? (
           <ErrorBanner
             what="recent games"
@@ -829,6 +1042,7 @@ export function PlayerStatsScreen() {
         ) : null}
 
         {(loading && games.length === 0)
+          || (!isH2H && defensePicked == null && detail.defensePending)
           || (isH2H && windowed.length === 0 && (detail.h2hLoading || h2hOpponent == null || !logSettled)) ? (
           <ActivityIndicator
             style={styles.loading}
@@ -858,6 +1072,8 @@ export function PlayerStatsScreen() {
             <Text style={styles.emptyText}>
               {isH2H
                 ? `No meetings with ${h2hOpponent} in the last 2 seasons.`
+                : defenseFilter !== 'all'
+                ? `No games vs ${tierLabel(defenseFilter).toLowerCase()} defenses in the last ${DEFENSE_SEASONS_PLAYED} seasons played.`
                 : games.length === 0
                 ? 'No recent games on file.'
                 : `No ${statLabel.toLowerCase()} in the last ${games.length} games.`}
@@ -870,27 +1086,40 @@ export function PlayerStatsScreen() {
               <View style={styles.hitTop}>
                 <View>
                   <Text style={styles.hitLabel}>
-                    {headline} · {windowLabel}
-                    {lineProvenance ? ` · ${lineProvenance}` : ''}
+                    {minutesContext
+                      ? `Minutes · ${windowLabel}`
+                      : `${headline} · ${windowLabel}${lineProvenance ? ` · ${lineProvenance}` : ''}`}
                   </Text>
                   <Text style={styles.hitCount}>
-                    {noEvidence ? noEvidenceText : `Hit ${hits} of ${hitTotal} games`}
+                    {minutesContext
+                      ? playingTitle
+                      : nonePlayed
+                        ? 'No played games in this window'
+                        : noEvidence
+                          ? noEvidenceText
+                          : `Hit ${hits} of ${hitTotal} games`}
                   </Text>
                 </View>
-                <View
-                  style={[styles.hitBadge, { backgroundColor: hitColor }]}
-                  accessible
-                  accessibilityLabel={
-                    noEvidence ? noEvidenceText : `Hit rate ${Math.round(hitPct * 100)} percent`
-                  }
-                >
-                  <Text style={styles.hitBadgeText}>
-                    {noEvidence ? '—' : `${Math.round(hitPct * 100)}%`}
-                  </Text>
-                </View>
+                {minutesContext ? null : (
+                  <View
+                    style={[styles.hitBadge, { backgroundColor: hitColor }]}
+                    accessible
+                    accessibilityLabel={
+                      nonePlayed
+                        ? 'No played games in this window'
+                        : noEvidence
+                          ? noEvidenceText
+                          : `Hit rate ${Math.round(hitPct * 100)} percent`
+                    }
+                  >
+                    <Text style={styles.hitBadgeText}>
+                      {noEvidence || nonePlayed ? '—' : `${Math.round(hitPct * 100)}%`}
+                    </Text>
+                  </View>
+                )}
               </View>
 
-              <View style={[styles.statsRow, stepperLayout !== 'inline' && styles.statsRowStacked]}>
+              <View style={[styles.statsRow, cardLayout !== 'inline' && styles.statsRowStacked]}>
                 <View style={styles.statCell}>
                   <Text style={styles.statCellValue}>{avg != null ? avg.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Avg</Text>
@@ -899,10 +1128,25 @@ export function PlayerStatsScreen() {
                   <Text style={styles.statCellValue}>{median != null ? median.toFixed(1) : '—'}</Text>
                   <Text style={styles.statCellLabel}>Median</Text>
                 </View>
+                {showAvgMin ? (
+                  <View
+                    style={styles.statCell}
+                    accessible
+                    accessibilityLabel={
+                      avgMin == null
+                        ? `Average minutes unavailable for ${avgMinWindow}`
+                        : `Average minutes ${avgMin.toFixed(1)} for ${avgMinWindow}`
+                    }
+                  >
+                    <Text style={styles.statCellValue}>{avgMin != null ? avgMin.toFixed(1) : '—'}</Text>
+                    <Text style={styles.statCellLabel}>Avg MIN</Text>
+                  </View>
+                ) : null}
+                {minutesContext ? null : (
                 <View
                   style={[
-                    stepperLayout === 'inline' ? styles.stepper : styles.stepperStacked,
-                    stepperLayout === 'split' && styles.stepperSplit,
+                    cardLayout === 'inline' ? styles.stepper : styles.stepperStacked,
+                    cardLayout === 'split' && styles.stepperSplit,
                   ]}
                 >
                   {/* The board's own mode control, not a second one. It opens
@@ -917,7 +1161,7 @@ export function PlayerStatsScreen() {
                     accessibilityLabel={`Direction: ${hitModeLabel(mode)}. Change`}
                     style={({ pressed }) => [
                       styles.modeBtn,
-                      stepperLayout === 'split' && styles.modeBtnSplit,
+                      cardLayout === 'split' && styles.modeBtnSplit,
                       pressed && { opacity: 0.7 },
                     ]}
                   >
@@ -927,7 +1171,7 @@ export function PlayerStatsScreen() {
                   {/* The three stay one group so a wrap can move them together
                       without a second copy of the field. At the default size
                       the group is only as wide as its contents. */}
-                  <View style={[styles.stepperControls, stepperLayout === 'split' && styles.stepperControlsSplit]}>
+                  <View style={[styles.stepperControls, cardLayout === 'split' && styles.stepperControlsSplit]}>
                     {/* Icon-only, so the label is the only thing VoiceOver has
                         — an unlabelled glyph button is announced as "button" and
                         nothing else. Pre-existing; cleared here because this
@@ -972,45 +1216,55 @@ export function PlayerStatsScreen() {
                     </Pressable>
                   </View>
                 </View>
+                )}
               </View>
 
-              {/* The bet, between the control that sets it and the evidence
-                  for it. Above the chart because the stepper directly above
-                  changes which bet this is and the price is that change's
-                  result — and because below a 200pt chart it fell entirely
-                  under the fold on a 4.7" phone, which is a poor home for the
-                  one thing this screen gained (UX review). NOT pinned:
-                  BetslipBar is mounted at the app root and owns the bottom of
-                  this screen the moment the slip has a leg. */}
-              <PlayerBetBar
-                quote={propQuote.quote}
-                game={propQuote.game}
-                headline={headline}
-                mode={mode}
-                side={selection.side}
-                books={books}
-                statLabel={statLabel}
-                marketPriced={market != null}
-                hasGame={propQuote.hasGame}
-                sidePosted={propQuote.sidePosted}
-                loading={propQuote.loading}
-                error={propQuote.error}
-                onRetry={propQuote.reload}
-                onCompare={openCompare}
-              />
+              {minutesContext ? (
+                <Text style={styles.minutesNote}>
+                  Not a bet market — playing time for the selected window.
+                </Text>
+              ) : (
+                /* The bet, between the control that sets it and the evidence
+                   for it. Above the chart because the stepper directly above
+                   changes which bet this is and the price is that change's
+                   result — and because below a 200pt chart it fell entirely
+                   under the fold on a 4.7" phone, which is a poor home for the
+                   one thing this screen gained (UX review). NOT pinned:
+                   BetslipBar is mounted at the app root and owns the bottom of
+                   this screen the moment the slip has a leg. */
+                <PlayerBetBar
+                  quote={propQuote.quote}
+                  game={propQuote.game}
+                  headline={headline}
+                  mode={mode}
+                  side={selection.side}
+                  books={books}
+                  statLabel={statLabel}
+                  marketPriced={market != null}
+                  hasGame={propQuote.hasGame}
+                  sidePosted={propQuote.sidePosted}
+                  loading={propQuote.loading}
+                  error={propQuote.error}
+                  onRetry={propQuote.reload}
+                  onCompare={openCompare}
+                />
+              )}
 
               <HitRateChart
                 values={windowed}
                 games={windowedGames}
                 unit={statLabel}
-                line={selection.line}
+                line={minutesContext ? 0 : selection.line}
                 side={selection.side}
                 lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
                 avg={avg}
                 median={median}
+                showMinuteLabels={showAvgMin}
+                minutesMode={minutesContext}
+                onSelect={onChartSelect}
               />
 
-              <View style={styles.legendRow}>
+              {minutesContext ? null : <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.bet }]} />
                   {/* Both halves named in the ACTIVE idiom. "Hit (2+)" beside
@@ -1025,7 +1279,7 @@ export function PlayerStatsScreen() {
                   <View style={[styles.legendDot, { backgroundColor: colors.avoid }]} />
                   <Text style={styles.legendText}>Miss</Text>
                 </View>
-              </View>
+              </View>}
             </View>
 
 
@@ -1033,7 +1287,7 @@ export function PlayerStatsScreen() {
                 sportsbook now, so this is the one place a leg joins OUR slip —
                 and only where the model actually made a pick, because a leg is
                 a bet of record and carries its own line. */}
-            {slipPick ? (
+            {minutesContext || !slipPick ? null : (
               <View style={styles.slipCard}>
                 <View style={styles.slipBody}>
                   <Text style={styles.slipLabel} numberOfLines={2}>
@@ -1067,9 +1321,11 @@ export function PlayerStatsScreen() {
                   </Text>
                 </Pressable>
               </View>
-            ) : null}
+            )}
 
-            {/* ── Tonight's line for this stat, and what the market says about it ── */}
+            {/* ── Tonight's line for this stat, and what the market says about it.
+                   Minutes is not a market, so none of the bet cards follow it. ── */}
+            {minutesContext ? null : <>
             <TonightLineCard
               statLabel={statLabel}
               nextGame={detail.nextGame}
@@ -1147,6 +1403,7 @@ export function PlayerStatsScreen() {
                 </View>
               </>
             ) : null}
+            </>}
 
             {/* ── MLB context the prop models train on ─────────────────── */}
             {sport === 'MLB' && detail.savant ? (
@@ -1174,17 +1431,23 @@ export function PlayerStatsScreen() {
             />
 
             <Text style={styles.sectionHeader}>Recent games</Text>
-            {games.map((g) => (
-              <GameRow
-                key={g.game_id}
-                row={g}
-                sport={sport}
-                stat={stat}
-                line={selection.line}
-                side={selection.side}
-                currentTeam={games[0]?.team ?? null}
-              />
-            ))}
+            {games.map((g) => {
+              const charted = windowedGames.find((c) => c.gameId === g.game_id);
+              return (
+                <GameRow
+                  key={g.game_id}
+                  row={g}
+                  sport={sport}
+                  stat={stat}
+                  line={selection.line}
+                  side={selection.side}
+                  currentTeam={games[0]?.team ?? null}
+                  minutesContext={minutesContext}
+                  lowMin={charted?.lowMin === true}
+                  outlined={outlinedGameId != null && g.game_id === outlinedGameId}
+                />
+              );
+            })}
           </>
         )}
         <BetslipBarSpacer />
@@ -1247,16 +1510,6 @@ export function PlayerStatsScreen() {
   );
 }
 
-function computeAvgMedian(values: number[]): { avg: number | null; median: number | null } {
-  if (values.length === 0) return { avg: null, median: null };
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median =
-    sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
-  return { avg, median };
-}
-
 function GameRow({
   row,
   sport,
@@ -1264,6 +1517,9 @@ function GameRow({
   line,
   side,
   currentTeam,
+  lowMin,
+  outlined,
+  minutesContext,
 }: {
   row: PlayerLogEntry;
   sport: PlayerLogSport;
@@ -1275,26 +1531,33 @@ function GameRow({
    *  compare the same number the same way. */
   line: number;
   side: HitDirection;
+  /** This row is in the chart window and under 70% of that window's average. */
+  lowMin?: boolean;
+  /** The bar the reader tapped. */
+  outlined?: boolean;
+  /** Minutes tab: the dot is navy, not a hit or a miss. */
+  minutesContext?: boolean;
 }) {
   const num = logStatValue(row, stat);
+  const didNotPlay = sportTracksMinutes(sport) && minutesPlayed(row) == null && num == null;
   // Yardage arrives as a NUMERIC string and can be fractional in nflverse — one
   // decimal at most, so a 78-yard game never renders as 78.0000001.
   const value = num == null ? '—' : String(Math.round(num * 10) / 10);
   const hit = isHit(num, line, side);
+  const dot = num == null ? null : minutesContext ? colors.tint : hit ? colors.bet : colors.avoid;
   return (
-    <View style={styles.gameRow}>
+    <View style={[styles.gameRow, outlined && styles.gameRowOutlined]}>
       <View style={styles.gameDot}>
-        {num != null ? (
-          <View
-            style={[styles.dot, { backgroundColor: hit ? colors.bet : colors.avoid }]}
-          />
-        ) : null}
+        {dot != null ? <View style={[styles.dot, { backgroundColor: dot }]} /> : null}
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={styles.gameBody}>
         {/* The chart's own date idiom ("10/26"), so the bar and the row
             name the game the same way. */}
         <Text style={styles.gameDate}>{shortGameDate(row.game_date)}</Text>
-        <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row, currentTeam)}</Text>
+        <View style={styles.gameMetaRow}>
+          <Text style={styles.gameMeta} numberOfLines={1}>{gameContextLine(sport, row, currentTeam, didNotPlay)}</Text>
+          {lowMin ? <Text style={styles.lowMin}>Low MIN</Text> : null}
+        </View>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>
@@ -1987,6 +2250,57 @@ const styles = StyleSheet.create({
   windowChipTextActive: {
     color: colors.textInverse,
   },
+  defenseBlock: {
+    marginTop: spacing.xs,
+  },
+  defenseLabel: {
+    paddingHorizontal: spacing.lg,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  defenseRow: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  defenseChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  pips: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  pip: {
+    width: spacing.xs,
+    height: spacing.xs,
+    borderRadius: radii.pill,
+  },
+  pipOff: {
+    opacity: 0.3,
+  },
+  // Amber lives on navy chrome only (UX_REVIEW §2: amber on white is 1.9:1).
+  nextTag: {
+    backgroundColor: colors.brandNavy,
+    borderRadius: radii.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+  },
+  nextTagText: {
+    fontSize: font.size.nano,
+    fontWeight: font.weight.bold,
+    color: colors.brand,
+    letterSpacing: 0.3,
+  },
+  defenseNote: {
+    paddingHorizontal: spacing.lg,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+  },
   hitCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -2178,6 +2492,27 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  gameRowOutlined: {
+    borderColor: colors.textPrimary,
+  },
+  gameBody: { flex: 1 },
+  gameMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  lowMin: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    color: colors.medInk,
+  },
+  minutesNote: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
   gameDot: {
     width: 16,
@@ -2194,6 +2529,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   gameMeta: {
+    flex: 1,
     fontSize: font.size.caption,
     color: colors.textSecondary,
     marginTop: 2,

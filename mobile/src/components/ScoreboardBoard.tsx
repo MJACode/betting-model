@@ -616,7 +616,10 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   // A horizontal ScrollView in a column grows to fill the height it is
   // given, which stretched every sport pill (Matt's screenshot, 2026-10-29).
-  sportScroll: { flexGrow: 0 },
+  // It also SHRINKS: RN 0.81's horizontal ScrollView ships flexShrink: 1, so
+  // under a tall board the row was squeezed and the pills clipped in half
+  // (Matt's screenshot, 2026-11-10). Neither grow nor shrink: chip height.
+  sportScroll: { flexGrow: 0, flexShrink: 0 },
   sports: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,

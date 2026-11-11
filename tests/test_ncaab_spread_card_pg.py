@@ -175,3 +175,41 @@ def test_the_first_run_ever_after_15z_records_the_days_games_without_failing(db)
     assert out["bets"] == 0 and out["decided"] == 3
     assert {v[0] for v in _ledger(db).values()} == {"missed"}
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+
+
+# ── a best quote at a state-limited book (betPARX, mike 2026-11-06) ──────────
+# The consensus still reads betPARX and a pick may never name it. An exact tie
+# with BetRivers' -8 is the same bet, so BetRivers takes it. A betPARX number
+# that is strictly best is an ordinary no-bet: the next-best quote is not the
+# one the research chose, and the run must not fail and alert every day it
+# happens (docs/sports/ncaab.md, the 2026-11-07 re-grade).
+
+def _parx(db, line):
+    db.execute("INSERT INTO odds (game_id, market, bookmaker, snapshot_type, snapshot_at, spread_home, "
+               "home_price, away_price) VALUES ('NCAAB_2026-12-05_kansas_duke', 'spreads', 'betparx', "
+               "'open', '2026-12-05T14:45:00Z', %s, '-110', '-110')", (line,))
+    db.commit()
+
+
+def test_an_exact_tie_at_a_state_limited_book_bets_at_the_book_that_can_be_bet(db):
+    _parx(db, "-8.0")
+    out = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))
+    assert out["bets"] == 1
+    assert _ledger(db)["NCAAB_2026-12-05_kansas_duke"][:2] == ("bets", "betrivers")
+
+
+def test_a_best_quote_at_a_state_limited_book_is_a_no_bet_and_the_run_does_not_fail(db):
+    _parx(db, "-7.5")
+    out = card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))
+    assert out["bets"] == 0
+    assert _ledger(db)["NCAAB_2026-12-05_kansas_duke"][:2] == ("book_not_bettable", "betparx")
+    assert db.execute("SELECT COUNT(*) FROM picks WHERE signal_type = 'BET'").fetchone()[0] == 0
+
+
+def test_any_other_book_that_cannot_be_bet_still_fails_the_run(db, monkeypatch):
+    """Only the state-limited books are expected. A book that left the deciding
+    list some other way is still a broken run the alerter must report."""
+    monkeypatch.setattr(card.config, "BEST_LINE_BOOKMAKERS",
+                        [b for b in card.config.BEST_LINE_BOOKMAKERS if b != "betrivers"])
+    with pytest.raises(card.CardIncomplete, match="book_not_bettable"):
+        card.run_card(do_publish=True, now=datetime(2026, 12, 5, 15, 5, tzinfo=UTC))

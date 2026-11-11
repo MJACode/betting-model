@@ -68,32 +68,30 @@ def test_the_tweet_never_publishes_a_worse_price_than_draftkings(worse):
 
 
 def test_the_good_to_clause_is_dropped_not_truncated_when_it_will_not_fit():
-    """A half-written price is worse than none. The hashtags earn their place
-    (+21% engagement) and the pick itself is the post.
+    """A half-written price is worse than none.
 
-    The label length is chosen so the tweet fits WITHOUT the "good to" clause
-    and overflows WITH it — the only case this branch decides. A longer label
-    overflows on its own and hits the pre-existing `[:MAX_TWEET]` truncation,
-    which is a different (and already tested) behaviour.
+    237 still fits "Good to -115." inside 280 weighted characters. 238 does
+    not, so the clause is left off whole. 235 used to be the boundary when
+    the post also carried team tags; that room belongs to the text now, and
+    235 fits the clause.
     """
-    # 235 is the measured length where the body plus #Royals #Marlins still
-    # fits, and "Good to -115." does not — even after every reach tag is
-    # dropped. 230 still fits the clause once #MLB is dropped. The old 205
-    # was measured against the longer "Free pick" / "More in Discord" body.
-    label = "X" * 235
-    base = xp.render_pick(_pick(label=label))
-    assert len(base) <= xp.MAX_TWEET, "fixture no longer fits without the clause"
+    freed = xp.render_pick(_pick(label="X" * 235, good_to=-115))
+    assert "Good to -115." in freed
+    assert xp.weighted_len(freed) <= xp.MAX_TWEET
 
+    still = xp.render_pick(_pick(label="X" * 237, good_to=-115))
+    assert "Good to -115." in still
+    assert xp.weighted_len(still) <= xp.MAX_TWEET
+
+    label = "X" * 238
+    base = xp.render_pick(_pick(label=label))
+    assert xp.weighted_len(base) <= xp.MAX_TWEET, (
+        "fixture no longer fits without the clause")
     t = xp.render_pick(_pick(label=label, good_to=-115))
-    assert len(t) <= xp.MAX_TWEET
+    assert xp.weighted_len(t) <= xp.MAX_TWEET
     assert "Good to" not in t, "the clause was added and then truncated"
-    # Team tags stay, and they stay ahead of whatever reach tags still fit.
-    # The two longest reach tags do not fit in this fixture, so they go.
-    assert "#Royals" in t and "#Marlins" in t
-    assert t.index("#Royals") < t.index("#Marlins")
-    assert "#GamblingX" not in t and "#FreePicks" not in t
-    if "#MLB" in t:
-        assert t.index("#Marlins") < t.index("#MLB")
+    assert "#" not in t
+    assert "MIA @ KC" in t
 
 
 def test_the_tweet_publishes_the_good_to_bound_when_it_fits():

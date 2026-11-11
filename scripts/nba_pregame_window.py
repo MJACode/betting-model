@@ -55,6 +55,8 @@ import models.nba_total_luck as tl  # noqa: E402
 import scripts.nba_first_half_total_luck_card as h1card  # noqa: E402
 import scripts.nba_first_half_total_luck_window as h1w  # noqa: E402
 import scripts.nba_prop_market_card as rule_card  # noqa: E402
+import scripts.nba_q1_trend_card as q1card  # noqa: E402
+import scripts.nba_q1_trend_window as q1w  # noqa: E402
 import scripts.nba_team_total_luck_card as ttcard  # noqa: E402
 import scripts.nba_team_total_luck_window as ttw  # noqa: E402
 import scripts.nba_total_luck_card as tlcard  # noqa: E402
@@ -65,7 +67,7 @@ from models.nba_prop_market import parse_ts  # noqa: E402
 _ET = ZoneInfo("America/New_York")
 
 # The slate's horizon: the far end of any model's window.
-HORIZON_MIN = max(tlw.LOOK_AHEAD_MIN[1], ttw.PLAN_HORIZON_MIN, h1w.PLAN_HORIZON_MIN)
+HORIZON_MIN = max(tlw.LOOK_AHEAD_MIN[1], ttw.PLAN_HORIZON_MIN, h1w.PLAN_HORIZON_MIN, q1w.PLAN_HORIZON_MIN)
 
 
 @dataclass
@@ -77,12 +79,15 @@ class PregamePlan:
     team_total: ttw.Plan = field(default_factory=ttw.Plan)
     # nba_first_half_total_luck: the same two lists.
     first_half: ttw.Plan = field(default_factory=ttw.Plan)
+    # nba_q1_trend (the first-quarter spread): the same two lists.
+    first_quarter: ttw.Plan = field(default_factory=ttw.Plan)
     # {model id: the error} for a model whose plan raised this tick.
     errors: dict[str, str] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.total_luck or self.team_total.decide or self.team_total.close
-                    or self.first_half.decide or self.first_half.close or self.errors)
+                    or self.first_half.decide or self.first_half.close
+                    or self.first_quarter.decide or self.first_quarter.close or self.errors)
 
 
 def plan(conn, now: datetime) -> PregamePlan:
@@ -91,7 +96,8 @@ def plan(conn, now: datetime) -> PregamePlan:
     out = PregamePlan()
     for model, read in (("nba_total_luck", lambda: tlw.plan(conn, now, games=games)),
                         ("nba_team_total_luck", lambda: ttw.plan(conn, now, games=games)),
-                        ("nba_first_half_total_luck", lambda: h1w.plan(conn, now, games=games))):
+                        ("nba_first_half_total_luck", lambda: h1w.plan(conn, now, games=games)),
+                        ("nba_q1_trend", lambda: q1w.plan(conn, now, games=games))):
         try:
             got = read()
         except Exception as exc:  # noqa: BLE001 - the other models still run this tick
@@ -106,8 +112,10 @@ def plan(conn, now: datetime) -> PregamePlan:
             out.total_luck = got
         elif model == "nba_team_total_luck":
             out.team_total = got
-        else:
+        elif model == "nba_first_half_total_luck":
             out.first_half = got
+        else:
+            out.first_quarter = got
     return out
 
 
@@ -118,7 +126,8 @@ UNDECIDED_LOOKBACK_HOURS = 24.0
 # decision row, or any BET of that model on the game.
 DECIDED_BY = (("nba_total_luck", tlcard.decided_games),
               ("nba_team_total_luck", ttcard.decided_games),
-              ("nba_first_half_total_luck", h1card.decided_games))
+              ("nba_first_half_total_luck", h1card.decided_games),
+              ("nba_q1_trend", q1card.decided_games))
 
 
 def undecided_games(conn, now: datetime,

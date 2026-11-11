@@ -51,7 +51,9 @@ from tests.test_prop_no_bet_rows_survive_to_tipoff import (  # noqa: E402
 
 NCAAB_CARDS = ("ncaab_total_blend", "ncaab_spread_market",
                "ncaab_moneyline_own_spread", "ncaab_first_half_spread",
-               "ncaab_first_half_total")
+               "ncaab_first_half_total",
+               # the women's totals card (2026-11-10): the same write-once NONE row
+               "ncaabw_total_blend")
 NFL_RULES = ("nfl_opener_spread", "nfl_wind_totals")
 # A game-market card that writes on MLB games (scripts run by the
 # mlb-game-market step), so a foreign row on a game the loop DOES reach.

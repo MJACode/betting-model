@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { friendlyCause } from '@/lib/errors';
+import { sportSpokenName } from '@/lib/loadState';
 import { unitsSpeech } from '@/lib/a11y';
 import { addDays, formatAmerican, labelWithoutStake } from '@/lib/format';
 import { modelRecordBelow, STACKED_BLOCK } from '@/lib/modelBadgeLayout';
@@ -277,7 +278,7 @@ export function DailyResultsModal({
                     key={s}
                     onPress={() => setSportFilter(s)}
                     style={[styles.sportChip, active && styles.sportChipActive]}
-                    accessibilityLabel={s === 'ALL' ? 'All sports' : s}
+                    accessibilityLabel={s === 'ALL' ? 'All sports' : sportSpokenName(s)}
                   >
                     <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
                       {s === 'ALL' ? 'All' : s}
@@ -491,7 +492,7 @@ function SportCard({
           onPress={onToggle}
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
-          accessibilityLabel={`${s.sport}, ${sub}${
+          accessibilityLabel={`${sportSpokenName(s.sport)}, ${sub}${
             s.total.picks === 0
               ? s.pending > 0
                 ? `, ${s.pending} pending`

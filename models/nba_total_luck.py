@@ -480,11 +480,20 @@ class TotalLuckBet:
 
 @dataclass(frozen=True)
 class Decision:
+    """One per decided game, bet or not. The best over offer is recorded on
+    every game that had one (as the team-total and first-half models do), so
+    a game the rule scored and did not bet is written as a NONE row and the
+    app's All board shows it (Matt, 2026-11-10)."""
     game_id: str
     fetch_at: datetime
     gap: float | None
     n_bets: int
     detail: str
+    book: str | None = None
+    line: float | None = None
+    price: float | None = None
+    p_fair: float | None = None
+    p_model: float | None = None
 
 
 DIAG_KEYS = ("games", "score_missing", "box_missing", "box_mismatch", "early_season",
@@ -826,7 +835,10 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
     cand = side_strength(neutral, f4_signal(proj))
     chosen = H.choose(cand[cand["strength"] >= gap_cut], -np.inf, books=books,
                       sides=[SIDE], floor=floor)
+    # The record: the best over offer on every game, whatever its gap.
+    best = H.choose(neutral, -np.inf, books=books, sides=[SIDE], floor=floor)
     by_game = {r.game_id: r for r in chosen.itertuples(index=False)}
+    best_by = {r.game_id: r for r in best.itertuples(index=False)}
     fair_by = {(r.game_id): r for r in fair[fair["market"] == MARKET].itertuples(index=False)}
     t_by = dict(zip(t["game_id"], t["T"]))
 
@@ -839,40 +851,44 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
         diag["games"] += 1
         T = t_by[gid]
         gap = gaps.get(gid)
+        o = by_game.get(gid) or best_by.get(gid)
+        offer = {} if o is None else {
+            "book": str(o.book), "line": float(o.line), "price": float(o.price),
+            "p_fair": float(o.p_win), "p_model": float(o.p_win + up)}
         miss = missing[gid]
         presumed.update(miss["presumed_unplayed"])
         if miss["score_missing"]:
             diag["score_missing"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"score_missing:{_named(miss['score_missing'])}"))
+                                      f"score_missing:{_named(miss['score_missing'])}", **offer))
             continue
         if miss["box_missing"]:
             diag["box_missing"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"box_missing:{_named(miss['box_missing'])}"))
+                                      f"box_missing:{_named(miss['box_missing'])}", **offer))
             continue
         if miss["box_mismatch"]:
             diag["box_mismatch"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"box_mismatch:{_named(miss['box_mismatch'])}"))
+                                      f"box_mismatch:{_named(miss['box_mismatch'])}", **offer))
             continue
         if gap is None:
             diag["early_season"] += 1
             decisions.append(Decision(gid, T, None, 0,
-                                      f"early_season: a team has under {min_games} games"))
+                                      f"early_season: a team has under {min_games} games", **offer))
             continue
         if gap < gap_cut:
             diag["gap_below_cut"] += 1
-            decisions.append(Decision(gid, T, float(gap), 0, f"gap_below_cut:{gap:.2f}"))
+            decisions.append(Decision(gid, T, float(gap), 0, f"gap_below_cut:{gap:.2f}", **offer))
             continue
         if gid not in fair_by:
             diag["no_fair_line"] += 1
-            decisions.append(Decision(gid, T, float(gap), 0, "no_fair_line"))
+            decisions.append(Decision(gid, T, float(gap), 0, "no_fair_line", **offer))
             continue
         c = by_game.get(gid)
         if c is None:
             diag["no_offer"] += 1
-            decisions.append(Decision(gid, T, float(gap), 0, "no_offer"))
+            decisions.append(Decision(gid, T, float(gap), 0, "no_offer", **offer))
             continue
         dk = vis[(vis["game_id"] == gid) & (vis["book"] == REFERENCE_BOOK) & vis["coherent"]
                  & np.isclose(vis["line"], c.line)]
@@ -887,6 +903,6 @@ def decide(targets: pd.DataFrame, quotes: pd.DataFrame, box: pd.DataFrame,
             fair_mu=float(fr.mu), fetch_at=T, dk_price=dk_price,
             link=getattr(c, "link_a", None), dk_link=dk_link))
         diag["bets"] += 1
-        decisions.append(Decision(gid, T, float(gap), 1, f"bet:{c.book} {c.line:g} {c.price:+.0f}"))
+        decisions.append(Decision(gid, T, float(gap), 1, f"bet:{c.book} {c.line:g} {c.price:+.0f}", **offer))
     diag["presumed_unplayed"] = sorted(presumed)
     return bets, decisions, diag

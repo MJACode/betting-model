@@ -30,8 +30,9 @@ are written as `missed` without failing.
 A RUN THAT CANNOT DECIDE ITS GAMES FAILS, after writing every game it could:
 an artifact for another season (the game is then `missed` next hour); every
 due game with no moneyline at all (the odds steps have stopped); a best side
-at a book config.BEST_LINE_BOOKMAKERS no longer lists; a best edge above the
-data-error cap (models/ncaab_quote_bounds.EDGE_CAP: the game is written as
+at a book config.BEST_LINE_BOOKMAKERS no longer lists (except a state-limited
+one, config.STATE_LIMITED_BOOKMAKERS: that game is an ordinary no-bet); a best
+edge above the data-error cap (models/ncaab_quote_bounds.EDGE_CAP: the game is written as
 edge_cap with no bet).
 
 A FEED TYPO NEVER BECOMES A BET (models/ncaab_quote_bounds.py). A moneyline
@@ -492,7 +493,15 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
                                     f"may have stopped")
                 for d in got:
                     if d.status == "book_not_bettable":
-                        problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
+                        book = str((d.best or {}).get("bookmaker") or "").lower()
+                        if book in config.STATE_LIMITED_BOOKMAKERS:
+                            # Expected, not broken: the consensus reads this book and a
+                            # pick may never name it (mike, 2026-11-06). The game is a
+                            # no-bet, as on the stored seasons' re-grade (docs/sports/ncaab.md).
+                            logger.info(f"NCAAB moneyline card: {d.game_id} not bet, its best "
+                                        f"quote is at {book}, which a pick never names")
+                        else:
+                            problems.append(f"book_not_bettable {d.game_id} ({d.detail})")
                     elif d.status == "edge_cap":
                         logger.error(f"NCAAB moneyline card: {d.game_id} not bet, its edge is a "
                                      f"data error: {d.detail}")

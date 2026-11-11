@@ -1068,6 +1068,24 @@ export interface PositionVsOpponentRow {
   teams_ranked: number;
 }
 
+/**
+ * One row of player_vs_defense_<sport>: a game the player played, with that
+ * season's rank of the opponent's defense, or (game_id null) the next
+ * opponent's rank. Rank 1 = the toughest defense.
+ */
+export interface PlayerVsDefenseRow {
+  season: number;
+  game_id: string | null;
+  game_date: string | null;
+  opponent: string | null;
+  is_home: boolean | null;
+  value: number | string | null;
+  def_rank: number | null;
+  teams_ranked: number | null;
+  avg_allowed: number | string | null;
+  def_team_games: number | null;
+}
+
 export interface H2HStatValuesRow {
   player_id: string;
   player_name: string;

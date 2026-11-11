@@ -46,9 +46,12 @@ const books = (qs: { bookmaker: string }[]) => qs.map((q) => q.bookmaker).join('
 
 // ── The book lists ARE config.py's ──────────────────────────────────────────
 // Read from config.py, not typed here. The counts this replaced (`=== 13`,
-// `=== 10`) were a second copy of the app's own list, so when the server cut
-// fourteen fetched books to ten on 2026-09-20 they kept agreeing with the app
-// and the picker kept offering four books that never showed a price again.
+// `=== 10`, and the 2026-11-10 `=== 13` / `=== 6` / `=== 8`) were a second
+// copy of the app's own list, so when the server cut fourteen fetched books
+// to ten on 2026-09-20 they kept agreeing with the app and the picker kept
+// offering books that never showed a price again. Women's college basketball
+// still stores seven reference books (config.NCAABW_EXTRA_BOOKMAKERS). Those
+// are checked below as not bettable; they are not part of the fetch list.
 const cfg = (() => {
   try {
     return readConfigBooks();
@@ -84,6 +87,11 @@ check('Pinnacle is not', !isBettableBook('pinnacle'));
 check('Bovada is not', !isBettableBook('bovada'));
 check('ESPN BET is not (mike, 2026-09-03)', !isBettableBook('espnbet'));
 check('betPARX is not: a few states only (mike, 2026-11-06)', !isBettableBook('betparx'));
+check('Bally Bet and Fliff are not: women\'s college basketball reference prices (2026-11-10)',
+  !isBettableBook('ballybet') && !isBettableBook('fliff'));
+check('the four women\'s-only reference books are named and not bettable',
+  ['betonlineag', 'lowvig', 'unibet', 'betwhale'].every((b) => !isBettableBook(b) && bookName(b) !== b),
+  ['betonlineag', 'lowvig', 'unibet', 'betwhale'].map((b) => bookName(b)).join(', '));
 check('an unknown key is not bettable', !isBettableBook('somebook'));
 check(
   'every book has a real name and a short label',

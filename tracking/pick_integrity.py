@@ -53,6 +53,10 @@ Checked:
                   for a first-half spread (spreads_h1, settled on the first
                   half's margin): it says "First Half", and its team and signed
                   number are checked as a spread's are, after that phrase.
+  * first quarter -- a pick that settles on the first quarter's margin (its
+                  model's market is spreads_q1, models/nba_q1_trend.py) says
+                  "First Quarter", so it cannot be read as the full-game spread;
+                  its team and signed number are checked as a spread's are.
 
 A producer that does not supply `side` and `line` cannot be checked, so its
 picks are refused too. A check that dead code can satisfy is not a check (§1b).
@@ -170,7 +174,20 @@ def _first_half_problem(label: str, model_id: str | None) -> str | None:
     return None
 
 
-_LEADING_FIRST_HALF = re.compile(r"^first[\s-]*half\s+", re.IGNORECASE)
+_LEADING_FIRST_HALF = re.compile(r"^first[\s-]*(half|quarter)\s+", re.IGNORECASE)
+
+_FIRST_QUARTER = re.compile(r"\bfirst[\s-]*quarter\b", re.IGNORECASE)
+
+
+def _first_quarter_problem(label: str, model_id: str | None) -> str | None:
+    """A first-quarter pick whose label reads as the full game. None for every model whose market is not a
+    first-quarter one."""
+    if _market(model_id) != "spreads_q1":
+        return None
+    if not _FIRST_QUARTER.search(label):
+        return ("the label does not say First Quarter, so it reads as the full-game spread; the pick settles on "
+                "the first quarter's margin")
+    return None
 
 
 def _tail(label: str) -> str:
@@ -260,6 +277,9 @@ def pick_problems(label, side, line, model_id, home=None, away=None,
     first_half = _first_half_problem(label, model_id)
     if first_half:
         problems.append(first_half)
+    first_quarter = _first_quarter_problem(label, model_id)
+    if first_quarter:
+        problems.append(first_quarter)
     return problems
 
 
