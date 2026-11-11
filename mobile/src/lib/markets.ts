@@ -383,23 +383,30 @@ export function linkForSide(
  * The picker and the per-pick line chips read BETTABLE_BOOKS; the All-books
  * table on the detail screen is passed the member's own books.
  *
+ * TEN BOOKS, IN config.py's ORDER (2026-11-06). The server cut fourteen to ten
+ * on 2026-09-20 (mike: "yes drop the 4 books") and this list was never cut
+ * with it, so the member's book picker offered Bally Bet, ReBet and Fliff —
+ * none priced since 2026-09-20 — and ESPN BET, none since 2026-10-01
+ * (v_latest_odds_all_books, measured 2026-11-06). scripts/verify_book_lines.ts and
+ * tests/test_mobile_book_lists_match_config.py now compare these lists with
+ * what config.py actually fetches and decides at, so the next cut on one
+ * side fails on the other.
+ *
+ * A dropped book keeps its name and label below: settled picks and NFL card
+ * labels still name it, and bookName() must keep rendering them.
+ *
  * Women's college basketball stores seven more books for its games
  * (config.NCAABW_EXTRA_BOOKMAKERS: espnbet, ballybet, fliff, betonlineag,
- * lowvig, unibet, betwhale). They are reference prices: none is a book a pick
- * may name, so none is a book a member is sent to (2026-11-10). Read in
- * production that day, v_latest_odds_all_books held rows at all seven for the
- * women's games of 2026-11-08 to 11-10.
- *   - betonlineag, lowvig, unibet and betwhale are not in LINE_SHOP_BOOKS, and
- *     BETTABLE_BOOKS is built from it, so they were never offered. They have
- *     a name and a label below as a guard: Pick Detail passes the member's
- *     own books to the All-books table, so these four draw only in the frame
- *     before that set loads, or in a table that is ever shown unfiltered.
- *   - ballybet and fliff were still listed as bettable here, though no pick
- *     has been decided at either since the fetch list dropped them on
- *     2026-09-20 (config.LINE_SHOP_BOOKMAKERS). Over the games of 2026-11-07
- *     to 11-10 the only prices at either newer than 2026-09-05 were on
- *     women's games. They are reference-only now, like espnbet: out of the
- *     sportsbook picker and off the line chips.
+ * lowvig, unibet, betwhale). They are reference prices: none of the seven is
+ * in this ten-book fetch list, and none is a book a pick may name, so none is
+ * a book a member is sent to (2026-11-10). Read in production that day,
+ * v_latest_odds_all_books held rows at all seven for the women's games of
+ * 2026-11-08 to 11-10. betonlineag, lowvig, unibet and betwhale were never
+ * fetched. They have a name and a label below: Pick Detail passes the
+ * member's own books to the All-books table, so these four draw only in the
+ * frame before that set loads, or in a table that is ever shown unfiltered.
+ * Without a label the fallback clips the key to four letters (BETO, LOWV,
+ * UNIB, BETW).
  */
 export const MODEL_BOOK = 'draftkings' as const;
 
@@ -408,37 +415,34 @@ export type BookKey =
   | 'fanduel'
   | 'betmgm'
   | 'williamhill_us'
-  | 'espnbet'
   | 'fanatics'
   | 'bovada'
   | 'pinnacle'
   | 'betrivers'
   | 'hardrockbet'
-  | 'ballybet'
-  | 'betparx'
-  | 'rebet'
-  | 'fliff';
+  | 'betparx';
 
 export const LINE_SHOP_BOOKS: BookKey[] = [
   'draftkings',
   'fanduel',
   'betmgm',
   'williamhill_us',
-  'espnbet',
   'fanatics',
   'bovada',
   'pinnacle',
   'betrivers',
   'hardrockbet',
-  'ballybet',
   'betparx',
-  'rebet',
-  'fliff',
 ];
 
-/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS, plus
- *  the two women's college basketball reference books listed above. */
-export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet', 'betparx', 'ballybet', 'fliff'];
+/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS, as a
+ *  set. ESPN BET is no longer fetched; it stays listed because config keeps
+ *  it excluded, so a book re-added to the fetch list stays out of the picker.
+ *  betPARX is fetched and reference-only (config.STATE_LIMITED_BOOKMAKERS).
+ *  Bally Bet and Fliff are not here and not in LINE_SHOP_BOOKS: the fetch list
+ *  dropped them, and women's college basketball still stores them as reference
+ *  prices (config.NCAABW_EXTRA_BOOKMAKERS). They stay out of the picker. */
+export const REFERENCE_ONLY_BOOKS: readonly string[] = ['pinnacle', 'bovada', 'espnbet', 'betparx'];
 
 /** Books a member can be sent to — mirrors config.BEST_LINE_BOOKMAKERS. */
 export const BETTABLE_BOOKS: BookKey[] = LINE_SHOP_BOOKS.filter(
@@ -464,6 +468,8 @@ const BOOK_LABELS: Record<string, string> = {
   ballybet: 'BALLY',
   betparx: 'PARX',
   rebet: 'REBET',
+  // No longer fetched, but 62 stored picks still name it (2026-11-06); without
+  // this they showed the fallback badge FLIF. Women's games still store it.
   fliff: 'FLIFF',
   // Women's college basketball reference books. The fallback clips the key to
   // four letters, which read BETO, LOWV, UNIB and BETW.
