@@ -67,11 +67,6 @@ export async function clearQueryCache(): Promise<void> {
 }
 
 /**
- * Wipe this install's copies. Returns 'tracked' when the tracked_bets delete
- * failed (that one is surfaced on its own). Returns 'wipe' for any other
- * failure. Does not sign out and does not rewrite the device books row.
- */
-/**
  * Drop this account from the Join-screen map. Other accounts on the phone
  * keep their own records. The hook drops the same id from memory so a later
  * write cannot put it back.
@@ -83,10 +78,19 @@ async function forgetDiscordJoinForCurrentUser(): Promise<void> {
   await forgetDiscordJoinUser(userId);
 }
 
+/**
+ * Wipe this install's copies. Returns 'tracked' when the tracked_bets delete
+ * failed (that one is surfaced on its own). Returns 'wipe' for any other
+ * failure. Does not sign out and does not rewrite the device books row.
+ */
 export async function wipeLocalAccountData(deviceId: string | null): Promise<LocalFailure | null> {
   let failure: LocalFailure | null = null;
   try {
-    await forgetDiscordJoinForCurrentUser();
+    try {
+      await forgetDiscordJoinForCurrentUser();
+    } catch (e) {
+      console.warn('[deleteAccount] discord join flag', e);
+    }
     await Promise.all([
       clearCustomModelsForAccountDeletion(),
       clearTrackedBetsForAccountDeletion(),

@@ -377,6 +377,18 @@ check(
 );
 
 const storeSrc = read('src/lib/discordJoinStore.ts');
+{
+  const wipeFn =
+    read('src/lib/deleteAccount.ts').split('export async function wipeLocalAccountData')[1]?.split(
+      'export async function',
+    )[0] ?? '';
+  const logged = wipeFn.indexOf("console.warn('[deleteAccount] discord join flag'");
+  const rest = wipeFn.indexOf('clearBankrollForAccountDeletion');
+  check(
+    'a discord-flag failure does not skip the other wipes',
+    wipeFn.includes('forgetDiscordJoinForCurrentUser') && logged !== -1 && rest > logged,
+  );
+}
 check(
   'account deletion drops one user, not the whole map',
   !read('src/lib/deleteAccountHelpers.ts').includes('DISCORD_JOIN_STORAGE_KEY') &&
