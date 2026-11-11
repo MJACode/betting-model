@@ -21,6 +21,33 @@
 
 ---
 
+## [ ] Volume settings: the dashboard panel, once the branch is merged (2026-11-11)
+
+Branch `claude/model-volume-dial` builds the database side and the sync. The
+panel on the dashboard's Models tab cannot be built before the merge: it reads
+`model_volume_bands` and calls `set_model_volume`, and neither exists in
+production until `data.view_migrations` runs the migration. After the merge:
+run the migrations, run the threshold sync, read `get_advisors`, then build
+the panel (one row per model with its four bands, one dropdown, the name of
+the signed-in person passed as `who`), and add it to `docs/monitoring.md`.
+
+## [ ] Volume settings: in-play models are listed and not moved (2026-11-11)
+
+Their posting does not read the edge cut, and a loop's first bet locks its
+game, so a posting cut would hide a bet without freeing the game. To give
+them an input, each loop's own decision needs a bar it reads before it writes
+(the women's and men's college loops already rank candidates a night; the
+bar would sit beside that). Nine models (`config.LIVE_MODELS`).
+
+## [ ] Volume settings: an unposted bet still counts in two checks (2026-11-11)
+
+A bet held back by a setting is still a BET row. The scorer's check that one
+game never carries two bets that cannot both win, and NCAAB agreement sizing,
+both read BET rows and do not ask whether the row was posted. With no setting
+made, nothing changes. Before a setting is used on a model that shares games
+with another (the college basketball cards do), decide whether those two
+readers should look at posted bets only.
+
 ## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
 
 Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
