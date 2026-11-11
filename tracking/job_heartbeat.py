@@ -80,6 +80,8 @@ MAX_SILENCE: dict = {
     "nba_live": 700,
     # The same shape: 11am to 2:50am ET, */10; one launch runs a slate.
     "ncaab_live": 700,
+    # The NCAABW halftime loop: 11am to 2:55am ET, every 10 minutes.
+    "ncaabw_live": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -152,6 +154,8 @@ ACTIVE_HOURS_ET: dict = {
     "nba_live": (11, 23, 30),
     # The NCAAB in-play loop beats the same way (models/ncaab_live_loop.Loop.heartbeat).
     "ncaab_live": (11, 23, 30),
+    # The NCAABW halftime loop beats the same way (models/ncaabw_live_loop.Loop.heartbeat).
+    "ncaabw_live": (11, 23, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

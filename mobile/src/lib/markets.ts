@@ -79,6 +79,9 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'ncaab_first_half_total') return 'totals_h1';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
+  // The NCAABW halftime total (models/ncaabw_live_ht.py): the game's total,
+  // and its id has no 'over_under' in it either.
+  if (modelId === 'ncaabw_live_total_ht') return 'totals';
   return 'h2h';
 }
 
@@ -282,6 +285,7 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'nba_total_luck') return 'game_total';
   if (modelId === 'ncaab_total_blend') return 'game_total';
   if (modelId === 'ncaabw_total_blend') return 'game_total';
+  if (modelId === 'ncaabw_live_total_ht') return 'game_total';
   // One team's points move with the game total, so the nearest class.
   if (modelId === 'nba_team_total_luck') return 'game_total';
   // The first half's points move with the game total too.
@@ -1088,6 +1092,9 @@ export const LIVE_PRICE_SLOT_ONLY: ReadonlySet<string> = new Set([
   'ncaab_live_spread_h1',
   'ncaab_live_spread_h2',
   'ncaab_live_total_h2',
+  // models/ncaabw_live_loop.py reads the books every five minutes, and only
+  // while a game is at its halftime break: after the bet no row is current.
+  'ncaabw_live_total_ht',
 ]);
 
 /**
@@ -2100,7 +2107,11 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           ? ` · inning ${pick.inning_at_pick}`
           : pick.sport === 'NCAAB'
             ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
-            : ` · Q${pick.inning_at_pick}`
+            : pick.sport === 'NCAABW'
+              ? // The women's one in-play model bets during the halftime break
+                // only (models/ncaabw_live_loop.build_pick stores quarter 2).
+                ' · halftime'
+              : ` · Q${pick.inning_at_pick}`
         : '';
     return {
       kind: 'live',

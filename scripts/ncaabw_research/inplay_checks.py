@@ -236,8 +236,9 @@ def halftime(Qs, states):
 if __name__ == "__main__":
     g = ip.load_games()
     pri = ip.priors()
-    Qs = {s: pd.read_parquet(CACHE / f"inplay_priced_{s}.parquet") for s, _ in FOLDS
-          if (CACHE / f"inplay_priced_{s}.parquet").exists()}
+    # the reading of the play list `inplay` was run with (NCAABW_INPLAY_STATE)
+    Qs = {s: pd.read_parquet(CACHE / f"{ip.PRICED}_{s}.parquet") for s, _ in FOLDS
+          if (CACHE / f"{ip.PRICED}_{s}.parquet").exists()}
     wanted = set().union(*[set(q["game_id"]) for q in Qs.values()])
     states = ip.load_states(g, wanted)
     print(f"cut: EV at or above {CUT}; games with a play-by-play {len(states):,}")

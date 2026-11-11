@@ -1136,14 +1136,7 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sport} yet`}
-          subtitle={
-            // Spelled out for the women's sport: the list of in-play sports
-            // names NCAAB, and "NCAAB ... NCAABW" in one sentence reads as a
-            // typo (UX review, 2026-11-10).
-            sport === 'NCAABW'
-              ? 'There is no in-play model for women’s college basketball. The All and Signals boards carry its pre-game picks.'
-              : `In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`
-          }
+          subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
         />
       );
     }

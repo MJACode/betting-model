@@ -47,7 +47,8 @@ def test_each_market_has_its_measured_range():
     assert nb.TOTAL_RANGE == qb.LINE_RANGE["totals"]          # one number, two readers
     assert qb.MAX_ABS_PRICE == 100_000
     # the replay's largest edge over every priced game is 0.2076, so not the men's 0.25
-    assert qb.EDGE_CAP == {"ncaabw_total_blend": 0.30}
+    # the halftime total's largest replayed edge is 0.371 (967 bets), so 0.40
+    assert qb.EDGE_CAP == {"ncaabw_total_blend": 0.30, "ncaabw_live_total_ht": 0.40}
 
 
 def test_a_typo_is_a_data_error_and_the_extremes_history_holds_are_not():

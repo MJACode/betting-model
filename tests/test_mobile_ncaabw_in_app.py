@@ -26,9 +26,10 @@ Measured on 93b032e3 (2026-11-10), before this change:
   app printed four of them as raw keys (``betonlineag``) and treated two
   (Bally Bet, Fliff) as books a member is sent to.
 
-Women's college basketball has ONE model and nothing else in the app: no
-player stats, no Teams board, no in-play model. Where the men's sport has
-those, the women's takes the app's existing empty state.
+Women's college basketball has TWO models (full-game totals before the game,
+and the full-game total at halftime, from 2026-11-11) and nothing else in the
+app: no player stats, no Teams board. Where the men's sport has those, the
+women's takes the app's existing empty state.
 
 These are text checks, like the rest of the mobile tests: node is not on the
 machine that runs this suite (CLAUDE.md section 1b), so the TypeScript is read,
@@ -72,6 +73,7 @@ TOTAL_CARD = ROOT / "scripts" / "ncaabw_total_card.py"
 # The id the NCAABW totals model writes its picks under
 # (models/ncaabw_total_blend.py MODEL_ID).
 NCAABW_TOTALS_ID = "ncaabw_total_blend"
+NCAABW_HALFTIME_ID = "ncaabw_live_total_ht"
 
 
 # -- the sport exists ---------------------------------------------------------
@@ -205,10 +207,13 @@ def test_the_totals_model_has_a_label_under_the_id_it_writes():
     assert "longLabel: 'NCAABW Totals'" in entry
     assert "shortLabel: 'O/U'" in entry
     assert "type: 'game'" in entry
-    # One women's model: a label under any other women's id is a card on the
+    # Two women's models: a label under any other women's id is a card on the
     # Models tab that never gets a pick.
     labelled = set(re.findall(r"\n  (ncaabw_[a-z0-9_]+): \{", src))
-    assert labelled == {NCAABW_TOTALS_ID}, labelled
+    assert labelled == {NCAABW_TOTALS_ID, NCAABW_HALFTIME_ID}, labelled
+    h = re.search(rf"\n  {NCAABW_HALFTIME_ID}: \{{(.*?)\n  \}},", src, re.S).group(1)
+    assert "longLabel: 'NCAABW Halftime Totals'" in h and "shortLabel: 'Halftime O/U'" in h
+    assert "type: 'game'" in h
     scored = {m for m in config.ACTION_THRESHOLDS if m.startswith("ncaabw_")}
     assert scored <= labelled, f"config scores {sorted(scored - labelled)} with no label in the app"
 
@@ -389,7 +394,7 @@ def test_the_season_label_is_the_ending_year():
 
 
 def test_ncaabw_has_no_stats_and_asks_the_server_for_none():
-    """No women's player stats, Teams board, player page or in-play model.
+    """No women's player stats, Teams board or player page.
 
     Each takes the app's existing empty state, and every Stats read returns
     nothing for NCAABW before it can fall through to another league's view
@@ -406,8 +411,13 @@ def test_ncaabw_has_no_stats_and_asks_the_server_for_none():
     assert ball and "'NCAABW'" not in ball.group(1), "an NCAABW Teams board has no rows behind it"
     log = re.search(r"const LOG_SPORTS = new Set<Sport>\(\[(.*?)\]\);", _read(PLAYER_LOG))
     assert log and "'NCAABW'" not in log.group(1), "an NCAABW player page has no log behind it"
-    live = re.search(r"export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set\(\[(.*?)\]\);", _read(LIVE_SPORTS))
-    assert live and "'NCAABW'" not in live.group(1), "NCAABW has no in-play model"
+    # It does have an in-play model (the halftime total, 2026-11-11), so the
+    # Live board says when it bets instead of "no live model".
+    live_src = _read(LIVE_SPORTS)
+    live = re.search(r"export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set\(\[(.*?)\]\);", live_src)
+    assert live and "'NCAABW'" in live.group(1)
+    assert ("'The NCAABW in-play model checks each game during its halftime break and bets it at most once, ' +"
+            in live_src)
 
     q = _read(QUERIES)
     season = _fn(q, "fetchSeasonTotals")
@@ -501,9 +511,9 @@ def test_the_empty_boards_say_where_the_womens_picks_are():
     # Today: the women's model posts when DraftKings opens a total, not on the
     # refresh cadence the other sports' copy names.
     assert ("Picks post as DraftKings opens each game’s total, mostly on game day." in picks)
-    # Live: no sentence that lists NCAAB and then says NCAABW.
-    assert ("'There is no in-play model for women’s college basketball. The All and Signals "
-            "boards carry its pre-game picks.'") in picks
+    # Live: the women's sport has an in-play model now, so no "there is no
+    # in-play model" sentence is left for it.
+    assert "There is no in-play model for women" not in picks
     stats = _read(SRC / "screens" / "StatsScreen.tsx")
     assert ("'There are no player or team stats for women’s college basketball. Its totals "
             "picks are on the Picks tab.'") in stats

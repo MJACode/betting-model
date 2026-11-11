@@ -390,6 +390,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # (scripts/ncaabw_total_card.py, which creates it on demand). Read by the
     # card, never by the app.
     "ncaabw_total_decisions",
+    # NCAABW play-by-play and its per-game load ledger: the game state the
+    # halftime total model is fitted on. Created on demand by
+    # data/ingestors/ncaabw_pbp.py; model input, never read by the app.
+    "ncaabw_pbp",
+    "ncaabw_pbp_games",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

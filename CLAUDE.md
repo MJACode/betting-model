@@ -575,7 +575,7 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW. 79
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF, NCAAB, NCAABW. 80
   models carry their own prob/edge cut in `config.ACTION_THRESHOLDS`; 29 are
   paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on

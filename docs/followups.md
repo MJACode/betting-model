@@ -39,6 +39,7 @@ its run and names the command if the schedule is short, so this cannot be
 missed silently; a step that loads it without a person would be better.
 
 ## [ ] NCAABW: the build reads a cache on one PC
+<!-- the halftime total's build has the same item, further down -->
 
 `scripts/ncaabw_total_blend_build.py` reads the research cache
 (`~/ncaabw_research/cache`), which is a copy of what Supabase holds. Every row
@@ -107,16 +108,46 @@ a 1,000-row response cap. A thirteenth market in `MAIN_GAME_ODDS_MARKETS`
 would pass it silently for both college basketball sports. Chunk at 64 or
 page the read. Found by the same review; it predates the women's sport.
 
-## [ ] NCAABW in play: finish the checks, then decide (2026-11-09)
+## [x] NCAABW in play: finish the checks, then decide (2026-11-09, done 2026-11-11)
 
-The second-half total made +8.75% [2.2, 15.7] on 698 bets in 2025-26 and
-+12.84% on 305 in 2024-25 (`scripts/ncaabw_research/inplay.py`). Before it is
-anything more than a first look it needs what the men's in-play models
-passed: the blind same-side baseline, the bands below and above the cut, the
-placebo (each game given another game's model), and the stale-quote checks
-(quote age, time since the last score, a sharp-book split; the women's board
-has no Pinnacle, so BetOnline and LowVig stand in). The first week of 2026-27
-was negative on every rule.
+The checks were run and the halftime total was built (`ncaabw_live_total_ht`,
+`docs/sports/ncaabw.md` "In play: the halftime total"). The halftime spread
+does not clear.
+
+## [ ] NCAABW halftime total: measure ESPN's publishing lag on the women's game (2026-11-11)
+
+The loop waits 90 seconds after a price read and 60 more before it decides,
+the lag measured on the men's game. `ncaabw_live_decisions.play_lag_s` stores
+the seconds between ESPN's newest play and each read. After a week of slates,
+read it: if the women's plays arrive as fast, the bet can post sooner after
+its price was read (`NCAABW_LIVE_PBP_WAIT_SEC`, `NCAABW_LIVE_PBP_RECHECK_SEC`).
+
+## [ ] NCAABW halftime spread: re-test on this season's stored halftime prices (2026-11-11)
+
+On the corrected reading it is +8.48% [-1.9, +18.2] walk-forward and 11-17
+this season. The halftime loop stores every book's spread at every read in
+the break (source `ncaabw_live_loop`), so the third season builds itself.
+Re-run `NCAABW_INPLAY_STATE=max python -m scripts.ncaabw_research.inplay` on
+them in January.
+
+## [ ] NCAABW halftime total: the build reads a cache on one PC (2026-11-11)
+
+`scripts/build_ncaabw_live_ht_artifact.py` reads the research cache, like the
+totals build above. Every input is in Supabase (`games`, `odds`,
+`ncaabw_inplay_quotes`, `ncaabw_pbp`). Next season's rebuild should read them.
+
+## [ ] The app's own check of its sportsbook list is out of date (2026-11-11)
+
+`mobile/scripts/verify_preferred_book.ts` asserts 13 line-shop books and
+fails on master and on every branch. Found while running the app's checks
+for the women's halftime model; not from that work.
+
+## [ ] The app reads the moneyline market for one in-play total model (2026-11-11)
+
+`gameMarketForModel('ncaab_live_total_h2')` in `mobile/src/lib/markets.ts`
+falls through to `'h2h'`, and `marketClassForModel` to `'other'`: the id has
+neither `over_under` nor an explicit line. The women's halftime model has its
+own two lines. Check what the men's card and a parlay with it read.
 
 ## [ ] NCAABW: ESPN's own odds are in a local cache only (2026-11-09)
 

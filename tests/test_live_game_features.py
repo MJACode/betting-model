@@ -118,7 +118,7 @@ def test_every_mlb_live_model_has_a_feature_map():
     assert mlb_live == set(LIVE_FEATURE_MAP.keys())
     for m in LIVE_MODELS:
         assert m.startswith(("mlb_live_", "ncaaf_live_", "nfl_live_leader_", "nba_live_",
-                              "ncaab_live_")), (
+                              "ncaab_live_", "ncaabw_live_")), (
             f"{m}: unknown live-model family — decide which engine serves it")
 
 

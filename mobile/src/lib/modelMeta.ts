@@ -748,6 +748,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Women's college basketball in play (models/ncaabw_live_ht.py, 2026-11-11):
+  // the full-game total, bet once a game during the halftime break. It
+  // SETTLES ON THE FULL GAME, so the name says when the bet is placed, never
+  // a period it is "on". Its picks appear on the Live segment only.
+  ncaabw_live_total_ht: {
+    shortLabel: 'Halftime O/U',
+    longLabel: 'NCAABW Halftime Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // Matt, 2026-10-24: "NFL Totals", badge O/U, same as the other totals.
   // No other NFL model uses this name.
   nfl_wind_totals: {
@@ -1154,6 +1165,11 @@ const NCAAB_LIVE_TIMING: Readonly<Record<string, { when: string; market: string 
   ncaab_live_total_h2: { when: 'from halftime until two minutes are left', market: 'total' },
 };
 
+// The women's in-play model (models/ncaabw_live_ht.py): one bet a game at most,
+// decided during the halftime break (models/ncaabw_live_loop.py reads the
+// books every five minutes while a game is at the half).
+const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+
 const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
 const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
 
@@ -1176,6 +1192,17 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         empty:
           `This model checks NCAAB games in progress twice an hour, ${ncaab.when}. ${LIVE_NOT_IN_LIST}`,
         note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
+    if (modelId === NCAABW_HALFTIME_MODEL) {
+      return {
+        title: 'Bets at halftime',
+        body:
+          'This model checks each NCAABW game during its halftime break and bets it at most once, at the ' +
+          'sportsbook with the best offer. The bet is on the full-game total: it settles on the final ' +
+          `score, overtime included, not on a half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty: `This model checks each NCAABW game during its halftime break. ${LIVE_NOT_IN_LIST}`,
+        note: 'Halftime bets appear on Live Signals, not in this list.',
       };
     }
     const nba = NBA_LIVE_TIMING[modelId];

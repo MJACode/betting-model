@@ -450,6 +450,8 @@ check('ncaab_total_blend resolves to totals (id has no over_under)', gameMarketF
 check('ncaab_total_blend is a game_total for parlay correlation', marketClassForModel('ncaab_total_blend') === 'game_total');
 // ncaabw_total_blend (NCAABW full-game totals, the women's): the same id shape, the same trap.
 check('ncaabw_total_blend resolves to totals (id has no over_under)', gameMarketForModel('ncaabw_total_blend') === 'totals');
+check('ncaabw_live_total_ht resolves to totals (id has no over_under)', gameMarketForModel('ncaabw_live_total_ht') === 'totals');
+check('ncaabw_live_total_ht is a game_total for parlay correlation', marketClassForModel('ncaabw_live_total_ht') === 'game_total');
 check('ncaabw_total_blend is a game_total for parlay correlation', marketClassForModel('ncaabw_total_blend') === 'game_total');
 // ncaab_first_half_spread HAS 'spread' in it, and must still read the first half's rows, not the game's.
 check('ncaab_first_half_spread resolves to spreads_h1, not spreads', gameMarketForModel('ncaab_first_half_spread') === 'spreads_h1');

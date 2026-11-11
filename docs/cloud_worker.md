@@ -329,6 +329,28 @@ It beats `job_heartbeats` every 5 minutes while a slate runs
 | `NCAAB_LIVE_CALL_CAP` / `NCAAB_LIVE_CREDIT_CAP` | `200` / `600` | Per-process ceilings (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
 | `NCAAB_LIVE_POLL_SEC` / `NCAAB_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
 
+### NCAABW halftime loop (added 2026-11-11)
+
+`models/ncaabw_live_loop.py`, job `ncaabw_live` on `pollers`, every 10 minutes
+11am-2:55am ET as a supervisor (one launch runs a whole slate and exits after 3
+idle ticks). The model and its evidence: `docs/sports/ncaabw.md`, "In play: the
+halftime total". It beats `job_heartbeats` every 5 minutes while a slate runs
+(`tracking/job_heartbeat.ACTIVE_HOURS_ET`). The decision ledger
+`ncaabw_live_decisions` is created by
+`data/migrations/ncaabw_live_decisions_2026_11_11.sql` (applied by
+`data.view_migrations`); the loop refuses to start without it.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NCAABW_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NCAABW` or `DISCORD_WEBHOOK_LIVE_NCAABW` | the channel id is set (read 2026-11-11) | Where women's live picks post. **Required**: no fallback to the shared live or #ncaabw channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`); with neither set the loop decides nothing and exits 3 while a game is in progress. A channel id resolves through `DISCORD_BOT_TOKEN`, set on pollers |
+| `NCAABW_LIVE_FETCH_WINDOW_SEC` / `NCAABW_LIVE_RETRY_GAP_SEC` | `120` / `45` | The books are read at each five-minute mark plus 37 seconds; how long after that a failed call may be tried again, and the seconds between tries |
+| `NCAABW_LIVE_PBP_WAIT_SEC` / `NCAABW_LIVE_PBP_RECHECK_SEC` | `90` / `60` | ESPN's summary is fetched this long after the read and again this much later (the men's measured lag; the women's is not measured yet) |
+| `NCAABW_LIVE_CALL_CAP` / `NCAABW_LIVE_CREDIT_CAP` | `600` / `3600` | Per-process ceilings (6 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
+| `NCAABW_LIVE_POLL_SEC` / `NCAABW_LIVE_IDLE_EXIT_TICKS` | `15` / `3` | Scoreboard tick, and the idle ticks before it exits |
+
+`--dry-run` makes no Odds API call and writes nothing.
+
 ### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
 
 `live_scoreboard` job, `pollers` service, every minute 24x7

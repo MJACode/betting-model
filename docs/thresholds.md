@@ -1553,6 +1553,26 @@ than it hits (claimed 0.599, won 0.571 on 198 games). November was flat in
 both seasons. No Pinnacle close exists for the women's games, so there is no
 sharp-close EV column.
 
+## NCAABW — `ncaabw_live_total_ht`, the full-game total at halftime (2026-11-11, mike)
+
+The whole story is `docs/sports/ncaabw.md`, "In play: the halftime total".
+
+| Setting | Value | Where |
+|---|---|---|
+| cut | EV >= 0.05 at the deciding price, on P(win, push left out) | the model file's `cut` (`models/saved/ncaabw_live_ht_2027.json`), read by `models/ncaabw_live_loop.py` |
+| EV floor | 0.05, the cut itself | `config.MODEL_OWN_EV_FLOOR` |
+| price floor | -200 (it laid -148 to +200 on 967 replayed bets) | `config.MODEL_MIN_ODDS` |
+| edge cap | 0.40: a larger decision edge is declined as a data error (largest replayed 0.371) | `models/ncaabw_quote_bounds.EDGE_CAP` |
+| probability | its own; no calibration map (no record) | `config.MODELS_ON_OWN_PROBABILITY` |
+| a day's count | no limit (median 3 on a day with a bet, 25 at the most) | |
+| stake | one unit to win, risk capped at 3 | `stake_for` |
+
+Replayed at 0.05: 2025-26 with a model fitted on 2024-25, 669 bets, 398-271,
++89.96 units, +11.84% [+5.1, +18.1]; 2024-25 with a model fitted on 2025-26
+(a second look), 298 bets, 178-119, +42.10 units, +12.35% [+0.6, +23.7].
+Every cut from 0.02 to 0.12 is positive in both seasons, so 0.05 sits on a
+plateau. Go-live gate standing: 0 settled of 50. Re-read at 50 settled bets.
+
 ## NBA — the in-play game-state model's quarters 1-2 spread (2026-11-04, mike)
 
 mike, 2026-11-04: *"everything goes live now, that's why we do back testing ...

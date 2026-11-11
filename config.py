@@ -382,15 +382,18 @@ DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 # while neither variable is set.
 # NCAAB (2026-11-07): the in-play models post to #ncaab-live
 # (DISCORD_CHANNEL_LIVE_NCAAB on pollers) and nowhere else.
-DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB"})
+# NCAABW (2026-11-11): the halftime total posts to #ncaabw-live
+# (DISCORD_CHANNEL_LIVE_NCAABW on pollers) and nowhere else.
+DISCORD_LIVE_CHANNEL_REQUIRED: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
 
 # Sports whose in-play picks are announced only while the game has no final
 # score in `games` (tracking/publish_filters.live_publishable_sql). Only a
 # sport whose `games` score is written at the final, never during the game,
 # belongs here; NBA's is written by data/ingestors/nba_results_ingestor.
 # NCAAB's is written by data/ingestors/ncaab_espn_ingestor only for a
-# completed event (2026-11-07).
-LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA", "NCAAB"})
+# completed event (2026-11-07). NCAABW's is written by
+# data/ingestors/ncaabw_espn_ingestor, the same rule (2026-11-11).
+LIVE_ANNOUNCE_WHILE_IN_PROGRESS: frozenset = frozenset({"NBA", "NCAAB", "NCAABW"})
 
 # Channel for the morning results recap (cross-sport, so it needs its own home).
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
@@ -1101,6 +1104,24 @@ ACTION_THRESHOLDS: dict = {
     "ncaab_live_spread_h1": {"min_prob": 0.0, "min_edge": 0.0},
     "ncaab_live_spread_h2": {"min_prob": 0.0, "min_edge": 0.0},
     "ncaab_live_total_h2":  {"min_prob": 0.0, "min_edge": 0.0},
+    # NCAABW halftime total (models/ncaabw_live_loop.py, 2026-11-11, mike: "why
+    # no live or ML / spread models for NCAABW?"). The full-game total, bet
+    # during the halftime break: a game-state model (the pre-game total and
+    # the first half's surprise) against each bettable book's in-play total at
+    # the first five-minute read of the break holding an eligible quote; bet
+    # at EV >= 0.05 (the artifact's cut; MODEL_OWN_EV_FLOOR), one decision a
+    # game. Two priced seasons exist. 2025-26 with a model fitted on 2024-25:
+    # 669 bets, 398-271, +89.96 units, +11.84% (95% +5.1..+18.1). 2024-25 with
+    # a model fitted on 2025-26 (a second look, not walk-forward): 298 bets,
+    # 178-119, +42.10 units, +12.35% (+0.6..+23.7). Every cut from 0.02 to
+    # 0.12 is positive in both. Blind overs and unders at the same reads lose,
+    # the bets turned round lose 24.6% and 25.3%, another game's decision
+    # loses 4.1% and 7.0%. November-December and January on are both positive
+    # in both seasons. The halftime SPREAD is not here (398 bets, +6.35%,
+    # interval through zero), nor a pre-game spread or moneyline (nothing
+    # clears). docs/sports/ncaabw.md, "In play". Go-live gate standing: 0
+    # settled of 50.
+    "ncaabw_live_total_ht": {"min_prob": 0.0, "min_edge": 0.0},
     # MLB run-line market-relative rule (models/mlb_game_market). Replaces
     # the paused mlb_runline *publish path* — mlb_runline stays paused
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
@@ -2298,6 +2319,11 @@ MODEL_MIN_ODDS: dict = {
     "ncaab_live_spread_h1":      -200,
     "ncaab_live_spread_h2":      -200,
     "ncaab_live_total_h2":       -200,
+    # NCAABW halftime total (2026-11-11, mike): the rule takes no price beyond
+    # -250 or +250, and its 967 replayed bets were laid at -148 to +200
+    # (median -115; none shorter than -150, 8 at plus money). -200 has never
+    # bound; pinned so a DEFAULT_MIN_ODDS override cannot move it.
+    "ncaabw_live_total_ht":      -200,
 }
 
 
@@ -2482,6 +2508,11 @@ MODEL_OWN_EV_FLOOR: dict = {
     "ncaab_live_spread_h1":      0.02,
     "ncaab_live_spread_h2":      0.05,
     "ncaab_live_total_h2":       0.02,
+    # The NCAABW halftime total (2026-11-11, mike). 0.05 IS its graded cut
+    # (the artifact's `cut`, read by models/ncaabw_live_loop.py for the rule
+    # itself); the row's probability is P(win | no push), the number that EV
+    # was graded on. No record yet: re-read at 50.
+    "ncaabw_live_total_ht":      0.05,
     "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
     "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
@@ -2758,6 +2789,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     "ncaab_live_spread_h1",
     "ncaab_live_spread_h2",
     "ncaab_live_total_h2",
+    # 2026-11-11 (mike). The NCAABW halftime total's number is its game-state
+    # model's own P(win | no push) (models/ncaabw_live_ht.py), the one its EV
+    # cut was graded on, and it tracked the result up to a claimed 0.70 on
+    # the two replayed seasons. No record, so a promoted map would be borrowed.
+    "ncaabw_live_total_ht",
     # 2026-10-15 (mike: "use what you've learned in this repo"). The NBA prop
     # rule's probability IS Pinnacle's proportional no-vig under at the same
     # line in the same fetch, which its EV >= 0.00 cut was measured on. It has
@@ -2969,6 +3005,11 @@ SCORING_METHODS: dict = {
     "ncaab_live_spread_h1": "rule",
     "ncaab_live_spread_h2": "rule",
     "ncaab_live_total_h2":  "rule",
+    # The NCAABW halftime total: its state model in one JSON artifact committed
+    # under models/saved/ (ncaabw_live_ht_2027.json,
+    # scripts/build_ncaabw_live_ht_artifact.py), loaded by its pinned path by
+    # models/ncaabw_live_loop.py, never registered.
+    "ncaabw_live_total_ht": "rule",
     # A rule with a parameter artifact committed under models/saved/ (the
     # residual sample and the bucket counts, models/nba_total_luck.py), never
     # registered: the card loads it by its pinned path.
@@ -3111,6 +3152,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaab_live_spread_h1":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3229,6 +3271,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaab_live_spread_h1":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaab_live_spread_h2":        0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
     "ncaab_live_total_h2":         0.0,    # 2026-11-07 mike; the cut is EV, per night, see ACTION_THRESHOLDS
+    "ncaabw_live_total_ht":        0.0,    # 2026-11-11 mike; the cut is EV >= 0.05, see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
@@ -3526,6 +3569,12 @@ LIVE_MODELS = {
                              "Live spread, second half: game-state model, the night's best few at the first fresh fetch"),
     "ncaab_live_total_h2":  ("NCAAB", "totals", "engine",
                              "Live total, second half: game-state model, the night's best few at the first fresh fetch"),
+    # NCAABW halftime total (models/ncaabw_live_loop.py, 2026-11-11, mike).
+    # Settled on the FULL GAME, overtime included, against scored_line, the
+    # in-play total taken at the break. docs/sports/ncaabw.md, "In play".
+    "ncaabw_live_total_ht": ("NCAABW", "totals", "engine",
+                             "Full-game total at the halftime break: game-state model, EV >= 0.05 at the first "
+                             "read holding an eligible quote"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
