@@ -149,6 +149,7 @@ export function tierChartGames(
     out.push({
       value: g.value,
       date: dateWithYear(g.gameDate),
+      iso: g.gameDate,
       opp: `${at}${g.opponent}`,
       oppFull: `${g.isHome === false ? '@ ' : at}${g.opponent}`,
       rank: g.rank,

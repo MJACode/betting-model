@@ -42,6 +42,20 @@ export function supportsPlayerDetail(sport: Sport): sport is PlayerLogSport {
   return LOG_SPORTS.has(sport);
 }
 
+/**
+ * Per-game minutes on the player page. NBA, WNBA and NCAAB logs carry
+ * `minutes`. NFL and NCAAF do not (snap share is a different design). NHL
+ * player detail is still closed. MLB already shows volume as IP / AB.
+ */
+const MINUTES_SPORTS = new Set<Sport>(['NBA', 'WNBA', 'NCAAB']);
+
+export function sportTracksMinutes(sport: Sport): boolean {
+  return MINUTES_SPORTS.has(sport);
+}
+
+/** A game is low-minutes when it is under this share of the window average. */
+export const LOW_MINUTES_RATIO = 0.7;
+
 /** One normalized game from any sport's player log, newest-first when listed. */
 export interface PlayerLogEntry {
   player_id: string;
@@ -60,6 +74,8 @@ export interface PlayerLogEntry {
    *  that store an opponent column. Absent when the game row was not found. */
   venue?: 'home' | 'away' | null;
   week?: number | null;
+  /** Basketball logs only. Null when this logged game has no minutes. */
+  minutes?: number | string | null;
   /** Every sport's stat columns, plus the derived ones added below. */
   [key: string]: number | string | null | undefined;
 }
@@ -158,6 +174,39 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Minutes on a log row, or null when the column is missing or not a number.
+ *  Zero is a played game (ESPN's "0" is in the box and settles). */
+export function minutesPlayed(row: { minutes?: unknown }): number | null {
+  return num(row.minutes);
+}
+
+/**
+ * A basketball log row with no minutes. Did-not-play players are not in the
+ * game log the screen loads: NBA writes them to `nba_player_dnp`, and the
+ * WNBA and NCAAB ingestors leave a didNotPlay athlete out. This is the row
+ * shape if one is present, not a guess at games the log does not have.
+ */
+export function isDidNotPlay(sport: Sport, row: { minutes?: unknown }): boolean {
+  return sportTracksMinutes(sport) && minutesPlayed(row) == null;
+}
+
+/** The Minutes chip is context, not a bet: no line, no Bet, no betslip. */
+export function isMinutesContextStat(def: StatDef | null | undefined): boolean {
+  return !!def && String(def.key) === 'minutes' && sportTracksMinutes(def.sport);
+}
+
+/** Minutes sits immediately after PRA on the player page. The leaderboard
+ *  keeps catalog order; only this chip list moves. */
+function minutesChipAfterPra(chips: StatDef[]): StatDef[] {
+  const idx = chips.findIndex((c) => String(c.key) === 'minutes');
+  if (idx < 0) return chips;
+  const minutes = chips[idx]!;
+  const rest = chips.filter((_, i) => i !== idx);
+  const pra = rest.findIndex((c) => String(c.key) === 'pra');
+  const at = pra < 0 ? rest.length : pra + 1;
+  return [...rest.slice(0, at), minutes, ...rest.slice(at)];
+}
+
 /** Sum of parts, or null when every part is missing (see normalizeLogRow). */
 function sum(...parts: unknown[]): number | null {
   let total = 0;
@@ -210,11 +259,13 @@ const OUTS_STAT: StatDef = {
  */
 export function chipsForPlayer(sport: PlayerLogSport, playerType?: PlayerType | null): StatDef[] {
   const all = [...statsForSport(sport), ...logDerivedStatsFor(sport)];
-  if (sport !== 'MLB') return all;
-  const type = playerType ?? 'batter';
-  return all
-    .filter((s) => s.playerType === type)
-    .map((s) => (s.key === 'innings_pitched' ? OUTS_STAT : s));
+  if (sport === 'MLB') {
+    const type = playerType ?? 'batter';
+    return all
+      .filter((s) => s.playerType === type)
+      .map((s) => (s.key === 'innings_pitched' ? OUTS_STAT : s));
+  }
+  return sportTracksMinutes(sport) ? minutesChipAfterPra(all) : all;
 }
 
 /** The stat a player's detail screen opens on. */
@@ -428,6 +479,16 @@ export function openingChip(
 ): StatDef | null {
   const inGroup = group ? chips.filter((c) => c.group === group) : chips;
   if (inGroup.length === 0) return null;
+  // Minutes is on nearly every basketball game, so weighing it with the
+  // betting stats would open the page on the context tab. It wins only when
+  // nothing else in the group has a number.
+  const betting = inGroup.filter((c) => !isMinutesContextStat(c));
+  const fromBetting = betting.length > 0 ? mostFilledChip(betting, filled) : null;
+  if (fromBetting) return fromBetting;
+  return mostFilledChip(inGroup, filled) ?? inGroup[0] ?? null;
+}
+
+function mostFilledChip(inGroup: StatDef[], filled: Map<string, number>): StatDef | null {
   const weight = new Map<StatGroup, number>();
   for (const c of inGroup) {
     weight.set(c.group, (weight.get(c.group) ?? 0) + (filled.get(chipKey(c)) ?? 0));
@@ -445,7 +506,7 @@ export function openingChip(
       bestGroupWeight = w;
     }
   }
-  return best ?? inGroup[0] ?? null;
+  return best;
 }
 
 // ── Line stepper ────────────────────────────────────────────────────────────
@@ -742,6 +803,18 @@ export interface ChartGame {
   /** The opponent's defense rank that season (1 = toughest), when the chart
    *  is filtered by defense toughness (lib/defenseTier). */
   rank?: number | null;
+  /** ISO date from the source. `date` is the printed form, which can add a year. */
+  iso?: string;
+  /** Log row id, so a tapped bar can outline that Recent games row. */
+  gameId?: string;
+  /** Minutes played. Null when this sport's log has no minutes for the game.
+   *  Absent when the chart does not carry minutes at all. */
+  minutes?: number | null;
+  /** No bar and the caption "Did not play". A logged game whose minutes and
+   *  charted stat are both missing. */
+  dnp?: boolean;
+  /** Under {@link LOW_MINUTES_RATIO} of the window's average minutes. */
+  lowMin?: boolean;
 }
 
 /**
@@ -749,25 +822,267 @@ export interface ChartGame {
  * each one's date and opponent. Built in one pass so a bar can never carry
  * another game's label: logValues DROPS games with no value, so indexing the
  * log by a value's position would shift every label after the first gap.
+ *
+ * When `sport` tracks minutes, a row with no stat AND no minutes is kept as
+ * a DNP (no bar). A row with a stat and no minutes is kept, without a minutes
+ * label. Zero minutes is a played game.
  */
 export function chartGames(
   games: PlayerLogEntry[],
   valueOf: (r: PlayerLogEntry) => number | null,
   abbrevs?: ReadonlyMap<string, string>,
   noSlice = false,
+  sport?: PlayerLogSport,
 ): ChartGame[] {
+  const track = sport != null && sportTracksMinutes(sport);
   const out: ChartGame[] = [];
   for (const r of games) {
     const v = valueOf(r);
-    if (v == null) continue;
-    out.push({
-      value: v,
+    const minutes = track ? minutesPlayed(r) : undefined;
+    const dnp = track && v == null && minutes == null;
+    if (v == null && !dnp) continue;
+    const game: ChartGame = {
+      value: v ?? 0,
       date: shortGameDate(r.game_date),
+      iso: r.game_date,
       opp: opponentLabel(r, true, abbrevs, noSlice),
       oppFull: opponentLabel(r, false),
-    });
+      gameId: r.game_id,
+    };
+    if (track) {
+      game.minutes = minutes ?? null;
+      if (dnp) game.dnp = true;
+    }
+    out.push(game);
   }
   return out;
+}
+
+export function averageAndMedian(values: readonly number[]): { avg: number | null; median: number | null } {
+  if (values.length === 0) return { avg: null, median: null };
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  return { avg, median };
+}
+
+/** True when `minutes` is under 70% of the window average. Equal to the cut is not low. */
+export function isLowMinutes(minutes: number | null | undefined, windowAvg: number | null): boolean {
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes)) return false;
+  if (windowAvg == null || !(windowAvg > 0)) return false;
+  return minutes < windowAvg * LOW_MINUTES_RATIO;
+}
+
+/** Chart values with DNP slots removed, so a did-not-play is not a zero. */
+export function scoredChartValues(games: readonly ChartGame[]): number[] {
+  const out: number[] = [];
+  for (const g of games) {
+    if (g.dnp) continue;
+    out.push(g.value);
+  }
+  return out;
+}
+
+/** Minutes for one bar. On the Minutes tab the bar's value is the minutes. */
+export function chartMinutes(game: ChartGame, minutesAreValue: boolean): number | null {
+  if (game.dnp) return null;
+  if (typeof game.minutes === 'number' && Number.isFinite(game.minutes)) return game.minutes;
+  if (minutesAreValue && Number.isFinite(game.value)) return game.value;
+  return null;
+}
+
+/**
+ * Average minutes across the window. Null unless every non-DNP game has a
+ * number, so a partial join (a head-to-head game the loaded log does not
+ * cover) is not shown as that window's average. DNP rows are excluded.
+ */
+export function windowAverageMinutes(games: readonly ChartGame[]): number | null {
+  const played = games.filter((g) => !g.dnp);
+  if (played.length === 0) return null;
+  const mins: number[] = [];
+  for (const g of played) {
+    if (typeof g.minutes !== 'number' || !Number.isFinite(g.minutes)) return null;
+    mins.push(g.minutes);
+  }
+  return averageAndMedian(mins).avg;
+}
+
+export function withLowMinutes(
+  games: readonly ChartGame[],
+  minutesAreValue: boolean,
+  threshold: number | null,
+): ChartGame[] {
+  return games.map((g) => ({
+    ...g,
+    lowMin: isLowMinutes(chartMinutes(g, minutesAreValue), threshold),
+  }));
+}
+
+function isoDay(iso: string | null | undefined): string {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(iso ?? ''));
+  return m ? m[1]! : '';
+}
+
+function matchLogRow(candidates: readonly PlayerLogEntry[], game: ChartGame): PlayerLogEntry | undefined {
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0];
+  const hay = `${game.oppFull ?? ''} ${game.opp ?? ''}`.toLowerCase();
+  const hits = candidates.filter((r) => {
+    const opp = String(r.opponent ?? '').trim().toLowerCase();
+    return opp.length > 0 && hay.includes(opp);
+  });
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/**
+ * Fills `minutes` on chart rows that did not come from the game log (the
+ * head-to-head and defense-tier reads do not return minutes) by the loaded
+ * log's date. A day with two games attaches minutes only when the opponent
+ * matches one of them. Unmatched games are left without minutes.
+ */
+export function lookupLogMinutes(
+  chart: readonly ChartGame[],
+  log: readonly PlayerLogEntry[],
+  sport: PlayerLogSport,
+): ChartGame[] {
+  if (!sportTracksMinutes(sport)) return chart.map((g) => ({ ...g }));
+  const byDay = new Map<string, PlayerLogEntry[]>();
+  for (const r of log) {
+    const day = isoDay(r.game_date);
+    if (!day) continue;
+    const list = byDay.get(day) ?? [];
+    list.push(r);
+    byDay.set(day, list);
+  }
+  return chart.map((g) => {
+    const candidates = byDay.get(isoDay(g.iso)) ?? [];
+    const row = matchLogRow(candidates, g);
+    if (!row) return { ...g };
+    return { ...g, minutes: minutesPlayed(row), gameId: g.gameId ?? row.game_id };
+  });
+}
+
+const CAPTION_UNIT: Record<string, string> = {
+  Points: 'pts',
+  Rebounds: 'reb',
+  Assists: 'ast',
+  '3PM': '3pm',
+  PRA: 'PRA',
+  Steals: 'stl',
+  Blocks: 'blk',
+  Turnovers: 'tov',
+  'Blocks+Steals': 'blk+stl',
+  'Reb+Ast': 'reb+ast',
+};
+
+/** Short unit for the bar caption, so "8 pts · 12 min" fits one line. */
+export function statCaptionUnit(label: string): string {
+  return CAPTION_UNIT[label] ?? label;
+}
+
+export function minuteLabel(minutes: number): string {
+  return `${Number(minutes).toFixed(0)}m`;
+}
+
+function minutePhrase(minutes: number): string {
+  return `${Number(minutes).toFixed(0)} min`;
+}
+
+function fmtStat(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+function spokenOpponent(oppFull: string | null): string {
+  if (!oppFull) return '';
+  if (oppFull.startsWith('@')) return `at ${oppFull.replace(/^@\s*/, '')}`;
+  return oppFull;
+}
+
+export interface SelectedGameReadout {
+  /** Who and when. Stays on one line beside Low MIN and Hit/Miss. */
+  caption: string;
+  /** The stat and the minutes, on their own line so a long opponent cannot clip them. */
+  detail: string | null;
+  spoken: string;
+  /** Null when the bar is not a hit or a miss (the Minutes tab, or a DNP). */
+  result: 'Hit' | 'Miss' | null;
+  low: boolean;
+}
+
+/**
+ * Caption and VoiceOver for the selected bar.
+ * `plain` is the chart's previous sentence. `stat` adds minutes. `minutes`
+ * charts minutes and does not say hit or miss.
+ */
+export function describeSelectedGame(input: {
+  ago: string;
+  game: ChartGame;
+  unit?: string;
+  hit: boolean;
+  mode: 'plain' | 'stat' | 'minutes';
+  rankCaption: string | null;
+  rankSpoken: string | null;
+}): SelectedGameReadout {
+  const { ago, game, unit, hit, mode, rankCaption, rankSpoken } = input;
+  const dnp = game.dnp === true;
+  const low = !dnp && game.lowMin === true;
+  const oppSpoken = spokenOpponent(game.oppFull);
+
+  const who = [ago, game.date, game.oppFull, rankCaption].filter(Boolean).join(' · ');
+
+  if (dnp) {
+    return {
+      caption: who,
+      detail: 'Did not play',
+      spoken: [ago, game.date, oppSpoken, rankSpoken, 'did not play'].filter(Boolean).join(', '),
+      result: null,
+      low: false,
+    };
+  }
+
+  if (mode === 'minutes') {
+    const mins = typeof game.minutes === 'number' ? game.minutes : game.value;
+    const spoken = [ago, game.date, oppSpoken, rankSpoken, `${Number(mins).toFixed(0)} minutes`];
+    if (low) spoken.push('low minutes');
+    return {
+      caption: who,
+      detail: minutePhrase(mins),
+      spoken: spoken.filter(Boolean).join(', '),
+      result: null,
+      low,
+    };
+  }
+
+  const valueText = fmtStat(game.value);
+  if (mode === 'stat' && typeof game.minutes === 'number') {
+    const unitShort = unit ? statCaptionUnit(unit) : '';
+    const spoken = [
+      ago,
+      game.date,
+      oppSpoken,
+      rankSpoken,
+      `${valueText}${unit ? ` ${unit.toLowerCase()}` : ''}`,
+      `${Number(game.minutes).toFixed(0)} minutes`,
+    ];
+    if (low) spoken.push('low minutes');
+    spoken.push(hit ? 'hit' : 'miss');
+    return {
+      caption: who,
+      detail: [unitShort ? `${valueText} ${unitShort}` : valueText, minutePhrase(game.minutes)].join(' · '),
+      spoken: spoken.filter(Boolean).join(', '),
+      result: hit ? 'Hit' : 'Miss',
+      low,
+    };
+  }
+
+  const caption = [who, valueText].filter(Boolean).join(' · ');
+  const spoken =
+    `${ago}, ${game.date}` +
+    (game.oppFull ? `, ${game.oppFull}` : '') +
+    (rankSpoken ? `, ${rankSpoken}` : '') +
+    `, ${valueText}${unit ? ` ${unit}` : ''}, ${hit ? 'hit' : 'miss'}`;
+  return { caption, detail: null, spoken, result: hit ? 'Hit' : 'Miss', low: false };
 }
 
 // ── Display helpers ─────────────────────────────────────────────────────────
@@ -793,6 +1108,8 @@ export function gameContextLine(
   sport: PlayerLogSport,
   row: PlayerLogEntry,
   currentTeam?: string | null,
+  /** True only when this row has no minutes and no value for the charted stat. */
+  didNotPlay = false,
 ): string {
   const team = row.team ?? '—';
   // "@CHI" on an away game, "vs CHI" at home — every sport now, from `games`.
@@ -807,11 +1124,13 @@ export function gameContextLine(
     // school only when it is not the header's (a transfer's earlier rows).
     const min = num(row.minutes);
     const own = row.team && row.team !== currentTeam ? row.team : null;
-    return [`${min == null ? '—' : min.toFixed(0)} min`, opp, own].filter(Boolean).join(' · ');
+    const minText = min == null ? (didNotPlay ? 'DNP' : '— min') : `${min.toFixed(0)} min`;
+    return [minText, opp, own].filter(Boolean).join(' · ');
   }
   if (sport === 'WNBA' || sport === 'NBA') {
     const min = num(row.minutes);
-    return [team, opp, `${min == null ? '—' : min.toFixed(0)} min`].filter(Boolean).join(' · ');
+    const minText = min == null ? (didNotPlay ? 'DNP' : '— min') : `${min.toFixed(0)} min`;
+    return [team, opp, minText].filter(Boolean).join(' · ');
   }
   const isPitcher = row.player_type === 'pitcher';
   const vol = isPitcher ? `${row.innings_pitched ?? '—'} IP` : `${row.at_bats ?? '—'} AB`;
