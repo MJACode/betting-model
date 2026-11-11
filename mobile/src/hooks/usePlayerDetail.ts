@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useNow } from '@/hooks/useNow';
 import { errorText, isAbortError } from '@/lib/errors';
-import { addDays, todayET, yearET } from '@/lib/format';
+import { addDays, boardSeasonET, todayET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
 import { positionOf, type PlayerLogEntry, type PlayerLogSport } from '@/lib/playerLog';
 import {
@@ -31,6 +31,7 @@ import {
   fetchH2HStatValues,
   fetchLineupSlot,
   fetchPlayerPositionGroup,
+  fetchPlayerVsDefense,
   fetchPositionVsOpponent,
   fetchSeasonStarted,
   fetchPropLineRows,
@@ -39,16 +40,24 @@ import {
   fetchSettledPropPicksForPlayer,
   fetchSlateGames,
 } from '@/lib/queries';
+import {
+  DEFENSE_SEASONS_PLAYED,
+  defenseSeasons,
+  splitDefenseRows,
+  type PlayerDefenseGames,
+} from '@/lib/defenseTier';
 import { isLogDerivedStat, propMarketForStat, type StatDef } from '@/lib/statCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
   playerHeadToHead,
+  h2hMeetings,
   playerPickRecord,
   propLineMove,
   statSplits,
   tonightLine,
   type PlayerHeadToHead,
+  type H2HMeeting,
   type PlayerPickRecord,
   type PropLineMove,
   type StatSplits,
@@ -59,6 +68,7 @@ import type {
   GameRow,
   H2HStatValuesRow,
   LineupSlotRow,
+  PlayerVsDefenseRow,
   PositionVsOpponentRow,
   PlayerType,
   PropOddsByBookRow,
@@ -105,14 +115,6 @@ export interface PlayerNextGame {
   unstarted: boolean;
 }
 
-/**
- * The season label the H2H read starts from — the same value the Stats
- * board uses, so the two surfaces cannot disagree about which two seasons
- * "the last 2 years" means. Football's start-year label falls back a season
- * inside fetchH2HStatValues, as every other football read does.
- */
-const SEASON = yearET();
-
 export function usePlayerDetail(args: {
   sport: PlayerLogSport;
   playerId: string | null;
@@ -146,7 +148,11 @@ export function usePlayerDetail(args: {
   // Pull-to-refresh: every section keys on this, so one slow read still
   // cannot hold the others back (UX review: an error with no retry).
   const [nonce, setNonce] = useState(0);
+  // The chart's H2H Retry. The shared nonce reloads every section; a flaky
+  // head-to-head read must not refetch the slate, the lines, or the record.
+  const [h2hNonce, setH2hNonce] = useState(0);
   const reload = () => setNonce((n) => n + 1);
+  const reloadH2h = () => setH2hNonce((n) => n + 1);
 
   // ── Next game, from the player's current team ────────────────────────────
   // Same 7-day window as the team page. earliestUpcomingGame, not tonight's
@@ -206,7 +212,7 @@ export function usePlayerDetail(args: {
   const gamesById = useMemo(() => new Map(logGames.data.map((g) => [g.game_id, g] as const)), [logGames.data]);
   const splits: StatSplits | null = useMemo(() => {
     if (!stat || threshold == null || games.length === 0) return null;
-    return statSplits(games, gamesById, stat, selection.line, selection.side, sport === 'NBA' || sport === 'WNBA');
+    return statSplits(games, gamesById, stat, selection.line, selection.side, sport === 'NBA' || sport === 'WNBA' || sport === 'NCAAB');
   }, [games, gamesById, stat, threshold, selection.line, selection.side, sport]);
 
   // ── Head-to-head with the next opponent, last two seasons ─────────────
@@ -218,32 +224,69 @@ export function usePlayerDetail(args: {
   //
   // Keyed on the STAT as well as the opponent: the RPC returns one stat's
   // values, so a chip tap refetches here where it does not for the chart.
-  const h2hRow = useSection<H2HStatValuesRow | null>(
-    null,
+  //
+  // Tagged with the query that produced it. useSection keeps the previous
+  // payload while a refetch is in flight, and its loading flag flips in an
+  // effect, so the render an opponent or a stat first appears still holds
+  // the last row (or none). A mismatch counts as loading until this query's
+  // row lands; after a failure the catch stores the untagged initial and the
+  // error is the answer, not another spinner (same rule as the
+  // position-vs-opponent read below). Without the tag, "no meetings yet"
+  // and "not loaded yet" are the same empty row, and the range chip would
+  // remember a fallback before the read had answered.
+  const h2hStatKey = stat ? String(stat.key) : '';
+  const h2hKey =
+    team && opponent && stat && serverStat
+      ? `${sport}|${playerId ?? ''}|${h2hStatKey}|${playerType ?? ''}|${team}|${opponent}`
+      : '';
+  const h2hRow = useSection<{ key: string; row: H2HStatValuesRow | null }>(
+    { key: '', row: null },
+    // The condition is the narrowing, not `h2hKey`: `team` and `opponent`
+    // are `string | null`, and the matchup arrays are `string[]`.
     team && opponent && stat && serverStat
       ? async () => {
           const rows = await fetchH2HStatValues(
             sport,
-            SEASON,
-            String(stat.key),
+            // The same season the Stats board asks for, so the two surfaces
+            // agree on which two seasons "last 2" means.
+            boardSeasonET(sport),
+            h2hStatKey,
             { teams: [team], opponents: [opponent] },
             playerType ?? undefined,
           );
           // The read is narrowed to one fixture, but a fixture is a TEAM pair:
           // it comes back with every player on that team who has met them.
-          return rows.find((r) => r.player_id === playerId) ?? null;
+          return { key: h2hKey, row: rows.find((r) => r.player_id === playerId) ?? null };
         }
       : null,
-    [sport, team, opponent, playerId, stat?.key, playerType, nonce],
+    [h2hKey, nonce, h2hNonce],
   );
+  const h2hFresh = h2hRow.data.key === h2hKey;
+  const h2hRowLoading = h2hKey !== '' && (h2hRow.loading || (h2hRow.error == null && !h2hFresh));
+  const h2hPayload = h2hFresh ? h2hRow.data.row : null;
   const h2h: PlayerHeadToHead | null = useMemo(() => {
     if (!opponent || threshold == null || !serverStat) return null;
-    const row = h2hRow.data;
     // An opponent with no stored meeting is still an answer — "they have not
     // played" is what the card says, and it needs the opponent's name to say
     // it. A null row is therefore an EMPTY head-to-head, not a missing one.
-    return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
-  }, [h2hRow.data, opponent, threshold, selection.line, selection.side, serverStat]);
+    // A stale row (previous stat) is not an answer for this stat.
+    return playerHeadToHead(
+      opponent,
+      h2hPayload?.values ?? [],
+      h2hPayload?.dates ?? [],
+      selection.line,
+      selection.side,
+    );
+  }, [h2hPayload, opponent, threshold, selection.line, selection.side, serverStat]);
+
+  // The same meetings with no line attached, for the page's H2H range chip.
+  // Null when there is no opponent to read against, or the stat is one the
+  // server does not hold (the chip is not offered then); [] while it loads
+  // or when they have never met.
+  const h2hValues: H2HMeeting[] | null = useMemo(() => {
+    if (!opponent || !serverStat) return null;
+    return h2hMeetings(h2hPayload?.values ?? [], h2hPayload?.dates ?? []);
+  }, [h2hPayload, opponent, serverStat]);
 
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
@@ -364,19 +407,61 @@ export function usePlayerDetail(args: {
   const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '')
     && pvo.data.opponent === opponent;
 
+  // ── Defense-toughness filter (Matt, 2026-11-07) ─────────────────────────
+  // The player's games over his last three seasons played, each with that
+  // season's rank of the opponent's defense, plus the next opponent's rank.
+  // NBA, WNBA and NFL (lib/defenseTier). Tagged with the query that produced
+  // it, the same rule as the reads above: useSection keeps the previous
+  // payload during a refetch, so an untagged row would tier the last stat's
+  // games under the new stat's chips for one round trip.
+  const defenseSport = sport === 'NBA' || sport === 'WNBA' || sport === 'NFL';
+  const defenseKey =
+    defenseSport && playerId && stat && serverStat && posGroup && pvoSeason != null
+      ? `${sport}|${playerId}|${String(stat.key)}|${posGroup}|${pvoSeason}|${opponent ?? ''}`
+      : '';
+  const defense = useSection<{ key: string; rows: PlayerVsDefenseRow[] }>(
+    { key: '', rows: [] },
+    defenseKey !== '' && playerId && stat && posGroup && pvoSeason != null
+      ? async () => {
+          const rows = await fetchPlayerVsDefense(
+            sport,
+            playerId,
+            String(stat.key),
+            posGroup,
+            defenseSeasons(pvoSeason),
+            DEFENSE_SEASONS_PLAYED,
+            opponent,
+          );
+          return { key: defenseKey, rows };
+        }
+      : null,
+    [defenseKey, nonce],
+  );
+  const defenseFresh = defenseKey !== '' && defense.data.key === defenseKey;
+  const defenseGames: PlayerDefenseGames | null = useMemo(
+    () => (defenseFresh ? splitDefenseRows(defense.data.rows) : null),
+    [defenseFresh, defense.data.rows],
+  );
+
   return {
     reload,
+    reloadH2h,
     // Every section the pull reloads, or the spinner stops while five of
     // them are still in flight (UX review, 2026-10-21).
     loading:
       slate.loading || lines.loading || logGames.loading || picks.loading
-      || h2hRow.loading || pvo.loading || savant.loading || lineup.loading || rosterPos.loading,
+      || h2hRow.loading || pvo.loading || savant.loading || lineup.loading || rosterPos.loading
+      || defense.loading,
     books,
     booksReady,
     market,
     nextGame,
     h2h,
-    h2hLoading: h2hRow.loading,
+    h2hLoading: h2hRowLoading,
+    h2hOpponent: opponent && serverStat ? opponent : null,
+    h2hMeetings: h2hValues,
+    // A failed read is not "never met": the H2H chip shows this with a retry.
+    h2hError: h2hRow.error,
     // Blocks+Steals or Reb+Ast with an opponent to read against: the two
     // cards above are not shown, and the page says why in their place.
     serverReadsSkipped: !serverStat && stat != null && opponent != null,
@@ -401,6 +486,15 @@ export function usePlayerDetail(args: {
           }
         : null,
     slateLoading: slate.loading,
+    // Null until this query's rows land, on a failure, and for sports or
+    // stats the server has no ranks for: the filter row is not drawn then.
+    defenseGames,
+    defenseGroup: defenseKey !== '' ? posGroup : null,
+    // The read is in flight for this player and stat. The chart holds its
+    // spinner until it answers, so it does not draw the last-N games and then
+    // swap to the next opponent's tier under the reader (UX review,
+    // 2026-11-07). A failure ends it: the chart falls back to All.
+    defensePending: defenseKey !== '' && !defenseFresh && defense.error == null,
     tonight,
     move,
     linesLoading: lines.loading,

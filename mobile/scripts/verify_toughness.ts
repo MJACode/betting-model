@@ -122,6 +122,11 @@ function main() {
     dated?.text === 'vs NE · NE allows 17.9 pts/g (2025)', `${dated?.text}`);
   check('and the spoken form is words, not a slash',
     dated?.fact === 'NE 17.9 points allowed per game (2025)', `${dated?.fact}`);
+  // NBA labels a season by its ENDING year. "(2027)" in November reads as a
+  // season not yet started; the Teams board says "2026-27" (2026-11-06).
+  const nba = grade('NBA', { def_rating: 115.2 }, 'PHX', 2027);
+  check('an NBA season is named the way the Teams board names it',
+    nba?.text === 'vs PHX · PHX 115.2 def rtg (2026-27)', `${nba?.text}`);
   check('with no season it makes no claim about one', !/\(\d{4}\)/.test(seaSide?.text ?? ''), `${seaSide?.text}`);
   // The visible label is the Teams board's own wording for the same number, so
   // one stat is not two idioms on one tab.
@@ -155,11 +160,11 @@ function main() {
   const s = read('src/screens/StatsScreen.tsx');
   const tb = read('src/components/TeamsBoard.tsx');
   check('the football grade names the season it fell back to',
-    /the \$\{defenceSeason\} season/.test(s) || /defenceSeason != null/.test(s));
+    /the \$\{seasonName\} season/.test(s) && /defenceSeason/.test(s));
   check('the tooltip is built per sport, not one MLB paragraph',
-    /gradesOnDefence\(sport\)\s*\n?\s*\?\s*`Graded on \$\{defenceMetricSpoken\(sport\)\}/.test(s));
+    /gradesOnDefence\(sport\)\s*\n?\s*\?\s*`Measured on \$\{defenceMetricSpoken\(sport\)\}/.test(s));
   check('and the dash sentence no longer talks about a starter on those sports',
-    /no matchup data for this row yet/.test(s));
+    /no matchup for this row yet/.test(s));
   check('the slate gate is an identity, not a boolean read stale on a switch',
     /slateFor !== sport/.test(s) && !/slateReady/.test(s));
   check('the slate chip is announced busy, not dimmed',

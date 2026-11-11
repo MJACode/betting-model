@@ -28,6 +28,13 @@ function newId(): string {
   return `cm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Account deletion. Empties the in-memory list and removes `customModels.v1`. */
+export async function clearCustomModelsForAccountDeletion(): Promise<void> {
+  cached = [];
+  listeners.forEach((fn) => fn([]));
+  await AsyncStorage.removeItem(KEY);
+}
+
 export function useCustomModels() {
   const [models, setModels] = useState<CustomModel[]>(cached ?? []);
   const [ready, setReady] = useState<boolean>(cached != null);

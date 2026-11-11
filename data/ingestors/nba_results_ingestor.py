@@ -22,8 +22,14 @@ nothing when nothing is missing (one read of the season's games, 73 ms over
                            has a `games` row, or that `nba_schedule` lists as a
                            regular-season game (then the row is inserted).
                            Preseason is ignored (ESPN season type 1, and no
-                           `games` row). Play-in and playoff games are written
-                           only when `games` already has them.
+                           `games` row). Play-in, playoff and Cup final games are
+                           written only when `games` already has them, and it does
+                           from the odds feed or the schedule refresh's game-day
+                           insert: nba_prop_market bets them, and its picks settle
+                           on these rows the way a regular-season pick does. If
+                           the feed's row has home and away the other way round
+                           from ESPN (a neutral court) and ESPN's own id has no
+                           row, the final lands on the feed's row (match_game).
                            A score already stored is never overwritten: a
                            different ESPN score is logged as a WARNING and
                            counted (`score_conflicts`), because a final that
@@ -99,7 +105,7 @@ from data.ingestors.nba_espn_box import (
     ESPN_NBA_SCOREBOARD_URL, ESPN_NBA_SUMMARY_URL, SEASON_TYPE_PRESEASON,
     parse_nba_box, parse_nba_dnp, parse_nba_postponed, parse_nba_scoreboard,
 )
-from data.ingestors.nba_stats_ingestor import _nba_season_for_date, _upsert_player_log
+from data.ingestors.nba_stats_ingestor import _build_game_id, _nba_season_for_date, _upsert_player_log
 from data.ingestors.wnba_results_ingestor import norm_player_name
 
 LOOKBACK_DAYS = 3
@@ -272,7 +278,15 @@ def box_is_complete(rows: list[dict], game: dict, ev: dict) -> bool:
 
 def match_game(ev: dict, known: dict[str, dict]) -> dict | None:
     """Our game for an ESPN final: the same game_id, else the only game with the
-    same home and away teams within a day (a `games` row before a schedule one)."""
+    same home and away teams within a day (a `games` row before a schedule one),
+    else a `games` row of the same two teams on the same date the other way round.
+
+    The last is a neutral court where the odds feed and ESPN disagree on who is
+    home. The props and any bet sit on the feed's id, so a final that matched
+    nothing would leave that bet open for good. Same date only, because a playoff
+    series changes home every few games: two teams never play twice on one date
+    and every stored series game is at least two dates from the last (2023-24..
+    2025-26). `oriented` turns the event to match the row."""
     exact = known.get(ev["game_id"])
     if exact is not None and exact["source"] == "games":
         return exact
@@ -285,7 +299,21 @@ def match_game(ev: dict, known: dict[str, dict]) -> dict | None:
         return in_games[0] if len(in_games) == 1 else None
     if exact is not None:
         return exact
-    return near[0] if len(near) == 1 else None
+    if near:
+        return near[0] if len(near) == 1 else None
+    flipped = known.get(_build_game_id(ev["game_date"], ev["home"], ev["away"]))
+    return flipped if flipped is not None and flipped["source"] == "games" else None
+
+
+def oriented(ev: dict, game: dict) -> dict:
+    """The event with home and away as `game` has them. score_action and
+    box_is_complete read a score by side, so a flipped final must not reach them as is."""
+    if ev["home"] == game["home"] and ev["away"] == game["away"]:
+        return ev
+    logger.warning(f"NBA results: ESPN has {ev['game_id']}, games has {game['game_id']}: one game, "
+                   f"home and away the other way round; scored on {game['game_id']}")
+    return {**ev, "game_id": game["game_id"], "home": ev["away"], "away": ev["home"],
+            "home_score": ev["away_score"], "away_score": ev["home_score"]}
 
 
 def score_action(game: dict, ev: dict) -> dict | None:
@@ -494,15 +522,19 @@ class PgStore:
 
     def ensure_dnp_table(self) -> None:
         """Create nba_player_dnp once. Gated on the catalog: CREATE TABLE IF NOT
-        EXISTS is real DDL and fires PostgREST's schema reload (data/ddl_guard.py)."""
+        EXISTS is real DDL and fires PostgREST's schema reload (data/ddl_guard.py).
+
+        Not lock_down. The player page reads this table. lock_down revokes anon
+        and leaves RLS with no policy, which is an empty screen, and it would
+        undo anon_read_nba_player_dnp_2026_11_11.sql on the next results pass.
+        Writes stay with the table owner. The migration grants SELECT and adds
+        the read policy.
+        """
         if self._dnp_ready:
             return
-        from data.anon_readable import API_ROLES, lock_down
         from data.ddl_guard import schema_is_current
-        if not schema_is_current(self.conn, DNP_TABLE, columns=DNP_COLUMNS,
-                                 rls=True, revoked_from=API_ROLES):
+        if not schema_is_current(self.conn, DNP_TABLE, columns=DNP_COLUMNS):
             self.conn.execute(DNP_DDL)
-            lock_down(self.conn, DNP_TABLE)
             self.conn.commit()
         self._dnp_ready = True
 
@@ -648,6 +680,7 @@ def ingest_nba_results(run_date: str | None = None, lookback_days: int = LOOKBAC
                 if resolver is None and (recheck or not game["logged"]):
                     resolver = store.resolver(_shift(dates[0], -NAME_HISTORY_DAYS))
                     conn.rollback()
+                ev = oriented(ev, game)
                 _one_game(ev, game, store, resolver, totals, get_json=get_json,
                           dry_run=dry_run, recheck=recheck, sleep=sleep)
     finally:

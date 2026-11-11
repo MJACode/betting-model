@@ -547,9 +547,9 @@ const settings = read('screens/SettingsScreen.tsx');
 {
   const books = settings.indexOf('label="Connected books"');
   const bank = settings.indexOf('<SectionHeader title="Bankroll" />');
-  const control = settings.indexOf('<SectionHeader title="Staying in control" />');
-  check('a "Bankroll" section sits right above Staying in control', books > 0 && books < bank && bank < control &&
-    /<SectionHeader title="Bankroll" \/>\s*<BankrollCard \/>\s*<SectionHeader title="Staying in control" \/>/.test(settings));
+  const alerts = settings.indexOf('<SectionHeader title="Alerts" />');
+  check('a "Bankroll" section sits right after Betting, above Alerts', books > 0 && books < bank && bank < alerts &&
+    /<SectionHeader title="Bankroll" \/>\s*<BankrollCard \/>/.test(settings));
 }
 check('the section is "Bankroll", not "Bankroll & limits"', !settings.includes('Bankroll & limits'));
 eq('card copy', BANKROLL_CARD_COPY, 'Only used to show your units in dollars. Nothing is sized off it, and it stays on this device.');
@@ -591,8 +591,8 @@ check('no font-size literals in Settings', !/fontSize:\s*\d/.test(settings));
 // Picks banner it drove (#838, 2026-09-26). This PR must not bring any back.
 check('Settings: no daily exposure card (removed on master in #838)',
   !/Daily exposure limit|exposureCap|useResponsibleGambling|toggleRgCap|rgDraft/.test(settings));
-check('Settings: the helpline card stays, directly under "Staying in control"',
-  /<SectionHeader title="Staying in control" \/>[\s\S]{0,400}onPress=\{openHelpline\}/.test(settings));
+check('Settings: the helpline stays, last, under "Responsible gambling"',
+  /<SectionHeader title="Responsible gambling" \/>[\s\S]{0,1600}onPress=\{openHelpline\}/.test(settings));
 check('useResponsibleGambling stays deleted',
   !readdirSync(join(SRC, 'hooks')).includes('useResponsibleGambling.ts'));
 const picks = read('screens/PicksHomeScreen.tsx');

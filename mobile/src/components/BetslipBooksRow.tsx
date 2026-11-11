@@ -4,10 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
+import { SgpPriceEntry } from '@/components/SgpPriceEntry';
 import { formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { handoffAtBook, matchupForLeg, priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
+import { NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -37,12 +39,30 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * (lib/lineLegs.ts) leaves its tile partial like any other book's — so the
  * row can, on such a slip, hold no complete quote at all.
  */
-export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
+export function BetslipBooksRow({
+  legs,
+  sgpFits = NO_SGP_FITS,
+  enteredPrices,
+  sgpGroups = 0,
+  onSgpEntered,
+  onSgpCleared,
+}: {
+  legs: ParlayLeg[];
+  /** Fitted same-game cuts; a same-game slip's tiles are estimates. */
+  sgpFits?: SgpHaircuts;
+  /** Prices the member typed in from a book's own slip, by book. */
+  enteredPrices?: Readonly<Record<string, number>>;
+  /** Same-game groups on the slip. With the two callbacks, an estimated
+   *  tile's sheet offers to take the book's real price (SgpPriceEntry). */
+  sgpGroups?: number;
+  onSgpEntered?: (book: string, american: number) => void;
+  onSgpCleared?: (book: string) => void;
+}) {
   const quotes = useMemo(
     // Bettable books only: a tile opens the book, and Pinnacle / Bovada /
     // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
-    () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS),
-    [legs],
+    () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS, sgpFits, enteredPrices),
+    [legs, sgpFits, enteredPrices],
   );
   // The book whose hand-off sheet is open, or null. Held as the book key rather
   // than a boolean so the sheet's own `book` prop cannot drift from the tile
@@ -73,6 +93,28 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
     [legs, handoff],
   );
 
+  // The open book's quote, for the same-game price row in its sheet: only a
+  // full quote has a multiplied-out price to check an entry against.
+  const openQuote = openBook ? quotes.find((q) => q.book === openBook) : undefined;
+  const priceEntry =
+    openQuote &&
+    sgpGroups > 0 &&
+    onSgpEntered &&
+    onSgpCleared &&
+    openQuote.multipliedDecimal != null &&
+    (openQuote.sgpEstimated || openQuote.entered) ? (
+      <SgpPriceEntry
+        key={openQuote.book}
+        book={openQuote.book}
+        multipliedDecimal={openQuote.multipliedDecimal}
+        legs={legs}
+        sgpGroups={sgpGroups}
+        entered={enteredPrices?.[openQuote.book]}
+        onEntered={onSgpEntered}
+        onCleared={onSgpCleared}
+      />
+    ) : null;
+
   if (legs.length === 0 || quotes.length === 0) return null;
   // "Best payout" only means something against another fully-priced book.
   // Since legs price at the same line only, DK is often the sole full quote,
@@ -91,7 +133,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
           <InfoTooltip
             title="Place this bet at"
             body={
-              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nOpening a book puts every linked leg on that book’s slip when the book accepts a multi-pick link. A book that doesn’t still lists each leg so you can add it there.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
+              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nOpening a book puts every linked leg on that book’s slip when the book accepts a multi-pick link. A book that doesn’t still lists each leg so you can add it there.\n\n“est.” means two or more legs share a game. Books price those legs together, as a same-game parlay, for less than the legs multiplied out, so the tile shows our estimate. Tap the tile to enter the price that book’s slip shows. “Book price” is a price you entered.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
             }
             accessibilityLabel="About placing this bet"
           />
@@ -117,12 +159,16 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
               accessibilityRole="button"
               accessibilityLabel={
                 full
-                  ? `Bet on ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
+                  ? `Bet on ${bookName(q.book)}, ${q.sgpEstimated ? 'estimated ' : q.entered ? 'your entered ' : ''}combined odds ${formatAmerican(q.americanOdds!)}${
                       q.isBest && fullCount > 1 ? ', best payout' : ''
                     }`
                   : `Bet on ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
-              accessibilityHint="Opens the leg-by-leg hand-off for this book"
+              accessibilityHint={
+                q.sgpEstimated || q.entered
+                  ? 'Opens the hand-off, where you can enter the price from this book’s slip'
+                  : 'Opens the leg-by-leg hand-off for this book'
+              }
               // A partial tile fades its ODDS only (oddsNa below): the badge
               // and the "2/3 legs" coverage are the information, and at 55%
               // on textTertiary they were under AA — on DraftKings' own tile,
@@ -143,8 +189,8 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
               <Text style={[styles.odds, !full && styles.oddsNa]}>
                 {full ? formatAmerican(q.americanOdds!) : 'N/A'}
               </Text>
-              <Text style={styles.coverage}>
-                {q.priced}/{q.total} legs
+              <Text style={styles.coverage} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                {q.entered ? 'Book price' : q.sgpEstimated ? `${q.priced}/${q.total} · est.` : `${q.priced}/${q.total} legs`}
               </Text>
             </Pressable>
           );
@@ -158,6 +204,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
         legs={handoffLegs}
         book={openBook ?? undefined}
         onClose={() => setOpenBook(null)}
+        priceEntry={priceEntry}
       />
     </View>
   );

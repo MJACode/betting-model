@@ -5,8 +5,8 @@
  * posted settled BETs (passesRecordFilter, Discord still has the lock). The
  * money is Discord's posted stake: `postedPickUnits`, the app twin of
  * `published_pick_unit_profit` / `published_pick_unit_risked`. ROI is units
- * won or lost divided by units risked. The Models tab stays on the flat
- * $100 book.
+ * won or lost divided by units risked. The Models tab and the model pages
+ * book the same stake (one unit basis, 2026-11-03).
  */
 import { formatPctSigned, formatSigned } from '@/lib/format';
 import {
@@ -123,8 +123,10 @@ const SPORT_ORDER: Record<string, number> = {
   NBA: 2,
   NFL: 3,
   NCAAF: 4,
-  UFC: 5,
-  NHL: 6,
+  NCAAB: 5,
+  NCAABW: 6,
+  UFC: 7,
+  NHL: 8,
   // GOLF retired 2026-09-08 (mike) -- omitted so the recap grows no chip that
   // can only ever report zero. DailyResultsModal appends any sport the lib
   // returns that is missing here, so a golf row could still never be dropped.

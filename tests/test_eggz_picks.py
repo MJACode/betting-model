@@ -491,14 +491,15 @@ def _grade_conn(pending_row, log_rows):
     return Conn(), reviews
 
 
-def test_a_non_mlb_prop_on_a_final_is_marked_for_review():
+def test_an_empty_nfl_log_stays_pending():
+    """No box score yet is not a grade and not a review. The recap waits."""
     row = (
         9, "NFL_2026-10-19_BUF_KC", "prop", "over", 250.5, -110, 1,
         "Josh Allen", "passing_yards", None, "2026-10-19T20:00:00+00:00", "NFL",
     )
     conn, reviews = _grade_conn(row, [])
-    assert eg.grade_pending(conn) == 1
-    assert reviews[0][0] == "prop_not_graded"
+    assert eg.grade_pending(conn) == 0
+    assert reviews == []
 
 
 def test_an_mlb_prop_waits_when_the_log_is_not_in_yet():
@@ -525,7 +526,8 @@ def test_the_all_time_line_stops_at_the_period_and_posts_on_every_span(monkeypat
     db.execute("""CREATE TABLE capper_picks (
         id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
         sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
-        graded_at TEXT)""")
+        graded_at TEXT, posted_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
     db.execute("""CREATE TABLE games (
         game_id TEXT, sport TEXT, game_date TEXT,
         home_score INT, away_score INT, commence_time TEXT)""")
@@ -540,7 +542,7 @@ def test_the_all_time_line_stops_at_the_period_and_posts_on_every_span(monkeypat
         (3, "graded", "WIN", "2026-10-20", "NHL", -135, 1.0, 1.35,
          "2026-10-21T04:23:21+00:00"),
         (4, "pending", None, "2026-10-21", "NHL", -110, None, None, None),
-        (5, "needs_review", "WIN", "2026-10-12", "NHL", -110, 5.0, 1.1, None),
+        (5, "needs_review", "WIN", "2026-09-30", "NHL", -110, 5.0, 1.1, None),
     ]
     db.executemany(
         "INSERT INTO capper_picks (id, status, result, game_date, sport, "
@@ -566,21 +568,28 @@ def test_the_all_time_line_stops_at_the_period_and_posts_on_every_span(monkeypat
     assert eg._post_window(
         conn, "day", "2026-10-12", "2026-10-12", "Oct 12") == 1
 
-    def footer(body):
-        return body["embeds"][0]["footer"]["text"]
+    def all_time(body):
+        fields = body["embeds"][0]["fields"]
+        return next(f for f in fields if "All-time" in f["name"])
 
     # Oct 18 day, the week, and the month stop before the Oct 20 win.
     for body in posted[:3]:
-        text = footer(body)
-        assert text.startswith("All-time: 1-1")
-        assert "-0.30u" in text and "ROI" in text
-        assert "2-1" not in text
+        field = all_time(body)
+        assert "since 2026-10-12" in field["name"]
+        assert "1-1" in field["value"]
+        assert "-0.30u" in field["value"] and "ROI" in field["value"]
+        assert "2 settled" in field["value"]
+        assert "2-1" not in field["value"]
+        assert "+5.00u" not in field["value"]
+        assert "footer" not in body["embeds"][0]
     # The Oct 12 day does not include the Oct 18 win graded on Oct 21.
-    assert footer(posted[3]).startswith("All-time: 0-1")
-    assert "+5.00u" not in footer(posted[3])
+    oct12 = all_time(posted[3])
+    assert "0-1" in oct12["value"]
+    assert "1 settled" in oct12["value"]
+    assert "+5.00u" not in oct12["value"]
     oct18 = posted[0]["embeds"][0]
     assert "1-0" in oct18["description"]
-    assert oct18["footer"]["text"].startswith("All-time: 1-1")
+    assert "NHL (all-time)" in [f["name"] for f in oct18["fields"]]
 
 
 def test_the_embed_names_eggz_and_states_units_and_roi():
@@ -897,3 +906,1640 @@ def test_the_job_is_on_the_pipeline_and_settle_posts_the_recap():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert "add_capper_picks_2026_10_20.sql" in ACTIVE_MIGRATIONS
     assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
+
+
+OCT22 = (
+    "Thursday Oct. 22\nAll 1U\n\nNHL\n"
+    "NSH Predators ML (+122)🗑️\nPIT Penguins ML (-112)✅\n\nNFL\n"
+    "A.J. Brown (NE) O5.5 Receptions (+116)🗑️\n\nNBA\n"
+    "E.J. Edgecombe (PHI) O11.5 Points (+100)🗑️"
+)
+OCT23 = (
+    "Friday Oct. 22\nAll 1U\n\nNBA \nORL Magic ML (-118)🗑️\n\nNCAAF\n"
+    "Tulsa ML (-115)🗑️"
+)
+OCT24 = (
+    "Saturday Oct. 24\n\nNCAAF\nALL 1U\nSouth Carolina ML (-130)\n"
+    "Texas -3 (-112)\n\nNHL\nPHI Flyers ML (-122)\n"
+    "WSH Capitals ML (-125)\nUTA Mammoth ML (-142)"
+)
+_POSTED_OCT22 = datetime(2026, 10, 22, 17, 54, 0, tzinfo=timezone.utc)
+_POSTED_OCT23 = datetime(2026, 10, 23, 22, 53, 29, tzinfo=timezone.utc)
+
+
+def test_a_date_without_a_sport_is_a_slate_header():
+    header = eg._slate_header("Friday Oct. 22", _POSTED_OCT23)
+    assert header == {"slate_date": "2026-10-22"}
+    assert "sport" not in header
+    legs, reviews = eg.parse_message("Friday Oct. 22\nNCAAF\nTulsa ML (-115)", _POSTED_OCT23)
+    assert reviews == []
+    assert legs[0]["sport_hint"] == "NCAAF"
+    assert legs[0]["slate_date"] == "2026-10-22"
+    assert legs[0]["team_text"] == "Tulsa"
+    assert legs[0]["price"] == -115
+
+
+def test_the_oct_22_and_oct_23_posts_parse_with_nothing_dropped():
+    legs, reviews = eg.parse_message(OCT22, _POSTED_OCT22)
+    assert reviews == []
+    assert [leg["market"] for leg in legs] == ["h2h", "h2h", "prop", "prop"]
+    nsh, pit, brown, edge = legs
+    assert nsh["team_text"] == "NSH Predators" and nsh["price"] == 122
+    assert nsh["sport_hint"] == "NHL" and nsh["slate_date"] == "2026-10-22"
+    assert pit["team_text"] == "PIT Penguins" and pit["price"] == -112
+    assert brown["player_name"] == "A.J. Brown"
+    assert brown["team_text"] == "NE" and brown["side"] == "over"
+    assert brown["line"] == 5.5 and brown["price"] == 116
+    assert brown["prop_stat"] == "receptions" and brown["sport_hint"] == "NFL"
+    assert edge["player_name"] == "E.J. Edgecombe"
+    assert edge["team_text"] == "PHI" and edge["side"] == "over"
+    assert edge["line"] == 11.5 and edge["price"] == 100
+    assert edge["prop_stat"] == "points" and edge["sport_hint"] == "NBA"
+    assert [leg["stake_units"] for leg in legs] == [1, 1, 1, 1]
+
+    legs, reviews = eg.parse_message(OCT23, _POSTED_OCT23)
+    assert reviews == []
+    assert [leg["team_text"] for leg in legs] == ["ORL Magic", "Tulsa"]
+    assert [leg["price"] for leg in legs] == [-118, -115]
+    assert [leg["sport_hint"] for leg in legs] == ["NBA", "NCAAF"]
+    assert [leg["slate_date"] for leg in legs] == ["2026-10-22", "2026-10-22"]
+
+    legs, reviews = eg.parse_message(OCT22 + "\nlets ride", _POSTED_OCT22)
+    assert len(legs) == 4
+    assert reviews[0]["reason"] == "unparsed"
+    assert "lets ride" in reviews[0]["raw"]
+
+    posted24 = datetime(2026, 10, 24, 15, 59, 4, tzinfo=timezone.utc)
+    legs, reviews = eg.parse_message(OCT24, posted24)
+    assert reviews == []
+    carolina, texas, phi, wsh, uta = legs
+    assert carolina["market"] == "h2h" and carolina["team_text"] == "South Carolina"
+    assert carolina["price"] == -130 and carolina["sport_hint"] == "NCAAF"
+    assert carolina["slate_date"] == "2026-10-24"
+    assert texas["market"] == "spreads" and texas["team_text"] == "Texas"
+    assert texas["line"] == -3 and texas["price"] == -112
+    assert [leg["team_text"] for leg in (phi, wsh, uta)] == [
+        "PHI Flyers", "WSH Capitals", "UTA Mammoth",
+    ]
+
+
+def _army_tulsa(game_id, game_date, commence, home_score, away_score):
+    home_win = None
+    if home_score is not None and away_score is not None:
+        home_win = 1 if float(home_score) > float(away_score) else 0
+    return (
+        game_id, "NCAAF", game_date, "Tulsa", "Army", commence,
+        home_score, away_score, home_win, None, 0,
+    )
+
+
+class _SlateConn:
+    """School-name lookup. A query pinned to the slate date returns nothing."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.sql = ""
+        self.params = ()
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        self.params = params or ()
+        return self
+
+    def fetchall(self):
+        if "game_date = %s" in self.sql:
+            return []
+        return list(self.rows)
+
+    def fetchone(self):
+        return None
+
+
+def test_a_school_name_is_matched_exactly():
+    """'Texas' is not Texas Tech, Texas A&M, or Texas State."""
+    posted = datetime(2026, 10, 24, 15, 59, tzinfo=timezone.utc)
+    legs, reviews = eg.parse_message(
+        "Saturday Oct. 24\nNCAAF\nTexas -3 (-112)", posted)
+    assert reviews == []
+    seen = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            seen.append((sql, params))
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            if "game_date = %s" in self.sql:
+                return [(
+                    "NCAAF_2026-10-24_ole-miss_texas", "NCAAF", "2026-10-24",
+                    "Texas", "Ole Miss", "2026-10-24T23:30:00+00:00",
+                    None, None, None, None, 0,
+                )]
+            return []
+
+        def fetchone(self):
+            return None
+
+    game, reason = eg._match_leg(Conn(), legs[0], posted)
+    assert reason is None
+    assert game["game_id"] == "NCAAF_2026-10-24_ole-miss_texas"
+    assert game["side"] == "home"
+    assert legs[0]["line"] == -3
+    sql, params = seen[0]
+    assert "lower(home_team) = lower(%s)" in sql
+    assert "lower(away_team) = lower(%s)" in sql
+    assert params[0] == "NCAAF"
+    assert params[1] == "Texas" and params[2] == "Texas"
+
+
+def test_tulsa_matches_the_odds_twin_when_the_slate_date_is_wrong():
+    et = _army_tulsa(
+        "NCAAF_2026-10-23_army_tulsa", "2026-10-23",
+        "2026-10-24T00:36:33+00:00", 35, 38)
+    utc = _army_tulsa(
+        "NCAAF_2026-10-24_army_tulsa", "2026-10-24",
+        "2026-10-24T00:30:00+00:00", 35, 38)
+    legs, reviews = eg.parse_message("Friday Oct. 22\nNCAAF\nTulsa ML (-115)", _POSTED_OCT23)
+    assert reviews == []
+    game, reason = eg._match_leg(_SlateConn([et, utc]), legs[0], _POSTED_OCT23)
+    assert reason is None
+    assert game["game_id"] == "NCAAF_2026-10-23_army_tulsa"
+    assert game["side"] == "home"
+    assert game["game_date"] == "2026-10-23"
+
+
+def test_a_twin_with_one_final_uses_the_scored_row():
+    posted = datetime(2026, 10, 23, 18, 0, tzinfo=timezone.utc)
+    kick = posted + timedelta(hours=6)
+    bare = {
+        "sport": "NCAAF", "home_team": "Tulsa", "away_team": "Army",
+        "commence": kick, "game_id": "NCAAF_2026-10-23_army_tulsa",
+        "game_date": "2026-10-23", "home_score": None, "away_score": None,
+    }
+    scored = {
+        **bare, "commence": kick + timedelta(minutes=6),
+        "game_id": "NCAAF_2026-10-24_army_tulsa", "game_date": "2026-10-24",
+        "home_score": 35, "away_score": 38,
+    }
+    chosen, reason = eg.choose_game([bare, scored], posted)
+    assert reason is None
+    assert chosen["game_id"] == "NCAAF_2026-10-24_army_tulsa"
+
+
+def test_two_games_and_a_later_kick_are_not_collapsed():
+    posted = datetime(2026, 10, 23, 18, 0, tzinfo=timezone.utc)
+    kick = posted + timedelta(hours=4)
+    tulsa = {
+        "sport": "NCAAF", "home_team": "Tulsa", "away_team": "Army",
+        "commence": kick, "game_id": "early", "game_date": "2026-10-23",
+        "home_score": 1, "away_score": 0,
+    }
+    later = {**tulsa, "commence": kick + timedelta(hours=5), "game_id": "late"}
+    chosen, reason = eg.choose_game([tulsa, later], posted)
+    assert chosen is None and reason == "ambiguous_game"
+    other = {**tulsa, "away_team": "Navy", "commence": kick + timedelta(hours=2),
+             "game_id": "other"}
+    chosen, reason = eg.choose_game([tulsa, other], posted)
+    assert chosen is None and reason == "ambiguous_game"
+
+
+def test_an_nfl_receptions_prop_grades_from_the_log():
+    graded = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+            if sql.startswith("UPDATE capper_picks SET status = 'graded'"):
+                graded.append(params)
+            return self
+
+        def fetchall(self):
+            if "FROM capper_messages" in self.sql:
+                return []
+            if "game_id IS NOT NULL" in self.sql:
+                return [(
+                    9, "NFL_2026_07_NE_CHI", "prop", "over", 5.5, 116, 1,
+                    "A.J. Brown", "receptions", "player_receptions",
+                    "2026-10-23T00:15:00+00:00", "NFL",
+                )]
+            if "nfl_player_game_log" in self.sql:
+                return [("A.J. Brown", 3)]
+            return []
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (24, 35, 0, None, 0, "2026-10-23T00:15:00+00:00", "2026-10-22")
+            if "RETURNING" in self.sql:
+                return (1,)
+            return None
+
+        def commit(self):
+            pass
+
+    assert eg.grade_pending(Conn()) == 1
+    result, profit, risked = graded[0][:3]
+    expect, expect_risk = eg.units_for_result(1, 116, "LOSS")
+    assert result == "LOSS"
+    assert abs(profit - expect) < 1e-9
+    assert abs(risked - expect_risk) < 1e-9
+    assert abs(expect - -0.8620689655172413) < 1e-9
+
+
+def test_a_player_missing_from_the_log_is_not_a_silent_no_action():
+    """The log says VJ Edgecombe. The post says E.J. Edgecombe. No guess."""
+    calls = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+            calls.append((sql, params))
+            return self
+
+        def fetchall(self):
+            if "FROM capper_messages" in self.sql:
+                return []
+            if "game_id IS NOT NULL" in self.sql:
+                return [(
+                    4, "NBA_2026-10-22_CLE_PHI", "prop", "over", 11.5, 100, 1,
+                    "E.J. Edgecombe", "points", "player_points",
+                    "2026-10-23T00:00:00+00:00", "NBA",
+                )]
+            if "nba_player_game_log" in self.sql:
+                return [("VJ Edgecombe", 11)]
+            return []
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (110, 108, 1, None, 0, "2026-10-23T00:00:00+00:00", "2026-10-22")
+            if "RETURNING" in self.sql:
+                return (1,)
+            return None
+
+        def commit(self):
+            pass
+
+    assert eg.grade_pending(Conn()) == 1
+    reviews = [params for sql, params in calls
+               if "SET status = 'needs_review'" in sql]
+    assert reviews == [("player_not_in_log", 4)]
+    assert not any("NO_ACTION" in sql for sql, _params in calls)
+
+
+def test_tulsa_moneyline_grades_as_a_home_loss(monkeypatch):
+    monkeypatch.setattr(eg, "_closing_odds", lambda *a, **k: None)
+    graded = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params
+            if sql.startswith("UPDATE capper_picks SET status = 'graded'"):
+                graded.append(params)
+            return self
+
+        def fetchall(self):
+            if "FROM capper_messages" in self.sql:
+                return []
+            if "game_id IS NOT NULL" in self.sql:
+                return [(
+                    8, "NCAAF_2026-10-23_army_tulsa", "h2h", "home", None, -115, 1,
+                    None, None, None, "2026-10-24T00:36:33+00:00", "NCAAF",
+                )]
+            return []
+
+        def fetchone(self):
+            if "FROM games" in self.sql:
+                return (35, 38, 0, None, 0, "2026-10-24T00:36:33+00:00", "2026-10-23")
+            return None
+
+        def commit(self):
+            pass
+
+    assert eg.grade_pending(Conn()) == 1
+    result, profit, risked = graded[0][:3]
+    expect, expect_risk = eg.units_for_result(1, -115, "LOSS")
+    assert result == "LOSS"
+    assert abs(profit - expect) < 1e-9 and abs(expect - -1.15) < 1e-9
+    assert abs(risked - expect_risk) < 1e-9
+
+
+def test_the_all_time_block_matches_the_main_recap():
+    from tracking.discord_notifier import render_all_time_fields
+    day = [("NCAAF", "eggz", "LOSS", None, -115, None, False, -1.15, 1.15)]
+    all_rows = day + [
+        ("NBA", "eggz", "LOSS", None, -118, 1.5, False, -1.18, 1.18),
+    ]
+    embed = eg.eggz_embed("Oct 23", day, pending=0, all_time=all_rows, since="2026-10-18")
+    assert embed["fields"][1:] == render_all_time_fields(all_rows, "2026-10-18")
+    overall = embed["fields"][1]
+    assert "All-time" in overall["name"] and "2026-10-18" in overall["name"]
+    assert "2 settled" in overall["value"]
+    assert "beat close" in overall["value"]
+    assert "NBA (all-time)" in [f["name"] for f in embed["fields"]]
+    assert "NCAAF (all-time)" in [f["name"] for f in embed["fields"]]
+    assert "footer" not in embed
+    assert eg.eggz_embed("Oct 23", day, pending=1, all_time=all_rows) is None
+
+
+def _sqlite():
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            return db.execute(sql.replace("%s", "?"), tuple(params or ()))
+
+        def commit(self):
+            db.commit()
+
+        def close(self):
+            pass
+
+    return db, Conn
+
+
+def test_a_needs_review_leg_holds_the_recap(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "1")
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
+        posted_at TEXT, capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT, commence_time TEXT)""")
+    db.execute("""CREATE TABLE push_sent (
+        lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
+        UNIQUE (lock_key, kind))""")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, price, "
+        "clv_pct, units, risked, posted_at) VALUES (1,'graded','WIN','2026-10-22',"
+        "'NHL',-112,NULL,1,1.12,'2026-10-22T17:54:00+00:00')")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, price, "
+        "clv_pct, units, risked, posted_at) VALUES (2,'needs_review',NULL,"
+        "'2026-10-22','NFL',116,NULL,NULL,NULL,'2026-10-22T17:54:00+00:00')")
+    conn = Conn()
+    assert eg._post_window(conn, "day", "2026-10-22", "2026-10-22", "Oct 22") == 0
+    assert posted == []
+    assert db.execute("SELECT COUNT(*) FROM push_sent").fetchone()[0] == 0
+
+
+def test_an_undated_needs_review_holds_the_new_york_day():
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, game_date TEXT, posted_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, game_date, posted_at) "
+        "VALUES (1,'needs_review',NULL,'2026-10-23T02:00:00+00:00')")
+    conn = Conn()
+    assert eg._unresolved_in(conn, "2026-10-22", "2026-10-22") == 1
+    assert eg._unresolved_in(conn, "2026-10-23", "2026-10-23") == 0
+    db.execute("UPDATE capper_picks SET posted_at = '2026-10-24T16:00:00+00:00'")
+    assert eg._unresolved_in(conn, "2026-10-22", "2026-10-22") == 0
+    assert eg._unresolved_in(conn, "2026-10-24", "2026-10-24") == 1
+
+
+def test_reparse_leaves_a_graded_leg_and_keeps_an_unparsed_line(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_OPS", "")
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_messages (
+        message_id TEXT PRIMARY KEY, body TEXT, posted_at TEXT,
+        parse_status TEXT, parse_note TEXT, capper_key TEXT DEFAULT 'eggz')""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, message_id TEXT, line_no INTEGER, status TEXT,
+        review_reason TEXT, sport TEXT, game_id TEXT, game_date TEXT,
+        home_team TEXT, away_team TEXT, commence_time TEXT, market TEXT,
+        side TEXT, line REAL, price REAL, stake_units REAL, player_name TEXT,
+        prop_stat TEXT, prop_market TEXT, posted_at TEXT, result TEXT,
+        units REAL, risked REAL, capper_key TEXT DEFAULT 'eggz',
+        parlay_id INTEGER, UNIQUE (message_id, line_no))""")
+    db.execute("""CREATE TABLE push_sent (
+        lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
+        UNIQUE (lock_key, kind))""")
+    body = "EDM Oilers ML -135\nlets ride"
+    posted = "2026-10-20T16:06:51+00:00"
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note) "
+        "VALUES ('m1',?,?, 'needs_review','old')",
+        (body, posted))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, result, "
+        "units, price, stake_units, posted_at) VALUES "
+        "(10,'m1',1,'graded','WIN',99,-135,1,?)", (posted,))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at) VALUES "
+        "(11,'m1',3,'needs_review','unparsed: gone',1,?)", (posted,))
+
+    def fake_match(conn, leg, posted_at):
+        return {
+            "sport": "NHL", "game_id": "NHL_2026-10-20_MIN_EDM",
+            "game_date": "2026-10-20", "home_team": "EDM", "away_team": "MIN",
+            "commence_time": "2026-10-21T00:00:00+00:00", "side": "home",
+        }, None
+
+    monkeypatch.setattr(eg, "_match_leg", fake_match)
+    assert eg.reparse_stored(Conn()) == 1
+    row = db.execute(
+        "SELECT status, result, units FROM capper_picks WHERE id = 10"
+    ).fetchone()
+    assert row == ("graded", "WIN", 99)
+    gone = db.execute("SELECT id FROM capper_picks WHERE line_no = 3").fetchone()
+    assert gone is None
+    review = db.execute(
+        "SELECT status, review_reason FROM capper_picks WHERE line_no = 2"
+    ).fetchone()
+    assert review[0] == "needs_review"
+    assert review[1].startswith("unparsed:")
+    assert "lets ride" in review[1]
+
+
+def _recap_db():
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        sport TEXT, price REAL, clv_pct REAL, units REAL, risked REAL,
+        stake_units REAL, review_reason TEXT, posted_at TEXT, graded_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT, commence_time TEXT)""")
+    db.execute("""CREATE TABLE push_sent (
+        lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
+        UNIQUE (lock_key, kind))""")
+    return db, Conn
+
+
+def test_restate_posts_corrected_and_keeps_the_sent_row(monkeypatch):
+    monkeypatch.setitem(eg.config.RECORD_RESTATEMENT_APPROVALS, "2026-10-23", "test")
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
+    db, Conn = _recap_db()
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, price, "
+        "units, risked) VALUES (1,'graded','LOSS','2026-10-23','NCAAF',-115,-1.15,1.15)")
+    sent_at = "2026-10-24T10:19:22-04:00"
+    db.execute(
+        "INSERT INTO push_sent VALUES (?,?,?,?)",
+        ("discord_eggz_results_day:2026-10-23", "discord_eggz_results_day",
+         sent_at, "1563557520860119051"))
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", Conn)
+    assert eg.restate_eggz_day("2026-10-23") == 1
+    title = posted[0]["embeds"][0]["title"]
+    description = posted[0]["embeds"][0]["description"]
+    assert title.endswith("Corrected")
+    assert description.startswith("Corrected. The earlier post for this day left graded picks out.")
+    assert "0-1" in description and "-1.15u" in description
+    locks = db.execute("SELECT lock_key, kind FROM push_sent ORDER BY kind").fetchall()
+    assert ("discord_eggz_results_day:2026-10-23", "discord_eggz_results_day") in locks
+    assert any(kind == "discord_eggz_results_day_restate" for _key, kind in locks)
+    assert eg.restate_eggz_day("2026-10-23") == 0
+    assert len(posted) == 1
+
+
+def test_restate_dry_run_and_an_unresolved_leg_post_nothing(monkeypatch):
+    for day in ("2026-10-21", "2026-10-22"):
+        monkeypatch.setitem(eg.config.RECORD_RESTATEMENT_APPROVALS, day, "test")
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append(body) or "77")
+    db, Conn = _recap_db()
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, price, "
+        "units, risked) VALUES (1,'graded','WIN','2026-10-22','NHL',-112,1,1.12)")
+    db.execute(
+        "INSERT INTO push_sent VALUES (?,?,?,?)",
+        ("discord_eggz_results_day:2026-10-22", "discord_eggz_results_day",
+         "2026-10-23T06:03:01-04:00", "1"))
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", Conn)
+    assert eg.restate_eggz_day("2026-10-22", dry_run=True) == 1
+    assert posted == []
+    assert db.execute("SELECT COUNT(*) FROM push_sent").fetchone()[0] == 1
+    db.execute(
+        "INSERT INTO capper_picks (id, status, game_date, sport) "
+        "VALUES (2,'needs_review','2026-10-22','NBA')")
+    assert eg.restate_eggz_day("2026-10-22", dry_run=True) == 0
+    assert eg.restate_eggz_day("2026-10-22") == 0
+    assert posted == []
+    assert db.execute("SELECT COUNT(*) FROM push_sent").fetchone()[0] == 1
+    assert eg.restate_eggz_day("2026-10-21") == 0
+
+
+def test_settle_manual_uses_the_stored_price_and_refuses_a_graded_row():
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        price REAL, stake_units REAL, units REAL, risked REAL,
+        review_reason TEXT, graded_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, game_date, price, stake_units) "
+        "VALUES (7,'needs_review','2026-10-22',100,1)")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, game_date, price, stake_units) "
+        "VALUES (8,'needs_review','2026-10-22',NULL,1)")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, game_date, price, stake_units) "
+        "VALUES (9,'graded','WIN','2026-10-22',-110,1)")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, price, stake_units) "
+        "VALUES (10,'needs_review',-115,1)")
+    conn = Conn()
+    preview = eg.settle_manual(conn, 7, "loss", "VJ Edgecombe logged 11 points", apply=False)
+    assert preview["applied"] is False
+    assert preview["result"] == "LOSS"
+    assert preview["units"] == -1.0 and preview["risked"] == 1.0
+    assert db.execute("SELECT status FROM capper_picks WHERE id = 7").fetchone()[0] == "needs_review"
+    applied = eg.settle_manual(conn, 7, "LOSS", "VJ Edgecombe logged 11 points")
+    assert applied["applied"] is True
+    row = db.execute(
+        "SELECT status, result, units, risked, review_reason FROM capper_picks WHERE id = 7"
+    ).fetchone()
+    assert row[0] == "graded" and row[1] == "LOSS"
+    assert row[2] == -1.0 and row[3] == 1.0
+    assert row[4].startswith("manual: VJ Edgecombe")
+    bare = eg.settle_manual(conn, 8, "LOSS", "no price was on the post")
+    assert bare["units"] == -1.0 and bare["risked"] == 1.0
+    try:
+        eg.settle_manual(conn, 9, "LOSS", "already graded")
+        raised = False
+    except eg.EggzSettleError:
+        raised = True
+    assert raised
+    assert db.execute("SELECT result FROM capper_picks WHERE id = 9").fetchone()[0] == "WIN"
+    for bad in (("PUSHY", "note"), ("WIN", "  ")):
+        try:
+            eg.settle_manual(conn, 8, bad[0], bad[1])
+            raised = False
+        except eg.EggzSettleError:
+            raised = True
+        assert raised
+    try:
+        eg.settle_manual(conn, 10, "LOSS", "no slate")
+        raised = False
+    except eg.EggzSettleError as exc:
+        raised = True
+        assert "game_date" in str(exc)
+    assert raised
+    assert db.execute("SELECT status FROM capper_picks WHERE id = 10").fetchone()[0] == "needs_review"
+
+
+def test_the_record_script_does_not_write_without_apply(monkeypatch, capsys):
+    from scripts import eggz_record
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        sport TEXT, market TEXT, player_name TEXT, side TEXT, price REAL,
+        stake_units REAL, units REAL, risked REAL, review_reason TEXT,
+        graded_at TEXT, posted_at TEXT,
+        capper_key TEXT DEFAULT 'eggz', parlay_id INTEGER)""")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, review_reason, game_date, sport, "
+        "market, player_name, side, price, stake_units) VALUES "
+        "(4,'needs_review','player_not_in_log','2026-10-22','NBA','prop',"
+        "'E.J. Edgecombe','over',100,1)")
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", Conn)
+    graded = []
+    monkeypatch.setattr(eggz_record, "grade_pending", lambda conn: graded.append(1) or 0)
+    assert eggz_record.main(["grade"]) == 0
+    assert graded == []
+    assert "dry-run" in capsys.readouterr().out
+    assert eggz_record.main(["grade", "--apply"]) == 0
+    assert graded == [1]
+    assert eggz_record.main([
+        "settle", "--id", "4", "--result", "LOSS",
+        "--note", "VJ Edgecombe logged 11 points",
+    ]) == 0
+    assert db.execute("SELECT status FROM capper_picks WHERE id = 4").fetchone()[0] == "needs_review"
+    assert eggz_record.main([
+        "settle", "--id", "4", "--result", "LOSS",
+        "--note", "VJ Edgecombe logged 11 points", "--apply",
+    ]) == 0
+    assert db.execute(
+        "SELECT status, result FROM capper_picks WHERE id = 4"
+    ).fetchone() == ("graded", "LOSS")
+    calls = []
+    monkeypatch.setattr(
+        eggz_record, "restate_eggz_day",
+        lambda game_date, dry_run=False, now=None: calls.append(dry_run) or 1)
+    assert eggz_record.main(["restate", "2026-10-22"]) == 0
+    assert calls == [True]
+    assert eggz_record.main(["restate", "2026-10-23", "--apply"]) == 0
+    assert calls == [True, False]
+
+
+def test_a_parlay_is_one_bet_at_the_stated_price_and_stake():
+    posted = datetime(2026, 10, 24, 18, 0, tzinfo=timezone.utc)
+    body = "\n".join([
+        "NBA Oct. 24",
+        "LAL @ BOS",
+        "3 leg parlay +450 1u",
+        "Lakers -3.5 -110",
+        "- Celtics ML -150",
+        "Over 220.5",
+    ])
+    legs, reviews = eg.parse_message(body, posted)
+    assert reviews == []
+    assert len(legs) == 3
+    header = legs[0]["parlay_header"]
+    assert header["ok"] is True
+    assert header["price"] == 450
+    assert header["stake_units"] == 1
+    assert all(leg["parlay_header"] is header for leg in legs)
+    assert [leg["market"] for leg in legs] == ["spreads", "h2h", "totals"]
+    assert legs[0]["line"] == -3.5 and legs[0]["price"] == -110
+    assert legs[1]["team_text"] == "Celtics"
+    assert "parlay_header" not in eg.parse_message(OCT18, _POSTED_OCT18)[0][0]
+
+
+def test_an_unparsed_parlay_line_is_kept_and_not_booked_as_singles():
+    body = "\n".join([
+        "PARLAY +450 2u",
+        "Lakers -3.5",
+        "lets ride",
+        "Celtics ML",
+    ])
+    legs, reviews = eg.parse_message(body)
+    assert reviews == [{"line_no": 3, "raw": "lets ride", "reason": "unparsed"}]
+    assert len(legs) == 2
+    assert legs[0]["parlay_header"]["ok"] is False
+    assert legs[0]["parlay_header"]["stake_units"] == 2
+    assert legs[0]["parlay_header"]["price"] == 450
+
+    bare, bare_reviews = eg.parse_message("PARLAY")
+    assert bare == []
+    assert bare_reviews[0]["reason"] == "unparsed"
+    assert "PARLAY" in bare_reviews[0]["raw"]
+
+    robin_legs, robin_reviews = eg.parse_message(
+        "round robin +400 1u\nLakers -3.5\nCeltics ML")
+    assert robin_reviews == []
+    assert len(robin_legs) == 2
+    assert robin_legs[0]["parlay_header"]["ok"] is False
+    assert robin_legs[0]["parlay_header"]["broken"] is True
+
+
+def test_parlaymatt_unset_does_not_read_or_post(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_CHANNEL_ID", "")
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_AUTHOR_ID", "")
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_PARLAYMATT", "")
+    monkeypatch.setattr(eg, "_token", lambda: "bot")
+
+    def boom(*_a, **_k):
+        raise AssertionError("discord was called")
+
+    monkeypatch.setattr(eg.requests, "get", boom)
+    assert eg.configured_to_read(eg.PARLAYMATT) is False
+    assert eg.configured_to_post(eg.PARLAYMATT) is False
+    assert eg.post_parlaymatt_recaps(
+        datetime(2026, 10, 20, 12, 0, tzinfo=eg.ET)) == 0
+    eg.run_parlaymatt_ingest()
+
+
+def test_parlaymatt_ingest_keeps_his_author_and_eggz_kinds_stay(monkeypatch):
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_CHANNEL_ID", "pm-chan")
+    monkeypatch.setattr(eg.config, "DISCORD_PARLAYMATT_AUTHOR_ID", "1186644933180923904")
+    monkeypatch.setattr(eg, "_token", lambda: "bot")
+    seen = []
+
+    def fetch(channel, after=None, before=None):
+        seen.append(channel)
+        if len(seen) == 1:
+            return [
+                {"id": "9", "author": {"id": "someone-else"}, "content": "nope",
+                 "timestamp": "2026-10-24T18:00:00+00:00"},
+                {"id": "8", "author": {"id": "1186644933180923904",
+                                       "username": "parlaymatt"},
+                 "content": "PARLAY +450 1u\nLakers -3.5\nCeltics ML",
+                 "timestamp": "2026-10-24T17:00:00+00:00"},
+            ]
+        return []
+
+    class Conn:
+        def __init__(self):
+            self.cursor = None
+            self.messages = {}
+            self.picks = []
+
+        def execute(self, sql, params=None):
+            self.sql = sql
+            self.params = params or ()
+            if "INSERT INTO capper_ingest_cursor" in sql:
+                self.cursor = (params[1], params[2], params[3])
+            elif "INSERT INTO capper_messages" in sql:
+                self.messages[params[0]] = params
+            elif "INSERT INTO capper_picks" in sql:
+                self.picks.append((sql, params))
+            return self
+
+        def fetchone(self):
+            if "FROM capper_ingest_cursor" in self.sql:
+                return self.cursor
+            if "FROM capper_messages WHERE message_id" in self.sql:
+                return None
+            if "status = 'graded'" in self.sql:
+                return None
+            if "FROM push_sent" in self.sql:
+                return None
+            if "RETURNING" in self.sql:
+                return (1,)
+            return None
+
+        def fetchall(self):
+            return []
+
+        def commit(self):
+            pass
+
+    conn = Conn()
+    assert eg.ingest_messages(conn, fetch, eg.PARLAYMATT) == 1
+    assert seen[0] == "pm-chan"
+    assert "8" in conn.messages
+    assert conn.messages["8"][-1] == "parlaymatt"
+    assert "9" not in conn.messages
+    assert any("'parlay'" in sql for sql, _params in conn.picks)
+    assert any("parlaymatt" in params for _sql, params in conn.picks)
+    assert "discord_eggz_results" in eg.EGGZ.results_prefix
+    assert eg.PARLAYMATT.results_prefix == "discord_parlaymatt_results"
+    assert eg.EGGZ.review_kind == "eggz_review"
+    assert "'eggz'" in eg._GRADED_LEGS
+    assert "discord_eggz" not in eg._graded_legs(eg.PARLAYMATT)
+
+
+def test_a_graded_parlay_counts_once_and_his_all_time_starts_at_his_first(monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_PARLAYMATT", "https://discord.test/pm")
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_EGGZ", "https://discord.test/eggz")
+    posted = []
+    monkeypatch.setattr(eg, "_post", lambda url, body: posted.append((url, body)) or "55")
+    db = sqlite3.connect(":memory:")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, game_date TEXT,
+        sport TEXT, market TEXT, price REAL, clv_pct REAL, units REAL,
+        risked REAL, stake_units REAL, posted_at TEXT, parlay_id INTEGER,
+        capper_key TEXT, message_id TEXT, line_no INTEGER)""")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT,
+        home_score INT, away_score INT, commence_time TEXT)""")
+    db.execute("""CREATE TABLE push_sent (
+        lock_key TEXT, kind TEXT, sent_at TEXT, message_id TEXT,
+        UNIQUE (lock_key, kind))""")
+    db.executemany(
+        "INSERT INTO capper_picks (id, status, result, game_date, sport, market, "
+        "price, units, risked, stake_units, capper_key, parlay_id, message_id, "
+        "line_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (1, "graded", "WIN", "2026-10-18", "NBA", "parlay", 450, 1.0, 0.2222,
+             1, "parlaymatt", None, "m", 1),
+            (2, "graded", "WIN", "2026-10-18", "NBA", "spreads", -110, 9.0, 9.0,
+             1, "parlaymatt", 1, "m", 2),
+            (3, "graded", "WIN", "2026-10-18", "NBA", "h2h", -110, 9.0, 9.0,
+             1, "parlaymatt", 1, "m", 3),
+            (4, "graded", "LOSS", "2026-10-18", "NHL", "h2h", -110, -1.1, 1.1,
+             1, "eggz", None, "e", 1),
+        ])
+
+    class Conn:
+        def execute(self, sql, params=None):
+            return db.execute(sql.replace("%s", "?"), tuple(params or ()))
+
+        def commit(self):
+            db.commit()
+
+    conn = Conn()
+    assert eg._post_window(
+        conn, "day", "2026-10-18", "2026-10-18", "Oct 18",
+        capper=eg.PARLAYMATT) == 1
+    assert eg._post_window(
+        conn, "day", "2026-10-18", "2026-10-18", "Oct 18") == 1
+    pm, eggz = posted
+    assert pm[0] == "https://discord.test/pm"
+    assert pm[1]["embeds"][0]["title"] == "\U0001F4CA ParlayMatt — Oct 18"
+    assert "1-0" in pm[1]["embeds"][0]["description"]
+    assert "+9.00u" not in pm[1]["embeds"][0]["description"]
+    assert "since 2026-10-18" in pm[1]["embeds"][0]["fields"][-1]["name"] or any(
+        "since 2026-10-18" in f["name"] for f in pm[1]["embeds"][0]["fields"])
+    assert eggz[0] == "https://discord.test/eggz"
+    assert eggz[1]["embeds"][0]["title"] == "\U0001F4CA Eggz — Oct 18"
+    assert "0-1" in eggz[1]["embeds"][0]["description"]
+    assert "+1.00u" not in eggz[1]["embeds"][0]["description"]
+    locks = db.execute("SELECT lock_key, kind FROM push_sent").fetchall()
+    assert ("discord_parlaymatt_results_day:2026-10-18",
+            "discord_parlaymatt_results_day") in locks
+    assert ("discord_eggz_results_day:2026-10-18",
+            "discord_eggz_results_day") in locks
+
+
+def test_parlay_rollup_uses_the_stated_price_not_the_leg_prices():
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, result TEXT, market TEXT,
+        price REAL, stake_units REAL, units REAL, risked REAL,
+        parlay_id INTEGER, capper_key TEXT, graded_at TEXT, review_reason TEXT,
+        clv_pct REAL, closing_price REAL, clv_beat_close INTEGER)""")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, market, price, stake_units, capper_key) "
+        "VALUES (1,'pending','parlay',450,1,'parlaymatt')")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, market, price, parlay_id, capper_key) "
+        "VALUES (2,'graded','WIN','spreads',-110,1,'parlaymatt')")
+    db.execute(
+        "INSERT INTO capper_picks (id, status, result, market, price, parlay_id, capper_key) "
+        "VALUES (3,'graded','LOSS','h2h',-150,1,'parlaymatt')")
+
+    class Conn:
+        def execute(self, sql, params=None):
+            return db.execute(sql.replace("%s", "?"), tuple(params or ()))
+
+        def commit(self):
+            pass
+
+    assert eg._grade_parlays(Conn(), eg.PARLAYMATT) == 1
+    row = db.execute(
+        "SELECT status, result, units, risked FROM capper_picks WHERE id = 1"
+    ).fetchone()
+    profit, risked = eg.units_for_result(1, 450, "LOSS")
+    assert row[0] == "graded" and row[1] == "LOSS"
+    assert abs(row[2] - profit) < 1e-9
+    assert abs(row[3] - risked) < 1e-9
+    assert db.execute(
+        "SELECT status FROM capper_picks WHERE id = 2").fetchone()[0] == "graded"
+
+
+def test_parlaymatt_is_on_the_same_schedule_and_the_migration_is_registered():
+    import scheduler
+    src = Path(scheduler.__file__).read_text(encoding="utf-8")
+    assert "run_parlaymatt_ingest" in src
+    assert "post_parlaymatt_recaps" in src
+    pipe = (Path(__file__).parent.parent / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "post_parlaymatt_recaps" in pipe
+    assert "post_eggz_recaps" in pipe
+    from data.view_migrations import ACTIVE_MIGRATIONS
+    name = "capper_parlaymatt_2026_10_28.sql"
+    assert name in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS[-1] == "published_record_units_2026_10_16.sql"
+    assert ACTIVE_MIGRATIONS.index(name) < len(ACTIVE_MIGRATIONS) - 2
+
+
+def test_the_record_script_accepts_parlaymatt_and_still_defaults_to_eggz(monkeypatch):
+    from scripts import eggz_record
+    seen = []
+    monkeypatch.setattr(
+        eggz_record, "grade_pending",
+        lambda conn, capper=eg.EGGZ: seen.append(capper.key) or 0)
+    monkeypatch.setattr(eggz_record, "open_legs", lambda conn, capper=eg.EGGZ: [])
+
+    class Conn:
+        def close(self):
+            pass
+
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: Conn())
+    assert eggz_record.main(["grade", "--apply"]) == 0
+    assert seen == ["eggz"]
+    assert eggz_record.main(["--capper", "parlaymatt", "grade", "--apply"]) == 0
+    assert seen == ["eggz", "parlaymatt"]
+    assert eggz_record.main(["grade", "--capper", "parlaymatt", "--apply"]) == 0
+    assert seen == ["eggz", "parlaymatt", "parlaymatt"]
+
+
+# Stored posts, read from capper_messages on 2026-11-03.
+_NOV1 = (
+    "Sunday Nov. 1\n\nNFL\nBAL Ravens +3 (-105) 1U\U0001f5d1\ufe0f\n\n"
+    "<@1408438245594763375>"
+)
+_OCT29 = (
+    "Thursday Oct. 29\n\nNFL\nCAR Panthers/GB Packers U47.5 (-123) 1U\u2705"
+)
+_MOONSHOT = "<@1408438245594763375>  moonshot parlay\U0001f680"
+_TD_MEGA = "TD Mega parlay <@1408438245594763375>"
+_POSTED_NOV1 = datetime(2026, 11, 1, 16, 55, 37, tzinfo=timezone.utc)
+_POSTED_OCT29 = datetime(2026, 10, 29, 15, 21, 15, tzinfo=timezone.utc)
+_POSTED_MOON = datetime(2026, 10, 31, 15, 48, 13, tzinfo=timezone.utc)
+_POSTED_TD = datetime(2026, 11, 1, 17, 29, 16, tzinfo=timezone.utc)
+
+
+def test_a_discord_mention_is_not_a_row_and_does_not_renumber():
+    for line in ("<@1408438245594763375>", "<@!1408438245594763375>",
+                 "<@&1408438245594763375>", "<#1408438245594763375>",
+                 "@everyone", "@here", "@EVERYONE", "@Here"):
+        legs, reviews = eg.parse_message(line)
+        assert legs == [] and reviews == [], line
+    legs, reviews = eg.parse_message(
+        "NYY ML -110\n<@99>\n@everyone\nBOS +3.5 -105")
+    assert reviews == []
+    assert [leg["line_no"] for leg in legs] == [1, 4]
+    assert [leg["market"] for leg in legs] == ["h2h", "spreads"]
+    legs, reviews = eg.parse_message(
+        "<@!1> @everyone NYY ML -120 @here <#9> <@&2>")
+    assert reviews == []
+    assert len(legs) == 1
+    assert legs[0]["market"] == "h2h"
+    assert legs[0]["price"] == -120
+    assert legs[0]["team_text"] == "NYY"
+    legs, reviews = eg.parse_message("here is a note")
+    assert legs == []
+    assert reviews[0]["reason"] == "unparsed"
+    legs, reviews = eg.parse_message("NE Patriots -3 -110")
+    assert reviews == []
+    assert legs[0]["market"] == "spreads"
+    assert "Patriots" in legs[0]["team_text"]
+
+
+def test_the_nov_1_post_keeps_the_ravens_line_and_drops_the_mention():
+    legs, reviews = eg.parse_message(_NOV1, _POSTED_NOV1)
+    assert reviews == []
+    assert len(legs) == 1
+    leg = legs[0]
+    assert leg["line_no"] == 3
+    assert leg["market"] == "spreads"
+    assert leg["line"] == 3
+    assert leg["price"] == -105
+    assert leg["stake_units"] == 1
+    assert leg["team_text"] == "BAL Ravens"
+    assert leg["sport_hint"] == "NFL"
+    assert leg["slate_date"] == "2026-11-01"
+    assert "<@" not in leg["raw"]
+
+
+def test_the_oct_29_panthers_packers_total_parses():
+    legs, reviews = eg.parse_message(_OCT29, _POSTED_OCT29)
+    assert reviews == []
+    assert len(legs) == 1
+    leg = legs[0]
+    assert leg["line_no"] == 3
+    assert leg["market"] == "totals"
+    assert leg["side"] == "under"
+    assert leg["line"] == 47.5
+    assert leg["price"] == -123
+    assert leg["stake_units"] == 1
+    assert leg["away_text"] == "CAR Panthers"
+    assert leg["home_text"] == "GB Packers"
+    assert leg["sport_hint"] == "NFL"
+    assert leg["slate_date"] == "2026-10-29"
+    spaced, spaced_reviews = eg.parse_message(
+        "NFL\nCAR Panthers / GB Packers U 47.5 (-123) 1U", _POSTED_OCT29)
+    assert spaced_reviews == []
+    assert spaced[0]["side"] == "under" and spaced[0]["line"] == 47.5
+    assert spaced[0]["away_text"] == "CAR Panthers"
+    assert spaced[0]["home_text"] == "GB Packers"
+
+
+def test_parlaymatt_moonshot_and_td_mega_stay_unparsed_after_the_mention_is_removed():
+    """The mention is not why these two stay needs_review.
+
+    `moonshot parlay` is a parlay header, and a header with no legs is
+    unparsed. `TD Mega parlay` is two words in front of parlay, and the
+    header takes one tag word, so it is not a header either.
+    """
+    moon_legs, moon_reviews = eg.parse_message(_MOONSHOT, _POSTED_MOON)
+    assert moon_legs == []
+    assert len(moon_reviews) == 1
+    assert moon_reviews[0]["reason"] == "unparsed"
+    assert moon_reviews[0]["raw"] == "moonshot parlay"
+    assert "<@" not in moon_reviews[0]["raw"]
+    assert eg._parlay_header("moonshot parlay", 1.0) is not None
+    assert eg._parlay_header("moonshot parlay", 1.0)["legs"] == []
+
+    td_legs, td_reviews = eg.parse_message(_TD_MEGA, _POSTED_TD)
+    assert td_legs == []
+    assert td_reviews[0]["reason"] == "unparsed"
+    assert td_reviews[0]["raw"] == "TD Mega parlay"
+    assert eg._parlay_header("TD Mega parlay", 1.0) is None
+    mention_legs, mention_reviews = eg.parse_message("<@1408438245594763375>")
+    assert mention_legs == [] and mention_reviews == []
+
+
+def test_grade_pending_reparses_the_stuck_posts_and_grades_the_under(monkeypatch):
+    """The next grade pass re-reads needs_review messages.
+
+    The Nov 1 mention row is deleted. The graded Ravens line stays. The
+    Oct 29 under matches NFL_2026_08_CAR_GB and grades at the posted price.
+    A second pass changes nothing. ParlayMatt's mention-only post clears.
+    moonshot and TD Mega stay needs_review.
+    """
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_OPS", "")
+    monkeypatch.setattr(eg, "_closing_odds", lambda *a, **k: None)
+    db, _Conn = _sqlite()
+    db.execute("""CREATE TABLE capper_messages (
+        message_id TEXT PRIMARY KEY, body TEXT, posted_at TEXT,
+        parse_status TEXT, parse_note TEXT, capper_key TEXT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, message_id TEXT, line_no INTEGER, status TEXT,
+        review_reason TEXT, sport TEXT, game_id TEXT, game_date TEXT,
+        home_team TEXT, away_team TEXT, commence_time TEXT, market TEXT,
+        side TEXT, line REAL, price REAL, stake_units REAL, player_name TEXT,
+        prop_stat TEXT, prop_market TEXT, posted_at TEXT, result TEXT,
+        units REAL, risked REAL, clv_pct REAL, closing_price REAL,
+        clv_beat_close INT, graded_at TEXT, capper_key TEXT,
+        parlay_id INTEGER, UNIQUE (message_id, line_no))""")
+    nov1_at = "2026-11-01T16:55:37.001+00:00"
+    oct29_at = "2026-10-29T15:21:15.420+00:00"
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+        "VALUES (?,?,?,?,?,?)",
+        ("1566495943430242375", _NOV1, nov1_at, "needs_review",
+         "line 4: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, result, "
+        "units, sport, game_id, game_date, home_team, away_team, market, side, "
+        "line, price, stake_units, posted_at, capper_key) VALUES "
+        "(1664,'1566495943430242375',3,'graded','LOSS',-1.05,'NFL',"
+        "'NFL_2026_08_BAL_BUF','2026-11-01','BUF','BAL','spreads','away',"
+        "-3,-105,1,?, 'eggz')", (nov1_at,))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(3251,'1566495943430242375',4,'needs_review',"
+        "'unparsed: <@1408438245594763375>',1,?,'eggz')", (nov1_at,))
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+        "VALUES (?,?,?,?,?,?)",
+        ("1565385033441742909", _OCT29, oct29_at, "needs_review",
+         "line 3: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(3252,'1565385033441742909',3,'needs_review',"
+        "'unparsed: CAR Panthers/GB Packers U47.5 (-123) 1U',1,?,'eggz')",
+        (oct29_at,))
+    db.execute(
+        "INSERT INTO capper_messages "
+        "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+        "VALUES (?,?,?,?,?,?)",
+        ("1565454245032103989", "<@1408438245594763375>",
+         "2026-10-29T19:56:16.749+00:00", "needs_review", "line 1: unparsed",
+         "parlaymatt"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(3254,'1565454245032103989',1,'needs_review',"
+        "'unparsed: <@1408438245594763375>',1,"
+        "'2026-10-29T19:56:16.749+00:00','parlaymatt')")
+    for mid, body, posted, note in (
+        ("1566116597980995586", _MOONSHOT, "2026-10-31T15:48:13.998+00:00",
+         "line 1: unparsed"),
+        ("1566504414771023912", _TD_MEGA, "2026-11-01T17:29:16.726+00:00",
+         "line 1: unparsed"),
+    ):
+        db.execute(
+            "INSERT INTO capper_messages "
+            "(message_id, body, posted_at, parse_status, parse_note, capper_key) "
+            "VALUES (?,?,?,?,?,?)",
+            (mid, body, posted, "needs_review", note, "parlaymatt"))
+        db.execute(
+            "INSERT INTO capper_picks (message_id, line_no, status, "
+            "review_reason, stake_units, posted_at, capper_key) VALUES "
+            "(?,1,'needs_review',?,1,?, 'parlaymatt')",
+            (mid, f"unparsed: {body[:80]}", posted))
+    car = (
+        "NFL_2026_08_CAR_GB", "NFL", "2026-10-29", "GB", "CAR",
+        "2026-10-30T00:15:00+00:00", 27, 19, 1, 1, 0,
+    )
+    bal = (
+        "NFL_2026_08_BAL_BUF", "NFL", "2026-11-01", "BUF", "BAL",
+        "2026-11-01T18:00:00+00:00", 36, 10, 1, 1, 0,
+    )
+    scores = {
+        "NFL_2026_08_CAR_GB": (
+            27.0, 19.0, 1, None, 0, "2026-10-30T00:15:00+00:00", "2026-10-29"),
+        "NFL_2026_08_BAL_BUF": (
+            36.0, 10.0, 1, None, 0, "2026-11-01T18:00:00+00:00", "2026-11-01"),
+    }
+
+    class _Rows:
+        def __init__(self, rows, one):
+            self._rows, self._one = rows, one
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return self._one
+
+    class Conn:
+        def execute(self, sql, params=None):
+            params = tuple(params or ())
+            if "FROM games" in sql:
+                if "game_id = %s" in sql:
+                    return _Rows([], scores.get(params[0]))
+                if params[:3] == ("NFL", "GB", "CAR"):
+                    return _Rows([car], None)
+                if params[:3] == ("NFL", "BAL", "BAL"):
+                    return _Rows([bal], None)
+                return _Rows([], None)
+            return db.execute(sql.replace("%s", "?"), params)
+
+        def commit(self):
+            db.commit()
+
+    conn = Conn()
+    assert eg.grade_pending(conn) >= 1
+    ravens = db.execute(
+        "SELECT status, result, units, line, game_id FROM capper_picks "
+        "WHERE id = 1664").fetchone()
+    assert ravens == ("graded", "LOSS", -1.05, -3, "NFL_2026_08_BAL_BUF")
+    assert db.execute(
+        "SELECT id FROM capper_picks WHERE id = 3251").fetchone() is None
+    assert db.execute(
+        "SELECT parse_status FROM capper_messages "
+        "WHERE message_id = '1566495943430242375'").fetchone()[0] == "parsed"
+    under = db.execute(
+        "SELECT status, result, units, risked, market, side, line, price, "
+        "stake_units, game_id, game_date, sport FROM capper_picks "
+        "WHERE message_id = '1565385033441742909'").fetchone()
+    assert under[0] == "graded"
+    assert under[1] == "WIN"
+    assert abs(under[2] - 1.0) < 1e-9
+    assert abs(under[3] - 1.23) < 1e-9
+    assert under[4:] == (
+        "totals", "under", 47.5, -123.0, 1.0, "NFL_2026_08_CAR_GB",
+        "2026-10-29", "NFL")
+    assert db.execute(
+        "SELECT COUNT(*) FROM capper_picks "
+        "WHERE message_id = '1565385033441742909' AND status = 'needs_review'"
+    ).fetchone()[0] == 0
+    assert eg.grade_pending(conn) == 0
+    again = db.execute(
+        "SELECT status, result, units FROM capper_picks "
+        "WHERE message_id = '1565385033441742909'").fetchone()
+    assert again[0] == "graded" and again[1] == "WIN"
+    assert abs(again[2] - 1.0) < 1e-9
+
+    assert eg.grade_pending(conn, eg.PARLAYMATT) == 0
+    assert db.execute(
+        "SELECT id FROM capper_picks WHERE id = 3254").fetchone() is None
+    assert db.execute(
+        "SELECT parse_status FROM capper_messages "
+        "WHERE message_id = '1565454245032103989'").fetchone()[0] == "parsed"
+    stuck = db.execute(
+        "SELECT message_id, status FROM capper_picks "
+        "WHERE capper_key = 'parlaymatt' AND status = 'needs_review' "
+        "ORDER BY message_id").fetchall()
+    assert stuck == [
+        ("1566116597980995586", "needs_review"),
+        ("1566504414771023912", "needs_review"),
+    ]
+
+
+_NOV5_BLACK = (
+    "Thursday Nov. 5\n\nNBA\nAnthony Black (ORL) 🪜 \n"
+    "O14.5 Points (-130) 1U🗑️\nO19.5 Points (+244) .5U🗑️"
+)
+_NOV6_HALF = (
+    "Friday Nov. 6\n\nNCAAF\nVirginia Tech 1st Half +3.5 (-105) 1U🗑️\n\n"
+    "NHL\nMIN Wild Puck Line -1.5 (-115) 1U✅"
+)
+_NOV8_NCAAB = "Sunday Nov. 8\n\nNCAAB\nNevada ML (-125) 1U✅"
+_NOV9_TOTAL = "Monday Nov. 9\n\nNCAAB\nSyracuse/Indiana U146.5 (-108) 1U🗑️"
+
+
+def _sqlite_pg():
+    """SQLite that can run the game lookup. The cast is Postgres-only."""
+    db, _Conn = _sqlite()
+
+    class Conn:
+        def execute(self, sql, params=None):
+            sql = sql.replace("%s", "?").replace("::timestamptz", "")
+            return db.execute(sql, tuple(params or ()))
+
+        def commit(self):
+            db.commit()
+
+    return db, Conn
+
+
+_POSTED_NOV5 = datetime(2026, 11, 5, 23, 16, 30, tzinfo=timezone.utc)
+_POSTED_NOV6 = datetime(2026, 11, 6, 21, 53, 55, tzinfo=timezone.utc)
+_POSTED_NOV8 = datetime(2026, 11, 8, 21, 19, 57, tzinfo=timezone.utc)
+_POSTED_NOV9 = datetime(2026, 11, 9, 23, 24, 42, tzinfo=timezone.utc)
+
+
+def test_a_bare_ncaab_line_is_a_slate_header_and_the_school_total_parses():
+    """`NCAAB` is the sport. It is not a bet. `NCAABW` is its own sport."""
+    legs, reviews = eg.parse_message(_NOV8_NCAAB, _POSTED_NOV8)
+    assert reviews == []
+    assert len(legs) == 1
+    nevada = legs[0]
+    assert nevada["line_no"] == 3
+    assert nevada["market"] == "h2h" and nevada["team_text"] == "Nevada"
+    assert nevada["price"] == -125 and nevada["stake_units"] == 1
+    assert nevada["sport_hint"] == "NCAAB"
+    assert nevada["slate_date"] == "2026-11-08"
+
+    legs, reviews = eg.parse_message(_NOV9_TOTAL, _POSTED_NOV9)
+    assert reviews == []
+    assert len(legs) == 1
+    total = legs[0]
+    assert total["line_no"] == 3
+    assert total["market"] == "totals" and total["side"] == "under"
+    assert total["line"] == 146.5 and total["price"] == -108
+    assert total["away_text"] == "Syracuse" and total["home_text"] == "Indiana"
+    assert total["sport_hint"] == "NCAAB"
+    assert total["slate_date"] == "2026-11-09"
+
+    women, women_reviews = eg.parse_message("NCAABW\nUConn ML (-140)")
+    assert women_reviews == []
+    assert women[0]["sport_hint"] == "NCAABW"
+    assert women[0]["team_text"] == "UConn"
+    assert eg.parse_message("NCAAB", _POSTED_NOV8) == ([], [])
+
+
+def test_a_college_total_matches_the_two_school_names():
+    """Syracuse/Indiana is the game. A later Indiana game is not."""
+    legs, reviews = eg.parse_message(_NOV9_TOTAL, _POSTED_NOV9)
+    assert reviews == []
+    db, Conn = _sqlite_pg()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT, home_team TEXT, away_team TEXT,
+        commence_time TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT)""")
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NCAAB_2026-11-09_syracuse_indiana", "NCAAB", "2026-11-09",
+         "Indiana", "Syracuse", "2026-11-09T23:30:00+00:00", 83, 80, 1, 1, 0))
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NCAAB_2026-11-10_purdue_indiana", "NCAAB", "2026-11-10",
+         "Indiana", "Purdue", "2026-11-10T16:00:00+00:00", 70, 60, 1, 1, 0))
+    game, reason = eg._match_leg(Conn(), legs[0], _POSTED_NOV9)
+    assert reason is None
+    assert game["game_id"] == "NCAAB_2026-11-09_syracuse_indiana"
+    assert game["side"] == "under"
+    assert legs[0]["line"] == 146.5
+
+
+def test_a_player_block_is_two_point_props():
+    """The name line is the player. The two stat lines are the bets.
+
+    `.5U` is half a unit. A name with nothing under it stays for review.
+    """
+    legs, reviews = eg.parse_message(_NOV5_BLACK, _POSTED_NOV5)
+    assert reviews == []
+    assert [leg["line_no"] for leg in legs] == [4, 5]
+    first, second = legs
+    assert first["market"] == "prop" and second["market"] == "prop"
+    assert first["player_name"] == "Anthony Black"
+    assert second["player_name"] == "Anthony Black"
+    assert first["team_text"] == "ORL" and second["team_text"] == "ORL"
+    assert first["prop_stat"] == "points" and second["prop_stat"] == "points"
+    assert first["side"] == "over" and first["line"] == 14.5
+    assert first["price"] == -130 and first["stake_units"] == 1
+    assert second["side"] == "over" and second["line"] == 19.5
+    assert second["price"] == 244 and second["stake_units"] == 0.5
+    assert first["sport_hint"] == "NBA" and first["slate_date"] == "2026-11-05"
+    alone, alone_reviews = eg.parse_message("Anthony Black (ORL)")
+    assert alone == []
+    assert alone_reviews[0]["reason"] == "unparsed"
+    assert alone_reviews[0]["raw"] == "Anthony Black (ORL)"
+
+
+def test_a_parenthetical_stake_stays_a_bet():
+    """`(1U)` is the stake. It is not a team, and the line is not a player."""
+    legs, reviews = eg.parse_message("Ravens ML -150 (1U)")
+    assert reviews == []
+    assert len(legs) == 1
+    ravens = legs[0]
+    assert ravens["market"] == "h2h" and ravens["team_text"] == "Ravens"
+    assert ravens["price"] == -150 and ravens["stake_units"] == 1
+
+    legs, reviews = eg.parse_message("Duke -3.5 (1.5U)")
+    assert reviews == []
+    duke = legs[0]
+    assert duke["market"] == "spreads" and duke["team_text"] == "Duke"
+    assert duke["line"] == -3.5 and duke["stake_units"] == 1.5
+    assert duke["price"] is None
+
+    legs, reviews = eg.parse_message("Celtics ML (-150) (2U)")
+    assert reviews == []
+    assert legs[0]["market"] == "h2h" and legs[0]["team_text"] == "Celtics"
+    assert legs[0]["price"] == -150 and legs[0]["stake_units"] == 2
+
+    legs, reviews = eg.parse_message("Jets/Bills U40.5 (-110) (1u)")
+    assert reviews == []
+    total = legs[0]
+    assert total["market"] == "totals" and total["side"] == "under"
+    assert total["line"] == 40.5 and total["price"] == -110
+    assert total["stake_units"] == 1
+    assert total["away_text"] == "Jets" and total["home_text"] == "Bills"
+
+    legs, reviews = eg.parse_message("Chiefs ML (1U)")
+    assert reviews == []
+    assert legs[0]["market"] == "h2h" and legs[0]["team_text"] == "Chiefs"
+    assert legs[0]["stake_units"] == 1 and legs[0]["price"] is None
+
+    legs, reviews = eg.parse_message("Over 8.5 (Max)")
+    assert reviews == []
+    assert legs[0]["market"] == "totals" and legs[0]["side"] == "over"
+    assert legs[0]["line"] == 8.5
+
+
+def test_a_first_half_spread_is_not_graded_on_the_final(monkeypatch):
+    """NCAAF has no first-half score source. The final is not the half."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_OPS", "")
+    legs, reviews = eg.parse_message(_NOV6_HALF, _POSTED_NOV6)
+    assert reviews == []
+    half, wild = legs
+    assert half["line_no"] == 3 and half["market"] == "spreads_h1"
+    assert half["team_text"] == "Virginia Tech"
+    assert half["line"] == 3.5 and half["price"] == -105
+    assert half["sport_hint"] == "NCAAF" and half["slate_date"] == "2026-11-06"
+    assert wild["market"] == "spreads" and wild["team_text"] == "MIN Wild Puck Line"
+    assert wild["line"] == -1.5 and wild["sport_hint"] == "NHL"
+
+    db, Conn = _sqlite_pg()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT, home_team TEXT, away_team TEXT,
+        commence_time TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, review_reason TEXT, result TEXT,
+        units REAL, risked REAL, game_id TEXT)""")
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NCAAF_2026-11-06_virginia-tech_smu", "NCAAF", "2026-11-06",
+         "SMU", "Virginia Tech", "2026-11-07T00:05:23+00:00", 51, 28, 1, 1, 0))
+    game, reason = eg._match_leg(Conn(), half, _POSTED_NOV6)
+    assert reason is None
+    assert game["game_id"] == "NCAAF_2026-11-06_virginia-tech_smu"
+    assert game["side"] == "away"
+    assert half["line"] == -3.5
+    db.execute(
+        "INSERT INTO capper_picks (id, status, game_id) VALUES (1, 'pending', ?)",
+        (game["game_id"],))
+    assert eg._grade_one(Conn(), (
+        1, game["game_id"], "spreads_h1", "away", -3.5, -105, 1,
+        None, None, None, game["commence_time"], "NCAAF",
+    ))
+    row = db.execute(
+        "SELECT status, review_reason, result, units FROM capper_picks WHERE id = 1"
+    ).fetchone()
+    assert row == ("needs_review", "no_first_half_score", None, None)
+
+
+def test_an_ncaab_first_half_spread_grades_from_the_half():
+    """The half and the final disagree. The half is the result."""
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT, commence_time TEXT, game_date TEXT)""")
+    db.execute("""CREATE TABLE ncaab_period_scores (
+        game_id TEXT, period INT, home_points INT, away_points INT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, review_reason TEXT, result TEXT,
+        units REAL, risked REAL, clv_pct REAL, closing_price REAL,
+        clv_beat_close INT, graded_at TEXT)""")
+    gid = "NCAAB_2026-11-09_duke_home"
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?)",
+        (gid, 80, 70, 1, 1, 0, "2026-11-10T00:00:00+00:00", "2026-11-09"))
+    db.execute(
+        "INSERT INTO ncaab_period_scores VALUES (?,?,?,?), (?,?,?,?)",
+        (gid, 1, 30, 40, gid, 2, 50, 30))
+    db.execute(
+        "INSERT INTO capper_picks (id, status) VALUES (1, 'pending')")
+    assert eg._grade_one(Conn(), (
+        1, gid, "spreads_h1", "home", 3.5, -110, 1,
+        None, None, None, "2026-11-10T00:00:00+00:00", "NCAAB",
+    ))
+    status, reason, result, units, clv = db.execute(
+        "SELECT status, review_reason, result, units, clv_pct FROM capper_picks "
+        "WHERE id = 1").fetchone()
+    assert status == "graded" and reason is None and result == "LOSS"
+    profit, risked = eg.units_for_result(1, -110, "LOSS")
+    assert abs(units - profit) < 1e-9
+    assert abs(profit + risked) < 1e-9
+    assert clv is None
+
+
+def test_an_nba_first_half_spread_grades_from_the_quarters():
+    """Q1+Q2 is the half. The final would have been the other result."""
+    db, Conn = _sqlite()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT, commence_time TEXT, game_date TEXT)""")
+    db.execute("""CREATE TABLE nba_period_scores (
+        game_id TEXT, period INT, home_points INT, away_points INT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, status TEXT, review_reason TEXT, result TEXT,
+        units REAL, risked REAL, clv_pct REAL, closing_price REAL,
+        clv_beat_close INT, graded_at TEXT)""")
+    gid = "NBA_2026-11-05_BOS_LAL"
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?)",
+        (gid, 110, 100, 1, 1, 0, "2026-11-06T00:00:00+00:00", "2026-11-05"))
+    db.execute(
+        "INSERT INTO nba_period_scores VALUES "
+        "(?,?,?,?), (?,?,?,?), (?,?,?,?), (?,?,?,?)",
+        (gid, 1, 20, 30, gid, 2, 15, 25, gid, 3, 40, 20, gid, 4, 35, 25))
+    db.execute("INSERT INTO capper_picks (id, status) VALUES (1, 'pending')")
+    assert eg._grade_one(Conn(), (
+        1, gid, "spreads_h1", "home", 3.5, -110, 1,
+        None, None, None, "2026-11-06T00:00:00+00:00", "NBA",
+    ))
+    status, reason, result, clv = db.execute(
+        "SELECT status, review_reason, result, clv_pct FROM capper_picks "
+        "WHERE id = 1").fetchone()
+    assert status == "graded" and reason is None and result == "LOSS"
+    assert clv is None
+
+
+def test_a_first_half_moneyline_or_total_is_not_the_full_game():
+    """A half that is not a spread stays needs_review. The final is not used."""
+    for line in (
+        "Lakers 1st Half ML",
+        "Lakers 1st Half ML (-110)",
+        "GB/CHI 1st Half U21.5",
+        "GB/CHI 1st Half U21.5 (-110)",
+        "Lakers first half ML",
+    ):
+        legs, reviews = eg.parse_message(line)
+        assert legs == []
+        assert reviews[0]["reason"] == "unparsed"
+        assert reviews[0]["raw"] == line
+
+
+def test_two_school_sports_are_not_a_guess():
+    """The same two names in two sports is not the first row."""
+    legs, reviews = eg.parse_message(
+        "Monday Nov. 9\nSyracuse/Indiana U146.5", _POSTED_NOV9)
+    assert reviews == []
+    assert legs[0]["sport_hint"] is None
+    db, Conn = _sqlite_pg()
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT, home_team TEXT, away_team TEXT,
+        commence_time TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT)""")
+    for sport in ("NCAAB", "NCAABW"):
+        db.execute(
+            "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (f"{sport}_2026-11-09_syracuse_indiana", sport, "2026-11-09",
+             "Indiana", "Syracuse", "2026-11-09T23:30:00+00:00",
+             80, 70, 1, 1, 0))
+    game, reason = eg._match_leg(Conn(), legs[0], _POSTED_NOV9)
+    assert game is None and reason == "ambiguous_team"
+
+
+def test_grade_pending_reparses_the_november_posts(monkeypatch):
+    """A needs_review message is read again. A graded line on it stays."""
+    monkeypatch.setattr(eg.config, "DISCORD_WEBHOOK_OPS", "")
+    monkeypatch.setattr(eg, "_closing_odds", lambda *a, **k: None)
+    db, Conn = _sqlite_pg()
+    db.execute("""CREATE TABLE capper_messages (
+        message_id TEXT PRIMARY KEY, body TEXT, posted_at TEXT,
+        parse_status TEXT, parse_note TEXT, capper_key TEXT)""")
+    db.execute("""CREATE TABLE capper_picks (
+        id INTEGER PRIMARY KEY, message_id TEXT, line_no INTEGER, status TEXT,
+        review_reason TEXT, sport TEXT, game_id TEXT, game_date TEXT,
+        home_team TEXT, away_team TEXT, commence_time TEXT, market TEXT,
+        side TEXT, line REAL, price REAL, stake_units REAL, player_name TEXT,
+        prop_stat TEXT, prop_market TEXT, posted_at TEXT, result TEXT,
+        units REAL, risked REAL, clv_pct REAL, closing_price REAL,
+        clv_beat_close INT, graded_at TEXT, capper_key TEXT,
+        parlay_id INTEGER, UNIQUE (message_id, line_no))""")
+    db.execute("""CREATE TABLE games (
+        game_id TEXT, sport TEXT, game_date TEXT, home_team TEXT, away_team TEXT,
+        commence_time TEXT, home_score REAL, away_score REAL, home_win INT,
+        home_win_reg INT, went_to_ot INT)""")
+    db.execute("""CREATE TABLE nba_player_game_log (
+        game_id TEXT, player_name TEXT, points INT)""")
+    nov5 = _POSTED_NOV5.isoformat()
+    nov6 = _POSTED_NOV6.isoformat()
+    nov8 = _POSTED_NOV8.isoformat()
+    nov9 = _POSTED_NOV9.isoformat()
+    db.execute(
+        "INSERT INTO capper_messages VALUES (?,?,?,?,?,?)",
+        ("m5", _NOV5_BLACK, nov5, "needs_review",
+         "line 3: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(922,'m5',3,'needs_review','unparsed: Anthony Black (ORL)',1,?, 'eggz')",
+        (nov5,))
+    db.execute(
+        "INSERT INTO capper_messages VALUES (?,?,?,?,?,?)",
+        ("m9", _NOV9_TOTAL, nov9, "needs_review", "line 2: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(928,'m9',2,'needs_review','unparsed: NCAAB',1,?, 'eggz')",
+        (nov9,))
+    db.execute(
+        "INSERT INTO capper_messages VALUES (?,?,?,?,?,?)",
+        ("m8", _NOV8_NCAAB, nov8, "needs_review", "line 2: unparsed", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, result, "
+        "units, sport, game_id, game_date, home_team, away_team, market, side, "
+        "price, stake_units, posted_at, capper_key) VALUES "
+        "(832,'m8',3,'graded','WIN',0.8,'NCAAB',"
+        "'NCAAB_2026-11-08_saint-mary-s_nevada','2026-11-08','Nevada',"
+        "'Saint Mary''s','h2h','home',-125,1,?, 'eggz')",
+        (nov8,))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, stake_units, posted_at, capper_key) VALUES "
+        "(828,'m8',2,'needs_review','unparsed: NCAAB',1,?, 'eggz')",
+        (nov8,))
+    db.execute(
+        "INSERT INTO capper_messages VALUES (?,?,?,?,?,?)",
+        ("m6", "Friday Nov. 6\n\nNCAAF\nVirginia Tech 1st Half +3.5 (-105) 1U",
+         nov6, "needs_review", "line 3: no_game", "eggz"))
+    db.execute(
+        "INSERT INTO capper_picks (id, message_id, line_no, status, "
+        "review_reason, market, line, price, stake_units, posted_at, capper_key) "
+        "VALUES (825,'m6',3,'needs_review','no_game','spreads',3.5,-105,1,?, 'eggz')",
+        (nov6,))
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NBA_2026-11-05_ORL_PHX", "NBA", "2026-11-05", "PHX", "ORL",
+         "2026-11-06T02:11:00+00:00", 117, 104, 1, 1, 0))
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NBA_2026-11-06_ORL_BOS", "NBA", "2026-11-06", "BOS", "ORL",
+         "2026-11-06T16:00:00+00:00", 110, 100, 1, 1, 0))
+    db.execute(
+        "INSERT INTO nba_player_game_log VALUES (?,?,?)",
+        ("NBA_2026-11-05_ORL_PHX", "Anthony Black", 10))
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NCAAB_2026-11-09_syracuse_indiana", "NCAAB", "2026-11-09",
+         "Indiana", "Syracuse", "2026-11-09T23:30:00+00:00", 83, 80, 1, 1, 0))
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NCAAF_2026-11-06_virginia-tech_smu", "NCAAF", "2026-11-06",
+         "SMU", "Virginia Tech", "2026-11-07T00:05:23+00:00", 51, 28, 1, 1, 0))
+    db.execute(
+        "INSERT INTO games VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("NCAAB_2026-11-08_saint-mary-s_nevada", "NCAAB", "2026-11-08",
+         "Nevada", "Saint Mary's", "2026-11-09T02:00:00+00:00", 70, 60, 1, 1, 0))
+    assert eg.grade_pending(Conn()) >= 1
+    props = db.execute(
+        "SELECT line_no, status, result, line, price, stake_units, player_name, "
+        "prop_stat, game_id, units FROM capper_picks WHERE message_id = 'm5' "
+        "ORDER BY line_no").fetchall()
+    assert [row[0] for row in props] == [4, 5]
+    assert props[0][1] == "graded" and props[0][2] == "LOSS"
+    assert props[0][3:9] == (
+        14.5, -130.0, 1.0, "Anthony Black", "points", "NBA_2026-11-05_ORL_PHX")
+    short, _risk = eg.units_for_result(1, -130, "LOSS")
+    assert abs(props[0][9] - short) < 1e-9
+    assert props[1][1] == "graded" and props[1][2] == "LOSS"
+    assert props[1][3:9] == (
+        19.5, 244.0, 0.5, "Anthony Black", "points", "NBA_2026-11-05_ORL_PHX")
+    half_u, _risk = eg.units_for_result(0.5, 244, "LOSS")
+    assert abs(props[1][9] - half_u) < 1e-9
+    assert db.execute(
+        "SELECT parse_status FROM capper_messages WHERE message_id = 'm5'"
+    ).fetchone()[0] == "parsed"
+
+    total = db.execute(
+        "SELECT status, result, market, side, line, price, game_id, game_date, "
+        "units FROM capper_picks WHERE message_id = 'm9'").fetchone()
+    assert total[0] == "graded" and total[1] == "LOSS"
+    assert total[2:8] == (
+        "totals", "under", 146.5, -108.0,
+        "NCAAB_2026-11-09_syracuse_indiana", "2026-11-09")
+    under, _risk = eg.units_for_result(1, -108, "LOSS")
+    assert abs(total[8] - under) < 1e-9
+    assert db.execute(
+        "SELECT id FROM capper_picks WHERE id = 928").fetchone() is None
+
+    nevada = db.execute(
+        "SELECT id, status, result, units, line_no FROM capper_picks "
+        "WHERE message_id = 'm8'").fetchall()
+    assert nevada == [(832, "graded", "WIN", 0.8, 3)]
+    assert db.execute(
+        "SELECT parse_status FROM capper_messages WHERE message_id = 'm8'"
+    ).fetchone()[0] == "parsed"
+
+    held = db.execute(
+        "SELECT status, review_reason, result, market, game_id, line, side "
+        "FROM capper_picks WHERE message_id = 'm6'").fetchone()
+    assert held[0] == "needs_review"
+    assert held[1] == "no_first_half_score"
+    assert held[2] is None
+    assert held[3:] == (
+        "spreads_h1", "NCAAF_2026-11-06_virginia-tech_smu", -3.5, "away")
+
+    assert eg.grade_pending(Conn()) == 0
+    again = db.execute(
+        "SELECT status, result, units FROM capper_picks WHERE message_id = 'm5' "
+        "ORDER BY line_no").fetchall()
+    assert again[0][0] == "graded" and again[0][1] == "LOSS"
+    assert abs(again[0][2] - short) < 1e-9
+    assert again[1][0] == "graded" and abs(again[1][2] - half_u) < 1e-9

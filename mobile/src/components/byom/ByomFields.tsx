@@ -1,0 +1,409 @@
+import React from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { ByomChoiceGroup } from '@/components/byom/ByomChoiceGroup';
+import { ErrorBanner } from '@/components/ErrorState';
+import { Skeleton } from '@/components/Skeleton';
+import type { NbaGameFactsStatus } from '@/hooks/useNbaGameFacts';
+import {
+  isPropMarket,
+  isYesOnlyProp,
+  NBA_GAME_BETS_WHEN,
+  NBA_NO_HISTORY,
+  NBA_PROP_MARKETS,
+  NFL_PROP_MARKETS,
+  type ByomMarket,
+  type ByomPropSide,
+  type ByomSport,
+  byomHasProps,
+  byomUsesRest,
+  gameMarketLabel,
+  type ByomGameMarket,
+} from '@/lib/byomRecord';
+import { colors, font, radii, spacing } from '@/lib/theme';
+
+const GAME_MARKETS: { value: ByomGameMarket; label: string }[] = [
+  { value: 'h2h', label: 'Moneyline' },
+  { value: 'spreads', label: 'Spread' },
+  { value: 'totals', label: 'Over/Under' },
+];
+
+function MarketRow({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      style={[styles.market, selected && styles.marketOn]}
+    >
+      <Text style={[styles.marketText, selected && styles.marketTextOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function MarketTile({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      style={[styles.tile, selected && styles.marketOn]}
+    >
+      <Text style={[styles.tileText, selected && styles.tileTextOn]}>
+        {selected ? `\u2713  ${label}` : label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function isGameMarket(market: ByomMarket | null): market is 'h2h' | 'spreads' | 'totals' {
+  return market === 'h2h' || market === 'spreads' || market === 'totals';
+}
+
+export function ByomMarketField({
+  market,
+  onChange,
+  sport = 'NFL',
+  factsStatus = 'ready',
+  factsError = null,
+  onRetryFacts,
+  savedGameMarket = null,
+  explainMissing = false,
+}: {
+  market: ByomMarket | null;
+  onChange: (market: ByomMarket) => void;
+  sport?: ByomSport;
+  /** NBA Moneyline, Spread, and Over/Under need byom_game_facts. */
+  factsStatus?: NbaGameFactsStatus;
+  factsError?: string | null;
+  onRetryFacts?: () => void;
+  /** The game bet this edit opened on. Stays visible so it can be put back. */
+  savedGameMarket?: ByomMarket | null;
+  /** Builder only. One line under the kicker when the read found no row. */
+  explainMissing?: boolean;
+}) {
+  const props = sport === 'NBA' ? NBA_PROP_MARKETS : NFL_PROP_MARKETS;
+  // NHL is game bets only (Matt, 2026-11-05).
+  const withProps = byomHasProps(sport ?? 'NFL');
+  const gameMarkets = GAME_MARKETS.map((option) => (
+    ({ ...option, label: gameMarketLabel(option.value, sport ?? 'NFL') })));
+  const propKicker = sport === 'NBA' ? 'NBA player props' : 'NFL player props';
+  const nbaFacts = sport === 'NBA' ? factsStatus : 'ready';
+  const kept = isGameMarket(savedGameMarket)
+    ? savedGameMarket
+    : isGameMarket(market)
+      ? market
+      : null;
+  const keptLabel = gameMarkets.find((option) => option.value === kept)?.label ?? null;
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel="Bet type">
+      <View style={styles.block}>
+        <Text style={styles.kicker}>Game bets</Text>
+        {nbaFacts === 'loading' ? (
+          <Skeleton label="game bets">
+            <View style={styles.skel} />
+          </Skeleton>
+        ) : nbaFacts === 'error' ? (
+          <ErrorBanner
+            what="NBA game bets"
+            error={factsError ?? 'Couldn’t load NBA game bets.'}
+            onRetry={onRetryFacts ?? (() => {})}
+            style={styles.banner}
+          />
+        ) : nbaFacts === 'missing' && kept != null && keptLabel != null ? (
+          <MarketTile
+            label={keptLabel}
+            selected={market === kept}
+            onPress={() => onChange(kept)}
+          />
+        ) : nbaFacts === 'missing' ? (
+          <View>
+            <Text style={styles.history}>{NBA_NO_HISTORY}</Text>
+            {explainMissing ? (
+              <Text style={styles.historyLead}>{NBA_GAME_BETS_WHEN}</Text>
+            ) : null}
+          </View>
+        ) : sport === 'NBA' || sport === 'NHL' ? (
+          <View style={styles.grid}>
+            {gameMarkets.map((option) => (
+              <MarketTile
+                key={option.value}
+                label={option.label}
+                selected={option.value === market}
+                onPress={() => onChange(option.value)}
+              />
+            ))}
+          </View>
+        ) : (
+          gameMarkets.map((option) => (
+            <MarketRow
+              key={option.value}
+              label={option.label}
+              selected={option.value === market}
+              onPress={() => onChange(option.value)}
+            />
+          ))
+        )}
+      </View>
+      {withProps ? (
+      <View style={styles.block}>
+        <Text style={styles.kicker}>{propKicker}</Text>
+        {sport === 'NBA' ? (
+          <View style={styles.grid}>
+            {props.map((option) => (
+              <MarketTile
+                key={option.value}
+                label={option.label}
+                selected={option.value === market}
+                onPress={() => onChange(option.value)}
+              />
+            ))}
+          </View>
+        ) : (
+          props.map((option) => (
+            <MarketRow
+              key={option.value}
+              label={option.label}
+              selected={option.value === market}
+              onPress={() => onChange(option.value)}
+            />
+          ))
+        )}
+      </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function ByomSideFields({
+  market,
+  side,
+  role,
+  primetime,
+  propSide,
+  sport = 'NFL',
+  rest = null,
+  factsStatus = 'ready',
+  onSide,
+  onRole,
+  onPrimetime,
+  onPropSide,
+  onRest,
+}: {
+  market: ByomMarket;
+  side: 'home' | 'away' | 'over' | 'under' | null;
+  role: 'favorite' | 'underdog' | 'pickem' | null;
+  primetime: boolean | null;
+  propSide: ByomPropSide | null;
+  sport?: ByomSport;
+  rest?: 'b2b' | 'rest2' | null;
+  /** NBA rest chips need byom_game_facts. A chip already set stays so it can be cleared. */
+  factsStatus?: NbaGameFactsStatus;
+  onSide: (side: 'home' | 'away' | 'over' | 'under' | null) => void;
+  onRole: (role: 'favorite' | 'underdog' | 'pickem' | null) => void;
+  onPrimetime: (primetime: boolean | null) => void;
+  onPropSide: (propSide: ByomPropSide | null) => void;
+  onRest?: (rest: 'b2b' | 'rest2' | null) => void;
+}) {
+  const prop = isPropMarket(market);
+  const yesOnly = isYesOnlyProp(market);
+  const showNbaRest = sport === 'NHL'
+    || (sport === 'NBA' && (factsStatus === 'ready' || rest != null));
+  return (
+    <View>
+      {market === 'totals' ? (
+        <ByomChoiceGroup
+          label="Side"
+          value={side === 'over' || side === 'under' ? side : ''}
+          onChange={(value) => onSide(value === 'over' || value === 'under' ? value : null)}
+          options={[
+            { value: 'over', label: 'Over' },
+            { value: 'under', label: 'Under' },
+          ]}
+        />
+      ) : prop ? (
+        <>
+          {yesOnly ? (
+            <View accessible accessibilityLabel="Side, Yes">
+              <Text style={styles.kicker}>Side</Text>
+              <Text style={styles.yes}>Yes</Text>
+            </View>
+          ) : (
+            <ByomChoiceGroup
+              label={sport === 'NBA' ? 'Over or under' : 'Side'}
+              value={propSide === 'over' || propSide === 'under' ? propSide : ''}
+              onChange={(value) => onPropSide(value === 'over' || value === 'under' ? value : null)}
+              options={[
+                { value: 'over', label: 'Over' },
+                { value: 'under', label: 'Under' },
+              ]}
+            />
+          )}
+          <ByomChoiceGroup
+            label="Player’s team"
+            value={side === 'home' || side === 'away' ? side : 'any'}
+            onChange={(value) => onSide(value === 'any' ? null : value)}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'home', label: 'Home' },
+              { value: 'away', label: 'Away' },
+            ]}
+          />
+        </>
+      ) : (
+        <>
+          <ByomChoiceGroup
+            label="Team"
+            value={side === 'home' || side === 'away' ? side : 'any'}
+            onChange={(value) => onSide(value === 'any' ? null : value)}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'home', label: 'Home' },
+              { value: 'away', label: 'Away' },
+            ]}
+          />
+          <ByomChoiceGroup
+            label="Favorite or underdog"
+            value={role ?? 'any'}
+            onChange={(value) => onRole(value === 'any' ? null : value)}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'favorite', label: 'Favorite' },
+              { value: 'underdog', label: 'Underdog' },
+              // An NHL puck line is always ±1.5, so there is no pick'em.
+              ...(sport === 'NHL' ? [] : [{ value: 'pickem' as const, label: 'Pick’em' }]),
+            ]}
+          />
+        </>
+      )}
+      {showNbaRest ? (
+        <ByomChoiceGroup
+          label="Quick filters"
+          value={rest ?? ''}
+          clearOnReselect
+          onChange={(value) => onRest?.(value === 'b2b' || value === 'rest2' ? value : null)}
+          options={[
+            { value: 'b2b', label: 'Back-to-back' },
+            { value: 'rest2', label: '2+ days rest' },
+          ]}
+        />
+      ) : byomUsesRest(sport ?? 'NFL') ? null : (
+        <ByomChoiceGroup
+          label="Kickoff"
+          value={primetime == null ? 'any' : primetime ? 'prime' : 'other'}
+          onChange={(value) => onPrimetime(value === 'any' ? null : value === 'prime')}
+          options={[
+            { value: 'any', label: 'Any' },
+            { value: 'prime', label: 'Primetime' },
+            { value: 'other', label: 'Not primetime' },
+          ]}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  block: {
+    marginBottom: spacing.lg,
+  },
+  kicker: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  market: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.separatorOpaque,
+  },
+  marketOn: {
+    backgroundColor: colors.tintSoft,
+    borderColor: colors.tint,
+  },
+  marketText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.medium,
+    color: colors.textPrimary,
+  },
+  marketTextOn: {
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+  yes: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.lg,
+  },
+  history: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  historyLead: {
+    marginTop: spacing.xs,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
+  skel: {
+    height: 48,
+    borderRadius: radii.md,
+    backgroundColor: colors.noneSoft,
+  },
+  banner: {
+    marginHorizontal: 0,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  tile: {
+    width: '31%',
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.separatorOpaque,
+  },
+  tileText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  tileTextOn: {
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+});

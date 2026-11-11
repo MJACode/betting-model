@@ -1,8 +1,8 @@
 /**
  * WHICH SPORTS HAVE AN IN-PLAY MODEL AT ALL.
  *
- * Mirror of the live lanes in the Python registry: `config.LIVE_MODELS` (MLB +
- * NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
+ * Mirror of the in-play models in the Python registry: `config.LIVE_MODELS`
+ * (MLB, NBA, NCAAB and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
  * in `nfl/live_model/config.MODEL_IDS`). PINNED BY
  * tests/test_mobile_live_segment.py, which fails until this set equals those
  * two sources — the same mechanism lib/thresholds.ts uses, for the same reason:
@@ -11,24 +11,57 @@
  * WHY THE APP NEEDS IT. The Live Signals board is always on screen for every
  * sport (matt, 2026-09-12), so an empty board has two completely different
  * meanings and the copy has to tell them apart: for MLB it means no in-play
- * edge right now, and for NBA it means we do not run an in-play model for that
+ * edge right now, and for NHL it means we do not run an in-play model for that
  * sport at all. One empty state for both reads as a broken board on half the
  * sports in the app.
  *
- * ADD A SPORT HERE WHEN ITS LIVE LANE SHIPS — the test will tell you.
+ * ADD A SPORT HERE WHEN ITS IN-PLAY MODEL SHIPS — the test will tell you.
  */
 
 /** Sports with at least one in-play model writing `is_live` picks. */
-export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NCAAF', 'NFL']);
+export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NCAAB', 'NCAAF', 'NFL']);
 
 /** Does this sport have an in-play model at all? */
 export function hasLiveModel(sport: string): boolean {
   return LIVE_MODEL_SPORTS.has(sport);
 }
 
-/** "MLB, NCAAF and NFL" — for copy that names the live lanes. */
+/** "MLB, NBA, NCAAF and NFL" — for copy that names the sports with an in-play model. */
 export function liveModelSportsSentence(): string {
   const s = [...LIVE_MODEL_SPORTS];
   if (s.length <= 1) return s.join('');
   return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
+}
+
+const LIVE_EMPTY_VALID = 'No live signal is a valid answer, not a board that failed to load.';
+
+/**
+ * The Live board's empty subtitle for a sport that HAS an in-play model: when
+ * the board can fill. NBA says when it checks, because its model does not
+ * watch a game continuously: models/nba_live_loop.py reads the books once an
+ * hour while a game is in progress (the backtest's own timing), and its one
+ * live model, the early spread, decides a game once, in quarters 1-2. No
+ * clock minute is named here, so the copy does not go stale if the loop's
+ * minute moves.
+ */
+export function liveEmptySubtitle(sport: string): string {
+  if (sport === 'NBA') {
+    return (
+      'The NBA in-play model checks games in progress once an hour, through the first and second quarters, and ' +
+      'bets each game at most once. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  if (sport === 'NCAAB') {
+    // models/ncaab_live_loop.py: games in progress twice an hour, only the
+    // biggest edges, and no more than five bets a night (mike, 2026-11-07).
+    // tests/test_ncaab_live_config.py pins "twice an hour" and "five" to the
+    // loop's cadence and cap.
+    return (
+      'The NCAAB in-play models check games in progress twice an hour, bet only their biggest edges, ' +
+      'and stop after five bets a night. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  return `Live signals appear while a game is in play and the in-play model finds an edge. ${LIVE_EMPTY_VALID}`;
 }

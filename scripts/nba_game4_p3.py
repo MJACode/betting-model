@@ -179,6 +179,20 @@ def _line_fit(x, y) -> tuple[float, float]:
 
 # ── the market's own pricing ────────────────────────────────────────────────
 
+def period_close_rows(close: pd.DataFrame, games_p: pd.DataFrame) -> pd.DataFrame:
+    """One row per game with Pinnacle's full-game close: season, its closing
+    spread and total, and the period results (period_results). What the period
+    pricing fits on, in the order it fits; the live first-half model's artifact
+    stores these rows (scripts/nba_first_half_total_luck_build.py). Empty when
+    the closes hold neither market."""
+    c = close[close["market"].isin(["spreads", "totals"])]
+    w = c.pivot_table(index=["game_id", "season"], columns="market", values="close_line",
+                      aggfunc="last").reset_index()
+    if w.empty or not {"spreads", "totals"} <= set(w.columns):
+        return pd.DataFrame()
+    return w.merge(period_results(games_p).drop(columns="season"), on="game_id")
+
+
 def period_market_pricing(close: pd.DataFrame, games_p: pd.DataFrame, seasons,
                           min_prior: int = MIN_PRIOR_GAMES) -> dict:
     """{(S, spreads_h1 | totals_h1 | spreads_q1 | totals_q1): ResidDist}: the
@@ -186,12 +200,9 @@ def period_market_pricing(close: pd.DataFrame, games_p: pd.DataFrame, seasons,
     margin its spread implies, -spread_home; or its total), a and b and the
     residuals from the seasons BEFORE S. Fewer than `min_prior` earlier games:
     no entry (no fallback to S's own results)."""
-    c = close[close["market"].isin(["spreads", "totals"])]
-    w = c.pivot_table(index=["game_id", "season"], columns="market", values="close_line",
-                      aggfunc="last").reset_index()
-    if w.empty or not {"spreads", "totals"} <= set(w.columns):
+    x = period_close_rows(close, games_p)
+    if x.empty:
         return {}
-    x = w.merge(period_results(games_p).drop(columns="season"), on="game_id")
     out = {}
     for S in sorted(int(s) for s in seasons):
         prior = x[x["season"] < S]

@@ -28,7 +28,7 @@ export function expectedValue(
 
 /**
  * "+2.4u" / "−0.5u" — a SIGNED result in units (CLAUDE.md §4: results are
- * always units). Distinct from thresholds.ts's `formatUnits`, which prints an
+ * always units). Distinct from `formatUnits` below, which prints an
  * unsigned stake ("2.4u"). One home for both detail pages (UX review,
  * 2026-09-20), in the formatter module so a player lib never imports from a
  * team lib.
@@ -81,24 +81,94 @@ export function formatPctSigned(value: number | null | undefined, digits = 1): s
   return formatSigned(value * 100, digits, '%');
 }
 
-/** Dollars — 30.5 -> "$30.50", -4 -> "−$4.00" (U+2212, as every signed amount). */
-export function formatCurrency(value: number | null | undefined): string {
-  const n = Number(value);
-  if (value == null || !Number.isFinite(n)) return '—';
-  const abs = Math.abs(n).toFixed(2);
-  // A value that rounds to zero is "$0.00", never "−$0.00".
-  const sign = n < 0 && Number(abs) !== 0 ? MINUS : '';
-  return `${sign}$${abs}`;
+/**
+ * Results are ALWAYS units, never dollars (mike, 2026-11-03: "everything must
+ * be units"; CLAUDE.md §4). One unit is one flat bet.
+ *
+ * `profit_flat` and `staked_flat` are STORED per 100 staked (a −110 win is
+ * 90.91), and the tracked-bet stakes on the Performance tab keep that same
+ * scale, so 100 stored is 1u. Nothing stored changes; screens divide here.
+ */
+export const FLAT_UNIT = 100;
+
+/** A stored per-100 amount as units: 90.91 → 0.9091. Null stays null. */
+export function flatToUnits(perHundred: number | null | undefined): number | null {
+  const n = Number(perHundred);
+  if (perHundred == null || !Number.isFinite(n)) return null;
+  return n / FLAT_UNIT;
 }
 
-/** Signed dollars — -25 -> "−$25.00", +30 -> "+$30.00". */
-export function formatCurrencySigned(value: number | null | undefined): string {
-  const n = Number(value);
-  if (value == null || !Number.isFinite(n)) return '—';
-  // A result that rounds to zero is a push: unsigned, never "+$0.00".
-  if (Number(Math.abs(n).toFixed(2)) === 0) return '$0.00';
-  const sign = n > 0 ? '+' : MINUS;
-  return `${sign}$${Math.abs(n).toFixed(2)}`;
+/**
+ * A signed result from a stored per-100 amount: 90.91 → "+0.91u",
+ * −100 → "−1.00u", 0.3 → "0.00u" (a push, unsigned). Missing → '—'.
+ * Two decimals, as Discord's `{units:+.2f}u` and the Record tab print them.
+ * Its colour is `pnlColor(value, 2, 1 / FLAT_UNIT)`, so the tone follows the
+ * number as printed (lib/tone.ts).
+ */
+export function formatFlatUnits(perHundred: number | null | undefined): string {
+  return formatSigned(flatToUnits(perHundred), 2, 'u');
+}
+
+/** The tone scale that matches formatFlatUnits: two decimals of value / 100. */
+export const FLAT_UNIT_TONE_SCALE = 1 / FLAT_UNIT;
+
+/**
+ * 2 -> "2u", 3.5 -> "3.5u", 1.15 -> "1.15u".
+ *
+ * TWO decimals, trailing zeros trimmed. One decimal used to round the -115
+ * stake (1.15 laid to win 1) to "1.2u", which is a different bet from the one
+ * the model asked for; every negative price divides out exactly at two
+ * decimals, so this is the precision the number actually has.
+ *
+ * Rounds HALF-UP, explicitly. Neither language's default is safe: Python's %.2f
+ * is half-to-EVEN while JS toFixed is half-up (0.125 renders "0.12" there and
+ * "0.13" here), and a float like 2.0250000000000004 is not an integer, so a
+ * naive isInteger check gives "2.00" on one side and "2" on the other. Trimming
+ * splits on the decimal point rather than stripping trailing zeros off the whole
+ * string, which would turn "20.00" into "2". The Python mirror uses the
+ * identical expression; the parity fixture pins that they agree — it caught
+ * exactly these divergences.
+ */
+export function formatUnits(u: number): string {
+  const n = Math.floor(u * 100 + 0.5) / 100;
+  const [whole, frac] = n.toFixed(2).split('.');
+  const trimmed = frac.replace(/0+$/, '');
+  return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
+}
+
+/**
+ * The old NFL sizing figure on a stored label: a "·", a number, then "u",
+ * followed by another "·" tag or the end. The pattern is the server's
+ * (tracking/pick_integrity._STAKE_TOKEN and the open_picks view), pinned
+ * together by tests/test_mobile_label_units.py.
+ */
+const LABEL_STAKE_TOKEN = /\s*·\s*\d+(?:\.\d+)?u(?!\s*[^\s·])/gu;
+
+/**
+ * A stored pick label, as the app prints it beside a stake.
+ *
+ * Older NFL wind and opener labels end in the model's own
+ * sizing figure: "DAL @ IND — IND +7.5 · 0.79u · NEW 0m",
+ * "LA @ WAS Under 47.5 · 0.87u". That figure is not the stake anyone books.
+ * The row beside it shows the posted stake or the posted units (1u to win at
+ * the decided price, risk capped at 3u), so one row carried two unit numbers
+ * that disagreed (mike, 2026-11-04: "everything must be units"). Labels
+ * written since carry no unit figure, as no other sport's label does. A stored
+ * label is never rewritten (CLAUDE.md §1c), so the old figure comes off here,
+ * on screen and in VoiceOver only.
+ *
+ * Only that token goes. The bet itself, the age tag ("NEW 0m") and every
+ * parenthetical stay word for word (CLAUDE.md §00). Every other label is
+ * returned as stored.
+ */
+export function labelWithoutStake(label: string | null | undefined): string {
+  return (label ?? '').replace(LABEL_STAKE_TOKEN, '');
+}
+
+/** An unsigned stake from a stored per-100 amount: 100 → "1u", 50 → "0.5u". */
+export function formatFlatStake(perHundred: number | null | undefined): string {
+  const u = flatToUnits(perHundred);
+  return u == null ? '—' : formatUnits(Math.abs(u));
 }
 
 /** Today in America/New_York as YYYY-MM-DD. */
@@ -129,6 +199,23 @@ export function todayET(): string {
  */
 export function yearET(): number {
   return Number(todayET().slice(0, 4));
+}
+
+/**
+ * The season label the Stats board and player page ask for, per sport.
+ * NBA labels a season by its ENDING year (CLAUDE.md §4), so from October the
+ * label is next year's: 2026-10-23 is season 2027. Every other sport's board
+ * read takes the calendar year and handles its own label (football and NHL
+ * fall back inside their reads). Asking the NBA for the calendar year read
+ * LAST season — Jaylen Brown on BOS three months after his trade (2026-10-23).
+ */
+export function boardSeasonET(sport: string): number {
+  const year = yearET();
+  // NCAAB labels by the ending year too (ncaab_player_game_log.season): the
+  // 2026-27 season is 2027 from its November tip-off. NCAABW has the same
+  // label (docs/sports/ncaabw.md); no women's board reads a season yet.
+  if (sport === 'NBA' || sport === 'NCAAB' || sport === 'NCAABW') return monthET() >= 10 ? year + 1 : year;
+  return year;
 }
 
 /** Calendar month in ET, 1–12. Same clock as `yearET`. */
@@ -360,8 +447,23 @@ interface GameLike {
 const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   MLB: 6 * 3_600_000,
   NHL: 5 * 3_600_000,
-  NBA: 5 * 3_600_000,
+  // The NBA has an in-play model (nba_live_*) and, like football below, no live
+  // game feed in the app, and its scores land at the next morning's
+  // settlement. So this window is the only thing that takes a finished game
+  // off the Live board, and at 5h an in-play pick stayed there, with a
+  // hand-off, long after the game ended. isGameOver below already treats an
+  // NBA game as over 3h after tip (GAME_DURATION_HOURS); 3.5h keeps another
+  // half hour for overtime and a late start. Same reasoning as NCAAF and NFL
+  // below.
+  NBA: 3.5 * 3_600_000,
   WNBA: 5 * 3_600_000,
+  // A college basketball game runs about two hours, and the late West Coast
+  // tips start after 10pm ET with no live feed in the app, so this window is
+  // all it has. 4h is twice the game.
+  NCAAB: 4 * 3_600_000,
+  // Women's college basketball: four 10-minute quarters, about two hours on
+  // the clock like the men's, and no live feed in the app either.
+  NCAABW: 4 * 3_600_000,
   // Football, and the reason these two are named rather than left on the
   // default: they are the sports that play late and are NOT covered by the live
   // poller, so the blind window is all they have. Once the app's live board
@@ -645,6 +747,11 @@ const GAME_DURATION_HOURS: Record<string, number> = {
   NHL: 3.5,
   NBA: 3,
   WNBA: 3,
+  // 40 minutes of play, about two hours on the clock. ESPN finals land on the
+  // next refresh pass, which drops the game sooner when they do.
+  NCAAB: 3,
+  // Women's: 40 minutes of play in four quarters, the same two hours.
+  NCAABW: 3,
   UFC: 6,
 };
 

@@ -20,6 +20,9 @@
       "channel": "production",
       "ios": {
         "image": "sdk-54"
+      },
+      "env": {
+        "SENTRY_ALLOW_FAILURE": "true"
       }
     }
   },

@@ -53,6 +53,20 @@ Odds API `bookmakers` param (the `us2` books cost a second region — measured,
 `docs/best_line.md` §2); `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED
 at, and it excludes the books a member cannot bet.
 
+**A STATE-LIMITED BOOK IS FETCHED AND NEVER THE BOOK A PICK NAMES.** (mike,
+2026-11-06: *"global rule. remove betparx from sports books for recommeding
+betting lines in picks only niche avaialble in a few states"*.) betPARX is
+licensed in Maryland, Pennsylvania and New Jersey only, so it sits in
+`config.STATE_LIMITED_BOOKMAKERS`. That one set takes it out of
+`BEST_LINE_BOOKMAKERS` and `BETTABLE_BOOKS` after any environment override,
+which the espnbet exclusion does not do. It stays in `LINE_SHOP_BOOKMAKERS`,
+because the NCAAB consensus models take a median over every book and were
+fitted with it. The app (`REFERENCE_ONLY_BOOKS` in `mobile/src/lib/markets.ts`),
+the NFL cards' standalone fallback (`nfl/data_ingest/books.py`) and the NBA
+in-play fetch (`feed_books`) each carry a copy, and
+`tests/test_betparx_never_a_pick_book.py` pins all of them. A new deciding
+path reads `BEST_LINE_BOOKMAKERS`, never its own list.
+
 ### Two invariants that must not be broken
 
 - **A PICK IS DECIDED, SIZED AND SETTLED AT THE BEST BETTABLE PRICE, AND THE
@@ -100,16 +114,18 @@ at, and it excludes the books a member cannot bet.
   `mv_scored_pick_outcomes.profit_units` is correctly NULL for these. Evidence,
   and the 261 affected BETs: `docs/rules_evidence.md`.
 
-- **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
-  (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,
-  and an app subscription entitles the Discord — so `subscriptions` only ever
-  holds half the answer. The gate is `public.my_access()` / `has_app_access()`
-  server-side and `useEntitlement()` in the app; gating on
-  `useSubscription().entitled` charges a Discord member twice for what they
-  already bought. Revocation follows the same rule in reverse, with one
-  refinement that must not be lost: **each side revokes only the Discord role
-  it granted**, so a lapsed App Store subscription cannot strip a member who is
-  still paying Whop. Detail: `mobile/docs/DISCORD_LINKING.md`.
+- **APP ACCESS IS THE APPLE SUBSCRIPTION, READ IN ONE PLACE.** (Matt,
+  2026-10-27. Reverses the 2026-08-30 rule that a Whop membership also unlocked
+  the app.) `public.my_access().entitled` and `has_app_access()` are
+  `subscriptions` in `trialing` or `active` whose period has not ended. A Whop
+  row is `discord_access` — the same person, Discord-only — and is not an
+  input to either gate. `useEntitlement()` reads that entitled bit and does
+  not OR `discord_access`. **Each side revokes only the Discord role it
+  granted**, so a lapsed App Store subscription cannot strip Whop's role.
+  Do not flip AUTH/BILLING/DISCORD until
+  `add_discord_link_and_whop_memberships.sql` is applied in that environment:
+  `fetchAccess()` throws when `my_access()` is missing. Detail:
+  `mobile/docs/DISCORD_LINKING.md`.
 - **Pre-game and in-play prices never mix.** In-play rows are written with
   `snapshot_type='in_play'` and are excluded from pre-game scoring, training
   features and closing-line math. Separately, the evening refresh keeps writing

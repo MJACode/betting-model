@@ -33,6 +33,13 @@ WHAT IT ALERTS ON
    the persistent-failure rule stayed quiet at WARN, while the board was
    objectively degraded — 18 clean passes out of 50 against 30/47 and 35/51 on
    the two days before.
+3. A real-money NBA game total model that lost a game: a regular-season game
+   that tipped in the last 24 hours with no decision from it, named per model
+   (scripts/nba_pregame_window.undecided_games). The window job's only failure
+   signal is its heartbeat, one row a job that the next idle tick overwrites with
+   "ok", and neither it nor the card's own warning names a game the job never
+   reached. The team-total card was killed at its time limit on 60 of 74 attempts
+   from 2026-10-24 to 10-31, and nothing said which games that cost.
 
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------
@@ -105,6 +112,131 @@ def _latest_health_rows(conn) -> list:
         WHERE checked_at = (SELECT MAX(checked_at) FROM system_health_checks)
         ORDER BY severity, check_name
     """, label="failure-alerter/health")
+
+
+def _undecided_conditions(conn, now: datetime) -> dict:
+    """{key: condition} per NBA game total model that lost a game. A read that
+    fails while the database answers is reported, not swallowed: a check that goes
+    quiet when it breaks is the silence this module exists to prevent. A dead
+    database says nothing here (the watchdog owns that, module docstring)."""
+    try:
+        from scripts.nba_pregame_window import UNDECIDED_LOOKBACK_HOURS, undecided_games
+        lost = undecided_games(conn, now)
+    except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
+        logger.warning(f"failure alerter: the undecided-game read failed: {exc}")
+        try:
+            conn.rollback()
+            conn.execute("SELECT 1").fetchall()
+        except Exception:  # noqa: BLE001 — the database itself is the problem
+            return {}
+        return {"check:nba_undecided_games": (
+            "WARN", "The NBA undecided-game check could not read",
+            f"`scripts/nba_pregame_window.undecided_games` raised:\n{exc!r}")}
+    out = {f"undecided:{model}": (
+        "CRIT", f"{model} lost {len(games)} game(s): tipped with no decision",
+        f"**{len(games)} regular-season game(s)** tipped in the last "
+        f"{UNDECIDED_LOOKBACK_HOURS:.0f} hours with no decision from `{model}`, so "
+        f"no bet could be written on them:\n" + "\n".join(f"· `{g}`" for g in games))
+        for model, games in lost.items()}
+    out.update(_prop_watch_conditions(conn, now))
+    out.update(_ncaab_first_half_undecided(conn, now))
+    return out
+
+
+def _prop_watch_conditions(conn, now: datetime) -> dict:
+    """nba_prop_market's own watch, one key per game: a WARN re-posts only every 12 hours, so a
+    shared key would keep the second game lost that night off the channel. A failed read is
+    reported under its own key and cannot take the three models' alerts above with it."""
+    try:
+        from scripts.nba_pregame_window import (
+            STRANDED_AFTER_HOURS, UNDECIDED_LOOKBACK_HOURS, stranded_prop_bets, undecided_rule_games)
+        from scripts.nba_prop_market_card import disputed_start_games
+        watch = undecided_rule_games(conn, now)
+        stranded = stranded_prop_bets(conn, now)
+        disputed = disputed_start_games(conn, now, UNDECIDED_LOOKBACK_HOURS)
+    except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
+        logger.warning(f"failure alerter: the NBA prop watch failed: {exc}")
+        try:
+            conn.rollback()
+            conn.execute("SELECT 1").fetchall()
+        except Exception:  # noqa: BLE001 — the database itself is the problem
+            return {}
+        return {"check:nba_prop_watch": (
+            "WARN", "The NBA prop watch could not read",
+            f"`scripts/nba_pregame_window` raised:\n{exc!r}")}
+    out: dict = {}
+    for gid, kind in watch["lost"].items():
+        what = "regular-season" if kind == "regular" else f"postseason ({kind})"
+        out[f"undecided:nba_prop_market:{gid}"] = (
+            "WARN", f"nba_prop_market has no decision on {gid}",
+            f"`{gid}`, a {what} game, tipped in the last {UNDECIDED_LOOKBACK_HOURS:.0f} hours with no "
+            f"decision from `nba_prop_market`, so no bet could be written on it. The rule writes none "
+            f"when Pinnacle has no price in its window, so this is not always a failure.")
+    for gid, twin in watch["refused"].items():
+        out[f"refused:nba_prop_market:{gid}"] = (
+            "WARN", f"nba_prop_market refused a second row for one game: {gid}",
+            f"The odds feed wrote `{gid}`, and the schedule lists these two teams as `{twin}` with no "
+            f"final. A bet settles on its own id, so none was allowed on `{gid}`. Read both rows: if "
+            f"`{twin}` holds no prices, the game had nothing to bet.")
+    for gid, g in disputed.items():
+        out[f"start_gap:nba_prop_market:{gid}"] = (
+            "WARN", f"Two starts for {gid}: the schedule and the odds feed disagree",
+            f"The schedule (ESPN) says `{g['schedule_start']}` and the odds feed says `{g['games_start']}`. "
+            f"`nba_prop_market` measures its decision window and the closing snapshot from "
+            f"`{g['tip'].isoformat()}`, the {g['tip_source']}'s. When ESPN's is the earlier, the bet's closing-line "
+            f"value stays empty. ESPN has been hours early and the feed has not been, but if the feed is the "
+            f"wrong one a bet could land after the real tip: read the game's real start.")
+    for gid, n in stranded.items():
+        out[f"stranded:nba_prop:{gid}"] = (
+            "WARN", f"{n} open NBA prop bet(s) on a game with no final: {gid}",
+            f"`{gid}` tipped over {STRANDED_AFTER_HOURS:.0f} hours ago, has no final score and holds "
+            f"{n} open NBA prop bet(s). Settlement needs that score, so they stay open until someone "
+            f"acts.\n"
+            f"**The game was played and its final landed on another row:** do not void. A played game's "
+            f"bet has a real result, and voiding it takes a real win or loss off the record. Write the "
+            f"final and the box lines onto `{gid}`, and the next settle pass grades them.\n"
+            f"**The game was postponed or cancelled:** the bet has no result, so it settles NO_ACTION "
+            f"(`scripts/void_picks.py --game-id {gid}`). A bet already posted also needs `--allow-posted` "
+            f"and a `config.RECORD_EXCLUSIONS` entry naming who asked.")
+    return out
+
+
+# The NCAAB first-half models and the fetch each decides on.
+_NCAAB_FIRST_HALF_MODELS = (("ncaab_first_half_spread", "tip-minus-10"),
+                            ("ncaab_first_half_total", "tip-minus-60"))
+
+
+def _ncaab_first_half_undecided(conn, now: datetime) -> dict:
+    """The same check for the NCAAB first-half spread and total models
+    (scripts/ncaab_first_half_window.undecided_games): a listed game that
+    tipped with no decision. Never raises."""
+    out: dict = {}
+    for model, mark in _NCAAB_FIRST_HALF_MODELS:
+        try:
+            import config
+            from scripts.ncaab_first_half_window import UNDECIDED_LOOKBACK_HOURS as hours
+            from scripts.ncaab_first_half_window import undecided_games as ncaab_undecided
+            games = ncaab_undecided(conn, now, model=model)
+        except Exception as exc:  # noqa: BLE001 — never raises (module docstring)
+            logger.warning(f"failure alerter: the NCAAB first-half undecided read failed "
+                           f"({model}): {exc}")
+            try:
+                conn.rollback()
+                conn.execute("SELECT 1").fetchall()
+            except Exception:  # noqa: BLE001 — the database itself is the problem
+                return out
+            out["check:ncaab_first_half_undecided"] = (
+                "WARN", "The NCAAB first-half undecided-game check could not read",
+                f"`scripts/ncaab_first_half_window.undecided_games` raised ({model}):\n{exc!r}")
+            continue
+        if not games or model in config.RETIRED_MODELS:
+            continue
+        out[f"undecided:{model}"] = (
+            "CRIT", f"{model} lost {len(games)} game(s): tipped with no decision",
+            f"**{len(games)} NCAAB game(s)** tipped in the last {hours:.0f} hours with no "
+            f"decision from `{model}`: no {mark} first-half fetch landed, so no bet "
+            f"could be written on them:\n" + "\n".join(f"· `{g}`" for g in games))
+    return out
 
 
 def _is_health_check_step(name: str) -> bool:
@@ -221,6 +353,8 @@ def _conditions(conn, now: datetime | None = None) -> dict:
                 "WARN", f"{job_id} failed its last run",
                 f"`{job_id}` is running on schedule, but its last run failed:\n"
                 f"{why or '(no detail)'}")
+
+    out.update(_undecided_conditions(conn, now))
 
     clean, total, ranked = _clean_rate(conn)
     if total >= CLEAN_RATE_WINDOW:

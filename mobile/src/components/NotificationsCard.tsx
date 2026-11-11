@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AppSwitch } from '@/components/AppSwitch';
 import { usePushOptIn } from '@/hooks/usePushOptIn';
 import {
   registerForPush,
@@ -102,7 +103,7 @@ export function NotificationsCard(): React.ReactElement {
             is the exact confusion this card exists to end. The value carries
             the same sentence the status block shows, so intent and reality
             arrive together in the audio order too. */}
-        <Switch
+        <AppSwitch
           value={enabled}
           onValueChange={onToggle}
           accessibilityLabel="Notifications"

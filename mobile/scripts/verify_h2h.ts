@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { h2hMatchups, nextGameByTeam } from '../src/lib/statsBoard';
-import { playerHeadToHead } from '../src/lib/playerDetail';
+import { defaultPlayerWindow, h2hMeetings, playerHeadToHead, rangeToRemember } from '../src/lib/playerDetail';
 import { isHit } from '../src/lib/hitRate';
 import type { GameRow } from '../src/types';
 
@@ -170,6 +170,74 @@ check('no meetings → games 0, rate null, opponent kept',
 const nan = playerHeadToHead('KC', [112, NaN], ['2026-01-04', '2025-11-10'], 89.5, 'over');
 check('NaN is dropped from the denominator', nan.bucket.games === 1, JSON.stringify(nan.bucket));
 
+// ── 6b. h2hMeetings — the parse both the chip and the card use ──
+// playerHeadToHead calls this. Pin it on its own so a card-only change cannot
+// leave the chart pairing a number with another game's date, counting a
+// non-finite value, or drawing the latest meeting on the left.
+const unordered = h2hMeetings(
+  [10, 30, 20],
+  ['2024-09-01', '2026-01-04', '2025-11-10'],
+);
+check(
+  'meetings sort newest first, value kept with its date',
+  unordered.map((m) => `${m.date}:${m.value}`).join() === '2026-01-04:30,2025-11-10:20,2024-09-01:10',
+  JSON.stringify(unordered),
+);
+const sameDay = h2hMeetings([1, 2], ['2026-06-01', '2026-06-01']);
+check('same-day meetings keep incoming order', sameDay.map((m) => m.value).join() === '1,2',
+  JSON.stringify(sameDay));
+const shortDates = h2hMeetings([112, 64, 90], ['2026-01-04']);
+check(
+  'values longer than dates stop at the dates',
+  shortDates.length === 1 && shortDates[0]!.date === '2026-01-04' && shortDates[0]!.value === 112,
+  JSON.stringify(shortDates),
+);
+const shortValues = h2hMeetings([64], ['2026-02-01', '2026-01-01']);
+check(
+  'dates longer than values stop at the values',
+  shortValues.length === 1 && shortValues[0]!.value === 64 && shortValues[0]!.date === '2026-02-01',
+  JSON.stringify(shortValues),
+);
+const nonFinite = h2hMeetings(
+  [112, NaN, Infinity, -Infinity, Number('nope')],
+  ['2026-04-01', '2026-03-01', '2026-02-01', '2026-01-15', '2025-12-01'],
+);
+check(
+  'non-finite values are dropped and do not shift the dates that remain',
+  nonFinite.length === 1 && nonFinite[0]!.value === 112 && nonFinite[0]!.date === '2026-04-01',
+  JSON.stringify(nonFinite),
+);
+const sharedValues = [3, 9, 1];
+const sharedDates = ['2025-01-01', '2026-06-01', '2025-08-01'];
+const sharedCard = playerHeadToHead('KC', sharedValues, sharedDates, 5, 'over');
+const sharedChip = h2hMeetings(sharedValues, sharedDates);
+check(
+  'the card and the chip share one meetings parse',
+  JSON.stringify(sharedCard.meetings) === JSON.stringify(sharedChip)
+    && sharedChip.map((m) => m.date).join() === '2026-06-01,2025-08-01,2025-01-01',
+  JSON.stringify(sharedCard.meetings),
+);
+
+// ── 6c. H2H fallback — remember the span the chip row is actually showing ──
+const spans = [
+  { value: 5 as const },
+  { value: 10 as const },
+  { value: 20 as const },
+  { value: 'all' as const },
+];
+check('H2H stays while the read is still out', rangeToRemember('h2h', false, true, spans) === 'h2h');
+check('H2H stays while the chip is offered', rangeToRemember('h2h', true, false, spans) === 'h2h');
+check(
+  'settled and not offered remembers L10, not h2h',
+  rangeToRemember('h2h', false, false, spans) === 10,
+);
+check('a numeric window is left alone', rangeToRemember(5, false, false, spans) === 5);
+check('All is left alone', rangeToRemember('all', false, false, spans) === 'all');
+const noL10 = [{ value: 3 as const }, { value: 5 as const }];
+check('with no L10 the fallback is the first span', rangeToRemember('h2h', false, false, noL10) === 3);
+check('default window is L10 when it is offered', defaultPlayerWindow(spans) === 10);
+check('default window is the first span otherwise', defaultPlayerWindow(noL10) === 3);
+
 // ── 7. Every sport the H2H chip is offered on has an RPC behind it ──
 // The chip is rendered for exactly the sports `supportsHitRate` allows
 // (StatsScreen filters it on `canHitRate`), and each of those needs a
@@ -192,6 +260,22 @@ for (const sport of hitRateSports) {
     h2hBody.includes(`player_h2h_stat_values_${sport.toLowerCase()}`),
   );
 }
+
+// ── 8. The screen remembers a settled fallback and retries only H2H ──
+const screenSrc = readFileSync(join(import.meta.dirname, '..', 'src/screens/PlayerStatsScreen.tsx'), 'utf-8');
+const hookSrc = readFileSync(join(import.meta.dirname, '..', 'src/hooks/usePlayerDetail.ts'), 'utf-8');
+check(
+  'the H2H banner retries the H2H read, not every section',
+  /onRetry=\{detail\.reloadH2h\}/.test(screenSrc) && !/onRetry=\{detail\.reload\}/.test(screenSrc),
+);
+check(
+  'a settled fallback is written back into gameWindow',
+  /rangeToRemember\(/.test(screenSrc) && /if \(range !== gameWindow\) setGameWindow\(range\)/.test(screenSrc),
+);
+check(
+  'reloadH2h bumps its own nonce and the H2H read depends on it',
+  /const reloadH2h = \(\) => setH2hNonce/.test(hookSrc) && /\[h2hKey, nonce, h2hNonce\]/.test(hookSrc),
+);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

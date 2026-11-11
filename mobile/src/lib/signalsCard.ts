@@ -16,7 +16,7 @@
  * weather row has no number.
  */
 
-import { MINUS } from './format';
+import { labelWithoutStake, MINUS } from './format';
 
 /** ASCII hyphen used as a minus sign → U+2212. Names with hyphens are left. */
 export function trueMinus(text: string): string {
@@ -74,7 +74,7 @@ export interface SignalsBetFields {
    * name (golf `yes`, a UFC method class). Anything else uses `label`. */
   side: string;
   line: number | string | null;
-  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, a prop key). */
+  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, `spreads_q1`, a prop key). */
   market: string | null;
   homeTeam?: string | null;
   awayTeam?: string | null;
@@ -102,8 +102,8 @@ function stripTrailingLabelNoise(text: string): string {
   let prev = '';
   while (prev !== text) {
     prev = text;
-    text = text
-      .replace(/\s*·\s*\d+(?:\.\d+)?u\s*$/iu, '')
+    // The stake is the app's one pattern (format.ts labelWithoutStake).
+    text = labelWithoutStake(text)
       .replace(/\s*·\s*NEW\s+\d+m\s*$/iu, '')
       .replace(/\s*·\s*up\s+\d+(?:\.\d+)?[hd]\s*$/iu, '')
       .replace(/\s*·\s*age unknown\s*$/iu, '');
@@ -171,7 +171,10 @@ function isPropMarket(market: string | null, player: string | null): boolean {
  * The bet the card headlines. "Under 56", "Sam Houston −7.5", "Sam Houston ML",
  * "Roquan Smith Under 9.5 Tackles + Assists". A first-five market keeps " F5". A team
  * total names the club the market belongs to and the market ("Boston Bruins Team
- * Total Over 3.5"), as DraftKings names it.
+ * Total Over 3.5"), as DraftKings names it. A first half's total says so
+ * ("First Half Over 112.5"): a bare "Over 112.5" reads as the game total. So
+ * does a first half's spread ("First Half Duke +3.5"), and a first quarter's
+ * spread ("First Quarter DEN -1.5").
  * Regulation moneyline is "(Regulation)", not "ML" — it pays only on a
  * regulation win. Golf and UFC method of victory have no structured market,
  * so the stored label is the headline.
@@ -201,6 +204,20 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
     const num = line == null ? '' : totalNumber(line);
     bet = [club, 'Team Total', word, num].filter((part) => part.length > 0).join(' ');
+  } else if (market === 'totals_h1') {
+    const word = side === 'over' ? 'Over' : side === 'under' ? 'Under' : '';
+    const num = line == null ? '' : totalNumber(line);
+    bet = ['First Half', word, num].filter((part) => part.length > 0).join(' ');
+  } else if (market === 'spreads_h1') {
+    // A first half's spread says so: a bare "Duke +3.5" reads as the game's.
+    const num = line == null ? '' : spreadNumber(line, side, market);
+    bet = ['First Half', team, num].filter((part) => part.length > 0).join(' ');
+  } else if (market === 'spreads_q1') {
+    // A first quarter's spread says so too (models/nba_q1_trend.py): a bare
+    // "DEN -1.5" reads as the game's. The stored line is the HOME number;
+    // spreadNumber flips it for the away side.
+    const num = line == null ? '' : spreadNumber(line, side, market);
+    bet = ['First Quarter', team, num].filter((part) => part.length > 0).join(' ');
   } else if (market != null && market.startsWith('spreads')) {
     const num = line == null ? '' : spreadNumber(line, side, market);
     bet = [team, num].filter((part) => part.length > 0).join(' ');
@@ -257,7 +274,7 @@ export function signalsReasonLine(input: {
 }
 
 /**
- * Footer caption. `longName` is `modelLong` ("Wind Totals (Under)").
+ * Footer caption. `longName` is `modelLong` ("NFL Totals").
  * `when` is the existing timing label ("Posted 11:07 AM ET", "Locked …",
  * "Priced …"), or null when the card is not showing one.
  */
@@ -321,40 +338,37 @@ export function signalsPriceText(priceText: string, book: string): string {
 }
 
 /**
- * "Bet MGM −110" when the button is the decision book at the decision price.
- * "Best now · FD −105" when the button's book or price is not that hero
- * (`bestNow`): the same Best/Bet split as the Today card, with "now" because
- * the 22pt number is still the lock. `lineText` is the book's current line
- * when this button is a bet at that line and it is not the line in the
- * headline. No price → "Open <book>", never a made-up number.
+ * Resting sportsbook control (Matt approved 2026-10-27).
+ * "Best DK −115" when several books are bettable (`best`).
+ * "Bet FD −105" when one book is bettable.
+ * "Open DK" when there is no price — never a made-up number.
+ * No "now". The line stays in the hero: `lineText` is ignored so this
+ * control cannot repeat it.
  */
 export function signalsCtaLabel(
   book: string,
   priceText: string | null,
-  lineText?: string | null,
-  opts?: { bestNow?: boolean },
+  _lineText?: string | null,
+  opts?: { best?: boolean },
 ): string {
   if (!priceText) return `Open ${book}`;
-  const line = lineText ? `${trueMinus(lineText)} ` : '';
-  const quote = `${book} ${line}${trueMinus(priceText)}`;
-  return opts?.bestNow ? `Best now · ${quote}` : `Bet ${quote}`;
+  const quote = `${book} ${trueMinus(priceText)}`;
+  return opts?.best ? `Best ${quote}` : `Bet ${quote}`;
 }
 
 /**
- * The same button, as VoiceOver should say it. Full book name, no middle
- * dot: "Best now, FanDuel, −105". `book` here is the spoken name.
+ * The same control, as VoiceOver should say it. Full book name, no middle
+ * dot: "Best, DraftKings, −115". `book` here is the spoken name. The line
+ * is not spoken here; the hero's Now line carries it.
  */
 export function signalsCtaSpeech(
   book: string,
   priceText: string | null,
-  lineText?: string | null,
-  opts?: { bestNow?: boolean },
+  _lineText?: string | null,
+  opts?: { best?: boolean },
 ): string {
   if (!priceText) return `Open ${book}`;
-  const parts = [opts?.bestNow ? 'Best now' : 'Bet', book];
-  if (lineText) parts.push(trueMinus(lineText));
-  parts.push(trueMinus(priceText));
-  return parts.join(', ');
+  return [opts?.best ? 'Best' : 'Bet', book, trueMinus(priceText)].join(', ');
 }
 
 /**

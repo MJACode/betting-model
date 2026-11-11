@@ -81,7 +81,7 @@ const ALLOWLIST: { file: string; snippet: RegExp; rule: 'label' | 'size' | 'geom
     snippet: /accessibilityRole="tab"/,
     rule: 'geometry',
     reason:
-      'Sport chips: the slop is TOGGLE_ROOM_ABOVE + reachAbove / 2 + reachBelow, props each screen sets — the H9 section below reads every <SportToggle> use and computes it (Picks 45, Models 45, Stats 35 listed short).',
+      'Sport chips: the slop is TOGGLE_ROOM_ABOVE + reachAbove / 2 + reachBelow, props each screen sets — the H9 section below reads every <SportToggle> use and computes it (Picks 45, Models 45). Stats uses the title menu instead of this row.',
   },
   {
     file: 'src/screens/PlayerStatsScreen.tsx',
@@ -121,7 +121,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/CalendarGrid.tsx', 'monthBtn', 2], // 42.0, 42.0pt
   ['src/components/DailyResultsModal.tsx', 'dateChip', 1], // 43.5pt
   ['src/components/DailyResultsModal.tsx', 'sportChip,sportChipActive', 1], // 41.5pt
-  ['src/components/DiscordLinkModal.tsx', '', 1], // 39.5pt
   ['src/components/ManualBetModal.tsx', 'cancelBtn', 1], // 41.8pt
   ['src/components/NotificationsCard.tsx', '', 1], // 38.3pt
   ['src/components/OnboardingModal.tsx', '', 1], // 41.8pt
@@ -129,7 +128,6 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/components/ParlayDkHandoff.tsx', 'addBtn,pressed', 1], // 43.5pt
   ['src/components/ParlayDkHandoff.tsx', 'openBtn,pressed', 1], // 43.0pt
   ['src/components/PlayerNewsSheet.tsx', 'readMore', 1], // 41.5pt
-  ['src/components/SportsbookIndicator.tsx', 'row', 1], // 42.3pt
   ['src/components/TeamsBoard.tsx', '', 1], // 34.0pt
   ['src/components/TeamsBoard.tsx', 'lineWrap,pressed', 1], // 38.3pt
   ['src/components/TeamsBoard.tsx', 'noLinesRow,pressed', 1], // 42.7pt
@@ -160,7 +158,7 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/ParlayScreen.tsx', 'buildBtn,manualBtn,pressed', 1], // 43.0pt
   ['src/screens/ParlayScreen.tsx', 'clearBtn,pressed', 1], // 43.0pt
   ['src/screens/ParlayScreen.tsx', 'missingNote,pressed', 1], // 39.5pt
-  ['src/screens/PaywallScreen.tsx', '', 6], // 17.8, 38.3, 38.3, 38.3, 39.5, 39.5pt
+  ['src/screens/PaywallScreen.tsx', '', 5], // 38.3, 38.3, 38.3, 39.5, 39.5pt — close is 44pt
   ['src/screens/PerformanceScreen.tsx', '', 3], // 39.5, 41.8, 41.8pt
   ['src/screens/PerformanceScreen.tsx', 'addManualBtn', 1], // 42.0pt
   ['src/screens/PerformanceScreen.tsx', 'reconnect,btnPressed', 1], // 40.0pt
@@ -178,11 +176,8 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SettingsScreen.tsx', 'helplineRow', 1], // 39.5pt
   ['src/screens/SettingsScreen.tsx', 'pressed', 1], // 38.3pt
   ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
-  ['src/screens/SignInScreen.tsx', '', 3], // 17.8, 39.5, 39.5pt
+  ['src/screens/SignInScreen.tsx', '', 2], // 17.8, 39.5pt — legal links are 44pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
-  ['src/screens/StatsScreen.tsx', 'clearBtn,pressed', 1], // 42.3pt
-  ['src/screens/StatsScreen.tsx', 'filterBtn,pressed', 1], // 40.0pt
-  ['src/screens/StatsScreen.tsx', 'noLinesRow,pressed', 1], // 40.7pt
   ['src/screens/StatsScreen.tsx', 'oddsWrap,pressed', 1], // 38.3pt
   ['src/screens/StatsScreen.tsx', 'pill,pressed', 1], // 34.3pt
 ];
@@ -469,9 +464,21 @@ check(`every close control names what it closes (${bareClose.length} bare "Close
 console.log('\nRule 5: text inputs and switches');
 const unlabelled: string[] = [];
 let inputs = 0;
+const rawSwitches: string[] = [];
 for (const f of files) {
   const src = readUtf8(f);
-  for (const m of src.matchAll(/<(TextInput|Switch)\s/g)) {
+  // AppSwitch is the one place a raw <Switch> lives: it forwards the caller's
+  // label through {...rest}, so the label is checked at each <AppSwitch>.
+  const isWrapper = relPosix(f).endsWith('components/AppSwitch.tsx');
+  // An aliased import (`Switch as RNSwitch`) would dodge the tag match below.
+  if (!isWrapper && /import\s*\{[^}]*\bSwitch\b[^}]*\}\s*from\s*'react-native'/.test(src)) {
+    rawSwitches.push(`${relPosix(f)}: imports Switch from react-native`);
+  }
+  for (const m of src.matchAll(/<(TextInput|Switch|AppSwitch)\s/g)) {
+    if (m[1] === 'Switch') {
+      if (isWrapper) continue;
+      rawSwitches.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
+    }
     inputs++;
     if (!/accessibilityLabel=/.test(openTag(src, m.index!))) {
       unlabelled.push(`${relPosix(f)}:${src.slice(0, m.index).split('\n').length}`);
@@ -479,6 +486,7 @@ for (const f of files) {
   }
 }
 check(`every TextInput / Switch has accessibilityLabel (${inputs} checked)`, unlabelled.length === 0, unlabelled.join('; '));
+check('every switch is an AppSwitch (a raw <Switch> has an invisible OFF track on a white card)', rawSwitches.length === 0, rawSwitches.join('; '));
 
 console.log('\nRule 6: M7 — the betslip bar never covers the last row');
 const app = read('App.tsx');
@@ -567,7 +575,7 @@ check('TrackRecord sport tabs: tablist + tab + selected + label', /accessibility
 check('TrackRecord sport tabs: ROW_SLOP_PAD slop inside a framed horizontal ScrollView (L13: one row, no wrap)',
   /hitSlop=\{\{ top: ROW_SLOP_PAD, bottom: ROW_SLOP_PAD/.test(record) && /marginTop: -ROW_SLOP_PAD/.test(record) && /paddingVertical: ROW_SLOP_PAD/.test(record) && !/sportTabs: \{[^}]*flexWrap/.test(record));
 const home = read('src/screens/PicksHomeScreen.tsx');
-check('PicksHome sub-tabs: tablist + tab + selected', /<View style=\{styles\.subTabs\} accessibilityRole="tablist">/.test(home) && /hitSlop=\{\{ top: SUBTAB_REACH_ABOVE, bottom: 2 \+ SUBTAB_REACH_BELOW \}\}\s*accessibilityRole="tab"\s*accessibilityState=\{\{ selected: active \}\}/.test(home));
+check('PicksHome sub-tabs: tablist + tab or locked button + selected', /<View style=\{styles\.subTabs\} accessibilityRole="tablist">/.test(home) && /hitSlop=\{\{ top: SUBTAB_REACH_ABOVE, bottom: 2 \+ SUBTAB_REACH_BELOW \}\}\s*accessibilityRole=\{locked \? 'button' : 'tab'\}\s*accessibilityState=\{\{ selected: active \}\}/.test(home) && /lockedLabel="Signals, Premium"/.test(home) && /lockedLabel="Live Signals, Premium"/.test(home));
 const models = read('src/screens/ModelsScreen.tsx');
 check('Models segment: tablist + tab + 9pt slop on a ~27pt pill', /<View style=\{styles\.segmentRow\} accessibilityRole="tablist">/.test(models) && /hitSlop=\{\{ top: 9, bottom: 9/.test(models) && /accessibilityRole="tab"/.test(models));
 const groupTabs = read('src/components/GroupTabs.tsx');
@@ -613,19 +621,18 @@ const statAbove = intOf(ps, /const statReachAbove = [^?]+\? (\d+) : 0;/);
 check(`PlayerStats stat chips under the group header: ${statAbove + 4} + ${chipH} + 4 = ${statAbove + 4 + chipH + 4}pt`,
   statAbove + 4 + chipH + 4 >= MIN_TAP_V && /hitSlop=\{\{ top: 4 \+ statReachAbove, bottom: 4, left: 2, right: 2 \}\}/.test(ps));
 // Known short, each with the reason (reported on the PR). A NEW short case
-// fails: every <SportToggle> must be on Picks / Models (reached) or listed here.
+// fails: every <SportToggle> must be on Picks / Models (reached).
 const H9_SHORT: { where: string; eff: number; reason: string }[] = [
-  { where: 'src/screens/StatsScreen.tsx', eff: TOGGLE_H + TOGGLE_IN.above + TOGGLE_IN.below,
-    reason: 'Stats header: 39.5pt from the sportsbook line to the next control (Players/Teams bar or the stat group pill), both interactive (with no player board, the Settings button’s slop sits above instead); the chips (23pt) cannot reach 44 without covering one of them — needs ~5pt more header, a visible change (Designer).' },
   { where: 'src/screens/PlayerStatsScreen.tsx#stat-under-tabs', eff: 4 + chipH + 4,
     reason: 'PlayerStats stat chips under the group tabs: flush against the tab bar above, 8pt gap shared 4/4 with the range chips below — no whitespace left (Designer).' },
   { where: 'src/components/CalendarGrid.tsx', eff: 36,
     reason: 'Calendar day: 36pt is the row pitch; 44pt wide, 36 tall (see the size allowlist).' },
 ];
-const statsUses = (read('src/screens/StatsScreen.tsx').match(/<SportToggle\b[^>]*\/>/g) ?? []);
-check(`every <SportToggle> is reached (Picks, Models) or listed short (${statsUses.length} on Stats, all plain)`,
-  statsUses.length > 0 && statsUses.every((t) => t === '<SportToggle />') &&
-    files.every((f) => { const r = relPosix(f); const n = (readUtf8(f).match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx', 'src/screens/StatsScreen.tsx'].includes(r); }));
+const statsSrc = read('src/screens/StatsScreen.tsx');
+check('Stats sport control is the title menu, not the league row',
+  !/<SportToggle\b/.test(statsSrc) && (statsSrc.match(/<StatsSportButton\b/g) ?? []).length >= 1);
+check('every <SportToggle> is reached (Picks, Models)',
+  files.every((f) => { const r = relPosix(f); const n = (readUtf8(f).match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx'].includes(r); }));
 check('every H9 short entry carries a reason and is really short', H9_SHORT.every((x) => x.reason.length > 40 && x.eff < MIN_TAP_V));
 for (const x of H9_SHORT) console.log(`  (short: ${x.where} ≈ ${x.eff}pt — ${x.reason})`);
 
@@ -662,7 +669,7 @@ console.log('\nM9 / M10 / M18 / M19 / M25 / M26');
 const perf = read('src/screens/PerformanceScreen.tsx');
 check('M10: stake chip 12pt slop (was 6) + role + label', /hitSlop=\{\{ top: 12, bottom: 12, left: 8, right: 8 \}\}\s*accessibilityRole="button"\s*accessibilityLabel=\{`Edit stake, /.test(perf));
 check('M10: stake pills are radios with checked state + 8pt slop', /accessibilityRole="radiogroup"/.test(perf) && /hitSlop=\{\{ top: 8, bottom: 8, left: 2, right: 2 \}\}\s*accessibilityRole="radio"\s*accessibilityState=\{\{ checked: active, selected: active \}\}/.test(perf));
-check('M10: StakeEditModal buttons labelled, 12pt slop, tap outside closes', /accessibilityLabel="Reset to \$100"/.test(perf) && /accessibilityLabel="Save stake"/.test(perf) && /<View style=\{styles\.stakeModalBackdrop\}>\s*\{\/\*[\s\S]*?\*\/\}\s*<Pressable\s*style=\{StyleSheet\.absoluteFill\}\s*onPress=\{onClose\}/.test(perf));
+check('M10: StakeEditModal buttons labelled, 12pt slop, tap outside closes', /accessibilityLabel="Use the posted stake"/.test(perf) && /accessibilityLabel="Save stake"/.test(perf) && /<View style=\{styles\.stakeModalBackdrop\}>\s*\{\/\*[\s\S]*?\*\/\}\s*<Pressable\s*style=\{StyleSheet\.absoluteFill\}\s*onPress=\{onClose\}/.test(perf));
 check('M10: tracked rows offer Untrack / Edit stake as accessibilityActions (Undo toast is PR 5)', /\{ name: 'untrack', label: 'Untrack' \}/.test(perf) && /actionName === 'untrack'\) onRowLongPress\(row\)/.test(perf));
 const tip = read('src/components/InfoTooltip.tsx');
 check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessibilityRole="button"/.test(tip));
@@ -672,7 +679,7 @@ check('M19: Skip and Next have roles; dots read "Page N of 5"', /accessibilityLa
 const manual = read('src/components/ManualBetModal.tsx');
 check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
   /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
-check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in dollars"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
+check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in units"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));

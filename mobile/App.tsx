@@ -4,13 +4,16 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   DefaultTheme,
+  getFocusedRouteNameFromRoute,
   NavigationContainer,
+  useNavigation,
   useNavigationContainerRef,
 } from '@react-navigation/native';
-import { View } from 'react-native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ActivityIndicator, View } from 'react-native';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
@@ -21,6 +24,10 @@ import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
 import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
 import { BuiltInModelDetailScreen } from '@/screens/BuiltInModelDetailScreen';
+import { ByomBuilderScreen } from '@/screens/ByomBuilderScreen';
+import { ByomEditScreen } from '@/screens/ByomEditScreen';
+import { ByomBetsScreen } from '@/screens/ByomBetsScreen';
+import { ByomDetailScreen } from '@/screens/ByomDetailScreen';
 import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { TeamStatsScreen } from '@/screens/TeamStatsScreen';
@@ -29,9 +36,11 @@ import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
+import { DeleteAccountScreen } from '@/screens/DeleteAccountScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
+import { ScoreboardGameScreen } from '@/screens/ScoreboardGameScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
@@ -44,6 +53,11 @@ import { usePushDeepLink } from '@/hooks/usePushDeepLink';
 import { installNotificationHandler } from '@/lib/pushPresentation';
 import { startCrashLogging } from '@/lib/crashLogSetup';
 import { setCrashScreen } from '@/lib/crashLog';
+import { noteScreen, noteTouch } from '@/lib/freezeLog';
+import { startFreezeLogging } from '@/lib/freezeLogSetup';
+import { sentryReadyNow, setSentryScreen, startSentry, wrapWithSentry } from '@/lib/sentry';
+import { startPerfLogging } from '@/lib/perfLogSetup';
+import { setPerfScreen } from '@/lib/perfLog';
 import { AppErrorBoundary } from '@/components/AppErrorBoundary';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
@@ -53,11 +67,17 @@ import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
 import { addDays, todayET } from '@/lib/format';
 import { ToastHost } from '@/components/Toast';
 import { BetslipBar } from '@/components/BetslipBar';
+import { PlayerStatsBackButton } from '@/components/StackBackButton';
 import {
   FALLBACK_TAB_BAR_HEIGHT,
   setTabBarHeight,
   useTabBarHeight,
 } from '@/hooks/useTabBarHeight';
+import { FeatureGate } from '@/components/FeatureGate';
+import { readAuthStatus, useAuth } from '@/hooks/useAuth';
+import { useMembership } from '@/hooks/useMembership';
+import { AUTH_ENABLED } from '@/lib/authConfig';
+import { signedOutRouteIsShell } from '@/lib/authShell';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -82,7 +102,7 @@ const TAB_ROUTE_NAMES = new Set<string>(Object.keys(TAB_ICONS));
  * slip), and the two flag-gated full-screen flows where a floating shortcut
  * would be noise.
  */
-const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall']);
+const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall', 'DeleteAccount']);
 
 /**
  * Stack headers (back chevron, "Back") otherwise keep React Navigation's
@@ -102,7 +122,46 @@ const NAV_THEME = {
   },
 };
 
+function withPremiumGate(
+  Screen: React.ComponentType,
+  heading: string,
+  chrome: boolean,
+) {
+  function Gated() {
+    return (
+      <FeatureGate heading={heading} chrome={chrome}>
+        <Screen />
+      </FeatureGate>
+    );
+  }
+  Gated.displayName = `PremiumGate(${heading})`;
+  return Gated;
+}
+
+const GatedPerformance = withPremiumGate(PerformanceScreen, 'Performance', true);
+const GatedModels = withPremiumGate(ModelsScreen, 'Models', true);
+const GatedStats = withPremiumGate(StatsScreen, 'Stats', true);
+const GatedPickDetail = withPremiumGate(PickDetailScreen, 'Pick', false);
+const GatedScoreboardGame = withPremiumGate(ScoreboardGameScreen, 'Game', false);
+const GatedModelEdit = withPremiumGate(ModelEditScreen, 'Model', false);
+const GatedModelDetail = withPremiumGate(ModelDetailScreen, 'Model', false);
+const GatedBuiltInModel = withPremiumGate(BuiltInModelDetailScreen, 'Model', false);
+const GatedByomBuilder = withPremiumGate(ByomBuilderScreen, 'Model', false);
+const GatedByomEdit = withPremiumGate(ByomEditScreen, 'Model', false);
+const GatedByomDetail = withPremiumGate(ByomDetailScreen, 'Model', false);
+const GatedByomBets = withPremiumGate(ByomBetsScreen, 'Model', false);
+const GatedPlayerStats = withPremiumGate(PlayerStatsScreen, 'Stats', false);
+const GatedTeamStats = withPremiumGate(TeamStatsScreen, 'Stats', false);
+const GatedSavedParlays = withPremiumGate(SavedParlaysScreen, 'Parlays', false);
+
 function TabsRoot() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { contentLocked } = useMembership();
+  const lockedTab = {
+    tabPress: () => {
+      if (contentLocked) navigation.navigate('Paywall');
+    },
+  };
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -128,15 +187,17 @@ function TabsRoot() {
         </View>
       )}
     >
+      {/* Picks stays on the free shell: the teaser, not the paywall. Signals
+          and Live Signals open the paywall from inside that screen. */}
       <Tab.Screen name="Picks" component={PicksHomeScreen} />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
         options={{ title: 'Record' }}
       />
-      <Tab.Screen name="Performance" component={PerformanceScreen} />
-      <Tab.Screen name="Models" component={ModelsScreen} />
-      <Tab.Screen name="Stats" component={StatsScreen} />
+      <Tab.Screen name="Performance" component={GatedPerformance} listeners={lockedTab} />
+      <Tab.Screen name="Models" component={GatedModels} listeners={lockedTab} />
+      <Tab.Screen name="Stats" component={GatedStats} listeners={lockedTab} />
     </Tab.Navigator>
   );
 }
@@ -197,10 +258,28 @@ function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
 installNotificationHandler();
 // Same reason: catch an error from the first render, and record how the
 // previous launch ended before this one can overwrite the marker.
-startCrashLogging();
+// Sentry first: native crashes and iOS app hangs (lib/sentry.ts). When the
+// device id is already on disk, init happens in this turn and the other
+// loggers follow immediately. The first launch of a build with a DSN waits
+// for AsyncStorage, then inits, so the first event already carries the id
+// the crash log uses. An empty DSN skips init and the other loggers still
+// start in this turn. The crash log wraps the JS error handler, so both see
+// every error.
+function startOtherLoggers(): void {
+  startCrashLogging();
+  // Freeze tracking: a trail of screens, taps and pop-ups on every report, and
+  // a `restart` report when the last session looks force-quit (lib/freezeLog.ts).
+  startFreezeLogging();
+  // Load times: the first screen is timed from here (lib/perfLog.ts).
+  startPerfLogging();
+}
+const sentryStarting = startSentry();
+if (sentryReadyNow()) startOtherLoggers();
+else void sentryStarting.then(startOtherLoggers);
 
-export default function App() {
+function App() {
   const { seen, ready, markSeen } = useOnboarding();
+  const { ready: authReady, signedIn } = useAuth();
   // A member who saw the intro before the sportsbook step existed gets that
   // step on its own, once (OnboardingModal booksOnly).
   const { needsChoice: needsBooks } = usePreferredBooks();
@@ -222,6 +301,9 @@ export default function App() {
   const syncRoute = useCallback(() => {
     const name = navRef.getCurrentRoute()?.name;
     setCrashScreen(name);
+    noteScreen(name);
+    setSentryScreen(name);
+    setPerfScreen(name);
     setRouteName(name);
   }, [navRef]);
   // Retry after a crash remounts the navigator; onReady sets this back, and
@@ -241,69 +323,160 @@ export default function App() {
     navRef.navigate('Betslip');
   }, [navRef]);
   const overTabs = routeName != null && TAB_ROUTE_NAMES.has(routeName);
+  const authHold = AUTH_ENABLED && !authReady;
+  const signedOut = AUTH_ENABLED && authReady && !signedIn;
+  // The paywall is the first screen after a fresh sign-in. The intro and the
+  // daily recap are modals, so they would cover it. Hold both until Close.
+  const holdIntro = routeName === 'Paywall' || routeName === 'SignIn';
+
+  // Auth on: the shell is unreachable signed out. Read the module status, not
+  // the React copy — a sign-in updates the module before this render, and a
+  // reset here would throw that sign-in back to SignIn. routeName re-runs
+  // this after a push deep link or any other navigation off SignIn.
+  useEffect(() => {
+    if (!AUTH_ENABLED || !navReady) return;
+    if (readAuthStatus() !== 'signedOut') return;
+    if (!signedOutRouteIsShell(navRef.getCurrentRoute()?.name)) return;
+    navRef.reset({ index: 0, routes: [{ name: 'SignIn' }] });
+  }, [signedOut, navReady, navRef, routeName]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-    <SafeAreaProvider>
+    // onTouchStart only records the tap (freezeLog); it never claims it.
+    <GestureHandlerRootView style={{ flex: 1 }} onTouchStart={noteTouch}>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
     <AppErrorBoundary onReset={resetNav}>
       <OnboardingModal
-        visible={ready && (!seen || needsBooks)}
+        visible={ready && (!seen || needsBooks) && (!AUTH_ENABLED || signedIn) && !holdIntro}
         booksOnly={seen && needsBooks}
         onDone={markSeen}
       />
-      <DailyRecap onboardingDone={ready && seen && !needsBooks} />
+      <DailyRecap onboardingDone={ready && seen && !needsBooks && (!AUTH_ENABLED || signedIn) && !holdIntro} />
+      {authHold ? (
+        <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.tint} />
+        </View>
+      ) : (
       <NavigationContainer
         ref={navRef}
         theme={NAV_THEME}
         onReady={onNavReady}
         onStateChange={syncRoute}
       >
-        <Stack.Navigator>
-          <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
+        <Stack.Navigator
+          initialRouteName={signedOut ? 'SignIn' : 'Tabs'}
+          // ARROW-ONLY BACK BUTTON, NO CUSTOM LABEL (Matt, 2026-11-08). On iOS
+          // 27.2 the native Back stopped responding after a pop-up had been
+          // opened on the screen: Settings twice, then Player Stats after
+          // Compare odds. The freeze trail showed no stuck pop-up and no JS
+          // stall, only taps that went nowhere. Apple's reported iOS 27 bug is a
+          // Back button carrying a custom title; its workaround is this mode.
+          // So no screen sets headerBackTitle (tests/test_mobile_back_button.py).
+          screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}
+        >
+          <Stack.Screen
+            name="Tabs"
+            component={TabsRoot}
+            // With the arrow-only Back, iOS's long-press Back menu lists the
+            // earlier screen by its title. Without one it would read "Tabs".
+            // It names the tab the reader came from (UX review, 2026-11-08).
+            options={({ route }) => {
+              const tab = getFocusedRouteNameFromRoute(route) ?? 'Picks';
+              return { headerShown: false, title: tab === 'TrackRecord' ? 'Record' : tab };
+            }}
+          />
           <Stack.Screen
             name="PickDetail"
-            component={PickDetailScreen}
-            options={{ title: 'Pick Detail', headerBackTitle: 'Back' }}
+            component={GatedPickDetail}
+            options={{ title: 'Pick Detail' }}
+          />
+          <Stack.Screen
+            name="ScoreboardGame"
+            component={GatedScoreboardGame}
+            options={{ title: 'Game' }}
           />
           <Stack.Screen
             name="ModelEdit"
-            component={ModelEditScreen}
-            options={{ title: 'Model', headerBackTitle: 'Back' }}
+            component={GatedModelEdit}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
             name="ModelDetail"
-            component={ModelDetailScreen}
-            options={{ title: 'Model', headerBackTitle: 'Back' }}
+            component={GatedModelDetail}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
             name="BuiltInModelDetail"
-            component={BuiltInModelDetailScreen}
-            options={{ title: 'Model', headerBackTitle: 'Back' }}
+            component={GatedBuiltInModel}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
+            name="ByomBuilder"
+            component={GatedByomBuilder}
+            options={({ route }) => ({
+              title: route.params?.sport === 'NBA' ? 'New NBA model' : 'New NFL model',
+            })}
+          />
+          <Stack.Screen
+            name="ByomEdit"
+            component={GatedByomEdit}
+            options={{ title: 'Edit model' }}
+          />
+          <Stack.Screen
+            name="ByomDetail"
+            component={GatedByomDetail}
+            options={{ title: 'Model' }}
+          />
+          <Stack.Screen
+            name="ByomBets"
+            component={GatedByomBets}
+            options={{ title: 'Bets' }}
+          />
+          {/* JS Back pill, not UIKit's. On iOS 27 the system "< Back" pill
+              stops popping after a modal on this screen (Compare odds).
+              react-native-screens 4.16 also measures that pill from the
+              pre-iOS 26 button frame, so it sits under the status bar.
+              This screen's left slot is our pressable, in the header the
+              stack already insets (SafeAreaProvider is seeded with
+              initialWindowMetrics so that inset is not 0 on the first frame).
+              gestureEnabled is the edge swipe. Full-screen swipe stays off:
+              the stat and range rows are horizontal scrolls. */}
+          <Stack.Screen
             name="PlayerStats"
-            component={PlayerStatsScreen}
-            options={{ title: 'Player Stats', headerBackTitle: 'Back' }}
+            component={GatedPlayerStats}
+            options={{
+              title: 'Player Stats',
+              headerShown: true,
+              headerTransparent: false,
+              headerBackVisible: false,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: false,
+              headerLeft: () => <PlayerStatsBackButton />,
+            }}
           />
           <Stack.Screen
             name="TeamStats"
-            component={TeamStatsScreen}
-            options={{ title: 'Team', headerBackTitle: 'Back' }}
+            component={GatedTeamStats}
+            options={{ title: 'Team' }}
           />
           <Stack.Screen
             name="Explainer"
             component={ExplainerScreen}
-            options={{ title: 'How this works', headerBackTitle: 'Back' }}
+            options={{ title: 'How this works' }}
           />
           <Stack.Screen
             name="ConnectSportsbook"
             component={ConnectSportsbookScreen}
-            options={{ title: 'Connect Sportsbook', headerBackTitle: 'Back' }}
+            options={{ title: 'Connect Sportsbook' }}
           />
           <Stack.Screen
             name="Settings"
             component={SettingsScreen}
-            options={{ title: 'Settings', headerBackTitle: 'Back' }}
+            options={{ title: 'Settings' }}
+          />
+          <Stack.Screen
+            name="DeleteAccount"
+            component={DeleteAccountScreen}
+            options={{ title: 'Delete account' }}
           />
           {/* The betslip renders its own header (close chevron, saved parlays,
               settings) so it reads like the sheet it is — hence headerShown
@@ -315,8 +488,8 @@ export default function App() {
           />
           <Stack.Screen
             name="SavedParlays"
-            component={SavedParlaysScreen}
-            options={{ title: 'Saved Parlays', headerBackTitle: 'Back' }}
+            component={GatedSavedParlays}
+            options={{ title: 'Saved Parlays' }}
           />
           {/* No UI navigates here since the Track Record link was removed
               (2026-09-05). The opening-signal shadow track still runs
@@ -324,17 +497,17 @@ export default function App() {
           <Stack.Screen
             name="OpeningComparison"
             component={OpeningComparisonScreen}
-            options={{ title: 'Opening vs Live', headerBackTitle: 'Back' }}
+            options={{ title: 'Opening vs Live' }}
           />
           <Stack.Screen
             name="Feedback"
             component={FeedbackScreen}
-            options={{ title: 'Feedback', headerBackTitle: 'Back' }}
+            options={{ title: 'Feedback' }}
           />
           <Stack.Screen
             name="FeedbackThread"
             component={FeedbackThreadScreen}
-            options={{ title: 'Conversation', headerBackTitle: 'Back' }}
+            options={{ title: 'Conversation' }}
           />
           {/* Auth is behind AUTH_ENABLED (lib/authConfig.ts). Registering the
               route costs nothing while the flag is off — no UI navigates to it
@@ -342,7 +515,7 @@ export default function App() {
           <Stack.Screen
             name="SignIn"
             component={SignInScreen}
-            options={{ title: 'Sign in', headerBackTitle: 'Back' }}
+            options={{ headerShown: false, gestureEnabled: false }}
           />
           {/* Paywall is behind BILLING_ENABLED (lib/billingConfig.ts). Same
               posture as SignIn — registered, but nothing navigates to it while
@@ -350,11 +523,12 @@ export default function App() {
           <Stack.Screen
             name="Paywall"
             component={PaywallScreen}
-            options={{ title: 'Subscribe', headerBackTitle: 'Back' }}
+            options={{ headerShown: false, title: 'Subscribe' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />
       </NavigationContainer>
+      )}
       <BetslipBar
         hidden={routeName == null || NO_BETSLIP_BAR_ROUTES.has(routeName)}
         bottomOffset={overTabs ? tabBarHeight || FALLBACK_TAB_BAR_HEIGHT : 0}
@@ -366,3 +540,5 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+export default wrapWithSentry(App);

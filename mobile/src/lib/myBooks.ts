@@ -107,8 +107,36 @@ export function foundAtText(bookShort: string, americanText: string): string {
   return `Found at ${bookShort} ${americanText}`;
 }
 
-/** The one line that says the record is not at the member's price. */
-export const RECORD_AT_BEST_BOOK_NOTE =
-  'Model records and stats use the best price across all books.';
+/**
+ * The record is kept at the price the pick was decided at, for EVERY model.
+ *
+ * It used to say "the best price across all books", with one model carved
+ * out. That was false: the NCAAB moneyline model
+ * (models/ncaab_moneyline_own_spread.py) bets the book with the largest edge,
+ * and 269 of its 914 replayed bets sat at a book another book beat on price.
+ * The true statement holds for every model, so there is one (2026-11-03).
+ * `modelId` stays in the signature so the callers need not change.
+ */
+const RECORD_NOTE = 'Model records and stats use the price the model found, not your book’s.';
+
+/** Pick Detail's record caption for a member whose own book has the bet. */
+export function recordNoteFor(_modelId: string): string {
+  return RECORD_NOTE;
+}
+
+/** The card's short form of recordNoteFor, after "Found at …". */
+export function recordNoteShortFor(_modelId: string): string {
+  return 'record kept at that price';
+}
 
 export const NOT_AT_MY_BOOKS = 'Not offered at your books';
+
+/**
+ * 'none' on an IN-PLAY pick. Its only quote is the deciding book's (a live
+ * card carries no other book's price), so 'none' there means that book is not
+ * one of theirs, not that none of their books has the bet: DraftKings may hold
+ * the same side at the same number. Say what is true in every case.
+ */
+export function liveNotAtMyBooksText(bookShort: string, americanText: string): string {
+  return `${foundAtText(bookShort, americanText)} · not one of your books`;
+}

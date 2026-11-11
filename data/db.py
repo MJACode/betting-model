@@ -75,7 +75,15 @@ _NAMED_PARAM_RE = re.compile(r"(?<!:):([A-Za-z_]\w*)")
 _SQL_SKIP_RE = re.compile(
     r"'(?:[^']|'')*'"      # string literal
     r"|--[^\n]*"           # line comment
-    r"|/\*.*?\*/",          # block comment
+    r"|/\*.*?\*/"           # block comment
+    # A dollar-quoted body, $$...$$ or $tag$...$tag$. Everything inside is a
+    # function or DO-block body, never a placeholder. On 2026-11-04 the jsonb
+    # key operator in `p_filters ? 'primetime'` became `p_filters %s
+    # 'primetime'` when the worker applied byom_official_legs_2026_11_04.sql,
+    # and every Build Your Own Model preview returned 400 until the body was
+    # replaced. The outer tag wins, so a $fn$ nested in a $mig$ is one region.
+    # The lookbehind keeps a $ inside an identifier (a$b$c) from opening one.
+    r"|(?<![A-Za-z0-9_$])\$([A-Za-z_][A-Za-z_0-9]*|)\$.*?\$\1\$",
     re.S,
 )
 
@@ -330,10 +338,15 @@ class DBConnection:
     """
 
     def __init__(self, pg_conn: psycopg2.extensions.connection,
-                 url: str | None = None):
+                 url: str | None = None,
+                 idle_in_transaction_ms: int | None = None):
         self._conn = pg_conn
         self._url = url          # what a reconnect dials; None = cannot reconnect
         self._dirty = False      # uncommitted writes on this connection
+        # None reads DB_IDLE_IN_TRANSACTION_TIMEOUT_MS at reconnect. A
+        # positive value is this connection's own limit, replayed after a
+        # drop so a BYOM builder does not come back without it.
+        self._idle_ms = idle_in_transaction_ms
 
     # ── reconnect ───────────────────────────────────────────────────────
     #
@@ -364,7 +377,7 @@ class DBConnection:
             except Exception:                                  # noqa: BLE001
                 pass
             try:
-                self._conn = _open(self._url)
+                self._conn = _open(self._url, _session_options(self._idle_ms))
                 self._dirty = False
                 logger.warning(f"db: connection lost ({str(why)[:80]}); "
                                f"reconnected on attempt {attempt}")
@@ -489,7 +502,8 @@ class DBConnection:
 
 # ── Factory ───────────────────────────────────────────────────────────────────
 
-def get_connection(session_mode: bool = False) -> DBConnection:
+def get_connection(session_mode: bool = False, *,
+                   idle_in_transaction_ms: int | None = None) -> DBConnection:
     """
     Open and return a wrapped Postgres connection.
 
@@ -527,7 +541,7 @@ def get_connection(session_mode: bool = False) -> DBConnection:
                or os.environ.get("DATABASE_URL", ""))
         if not url:
             raise ValueError("Neither DATABASE_URL_SESSION nor DATABASE_URL is set.")
-        return _connect(url)
+        return _connect(url, idle_in_transaction_ms)
 
     url = os.environ.get("DATABASE_URL", "")
     if url:
@@ -538,7 +552,7 @@ def get_connection(session_mode: bool = False) -> DBConnection:
             "Add it to your .env file or Railway environment variables.\n"
             "Format: postgresql://user:password@host:5432/dbname"
         )
-    return _connect(url)
+    return _connect(url, idle_in_transaction_ms)
 
 
 # Supabase's session pooler and transaction pooler are the SAME host with
@@ -592,14 +606,27 @@ def use_poller_session() -> None:
     os.environ["DB_IDLE_IN_TRANSACTION_TIMEOUT_MS"] = str(POLLER_IDLE_IN_TRANSACTION_MS)
 
 
-def _session_options() -> str | None:
-    """libpq `-c` options for one connection, from the process environment."""
+def _session_options(idle_in_transaction_ms: int | None = None) -> str | None:
+    """libpq `-c` options for one connection.
+
+    Statement timeout still comes from the process environment. The idle
+    limit uses `idle_in_transaction_ms` when the caller passed one, and
+    otherwise `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`. A positive explicit
+    value does not change the process environment, so a scorer in the
+    same process keeps the unlimited default.
+    """
     parts: list[str] = []
     timeout_ms = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "").strip()
     if timeout_ms.isdigit():
         parts.append(f"-c statement_timeout={int(timeout_ms)}")
-    idle_ms = os.environ.get("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", "").strip()
-    if idle_ms.isdigit() and int(idle_ms) > 0:
+    idle_ms = idle_in_transaction_ms
+    if idle_ms is None:
+        raw = os.environ.get("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", "").strip()
+        if raw.isdigit() and int(raw) > 0:
+            idle_ms = int(raw)
+    elif int(idle_ms) <= 0:
+        idle_ms = None
+    if idle_ms:
         parts.append(f"-c idle_in_transaction_session_timeout={int(idle_ms)}")
     return " ".join(parts) or None
 
@@ -626,7 +653,7 @@ def release_read(conn) -> None:
         pass
 
 
-def _connect(url: str) -> DBConnection:
+def _connect(url: str, idle_in_transaction_ms: int | None = None) -> DBConnection:
     """Open one wrapped connection to `url`. Shared by both modes."""
     # Per-session statement timeout, opt-in via DB_STATEMENT_TIMEOUT_MS.
     #
@@ -643,8 +670,9 @@ def _connect(url: str) -> DBConnection:
     # that licence should be held by the one job that has earned it.
     #
     # Autocommit off — callers manage transactions with conn.commit() / conn.rollback()
-    pg_conn = _open(url, _session_options())
-    return DBConnection(pg_conn, url=url)
+    pg_conn = _open(url, _session_options(idle_in_transaction_ms))
+    return DBConnection(
+        pg_conn, url=url, idle_in_transaction_ms=idle_in_transaction_ms)
 
 
 def _open(url: str, options: str | None = None) -> psycopg2.extensions.connection:

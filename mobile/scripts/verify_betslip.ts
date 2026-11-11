@@ -330,9 +330,9 @@ check('two resolved legs → parlay price',
   twoSummary.count === 2 && twoSummary.resolved === 2 && twoSummary.isParlay);
 check('combined odds match the screen headline',
   twoSummary.americanOdds === computeParlayMetrics(twoLeg.legs).americanOdds);
-check(`$${BETSLIP_BAR_STAKE} pays = stake x combined decimal (stake included)`,
-  approx(twoSummary.payoutPerTen, BETSLIP_BAR_STAKE * expectedPayout, 1e-6),
-  `${twoSummary.payoutPerTen}`);
+check(`${BETSLIP_BAR_STAKE}u pays = stake x combined decimal, in units (stake included)`,
+  BETSLIP_BAR_STAKE === 1 && approx(twoSummary.payoutPerUnit, BETSLIP_BAR_STAKE * expectedPayout, 1e-6),
+  `${twoSummary.payoutPerUnit}`);
 
 // The whole reason the bar can skip the copula pass: correlation changes the
 // win probability, never the payout — so the bar and the screen can't disagree.
@@ -349,7 +349,7 @@ check('single leg prices as a straight bet',
     // approx, not ===: the decimal round-trip lands on -109.99999999999999.
     // formatAmerican rounds for display, so the bar reads "-110".
     approx(oneSummary.americanOdds, -110, 1e-6) &&
-    approx(oneSummary.payoutPerTen, BETSLIP_BAR_STAKE * toDec(-110), 1e-6));
+    approx(oneSummary.payoutPerUnit, BETSLIP_BAR_STAKE * toDec(-110), 1e-6));
 
 // A settled / de-listed / now-prob-only selection stops resolving: the badge
 // must still count it (the user picked it) while the price covers only what's
@@ -365,8 +365,22 @@ check('badge counts selections, price counts resolved legs',
 const noneSummary = betslipSummary([], 2);
 check('nothing priceable → no odds, no payout, still counted',
   noneSummary.count === 2 && noneSummary.resolved === 0 &&
-    noneSummary.americanOdds === null && noneSummary.payoutPerTen === null &&
-    !noneSummary.isParlay);
+    noneSummary.americanOdds === null && noneSummary.payoutPerUnit === null &&
+    !noneSummary.isParlay && noneSummary.held === 0);
+
+// A pre-game alternate held after kickoff is still a selection. The bar
+// stays (so the user can open the slip and remove it) and its odds are
+// not the bar's price.
+const heldLeg = { ...oneLeg.legs[0]!, pregameStale: true };
+const heldOnly = betslipSummary([heldLeg], 1);
+check('a held pre-game alt keeps the bar and is left out of the odds',
+  heldOnly.resolved === 0 && heldOnly.held === 1 && heldOnly.americanOdds === null &&
+    shouldShowBetslipBar(heldOnly, false));
+const heldMix = betslipSummary([...oneLeg.legs, heldLeg], 2);
+check('bar odds ignore a held pre-game alt beside a live leg',
+  heldMix.resolved === 1 && heldMix.held === 1 &&
+    heldMix.americanOdds === oneSummary.americanOdds &&
+    shouldShowBetslipBar(heldMix, false));
 
 // A prob-only selection (no DK price) can never become a leg — same rule the
 // betslip screen uses, so the bar can't advertise a price for it.

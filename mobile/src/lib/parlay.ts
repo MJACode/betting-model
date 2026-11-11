@@ -19,12 +19,13 @@
  * recomputes everything synchronously.
  */
 
-import { americanToDecimal } from '@/lib/format';
+import { americanToDecimal, labelWithoutStake } from '@/lib/format';
 import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
+import { applySgpHaircut, sameGameGroupCount, NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -87,6 +88,21 @@ export interface ParlayLeg {
   /** The book `americanOdds` came from, for a line leg DraftKings did not
    * post — so its card can say "−115 · FD" rather than imply DraftKings. */
   pricedAt?: string;
+  /** True when that price came from the once-a-day alternate ladder
+   *  (lib/lineLegs.foldAltGameRows), so the leg card can say how old it is. */
+  pricedFromLadder?: boolean;
+  /** The ladder price's own stamp (the book's last_update), when
+   *  pricedFromLadder. */
+  pricedAsOf?: string | null;
+  /**
+   * The game has started and this price exists only on the pre-game
+   * alternate ladder. The card stays so the user can remove it. It is not
+   * a live price: parlay odds, the book row, and a saved parlay leave it out.
+   */
+  pregameStale?: boolean;
+  /** Held after kickoff but the ladder read failed, so there is no price
+   *  to show. The card is the label and the note. */
+  pregameUnpriced?: boolean;
   /**
    * The snapshot this leg was rebuilt from (savedLegToParlayLeg), when it came
    * out of a SavedParlay rather than off today's board.
@@ -103,7 +119,13 @@ export interface ParlayLeg {
 
 export interface ParlayMetrics {
   parlayProb: number; // Π modelProb
-  decimalPayout: number; // Π decimalOdds
+  /** Π decimalOdds, cut to the estimated same-game price when 2+ legs share a
+   *  game (lib/sgpPricing.ts). Equal to multipliedDecimal otherwise. */
+  decimalPayout: number;
+  /** Π decimalOdds — every leg multiplied out, before any same-game cut. */
+  multipliedDecimal: number;
+  /** Games with 2+ legs. > 0 means decimalPayout is an ESTIMATE. */
+  sgpGroups: number;
   americanOdds: number; // combined, converted back to American
   ev: number; // parlayProb × decimalPayout − 1
   dkImpliedProb: number; // 1 / decimalPayout
@@ -187,7 +209,8 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     isGameLine: isGameLineModel(p.model_id),
     isLive: p.is_live === true,
     isFavorite: odds < 0,
-    label: p.pick_label,
+    // No old NFL sizing figure ("· 0.79u"): the slip shows its own stake.
+    label: labelWithoutStake(p.pick_label),
     modelProb: p.model_probability,
     decimalOdds: americanToDecimal(odds),
     americanOdds: odds,
@@ -232,14 +255,21 @@ export function resolveSlipLegs(
   return { legs, missingKeys };
 }
 
-/** (b) Pure metric calculation for an arbitrary leg set. */
-export function computeParlayMetrics(legs: ParlayLeg[]): ParlayMetrics {
+/** (b) Pure metric calculation for an arbitrary leg set. The payout is
+ *  DraftKings' (legs' stored prices), at its estimated same-game price when
+ *  2+ legs share a game. */
+export function computeParlayMetrics(
+  legs: ParlayLeg[],
+  sgpFits: SgpHaircuts = NO_SGP_FITS,
+): ParlayMetrics {
   let parlayProb = 1;
-  let decimalPayout = 1;
+  let multipliedDecimal = 1;
   for (const l of legs) {
     parlayProb *= l.modelProb;
-    decimalPayout *= l.decimalOdds;
+    multipliedDecimal *= l.decimalOdds;
   }
+  const sgpGroups = sameGameGroupCount(legs);
+  const decimalPayout = applySgpHaircut(multipliedDecimal, sgpGroups, MODEL_BOOK, sgpFits);
   const dkImpliedProb = decimalPayout > 0 ? 1 / decimalPayout : 0;
   const b = decimalPayout - 1;
   const p = parlayProb;
@@ -248,6 +278,8 @@ export function computeParlayMetrics(legs: ParlayLeg[]): ParlayMetrics {
   return {
     parlayProb,
     decimalPayout,
+    multipliedDecimal,
+    sgpGroups,
     americanOdds: decimalToAmerican(decimalPayout),
     ev: parlayProb * decimalPayout - 1,
     dkImpliedProb,
@@ -265,9 +297,11 @@ export function computeParlayMetrics(legs: ParlayLeg[]): ParlayMetrics {
  * both (the badge counts what you picked; the odds only what's actually
  * priceable).
  *
- * Payout is correlation-independent: correlation moves a parlay's win
- * probability, never its price, so the bar's number always equals the headline
- * odds on the betslip screen without paying for the copula pass.
+ * The bar's number equals the headline odds on the betslip screen without
+ * paying for the copula pass: the price does not depend on our correlation
+ * model. It DOES depend on whether legs share a game — a book prices those as
+ * a same-game parlay, below the legs multiplied out (lib/sgpPricing.ts), and
+ * both surfaces apply the same estimate.
  */
 export interface BetslipSummary {
   /** Selections in the slip, including ones with no priced pick today. */
@@ -276,31 +310,76 @@ export interface BetslipSummary {
   resolved: number;
   /** Combined American odds across the resolved legs; null when none resolve. */
   americanOdds: number | null;
-  /** Total return on a $10 stake (stake included); null when none resolve. */
-  payoutPerTen: number | null;
+  /** Total return, in units, on a 1u stake (stake included); null when none
+   *  resolve. Units, never dollars (mike, 2026-11-03). */
+  payoutPerUnit: number | null;
   /** 2+ resolved legs — the price is a parlay rather than a single bet. */
   isParlay: boolean;
+  /** 2+ legs share a game, so the price is an estimated same-game price. */
+  sgpEstimated: boolean;
+  /** Legs kept on the slip as a pre-game alternate after kickoff. They are
+   *  in `count` and not in `resolved`, and they are not in the odds. */
+  held: number;
 }
 
-export const BETSLIP_BAR_STAKE = 10;
+/** The betslip bar's example stake, in units. */
+export const BETSLIP_BAR_STAKE = 1;
 
-export function betslipSummary(legs: ParlayLeg[], selectionCount: number): BetslipSummary {
-  if (legs.length === 0) {
+/** Legs whose price may go into the parlay, the book row, and a saved slip.
+ *  A pre-game alternate held after kickoff stays on the card list and is
+ *  left out of the price. */
+export function legsForPricing(legs: readonly ParlayLeg[]): ParlayLeg[] {
+  return legs.filter((l) => !l.pregameStale);
+}
+
+/** The priced legs' slip keys — which slip a typed same-game price belongs to.
+ *  Sorted, so reordering the same legs keeps the price. The bar and the
+ *  Betslip screen compute it the same way. */
+export function slipSignature(legs: readonly ParlayLeg[]): string {
+  return legsForPricing(legs).map((l) => l.slipKey).sort().join(',');
+}
+
+export function betslipSummary(
+  legs: ParlayLeg[],
+  selectionCount: number,
+  sgpFits: SgpHaircuts = NO_SGP_FITS,
+  /** DraftKings price the member typed in from DK's own slip, if any. */
+  enteredDkAmerican?: number,
+): BetslipSummary {
+  const priced = legsForPricing(legs);
+  const held = legs.length - priced.length;
+  if (priced.length === 0) {
     return {
       count: selectionCount,
       resolved: 0,
       americanOdds: null,
-      payoutPerTen: null,
+      payoutPerUnit: null,
       isParlay: false,
+      sgpEstimated: false,
+      held,
     };
   }
-  const m = computeParlayMetrics(legs);
+  const m = computeParlayMetrics(priced, sgpFits);
+  const typed = m.sgpGroups > 0 && enteredDkAmerican != null ? americanToDecimal(enteredDkAmerican) : NaN;
+  if (typed > 1) {
+    return {
+      count: selectionCount,
+      resolved: priced.length,
+      americanOdds: decimalToAmerican(typed),
+      payoutPerUnit: BETSLIP_BAR_STAKE * typed,
+      isParlay: priced.length >= 2,
+      sgpEstimated: false,
+      held,
+    };
+  }
   return {
     count: selectionCount,
-    resolved: legs.length,
+    resolved: priced.length,
     americanOdds: m.americanOdds,
-    payoutPerTen: BETSLIP_BAR_STAKE * m.decimalPayout,
-    isParlay: legs.length >= 2,
+    payoutPerUnit: BETSLIP_BAR_STAKE * m.decimalPayout,
+    isParlay: priced.length >= 2,
+    sgpEstimated: m.sgpGroups > 0,
+    held,
   };
 }
 
@@ -335,6 +414,11 @@ export function canPruneSlip(board: {
  */
 export function shouldShowBetslipBar(summary: BetslipSummary, resolving: boolean): boolean {
   if (summary.resolved > 0) return true;
+  // A pre-game alternate held after kickoff is still a selection. The bar
+  // stays so the user can open the slip and remove it. A slip whose
+  // selections are about to be pruned (nothing held, nothing priced) stays
+  // hidden.
+  if (summary.held > 0) return true;
   return resolving && summary.count > 0;
 }
 
@@ -423,6 +507,10 @@ export function parlayHasLineShop(legs: ParlayLeg[]): boolean {
  * FanDuel deep link, so the DK hand-off still uses DK odds.
  */
 export function lineShopParlay(legs: ParlayLeg[], jointProb: number, dkEv: number): LineShop | null {
+  // A same-game parlay is placed at ONE book, as one bet: a leg cannot be
+  // taken at FanDuel while its game-mate is taken at DraftKings. Best-book-per-
+  // leg is not a price anyone can get, so the row says nothing.
+  if (sameGameGroupCount(legs) > 0) return null;
   const shopped = legs.filter((l) => l.bestBook != null);
   if (shopped.length === 0) return null;
   let decimalPayout = 1;
@@ -450,6 +538,13 @@ export interface BetslipBookQuote {
    * the coverage count instead. */
   decimalPayout: number | null;
   americanOdds: number | null;
+  /** This book's legs multiplied out, before the same-game cut; null when
+   *  partial. What an entered price is compared against. */
+  multipliedDecimal: number | null;
+  /** decimalPayout is an estimated same-game price (2+ legs share a game). */
+  sgpEstimated: boolean;
+  /** decimalPayout is the price the member read off this book's own slip. */
+  entered: boolean;
   ev: number | null; // jointProb × payout − 1, same jointProb for every book
   isBest: boolean; // highest payout among fully-priced books (ties all starred)
   isModelBook: boolean; // DraftKings — the book the models score against
@@ -514,8 +609,13 @@ export function priceBooksForParlay(
   legs: ParlayLeg[],
   jointProb: number,
   books: string[],
+  sgpFits: SgpHaircuts = NO_SGP_FITS,
+  /** American odds the member entered from a book's own slip, by book. A
+   *  fully-priced book with an entry shows that price, not the estimate. */
+  enteredPrices: Readonly<Record<string, number>> = {},
 ): BetslipBookQuote[] {
   if (legs.length === 0) return [];
+  const sgpGroups = sameGameGroupCount(legs);
   const quotes: BetslipBookQuote[] = [];
   for (const book of books) {
     let priced = 0;
@@ -529,13 +629,24 @@ export function priceBooksForParlay(
       decimalPayout *= q.decimal;
     }
     const full = priced === legs.length;
+    const typed = full ? enteredPrices[book] : undefined;
+    const enteredDecimal = typed != null ? americanToDecimal(typed) : NaN;
+    const useEntered = enteredDecimal > 1;
+    const payout = !full
+      ? null
+      : useEntered
+        ? enteredDecimal
+        : applySgpHaircut(decimalPayout, sgpGroups, book, sgpFits);
     quotes.push({
       book,
       priced,
       total: legs.length,
-      decimalPayout: full ? decimalPayout : null,
-      americanOdds: full ? decimalToAmerican(decimalPayout) : null,
-      ev: full ? jointProb * decimalPayout - 1 : null,
+      decimalPayout: payout,
+      americanOdds: payout != null ? decimalToAmerican(payout) : null,
+      multipliedDecimal: full ? decimalPayout : null,
+      sgpEstimated: full && sgpGroups > 0 && !useEntered,
+      entered: useEntered,
+      ev: payout != null ? jointProb * payout - 1 : null,
       isBest: false,
       isModelBook: book === MODEL_BOOK,
       links,
@@ -553,7 +664,11 @@ export function priceBooksForParlay(
     return b.priced - a.priced;
   });
   const bestDecimal = quotes[0]?.decimalPayout ?? null;
-  if (bestDecimal != null) {
+  // A typed price at one book against estimates at the others is not a fair
+  // comparison, so no star when the full quotes mix the two.
+  const full = quotes.filter((q) => q.decimalPayout != null);
+  const mixed = full.some((q) => q.entered) && full.some((q) => q.sgpEstimated);
+  if (bestDecimal != null && !mixed) {
     for (const q of quotes) q.isBest = q.decimalPayout === bestDecimal;
   }
   return quotes;
@@ -864,7 +979,8 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     // in-play caveat cannot apply to them.
     isLive: false,
     isFavorite: sl.isFavorite,
-    label: sl.label,
+    // A slip saved before carries the label as it was then.
+    label: labelWithoutStake(sl.label),
     modelProb: sl.modelProb,
     decimalOdds: sl.decimalOdds,
     americanOdds: sl.americanOdds,

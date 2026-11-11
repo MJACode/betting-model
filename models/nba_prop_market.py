@@ -37,7 +37,7 @@ THE RULE, per game, ONCE (the first look that can price it; see DECIDED ONCE):
   6. One candidate per (game, player, market): the best EV among the books,
      a tie to the earlier book in SOFT_BOOKS (DraftKings first). Every
      qualifying proposition is a CANDIDATE; what is written is one bet a game
-     across both NBA prop models and four a night, strongest first by each
+     across both NBA prop models and six a night, strongest first by each
      bet's EV percentile within its own model
      (scripts/nba_props_card.py; mike, 2026-10-20: "Only the strongest picks
      need to be sent, like NHL", replacing 2026-10-16's no-cap rule).
@@ -79,6 +79,26 @@ Expect about +2% live: the top cell of a search carries winner's curse, and
 of the units and is decaying (+16 / +8 / +3% by season); the rule clears
 without it (+2.29%). Closing-line value could not be measured (one archived
 snapshot a game), so the card stores a closing snapshot for every bet.
+
+THE PLAY-IN, THE PLAYOFFS AND THE CUP FINAL (2026-11-02, mike). The same rule, cut,
+floor and caps also bet these, and no other NBA model does (the card's own slate, with
+its gate in models/nba_total_luck.py; docs/nba_search_postseason.md, branch
+nba-searches-graded). On the 272 such games of 2023-24..2025-26:
+    every qualifying proposition    1,953 bets  +138.87 units  +6.8%   95% +2.1..+11.3
+                                    prices -192 to +210, median -104
+    the top bet in each game        251 bets    +23.36 units   +9.71%  95% -3.82..+22.81
+    (what the one-a-game cap writes) prices -155 to +188, median +106, 5th-95th -125..+145,
+                                    64.5% plus money, 2 worse than -150, 0 worse than -180
+    the same, the 54-minute lead    139 bets    +4.34 units    +3.23%  95% -13.72..+20.42
+    (the population the card decides at) prices -155 to +170, median +107
+The third line is the population the card decides at, because its first look lands 53-57 minutes
+out and the 251 pool snapshots at 54, 59 and 64. Its interval crosses zero, and so does the second
+line's, which by season is +1.08 / +19.99 / +2.28 units. The by-lead intervals overlap, so the gap
+may be noise (docs/thresholds.md). An independent check rebuilt all 1,953 bets exactly, and
+found most of the return is a general lean to unders in this sample, larger than in the
+regular seasons; at the regular-season lean the same bets would return about +4.4%.
+Settlement is ESPN's box alone here, as for a regular-season bet: the search's second source
+for a game it left out (18 of 272) has no live copy, and a placed bet cannot be left out.
 """
 from __future__ import annotations
 
@@ -249,6 +269,37 @@ def tip_of(schedule_ct, games_ct) -> datetime | None:
     if b is None:
         return a
     return min(a, b)
+
+
+# How far the odds feed's start runs behind the league's tip (FEED_LAG in
+# data/ingestors/nba_schedule_refresh.py, pinned by test). A wider gap means one of the two is wrong.
+START_GAP_MIN = 30
+
+
+def postseason_tip(schedule_ct, games_ct) -> tuple[datetime | None, str | None]:
+    """(the tip, 'schedule' or 'feed') for a play-in, playoff or Cup final game.
+
+    `tip_of`, unless the schedule's start sits more than START_GAP_MIN before the feed's. Every one of
+    these schedule rows is ESPN's and ESPN alone sets its tip (data/ingestors/nba_schedule_refresh.plan,
+    with no second source), and ESPN has been five hours early: CHI @ MIL, 2026-10-23, 1 of 1,200 league
+    rows. The feed's start ran 2.3 to 20.2 minutes after the league's on all 107 games it wrote
+    2026-10-20..11-02, and never before it. So in that gap the feed's start is the one read: the earlier
+    would have the rule bet hours ahead, or lose the game when Pinnacle is not up by ESPN's window.
+    tracking/failure_alerter names the game, because the feed could be the wrong one.
+    """
+    s, g = parse_ts(schedule_ct), parse_ts(games_ct)
+    if s is not None and g is not None and g - s > timedelta(minutes=START_GAP_MIN):
+        return g, "feed"
+    tip = tip_of(s, g)
+    if tip is None:
+        return None, None
+    return tip, "schedule" if tip == s else "feed"
+
+
+def starts_disagree(schedule_ct, games_ct) -> bool:
+    """The two starts sit further apart than the feed has any reason to run."""
+    s, g = parse_ts(schedule_ct), parse_ts(games_ct)
+    return s is not None and g is not None and abs((g - s).total_seconds()) > START_GAP_MIN * 60
 
 
 def minutes_to_tip(tip: datetime, now: datetime) -> float:

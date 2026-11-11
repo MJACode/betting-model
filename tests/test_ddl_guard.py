@@ -282,6 +282,10 @@ DDL_GUARD_EXEMPT = {
     # Manually invoked probes; neither table appears in pg_stat_statements.
     "scripts/dk_freshness_compare.py": "one-off probe script",
     "scripts/live_feed_probe.py": "one-off probe script",
+    # The local backup's schema dump WRITES this text into .sql files and runs
+    # none of it: every statement it sends is inside BEGIN ... READ ONLY
+    # (measured on production 2026-11-03: transaction_read_only = on).
+    "scripts/local_mirror.py": "writes DDL text to backup files; runs none, read-only",
 }
 
 SKIP_DIRS = ("tests", "node_modules", ".git", "mobile", "docs", "data/migrations")

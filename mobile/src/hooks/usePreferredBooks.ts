@@ -216,3 +216,28 @@ export function usePreferredBooks() {
   const needsChoice = ready && promptDueAtLaunch && !state.chosen;
   return { books: state.books, chosen: state.chosen, needsChoice, setBooks, ready };
 }
+
+/** Drop this install's book set. The device row is rewritten separately,
+ *  after sign-out, so a still-present auth.uid() cannot recreate the user row. */
+export async function clearPreferredBooksForAccountDeletion(): Promise<void> {
+  serverSynced = true;
+  promptDueAtLaunch = false;
+  publish({ books: DEFAULT_BOOKS, chosen: false, checked: true });
+  try {
+    await AsyncStorage.multiRemove([STORAGE_KEY, PROMPT_DUE_KEY, LEGACY_KEY]);
+  } catch (err) {
+    console.warn('[preferredBooks] account wipe failed', err);
+  }
+}
+
+/** Rewrite the device row to every book. Call after the local sign-out. */
+export async function resetPreferredBooksDeviceRow(deviceId: string): Promise<void> {
+  const { error } = await supabase.rpc('member_books_set', {
+    p_device_id: deviceId,
+    p_books: DEFAULT_BOOKS,
+  });
+  if (error) {
+    serverSynced = false;
+    throw error;
+  }
+}

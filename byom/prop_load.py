@@ -3,9 +3,14 @@
 One game at a time. player_prop_odds is large; a season is not one
 fetch. apply=False counts and writes nothing.
 
-The line is the last DraftKings snapshot at or before kickoff. Rows
-before PROP_HISTORY_START_DATE are not built. Alt-ladder market keys
-are not read. Prices are not read. Does not touch picks.
+The line is the last DraftKings snapshot at or before kickoff. The
+over and under prices are the prices on that same row. A side that
+row does not price is null. Another book is not read. Rows before
+PROP_HISTORY_START_DATE are not built. Alt-ladder market keys are
+not read. Does not touch picks.
+
+No season argument builds every NFL season from PROP_HISTORY_START_SEASON
+whose game_date is on or after PROP_HISTORY_START_DATE.
 """
 from __future__ import annotations
 
@@ -14,8 +19,14 @@ from byom.constants import (
     PROP_HISTORY_START_SEASON,
     SPORT,
 )
-from byom.game_facts import parse_date, parse_game_id
-from byom.prop_facts import MARKET_COLUMNS, facts_for_game
+from byom.game_facts import _rank, parse_date, parse_game_id
+from byom.prop_facts import (
+    MARKET_COLUMNS,
+    NBA_MARKET_COLUMNS,
+    _pre_start as _prop_pre_start,
+    facts_for_game,
+)
+from byom.official import OFFICIAL_SPORTS, PointClock, RoleClock, prop_lock_candidates
 
 # Month 01-12 and day 01-31. '2024-13-45' matches a leading-year check
 # and the cast then aborts the game. A value that fails this pattern is
@@ -35,11 +46,10 @@ def _ts_case(expr: str) -> str:
 _SNAP = _ts_case("p.snapshot_at")
 _KICK = _ts_case("g.commence_time")
 
-_MARKETS = tuple(MARKET_COLUMNS)
-
 FACT_COLUMNS = (
     "prop_key", "canonical_key", "sport", "season", "week",
     "player_name", "player_key", "team", "market", "line",
+    "over_price", "under_price",
     "line_basis", "actual", "over_result", "under_result", "log_status",
 )
 
@@ -51,20 +61,45 @@ _LOG_COLS = (
     "def_sacks", "def_tackles_solo", "def_tackle_assists",
 )
 
+_NBA_LOG_COLS = (
+    "player_name", "team",
+    "points", "rebounds", "assists", "steals", "blocks", "turnovers",
+    "fg3_made",
+)
+
+_SPORTS = frozenset({"NFL", "NBA"})
+
+
+def _markets(sport: str) -> dict:
+    if sport == "NBA":
+        return NBA_MARKET_COLUMNS
+    return MARKET_COLUMNS
+
+
+def _log_table(sport: str) -> tuple[str, tuple[str, ...]]:
+    if sport == "NBA":
+        return "nba_player_game_log", _NBA_LOG_COLS
+    return "nfl_player_game_log", _LOG_COLS
+
 
 def _fetch(conn, sql, params):
+    """Read, then end a clean transaction. See byom.load._fetch."""
+    from data.db import release_read
     cur = conn.execute(sql, params)
-    return cur.fetchall()
+    try:
+        return cur.fetchall()
+    finally:
+        release_read(conn)
 
 
-def _games(conn, season: int) -> list[dict]:
+def _games(conn, season: int, sport: str = SPORT) -> list[dict]:
     rows = _fetch(conn, """
         SELECT game_id, season, game_date, home_team, away_team,
                home_score, away_score, commence_time
           FROM games
          WHERE sport = %s AND season = %s
            AND game_date >= %s
-    """, (SPORT, season, PROP_HISTORY_START_DATE))
+    """, (sport, season, PROP_HISTORY_START_DATE))
     out = []
     for row in rows:
         out.append({
@@ -72,6 +107,7 @@ def _games(conn, season: int) -> list[dict]:
             "home_team": row[3], "away_team": row[4],
             "home_score": row[5], "away_score": row[6],
             "commence_time": row[7],
+            "sport": sport,
         })
     return out
 
@@ -84,22 +120,25 @@ def _as_quotes(rows) -> list[dict]:
             "bookmaker": row[3], "snapshot_at": row[4],
             "commence_time": row[5], "point": row[6],
             "prop_id": row[7], "captured_at": row[8],
+            "over_price": row[9], "under_price": row[10],
         })
     return out
 
 
-def _quotes_for_game(conn, game_id: str) -> list[dict]:
+def _quotes_for_game(conn, game_id: str, sport: str = SPORT) -> list[dict]:
     """DraftKings at or before kickoff. One game. The cast sits in a CASE.
 
-    Other books are not read. Prices are not read. created_at is when
-    the row was written; the grader calls that captured_at. prop_id
-    breaks a tie between two lines on the same snapshot.
+    Other books are not read. over_price and under_price are the prices
+    on this row, the same row as the line. created_at is when the row
+    was written; the grader calls that captured_at. prop_id breaks a
+    tie between two lines on the same snapshot.
     """
     sql = f"""
         SELECT p.player_name, p.team, p.market, p.bookmaker,
                {_SNAP} AS snapshot_at,
                {_KICK} AS commence_time,
-               p.line, p.prop_id, p.created_at
+               p.line, p.prop_id, p.created_at,
+               p.over_price, p.under_price
           FROM player_prop_odds p
           JOIN games g ON g.game_id = p.game_id
          WHERE p.game_id = %s
@@ -110,47 +149,82 @@ def _quotes_for_game(conn, game_id: str) -> list[dict]:
            AND {_SNAP} IS NOT NULL
            AND {_SNAP} <= {_KICK}
     """
-    return _as_quotes(_fetch(conn, sql, (game_id, list(_MARKETS))))
+    return _as_quotes(_fetch(conn, sql, (game_id, list(_markets(sport)))))
 
 
-def _log_for_game(conn, game_id: str) -> list[dict]:
-    cols = ", ".join(_LOG_COLS)
+def _log_for_game(conn, game_id: str, sport: str = SPORT) -> list[dict]:
+    table, cols = _log_table(sport)
+    listed = ", ".join(cols)
     rows = _fetch(conn, f"""
-        SELECT {cols}
-          FROM nfl_player_game_log
+        SELECT {listed}
+          FROM {table}
          WHERE game_id = %s
     """, (game_id,))
     out = []
     for row in rows:
-        out.append(dict(zip(_LOG_COLS, row)))
+        out.append(dict(zip(cols, row)))
     return out
 
 
 def facts_for_season(conn, season: int,
-                     game_ids: list[str] | None = None) -> tuple[list[dict], list[str]]:
+                     game_ids: list[str] | None = None,
+                     sport: str = SPORT) -> tuple[list[dict], list[str]]:
     """Facts, and the canonical keys of the games this read considered.
 
     `game_ids` None reads every game. A list reads only those games.
     A game with no line is still in the key list so a rebuild can delete
     the rows a previous pass wrote.
     """
-    if season < PROP_HISTORY_START_SEASON:
+    if sport not in _SPORTS or season < PROP_HISTORY_START_SEASON:
         return [], []
-    games = _games(conn, season)
+    games = _games(conn, season, sport)
     if game_ids is not None:
         wanted = set(game_ids)
         games = [game for game in games if game["game_id"] in wanted]
     facts = []
     keys = []
     for game in games:
-        parsed = parse_game_id(game["game_id"])
-        if parsed is None or parse_date(game.get("game_date")) is None:
-            continue
-        keys.append(parsed[0])
-        quotes = _quotes_for_game(conn, game["game_id"])
-        log_rows = _log_for_game(conn, game["game_id"])
-        facts.extend(facts_for_game(game, quotes, log_rows))
+        if sport == "NFL":
+            parsed = parse_game_id(game["game_id"])
+            if parsed is None or parse_date(game.get("game_date")) is None:
+                continue
+            keys.append(parsed[0])
+        else:
+            if parse_date(game.get("game_date")) is None or not game.get("game_id"):
+                continue
+            keys.append(str(game["game_id"]))
+        quotes = _quotes_for_game(conn, game["game_id"], sport)
+        log_rows = _log_for_game(conn, game["game_id"], sport)
+        game_facts = facts_for_game(game, quotes, log_rows)
+        if sport in OFFICIAL_SPORTS and game_facts:
+            _attach_official(conn, game, quotes, game_facts, sport)
+        facts.extend(game_facts)
     return facts, keys
+
+
+def _attach_official(conn, game: dict, quotes: list[dict],
+                     game_facts: list[dict], sport: str = "NFL") -> None:
+    """Official (first-match) legs on each fact, under `_official`.
+
+    The role clock is the game's DraftKings spread history, read with
+    the same query the game builder uses. Not a column.
+    """
+    from byom.game_facts import _pre_start as _game_pre_start
+    from byom.load import _dk_quotes
+
+    dk = _dk_quotes(conn, game["game_id"], sport)
+    clock = RoleClock(_game_pre_start(dk, "spreads"))
+    total_clock = PointClock(_game_pre_start(dk, "totals"), _rank)
+    pools: dict[tuple, list[dict]] = {}
+    for quote in quotes:
+        row = _prop_pre_start(quote)
+        if row is None or row.get("point") is None:
+            continue
+        pools.setdefault((row["player_key"], row["market"]), []).append(row)
+    for fact in game_facts:
+        fact["_official"] = prop_lock_candidates(
+            fact, pools.get((fact["player_key"], fact["market"]), []), clock,
+            game.get("home_team"), game.get("away_team"), total_clock)
 
 
 def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:
@@ -181,33 +255,57 @@ def _upsert(conn, facts: list[dict], canonical_keys: list[str]) -> int:
 
 
 def build_season(conn, season: int, apply: bool = False,
-                 game_ids: list[str] | None = None) -> dict:
+                 game_ids: list[str] | None = None,
+                 sport: str = SPORT) -> dict:
     """One season. apply=False writes nothing. `game_ids` limits the read."""
+    if sport not in _SPORTS:
+        return {
+            "season": season, "sport": sport, "facts": 0, "written": 0,
+            "canonical_keys": [],
+            "skipped": "sport is NFL or NBA",
+        }
     if season < PROP_HISTORY_START_SEASON:
         return {
-            "season": season, "facts": 0, "written": 0,
+            "season": season, "sport": sport, "facts": 0, "written": 0,
             "canonical_keys": [],
             "skipped": "before player_prop_odds history",
         }
-    facts, keys = facts_for_season(conn, season, game_ids=game_ids)
+    facts, keys = facts_for_season(conn, season, game_ids=game_ids, sport=sport)
+    legs = [leg for fact in facts for leg in fact.get("_official") or ()]
     written = _upsert(conn, facts, keys) if apply else 0
+    official = 0
+    if apply and sport in OFFICIAL_SPORTS:
+        from byom.load import write_official_legs
+        official = write_official_legs(conn, keys, legs, props=True)
+    if apply:
+        # Same boundary as byom.load.build_season: the next season's
+        # odds read must not sit inside this official-leg write.
+        conn.commit()
     return {
-        "season": season, "facts": len(facts), "written": written,
+        "season": season, "sport": sport, "facts": len(facts), "written": written,
+        "official_legs": len(legs), "official_written": official,
         "canonical_keys": keys,
     }
 
 
-def build_seasons(conn, seasons, apply: bool = False) -> dict:
+def build_seasons(conn, seasons, apply: bool = False, sport: str = SPORT) -> dict:
+    if sport not in _SPORTS:
+        return {
+            "apply": apply, "sport": sport, "seasons": [],
+            "skipped": "sport is NFL or NBA",
+        }
     if seasons is None:
         rows = _fetch(conn, """
             SELECT DISTINCT season FROM games
              WHERE sport = %s AND season >= %s
              ORDER BY season
-        """, (SPORT, PROP_HISTORY_START_SEASON))
+        """, (sport, PROP_HISTORY_START_SEASON))
         seasons = [int(row[0]) for row in rows]
     elif isinstance(seasons, int):
         seasons = [seasons]
-    built = [build_season(conn, int(s), apply=apply) for s in seasons]
+    built = [
+        build_season(conn, int(s), apply=apply, sport=sport) for s in seasons
+    ]
     if apply:
         conn.commit()
-    return {"apply": apply, "seasons": built}
+    return {"apply": apply, "sport": sport, "seasons": built}

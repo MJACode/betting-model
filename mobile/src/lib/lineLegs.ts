@@ -34,7 +34,9 @@
  * betslip re-reads that player's -- or that game market's -- latest lines
  * each time (queries.ts fetchPropLineRows / fetchGameLineRows). A spec whose
  * line no book posts any more -- game started, market pulled -- resolves to
- * nothing and is pruned like a dead pick key.
+ * nothing and is pruned like a dead pick key. An alternate spread or total
+ * the user already took is the exception: once the game has started that
+ * rung is a pre-game price, the leg stays, and the user removes it.
  *
  * A GAME LINE LEG IS A GAME LINE. `isGameLine` is true for it, so the slip's
  * correlation guard (parlay.ts isValidCombo: one game-line leg per game) sees
@@ -42,10 +44,10 @@
  * way it would two model game legs.
  */
 
-import { americanToDecimal } from '@/lib/format';
+import { americanToDecimal, formatStampET, parseStamp } from '@/lib/format';
 import { bookLineLabel } from '@/lib/hitMode';
 import { nhlOffLineCount } from '@/lib/nhlBoard';
-import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
+import { CUSTOM_MODEL_ID, type LegBookPrice, type ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
 import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '@/types';
@@ -198,7 +200,7 @@ export function gameRowAtNumber(r: OddsByBookRow, s: GameLineLegSpec): boolean {
  * NO bettable book does -- the leg cannot exist without a price, and the
  * caller prunes it.
  */
-function buildLeg<R extends { bookmaker: string }>(
+function buildLeg<R extends { bookmaker: string; fromLadder?: boolean; snapshot_at?: string | null }>(
   spec: LineLegSpec,
   at: readonly R[],
   priceOf: (r: R) => number | null,
@@ -208,10 +210,7 @@ function buildLeg<R extends { bookmaker: string }>(
   if (at.length === 0) return null;
   const key = lineLegKey(spec);
   const dk = at.find((r) => r.bookmaker === MODEL_BOOK) ?? null;
-  // Best bettable price otherwise -- American odds are monotonic in payout, so
-  // the numeric max pays most (statsOdds.ts bestOf).
-  const best = at.reduce((b, r) => ((priceOf(r) as number) > (priceOf(b) as number) ? r : b), at[0]!);
-  const anchor = dk ?? best;
+  const anchor = anchorRow(at, priceOf)!;
   const americanOdds = priceOf(anchor) as number;
   const decimalOdds = americanToDecimal(americanOdds);
 
@@ -242,7 +241,32 @@ function buildLeg<R extends { bookmaker: string }>(
     dkPriced: dk != null,
     dkLink: dk ? linkOf(dk) : null,
     pricedAt: anchor.bookmaker,
+    pricedFromLadder: anchor.fromLadder === true,
+    pricedAsOf: anchor.fromLadder ? anchor.snapshot_at ?? null : null,
   };
+}
+
+/**
+ * The row a line leg is priced at: DraftKings when it posts the side, else the
+ * best bettable price (American odds are monotonic in payout, so the numeric
+ * max pays most — statsOdds.ts bestOf). ONE rule, shared by the leg and the
+ * edit sheet, so the price a user picks in the sheet is the price the slip
+ * shows (UX review, 2026-10-28). `at` holds only rows that price the side.
+ */
+export function anchorRow<R extends { bookmaker: string; fromLadder?: boolean }>(
+  at: readonly R[],
+  priceOf: (r: R) => number | null,
+): R | null {
+  if (at.length === 0) return null;
+  // A price refreshed this pass before one from the once-a-day alternate
+  // ladder: DraftKings' main, then the best main, then DraftKings' rung,
+  // then the best rung. Without this a 6 AM DraftKings rung beat a fresh
+  // main line another book hangs at the same number (UX review, 2026-10-29).
+  const fresh = at.filter((r) => !r.fromLadder);
+  const pool = fresh.length > 0 ? fresh : at;
+  const dk = pool.find((r) => r.bookmaker === MODEL_BOOK);
+  if (dk) return dk;
+  return pool.reduce((b, r) => ((priceOf(r) as number) > (priceOf(b) as number) ? r : b), pool[0]!);
 }
 
 /**
@@ -295,6 +319,22 @@ export function gameLineLegFromRows(
 /** Is this leg one of ours -- a Stats line rather than a pick or a custom entry? */
 export function isLineLeg(leg: Pick<ParlayLeg, 'modelId'>): boolean {
   return leg.modelId === LINE_LEG_MODEL_ID;
+}
+
+/**
+ * The pencil. A stored Stats line leg (prop or game) and a custom leg. A
+ * model pick is a bet of record at its own line (CLAUDE.md §1c) and is not
+ * editable. One function so the slip cannot give a game line the pencil and
+ * then refuse to open it, or the other way around.
+ */
+export function slipLegCanEdit(
+  leg: { modelId?: string | null; slipKey?: string | null },
+  specs: readonly LineLegSpec[],
+): boolean {
+  if (leg.modelId === CUSTOM_MODEL_ID) return true;
+  if (leg.modelId !== LINE_LEG_MODEL_ID || !leg.slipKey) return false;
+  const key = leg.slipKey;
+  return specs.some((s) => lineLegKey(s) === key);
 }
 
 // ── What the "Add to betslip?" sheet is handed ──────────────────────────────
@@ -386,4 +426,414 @@ export function teamLineSheetInput(quote: TeamLineQuote, sport: string): LineShe
   const side = gameLegSide(spec);
   const prices = bettablePrices(quote.bookRows, (r) => priceForSide(r, side));
   return { spec, prices };
+}
+
+// ── Editing a prop line leg (Matt, 2026-10-28) ───────────────────────────────
+//
+// "If I select 10+ points for someone I should be able to edit and change it to
+// 15." A line leg is the user's own research bet, not a pick (§1c does not
+// apply to it — see the header), so changing its line is changing which bet
+// they want. Only numbers a bettable book actually POSTS are offered: a line
+// no book hangs could not be priced, and the slip would prune it on the next
+// resolve.
+
+/** The best bettable price for one side of one line. */
+export interface LineOptionPrice {
+  price: number;
+  book: string;
+}
+
+/** One number the books post for this player and market, with each side —
+ *  priced the way the leg will be (anchorRow), not at the best book. */
+export interface LineOption {
+  line: number;
+  over: LineOptionPrice | null;
+  under: LineOptionPrice | null;
+}
+
+/**
+ * Every line the bettable books post for the spec's player and market, lowest
+ * first, with each side priced the way the leg would be (anchorRow:
+ * DraftKings when it posts the side, else the best book). `rows` is what fetchPropLineRows
+ * returns (main and alternate markets already folded into one).
+ */
+export function lineOptionsFromRows(
+  spec: PropLineLegSpec,
+  rows: readonly PropOddsByBookRow[],
+): LineOption[] {
+  const byLine = new Map<number, PropOddsByBookRow[]>();
+  for (const r of rows) {
+    if (r.game_id !== spec.game_id || r.market !== spec.market || r.player_name !== spec.player_name) continue;
+    if (!isBettableBook(r.bookmaker)) continue;
+    const line = num(r.line);
+    if (line == null) continue;
+    const list = byLine.get(line) ?? [];
+    list.push(r);
+    byLine.set(line, list);
+  }
+  const sideOf = (list: PropOddsByBookRow[], side: LineSide): LineOptionPrice | null => {
+    const priceOf = (r: PropOddsByBookRow) => num(side === 'under' ? r.under_price : r.over_price);
+    const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
+    return a ? { price: priceOf(a) as number, book: a.bookmaker } : null;
+  };
+  return [...byLine.entries()]
+    .map(([line, list]) => ({ line, over: sideOf(list, 'over'), under: sideOf(list, 'under') }))
+    .filter((o) => o.over != null || o.under != null)
+    .sort((a, b) => a.line - b.line);
+}
+
+/** The same leg at another number and/or side. */
+export function withLine(spec: PropLineLegSpec, line: number, side: LineSide): PropLineLegSpec {
+  return { ...spec, line, side };
+}
+
+/**
+ * The specs after swapping one leg for its edited version, in the SAME place
+ * in the slip. Null when nothing should change: the old leg is gone, or the
+ * edit names a bet that is already a different leg on the slip (two copies of
+ * one bet is the duplicate the add path already refuses).
+ */
+export function lineLegsAfterReplace(
+  specs: readonly LineLegSpec[],
+  oldKey: string,
+  next: LineLegSpec,
+): LineLegSpec[] | null {
+  const at = specs.findIndex((s) => lineLegKey(s) === oldKey);
+  if (at < 0) return null;
+  const newKey = lineLegKey(next);
+  if (newKey === oldKey) return null;
+  if (specs.some((s, i) => i !== at && lineLegKey(s) === newKey)) return null;
+  const out = specs.slice();
+  out[at] = next;
+  return out;
+}
+
+// ── The edit sheet's menu, for every kind of line leg ────────────────────────
+//
+// Matt, 2026-10-29, on game lines: "Yes" to an edit button on moneyline,
+// spread and total legs too. One menu shape for both kinds, so the sheet does
+// not branch: a row of segments (Over/Under, or the two teams), and under each
+// the bets a bettable book posts right now, each priced by anchorRow — the
+// leg's own rule — so the price picked is the price the slip shows.
+//
+// Game lines offer what the books POST: the main number each book hangs,
+// plus the alternate ladder (Matt approved the cost 2026-10-29; the pass
+// refreshes games inside 24 hours), folded in by foldAltGameRows.
+
+/** One bet the sheet can switch the leg to. */
+export interface EditChoice {
+  /** Which segment it lists under ('over', 'under', or a team). */
+  segment: string;
+  /** The leg it becomes. */
+  spec: LineLegSpec;
+  /** "Over 14.5", "KC −3.5", "KC ML". */
+  title: string;
+  /** "15 or more" under a half-point prop line; null elsewhere. */
+  hint: string | null;
+  price: number;
+  book: string;
+}
+
+export interface EditMenu {
+  /** The tabs. One segment (key 'all') means no tab row is drawn. */
+  segments: { key: string; label: string; empty: string }[];
+  choices: EditChoice[];
+  /** The line under the sheet's title, per market. */
+  subtitle: string;
+  /** Set when the pre-game ladder was hidden because the game has started. */
+  ladderHidden?: 'started';
+}
+
+const PROP_SUBTITLE = 'Pick a new line. Only lines a sportsbook posts are listed.';
+const ML_SUBTITLE = 'Switch sides. Each price is the one your slip will use.';
+// Alternate spreads and totals refresh every odds pass for games inside
+// 24 hours, and once a day for the 3-day look-ahead (Matt, 2026-10-29;
+// data/ingestors/alt_game_lines.py). The main numbers refresh every pass.
+const GAME_LINE_SUBTITLE = 'Every number a sportsbook posts, including alternate lines.';
+// No ladder reached the sheet (not fetched yet for this game, or the read
+// failed): do not claim alternates the user cannot see.
+const MAIN_ONLY_SUBTITLE = 'Every number a sportsbook is hanging right now.';
+// The ladder was loaded and then hidden: the game has started. Do not reuse
+// the "hanging right now" sentence, which describes a ladder that never arrived.
+const STARTED_SUBTITLE = 'The game has started, so pre-game alternate lines aren’t listed.';
+/** On a slip leg whose only price is that hidden ladder. */
+export const PREGAME_ALT_NOTE = 'Pre-game price — the game has started';
+/** The whole game is off the board. */
+export const GAME_OFF_BOARD = 'No sportsbook is pricing this game right now.';
+
+/**
+ * When no tab would hold more than one row (a moneyline, a spread or total
+ * every book hangs at one number), the tabs only hide the comparison: one
+ * flat list of both sides reads "KC −150 / BUF +130" at a glance (UX review,
+ * 2026-10-29). Order is kept, segment by segment.
+ */
+function collapseThinMenu(menu: EditMenu): EditMenu {
+  const thin = menu.segments.every((g) => menu.choices.filter((c) => c.segment === g.key).length <= 1);
+  if (!thin || menu.choices.length === 0) return menu;
+  const order = new Map(menu.segments.map((g, i) => [g.key, i]));
+  const choices = [...menu.choices]
+    .sort((a, b) => (order.get(a.segment) ?? 0) - (order.get(b.segment) ?? 0))
+    .map((c) => ({ ...c, segment: 'all' }));
+  return { ...menu, segments: [{ key: 'all', label: '', empty: GAME_OFF_BOARD }], choices };
+}
+
+/**
+ * Which row a tab should open on. The leg's own row when it is on this tab.
+ * Otherwise the other side of the same number: the negated line for the other
+ * team on a spread, the same line for a total or a prop. Null when that rung
+ * is not posted, so the list stays at the top.
+ */
+export function editScrollTarget(menu: EditMenu, segment: string, spec: LineLegSpec): string | null {
+  const inTab = menu.choices.filter((c) => c.segment === segment);
+  const own = lineLegKey(spec);
+  if (inTab.some((c) => lineLegKey(c.spec) === own)) return own;
+  const line = spec.line;
+  if (line == null) return null;
+  const want = isGameSpec(spec) && spec.market === 'spreads' ? -line : line;
+  const pair = inTab.find((c) => {
+    const n = c.spec.line;
+    return n != null && Math.abs(n - want) < 1e-9;
+  });
+  return pair ? lineLegKey(pair.spec) : null;
+}
+
+/** The segment to show first: the leg's own, else the first one there is. */
+export function initialEditSegment(menu: EditMenu, spec: LineLegSpec): string {
+  const own = isGameSpec(spec) ? (spec.market === 'totals' ? spec.side ?? 'over' : spec.team) : spec.side;
+  return menu.segments.some((g) => g.key === own) ? own : menu.segments[0]?.key ?? own;
+}
+
+/**
+ * Whether Update may save. Only a choice on the VISIBLE tab counts: picking
+ * BUF +3.5, then switching to the KC tab, must not leave Update saving a bet
+ * that is no longer on screen (UX review, 2026-10-29).
+ */
+export function canSaveEdit(menu: EditMenu | null, segment: string, picked: string | null, currentKey: string | null): boolean {
+  if (!menu || picked == null || picked === currentKey) return false;
+  return menu.choices.some((c) => c.segment === segment && lineLegKey(c.spec) === picked);
+}
+
+/** "15 or more" for Over 14.5, "14 or fewer" for Under 14.5. Whole-number
+ *  lines (a push is possible) get no hint. */
+export function countHint(line: number, side: LineSide): string | null {
+  if (!Number.isFinite(line) || Number.isInteger(line) || Math.abs((line % 1) - 0.5) > 1e-9) return null;
+  return side === 'over' ? `${Math.ceil(line)} or more` : `${Math.floor(line)} or fewer`;
+}
+
+const sideSegments = (what: string) => [
+  { key: 'over', label: 'Over', empty: `No sportsbook posts the Over for ${what} right now.` },
+  { key: 'under', label: 'Under', empty: `No sportsbook posts the Under for ${what} right now.` },
+];
+
+/** A prop leg's menu: every posted line, Over and Under. */
+export function propEditMenu(spec: PropLineLegSpec, rows: readonly PropOddsByBookRow[]): EditMenu {
+  const choices: EditChoice[] = [];
+  for (const o of lineOptionsFromRows(spec, rows)) {
+    for (const side of ['over', 'under'] as const) {
+      const p = side === 'over' ? o.over : o.under;
+      if (!p) continue;
+      choices.push({
+        segment: side,
+        spec: withLine(spec, o.line, side),
+        title: `${side === 'over' ? 'Over' : 'Under'} ${o.line}`,
+        hint: countHint(o.line, side),
+        price: p.price,
+        book: p.book,
+      });
+    }
+  }
+  return { segments: sideSegments('this player'), choices, subtitle: PROP_SUBTITLE };
+}
+
+/** The same game leg from the other team's side, at that team's number. */
+function asTeam(spec: GameLineLegSpec, team: string, line: number | null): GameLineLegSpec {
+  if (team === spec.team) return { ...spec, line };
+  return { ...spec, team: spec.opponent, opponent: spec.team, isHome: !spec.isHome, line };
+}
+
+/**
+ * A game leg's menu. Moneyline: the two teams. Spread: the two teams, each at
+ * every number a book hangs (the home number h is the away team's −h).
+ * Total: Over and Under at every total a book hangs. The market itself does
+ * not change — a spread stays a spread.
+ */
+export function gameEditMenu(spec: GameLineLegSpec, rows: readonly GameLineRow[]): EditMenu {
+  const ladderHidden = (rows as { ladderHidden?: 'started' }).ladderHidden === 'started' ? 'started' as const : undefined;
+  // After kickoff the ladder rows are still on the array so the slip can
+  // hold an alt the user already took. They are not choices: the sheet
+  // lists the main numbers only.
+  const at = rows.filter(
+    (r) => r.game_id === spec.game_id && r.market === spec.market && isBettableBook(r.bookmaker)
+      && !(ladderHidden === 'started' && r.fromLadder),
+  );
+  const choices: EditChoice[] = [];
+  // Whether any alternate rung reached this menu: it decides the subtitle
+  // and whether main rows are labelled (a menu of only main rows needs no
+  // "Main line" on every row).
+  const hasLadder = at.some((r) => r.fromLadder);
+  const quietSubtitle = ladderHidden === 'started' ? STARTED_SUBTITLE : MAIN_ONLY_SUBTITLE;
+  const push = (segment: string, next: GameLineLegSpec, list: GameLineRow[], title = lineLegLabel(next)) => {
+    const side = gameLegSide(next);
+    const priceOf = (r: GameLineRow) => priceForSide(r, side);
+    const a = anchorRow(list.filter((r) => priceOf(r) != null), priceOf);
+    if (!a) return;
+    // A ladder price says how old it is; a main price says it is the main
+    // number, so a far-out rung one book hangs does not read like it.
+    const hint = a.fromLadder
+      ? `Alt · ${formatStampET(a.snapshot_at) || 'today'}`
+      : hasLadder
+        ? 'Main line'
+        : null;
+    choices.push({ segment, spec: next, title, hint, price: priceOf(a) as number, book: a.bookmaker });
+  };
+  const teams = [spec.team, spec.opponent];
+  const teamSegments = (kind: string) =>
+    teams.map((t) => ({ key: t, label: t, empty: `No sportsbook has a ${t} ${kind} right now.` }));
+
+  if (spec.market === 'h2h') {
+    for (const t of teams) push(t, asTeam(spec, t, null), at);
+    return collapseThinMenu({ segments: teamSegments('moneyline'), choices, subtitle: ML_SUBTITLE });
+  }
+  if (spec.market === 'spreads') {
+    const homeNumbers = [...new Set(at.map((r) => num(r.spread_home)).filter((n): n is number => n != null))];
+    for (const t of teams) {
+      const teamIsHome = t === spec.team ? spec.isHome : !spec.isHome;
+      // This team's numbers, favourite (most negative) first.
+      const lines = homeNumbers.map((h) => (teamIsHome ? h : -h)).sort((a, b) => a - b);
+      for (const line of lines) {
+        const next = asTeam(spec, t, line);
+        push(t, next, at.filter((r) => gameRowAtNumber(r, next)));
+      }
+    }
+    return collapseThinMenu({ segments: teamSegments('spread'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : quietSubtitle, ladderHidden });
+  }
+  const totals = [...new Set(at.map((r) => num(r.total_line)).filter((n): n is number => n != null))].sort((a, b) => a - b);
+  for (const side of ['over', 'under'] as const) {
+    for (const line of totals) {
+      const next: GameLineLegSpec = { ...spec, line, side };
+      push(side, next, at.filter((r) => gameRowAtNumber(r, next)), `${side === 'over' ? 'Over' : 'Under'} ${fmtLine(line)}`);
+    }
+  }
+  return collapseThinMenu({ segments: sideSegments('this game'), choices, subtitle: hasLadder ? GAME_LINE_SUBTITLE : quietSubtitle, ladderHidden });
+}
+
+// ── Alternate game lines (Matt, 2026-10-29: "yes") ───────────────────────────
+
+/** A game odds row, tagged when it came from the alternate ladder. */
+export type GameLineRow = OddsByBookRow & { fromLadder?: boolean };
+
+/** The alternate market a game market's ladder is stored under. */
+export const ALT_GAME_MARKET: Partial<Record<GameLineMarket, string>> = {
+  spreads: 'alternate_spreads',
+  totals: 'alternate_totals',
+};
+
+/**
+ * The alternate ladder is a pre-game price. Hide it from the edit sheet
+ * once the game has started: those numbers drift, and the main row is
+ * already the last pre-game price. The rows stay available to the slip so
+ * an alt the user already took is held and marked stale, not deleted. A
+ * missing or unparseable start stays visible — we have not seen a kickoff.
+ * parseStamp, not Date.parse: Hermes rejects the space-separated timestamps
+ * the pipeline stores, and Date.parse then returns NaN, which would leave
+ * the ladder up.
+ */
+export function pregameLadderVisible(
+  commenceTime: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (commenceTime == null || commenceTime === '') return true;
+  const t = parseStamp(commenceTime).getTime();
+  if (!Number.isFinite(t)) return true;
+  return t > nowMs;
+}
+
+/**
+ * A game market's main rows plus its alternate ladder (alt_game_lines), as
+ * one list in the MAIN market's name, so the edit menu and the slip's
+ * re-pricing (gameEditMenu, gameLineLegFromRows) see every number a book
+ * hangs. Where a book's alternate rung repeats its main number, the main row
+ * wins: it is refreshed every pass, and the ladder for a game inside 24
+ * hours is too.
+ */
+
+/**
+ * What the slip does with a game spec after reading its rows.
+ * `hold: 'pregame'` — the only price is an alternate rung and the game has
+ * started. Keep the leg, mark it stale, do not price the parlay off it,
+ * and do not remove it. Otherwise `leg` is the priced leg, or null when
+ * nothing posts the number (the caller prunes that).
+ */
+export function gameLineHold(
+  spec: GameLineLegSpec,
+  rows: readonly GameLineRow[],
+  game: GameRow | null,
+): { leg: ParlayLeg | null; hold: 'pregame' | null } {
+  const marked = rows as { ladderHidden?: 'started'; ladderFailed?: boolean };
+  const hidden = marked.ladderHidden === 'started';
+  if (!hidden) return { leg: gameLineLegFromRows(spec, rows, game), hold: null };
+  // After kickoff a live main-number leg is priced from main rows only.
+  // buildLeg copies every row at the number into bookPrices and credits
+  // DraftKings from any of them, so a pre-game alt rung at the same number
+  // would otherwise leak into the handoff. The ladder is consulted only
+  // when no main row prices the leg, and then only to hold the alt.
+  const live = gameLineLegFromRows(spec, rows.filter((r) => !r.fromLadder), game);
+  if (live) return { leg: live, hold: null };
+  // The game has started and the ladder read failed. A number that is not
+  // on the main rows may be the alt the user took. Hold it. Do not prune.
+  if (marked.ladderFailed && spec.market !== 'h2h' && spec.line != null) {
+    return { leg: null, hold: 'pregame' };
+  }
+  const fromLadder = gameLineLegFromRows(spec, rows, game);
+  if (fromLadder?.pricedFromLadder) return { leg: fromLadder, hold: 'pregame' };
+  return { leg: fromLadder, hold: null };
+}
+
+/** A held alt whose ladder could not be read. No price: the card shows the
+ *  label and the pre-game note, and the parlay does not count it. */
+export function pregameUnpricedLeg(spec: GameLineLegSpec, game: GameRow | null): ParlayLeg {
+  const key = lineLegKey(spec);
+  return {
+    pickId: lineLegPickId(key),
+    slipKey: key,
+    gameId: spec.game_id,
+    isLive: false,
+    modelId: LINE_LEG_MODEL_ID,
+    isGameLine: true,
+    isFavorite: false,
+    label: lineLegLabel(spec),
+    modelProb: 0,
+    decimalOdds: 1,
+    americanOdds: 0,
+    legEdge: 0,
+    bestBook: null,
+    bookPrices: [],
+    pick: null,
+    game,
+    dkPriced: false,
+    pregameStale: true,
+    pregameUnpriced: true,
+  };
+}
+
+export function foldAltGameRows(
+  market: string,
+  main: readonly OddsByBookRow[],
+  alt: readonly OddsByBookRow[],
+): GameLineRow[] {
+  const altName = ALT_GAME_MARKET[market as GameLineMarket];
+  if (!altName) return [...main];
+  // Rows from the daily ladder carry fromLadder, so pricing prefers a fresh
+  // main row and the sheet can say how old a ladder price is.
+  const numberOf = (r: OddsByBookRow) => num(market === 'spreads' ? r.spread_home : r.total_line);
+  const have = new Set(main.map((r) => `${r.bookmaker}|${numberOf(r)}`));
+  const out: GameLineRow[] = [...main];
+  for (const r of alt) {
+    if (r.market !== altName) continue;
+    const n = numberOf(r);
+    if (n == null || have.has(`${r.bookmaker}|${n}`)) continue;
+    have.add(`${r.bookmaker}|${n}`);
+    out.push({ ...r, market, fromLadder: true });
+  }
+  return out;
 }

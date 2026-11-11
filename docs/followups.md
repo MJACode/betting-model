@@ -21,6 +21,473 @@
 
 ---
 
+## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
+
+Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
+cut at 0.05, settlement, the scheduler job, Discord and the app.
+`docs/sports/ncaabw.md` "The totals model".
+
+## [ ] NCAABW: load each season's schedule whole (every October)
+
+The totals model pools a team with fewer than 10 games on the stored
+schedule, and the daily step stores only 14 days ahead. 2026-27 was loaded
+by hand on 2026-11-10. Before the first game of 2027-28:
+`python -m data.ingestors.ncaabw_espn_ingestor --backfill 2027-11-01 2028-03-15`,
+then rebuild the artifact (`python -m scripts.ncaabw_total_blend_build
+--last-season 2027`, after the research cache is refreshed). The card fails
+its run and names the command if the schedule is short, so this cannot be
+missed silently; a step that loads it without a person would be better.
+
+## [ ] NCAABW: the build reads a cache on one PC
+
+`scripts/ncaabw_total_blend_build.py` reads the research cache
+(`~/ncaabw_research/cache`), which is a copy of what Supabase holds. Every row
+is in the database, but the build cannot run on the worker. Next season's
+rebuild should read the three tables directly.
+
+## [ ] Ten tests fail in the main checkout only because other checkouts sit inside it (2026-11-10)
+
+Full suite on `claude/ncaaf-market-audit` in the main checkout: 23 failed,
+11,521 passed, 107 skipped (1h19m, nothing else running). Thirteen are the
+fourteen listed below (the rules-split test passes where a `.env` exists).
+The other ten pass, or skip, on a clean copy of master and of that branch
+made outside the repo (`git worktree add --detach`, 153 and 154 passed).
+
+- Nine scan the repo and walk into `.claude/worktrees/` (two old checkouts
+  on this machine, `compassionate-galileo-faf01f` and `ncaabw`), then fail on
+  the old files there: `test_anon_readable` (two), `test_ddl_guard`,
+  the live-money wording scan (`tests/test_live_money_*.py`, one),
+  `test_nhl_goalie_guards` (two), `test_worker_deps` (three). The fix is for those scans to skip
+  `.claude/worktrees/`, or to remove the two checkouts once their branches
+  are merged.
+- `test_mobile_nhl_skater_stats::test_the_behavioural_checks_pass` fails in
+  the main checkout and is skipped on the clean copies. Not looked into.
+
+## [ ] Fourteen tests fail on master (measured 2026-11-10, master 93b032e3)
+
+`python -m pytest -q tests/` on this machine: 14 failed, 11,510 passed. None
+is from the work that found them; each was re-run on a clean copy of master.
+
+- Fail alone: `test_claude_rules_split` (`config-topology.md`; needs a
+  `.env`), `test_deploy_drain` (the forwarded SIGTERM),
+  `test_health_check_observe` and `test_model_quality` (both compare a line of
+  `run_pipeline.py` at four spaces of indent; master has eight),
+  `test_market_coverage_probe` (an all-line leg slip),
+  `test_mobile_board_season` (the grade legend), `test_multi_book_odds` (the
+  closing-line reads), `test_nhl_totals_card` (insert once under the model
+  lock), `test_picks_unique_row` (the card insert), `test_price_prefilter_rollback`
+  (two), `test_web_site` (the record math against the node suite; no node on
+  PATH here).
+- Fail only in a full run: `test_social_posts` and `test_social_profile`
+  (one test each). They call `scheduler.build_scheduler()` after a test that
+  reloaded the scheduler has left it in the pollers role. Reproduce:
+  `python -m pytest -q tests/test_daily_retry.py tests/test_nba_live_config.py
+  tests/test_ncaab_live_config.py tests/test_nfl_live_leader_config.py
+  tests/test_pipeline_watch.py tests/test_savant_freshness.py
+  tests/test_service_role_split.py tests/test_social_posts.py
+  tests/test_social_profile.py`.
+
+## [ ] App: ReBet is still a selectable sportsbook with no prices (2026-11-10)
+
+The feed stopped fetching ReBet on 2026-09-20 (its newest row in
+`latest_odds` is 2026-09-20T19:17Z), but the app's sportsbook picker still
+offers it. Read 2026-11-10: 4 of 28 stored book sets hold ReBet and none
+holds only ReBet, so nobody is stranded today; a member who picked only ReBet
+would see "Not offered at your books" on every pick. The fix is the one made
+for Bally Bet and Fliff on 2026-11-10: add it to `REFERENCE_ONLY_BOOKS`
+(`mobile/src/lib/markets.ts`) and update the two counts in
+`mobile/scripts/verify_book_lines.ts`. Found by the UX review of the NCAABW
+app change; it predates it.
+
+## [ ] App: the college basketball look-ahead read sits 40 rows under the cap
+
+`fetchUpcomingCollegeBasketballPicks` (`mobile/src/lib/queries.ts`) reads
+DraftKings' lines for 80 games a request across 12 markets: 960 rows against
+a 1,000-row response cap. A thirteenth market in `MAIN_GAME_ODDS_MARKETS`
+would pass it silently for both college basketball sports. Chunk at 64 or
+page the read. Found by the same review; it predates the women's sport.
+
+## [ ] NCAABW in play: finish the checks, then decide (2026-11-09)
+
+The second-half total made +8.75% [2.2, 15.7] on 698 bets in 2025-26 and
++12.84% on 305 in 2024-25 (`scripts/ncaabw_research/inplay.py`). Before it is
+anything more than a first look it needs what the men's in-play models
+passed: the blind same-side baseline, the bands below and above the cut, the
+placebo (each game given another game's model), and the stale-quote checks
+(quote age, time since the last score, a sharp-book split; the women's board
+has no Pinnacle, so BetOnline and LowVig stand in). The first week of 2026-27
+was negative on every rule.
+
+## [ ] NCAABW: ESPN's own odds are in a local cache only (2026-11-09)
+
+`scripts/ncaabw_research/espn_odds.py` read ESPN's stored odds for 2022-23 and
+2023-24 (11,694 games asked, a sportsbook line on 4,886 and 3,057) into a
+research cache. They are free and re-readable, but they took a run to fetch
+and they are evidence the totals model is cited on, so they belong in
+Supabase: an importer and a table, then the research reads the table.
+
+## [ ] NCAABW: the feed lists about one game in five (2026-11-09)
+
+The odds feed listed 2,293 women's games over two seasons against about
+12,000 played, and ESPN's stored odds show one sportsbook pricing 84% of
+2022-23's games. Whether books still price that many and the feed does not
+carry them, or the books stopped, is not known. `docs/odds_sources.md` lists
+the other providers; none has been asked about women's college basketball.
+
+## [x] NBA first quarter: grade what was bought (2026-11-03) — DONE 2026-11-04
+
+Graded 2026-11-04, nothing built: first-quarter props 0 of 18 pass (run `2026-11-04-q1props`,
+`docs/nba_search_q1props.md` section 17), first-quarter and first-half team totals 0 of 26 pass (run
+`2026-11-04-q1tt`, `docs/nba_search_q1tt.md` section 15). Summary: `docs/nba_models_2026.md` section 13.
+
+mike, 2026-11-03: "Buy 1Q data". Bought the same day, at tip minus 60 minutes, by
+`data/ingestors/nba_odds_history.py --q1-props` and `--period-team-totals`:
+
+| What | 2023-24 | 2024-25 | 2025-26 | Where |
+|---|---|---|---|---|
+| First-quarter points, rebounds and assists props | none in the feed | 1,213 games, 40,144 rows | 1,225 games, 62,861 rows | `player_prop_odds`, markets `player_points_q1` and so on |
+| First-quarter and first-half team totals | none in the feed | 1,230 games, 29,709 rows | 1,230 games, at least 41,627 rows | `odds`, source `odds_api_nba_period_team_total_history` |
+
+About 112,900 credits in all (each run's own meter; the two runs stopped and restarted per season
+count to their last logged line). What the search must handle, measured on the stored rows:
+
+- **No Pinnacle on any of the five markets**, so the same-line under rule cannot run. First-quarter props
+  come from FanDuel and Hard Rock, and rebounds and assists from Hard Rock alone. The team totals come
+  from betPARX, BetRivers, DraftKings, FanDuel and Hard Rock.
+- **Hard Rock files a ladder under the period team-total key** (five lines a team on 2026-01-15 MEM at
+  ORL), and each line is stored as its own row. The main number has to be chosen, as the first-half
+  model does (`models/nba_book_numbers.split_main_rungs`).
+- **First-quarter player results do not exist yet.** Settlement must be built from play-by-play and
+  checked against full-game box scores first.
+- Seven games did not match a scheduled game (postponed or moved) and were skipped.
+
+Next, from the sweep that ranked these: pre-register a search before any grade. For the props, with no
+Pinnacle, a projection of first-quarter minutes from `nba_stints`, fit walk-forward. For the team totals, (a)
+the team number a book's own period spread and total imply against its period team-total price, and (b) the
+live home team-total rule carried to the home first-half team total, re-graded with no new choices. Build
+first-quarter settlement first.
+
+## [ ] nba_prop_market on the Cup final: the reads before it can bet (2026-11-02)
+
+The play-in, playoffs and Cup final went live with no game to run on, so what the tests cannot see has
+to be read off production. All read-only. No paid call.
+
+1. **Every day 12-01 to 12-09: rows the schedule does not list and that have no score.** The Cup
+   quarterfinals and semifinals (12-04, 12-05, 12-08) are the likely place for a feed row on the wrong date,
+   because their schedule slots have no teams. `SELECT g.game_id, g.game_date, g.commence_time FROM games g
+   LEFT JOIN nba_schedule s ON s.game_id = g.game_id WHERE g.sport = 'NBA' AND g.game_date BETWEEN
+   '2026-11-25' AND '2026-12-12' AND s.game_id IS NULL AND g.home_score IS NULL`. See the next item for why a
+   wrong one matters more than it looks.
+2. **12-09: one semifinal, end to end.** Its `games` row, `nba_schedule` row and box rows, and whether
+   the feed and ESPN agree on who is home at a neutral court. This rehearses the feed writing a knockout game,
+   the first ESPN-keyed writes and settlement. It does NOT run the new code: those games are typed regular. So
+   a reversed row on a semifinal can strand a bet, as on any neutral-court regular-season game (the entry below, whose
+   first read is 11-05).
+3. **12-11 after the 6am run: the final itself.** Both ids, in `games` and in `nba_schedule`, and
+   `nba_schedule.game_type = 'cup_final'` on the real row. If `games` holds two rows for it, the rule refuses
+   the unlisted one and the game has no prices to bet: read before the first look. The tip is unknown until
+   ESPN's row carries one, because the 8pm stored today belongs to the placeholder, which never joins the real
+   game. If ESPN's start and the feed's sit over 30 minutes apart, `start_gap:nba_prop_market:<game>` is in the ops
+   channel and the rule is measuring from the feed's. Read the real start then: if the feed is the stale one, a bet can
+   land after the real tip. Then, with the tip known, read-only: `python -c "from datetime import datetime, timedelta, timezone as z;
+   from scripts.nba_prop_window import plan_tick as p; print(p(<tip> - timedelta(minutes=60)))"`, and expect
+   the final in `decide` and `project` empty.
+4. **12-12: the result.** The ledger row (`detail` holds `game_type=cup_final` and the `tip_source`), the bet if
+   there is one, and its grade. `stranded:nba_prop:<game>` in the ops channel means the final landed elsewhere.
+
+## [ ] NBA season-long numbers stay regular-season once these games land (2026-11-02, design done, not built)
+
+From the Cup final on, a postseason game's box lines sit in `nba_player_game_log` and its score in `games`, so a
+player's season numbers, opponent ranks, team records and the first-quarter card would count it. On those screens
+this is display only. It is not all display only: the final's `games` row also changes the two finalists' rest inputs
+in the projection model for their next game (next entry). **Land it before 2026-12-11 if the final's two teams matter on those screens, and before the
+play-in (2027-04-13 if the pattern repeats) regardless.** Until then only the final's one game can blend in. It is
+a separate pull request because it carries a migration and is not a model update (no `Updated-By`).
+
+- **The column.** Nullable `games.game_type` with a small partial index on the three postseason types, backfilled
+  from `nba_schedule`. It has to be on `games` because `nba_schedule` is worker-only (`data/anon_readable.py`) and
+  these functions run as the app's reader. No trigger or column-level grant on `games` stands in the way
+  (read 2026-11-02).
+- **Every filter keeps NULLs, never `= 'regular'`.** The column is NULL on every unscored row and on every other
+  sport. Use `NOT IN` the three types, or an anti-join for the functions below that do not read `games`.
+- **Set it whenever a final is seen,** not just in `write_score`'s `fill`: also the `insert` branch
+  (`nba_results_ingestor`), and when `score_action` returns None because another writer stored the score and the
+  box still lands. One helper with `event_rows` (ESPN type 3 playoff, 5 play-in, 2 with the note or the
+  league's date cup_final), so the two cannot disagree.
+- **Filter:** `player_season_stat_values_nba` and `v_player_season_totals_nba` (neither reads `games` today; the view's
+  definition is in `data/supabase_schema.sql`, not a migration), `player_window_totals_nba` when `p_window` is NULL (does
+  not read `games`), `position_vs_opponent_nba` (joins `games`), `team_stats_board_compute` (the `cand` block reads
+  `games`), `data/ingestors/nba_team_q1.py`'s `g` block, `byom/load.py` `_games`, `byom/prop_load.py` `_games`.
+- **Leave unfiltered,** because each row is a real game he played: `player_recent_games_nba`,
+  `player_h2h_stat_values_nba`. Judgement call for mike: during the playoffs a player's last 10 and head-to-head then
+  include playoff games while his season numbers do not. Reversing it means the season numbers count them too.
+- **The migration's shape.** `data/view_migrations.py` runs every active file on every pass, so guard on the property.
+  These functions have several owners, so patch the live definition with one clause, as
+  `record_strikes_nfl_live_prop_2026_10_04.sql` does, rather than copying a body and rolling another owner back.
+  `nba_window_reads_roster_team_2026_10_26.sql` shows the guard. Revoke from `anon` and `authenticated` by name.
+- **`SELECT *` on `games`, the two that a new column breaks.** `scripts/nba_research_cache.py:49` puts the column in the
+  cached games table, and `scripts/nba_total_luck_replay.py:103`'s merge then gives `game_type_x` and `game_type_y`.
+  `scripts/merge_mlb_twin_games.py:107` (`INSERT INTO backup SELECT * FROM games`) fails on a backup table that exists
+  without the column. Name the columns in both. The cache should also export regular-season games and lines only, so a
+  later search does not take postseason rows as regular-season history.
+- **Tests.** A scratch-database test that a playoff box line stays out of each filtered read and stays in last-N and
+  head-to-head, each filter removed once and watched failing. About 25 test files create their own `games`, so a
+  read naming the new column needs them updated (`grep "CREATE TABLE.*games" tests/`).
+
+## [ ] Decision for mike: should the Cup final count toward a finalist's rest? (2026-11-02)
+
+If it counts, as it does today, the projection model reads a finalist playing the next night as short of rest, which
+is true and was never graded. If it does not count, that model reads the team as rested when it is not. It reaches about
+two teams a season, for one game each. Knicks at Miami the day after a 12-11 final: rest 4 becomes 1, back-to-back 0 becomes 1,
+games in four days 1 becomes 2, road trip 2 becomes 3 (`models.nba_props.team_games`, measured by
+`tests/test_nba_postseason_docs.py`). Play-in and playoff rows are not read there. Recommended: leave it counting,
+because the input is true and the alternative feeds the model a number known to be wrong. Code unchanged until he says.
+
+## [ ] NBA: a reversed row on a neutral-court regular-season game can strand a bet (2026-11-02, watch item, first read 11-05)
+
+The fix for a feed row with home and away the other way round from ESPN covers only postseason types. On a neutral
+court typed regular, the final lands on ESPN's id, so a bet on the feed's row stays open, and that row also stops the three
+total models, which read it as a game the season still owes. This is old code, not the Cup work, and it reaches a
+game before any postseason one: DEN at IND in Mexico City on 2026-11-07, then Paris 2027-01-14, Manchester 2027-01-17 and
+the Cup semifinal slots. How often the feed reverses a game is not measured: `games` holds no reversed NBA pair since
+2025-10-01.
+
+**The read, 11-05 to 11-07, read-only, no paid call:** `SELECT game_id, data_source, commence_time FROM games WHERE game_id
+IN ('NBA_2026-11-07_DEN_IND', 'NBA_2026-11-07_IND_DEN')`, and `SELECT game_id, count(*) FROM odds WHERE game_id IN (the
+same two) GROUP BY 1`. Read 2026-11-02: only `NBA_2026-11-07_DEN_IND`, written by the league schedule (`nba_api_schedule`) and
+not by the feed.
+
+- **The feed agrees with ESPN:** this stays a watch item. Read the same way before the Paris and Manchester games.
+- **The feed reverses the game (`NBA_2026-11-07_IND_DEN` appears):** (1) in `nba_schedule_refresh.plan`, apply `flipped_id` to
+  regular types too; (2) in `nba_results_ingestor.match_game`, prefer a reversed `games` row that holds a bet over ESPN's row;
+  (3) apply the `listed_twin` test to the regular-season gate, in its own `Updated-By: mike` commit. Step 3 is needed
+  because Mexico City, Paris and Manchester already have ESPN-id rows in `games`.
+
+## [ ] NBA: a feed row on the wrong date stops three live models (2026-11-02, flagged, not caused by the Cup work)
+
+A wrong-date feed row on a regular-season day counts as a regular-season game the season owes
+(`scripts/nba_total_luck_card.load_season`), and `models/nba_total_luck.missing_inputs` then makes
+`nba_total_luck`, `nba_team_total_luck` and `nba_first_half_total_luck` decline every game for up to 14 days. The
+prop slate would price it too.
+
+**A postseason game can be bet this way, by all four other NBA models.** `_regular_games`, which every slate reads, now
+drops an unlisted row when the schedule lists the same two teams under a postseason type within two days
+(`models.nba_total_luck.postseason_twin`). So a row dated 12-10 for a final listed 12-11, or dated on the last regular-season
+day for a play-in listed two days on, reaches none of them. **That cannot catch a wrong-date row before the schedule lists
+the real game**: the final's slot has no teams until ESPN sets them, and until it does the row reaches
+`nba_total_luck`, `nba_team_total_luck`, `nba_first_half_total_luck` and `nba_prop_projection`, and any of them can bet it. Pinned by
+`test_before_the_schedule_lists_the_final_a_misdated_row_still_reaches_the_other_models`. It also does not change
+`load_season`, which reads `regular_season` directly, so the decline above is unchanged.
+
+Measured: the feed wrote four such rows in the 2026 WNBA playoffs
+(`WNBA_2026-09-25_NY_MIN`, `10-01_DAL_GSV`, `10-03_NY_ATL`, `10-22_GSV_ATL`, the real games one to two days later).
+`final_scores` goes STALE at WARN on those, and was STALE on most days of 09-24 to 10-10. NBA has none yet (0
+unscored rows 08-01 to 11-01). The same-teams test in `models.nba_total_luck.listed_twin` would close it, but
+it changes those three models, so it needs its own `Updated-By: mike` commit, and it is not in the Cup work.
+
+## [ ] NBA: no command writes a final onto the row a bet sits on (2026-11-02, flagged)
+
+`stranded:nba_prop:<game>` tells a person to write the final and the box lines onto the bet's row when the game was played
+and the final landed elsewhere, because voiding a played game's bet removes a real result. NCAAF does this by itself
+(`cfbd_ingestor.mirror_stored_finals`, called from `settle_picks`); NBA has no equivalent, so today that is hand SQL. Build it
+the first time the alert fires on a played game. The postponed half stays by hand for now too: `nba_schedule.status_text` has
+never held a postponed value (0 rows, all seasons, 2026-11-02), so an automatic NO_ACTION like `_void_postponed_mlb_picks`
+would rest on a trigger no real row has tested.
+
+## [ ] NBA: an unlisted All-Star row would count as a regular-season game (2026-11-02, flagged)
+
+Season 2027 holds no `allstar` rows (`nba_schedule`), and ESPN's type is not stored
+(`nba_schedule_refresh.ESPN_TYPES`), so `regular_season` has no other kind of game on that day. Past seasons do
+hold them (2026-02-13..15). Whether the feed ever lists an All-Star event is not measured. nba_prop_market's new
+gate refuses it; the regular-season gate does not. The fix is a row of type `allstar` on that date.
+
+## [ ] A bet on a game with no final, in the other sports (2026-11-02, flagged)
+
+`stranded:nba_prop:<game>` (`scripts/nba_pregame_window.stranded_prop_bets`) covers the two NBA prop models. Nothing
+says so for anything else: settlement and both settlement health checks start from a final score. A priced game
+then postponed does this in any sport (`MLB_2026-10-16_TB_CLE`, rained out, holds 128,768 prop rows at 10 books).
+Moving it into `tracking/system_health.py` for every model is the shape it should end up in. No bet of that kind
+was found on the 12 rows examined, so this has not cost anything yet.
+## [ ] Player props: a book's last-listed line overwrites its main number (2026-11-02)
+
+`data/ingestors/prop_odds_ingestor.py:417-425` keys a standard prop market on (market, player), so when a book lists
+several lines under that key the last one wins, and the two prices can come from different lines. Measured:
+
+- **One paid call (1 credit), 2026-11-03 02:13Z, PHX at GSW, `player_points`, eight books.** Seven books list one line
+  a player. Bovada lists several for all 13 players (seven for Brandin Podziemski, 12.5 to 18.5), and the line we
+  keep is not the one closest to even for any of them. The raw response is in `%TEMP%/q1trend/probe_prop_ladder_raw.json`.
+- Bovada's own site, read once without credits: the stored line is the last it lists for 90 of 90 players.
+- Raw NFL in-play responses (`nfl_live_prop_snapshots`): 4 of 75,024 player-market groups list several lines, and the
+  parser mixed two lines into one row on 2 of them, both DraftKings.
+- **No bet is reached now.** Bovada cannot be bet. Of 362 live prop bets read row by row, at most one may sit on a
+  line other than the book's main number. The app's all-books table does read Bovada's rows, so it can show a
+  Bovada line several points above every other book's (by the code and the view; not seen on a screen).
+- Removing BetRivers 2023-24, the book-season that looks like this in history: `nba_prop_market` +2.92% against
+  +2.96%; `nba_prop_projection` +4.04% against +4.12%, every season still positive.
+
+The fix: key standard markets on (market, player, line), keep each book's two-sided line closest to even under the
+standard name, and file the rest as alternates. It needs a carve-out for books that post one side only (BetRivers'
+NFL rows are about half one-sided), a test on the NHL models, which shop every line, and a margin check on the NFL,
+WNBA and DraftKings row reads that have none. It changes what "a book's line" means everywhere, so it ships on its
+own branch with a review.
+
+## [ ] NBA prop projection: pin the training thread count before any retrain (2026-11-02)
+
+`models/nba_props.py:703-704` fits with every core and a 0.8 row sample, so the seed does not pin the model: on 3
+threads the minutes model differs from the shipped one by 0.32 minutes on average. Pin it at 8, which rebuilds the
+shipped artifact exactly. The record is one draw of five (`docs/nba_models_2026.md` section 5).
+
+## [ ] NBA prop projection: grade the first ten games before next season (2026-11-02)
+
+A team's first ten games earned +0.15% against +4.68% after (section 5). Before October 2027, sweep 5, 10, 15 and 20
+games by cell, by season and across training draws, and decide whether to hold that window. Not this season: every
+team reaches ten games by about 2026-11-09.
+
+## [ ] NBA prop projection: players the name match cannot place (2026-11-02)
+
+The live card matches a priced name only against players logged for either team this season or last. So a player in
+his first game for a new team, or back from a missed season, gets no projection: on 2026-10-21 Tyrese Haliburton and
+Fred VanVleet played 34 and 30 minutes with none. On teams' first games of 2026-27, 47 players a book priced had no
+projection.
+
+## [ ] NBA game total models: read what could not be measured before they ran live (2026-10-31)
+
+Three reads, none possible from the branch that made the changes (no production
+connection, no deploy; session log, 2026-10-31):
+
+1. **How many team-total games the killed cards actually lost.** The worker's logs
+   show 60 of 74 cards killed from 2026-10-24 20:55Z to 10-31 01:15Z, and 20 groups of
+   games (32 games) with no finished card, but a run that was killed may have committed
+   first. `SELECT g.game_id FROM games g LEFT JOIN nba_team_total_luck_decisions d
+   USING (game_id) WHERE g.sport = 'NBA' AND g.commence_time::timestamptz BETWEEN
+   '2026-10-24 21:30+00' AND '2026-10-31 02:30+00' AND d.game_id IS NULL`.
+2. **Whether the stored price table ended the kills.** After it deploys, pair the worker's
+   `START` and `DONE`/`TIMEOUT` lines for `nba-team-total-luck`, `nba-total-luck` and
+   `nba-first-half-total-luck` over a week of evenings. The table took 41.0, 18.5 and
+   17.3 s of each run on an idle machine; the rest of a card's time on a slow evening is
+   not established. The same lines say whether three cards at once strain the worker.
+3. **Whether the books hang first-half ladders.** The graded quotes at BetRivers, betPARX
+   and probably Hard Rock read as a ladder cut to one rung (`docs/nba_models_2026.md`
+   8.4), inferred because no raw response was stored. `SELECT bookmaker, COUNT(*) FROM
+   odds WHERE market = 'totals_h1_alternate' AND source = 'odds_api_nba_first_half_live'
+   GROUP BY 1`, once the model has fetched a few games.
+
+**Read 2026-11-02, after the first evening on the new code (four games, 2026-11-01):**
+
+1. **The killed cards lost no bets.** 35 of the 60 NBA games from 2026-10-24 to 10-31 have no team-total decision.
+   Every team-total decision through 2026-11-01 (56 games) reads `early_season: a team has under 10 games`, so
+   those games were inside the ten-game wait and could not have bet. The wait came off on 2026-11-02.
+2. **The stored price table ended the kills on the first evening.** All 12 card runs on 11-01 exited 0, each in
+   about 3 to 5 seconds, against the 180-second kill on most runs before it. The team-total and first-half cards ran
+   side by side on all four games; the full-game card ran ten minutes earlier, so three at once has not been seen.
+   Leave this item open for a week of evenings, and for the first real bets, when the cards read more than the hold.
+3. **No first-half ladder so far.** On the first four games, `rows_stored` equals `main_rows` on every call (8 and
+   8), and `totals_h1_alternate` has no row. Eight books each hold one row per game, BetRivers, betPARX and Hard Rock
+   among them. A call cost 1 credit. Leave this open until a full slate has been read.
+
+## [x] Replay the kept NCAAB raw events once the team-name fix is merged (2026-10-29) — DONE 2026-10-30
+
+`ncaab_odds_unmatched` holds the events the game-lines purchase could not
+place on an ESPN game (worker job 805227). Branch `fix/ncaab-odds-team-names`
+places 80 more feed names and adds the replay; `docs/sports/ncaab.md`,
+"Replaying the kept raw events", says what it does and the counts to expect.
+#1094 merged 2026-10-30 00:26Z. Queued: worker job 827393 `{"mode":
+"replay_unmatched", "dry_run": true}`, then 827394 `{"mode":
+"replay_unmatched"}` with run_after 04:00Z. 827393 ran 00:45-01:07Z: 1,201,028
+rows would be inserted, 0 already stored. 827394 ran 04:00-04:40Z on
+2026-10-30 and stored all 1,201,028, with 0 instants failed to write; the
+rows read back from `odds` (session log, 2026-10-29/30 evening). It bought
+nothing. A second run stores nothing new.
+
+## [ ] NCAAB: a second feed listing a day off still lands on the real game (2026-10-29)
+
+`ncaab_teams.match_event` places a feed event on the nearest ESPN game of the
+same two teams within a day either side of its date. In the kept raw events,
+24 feed events (144 event snapshots) landed 12 to 29 hours from their game's
+tip, and every one of those games also has a listing within the hour (SQL on
+the Supabase connector, 2026-10-29). The replay refuses them. The lines
+purchase and the live capture use the same matcher and still accept them, so
+stored history can hold a second listing's quotes beside the real one at a
+game's anchors. Next: measure how often it happens in what is already stored
+and in the live capture, then decide whether the shared matcher should refuse
+such listings. A real game must never be refused there.
+
+## [ ] Knowledge-graph community names after the 2026-10-29 rebuild
+
+`graphify update .` on branch `fix/ncaab-odds-team-names` rebuilt master's
+committed graph, which was missing 171 files master now has (most of
+`data/migrations/`, and `data/ingestors/alt_game_lines.py`,
+`live_scoreboard.py` and `scoreboard_splits.py` among them), so its
+communities moved. graphify keeps a hand-written community name only where a
+strict majority of the community's members stayed together. After the
+review round's rebuild: 1,110 communities, 514 with a hand-written name and
+596 waiting for one (master's committed graph: 933 communities, 623 named,
+310 waiting). Next: name the waiting communities
+(`graphify-out/.graphify_labels.pending.json`) from a per-community digest
+and re-sign `.graphify_labels.json.sig`, as on 2026-10-16.
+
+## [ ] NCAAB feed events whose two teams resolve but match no ESPN game (2026-10-29)
+
+Even with every name placed, 500 kept events (3,789 event snapshots, 462 team
+pairs) match no ESPN game within a day of the feed's start (Supabase
+connector, 2026-10-29); the purchase reported 302 such pairs before the name
+fix. The replay leaves them raw. A sample of 10 read the same day:
+
+- 2 are games ESPN has a few days later: William & Mary at Elon, feed
+  2021-02-18 ET, ESPN 2021-02-22; Tarleton State at UT-Arlington, feed
+  2023-02-01, ESPN 2023-02-06 with the note "MAKEUP FROM FEB. 1".
+- 1 pair met three weeks later with the other team at home: Pittsburgh at
+  Duke, feed 2020-12-29, ESPN Duke at Pittsburgh 2021-01-19.
+- 4 have no ESPN game for either team within a day: Cal Poly at UC San Diego
+  (2023-03-02), Southern Miss at Western Kentucky (2020-12-06, Western
+  Kentucky played Mississippi Valley State that day), Western Kentucky at
+  Florida Atlantic (2021-02-05), Charleston at Rhode Island (2021-12-19).
+- 3 are matchups the feed listed that were never played: Ohio State at UConn
+  (2021-02-28), North Carolina at Villanova (2022-04-02, when ESPN has
+  Villanova v Kansas and North Carolina v Duke), Texas at Arizona
+  (2026-03-28, when ESPN has Arizona v Purdue).
+
+Next: classify all 462 pairs the same way before changing how a feed event
+is matched to a date; a matchup that was never played stays raw.
+
+## [ ] KenPom API: mike buys it, then the key and the daily pull (2026-10-28)
+
+$145.00 for 12 months, web access included (live page read 2026-10-28). mike
+buys it in his own browser under the sign-up mailbox; no permission request
+(mike, 2026-10-29). Then: the key into the local `.env` and Railway as
+`KENPOM_API_KEY`, six checks with the key (ratings `y=2026`, archive
+`d=2025-02-15`, preseason `y=2027`, fanmatch, teams `y=2027`, the earliest
+archive date), the archive import into Supabase, and a daily ratings pull stored with the time
+pulled.
+
+## [ ] [needs-decision] Pre-tip injury / availability feed for NCAAB (2026-10-28)
+
+The brief for grokbot is `docs/grokbot/grokbot-2026-10-29-ncaab-injury-feed.md`
+(also the Claude doc https://claude.ai/artifact/XoJ3cFxitCaX5dS987byaY): price
+requests to SportsDataIO and RotoWire signed Signalbase (neither publishes a
+price), the official conference reports, what to buy and what to hand back. The model needs
+status BEFORE tip with a timestamp; the stored form is a snapshot table keyed
+on (game, team, player, observed_at).
+
+## [ ] Torvik: the archive import and a daily season-file pull (2026-10-28)
+
+`docs/sports/ncaab.md` "Data accounts". cbbdata's archive is daily 2014-15 →
+2024-25 and EMPTY after (the maintainer's last reply on any issue was
+2024-01-18); the import (backtest feature and benchmark) reads `CBBDATA_*`,
+which are on the Railway worker since 2026-10-29 about 22:58Z (names checked
+with list-variables). Current-season ratings
+come from Torvik's own `2027_team_results.csv`, which his robots.txt lets
+general agents fetch with a 10-second crawl delay: pull it once a day before
+the first tip and store every pull with the time pulled, so the as-of history
+builds from opening night.
+
+## [ ] College Basketball Data: measure lines coverage by season, plays, lineups (2026-10-28)
+
+The football key opens it (probe, 2026-10-28). `/lines` carries ESPN BET,
+Bovada, DraftKings and consensus lines; how many seasons, and whether
+play-by-play, lineups and substitutions exist for enough seasons to build
+who-actually-played features, is unmeasured. A probe job, then importers.
+
 ## [ ] NBA totals overs (`nba_total_luck`): first decisions, and the refit before 2027-28 (2026-10-17)
 
 Live from 2026-10-17; the first bet needs both teams at 10 games, so mid-November.
@@ -50,7 +517,7 @@ ESPN lists the teams (`espn:` keys; the placeholders stay, the date rule reads
 them); no reload by hand is needed; (4) the
 artifact's copy in Supabase's `model_artifacts` — not written yet (the
 committed file is what the worker loads); `python -m scripts.nba_total_luck_build
---store models/saved/nba_total_luck_20261017_090305.pkl` writes it. **Before the
+--store models/saved/nba_total_luck_20261031_095356.pkl` writes it. **Before the
 2027-28 season** refit the artifact through 2026-27
 (`python -m scripts.nba_total_luck_build`): the card refuses a season the artifact
 does not end just before. Re-sweep the gap cut at about 250 settled bets
@@ -278,20 +745,27 @@ needs a daily run over an hour late; 2026-10-01's ran 10:10Z to 12:39Z. Next,
 if it matters: have the refresh pass skip its goalie poll while the daily
 run holds its lock.
 
-## [ ] [needs-decision] The injury reader counts every snapshot of the day (found 2026-10-13)
+## [x] The injury reader counts every snapshot of the day (found 2026-10-13, fixed 2026-10-30)
+
+`query_injuries_for_game` keeps the newest ingest that already existed at
+tip-off (`games.commence_time`), and only the players on that pull. A name
+an earlier copy the same day listed, and that pull left off, does not count
+(mike, 2026-10-30). The training reader uses the same rule. Ottawa at 22:23Z
+on 2026-10-13 was 53.900 summed and is 2.800 on the 22:10Z pull (Harrison
+Scott is off it). STL the same minute was 79.800 summed and is 4.200. No
+threshold, stake, or pause change.
 
 `injuries` gets a full copy of each team's list on every ingest run
 (report_date 2026-10-13, last write 22:10Z: 19 snapshots; 17.5 copies per
-player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). `query_injuries_for_game`
-reads every row for the latest report_date and `_compute_injury_adjustment`
-sums them, so `home_injury_adj` / `away_injury_adj` grow all day: Ottawa read
-11.2 at 07:22Z and 53.9 at 22:23Z, against 2.8 and 3.5 counting each player once
-(the docstring says 0-3). It is also the "Opponent injury burden: 79.80" note
-on picks. `nhl_moneyline_regulation` never splits on an injury input (0
-splits across all folds), so it changed nothing there. Before a fix (read
-only the latest snapshot), list which live artifacts DO split on injury
-inputs and what their inputs looked like in training, since the fix moves
-those models' inputs: mike's call.
+player in NHL, 18.3-19.0 in MLB, NBA, NFL and WNBA). Until 2026-10-30
+`query_injuries_for_game` read every row for the latest report_date and
+`_compute_injury_adjustment` summed them, so `home_injury_adj` /
+`away_injury_adj` grew all day: Ottawa read 11.2 at 07:22Z and 53.9 at
+22:23Z, against 2.8 and 3.5 counting each player once (the docstring says
+0-3). It was also the "Opponent injury burden: 79.80" note on picks.
+`nhl_moneyline_regulation` never splits on an injury input (0 splits across
+all folds), so it changed nothing there. Which live artifacts' inputs move,
+and which of those trees split, is in the 2026-10-30 session entry.
 
 **For the NHL game models the six injury inputs are dead whatever the reader
 does.** NHL rows in `injuries` start 2026-04-05, so every training game
@@ -783,14 +1257,32 @@ production backtests were fixed in #895 (`scripts/nhl_prop_backtest.namesakes`).
 The lab was not. Apply the same drop before its merge, then treat every lab
 table in `docs/nhl_market_lab.md` dated before 2026-10-08 as unconfirmed.
 
-## [ ] NHL derivative totals: the grade has two defects
+## [x] NHL derivative totals: the grade has two defects — fixed, re-graded 2026-11-09
 
 Found 2026-10-08. Team totals were graded on regulation goals, but every book
 prices full-game goals; on full-game goals the same unders lose (-1.78% at EV
-≥ 0.10). The alternate and first-period grades paid a push as an under win on
-whole-number lines. Fix both in `scripts/nhl_derivative_totals_backtest.py`
-and re-grade (it is on the `nhl_research` allowlist). The purchase itself is
-done: all 4,192 priced games.
+≥ 0.10). The second defect was in the model's chance, not the payout: on a
+whole-number line the under was given 1 minus the over's chance, so the
+chance of a push counted as an under win and inflated the under's expected
+value (`side_frame`; the payout already returned the stake). The purchase
+itself is done: all 4,192 priced games.
+
+2026-10-10 (mike, rebuilding PR #863): both fixed, on a branch that was never
+pushed; landed on master 2026-11-09 (mike: "rebuild NHL grading fix on current
+master"). Team totals settle on the
+full-game score only; the prices confirm it (no-vig over 0.5012 against 0.4948
+landed on the full game and 0.4612 on three periods, 39,515 quotes;
+`docs/nhl_derivative_totals.md`). The under's chance is P(goals < line) and
+expected value returns the stake on a push. The re-grade is the declared job
+`nhl-derivative-totals-regrade-2026-11-09`. Read 2026-11-09: nothing clears;
+the corrected tables are at the top of `docs/nhl_derivative_totals.md`.
+
+Also in that printout: PR #863's Pinnacle-against-a-bettable-book table. Its
+one cell clear of zero was first-period totals at 2% or more (+19.3% on 160
+bets, interval +1.9 to +37.4, unstable by half-season). Reading it on 2026-27
+needs the 2026-27 derivative prices (the `nhl_derivative_odds_history` job
+buys scored games not yet stored), the grader's seasons extended to 2027, and
+2026-27 period scores, which `step_nhl_results` now keeps current.
 
 ## [ ] A best-price quote far from every other book is taken as real
 
@@ -1039,6 +1531,35 @@ add it to `data/anon_readable.py`, and the page reads ~40 rows per team by
 `(sport, team)` and drops its NFL-only branch. One migration, one line in the
 daily refresh, first fill on the worker.
 
+## [ ] MLB pitcher prop models: re-run the pitcher-prop market check on 2027 prices before any unpause (added 2026-10-10)
+
+All five pitcher prop models are paused (strikeouts, outs and hits allowed
+since 2026-09-19, #764). The one market-price test of pitcher outs found
+August +2.0% on 52 bets and September 1-19 −9.7% on 28
+(`docs/mlb_prop_market_eval.md` §3). Before considering any unpause in
+2027, re-run that check on the new season's Pinnacle and DraftKings
+pitcher-prop prices; the commands are in §5 of the same file.
+
+## [ ] MLB first-five totals: re-check the Pinnacle-against-soft-book over side in May 2027 (added 2026-10-10)
+
+The 2026 search found no first-five card (`docs/mlb_f5_edge_search.md`).
+Its closest miss, Pinnacle no-vig against a bettable soft book's no-vig on
+first-five totals at 1.5 points, was 96 bets +9.92% from Sep 2 to 30, and
+all of it was on the over side: over picks 54 bets +30.1% against +4.8%
+for blind overs at the same book and line, under picks 42 bets −16.0%.
+Pinnacle first-five prices return with the 2027 season.
+
+- Re-check in May 2027, after one full regular-season month of Pinnacle
+  first-five totals.
+- Read over and under picks separately, and compare each with blind bets
+  at the same book and the same line.
+- The bettable books will be FanDuel, BetMGM and William Hill (Rebet was
+  dropped from the shopped books on 2026-09-20).
+- A rule built on the over side alone is the candidate, if it repeats.
+- If code is wanted, start from PR #762 (branch
+  `cursor/mlb-f5-edge-hunt-7ba7`, commit `b3a4aac`) and add a by-side
+  split; that sweep does not report one.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
@@ -1052,6 +1573,12 @@ After this merges: `mlb_runline_retrain_sweep` register=false. Worker job
 `mlb-over-under-retrain-sweep-2026-09-16`, #741) is the totals twin and
 consumes the same `FEATURE_MAP`. Do not flip `PAUSED_MODELS` or
 `MLB_*_MARKET_PUBLISH`.
+
+2026-10-10: the search for a run-line rule built on market data instead
+of a trained model (PR #757, 2026-09-19, never merged) found none: fading
+the public by tickets or money, the home underdog, reverse line movement,
+line moves and Pinnacle gaps. Every near miss lost in the 105 games played
+after it (`docs/mlb_runline_edge_hunt.md`).
 
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
 
@@ -1624,7 +2151,10 @@ nothing; it needs a caller and a comparison against the pruned list.
 so **prop credit spend is invisible in that table for every sport**. Today's
 590-credit college pass had to be read out of the Railway worker log. Worth
 doing at the same time — both are about a measurement that exists nowhere
-queryable. Detail in `docs/market_coverage.md`.
+queryable. Detail in `docs/market_coverage.md`. **That half is closed
+(2026-11-03):** config.py now installs the call logger in every process that
+imports it, so a prop ingestor's calls are in `api_call_log` however it was
+started (`docs/monitoring.md`). The drift check above is still open.
 
 ---
 
@@ -1734,8 +2264,8 @@ starts 2026-08-27, so there is no code history for July, and identifying it
 needs the feature engine run for one date either side of 07-23 (a worker job:
 no DATABASE_URL in a dev sandbox).
 
-**Do NOT chase the volume back.** Realised record, 521 settled BETs, flat $100
-(`profit_flat` is exactly -100 on every loss, so flat ROI = sum/(n*100) —
+**Do NOT chase the volume back.** Realised record, 521 settled BETs, one flat unit each
+(`profit_flat` is stored per 100 staked and is exactly -100 on every loss, so flat ROI = sum/(n*100) —
 dividing by `recommended_bet` mixes flat profit with a Kelly stake and gives a
 nonsense -127%):
 
@@ -1760,7 +2290,7 @@ so it is fitting the pre-07-23 period that no longer exists.
 
 **Decision needed (a model update — needs `Updated-By: <person>` per §1b):**
 1. PAUSE or RETIRE it. config's own comment has called it a retrain candidate
-   since 2026-06-21; it has now lost $4,098 at flat $100 over 521 bets.
+   since 2026-06-21; it has now lost 40.98 units over 521 flat bets.
 2. Or retrain first, then decide — the features (rolling form, prior-season
    Savant, batting order, opp team ERA) are the same ones that stopped
    discriminating on 07-23, so a retrain without finding that cause may
@@ -1782,17 +2312,16 @@ Found 2026-09-04 in session 208 while enumerating the function grant surface.
 `fetchAccess()` does `if (error) throw error` — it does not fail soft. But
 `my_access()` is **absent from `pg_proc`**: it and `has_app_access()` are defined
 only in `data/migrations/add_discord_link_and_whop_memberships.sql`, which has
-**never been applied**. `has_active_subscription()` — the function that migration
-supersedes — is the one that actually exists.
+**never been applied**. As of 2026-10-27 that unapplied file is Apple-only:
+`entitled` / `has_app_access()` read `subscriptions` (trialing/active, period
+open). A Whop row is `discord_access` and does not unlock the app. Do not apply
+an older copy of the file that ORs Whop in. Do not flip AUTH/BILLING/DISCORD
+until this file is applied — `fetchAccess()` throws if `my_access()` is missing.
 
-CLAUDE.md §6 states the gate is `public.my_access()` / `has_app_access()`. That
-is the intended design, not the deployed one, and the difference has never been
-written down.
+CLAUDE.md §6 states the gate. That is the intended design, not the deployed one.
 
-**What needs deciding:** whether to apply that migration (it also creates the
-Discord-link and Whop-membership tables), or to change the app. Not touched here
-— it is the entitlement path, and applying a never-run migration that creates
-billing-adjacent tables is not a side effect of a grant change.
+**Still open:** Matt applies the migration. This file is the first apply and
+is already Apple-only. Applying it is not a side effect of another change.
 
 Note it does NOT block the grant work: the migration already carries its own
 `REVOKE ALL ... FROM PUBLIC, anon, authenticated` plus

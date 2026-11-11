@@ -75,6 +75,11 @@ MAX_SILENCE: dict = {
     # RETURNS, and one launch can run a whole Sunday slate (1pm to ~7:30pm
     # ET, ~6.5h), which 700 also clears.
     "nfl_live_leader": 700,
+    # 11am to 2:50am ET, */10: off 3am-11am, ~8h of legitimate silence; one
+    # launch can run a whole evening slate (~7pm to ~1:30am ET, 6.5h).
+    "nba_live": 700,
+    # The same shape: 11am to 2:50am ET, */10; one launch runs a slate.
+    "ncaab_live": 700,
     # The watcher. 10-minute cadence; 45 minutes of silence means the thing
     # that reports everything else has stopped reporting.
     "failure_alerter": 45,
@@ -91,14 +96,47 @@ MAX_SILENCE: dict = {
     "nba_prop_window": 30,
     # Every minute, 24x7, and it beats on the idle ticks too (one read, then
     # return), so 20 minutes is 20 missed ticks: a stopped job, not a quiet one.
-    # One job for both NBA totals models, nba_total_luck and
-    # nba_team_total_luck (scripts/nba_pregame_window.py), so one entry.
+    # One job for the NBA game total models, nba_total_luck,
+    # nba_team_total_luck and nba_first_half_total_luck
+    # (scripts/nba_pregame_window.py), so one entry.
     "nba_total_luck_window": 20,
     # Every five minutes, 11:00-23:55 ET, and it beats on the idle ticks too.
     # Off overnight by design (23:55 to 11:00 is 665 minutes), so the bound has
     # to clear that gap, as the NFL in-play worker's does. Inside its hours the
     # tighter bound in ACTIVE_HOURS_ET applies.
     "nhl_goalie_window": 700,
+    # Every five minutes, 24x7, and it beats on the idle ticks too (one read
+    # of ncaab_events, then return, all off-season), so 20 minutes is four
+    # missed ticks: a stopped capture, and opener times going unrecorded.
+    "ncaab_odds_capture": 20,
+    # The women's capture: the same cadence and the same bound.
+    "ncaabw_odds_capture": 20,
+    # Every five minutes, 24x7. The tick beats when it returns, including the
+    # ones that poll nothing because the cadence has not elapsed, so 20
+    # minutes is four missed ticks: a stopped feed, not a quiet afternoon.
+    "ncaab_injury_feed": 20,
+    # Every five minutes, 24x7, and it beats on the idle ticks too (the slate,
+    # ledger and first-total reads), so 20 minutes is four missed ticks: a
+    # stopped card, and DraftKings' first totals going by unbet.
+    "ncaab_total_card": 20,
+    # The women's card: the same cadence and the same bound.
+    "ncaabw_total_card": 20,
+    # The same cadence: hourly at five past, 24x7 UTC, beating on the idle
+    # hours too. It decides only in the 15:00 UTC hour, so a stopped card is
+    # also caught by the next run's `missed` failure.
+    "ncaab_spread_card": 150,
+    # The NCAAB moneyline card: the same cadence and the same 15:00 UTC
+    # decision, so the same bound.
+    "ncaab_moneyline_card": 150,
+    # Every minute, 24x7, and it beats on the idle ticks too (one read, then
+    # return), so 20 minutes is 20 missed ticks: a stopped job, and every game
+    # tipping meanwhile undecided by the NCAAB first-half spread model.
+    "ncaab_first_half_window": 20,
+    # The NCAAB first-post moneyline job: every minute, 24x7, beating on the
+    # idle ticks too (one planning read, then return). 20 minutes is 20 missed
+    # ticks, and every first post stored meanwhile goes past the card's
+    # 15-minute limit and is written `missed`.
+    "ncaab_moneyline_first_post": 20,
 }
 
 # Jobs that run only inside fixed Eastern hours: (first hour, last hour,
@@ -108,6 +146,12 @@ MAX_SILENCE: dict = {
 # reported around 23:40 ET, after the slate it exists for.
 ACTIVE_HOURS_ET: dict = {
     "nhl_goalie_window": (11, 23, 30),
+    # The NBA in-play loop beats every 5 minutes while a slate runs
+    # (models/nba_live_loop.Loop.heartbeat) and on every idle relaunch (every
+    # 10 minutes), so 30 minutes of silence in its hours is a hung loop.
+    "nba_live": (11, 23, 30),
+    # The NCAAB in-play loop beats the same way (models/ncaab_live_loop.Loop.heartbeat).
+    "ncaab_live": (11, 23, 30),
 }
 _ET = ZoneInfo("America/New_York")
 

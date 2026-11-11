@@ -330,7 +330,8 @@ def test_every_pnl_color_call_names_its_precision():
         src = "\n".join(_code_lines(path))
         for m in re.finditer(r"pnlColor\(((?:[^()]|\([^()]*\))*)\)", src):
             n += 1
-            if not re.search(r",\s*(1,\s*100|2|1)\s*$", m.group(1)):
+            # `2, FLAT_UNIT_TONE_SCALE` is formatFlatUnits' precision (lib/format).
+            if not re.search(r",\s*(1,\s*100|2,\s*FLAT_UNIT_TONE_SCALE|2|1)\s*$", m.group(1)):
                 bad.append(f"{path.relative_to(ROOT)}: pnlColor({m.group(1)})")
     assert n >= 20 and bad == [], bad
     pick_detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
@@ -371,26 +372,26 @@ def _node_strips_types() -> bool:
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_signed_formatter_and_tone_behaviour():
     script = """
-import { formatCurrency, formatCurrencySigned, formatPctSigned, formatSigned, formatSignedUnits } from './mobile/src/lib/format.ts';
+import { formatFlatStake, formatFlatUnits, formatPctSigned, formatSigned, formatSignedUnits } from './mobile/src/lib/format.ts';
 import { badgeGlyphSize, pnlTone } from './mobile/src/lib/tone.ts';
 const M = '\\u2212';
 const cases = [
   [formatSigned(1.23), '+1.2'], [formatSigned(-0.5, 2), M + '0.50'], [formatSigned(-0.04), '0.0'],
   [formatSigned(2.3, 1, 'pp'), '+2.3pp'], [formatSigned(null), '—'],
   [formatPctSigned(0.125), '+12.5%'], [formatPctSigned(-0.03), M + '3.0%'], [formatPctSigned(-0.0004), '0.0%'],
-  [formatCurrencySigned(-25), M + '$25.00'], [formatCurrencySigned(0.004), '$0.00'],
+  [formatFlatUnits(-2500), M + '25.00u'], [formatFlatUnits(0.4), '0.00u'],
   [formatSignedUnits(2.44), '+2.4u'], [formatSignedUnits(-0.5), M + '0.5u'], [formatSignedUnits(0.04), '0.0u'],
   [pnlTone(1, 1), 'betInk'], [pnlTone(-1, 1), 'avoidInk'], [pnlTone(0, 1), 'textSecondary'],
   [pnlTone(null, 1), 'textSecondary'], [pnlTone(Infinity, 1), 'textSecondary'],
   // Reviewer MEDIUM A pins: tone from the value as PRINTED.
   [formatPctSigned(-0.0004), '0.0%'], [pnlTone(-0.0004, 1, 100), 'textSecondary'],
-  [formatCurrencySigned(1e-13), '$0.00'], [pnlTone(1e-13, 2), 'textSecondary'],
+  [formatFlatUnits(1e-11), '0.00u'], [pnlTone(1e-11, 2, 0.01), 'textSecondary'],
   [formatPctSigned(0.0008), '+0.1%'], [pnlTone(0.0008, 1, 100), 'betInk'],
   [formatSigned(-0.03, 1, 'pp'), '0.0pp'], [pnlTone(-0.03, 1), 'textSecondary'],
   // Reviewer Low 4.
   [formatSigned(Infinity), '—'], [formatSigned(NaN), '—'],
   [formatSignedUnits(0.25), '+0.3u'], [formatSignedUnits(-0.25), M + '0.3u'],
-  [formatCurrency(-4), M + '$4.00'], [formatCurrency(-0.001), '$0.00'],
+  [formatFlatStake(400), '4u'], [formatFlatStake(null), '—'],
   [badgeGlyphSize(11, 1), 11], [badgeGlyphSize(11, 1.5), 17], [badgeGlyphSize(11, 3.1), 22], [badgeGlyphSize(11, NaN), 11],
 ];
 for (const [got, want] of cases) if (got !== want) throw new Error(`${got} !== ${want}`);

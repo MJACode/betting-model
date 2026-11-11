@@ -45,6 +45,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from live_model.config import ARTIFACT_DIR                        # noqa: E402
 from live_model.backtest.flow_dataset import DECISION_POINTS      # noqa: E402
 
+
+# Every call this module sends to the Odds API is logged to api_call_log,
+# however the process was started (monitoring/probe.py). This module reads its
+# key from the environment instead of importing config, which installs the
+# logger for every other caller, so it installs it here. When a run from
+# inside a subproject cannot see the repo root, the root is added at the END
+# of the path, so it can never shadow a module of the subproject's own.
+def _install_api_call_log() -> None:
+    try:
+        try:
+            from monitoring.probe import install
+        except ImportError:
+            import sys as _sys
+            from pathlib import Path as _Path
+            _sys.path.append(str(_Path(__file__).resolve().parents[3]))
+            from monitoring.probe import install
+        install()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_install_api_call_log()
+
 API_ROOT = "https://api.the-odds-api.com/v4"
 SPORT = "americanfootball_nfl"
 CACHE = ARTIFACT_DIR / "prop_snaps"

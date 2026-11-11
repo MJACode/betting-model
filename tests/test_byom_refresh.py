@@ -1,12 +1,13 @@
 """Incremental refresh: due games only, freshness reads no odds.
 
-The declared job ships enabled false and apply false. Nothing here
-writes production.
+The declared job is on (Matt, 2026-11-04), and the scheduler queues the
+same job every day. Nothing here writes production.
 """
 from __future__ import annotations
 
 import json
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -14,13 +15,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 AS_OF = date(2026, 10, 16)
 
-def test_the_job_ships_disabled_and_does_not_write_by_default():
+def test_the_job_is_on_daily_and_does_not_write_by_default():
     from tracking.job_queue import JOBS, _validate_byom_refresh
 
     assert "byom_refresh" in JOBS
     assert _validate_byom_refresh({}) == {"sport": "NFL", "apply": False}
+    # NBA joined 2026-11-04. Any other sport is refused.
+    assert _validate_byom_refresh({"sport": " nba ", "apply": True}) == {"sport": "NBA", "apply": True}
     with pytest.raises(ValueError):
-        _validate_byom_refresh({"sport": "NBA"})
+        _validate_byom_refresh({"sport": "MLB"})
     with pytest.raises(ValueError):
         _validate_byom_refresh({"apply": "yes"})
     declared = json.loads(
@@ -28,8 +31,13 @@ def test_the_job_ships_disabled_and_does_not_write_by_default():
     found = [entry for entry in declared if entry["job_type"] == "byom_refresh"]
     assert len(found) == 1
     assert found[0]["key"] == "byom-nfl-refresh"
-    assert found[0]["enabled"] is False
-    assert found[0]["args"]["apply"] is False
+    assert found[0]["enabled"] is True
+    assert found[0]["args"]["apply"] is True
+    sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
+    assert 'id="byom_nfl_refresh"' in sched
+    assert 'dedupe_key=f"byom-{sport.lower()}-refresh-{today}"' in sched
+    assert 'for sport in ("NFL", "NBA", "NHL"):' in sched
+    assert '"byom_nfl_refresh"}' in sched  # owned by the pipeline role
     assert found[0]["args"]["sport"] == "NFL"
     text = (ROOT / "byom" / "refresh.py").read_text(encoding="utf-8").lower()
     for banned in ("min_odds", "spread_size", "price_band", "insert into picks",
@@ -83,7 +91,8 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
               odds_id bigserial PRIMARY KEY, game_id text, sport text,
               market text, bookmaker text, snapshot_type text, snapshot_at text,
               home_price numeric, away_price numeric, spread_home numeric,
-              total_line numeric, over_price numeric, under_price numeric);
+              total_line numeric, over_price numeric, under_price numeric,
+              created_at text);
             CREATE TABLE player_prop_odds (
               prop_id bigserial PRIMARY KEY, game_id text, game_date text,
               player_name text, team text, market text, bookmaker text,
@@ -102,6 +111,15 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
             encoding="utf-8")
         cur.execute(text)
         cur.execute(text)
+        price = (ROOT / "data/migrations" / "byom_dk_start_price_2026_10_23.sql").read_text(
+            encoding="utf-8")
+        cur.execute(price)
+        prop_prices = (
+            ROOT / "data/migrations" / "byom_prop_facts_dk_prices_2026_10_28.sql"
+        ).read_text(encoding="utf-8")
+        cur.execute(prop_prices)
+        cur.execute((ROOT / "data/migrations" / "byom_official_legs_2026_11_04.sql").read_text(
+            encoding="utf-8"))
         _load(cur)
         raw.autocommit = False
 
@@ -178,6 +196,11 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         wrote = refresh(conn, apply=True, today=AS_OF)
         assert wrote["written_game_facts"] == 6
         assert wrote["written_prop_facts"] == 1
+        # The planner's row counts follow the write (byom/analyze.py).
+        from byom.analyze import TABLES
+        assert wrote["analyzed"] == list(TABLES)
+        analyzed = [sql for sql, _p in conn.calls if sql.startswith("ANALYZE ")]
+        assert analyzed == [f"ANALYZE public.{t}" for t in TABLES]
         touched = set()
         for _sql, params in conn.calls:
             if not params:
@@ -204,8 +227,11 @@ def test_apply_false_is_the_report_and_apply_true_rebuilds_only_the_due_set():
         }
         assert rows["2026_02_NYJ_SF"].startswith("2026-10-01") is False
         assert rows["2026_06_BUF_MIA"].startswith("2026-10-14") is False
-        cur.execute("SELECT canonical_key FROM byom_prop_facts")
-        assert [row[0] for row in cur.fetchall()] == ["2026_05_BAL_KC"]
+        cur.execute("SELECT canonical_key, over_price, under_price FROM byom_prop_facts")
+        prop_row = cur.fetchone()
+        assert prop_row[0] == "2026_05_BAL_KC"
+        assert Decimal(str(prop_row[1])) == Decimal("-110")
+        assert Decimal(str(prop_row[2])) == Decimal("-110")
         cur.execute("""
             SELECT props_scanned_at IS NOT NULL
               FROM byom_game_facts

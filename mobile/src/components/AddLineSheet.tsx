@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 
 import { showToast } from '@/components/Toast';
@@ -82,14 +83,19 @@ export function AddLineSheet({
       onClose();
       return;
     }
-    legs.add(spec);
-    showToast('Added to betslip');
-    onClose();
-    onAdded?.();
+    // The store rejects a sidelined player and returns false. No toast: there
+    // is no notice for this, and "Added" would be a lie. The sheet stays up.
+    void (async () => {
+      const added = await legs.add(spec);
+      if (!added) return;
+      showToast('Added to betslip');
+      onClose();
+      onAdded?.();
+    })();
   };
 
   return (
-    <Modal visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal trackName="AddLineSheet" visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
             parent: an accessible Pressable groups everything inside it into

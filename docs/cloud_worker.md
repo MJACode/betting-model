@@ -20,8 +20,8 @@ crons had).
 | Job | When (ET) | Command |
 |---|---|---|
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
-| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set |
-| Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only. No request when the token, channel id, or author id is unset |
+| Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set, and ParlayMatt's windows when `DISCORD_WEBHOOK_PARLAYMATT` is set |
+| Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only, then ParlayMatt's channel when `DISCORD_PARLAYMATT_CHANNEL_ID` and `DISCORD_PARLAYMATT_AUTHOR_ID` are set. No request for a capper whose token, channel id, or author id is unset |
 | Model quality monitor | 11:00am | `tracking.model_quality.run_model_quality()` — also Step 13 of the daily; report only, `model_quality_checks`. Kill switch: `RUN_MODEL_QUALITY=0` |
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
@@ -32,12 +32,50 @@ crons had).
 | Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 | Kalshi NFL prop ladders (quotes stored, not a bet) | every :40 | `run_kalshi_ladder_record()` → `kalshi_prop_ladders`; free, keyless, never on the betting path |
 | Kalshi NCAAF game markets (quotes stored, not a bet) | every :45 | `run_kalshi_game_record()` → `kalshi_game_markets` (winner / total / spread ladders, ~5,000 contracts a pass); added 2026-09-10, session 280 |
+| NCAAB totals card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_total_card()` → `python -m scripts.ncaab_total_card --publish`, then publish. Decides each game once, at 22:00 UTC the evening before its date, else at 15:00 UTC on the day and each hour to tip, on DraftKings' standing total. Kill switch: `RUN_NCAAB_TOTAL_CARD=0` (the job still beats). A run that cannot decide a due game for a reason that will not clear by itself (an artifact for another season, a team missing two or more old box scores, a missing blend) exits 1 after writing the rest: the heartbeat records `error` and the failure alerter reports it. Added 2026-10-30; `docs/sports/ncaab.md` |
+| NCAABW totals card (live, real money) | every 5 minutes at :04/:09/.., 24x7, UTC | `run_ncaabw_total_card()` → `python -m scripts.ncaabw_total_card --publish`, then publish. The women's twin of the NCAAB totals card: decides each game once at DraftKings' first posted total, three minutes after each NCAABW capture tick, only while that number still stands. Exits 1 (heartbeat "error") when a due game cannot be decided: an artifact for another season, a season schedule not stored whole, a team missing two box scores, a missing blend, an edge above the data-error cap. `RUN_NCAABW_TOTAL_CARD=0` stops it. |
+| NCAAB spread card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_spread_card()` → `python -m scripts.ncaab_spread_card --publish`, then publish. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's spread stamped 14:00-15:00 UTC; every other hour reads the slate and the ledger only. A later run that finds one of the day's games undecided writes it as `missed` (no bet) and exits 1, as does a run where no due game has any quote, or the best quote is at a book no longer in `BEST_LINE_BOOKMAKERS`. Kill switch: `RUN_NCAAB_SPREAD_CARD=0` (the job still beats; switched back on, that day's undecided games are written as `missed` and the run fails once). Added 2026-11-02; `docs/sports/ncaab.md` |
+| NCAAB moneyline card (live, real money) | every hour at :05, 24x7, on UTC hours, not ET | `run_ncaab_moneyline_card()` → `python -m scripts.ncaab_moneyline_card --publish`, then publish. Its own job beside the spread card's, so each model keeps its own kill switch and failure. Decides each game once, in the 15:00 UTC hour on its date, on every bettable book's moneyline and the same book's spread stamped 14:00-15:00 UTC (Pinnacle's and Bovada's moneylines read for the favourite check only); every other hour reads the slate and the ledger only. Fails the run in the same three cases as the spread card. Kill switch: `RUN_NCAAB_MONEYLINE_CARD=0`. Added 2026-11-02; `docs/sports/ncaab.md` |
+| NCAAB opening moneyline card (live, real money) | every minute, 24x7 | `run_ncaab_moneyline_first_post()` → one planning read in the scheduler (the bettable (game, book) pairs with a moneyline in `latest_odds` that the card's ledger has never seen, for NCAAB games tipping in the next seven days); only when there is one, `python -m scripts.ncaab_moneyline_first_post_card --publish`, then publish. Decides each book's FIRST moneyline post once, within the minute after the capture or a refresh pass stored it, priced off the same book's spread at that moment; one bet a game across this model and the 15:00 UTC moneyline card. A first post the card first sees more than 15 minutes after it was stored is written `missed` (no bet) and the run exits 1, as does a pick at a book no longer in `BEST_LINE_BOOKMAKERS`. Its first run writes every post already up as `pre_model`. The capture's next poll after each bet writes the fill check on the bet's ledger row. No Odds API call of its own. Kill switch: `RUN_NCAAB_MONEYLINE_FIRST_POST=0` (the job still beats; posts stored while it is off are written `missed` when it is back on, and that run fails once). Added 2026-11-03; `docs/sports/ncaab.md` |
+| NCAAB first half (live, real money) | every minute, 24x7 | `run_ncaab_first_half_window()` → one planning read; for the due games `python -m scripts.ncaab_first_half_window --fetch G...` (one Odds API event call per game for its first-half moneyline, spread, total and team totals, at 15:00 UTC on its date and 180, 120, 60, 50, 40, 30, 20 and 10 minutes before tip; at most 4 credits a call, 36 a game), then `python -m scripts.ncaab_first_half_spread_card --publish` once a game is ten minutes or less from tip and `python -m scripts.ncaab_first_half_total_card --publish` once a game is sixty minutes or less from tip, then publish. The spread card decides each game once on its tip-minus-10 fetch, the total card on its tip-minus-60 fetch (both calls retried every minute when they fail). Only games with a bettable book's full-game spread stored are fetched. The fetch buys nothing when the balance is under one day of the measured burn (`NCAAB_FIRST_HALF_RESERVE_DAYS`). Kill switch: `RUN_NCAAB_FIRST_HALF=0` (the job still beats). A failed call, or a game with no decision fetch by five minutes before tip (55 minutes for the total), fails the tick after publishing; the failure alerter also names any listed game that tipped undecided. Added 2026-11-02; `docs/sports/ncaab.md` |
 
 Manual posts to @SignalBasePicks (`social_post_queue`, every 5 minutes) are
 a separate job. They do not move the pick slate or the recap jobs above.
 See `docs/social_posts.md`.
 
-Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
+**Alternate spreads and totals (2026-10-29, Matt approved the cost; every
+pass since the same day, option B).** Every refresh pass's odds step buys
+alternates for games starting in the next 24 hours
+(`ALT_GAME_LINES_WINDOW_HOURS`, default 24) and refreshes `alt_game_lines`
+for them, one ledger row per sport per pass (`endpoint = 'pass'`). The
+daily full pipeline's Step 2-alt (`--step alt-game-lines`,
+`data/ingestors/alt_game_lines.py`) makes one per-event call per game starting
+in the next 3 days, for NFL, NCAAF, NBA, NHL, MLB, WNBA and NCAAB, and stores
+every rung in `odds` (source `odds_api_alt_game_lines_live`, protected from the
+pruner) and the current ladder in `alt_game_lines`, which the betslip's
+game-line edit reads. Its cost was put to Matt as an ESTIMATE (~2-4 credits a
+game, ~160 games); the measurement is `alt_game_line_fetches.credits_last`,
+one row per call. Both paths call `buy_allowance()`. Kill switch:
+`ALT_GAME_LINES_ENABLED=0` (default `1`) buys nothing on the daily run,
+including the event lists, and nothing on the pass. `ALT_GAME_LINES_MAX_GAMES`,
+unset by default, caps event-odds calls for that process (sport order, then
+game id) when set to a whole number; anything else buys nothing on both
+paths and fails the daily step. The pass logs that and still stores main
+lines. `FETCH_ALT_GAME_LINES=0` is an extra gate on the pass only (default
+`1`); it does not affect the daily run. A pass spends only when that flag
+is `1` and `buy_allowance()` allows it. Neither flag is a credit budget.
+The app hides that ladder from the edit sheet once `games.commence_time`
+has passed. A slip leg the user already moved to an alternate rung stays,
+marked as a pre-game price, until they remove it. `drop_started_ladders`
+runs on the daily step only, so a pass-written ladder for a started game
+stays in the table until the next daily run; the sheet does not list it.
+The measurement query:
+
+    SELECT fetch_at::date, sport, count(*) FILTER (WHERE endpoint = 'event_odds') AS games,
+           sum(credits_last) AS credits, count(*) FILTER (WHERE NOT ok) AS failed
+      FROM alt_game_line_fetches GROUP BY 1, 2 ORDER BY 1 DESC, 2;
+
+Pre-game Odds-API credit burn is otherwise unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
 instead of double-fetching.
 
@@ -50,13 +88,24 @@ mid-daily (a Railway redeploy after a merge) left the run `failed_steps=aborted`
 aimed the next daily at *tomorrow* 6:00am. `pipeline_watch` reported the abort and
 did not re-queue.
 
-`scheduler.py::catch_up_daily_pipeline` runs on boot and again after the 7:15am ET
-pipeline watch. If today's daily is missing, unfinished, aborted, or failed before
-the MLB freshness steps, it invokes `python run_pipeline.py` once the same
-America/New_York calendar day, posts an ops Discord note, and caps at one automatic
-retry (two ledgered `run_kind='daily'` starts). In-process lock plus a successful
-daily already today both no-op. Kill switch: `RUN_DAILY_RETRY=0`. See
-`tracking/daily_retry.py`.
+`scheduler.py::catch_up_daily_pipeline` is a one-off job five seconds after the
+scheduler starts, and it runs again after the 7:15am ET pipeline watch. It is
+not called before `sched.start()`: on 2026-11-04 the 13:01Z boot ran the daily
+on that thread, and the 13:17Z hourly never ledgered (last hourly 12:17Z). If
+today's daily is missing, unfinished, aborted, or failed before the MLB
+freshness steps, and this process is not already inside a daily, it invokes
+`python run_pipeline.py` again the same America/New_York calendar day and posts
+an ops Discord note that says which start this is and why. A deploy-kill
+(`failed_steps` contains `aborted`, or the row is still unfinished) does not
+consume the failure cap. On 2026-11-04 four aborted starts filled a cap of 4
+by 13:29Z and the day was skipped. Deploy-kills relaunch until 12
+(`MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY`) or 22:00 ET. A daily that finishes and
+fails before the MLB freshness steps for a reason other than aborted gets one
+retry, then stops, so an upstream outage does not buy odds on every boot. The
+in-process lock is the double-run guard. A successful daily already today is a
+no-op. Kill switch: `RUN_DAILY_RETRY=0`. A `worker_jobs` row with
+`job_type = 'daily_pipeline'` (no args) runs the full daily once under that
+same lock; it is not in `jobs/declared_jobs.json`. See `tracking/daily_retry.py`.
 
 **The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
 stops the container whatever it is doing; 11 refresh passes ended `aborted`
@@ -76,14 +125,119 @@ unfinished `pipeline_runs` row later that morning: later hourlies finished,
 and the next evening `start_run` is the next evening, so
 `refresh_pass_completion` stayed on its stuck branch.
 `scheduler.abort_orphaned_refresh_runs` runs once before the scheduler
-starts, on the service that owns `hourly_refresh`, and stamps unfinished
-`hourly` and `evening` rows that started before this process
-(`finished_at`, `ok=false`, `failed_steps='aborted'`). It does not touch
-`daily`. The cutoff freezes on the first call, so a second call cannot
-abort a pass this process has opened. The one-off
+starts, on the service that owns `hourly_refresh` or `daily_pipeline`, and
+again before the daily catch-up decides. It stamps unfinished `hourly`,
+`evening` and `daily` rows that started before this process (`finished_at`,
+`ok=false`, `failed_steps='aborted'`). It does not touch `manual`. A daily
+this process opened is stamped the same way only when it is older than 75
+minutes and the daily lock is free — a slow run still inside the subprocess
+stays open. That 75-minute cutoff is daily only. An hourly or evening this
+process opened stays unfinished, so `refresh_pass_completion` can still see
+a hang past 2 hours. The previous-process cutoff freezes on the first call, so a
+second call cannot abort a pass this process has just opened. The one-off
 `abort_deploy_killed_evening_2026_10_16.sql` closes that row on the next
 view-migration pass if boot has not already. This sweep does not re-run
 the pass.
+
+### Drain on redeploy, and the merge gate (2026-11-05)
+
+A merge to master redeploys the worker and Railway sends SIGTERM. The
+scheduler forwards that to the in-flight child and waits. It does not
+kill the child. `python run_pipeline.py` (the daily) and
+`scripts/refresh_pass.sh` finish the step they are in, do not start the
+next one, and close `pipeline_runs` with `failed_steps` containing
+`deploy-cutoff` (`ok` false). That is a deploy-kill, same as `aborted`:
+the same-day catch-up may start the daily again, and a drained hourly
+is still replaced at boot. SIGKILL cannot be caught. If the platform's
+stop grace ends before the step returns, the row stays unfinished and
+the boot sweep still stamps it `aborted`.
+
+`railway.json` sets `deploy.drainingSeconds` to **600**. Railway's
+schema is a number. Config in the file overrides the service settings
+for that deployment (`docs.railway.com` config-as-code reference). The
+default without it is 0, so SIGKILL follows SIGTERM immediately and the
+handler never runs. A step that is still going at 600 seconds is
+SIGKILLed. The file is included in `watchPatterns`, so the change
+deploys with the worker. On the deployment page, draining seconds shows
+a file icon when it came from `railway.json`.
+
+SIGTERM is sent after the new container is already active, so the two
+processes overlap until the old one exits. `_DAILY_LOCK` is in-process
+(and the #1160 wait between daily and refresh is not on master). The
+cross-process guard is a session advisory lock
+(`tracking/scoring_lease.py`): the daily child holds the daily key
+until it has closed the row, and `refresh_pass.sh` holds the refresh
+key the same way. The boot sweep does not stamp a kind whose key is
+held. The daily catch-up waits for the daily key, on its own thread,
+before it starts another daily. The refresh catch-up waits for the
+refresh key. A leaked lock does not silence the 6am cron: the holder
+gives up after the drain window and runs. The first deploy of this
+lease overlaps a process that is not holding it, so that one boot can
+still sweep the live row.
+
+A refresh on the new container does not wait for the daily key. During
+the drain, that refresh can score while the old daily finishes its
+current step. Live loops are not under the lease either. They start as
+soon as the new scheduler does. #1160's in-process wait, if it lands,
+still does not see the other container.
+
+Merges into master are blocked while a daily is open by the check
+**daily pipeline not running**
+(`.github/workflows/daily-merge-gate.yml`; the Actions UI prefixes the
+workflow name). It reads `pipeline_runs` where `run_kind = 'daily'`,
+`finished_at` is null, and `started_at::timestamptz` is inside the last
+75 minutes (`MAX_DAILY_RUN`). An older unfinished row is not a live
+daily. The pull-request job runs from the base branch and checks out
+the base sha. It reads `DATABASE_URL_READONLY` only. Without that
+secret it falls back to 06:00–07:15 America/New_York, which misses a
+catch-up daily outside that window. A result from push time goes
+stale, so a schedule on master re-posts the same check name on every
+open PR head every 10 minutes from 09:00 UTC through 03:59 UTC (an
+hour before 6:00am ET through the 22:00 ET catch-up cutoff, in both
+EST and EDT). That schedule uses `DATABASE_URL`, the table owner, because it
+runs only from the default branch. From 05:45 until 06:20
+America/New_York the check blocks even when `pipeline_runs` has no
+open daily, so a late tick cannot leave a green check across the
+6:00am start. Outside that stretch a merge between ticks can still
+land on a catch-up daily. Re-running the failed pull-request job
+re-evaluates that one PR. The check blocks merges
+only after it is a required status on `master` (Settings → Rules →
+Rulesets, or branch protection, required status checks). Add
+`daily pipeline not running`.
+
+`DATABASE_URL_READONLY` is a new Actions secret. `pipeline_runs` has
+RLS on and no other policy, so the role needs its own SELECT policy or
+the query returns no rows and the pull-request job stays green during
+a daily. The Postgres role name is `daily_gate_reader`. On a Supavisor
+pooler host (`*.pooler.supabase.com`, port 5432 or 6543) the connection
+username is `daily_gate_reader.<project-ref>`, not the bare role. A
+bare user fails to connect, the check treats that as an unread ledger,
+and every PR stays red. This project's ref is `vvprgnrmzeekokzkrkfu`
+(`docs/config_topology.md`). The direct host
+`db.vvprgnrmzeekokzkrkfu.supabase.co` takes the bare role; that host is
+not what the worker or Actions uses.
+
+```text
+postgresql://daily_gate_reader.vvprgnrmzeekokzkrkfu:[password]@aws-1-us-west-2.pooler.supabase.com:6543/postgres
+```
+
+Run this in the Supabase SQL editor. The password goes only in the
+secret. The role name in the SQL stays bare; the suffix is only the
+pooler username.
+
+```sql
+CREATE ROLE daily_gate_reader LOGIN PASSWORD 'choose-a-password';
+GRANT USAGE ON SCHEMA public TO daily_gate_reader;
+GRANT SELECT ON TABLE public.pipeline_runs TO daily_gate_reader;
+CREATE POLICY daily_gate_reader_select ON public.pipeline_runs
+  FOR SELECT TO daily_gate_reader
+  USING (true);
+```
+
+Emergency bypass: label the PR `emergency-merge` (the check re-runs on
+the label), or, as an owner or member, put `bypass-daily-gate` in the
+PR body and re-run the check. A repo admin can also use GitHub's bypass
+of branch protections.
 
 ### NFL polling (changed 2026-08-22)
 
@@ -127,6 +281,102 @@ Credit safety: in-play fetches are debounced (60s) and capped by `LIVE_DAILY_CRE
 Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cadence.
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
+
+### The NBA in-play loop (added 2026-11-04)
+
+`models/nba_live_loop.py`, job `nba_live` on `pollers`, every 10 minutes 11am-2:50am ET as
+a supervisor (one launch runs a whole slate and exits after 3 idle ticks). The model and
+its evidence: `docs/sports/nba.md`, "In play". It beats `job_heartbeats` itself every 5
+minutes while a slate runs (`tracking/job_heartbeat.ACTIVE_HOURS_ET`), and
+`system_health` reads its outputs the next morning (`nba_live_outputs`). A game
+or fetch window that finished before the loop's first tick (2026-11-05 11:00 ET)
+is not scored; the check was added in the same deploy as the loop.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NBA_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NBA` or `DISCORD_WEBHOOK_LIVE_NBA` | unset | Where NBA live picks post. **Required**: NBA live picks never fall back to the shared live or the pre-game channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`), and with neither set the loop decides nothing and exits 3 while a game is in progress, so the job reads failed. A channel id resolves through `DISCORD_BOT_TOKEN` (the bot makes a webhook named `nba-live`) |
+| `NBA_LIVE_FETCH_OFFSET_SEC` | `264` | Fetch at each hour minus this (the archive's hourly purchase served the market 264 s before the hour) |
+| `NBA_LIVE_FETCH_WINDOW_SEC` | `240` | How long after that instant an attempt may still start (retries of a skipped game) |
+| `NBA_LIVE_RETRY_GAP_SEC` | `60` | Seconds between attempts inside a window |
+| `NBA_LIVE_PBP_WAIT_SEC` | `170` | Seconds after the fetch before ESPN's summary is read (the scoring plays' measured 99th-percentile publication lag) |
+| `NBA_LIVE_PBP_RECHECK_SEC` | `60` | Seconds to the second read; a play logged before the fetch that appears only then skips the game (fail closed) |
+| `NBA_LIVE_HEADER_RECHECK_SEC` | `20` | ESPN's header score ahead of its play list: re-read after this, refuse if still ahead |
+| `NBA_LIVE_PLAY_LAG_MAX_SEC` | `230` | Refuse when ESPN's newest play is older than this while its clock is running |
+| `NBA_LIVE_CALL_CAP` / `NBA_LIVE_CREDIT_CAP` | `100` / `200` | Per-process ceilings on Odds API calls and credits (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the loop stops fetching under 1,000 credits left (no share-of-plan floor since 2026-11-07, mike) |
+| `NBA_LIVE_POLL_SEC` / `NBA_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
+
+`--dry-run` makes no Odds API call and writes nothing.
+
+### NCAAB in-play loop (added 2026-11-07)
+
+`models/ncaab_live_loop.py`, job `ncaab_live` on `pollers`, every 10 minutes
+11am-2:50am ET as a supervisor (one launch runs a whole slate and exits after 3
+idle ticks). The models and their evidence: `docs/sports/ncaab.md`, "In play".
+It beats `job_heartbeats` every 5 minutes while a slate runs
+(`tracking/job_heartbeat.ACTIVE_HOURS_ET`). The decision ledger
+`ncaab_live_decisions` is created by `data/migrations/ncaab_live_decisions_2026_11_07.sql`
+(applied by `data.view_migrations`); the loop refuses to start without it.
+
+| Variable (on `pollers`) | Default | What it does |
+|---|---|---|
+| `RUN_NCAAB_LIVE` | `1` | `0` / `false` / `off` / `no`: the job is not scheduled |
+| `DISCORD_CHANNEL_LIVE_NCAAB` or `DISCORD_WEBHOOK_LIVE_NCAAB` | the channel id is set (2026-11-07) | Where NCAAB live picks post. **Required**: no fallback to the shared live or #ncaab channel (`config.DISCORD_LIVE_CHANNEL_REQUIRED`); with neither set the loop decides nothing and exits 3 while a game is in progress. A channel id resolves through `DISCORD_BOT_TOKEN`, set on pollers |
+| `NCAAB_LIVE_FETCH_OFFSET_SEC` | `262` | Fetch at each :00 and :30 minus this (the purchase served the market 261-263 s before each instant, 2022-23 on) |
+| `NCAAB_LIVE_FETCH_WINDOW_SEC` / `NCAAB_LIVE_RETRY_GAP_SEC` | `240` / `60` | How long after that instant an attempt may start, and the seconds between attempts |
+| `NCAAB_LIVE_PBP_WAIT_SEC` / `NCAAB_LIVE_PBP_RECHECK_SEC` | `90` / `60` | ESPN's summary is read this long after the fetch and again this much later (scoring plays served a median 37 s after their wallclock, longest 58 s, 2026-11-07) |
+| `NCAAB_LIVE_HEADER_RECHECK_SEC` / `NCAAB_LIVE_PLAY_LAG_MAX_SEC` | `20` / `120` | Header score ahead of the plays: re-read after this; refuse when the newest play is older than the second while the clock runs |
+| `NCAAB_LIVE_CALL_CAP` / `NCAAB_LIVE_CREDIT_CAP` | `200` / `600` | Per-process ceilings (2 credits a call); the shared `LIVE_DAILY_CREDIT_CAP` also applies, and the shared feed stops under 1,000 credits left |
+| `NCAAB_LIVE_POLL_SEC` / `NCAAB_LIVE_IDLE_EXIT_TICKS` | `20` / `3` | Scoreboard tick, and the idle ticks before it exits |
+
+### Scoreboard live scores (NFL, NBA, NHL — added 2026-10-29)
+
+`live_scoreboard` job, `pollers` service, every minute 24x7
+(`data/ingestors/live_scoreboard.py`). While a sport has a game that has
+started, has no final on `games` and no final row yet, it reads ESPN's site
+scoreboard once per sport for each ET date on the slate (today, and
+yesterday until 6 am ET; ESPN refuses a date range with HTTP 400) and
+upserts one row per game into
+`public.live_scoreboard` (`state` `in` / `post`, score, clock label, NFL down
+and possession). The app's Scoreboard reads it. No Odds API credits. An idle
+tick is one database read and no HTTP call. `RUN_LIVE_SCOREBOARD=0` stops it.
+`site.api.espn.com` answered the worker 200 on 3,164 scheduler calls in the
+week before 2026-10-29 (`api_call_log`); older notes calling it 403 from the
+worker are out of date. MLB and NCAAF keep their own live tables.
+
+The Scoreboard's % bets / % money come from the `scoreboard-splits`
+refresh-pass step (`data/ingestors/scoreboard_splits.py`) into
+`public.scoreboard_splits`: Action Network's free v2 scoreboard, every sport
+with an unstarted game today or tomorrow, display only (never
+`public_betting`, which the scorer reads).
+
+### NCAAB box scores and period scores (added 2026-10-30)
+
+Refresh-pass step `ncaab-box` (`data/ingestors/ncaab_espn_box.py`), on the
+HOURLY passes only (midnight-5am and 7am-5pm ET; the evening passes have no
+room in their 10-minute tick), after the results group, settle and
+refresh-outcomes: one ESPN game summary per NCAAB final of the last 3 ET
+dates with no box row yet, into `ncaab_team_game_stats` (source
+`espn_summary`) and `ncaab_period_scores`. Free, no key, no new variable, no
+Odds API credits. At most 80 games and about 150 seconds of fetching a pass,
+one request at a time; an idle pass makes no ESPN call. Red when ESPN answers
+403 or 429, when a fetch fails outright (the run stops there; about 46 s at
+worst), or when the newest 5 finals ESPN answered for were all refused, which
+means its summary changed for every game. Detail: `docs/sports/ncaab.md`
+(Box scores and period scores).
+
+Backfill job `ncaab_box_backfill`: `{"kind": "periods", "first": 2021,
+"last": 2026}` stores the period scores of every 2020-21 to 2025-26 final
+from one scoreboard call per date; `{"kind": "box"}` fetches the 2026-27
+box scores the passes have not stored. Both are declared in
+`jobs/declared_jobs.json`: `ncaab-period-scores-2021-2026` is ON (mike,
+2026-10-30), so the worker queues it once after the merge;
+`ncaab-box-scores-2027` is OFF. To queue it, set its `enabled` to true and
+merge: that one line is the whole change, no test needs editing. A run
+that ESPN stops part-way is still recorded as done, as the schedule backfill
+is; its result names the stop, so the read-back query is the check. Its two tables
+are also created by `add_ncaab_period_scores_2026_10_30.sql`, which the
+`apply-view-migrations` step applies on the first pass after a merge.
 
 ### NHL player props
 
@@ -273,12 +523,34 @@ Notes:
    - `ODDS_API_KEY`
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
+   - `ALT_GAME_LINES_ENABLED` — OPTIONAL, default `1`. `0` skips alternate
+     spreads/totals on the daily step and on every odds pass.
+     `ALT_GAME_LINES_MAX_GAMES` — OPTIONAL, unset means no cap. A whole
+     number caps event-odds calls for that process (daily step, or one
+     pass). Anything else buys nothing and fails the daily step.
+     `FETCH_ALT_GAME_LINES` — OPTIONAL, default `1`. `0` skips only the
+     every-pass buy; the daily step still runs.
    - `TZ` = `America/New_York`
    - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
      `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put
      the NFL card on a dedicated key/quota.
    - `DISCORD_WEBHOOK_*` — OPTIONAL, see [Discord](#discord-picks-to-your-server)
      below. Omit them all and nothing Discord-related runs.
+   - `RUN_NCAAB_TOTAL_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     totals card before it reads anything; its job still beats, so the
+     silence still means stopped. Worker only (the card is a worker job).
+   - `RUN_NCAAB_SPREAD_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     spread card before it reads anything; its job still beats. Worker only.
+     Games whose 15:00 UTC passes while it is off are recorded as `missed`
+     when it is back on, and that run fails once.
+   - `RUN_NCAAB_MONEYLINE_CARD` — OPTIONAL, default on. `0` stops the NCAAB
+     moneyline card before it reads anything; its job still beats. Worker
+     only. Same `missed` behaviour as the spread card.
+   - `RUN_NCAAB_MONEYLINE_FIRST_POST` — OPTIONAL, default on. `0` stops the
+     NCAAB opening-moneyline card before it reads anything (the scheduler's
+     planning read too); its job still beats. Worker only. First posts stored
+     while it is off are recorded as `missed` when it is back on, and that
+     run fails once.
    - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` /
      `MLB_TOTAL_PUBLIC_FADE_PUBLISH` — OPTIONAL, default `0`. MLB game-line
      cards log every pass; they INSERT picks only when the matching flag is
@@ -358,6 +630,10 @@ One channel per sport. Set only the sports you actually want; a sport with no
 webhook is skipped, and — importantly — its signals are **not** marked as sent,
 so adding that channel later still delivers the rest of the day's picks.
 
+| Variable (on `worker`) | What it does |
+|---|---|
+| `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` | `sentry_events_sync` (every 15 min, `max_instances=1`) copies the app's Sentry events into `sentry_events`. Each request is bounded (5s connect, 10s read) and a tick stops after 45s, so a Sentry outage cannot run into the next tick. Unset = the job logs `not_configured` and writes nothing. `docs/sentry.md` |
+
 | Variable | Channel it feeds |
 |---|---|
 | `DISCORD_WEBHOOK_MLB` | e.g. `#mlb-picks` |
@@ -368,18 +644,24 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_UFC` | `#ufc-picks` |
 | `DISCORD_WEBHOOK_GOLF` | `#golf-picks` |
 | `DISCORD_WEBHOOK_NCAAF` | `#ncaaf-picks` |
+| `DISCORD_WEBHOOK_NCAAB` | `#ncaab`. Optional: NCAAB can post through `DISCORD_CHANNEL_NCAAB` instead (next row). When both are set, the webhook wins. |
+| `DISCORD_CHANNEL_<SPORT>` | A sport's channel ID, in place of its webhook (added 2026-10-30 for NCAAB: `DISCORD_CHANNEL_NCAAB`; NCAABW, 2026-11-03: `DISCORD_CHANNEL_NCAABW`). Not a secret. It only works on a service that also has `DISCORD_BOT_TOKEN`. The NCAAB cards run on `worker`, which has both. `pollers` has the token too (variable names read 2026-11-05) but not this id, so pollers' publish passes skip that sport without marking it sent and the worker posts it. The notifier uses the token to reuse the bot's own webhook in that channel, or creates one named after the sport (`ncaab`), and keeps its URL in memory only. The ID comes from the one-off `discord_create_channel` worker job (`scripts/discord_create_sport_channel.py`). That job accepts a channel name with one leading emoji and a hyphen (`🔴-ncaab-live`); the rest of the name stays a lowercase slug with a letter in it. Redeploy after setting. The `discord_probe` job reports such a sport by the channel and the bot's webhook ID and name. |
 | `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
-| `DISCORD_WEBHOOK_LIVE_NFL` / `_LIVE_MLB` / `_LIVE_NCAAF` | **The sport's live channel** (`#nfl-live`, `#mlb-live`, `#ncaaf-live`; mike, 2026-09-09). Set on BOTH `worker` (runs the NFL in-play worker) and `pollers` (runs the MLB and NCAAF loops). Any `DISCORD_WEBHOOK_LIVE_{SPORT}` over the sport list works. |
-| `DISCORD_WEBHOOK_LIVE` | Shared in-play channel, the fallback for a sport with no live channel of its own. Falls back to the sport's channel if unset too. |
+| `DISCORD_WEBHOOK_LIVE_NFL` / `_LIVE_MLB` / `_LIVE_NCAAF` | **The sport's live channel** (`#nfl-live`, `#mlb-live`, `#ncaaf-live`; mike, 2026-09-09). Set on BOTH `worker` and `pollers`. Any `DISCORD_WEBHOOK_LIVE_{SPORT}` over the sport list works, and it wins over a live channel id. Measured 2026-11-03: the MLB live loop, the NCAAF live loop and the NFL-leader loop run on `pollers` (`SERVICE_ROLE=poller`). `worker` (`SERVICE_ROLE=pipeline`) skips those jobs. The retired NFL in-play worker, when `RUN_NFL_LIVE=1`, is a pipeline job. |
+| `DISCORD_CHANNEL_LIVE_<SPORT>` | A sport's live channel ID, used when `DISCORD_WEBHOOK_LIVE_<SPORT>` is unset (2026-11-03: `DISCORD_CHANNEL_LIVE_NCAAB`, `DISCORD_CHANNEL_LIVE_NCAABW`, set on `worker`). Not a secret. The notifier reuses the bot's webhook in that channel or creates one named `<sport>-live`. It only resolves where `DISCORD_BOT_TOKEN` is set. `pollers`, where the live loops post, now holds `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_LIVE_NCAAB` and `DISCORD_CHANNEL_LIVE_NCAABW` (variable names read 2026-11-05). The NBA in-play model's `DISCORD_CHANNEL_LIVE_NBA` goes there too. A channel id on a service with no token is skipped: one error line, no Discord call, the pick is not marked sent, and it is not redirected to the shared or pre-game channel. |
+| `DISCORD_WEBHOOK_LIVE` | Shared in-play channel, the fallback for a sport with no live webhook and no live channel id. Falls back to the sport's channel if unset too. |
 | `DISCORD_WEBHOOK_RESULTS` | The morning results recap (cross-sport, so it needs its own home). Falls back to `DISCORD_WEBHOOK_DEFAULT`. |
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
   public audience than the full feed, so leaving it unset posts nothing rather than leaking the
   free pick into the catch-all channel. |
-| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. An Eggz post that cannot be parsed is logged here once per message id when this is set. |
+| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. A capper post that cannot be parsed is logged here once per message id when this is set (`eggz_review`, `parlaymatt_review`). |
 | `DISCORD_WEBHOOK_EGGZ` | Eggz recaps in `#eggz-picks` only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
 | `DISCORD_EGGZ_CHANNEL_ID` | The `#eggz-picks` channel id the bot reads. Unset, the poll does not call Discord. |
 | `DISCORD_EGGZ_AUTHOR_ID` | Discord user id of the only author stored. That id is the user whose username is `jack_mehoff123` and whose display name is Dr. Eggz. The username is not the filter. |
-| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. |
+| `DISCORD_WEBHOOK_PARLAYMATT` | ParlayMatt recaps in his channel only. **No fallback** to `#results`, `DISCORD_WEBHOOK_DEFAULT`, or X. Unset posts nothing. |
+| `DISCORD_PARLAYMATT_CHANNEL_ID` | The `#parlaymatt-picks` channel id the bot reads. Unset, his poll does not call Discord. |
+| `DISCORD_PARLAYMATT_AUTHOR_ID` | Discord user id of the only ParlayMatt author stored. The username is not the filter. |
+| `DISCORD_BOT_TOKEN` | Existing bot token, the same one `monitoring/discord_stats.py` uses. The Eggz read reuses it. The bot needs View Channel and Read Message History in `#eggz-picks`, and the Message Content privileged intent. Without that intent Discord returns an empty body. A sport that posts through `DISCORD_CHANNEL_<SPORT>` also needs **Manage Webhooks** on that channel, and the `discord_create_channel` job needs **Manage Channels** in the guild (plus whatever permissions the copied overwrites grant). It is on `worker` and `pollers` (variable names read 2026-11-05; on 2026-10-30 `pollers` had none). |
 | `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
 | `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |
@@ -389,11 +671,12 @@ so adding that channel later still delivers the rest of the day's picks.
 | Event | Trigger | Channel |
 |---|---|---|
 | **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
-| **Live (in-play) signal** | End of each MLB / NCAAF live pass; after every NFL live BET the in-play worker writes | `DISCORD_WEBHOOK_LIVE_{SPORT}`, else `DISCORD_WEBHOOK_LIVE`, else the sport's |
+| **Live (in-play) signal** | End of each MLB / NCAAF live pass and the NFL-leader loop, on `pollers`; the retired NFL in-play worker, on `worker`, when `RUN_NFL_LIVE=1` | `DISCORD_WEBHOOK_LIVE_{SPORT}`, else `DISCORD_CHANNEL_LIVE_{SPORT}` (bot token, webhook `<sport>-live`), else `DISCORD_WEBHOOK_LIVE`, else the sport's. A channel id this process cannot open is skipped |
 | **Results recap** | After settlement, once per settled day. The 6:00am ET daily settles yesterday. A miss retries from 7:00am ET on later settle passes. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Weekly results** | Monday 7:30am ET, the prior Monday–Sunday. Later settle passes retry until the next Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Monthly results** | The first Monday of the month, 7:30am ET, the previous calendar month. Later settle passes retry until the next month's first Monday 7:30am. | `DISCORD_WEBHOOK_RESULTS` (`#results`) |
 | **Eggz results** | Previous day from the 6:00am ET settle, and again on later settle passes. The week and the month use the Monday 7:30am clock. A window that still has a pending leg is not ledgered. | `DISCORD_WEBHOOK_EGGZ` (`#eggz-picks`) |
+| **ParlayMatt results** | The same windows as Eggz. Unset webhook posts nothing. | `DISCORD_WEBHOOK_PARLAYMATT` |
 | **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
@@ -438,6 +721,18 @@ pre-start close. They are not rows in `picks`, and they are not in `#results`
 or on X. A line that cannot be parsed or matched is `needs_review` and is
 logged; if `DISCORD_WEBHOOK_OPS` is set, one alert is posted for that message
 id. The read is `eggz_ingest`, every 15 minutes, with `DISCORD_BOT_TOKEN`.
+
+ParlayMatt uses that same clock and the same tally, on `DISCORD_WEBHOOK_PARLAYMATT`
+only. Ledger keys are `discord_parlaymatt_results_day`,
+`discord_parlaymatt_results_week`, and `discord_parlaymatt_results_month`.
+His rows are `capper_picks` with `capper_key = 'parlaymatt'`. A parlay header
+(`PARLAY +450 1u`, `3 leg parlay`) is one bet at that price and stake. The
+legs are stored and graded, and they are not a second unit. A line that
+cannot be parsed, a round robin, and a push that would change the stated
+price are `needs_review`. They are not dropped. His all-time line starts at
+his own first graded `game_date`. Unset channel, author, or webhook: that
+half returns without a request and without a post. The same 15-minute job
+reads his channel after Eggz.
 
 ### Guarantees
 

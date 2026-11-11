@@ -2,16 +2,18 @@
 
 | Function | verify_jwt | Purpose | Runbook |
 |---|---|---|---|
-| `sharpsports` | true | Actions `context` (start Booklink) and `bets` (read/refresh synced bets). Called by the app with the Supabase anon JWT. | below |
+| `sharpsports` | true | Actions `context` (start Booklink), `bets` (read/refresh synced bets), and `unlink` (revoke bettor access and drop this install's rows). Called by the app with the Supabase anon JWT. | below |
 | `sharpsports-webhook` | false | Receives SharpSports webhooks (secret-authenticated) and re-triggers a sync. | below |
 | `stripe-checkout` / `stripe-portal` | true | Billing on the Stripe rail — built and dark. | `mobile/docs/BILLING.md` |
 | `stripe-webhook` | **false** | Stripe entitlement → `subscriptions`. Signature verified over the raw body. | `mobile/docs/BILLING.md` |
 | `revenuecat-webhook` | **false** | IAP entitlement → `subscriptions`, **and** the Discord role sync. Authorization header, constant-time. | `mobile/docs/BILLING.md` |
 | `discord-link` | true | Discord OAuth link, one-tap guild join, role sync, unlink. A link asserts who someone IS, so it must never be makeable on another account's behalf. | `mobile/docs/DISCORD_LINKING.md` |
-| `whop-webhook` | **false** | Whop membership state → `whop_memberships`, which is what lets a Discord-paid member into the app for free. HMAC over the raw body. | `mobile/docs/DISCORD_LINKING.md` |
+| `whop-webhook` | **false** | Whop membership mirror + identity keys in `whop_memberships`. Does not unlock the app and does not touch our Discord role. HMAC over the raw body. | `mobile/docs/DISCORD_LINKING.md` |
+| `app-review-sign-in` | **false** | App Review only. One email plus a fixed code, both from secrets. Refuses every code until `app_review_sign_in_attempts` exists. | `mobile/docs/AUTHENTICATION.md` |
 
-`_shared/discord.ts` (bot API) and `_shared/entitlement.ts` (the two-way
-membership rule) are imported by `discord-link` and `revenuecat-webhook`.
+`_shared/discord.ts` (bot API) and `_shared/entitlement.ts` (Apple subscription
+→ our Discord role) are imported by `discord-link` and `revenuecat-webhook`.
+`whop-webhook` imports neither.
 **Deno resolves relative imports at deploy time, so a change to either file
 requires redeploying every function that imports it.**
 

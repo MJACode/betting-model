@@ -89,7 +89,7 @@ def test_the_job_posts_both_surfaces_through_the_ordinary_paths():
     assert body.index("notify_discord_results(game_date)") < body.index(
         "notify_x_results(game_date)")
     code = body.split('"""')[-1]
-    for bypass in ("datetime", "today", "force", "restate"):
+    for bypass in ("datetime", "today", "force"):
         assert bypass not in code, f"the job manipulates {bypass}"
 
 

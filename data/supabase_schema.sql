@@ -994,6 +994,9 @@ CREATE TABLE IF NOT EXISTS picks (
     market_clv_pp      NUMERIC,            -- that comparison in probability points
     market_clv_method  TEXT,               -- power | power_3way | zero_vig
     pinnacle_close_odds NUMERIC,           -- Pinnacle American on our side, same line
+    stake_units        NUMERIC CHECK (stake_units IS NULL OR (stake_units >= 1 AND stake_units <= 3)),
+                                          -- the pick's own units TO WIN; NULL is 1u (2026-11-06)
+    stake_reason       TEXT,               -- why stake_units is above 1u
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -2312,16 +2315,19 @@ CREATE POLICY "users read own subscription" ON subscriptions
 -- REVOKE ALL ON TABLE subscriptions FROM anon; GRANT SELECT TO authenticated;
 -- Plus public.has_active_subscription() (SECURITY INVOKER, authenticated) —
 -- the honest entitlement check for future server-side signal gating.
+--
+-- Non-IAP grants live in access_grants (add_access_grants_2026_11_05.sql).
+-- Not applied by the worker. comped and app_review OR into my_access().entitled
+-- beside the subscriptions row. Whop does not. comped also unlocks Discord.
 
 
--- ── DISCORD LINKING + WHOP MEMBERSHIPS (two-way membership) ──────────────────
--- Applied via migration add_discord_link_and_whop_memberships. Ships the rule
--- that one membership covers both surfaces: pay in the app and you get the
--- Discord subscriber role; pay via Whop (the Discord seller) and the app costs
--- nothing extra; lose access on either side and it goes on both.
--- Each side only ever revokes the role IT granted (DISCORD_APP_ROLE_ID is
--- ours, Whop keeps its own), so a lapsed app subscription cannot strip a
--- member who is still paying Whop.
+-- ── DISCORD LINKING + WHOP MEMBERSHIPS (Apple app, Whop Discord-only) ───────
+-- Defined in add_discord_link_and_whop_memberships.sql, which is NOT applied
+-- in production. First apply is Apple-only: my_access().entitled and
+-- has_app_access() read subscriptions (trialing/active, period open). A Whop
+-- row is discord_access — identity for the same person — and does not unlock
+-- the app. Pay in the app and you get our Discord role. Pay via Whop and Whop
+-- assigns its own role. Each side only revokes the role it granted.
 -- NOT mirrored into the SQLite schema in db_setup.py: references auth.users
 -- and the Python pipeline never reads either table.
 CREATE TABLE IF NOT EXISTS discord_links (
@@ -2363,9 +2369,9 @@ CREATE POLICY "users read own discord link" ON discord_links
 -- other people's emails and is service-role only — the app sees only the
 -- boolean that falls out of my_access().)
 -- Plus public.my_access() and public.has_app_access() (SECURITY DEFINER,
--- pinned to auth.uid(), EXECUTE granted to authenticated only) — the single
--- place the two-way rule is expressed. has_app_access() supersedes
--- has_active_subscription(), which cannot see a Whop-paid member.
+-- pinned to auth.uid(), EXECUTE granted to authenticated only). Both grant
+-- the app from the Apple subscription only. discord_access_for() is the Whop
+-- identity match and is not an input to either gate.
 
 
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────

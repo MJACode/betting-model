@@ -35,6 +35,11 @@ export const colors = {
   // Separators
   separator: '#3C3C4349',
   separatorOpaque: '#C6C6C8',
+  // A switch's OFF track. The iOS default (#E9E9EA, white thumb) is 1.2:1 on
+  // bgCard, so an off switch on a white card all but vanished (Matt,
+  // 2026-11-02, Stats > Filters > Playing today). #8E8E93 is 3.26:1 on white
+  // and against the white thumb — over the 3:1 non-text floor (WCAG 1.4.11).
+  switchTrackOff: '#8E8E93',
 
   // Brand — sampled from the @signalbasepicks mark and banner
   // (assets/brand/, fetched 2026-09-03; scripts/render_brand_icons.py).
@@ -47,6 +52,9 @@ export const colors = {
   brandInk: BRAND_INK, //                                 (18.6:1 on white)
   brandNavy: '#0B1220', // the banner's ground — dark chrome surfaces
   brandNavyRaised: '#152034', // the banner's watermark — a raised dark surface
+  // Discord's own mark. Not a Signal Base colour. Named so the link sheet
+  // does not hard-code the hex.
+  discord: '#5865F2',
   brandMuted: '#8A97AB', // the banner's caption grey — inactive on navy (6.3:1)
   brandSeparator: '#374151', // hairline between navy chrome surfaces (1.8:1 vs navy)
 
@@ -65,10 +73,12 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
-  // Also the empty Anytime TD meter bar. #C6C6C8 on the white card is
-  // 1.7:1; this gray is 3.26:1 on bgCard, which clears the 3:1 non-text floor
-  // (Designer review of #995).
   none: '#8E8E93', // gray
+  // Unfilled matchup segment. The filled segments carry the contrast
+  // (gradeGood / gradeMid / gradeBad, each ≥4.5:1). The count of filled
+  // segments is the meaning, so the empty one stays this light gray
+  // (Matt, 2026-10-28, Option A).
+  matchupEmpty: '#D1D1D6',
   noneSoft: '#EFEFF4',
 
   // ── Text-safe inks (usability audit H1 / H2 / H8, 2026-09-25) ────────────
@@ -140,7 +150,24 @@ export const colors = {
   neutral: '#C7C7CC',
 };
 
+/**
+ * Abbreviation discs on the Scoreboard. White text. Dark fills only —
+ * amber and the bright signal greens are too light under a white label.
+ */
+export const teamDisc = [
+  '#0B1320',
+  '#0B3D91',
+  '#8C1D18',
+  '#0E6B4F',
+  '#5C2E91',
+  '#8A4B08',
+  '#1A365D',
+  '#7A2E0E',
+] as const;
+
 export const radii = {
+  // Small status tags (the Stats board's IR / O / Q chip).
+  xs: 4,
   sm: 8,
   md: 12,
   lg: 16,
@@ -195,8 +222,8 @@ export const font = {
  * The tone is taken from the value ROUNDED the way the screen shows it —
  * `digits` decimals of `value × scale` — so a ratio printed as "0.0%" is grey
  * and one printed as "+0.1%" is green. Match the formatter beside it:
- * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatCurrencySigned(v)` →
- * `pnlColor(v, 2)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
+ * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatFlatUnits(v)` →
+ * `pnlColor(v, 2, FLAT_UNIT_TONE_SCALE)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
  *
  * The rule itself lives in `lib/tone.ts` so the verify scripts, which cannot
  * import react-native, can pin it.
@@ -230,18 +257,23 @@ export function heatColor(profit: number, max: number): string {
 }
 
 /**
- * Matchup grade → its colour. Five steps across thirteen letters: the letter
- * separates neighbours, the colour separates tiers.
+ * Filled-segment colour. 5–4 green, 3 gray, 2–1 maroon. `gradeColor` uses
+ * this, so a letter and its bar cannot drift.
  *
- * It lives here rather than in the board because two screens draw a grade —
- * the Stats MATCHUP column and the player's detail header — and a second copy
- * is how they drift apart. (It cannot live in `lib/matchup.ts`: that module is
- * imported by the tsx verify scripts, and this file pulls in `react-native`,
- * which they cannot resolve.)
+ * It lives here rather than in the board because every matchup surface draws
+ * one meter. (It cannot live in `lib/matchup.ts`: that module is imported by
+ * the tsx verify scripts, and this file pulls in `react-native`, which they
+ * cannot resolve.)
  */
+export function strengthColor(filled: number): string {
+  if (filled >= 4) return colors.gradeGood;
+  if (filled === 3) return colors.gradeMid;
+  return colors.gradeBad;
+}
+
+/** Letter → the same ramp `strengthColor` uses. A/B green, C gray, D/F maroon. */
 export function gradeColor(grade: MatchupGrade): string {
   const letter = grade[0];
-  if (letter === 'A' || letter === 'B') return colors.gradeGood;
-  if (letter === 'C') return colors.gradeMid;
-  return colors.gradeBad;
+  const filled = letter === 'A' ? 5 : letter === 'B' ? 4 : letter === 'C' ? 3 : letter === 'D' ? 2 : 1;
+  return strengthColor(filled);
 }

@@ -10,7 +10,49 @@ import pytest
 # Add project root to sys.path so all modules resolve correctly
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.db_setup import SCHEMA_SQL
+# The call logger, installed BEFORE anything imports config. config.py installs
+# it in every process (so a paid call is logged however the process started),
+# and its writer would send each recorded call to DATABASE_URL -- which on a
+# machine with the main checkout's .env is production. Installed here first,
+# with no writer, the suite's calls stay on the in-memory queue the probe's
+# own tests read (tests/test_monitoring.py), and nothing a test does reaches
+# api_call_log. tests/test_odds_call_log_everywhere.py runs the real writer
+# in child processes against a sqlite stand-in instead.
+from monitoring import probe as _api_call_log                       # noqa: E402
+_api_call_log.install("pytest", start_writer=False)
+
+from data.db_setup import SCHEMA_SQL                                 # noqa: E402
+
+
+def _refuse_real_odds_api_calls() -> None:
+    """A test that forgets to mock fails here instead of spending credits.
+
+    The suite writes no call to api_call_log (above), so a real Odds API call
+    from a test would be the one paid call the log could not have. On a machine
+    with the main checkout's .env, ODDS_API_KEY is loaded and the call bills.
+    So the transport refuses the host: nothing goes out, nothing is billed, and
+    the test that tried says so. Below Session.request, so the probe's own
+    wrapper still sees and records the attempt, and a test that patches
+    Session.request or a module's requests.get never reaches this.
+    """
+    import requests.adapters as _adapters
+    from monitoring import registry as _registry
+    original = _adapters.HTTPAdapter.send
+    if getattr(original, "_refuses_odds_api", False):
+        return
+
+    def send(self, request, *args, **kwargs):
+        if _registry.classify(getattr(request, "url", "") or "")[1] == "The Odds API":
+            raise RuntimeError(
+                "a test sent a real request to the Odds API; mock it "
+                "(tests/conftest.py refuses the host so no test can bill credits)")
+        return original(self, request, *args, **kwargs)
+
+    send._refuses_odds_api = True
+    _adapters.HTTPAdapter.send = send
+
+
+_refuse_real_odds_api_calls()
 
 
 @pytest.fixture

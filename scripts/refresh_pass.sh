@@ -7,10 +7,12 @@
 # Requires: DATABASE_URL, ODDS_API_KEY, DATAGOLF_API_KEY, FETCH_F5_LIVE in the env.
 #
 # Usage: refresh_pass.sh [hourly|evening]   (default hourly)
-#   The only difference is the WNBA results ingest, which costs ~40 ESPN calls
-#   per game. ESPN IP-blocked this worker in August 2026 and WNBA settlement was
-#   dead for two weeks; running that every 10 minutes is how it happens again.
-#   Everything else runs on every pass.
+#   The difference is three hourly-only steps. The WNBA results ingest costs
+#   ~40 ESPN calls per game. ESPN IP-blocked this worker in August 2026 and WNBA
+#   settlement was dead for two weeks; running that every 10 minutes is how it
+#   happens again. Golf results is a per-event DataGolf pull. The NCAAB box
+#   scores (ncaab-box) can take up to ~150 s, which a 10-minute tick has no
+#   room for. Everything else runs on every pass.
 # NOT `set -e`. Every step below is an independent producer, so one failure must
 # never abort the rest of the pass. On 2026-08-27 a NameError in the WNBA prop
 # scorer (step 9 of 24) aborted every hourly pass for three days: opening-signal
@@ -21,6 +23,60 @@
 set -uo pipefail
 MODE="${1:-hourly}"
 
+# Railway redeploy sends SIGTERM here. The trap does not run until the
+# foreground step returns, and par_wait loops until a signaled wait has
+# reaped the group, so the step in progress finishes. Later steps do not
+# start. The ledger row is closed as deploy-cutoff instead of left open.
+# SIGKILL cannot be caught; the boot sweep still stamps those as aborted.
+DRAIN=0
+on_deploy_term() {
+  DRAIN=1
+  echo "deploy drain: SIGTERM — finish the current step, then stop" >&2
+}
+trap on_deploy_term TERM
+
+# Cross-process lease. The boot sweep on the new container must not stamp
+# this pass aborted while this shell is still in a step, and the refresh
+# catch-up must not start a second pass until this one has closed the row.
+# The helper blocks until it holds the lock (or the drain window ends).
+# This shell waits for --ready before start_run, so the orphan abort inside
+# start_run cannot land on the pass that is still running. The EXIT trap
+# releases the lock after the ledger finish below. SIGKILL drops the
+# session and the lock with it.
+LEASE_DIR="$(mktemp -d)"
+python -m tracking.scoring_lease --kind refresh \
+  --ready "$LEASE_DIR/ready" --release "$LEASE_DIR/release" &
+LEASE_PID=$!
+# par_wait uses a bare `wait`, which waits for every child still in the
+# shell's job table. The helper stays up until the EXIT trap, so leaving
+# it there deadlocks the first parallel group. disown drops it from that
+# table. `wait $LEASE_PID` can no longer see it; the release file is how
+# the trap asks it to unlock.
+disown "$LEASE_PID" 2>/dev/null || true
+_lease_i=0
+while [ "$_lease_i" -lt 6600 ]; do
+  if [ -f "$LEASE_DIR/ready" ]; then
+    break
+  fi
+  if ! kill -0 "$LEASE_PID" 2>/dev/null; then
+    break
+  fi
+  _lease_i=$((_lease_i + 1))
+  sleep 0.1
+done
+if [ -f "$LEASE_DIR/ready" ] && [ "$(cat "$LEASE_DIR/ready")" = "open" ]; then
+  echo "scoring lease: refresh lock not acquired; this pass still runs" >&2
+fi
+
+release_scoring_lease() {
+  if [ -n "${LEASE_DIR:-}" ]; then
+    : > "$LEASE_DIR/release" 2>/dev/null || true
+  fi
+  # The helper polls the release file. Give it one poll to unlock before
+  # this shell exits. The ledger finish has already run.
+  sleep 0.3
+}
+
 # Record that this pass ran. Until 2026-08-27 nothing did, so a pass that died
 # mid-chain left no trace except missing side-effects. `|| true` throughout:
 # observability must never be able to break the pass it is observing.
@@ -30,6 +86,10 @@ FAILED_STEPS=()
 STEPS_TOTAL=0
 
 step() {
+  if [ "${DRAIN:-0}" = 1 ]; then
+    echo "deploy drain: not starting $1" >&2
+    return 0
+  fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   if ! python run_pipeline.py --step "$1"; then
     echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
@@ -58,9 +118,13 @@ step() {
 # would make a failed step invisible -- the exact blindness the run ledger was
 # built to end.
 PAR_DIR="$(mktemp -d)"
-trap 'rm -rf "$PAR_DIR"' EXIT
+trap 'release_scoring_lease; rm -rf "$PAR_DIR" "$LEASE_DIR"' EXIT
 
 par() {
+  if [ "${DRAIN:-0}" = 1 ]; then
+    echo "deploy drain: not starting $1" >&2
+    return 0
+  fi
   STEPS_TOTAL=$((STEPS_TOTAL + 1))
   (
     if ! python run_pipeline.py --step "$1"; then
@@ -71,7 +135,17 @@ par() {
 }
 
 par_wait() {
-  wait
+  # A SIGTERM trap makes `wait` return immediately (status 128+signal)
+  # while the background steps are still running. Loop until it returns
+  # a child status, which is when the group has actually finished.
+  local rc=0
+  while true; do
+    wait
+    rc=$?
+    if [ "$rc" -lt 128 ]; then
+      break
+    fi
+  done
   # Collect what the subshells could not append themselves.
   for f in "$PAR_DIR"/*.failed; do
     [ -e "$f" ] || continue
@@ -135,6 +209,9 @@ par public-betting
 # NBA splits: a pre-tip snapshot per pass into nba_public_splits (never
 # public_betting, which the scorer reads), plus yesterday's archive once.
 par nba-public-splits
+# Scoreboard % bets / % money for every sport, display only
+# (scoreboard_splits; never public_betting).
+par scoreboard-splits
 par_wait
 
 # NHL total goals (nhl_over_under): Pinnacle's no-vig price against the
@@ -155,9 +232,9 @@ step nhl-over-under
 # 65 minutes before tip) IN THE PROP FETCH `par nba-prop-odds` JUST STORED. They
 # decide only games whose tip is 45-57 minutes away, so they run here, minutes
 # after the fetch, rather than in the scoring group. ONE step: the two cards'
-# candidates meet in one choice, one bet a game across both models and at most 4
+# candidates meet in one choice, one bet a game across both models and at most 6
 # a night, ranked by each model's own EV percentile (scripts/nba_props_card.py;
-# mike, 2026-10-20). SEQUENTIAL,
+# mike, 2026-10-20, six from 2026-11-04). SEQUENTIAL,
 # like every writer to picks; each game decided once per model under both
 # models' locks. The five-minute window job (scheduler.run_nba_prop_window)
 # runs this same step for the tip times these passes cannot reach.
@@ -253,6 +330,9 @@ step push-notifications
 #                    has a final and no nhl_api_score row (20 dates on
 #                    2026-10-21; none once those are stored). No-ops out of season
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
+#   ncaab-results    no ESPN call unless a started NCAAB game in the last 14
+#                    days is unscored; then one scoreboard call per such date
+#   ncaabw-results   the same for women's college basketball (NCAABW)
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
 par game-log-today
@@ -260,6 +340,8 @@ par nfl-results
 par nhl-results
 par ufc-results-poll
 par nba-results
+par ncaab-results
+par ncaabw-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
@@ -285,6 +367,27 @@ step settle
 # finish" true for that branch; ~7s, CONCURRENTLY, readers never block.
 step refresh-outcomes
 
+# NCAAB box scores and period scores (ncaab_team_game_stats under
+# 'espn_summary', ncaab_period_scores), one ESPN game summary per final.
+# AFTER ncaab-results, which writes the finals it reads. After settle and
+# refresh-outcomes because nothing settles off it and it can take a minute or
+# two. SEQUENTIAL: it opens its own connection (the pool note on
+# probables-refresh above) and calls ESPN one request at a time.
+# Self-limiting: no ESPN call unless a final of the last 3 ET dates has no
+# ESPN box row; at most 80 games and ~150 s of fetching a pass, and one failed
+# fetch ends its run (about 46 s at worst).
+# HOURLY passes only (7am-5pm and midnight-5am ET). An evening pass already
+# takes 455-526 s (median, p90, pipeline_runs 7 days to 2026-10-30) of its
+# 10-minute tick; this step's up-to-150 s there would push passes past the
+# tick and skip the next one. The evening's finals are stored from the 12:17am
+# pass on, and nothing reads them sooner.
+if [ "$MODE" = "hourly" ]; then
+  step ncaab-box
+  # The same for women's college basketball (NCAABW): the box scores the
+  # women's totals model's ratings are refit on. After ncaabw-results.
+  step ncaabw-box
+fi
+
 # Health check LAST, on every pass. It used to run only as the final step of the
 # daily 6am pipeline, so a break that only affected refresh passes was invisible
 # for up to 24 hours - exactly what happened 8/24-8/27. It is pure SQL over
@@ -306,8 +409,22 @@ step live-calibration
 
 # Close the ledger row. Runs whatever happened above, so a pass that completes
 # with failures is still recorded as finished-with-failures rather than missing.
+# A drain names deploy-cutoff even when earlier steps failed, so the catch-up
+# treats the pass as a deploy-kill and not as a chain that ran to its end.
+if [ "${DRAIN:-0}" = 1 ]; then
+  if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
+    FAILED_STEPS=("deploy-cutoff")
+  else
+    FAILED_STEPS=("deploy-cutoff" "${FAILED_STEPS[@]}")
+  fi
+fi
 python -m tracking.run_ledger finish --run-id "$RUN_ID" \
     --steps-total "$STEPS_TOTAL" --failed "${FAILED_STEPS[*]:-}" 2>/dev/null || true
+
+if [ "${DRAIN:-0}" = 1 ]; then
+  echo "refresh pass stopped for a deploy (deploy-cutoff)" >&2
+  exit 0
+fi
 
 if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
   echo "refresh pass finished with ${#FAILED_STEPS[@]} failed step(s): ${FAILED_STEPS[*]}" >&2

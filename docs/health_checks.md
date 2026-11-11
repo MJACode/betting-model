@@ -31,7 +31,8 @@ demand via `python run_pipeline.py --step health-check`. Results are upserted in
   yesterday = dead ingest job), picks scored today.
 - **WARN** = degraded but not pick-blocking: prop odds, pitcher stats, injuries, lineups,
   umpires, public betting, WNBA/NBA box-score logs (the local Task Scheduler job),
-  golf odds, missing model artifacts, settlement lag.
+  golf odds, missing model artifacts, settlement lag (`settlement_lag`, 2 to 14
+  days old; `settlement_stranded`, older than that with no ceiling, naming the picks).
 - **Cadence-aware:** every sport's checks gate on that sport having games in the window —
   NBA in July, UFC midweek, golf off-weeks are SKIPPED, never false alarms.
   Bullpen, the player game log and umpires expect the newest MLB final on or
@@ -52,6 +53,7 @@ pass**, not just the daily one:
 | check | severity | catches |
 |---|---|---|
 | `refresh_pass_completion` | CRIT | no pass finished in 90 min inside the 7am–midnight ET window; or a run that started >2h ago and never finished (hang / OOM / killed worker) |
+| `daily_pipeline_completion` | CRIT | an unfinished `daily` older than 75 min (the longest finished daily from 2026-10-15 through 2026-11-03 was 47.5 min), or no successful daily today once 75 min have passed since 6:00am ET. The 2h branch above stayed green on 2026-11-04: the retry had been open 81 min while hourlies were finishing |
 | `refresh_pass_steps` | CRIT / WARN | a step failing in **all** of the last 3 passes = a real break (CRIT, names the step); failing in only some = flaky upstream (WARN) |
 | `signal_delivery` | CRIT | a standing BET pick that the Discord producer would post **right now** has no `discord_signal` ledger row past a 90-minute grace — reads `picks` at the same `model_action_thresholds` cut as `_new_signals` (not `opening_signals`; that is the CLV shadow track). A leftover capture row whose pick was deleted is not an outage. A finished game is no longer announcable, so a one-time miss that has already commenced is not a standing CRIT (the producer refuses started games; 2026-09-15 five MLB props). A genuine notifier outage still alarms on pre-commence picks. |
 | `pick_label_integrity` | CRIT | an open BET (last 3 days) whose label disagrees with its side or line — the publishers refuse to send it (`tracking/pick_integrity.py`), and this makes that refusal visible. Added 2026-09-12 after "BUF +1" was relayed as "Bills −1" |
@@ -71,12 +73,16 @@ Load-bearing details:
 - **The health check runs as a step, i.e. before the pass calls `finish_run`.** So the first
   pass after this ships has a started row and no finished one; that reports SKIPPED, not a
   failure.
-- **A deploy does not leave a refresh row looking like a live hang.** Pipeline boot
-  (`scheduler.abort_orphaned_refresh_runs`) stamps unfinished `hourly` and `evening`
-  rows that started before this process, the same `failed_steps='aborted'` stamp
-  `_abort_orphans` writes. `daily` is left open. After that, an unfinished row older
-  than 2h is a pass this process may still be inside. Same-kind cleanup alone cannot
-  do this: an evening killed after the window does not start again until the next evening.
+- **A deploy does not leave a refresh or daily row looking like a live hang.** Pipeline boot
+  (`scheduler.abort_orphaned_refresh_runs`) stamps unfinished `hourly`, `evening` and
+  `daily` rows that started before this process, the same `failed_steps='aborted'` stamp
+  `_abort_orphans` writes. `manual` is left open. A daily this process opened is stamped
+  only when it is older than 75 minutes and the daily lock is free. After that, an
+  unfinished row older than 2h is a pass this process may still be inside.
+  `daily_pipeline_completion` flags an unfinished daily at 75 minutes, which is what
+  the 2h branch missed on 2026-11-04. Same-kind cleanup alone cannot do this: an
+  evening killed after the window does not start again until the next evening, and a
+  daily does not start again until tomorrow.
 - `refresh_pass_steps` ignores `run_kind='daily'` — the daily pipeline's failure semantics
   are different (it continues past failures by design).
 

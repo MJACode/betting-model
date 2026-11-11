@@ -14,7 +14,7 @@
 
 import { decisionEdge, decisionOdds } from './decisionPrice';
 import { discordLedVisible, type DiscordPublish } from './discordPublish';
-import { todayET } from './format';
+import { formatUnits, todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
 import {
@@ -160,10 +160,45 @@ export interface ServerThreshold {
 }
 
 let serverThresholds: Record<string, ServerThreshold> | null = null;
+/** True only after the live table has been applied. The cache prime is not
+ *  this: it can disagree with the fetch and would flash a label twice. */
+let thresholdsFetched = false;
+/** Bumps when the store changes. Signals reads the flag inside useMemo, so a
+ *  bare module write would leave the board on the pre-fetch answer. */
+let thresholdsRevision = 0;
+const thresholdListeners = new Set<() => void>();
 
-/** Populate the server store (called by useActionThresholds). null = clear. */
+function emitThresholds(): void {
+  thresholdsRevision += 1;
+  thresholdListeners.forEach((fn) => fn());
+}
+
+/** Populate the server store (called by useActionThresholds). null = clear.
+ *  Clearing also forgets that a fetch had landed, so the next cold start
+ *  is the bundled set again. */
 export function setServerThresholds(map: Record<string, ServerThreshold> | null): void {
   serverThresholds = map;
+  if (map == null) thresholdsFetched = false;
+  emitThresholds();
+}
+
+/** The network table has replaced the store. The cache prime does not call this. */
+export function markThresholdsFetched(): void {
+  if (serverThresholds == null || thresholdsFetched) return;
+  thresholdsFetched = true;
+  emitThresholds();
+}
+
+/** Picks subscribes so the Signals list re-runs when the fetch lands. */
+export function subscribeThresholds(fn: () => void): () => void {
+  thresholdListeners.add(fn);
+  return () => {
+    thresholdListeners.delete(fn);
+  };
+}
+
+export function thresholdsRevisionNow(): number {
+  return thresholdsRevision;
 }
 
 /** True once server thresholds have loaded (else the bundled fallback is used). */
@@ -171,14 +206,30 @@ export function hasServerThresholds(): boolean {
   return serverThresholds != null;
 }
 
+/** True once the live table, not the cache, is the store. */
+export function hasFetchedThresholds(): boolean {
+  return thresholdsFetched;
+}
+
+/** Pause as the shipped catalog knows it. Used until the live table lands. */
+export function isBundledPaused(modelId: string): boolean {
+  return PAUSED_MODELS.has(modelId);
+}
+
 /**
  * Whether a model is paused (never surfaced as an actionable pick, and hidden
- * from the Models list). Prefers the server flag (model_action_thresholds.paused),
- * falls back to the bundled PAUSED_MODELS set when not yet loaded / offline.
+ * from the Models list and from Signals).
+ *
+ * An explicit `paused` flag always wins, cache or live table. A row with no
+ * flag is a cache from a build that did not store one: it overrides the
+ * bundled pause list only after the live table has been applied. Until then
+ * the bundle still pauses the model, so Signals does not flash mlb_over_under
+ * as live on a cold start. No row at all uses the bundled list.
  */
 export function isModelPaused(modelId: string): boolean {
   const sv = serverThresholds?.[modelId];
-  if (sv) return sv.paused;
+  if (sv && typeof sv.paused === 'boolean') return sv.paused;
+  if (sv && hasFetchedThresholds()) return false;
   return PAUSED_MODELS.has(modelId);
 }
 
@@ -319,7 +370,9 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   const posted = p.discordPublish === 'published';
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
-    if (sv.paused) return false;
+    // Same pause rule as isModelPaused. `sv.paused` alone treats a cached
+    // row that omits the flag as live, and Signals is this filter.
+    if (isModelPaused(p.model_id)) return false;
     if (posted) return true;
     if (p.model_probability < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;
@@ -414,8 +467,10 @@ export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null
  *               1u; at +150, 0.67u to win 1u. Without this the same "2u" label
  *               meant wildly different money at -300 and at +200.
  *
- * The conviction scale is Kelly rescaled so the server's 5% Kelly cap lands on
- * exactly 3u — Kelly is still the ranking signal, only the denominator moved.
+ * The conviction is FLAT 1u (convictionFor) unless the pick carries its own
+ * stake: picks.stake_units, 1..3 units to win, written by the card that decided
+ * it (pickConviction; NCAAB agreement sizing, mike 2026-11-06). The Kelly tier
+ * scale that used to set it is retired; see convictionFor.
  *
  * RISK IS HARD-CAPPED AT MAX_RISK_UNITS ON ONE EVENT. Un-capped, "3 units to
  * win" at the median -135 lays 4.05u and 30% of the book would risk over 3u
@@ -428,9 +483,11 @@ export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null
  * settlement uses, but that is a GRADING convention and is deliberately not
  * asserted as a price on the card.
  *
- * Mirrors stake_for()/conviction_for() in tracking/discord_notifier.py — the
- * app and the Discord channel show the SAME numbers, which is the point of
- * publishing in units at all. Nothing here is per-user, so they cannot drift.
+ * Mirrors stake_for()/pick_conviction()/conviction_for() in
+ * tracking/discord_notifier.py — the app and the Discord channel show the SAME
+ * numbers, which is the point of publishing in units at all. Nothing here is
+ * per-user (stake_units is the pick's, the same row for every viewer), so they
+ * cannot drift.
  *
  * Deliberately derived from kelly, never from bankroll: the compounded paper
  * bankroll has decayed to ~$107, so a dollar stake off it says nothing about
@@ -439,7 +496,7 @@ export function publishedRecordKeeps(p: { discordPublish?: DiscordPublish | null
  */
 export const UNIT_KELLY_FRACTION = 0.01;  // legacy: 1u == 1% of roll
 export const MAX_CONVICTION = 3;          // ceiling of the (currently unused) tier scale
-export const FLAT_CONVICTION = 1;        // every pick, until a tier survives a time split
+export const FLAT_CONVICTION = 1;        // every pick without its own stake_units
 export const MIN_CONVICTION = 1;          // lowest
 export const MAX_RISK_UNITS = 3;          // never lay more than this on one event
 const DEFAULT_UNITS = 1;                  // kelly absent/zero (prob-only picks)
@@ -460,7 +517,8 @@ export function decimalOdds(american: number | null | undefined): number | null 
 }
 
 /**
- * Conviction in UNITS TO WIN. Currently FLAT 1u for every pick.
+ * Conviction in UNITS TO WIN from the model's Kelly. FLAT 1u for every pick;
+ * a pick's own stake_units overrides it in pickConviction, not here.
  *
  * Mirrors tracking/discord_notifier.conviction_for -- the app and the channel
  * must publish the same number, and scripts/verify_units_parity.ts pins that.
@@ -482,12 +540,36 @@ export function convictionFor(
   return FLAT_CONVICTION;
 }
 
-/** Conviction plus the price-aware risk/win pair. See the block comment above. */
+/**
+ * The conviction a pick publishes: its own `stake_units` (picks.stake_units,
+ * units to win) when that is a finite number from 1 to 3, else the flat unit.
+ *
+ * Mirrors tracking/discord_notifier.pick_conviction. Coerced with Number()
+ * because PostgREST can send a NUMERIC as a string, and Python's float()
+ * reads one too; null, a blank, NaN, Infinity and anything outside 1..3 are
+ * the flat 1u on both sides.
+ */
+export function pickConviction(
+  serverKellyFraction: number | null | undefined,
+  stakeUnits?: number | null,
+): number {
+  if (stakeUnits == null) return convictionFor(serverKellyFraction);
+  const u = Number(stakeUnits);
+  if (Number.isFinite(u) && u >= MIN_CONVICTION && u <= MAX_CONVICTION) return u;
+  return convictionFor(serverKellyFraction);
+}
+
+/**
+ * Conviction plus the price-aware risk/win pair. See the block comment above.
+ * `stakeUnits` is the pick's own stake (picks.stake_units); leave it out, or
+ * pass null, for the usual 1u to win.
+ */
 export function stakeFor(
   serverKellyFraction: number | null | undefined,
   dkOdds: number | null | undefined,
+  stakeUnits?: number | null,
 ): UnitStake {
-  const conviction = convictionFor(serverKellyFraction);
+  const conviction = pickConviction(serverKellyFraction, stakeUnits);
   const dec = decimalOdds(dkOdds);
   if (dec == null || dec <= 1) {
     // No price to gross up against — publish the bare conviction.
@@ -509,31 +591,35 @@ export function stakeFor(
 
 /**
  * Units LAID on a pick — what exposure sums should add up. Price-aware, so at
- * -110 a 1u-conviction play returns 1.1.
+ * -110 a 1u-conviction play returns 1.1. `stakeUnits` as in stakeFor.
  */
 export function unitsFor(
   serverKellyFraction: number | null | undefined,
   dkOdds: number | null | undefined = null,
+  stakeUnits?: number | null,
 ): number {
-  return stakeFor(serverKellyFraction, dkOdds).risk;
+  return stakeFor(serverKellyFraction, dkOdds, stakeUnits).risk;
 }
 
 /**
  * Units won or lost, and units risked, at the posted stake.
  *
  * The same pair as `published_pick_unit_profit` / `published_pick_unit_risked`
- * and `tracking.published_units`. `stakeFor` is the price math; this only
- * applies the result. A win pays `stake.win` (1, unless the 3u cap bound).
- * A loss costs `stake.risk`. A push, a void, and an ungraded pick risk
- * nothing. A missing price is 1 unit, not a made-up −110.
+ * (the three-argument pair, pick_stake_units_2026_11_06.sql) and
+ * `tracking.published_units`. `stakeFor` is the price math; this only applies
+ * the result. A win pays `stake.win` (the pick's stake_units, else 1, unless
+ * the 3u cap bound). A loss costs `stake.risk`. A push, a void, and an
+ * ungraded pick risk nothing. A missing price is the bare stake, not a
+ * made-up −110. A row without `stake_units` is the usual 1u.
  */
 export function postedPickUnits(p: {
   kelly_fraction?: number | null;
   dk_odds?: number | null;
   decision_odds?: number | null;
   result?: string | null;
+  stake_units?: number | null;
 }): { units: number; risked: number } {
-  const stake = stakeFor(p.kelly_fraction, decisionOdds(p));
+  const stake = stakeFor(p.kelly_fraction, decisionOdds(p), p.stake_units);
   if (p.result === 'WIN') return { units: stake.win, risked: stake.risk };
   if (p.result === 'LOSS') return { units: -stake.risk, risked: stake.risk };
   return { units: 0, risked: 0 };
@@ -546,25 +632,21 @@ export function formatStake(stake: UnitStake): string {
 }
 
 /**
- * 2 -> "2u", 3.5 -> "3.5u", 1.15 -> "1.15u".
- *
- * TWO decimals, trailing zeros trimmed. One decimal used to round the -115
- * stake (1.15 laid to win 1) to "1.2u", which is a different bet from the one
- * the model asked for; every negative price divides out exactly at two
- * decimals, so this is the precision the number actually has.
- *
- * Rounds HALF-UP, explicitly. Neither language's default is safe: Python's %.2f
- * is half-to-EVEN while JS toFixed is half-up (0.125 renders "0.12" there and
- * "0.13" here), and a float like 2.0250000000000004 is not an integer, so a
- * naive isInteger check gives "2.00" on one side and "2" on the other. Trimming
- * splits on the decimal point rather than stripping trailing zeros off the whole
- * string, which would turn "20.00" into "2". The Python mirror uses the
- * identical expression; the parity fixture pins that they agree — it caught
- * exactly these divergences.
+ * Why a pick is staked above the usual 1u, for the line under its stake: the
+ * pick's own `stake_reason` (picks.stake_reason), shown only while the stake
+ * it explains is in force, i.e. the conviction stakeFor settled on is above
+ * the flat unit. A 1u pick, a stake_units outside 1..3 (which stakeFor reads
+ * as 1u), and a blank reason all show nothing.
  */
-export function formatUnits(u: number): string {
-  const n = Math.floor(u * 100 + 0.5) / 100;
-  const [whole, frac] = n.toFixed(2).split('.');
-  const trimmed = frac.replace(/0+$/, '');
-  return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
+export function stakeReasonLine(
+  stake: Pick<UnitStake, 'conviction'>,
+  reason: string | null | undefined,
+): string | null {
+  if (!(stake.conviction > FLAT_CONVICTION)) return null;
+  const text = typeof reason === 'string' ? reason.trim() : '';
+  return text || null;
 }
+
+// formatUnits lives in lib/format (one copy of its half-up rounding, shared
+// with formatFlatStake) and is re-exported here for its existing callers.
+export { formatUnits };

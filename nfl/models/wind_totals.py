@@ -401,7 +401,7 @@ def _apply_ruling_wind(games: pd.DataFrame, wind_reads: dict | None) -> pd.DataF
 
 
 def select_bets(games: pd.DataFrame, threshold: float = 11.0,
-                min_edge: float = MIN_EDGE, bankroll: float = 1.0,
+                min_edge: float = MIN_EDGE,
                 max_fire_lead: float = MAX_FIRE_LEAD,
                 wind_reads: dict | None = None) -> pd.DataFrame:
     """
@@ -486,8 +486,8 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
                                              out.lead_days, slate)]
     out["stake_pct"] = (out.units * UNIT_PCT * 100).round(3)
     out = apply_slate_cap(out)
-    if bankroll != 1.0:
-        out["stake_amt"] = (out.stake_pct / 100 * bankroll).round(2)
+    # Stakes are units (CLAUDE.md §4). The card used to add a dollar
+    # stake column off a --bankroll flag; nothing read it.
     return out.sort_values("edge", ascending=False).reset_index(drop=True)
 
 

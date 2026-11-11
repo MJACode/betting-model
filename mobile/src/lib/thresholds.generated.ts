@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-10-18
+ * Last generated: 2026-11-10
  */
 
 export interface ModelThreshold {
@@ -34,10 +34,23 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_spread_market: { min_prob: 0, min_edge: 0.018, min_odds: -200 },
   mlb_total_market: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   mlb_total_public_fade: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nba_first_half_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nba_live_spread_q12: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_prop_market: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_prop_projection: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  nba_q1_trend: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_team_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nba_total_luck: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_first_half_spread: { min_prob: 0, min_edge: 0.025, min_odds: -200 },
+  ncaab_first_half_total: { min_prob: 0, min_edge: 0.025, min_odds: -200 },
+  ncaab_live_spread_h1: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_live_spread_h2: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_live_total_h2: { min_prob: 0, min_edge: 0, min_odds: -200 },
+  ncaab_moneyline_first_post: { min_prob: 0, min_edge: 0.015, min_odds: -200 },
+  ncaab_moneyline_own_spread: { min_prob: 0, min_edge: 0.01, min_odds: -200 },
+  ncaab_spread_market: { min_prob: 0, min_edge: 0.03, min_odds: -200 },
+  ncaab_total_blend: { min_prob: 0, min_edge: 0.05, min_odds: -200 },
+  ncaabw_total_blend: { min_prob: 0, min_edge: 0.05, min_odds: -200 },
   ncaaf_live_total: { min_prob: 0.73, min_edge: 0.12, min_odds: -200 },
   ncaaf_live_win_prob: { min_prob: 0.5, min_edge: 0.16, min_odds: -200 },
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 },

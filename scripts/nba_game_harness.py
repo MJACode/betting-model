@@ -283,8 +283,20 @@ def frame_quotes(o: pd.DataFrame, extra=()) -> pd.DataFrame:
     return o[QUOTE_COLS + list(extra)].reset_index(drop=True)
 
 
-def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
+NEWS_WINDOW_WHY = "news_window"
+
+
+def load(cache: Path = CACHE, seasons=None, require_seasons=None,
+         include_news_windows: bool = False) -> Data:
     """Games, full-game quotes and the fetches that bought them.
+
+    `include_news_windows`: the seventh search's 5-minute purchase around
+    injury-report changes (ledger why = NEWS_WINDOW_WHY, docs/nba_models_2026.md
+    section 11) buys the whole slate at times no other search planned on. Left
+    in, it would become many games' close and decision fetch, so a grade would
+    depend on when the cache was refreshed. It is left OUT unless asked for:
+    its ledger rows and the quotes they bought (created_at = pulled_at) are
+    dropped before any quote is placed in a fetch.
 
     `require_seasons`: a graded run names the seasons it needs; the load
     refuses when any of them has a price on fewer than 90% of its games, or
@@ -299,6 +311,12 @@ def load(cache: Path = CACHE, seasons=None, require_seasons=None) -> Data:
     o["snapshot_at"] = pd.to_datetime(o["snapshot_at"], utc=True)
     o = o.merge(g[["game_id", "season", "game_date", "tip"]], on="game_id")
     led = pd.read_parquet(cache / "nba_fetch_ledger.parquet")
+    if not include_news_windows and "why" in led:
+        news = led["why"].astype(str) == NEWS_WINDOW_WHY
+        if news.any():
+            pulled = set(pd.to_datetime(led.loc[news, "pulled_at"], utc=True))
+            o = o[~pd.to_datetime(o["created_at"], utc=True, format="mixed").isin(pulled)]
+            led = led[~news]
     o, notes = attach_fetch(o, led)
     o = frame_quotes(o)
     f = o[["game_id", "tip", "fetch_at"]].drop_duplicates(["game_id", "fetch_at"]).copy()
@@ -469,6 +487,26 @@ class ResidDist:
         win = np.where(whole, np.interp(d, self.d, self.win_whole), np.interp(d, self.d, self.win_half))
         push = np.where(whole, np.interp(d, self.d, self.push_whole), 0.0)
         return win, push, np.clip(1.0 - win - push, 0.0, 1.0)
+
+    TABLES = ("d", "win_whole", "push_whole", "win_half")
+
+    def state(self) -> dict:
+        """Everything probs() reads, as plain Python numbers: what a live artifact
+        stores, so a card reads the finished table instead of tabulating it on every
+        run (models.nba_total_luck.with_pricing_table). Lists, not arrays: a pickled
+        array names numpy's internal modules, which differ between numpy versions, and
+        the file is written on one machine and opened on the worker. A float survives
+        the round trip exactly."""
+        return {"mean": self.mean, "n": self.n, "sd": self.sd, "label": self.label,
+                **{k: np.asarray(getattr(self, k), float).tolist() for k in self.TABLES}}
+
+    @classmethod
+    def from_state(cls, state: dict) -> "ResidDist":
+        d = cls.__new__(cls)
+        d.mean, d.n, d.sd, d.label = state["mean"], state["n"], state["sd"], state["label"]
+        for k in cls.TABLES:
+            setattr(d, k, np.asarray(state[k], float))
+        return d
 
     def __repr__(self):
         return f"ResidDist({self.label}, n={self.n}, sd={self.sd:.2f})"
