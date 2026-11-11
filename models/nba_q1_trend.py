@@ -167,16 +167,17 @@ def uplift(art: dict, season: int) -> float:
 
 # ── the quotes ───────────────────────────────────────────────────────────────
 
-def quote_frame(rows: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+def quote_frame(rows: pd.DataFrame, games: pd.DataFrame, markets=(MARKET,)) -> pd.DataFrame:
     """Stored first-quarter spread rows (QUOTE_ROW_COLS) -> the harness's quote frame: line = spread_home (the HOME
-    number), price_a = home, price_b = away.
+    number), price_a = home, price_b = away. `markets`: this model's spread alone unless given; the moneyline model
+    (models/nba_q1_trend_ml.py) passes the spread and the moneyline, whose line is none.
 
     THE FETCH INSTANT: a live row's is its created_at (one fetch, one transaction) and its snapshot_at is the book's
     own last_update; a purchased row's snapshot_at IS the historical snapshot it was bought at (its created_at is
     when it was stored). The harness judges staleness on snapshot_at, so it is set to the fetch instant here and the
     book's own stamp kept as book_update_at. `games` carries season, game_date and tip."""
     from scripts import nba_game_harness as H
-    o = rows[(rows["market"] == MARKET) & (rows["snapshot_type"] == "open")].copy()
+    o = rows[rows["market"].isin(tuple(markets)) & (rows["snapshot_type"] == "open")].copy()
     created = pd.to_datetime(o["created_at"], utc=True, format="mixed")
     stamped = pd.to_datetime(o["snapshot_at"], utc=True, format="mixed")
     live = (o["source"] == LIVE_SOURCE).to_numpy() if "source" in o else np.ones(len(o), bool)

@@ -1093,6 +1093,26 @@ standard**: it failed the 200-bet bar. `docs/sports/nba.md`, "First quarter", ha
 | closing line | one more call 12-25 minutes before tip, only for bet games, stored as `close` | `scripts/nba_q1_trend_window.py` |
 | artifact | the pricing rows and the cell's 88 graded bets | `models/saved/nba_q1_trend_20261107.pkl` |
 
+## NBA — `nba_q1_trend_ml`, first-quarter moneylines, the hot team (2026-11-07, mike)
+
+`nba_q1_trend`'s rule exactly, bet on the hot team's first-quarter moneyline (`models/nba_q1_trend_ml.py`,
+`scripts/nba_q1_trend_ml_card.py`; search `docs/nba_search_q1mt.md`, family Q1M). **Live on mike's instruction
+(2026-11-07: "Build it anyway"), not on the house standard**: it failed the 200-bet bar. `docs/sports/nba.md`, "First
+quarter", has the record and its overlap with the spread model.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | `nba_q1_trend`'s rule, imported: the game's number is still the first-quarter SPREAD | `models/nba_q1_trend.signals`, `K_CUT` |
+| prob / edge | 0.0 / 0.0, so every publisher shows what the card wrote | `config.ACTION_THRESHOLDS` |
+| price floor | -200, pinned. It laid -192 to +360 on its 87 graded bets, median +130 | `config.MODEL_MIN_ODDS` |
+| EV floor | 0.00 on the fair probability plus the uplift (+0.1416 for 2026-27). Swept on its own 87: every floor from 0.00 to 0.15 keeps all 87 (the smallest EV is +0.182), 0.20 drops 7 | `config.MODEL_OWN_EV_FLOOR`, `models.honest_ev.gate` in the card |
+| the fair price | Pinnacle's no-vig first-quarter moneyline when it quotes coherently, else the deciding books' median no-vig; P(win given the quarter is not level) | `scripts/nba_game_harness.market_fair` |
+| the offer | the hot side's moneyline with the highest expected value under that fair price, at a deciding book | `scripts/nba_s_q1mt.ml_cand`, `scripts/nba_game_harness.choose` |
+| decided once | on the spread model's fetch (one call, both markets), 45-66 minutes before tip, at most 5 minutes old; a row in `nba_q1_trend_ml_decisions`, bet or not | `scripts/nba_q1_trend_window.py`, `scheduler.run_nba_total_luck_window` (step after `nba-q1-trend`) |
+| settlement | period 1 of `nba_period_scores`: the hot team ahead wins, a level quarter a push; untrusted periods: pending | `tracking/paper_tracker._compute_result` (`h2h_q1`) |
+| closing line | the first-quarter close (12-25 minutes before tip) holds the moneyline too, stored as `close` | `scripts/nba_q1_trend_window.py` |
+| artifact | the cell's per-season counts (its uplift) and the 87 graded bets | `models/saved/nba_q1_trend_ml_20261107.pkl` |
+
 ## NBA — `nba_first_half_total_luck`, first-half totals, overs (2026-10-30, mike)
 
 The same shooting luck, read on the first half's line. When both defences have
@@ -1552,6 +1572,61 @@ two seasons (beta 1.05 on 2024-25, 0.46 on 2025-26). The model claims more
 than it hits (claimed 0.599, won 0.571 on 198 games). November was flat in
 both seasons. No Pinnacle close exists for the women's games, so there is no
 sharp-close EV column.
+
+## NCAAF — `ncaaf_moneyline_market`, full-game moneylines (2026-11-10, mike)
+
+mike, 2026-11-10, asked after the NCAAF market audit whether he wanted a
+moneyline model live although nothing measured clears: *"ML model yes"*. At
+14:00 UTC on the game's Eastern date, the best moneyline among the seven
+deciding books is priced against the win chance the ten fetched books' middle
+spread implies through the final-margin distribution; every side shorter than
+-200 is removed before the pick; the single largest edge of the game is bet
+when it is above 0.02 and three other books are in the consensus
+(`models/ncaaf_moneyline_market.py`, `scripts/ncaaf_moneyline_card.py`; the
+rule, the evidence and the risks are `docs/sports/ncaaf.md`, "The NCAAF
+moneyline model"). **It did not clear** (the 2023-2025 interval reaches below
+zero, and the profit is the 2024 season). The paused classifier
+`ncaaf_moneyline` is a different model and is unchanged.
+
+| Setting | Value | Where |
+|---|---|---|
+| the cut | edge > 0.02, at the bet book's own price | `MODEL_EDGE_THRESHOLDS` |
+| prob / edge filter | 0.0 / 0.02. model_probability is the same fair chance the cut was measured on, so decision_edge equals the card's edge and every publisher keeps exactly what the card wrote | `ACTION_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` |
+| EV floor | 0.04, on its own probability. The smallest EV the cut admitted in the replay was +0.0437 (median +0.0816, 311 bets). EV is edge x decimal, so an edge just above 0.02 at a price shorter than +100 can sit under 0.04; the replay's shortest price was +110 | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
+| price floor | -200, removed before the pick and pinned again; it laid +110 to +430 (median +146), no favourites. The rule has no upper limit on the price | `MIN_PRICE`, `MODEL_MIN_ODDS` |
+| books | a bet may be placed at seven; the consensus is the median over ten; a bet needs three other books in it | `models/ncaaf_moneyline_market.py` |
+| decided once | 14:00 UTC on the game's Eastern date, on quotes stamped 13:00-14:00 UTC; a row in `ncaaf_moneyline_decisions`, bet or not; a missed 14:00 is recorded as `missed` and fails the run, never bet later | `scripts/ncaaf_moneyline_card.py`, `scheduler.run_ncaaf_moneyline_card` |
+| other models | no bet on a game the opening spread model already holds a bet on | `scripts/ncaaf_moneyline_card.py` |
+| stake | flat, one unit to win | no `stake_units` |
+
+**The neighbourhood** (replayed by the card's own code, which matched the
+research's 311 bets; every priced game of 2023-2025, 2,197 of them;
+walk-forward by season; date-resampled 95% interval, the build's own draw):
+
+| Cut | Bets | Record | Units | Return | Interval | Without the 10 best dates |
+|---|---|---|---|---|---|---|
+| 0.01 | 601 | 213-388 | +13.78 | +4.1% | [-4.3, +13.5] | -15.36 |
+| **0.02** | **311** | **122-189** | **+14.70** | **+7.8%** | **[-5.1, +22.0]** | **-9.26** |
+| 0.03 | 136 | 58-78 | +10.27 | +11.7% | [-5.3, +29.8] | -6.43 |
+| 0.04 | 43 | 20-23 | +5.45 | +19.4% | [-14.4, +57.7] | -5.55 |
+| 0.05 | 11 | 3-8 | -1.96 | -28.4% | [-81.8, +62.0] | 0.00 |
+
+The audit's own resample of the 0.02 row printed -4.7% to +21.6%. The cuts
+from 0.01 to 0.04 are positive and no interval clears zero. By season at
+0.02: 2023 140 bets, -2.77 units; 2024 78 bets, +16.66; 2025 93 bets, +0.81:
+one season carries it. Each season split at its middle bet date: the early
+halves made +5.29 units on 149 bets (+5.9%), the late halves +9.40 on 162
+(+9.5%). The 0.01 cut lays prices from -108 to +3500; from 0.02 up every bet
+is an underdog.
+
+**Two controls, neither the model** (the same build): with the fitted
+home/away offset set to zero the 0.02 cut is 212 bets, -9.22 units; every road
+team priced +110 to +430 at its best deciding-book price, with no rule at all,
+is 813 bets, +6.94 units. 294 of the model's 311 bets are road teams.
+
+**Review at 50 settled bets** (gate standing, CLAUDE.md §2: positive flat-bet
+ROI, calibration within 5%). Read beside the return: the share of road teams,
+and how often the bet book's price was still up when the pick posted.
 
 ## NBA — the in-play game-state model's quarters 1-2 spread (2026-11-04, mike)
 

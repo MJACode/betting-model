@@ -282,6 +282,7 @@ def test_open_close_and_final_each_ask_for_the_alternate_lines(monkeypatch):
         "id": "ev", "home": "Colorado Avalanche", "away": "Pittsburgh Penguins", "start": start,
     }], 0))
     monkeypatch.setattr(ing, "_existing_game_ids", lambda _conn, ids: set(ids))
+    monkeypatch.setattr(ing, "_schedule_only_ids", lambda _conn, ids: set())
     monkeypatch.setattr(ing, "_stored_snapshots", fake_stored)
     monkeypatch.setattr(ing, "_insert_prop_odds", fake_insert)
     monkeypatch.setattr(ing, "get_connection", lambda: Conn())

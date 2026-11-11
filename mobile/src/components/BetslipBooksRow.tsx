@@ -142,8 +142,8 @@ export function BetslipBooksRow({
       </View>
 
       {/* The indicator stays ON here, unlike every other horizontal strip in
-          the app. There are 10 bettable books at 86pt in a ~311pt card, so 7 of
-          them are off-screen — and since this row became the bet control there
+          the app. Every bettable book gets an 86pt tile in a ~311pt card, so
+          most of them are off-screen — and since this row became the bet control there
           is no other affordance saying the rest exist (UX review). */}
       <ScrollView
         horizontal
