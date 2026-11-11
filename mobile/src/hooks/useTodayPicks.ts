@@ -15,6 +15,7 @@ import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
 import { errorText, isAbortError } from '@/lib/errors';
 import {
   loadTodayBoard,
+  loadTodayBoardOnForeground,
   setTodayBoardReader,
   subscribeTodayBoard,
   todayBoardSnapshot,
@@ -255,7 +256,7 @@ export function useTodayPicks(date?: string) {
       if (state !== 'active') return;
       const day = todayET();
       if (date == null) setLiveDay((prev) => (prev === day ? prev : day));
-      void loadTodayBoard(date ?? day, false);
+      void loadTodayBoardOnForeground(date ?? day);
     });
     return () => sub.remove();
   }, [date]);

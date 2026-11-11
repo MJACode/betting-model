@@ -10,19 +10,26 @@
  * A refresh that arrives while a read is running does not start a second
  * one; it asks for exactly one follow-up when the current read settles.
  *
- * A finished read is reused for TODAY_BOARD_MAX_AGE_MS. A model page or
+ * A finished read is reused for TODAY_PICKS_STALE_MS. A model page or
  * Player Stats opened later than that starts one new read, and every other
  * mount of the same date hears it. Inside the window, hopping screens does
- * not start another seven-sport read. 5 minutes is the review's pick
- * (2026-11-11): long enough that a launch burst stays one read, short enough
- * that an evening visit is not still showing noon. Change the constant to
- * move that line.
+ * not start another seven-sport read. Returning to the app does the same
+ * check. Set the constant to Infinity for foreground-only: a mount never
+ * expires the read, and coming back to the app is what reads again.
  *
  * No React and no native module, so the dedupe can be run under node.
  */
 
-/** How long a finished read satisfies a mount that did not ask to refresh. */
-export const TODAY_BOARD_MAX_AGE_MS = 5 * 60 * 1000;
+/**
+ * How old a finished read may be before the next mount, or the next return
+ * to the app, starts another one.
+ *
+ * 5 minutes for now. Matt is choosing among 5 minutes, 15 minutes, and
+ * foreground-only. Set this to `Infinity` for foreground-only: a mount keeps
+ * the read for the whole session, and AppState 'active' is what starts the
+ * next read. Pull-to-refresh always reads, whatever this is.
+ */
+export const TODAY_PICKS_STALE_MS = 5 * 60 * 1000;
 
 export interface TodayBoardPartial {
   whats: string[];
@@ -62,6 +69,21 @@ const slots = new Map<string, Slot<unknown>>();
 
 let reader: ((date: string) => Promise<TodayBoardRead<unknown>>) | null = null;
 let nowMs: () => number = () => Date.now();
+/** Tests pass Infinity without editing the exported constant. null uses the constant. */
+let staleMsOverride: number | null = null;
+
+function staleMs(): number {
+  return staleMsOverride ?? TODAY_PICKS_STALE_MS;
+}
+
+/** A mount reuses a finished read until it is older than the staleness age.
+ *  Infinity never expires a mount. */
+function readIsFresh(slot: Slot<unknown>): boolean {
+  if (!slot.value.loaded) return false;
+  const age = staleMs();
+  if (!Number.isFinite(age)) return true;
+  return nowMs() - slot.fetchedAt < age;
+}
 
 export function emptyTodayBoard<Row>(): TodayBoardSnapshot<Row> {
   return {
@@ -105,9 +127,24 @@ export function setTodayBoardReader<Row>(fn: (date: string) => Promise<TodayBoar
   reader = fn as (date: string) => Promise<TodayBoardRead<unknown>>;
 }
 
-/** Tests move the clock instead of waiting out TODAY_BOARD_MAX_AGE_MS. */
+/** Tests move the clock instead of waiting out TODAY_PICKS_STALE_MS. */
 export function setTodayBoardClockForTests(fn: () => number): void {
   nowMs = fn;
+}
+
+/** Tests the Infinity (foreground-only) switch. Pass null to use the constant. */
+export function setTodayPicksStaleMsForTests(ms: number | null): void {
+  staleMsOverride = ms;
+}
+
+/**
+ * AppState 'active'. A finite age re-reads only when the cached read is
+ * older than TODAY_PICKS_STALE_MS. Infinity re-reads on every return: that
+ * is the foreground-only setting, and concurrent callers still share one flight.
+ */
+export function loadTodayBoardOnForeground(date: string): Promise<void> {
+  if (!Number.isFinite(staleMs())) return loadTodayBoard(date, false, true);
+  return loadTodayBoard(date, false, false);
 }
 
 export function todayBoardSnapshot<Row>(date: string): TodayBoardSnapshot<Row> {
@@ -130,14 +167,13 @@ export function subscribeTodayBoard<Row>(
  * not, await the same promise. A force that arrives mid-read schedules one
  * follow-up instead of a parallel read.
  */
-export async function loadTodayBoard(date: string, force = false): Promise<void> {
+export async function loadTodayBoard(date: string, force = false, bypassAge = false): Promise<void> {
   const slot = slotFor(date);
   if (slot.inFlight) {
     if (force) slot.again = true;
     return slot.inFlight;
   }
-  const fresh = slot.value.loaded && nowMs() - slot.fetchedAt < TODAY_BOARD_MAX_AGE_MS;
-  if (!force && fresh) return;
+  if (!force && !bypassAge && readIsFresh(slot)) return;
   if (!reader) throw new Error('today board reader is not installed');
 
   const read = reader;
@@ -195,4 +231,5 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
 export function resetTodayBoardForTests(): void {
   slots.clear();
   nowMs = () => Date.now();
+  staleMsOverride = null;
 }

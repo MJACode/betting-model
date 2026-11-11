@@ -12,11 +12,13 @@
 
 import {
   loadTodayBoard,
+  loadTodayBoardOnForeground,
   resetTodayBoardForTests,
   setTodayBoardClockForTests,
   setTodayBoardReader,
+  setTodayPicksStaleMsForTests,
   subscribeTodayBoard,
-  TODAY_BOARD_MAX_AGE_MS,
+  TODAY_PICKS_STALE_MS,
   todayBoardSnapshot,
   type TodayBoardRead,
 } from '../src/lib/todayPicksFlight';
@@ -155,6 +157,7 @@ async function datesDoNotShare(): Promise<void> {
 
 async function ageWindow(): Promise<void> {
   resetTodayBoardForTests();
+  check('the staleness age is five minutes', TODAY_PICKS_STALE_MS === 5 * 60 * 1000, String(TODAY_PICKS_STALE_MS));
   let t = 1_000_000;
   setTodayBoardClockForTests(() => t);
   let calls = 0;
@@ -163,14 +166,20 @@ async function ageWindow(): Promise<void> {
     return ok(calls);
   });
   await loadTodayBoard(DATE, false);
-  t += TODAY_BOARD_MAX_AGE_MS - 1;
+  t += TODAY_PICKS_STALE_MS - 1;
   await loadTodayBoard(DATE, false);
   check('a fresh mount does not re-read', calls === 1, `calls=${calls}`);
+  await loadTodayBoardOnForeground(DATE);
+  check('a fresh foreground does not re-read', calls === 1, `calls=${calls}`);
   t += 1;
   await loadTodayBoard(DATE, false);
   check('a stale mount re-reads once', calls === 2, `calls=${calls}`);
 
-  t += TODAY_BOARD_MAX_AGE_MS;
+  t += TODAY_PICKS_STALE_MS;
+  await loadTodayBoardOnForeground(DATE);
+  check('a stale foreground re-reads once', calls === 3, `calls=${calls}`);
+
+  t += TODAY_PICKS_STALE_MS;
   const hold = gate();
   setTodayBoardReader(async () => {
     calls += 1;
@@ -178,10 +187,37 @@ async function ageWindow(): Promise<void> {
     return ok(calls);
   });
   const pending = [0, 1, 2, 3].map(() => loadTodayBoard(DATE, false));
-  check('four stale callers start one read', calls === 3, `calls=${calls}`);
+  check('four stale callers start one read', calls === 4, `calls=${calls}`);
   hold.release();
   await Promise.all(pending);
-  check('four stale callers still made one read', calls === 3, `calls=${calls}`);
+  check('four stale callers still made one read', calls === 4, `calls=${calls}`);
+}
+
+async function infinityIsForegroundOnly(): Promise<void> {
+  resetTodayBoardForTests();
+  setTodayPicksStaleMsForTests(Number.POSITIVE_INFINITY);
+  let t = 1_000_000;
+  setTodayBoardClockForTests(() => t);
+  let calls = 0;
+  setTodayBoardReader(async () => {
+    calls += 1;
+    return ok(calls);
+  });
+  await loadTodayBoard(DATE, false);
+  t += 24 * 60 * 60 * 1000;
+  await loadTodayBoard(DATE, false);
+  check('Infinity: a later mount does not re-read', calls === 1, `calls=${calls}`);
+  const hold = gate();
+  setTodayBoardReader(async () => {
+    calls += 1;
+    await hold.opened;
+    return ok(calls);
+  });
+  const pending = [0, 1, 2, 3].map(() => loadTodayBoardOnForeground(DATE));
+  check('Infinity: four foregrounds start one read', calls === 2, `calls=${calls}`);
+  hold.release();
+  await Promise.all(pending);
+  check('Infinity: four foregrounds still made one read', calls === 2, `calls=${calls}`);
 }
 
 async function aQuietDateIsDropped(): Promise<void> {
@@ -323,6 +359,7 @@ async function main(): Promise<void> {
   await failedRefreshKeepsRows();
   await datesDoNotShare();
   await ageWindow();
+  await infinityIsForegroundOnly();
   await aQuietDateIsDropped();
   await listenersSeeTheRead();
   await countLaunchRequests();

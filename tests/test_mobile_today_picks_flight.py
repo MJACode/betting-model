@@ -43,8 +43,12 @@ def test_the_hook_reads_through_the_shared_flight():
     # Foreground re-reads a stale board and picks up the next Eastern date.
     # AppState, not useFocusEffect: the betslip bar is outside the navigator.
     assert "AppState.addEventListener" in src
+    assert "loadTodayBoardOnForeground" in src
     assert "useFocusEffect" not in src
-    assert "TODAY_BOARD_MAX_AGE_MS" in (MOBILE / "src" / "lib" / "todayPicksFlight.ts").read_text(encoding="utf-8")
+    flight = (MOBILE / "src" / "lib" / "todayPicksFlight.ts").read_text(encoding="utf-8")
+    assert "export const TODAY_PICKS_STALE_MS = 5 * 60 * 1000;" in flight
+    assert "TODAY_BOARD_MAX_AGE_MS" not in flight
+    assert "Infinity" in flight
     # The paused split stays at the source. All reads pausedData; everyone
     # else reads data. Refresh still goes through the same reader.
     assert "setData(all.filter((d) => !isPausedForDisplay(d.pick)))" in src
@@ -57,4 +61,7 @@ def test_single_flight_and_refresh_invalidation():
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "four concurrent callers start one read" in proc.stdout
     assert "refresh after a finished read starts another" in proc.stdout
+    assert "a stale foreground re-reads once" in proc.stdout
+    assert "the staleness age is five minutes" in proc.stdout
+    assert "Infinity: a later mount does not re-read" in proc.stdout
     assert "ALL PASS" in proc.stdout
