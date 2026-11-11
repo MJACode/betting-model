@@ -105,7 +105,11 @@ export function SettingsSectionBackButton() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const onPress = () => {
     if (stackBackDecision(navigation.canGoBack()) === 'pop') navigation.goBack();
-    else navigation.replace('Settings');
+    else {
+      // Settings alone has no back and no tabs, so Android back would leave
+      // the app. Put the tabs under it.
+      navigation.reset({ index: 1, routes: [{ name: 'Tabs' }, { name: 'Settings' }] });
+    }
   };
   return <BackPill onPress={onPress} />;
 }

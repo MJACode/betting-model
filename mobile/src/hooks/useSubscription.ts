@@ -7,6 +7,71 @@ import { errorText, isAbortError } from '@/lib/errors';
 import { useAuth } from './useAuth';
 
 /**
+ * One subscription row for every mounted reader.
+ *
+ * Settings home and a Settings section are both mounted, and each used to
+ * keep its own copy. A refresh in the section (Unlock Discord early) then
+ * left the home tile on the old plan. The row lives here, like useAccess,
+ * so one fetch serves every reader and a refresh updates all of them.
+ */
+interface SubscriptionSnapshot {
+  subscription: SubscriptionRow | null;
+  loading: boolean;
+  error: string | null;
+}
+
+const listeners = new Set<(s: SubscriptionSnapshot) => void>();
+let snapshot: SubscriptionSnapshot = {
+  subscription: null,
+  loading: billingReady(),
+  error: null,
+};
+/** The signed-in flag the last successful read was for. null = never read. */
+let loadedFor: boolean | null = null;
+let inFlight: Promise<void> | null = null;
+
+function publish(next: Partial<SubscriptionSnapshot>) {
+  snapshot = { ...snapshot, ...next };
+  listeners.forEach((fn) => fn(snapshot));
+}
+
+async function loadSubscription(signedIn: boolean, force = false): Promise<void> {
+  if (!billingReady() || !signedIn) {
+    loadedFor = signedIn;
+    publish({ subscription: null, loading: false, error: null });
+    return;
+  }
+  if (inFlight) {
+    await inFlight;
+    if (!force) return;
+  }
+  if (!force && loadedFor === signedIn) return;
+  // Claim the slot before the first await so a second reader joins this read.
+  let finish!: () => void;
+  const run = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  inFlight = run;
+  publish({ loading: true });
+  try {
+    const row = await fetchSubscription();
+    loadedFor = signedIn;
+    publish({
+      subscription: (row as SubscriptionRow | null) ?? null,
+      error: null,
+      loading: false,
+    });
+  } catch (e) {
+    // Keep the previous row — a blip must not drop a paying member.
+    if (!isAbortError(e)) publish({ error: errorText(e), loading: false });
+    else publish({ loading: false });
+  } finally {
+    if (inFlight === run) inFlight = null;
+    finish();
+  }
+}
+
+/**
  * The signed-in user's subscription + whether they're entitled.
  *
  * Two behaviours worth knowing:
@@ -33,36 +98,30 @@ export interface UseSubscription {
 export function useSubscription(): UseSubscription {
   const { signedIn, status: authStatus } = useAuth();
   const enabled = billingReady();
+  const [snap, setSnap] = useState<SubscriptionSnapshot>(snapshot);
 
-  const [subscription, setSubscription] = useState<SubscriptionRow | null>(null);
-  const [loading, setLoading] = useState<boolean>(enabled);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!enabled || !signedIn) {
-      setSubscription(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const row = await fetchSubscription();
-      setSubscription((row as SubscriptionRow | null) ?? null);
-      setError(null);
-    } catch (e) {
-      // Keep the previous row — see the note above about not paywalling on a blip.
-      if (!isAbortError(e)) setError(errorText(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [enabled, signedIn]);
+  useEffect(() => {
+    const listener = (next: SubscriptionSnapshot) => setSnap(next);
+    listeners.add(listener);
+    setSnap(snapshot);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
 
   useEffect(() => {
     if (authStatus === 'loading') return;
-    void load();
-  }, [load, authStatus]);
+    void loadSubscription(signedIn);
+  }, [authStatus, signedIn]);
 
-  const entitled = !enabled ? true : isEntitled(subscription);
+  const refresh = useCallback(() => loadSubscription(signedIn, true), [signedIn]);
+  const entitled = !enabled ? true : isEntitled(snap.subscription);
 
-  return { subscription, entitled, loading, error, refresh: load };
+  return {
+    subscription: snap.subscription,
+    entitled,
+    loading: enabled ? snap.loading : false,
+    error: snap.error,
+    refresh,
+  };
 }

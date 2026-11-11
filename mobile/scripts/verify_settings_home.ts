@@ -139,7 +139,10 @@ check(
 
 const pill = read('src/components/StackBackButton.tsx');
 check('settings and player stats share the pill', (pill.match(/<BackPill /g) ?? []).length === 2);
-check('an empty settings stack replaces to Settings', /navigation\.replace\('Settings'\)/.test(pill));
+check(
+  'an empty settings stack resets to the tabs under Settings',
+  /navigation\.reset\(\{ index: 1, routes: \[\{ name: 'Tabs' \}, \{ name: 'Settings' \}\] \}\)/.test(pill),
+);
 check(
   'an empty player stack still replaces to the Stats tab',
   /navigation\.replace\(PLAYER_DETAIL_PARENT\.name/.test(pill),
@@ -151,6 +154,46 @@ check(
   back.settingsTitleMaxWidth(390, 1) > back.playerTitleMaxWidth(390, 1),
 );
 check('Legal & support fits at 390pt', back.settingsTitleMaxWidth(390, 1) >= 180);
+
+eq('six tiles at 390 stay in two columns', home.settingsHomeLayout([1, 2, 3, 4, 5, 6], 1, 390).paired.length, 6);
+eq('six tiles at 390 have no leftover row', home.settingsHomeLayout([1, 2, 3, 4, 5, 6], 1, 390).fullWidth.length, 0);
+{
+  const odd = home.settingsHomeLayout(['a', 'b', 'c', 'd', 'e'], 1, 390);
+  eq('an odd tile is full width', odd.fullWidth.join(','), 'e');
+  eq('the pairs stay in the grid', odd.paired.join(','), 'a,b,c,d');
+}
+eq('a narrow phone stacks every tile', home.settingsHomeLayout([1, 2, 3, 4], 1, 320).paired.length, 0);
+eq(
+  'xxLarge on a 375pt phone stacks',
+  home.settingsHomeLayout([1, 2], 1.235, 375).fullWidth.length,
+  2,
+);
+eq('390 at 1× does not stack six tiles', home.settingsHomeLayout([1, 2, 3, 4, 5, 6], 1, 390).fullWidth.length, 0);
+
+const labels = [
+  'Track record',
+  'Live Signals (beta)',
+  'How this works',
+  'Replay intro',
+  'Follow us on X',
+  'Send feedback',
+  'Connected books',
+  'Sign in',
+  'Sign out',
+  'Delete account',
+  'Restore purchases',
+  'Manage subscription',
+  'Upgrade to Premium',
+  'Join Discord',
+  'Connect Discord',
+  'Disconnect Discord',
+  'Gambling help & resources',
+  'Gambling help &amp; resources',
+];
+for (const label of labels) {
+  const needle = label.includes('&amp;') ? label : label;
+  check(`still has ${label}`, settings.includes(needle) || settings.includes(label.replace('&', '&amp;')));
+}
 
 const paywall = read('src/screens/PaywallScreen.tsx');
 check('paywall still says 8 sports', paywall.includes('all 8 sports') && !paywall.includes('all 7 sports'));

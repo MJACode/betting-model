@@ -20,6 +20,26 @@ export const SETTINGS_GRID_SECTIONS = [
 
 export const SETTINGS_LEGAL_SECTION = 'legal' as const;
 
+/**
+ * Which home tiles sit in the 2-up grid, and which are full width.
+ *
+ * An odd count puts the last tile on its own row. A large font scale, or a
+ * narrow phone (width / scale under 360), stacks every tile.
+ */
+export function settingsHomeLayout<T>(
+  tiles: readonly T[],
+  fontScale: number,
+  windowWidth: number,
+): { paired: T[]; fullWidth: T[] } {
+  const scale = fontScale > 0 ? fontScale : 1;
+  const stack = scale > 1.3 || windowWidth / scale < 360;
+  if (stack) return { paired: [], fullWidth: [...tiles] };
+  if (tiles.length % 2 === 1) {
+    return { paired: tiles.slice(0, -1), fullWidth: tiles.slice(-1) };
+  }
+  return { paired: [...tiles], fullWidth: [] };
+}
+
 export type SettingsSectionId =
   | (typeof SETTINGS_GRID_SECTIONS)[number]
   | typeof SETTINGS_LEGAL_SECTION;

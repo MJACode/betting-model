@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -78,6 +78,7 @@ import {
   communityTileSummary,
   isSettingsSectionId,
   notificationsTileSummary,
+  settingsHomeLayout,
   sportsbooksTileSummary,
   type SettingsSectionId,
 } from '@/lib/settingsHome';
@@ -142,7 +143,7 @@ function LinkRow({
 
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
-  const { fontScale } = useWindowDimensions();
+  const { fontScale, width } = useWindowDimensions();
   const { summaries, accountSpoken, showAccountSection } = useSettingsHomeModel();
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
   // A newer bundle is downloaded and runs at the next start (src/lib/updateReady.ts).
@@ -151,11 +152,9 @@ export function SettingsScreen() {
     navigation.navigate('SettingsSection', { section });
   };
   const grid = SETTINGS_GRID_SECTIONS.filter((id) => id !== 'account' || showAccountSection);
-  // Half-width tiles collide once Dynamic Type is up, and an odd count leaves
-  // an empty cell. Both become full-width rows. Legal is always full width.
-  const stackTiles = fontScale > 1.3 || grid.length % 2 === 1;
-  const paired = stackTiles ? (fontScale > 1.3 ? [] : grid.slice(0, -1)) : grid;
-  const fullWidth = fontScale > 1.3 ? grid : grid.length % 2 === 1 ? [grid[grid.length - 1]!] : [];
+  // Half-width tiles collide once Dynamic Type is up, on a narrow phone, or
+  // when the count is odd. Legal is always full width, below these.
+  const { paired, fullWidth } = settingsHomeLayout(grid, fontScale, width);
 
   return (
     <SettingsScroll>
@@ -1020,9 +1019,6 @@ function LegalSection() {
               onPress={openHelpline}
               accessibilityRole="link"
               accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
-              // The row's top padding is inside the card's divider; slop below
-              // brings a one-line wrap up to 44pt without moving the rule (M9).
-              hitSlop={{ top: 0, bottom: 12, left: 0, right: 0 }}
               style={styles.helplineRow}
             >
               <Ionicons name="call-outline" size={15} color={colors.tint} />
@@ -1125,6 +1121,18 @@ function BankrollCard() {
     setBlurError(c.error);
     if (c.save !== undefined) setAmount(c.save);
   };
+
+  // Back can unmount the field without a blur. Save the same way blur does.
+  const latest = useRef({ text, amount: settings.amount });
+  latest.current = { text, amount: settings.amount };
+  const setAmountRef = useRef(setAmount);
+  setAmountRef.current = setAmount;
+  useEffect(() => {
+    return () => {
+      const c = commitBankrollText(latest.current.text, latest.current.amount);
+      if (c.save !== undefined) setAmountRef.current(c.save);
+    };
+  }, []);
 
   return (
     <View style={styles.card}>
@@ -1508,7 +1516,9 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: spacing.md,
     paddingTop: spacing.md,
+    paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
+    minHeight: 44,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
