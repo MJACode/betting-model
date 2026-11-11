@@ -5,17 +5,19 @@ import {
   DISCORD_JOIN_STORAGE_KEY,
   discordJoinBlocksRecap,
   discordJoinOffer,
+  discordJoinVisible,
   markDiscordJoinChosen,
   mergeDiscordJoinStores,
   observeDiscordTier,
+  onDiscordJoinUserForgotten,
   parseDiscordJoinStore,
   serializeDiscordJoinStore,
   userDiscordJoinRecord,
   withUserDiscordJoinRecord,
+  withoutUserDiscordJoinRecord,
   type DiscordJoinChoice,
   type DiscordJoinStore,
   type DiscordJoinVariant,
-  type DiscordTier,
 } from '@/lib/discordJoin';
 
 /**
@@ -27,7 +29,8 @@ import {
  */
 export function useDiscordJoin(input: {
   userId: string | null;
-  tier: DiscordTier;
+  /** A loaded trialing row. Not the fallback tier. */
+  trialConfirmed: boolean;
   discordPaid: boolean;
   comped: boolean;
   onboardingFinished: boolean;
@@ -36,20 +39,25 @@ export function useDiscordJoin(input: {
 }): {
   show: boolean;
   variant: DiscordJoinVariant | null;
+  /** This account already dismissed Join. Replay intro uses the Settings sentence. */
+  joinSeen: boolean;
   blocking: boolean;
   choose: (choice: DiscordJoinChoice) => void;
 } {
   const [store, setStore] = useState<DiscordJoinStore>({ users: {} });
   const [ready, setReady] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const loaded = useRef<string | null>(null);
+  const readGen = useRef(0);
   const userIdRef = useRef(input.userId);
   userIdRef.current = input.userId;
 
   useEffect(() => {
     let mounted = true;
+    const gen = ++readGen.current;
     AsyncStorage.getItem(DISCORD_JOIN_STORAGE_KEY)
       .then((raw) => {
-        if (!mounted) return;
+        if (!mounted || gen !== readGen.current) return;
         const parsed = parseDiscordJoinStore(raw);
         loaded.current = serializeDiscordJoinStore(parsed);
         setStore((prev) => mergeDiscordJoinStores(parsed, prev));
@@ -57,7 +65,11 @@ export function useDiscordJoin(input: {
       })
       .catch((err) => {
         console.warn('[discordJoin] load failed', err);
-        if (mounted) setReady(true);
+        if (!mounted || gen !== readGen.current) return;
+        // Stay hidden, and do not write. A write here would replace every
+        // other account's record with whatever this session has in memory.
+        setLoadFailed(true);
+        setReady(true);
       });
     return () => {
       mounted = false;
@@ -65,21 +77,31 @@ export function useDiscordJoin(input: {
   }, []);
 
   useEffect(() => {
+    return onDiscordJoinUserForgotten((id) => {
+      readGen.current += 1;
+      setStore((prev) => {
+        const next = withoutUserDiscordJoinRecord(prev, id);
+        loaded.current = serializeDiscordJoinStore(next);
+        return next;
+      });
+      setReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
     const id = input.userId;
-    if (!id) return;
+    if (!id || !input.trialConfirmed) return;
     setStore((prev) => {
       const current = userDiscordJoinRecord(prev, id);
-      const next = observeDiscordTier(current, input.tier);
+      const next = observeDiscordTier(current, 'trial');
       if (next === current) return prev;
       return withUserDiscordJoinRecord(prev, id, next);
     });
-  }, [input.userId, input.tier]);
+  }, [input.userId, input.trialConfirmed]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || loadFailed) return;
     const serial = serializeDiscordJoinStore(store);
-    // A failed read leaves loaded null. Do not overwrite storage with the
-    // empty memory copy; the next real change is the first write.
     if (loaded.current == null) {
       loaded.current = serial;
       return;
@@ -89,7 +111,7 @@ export function useDiscordJoin(input: {
     AsyncStorage.setItem(DISCORD_JOIN_STORAGE_KEY, serial).catch((err) => {
       console.warn('[discordJoin] save failed', err);
     });
-  }, [store, ready]);
+  }, [store, ready, loadFailed]);
 
   const choose = useCallback((choice: DiscordJoinChoice) => {
     const id = userIdRef.current;
@@ -112,14 +134,20 @@ export function useDiscordJoin(input: {
     surfaceClear: input.surfaceClear,
     hasAccount: input.userId != null,
   });
+  const show = discordJoinVisible({
+    ready,
+    loadFailed,
+    offerShow: offer.show,
+  });
 
   return {
-    show: ready && offer.show,
-    variant: offer.show ? offer.variant : null,
+    show,
+    variant: show ? offer.variant : null,
+    joinSeen: ready && !loadFailed && record.seen,
     blocking: discordJoinBlocksRecap({
       storageReady: ready,
       membershipHold: input.membershipHold,
-      show: ready && offer.show,
+      show,
     }),
     choose,
   };

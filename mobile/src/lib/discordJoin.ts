@@ -78,6 +78,44 @@ export function withUserDiscordJoinRecord(
   return { users: { ...store.users, [userId]: record } };
 }
 
+/** One account leaves the map. Every other account on this device stays. */
+export function withoutUserDiscordJoinRecord(
+  store: DiscordJoinStore,
+  userId: string,
+): DiscordJoinStore {
+  if (!store.users[userId]) return store;
+  const users = { ...store.users };
+  delete users[userId];
+  return { users };
+}
+
+const forgotten = new Set<(userId: string) => void>();
+
+/** The Join hook drops this account from memory when deletion removes it. */
+export function onDiscordJoinUserForgotten(fn: (userId: string) => void): () => void {
+  forgotten.add(fn);
+  return () => {
+    forgotten.delete(fn);
+  };
+}
+
+export function notifyDiscordJoinUserForgotten(userId: string): void {
+  forgotten.forEach((fn) => fn(userId));
+}
+
+/**
+ * A trial counts only from a loaded subscription row whose status is
+ * `trialing` and whose period is still open. An entitled user with no row
+ * yet is not a trial: that is the cold-start shape of a long-time paid member.
+ */
+export function confirmedTrial(input: {
+  subLoading: boolean;
+  status: string | null | undefined;
+  periodEntitled: boolean;
+}): boolean {
+  return !input.subLoading && input.status === 'trialing' && input.periodEntitled;
+}
+
 /**
  * A trial observation sticks. A later paid tier does not clear it: that is
  * how a conversion is told apart from a Weekly checkout.
@@ -167,13 +205,27 @@ export function paywallDiscordBullet(trialDays: number): string {
 }
 
 /** Preview slide. No join button on either variant. */
-export function discordOnboardingSlide(discordPaid: boolean): { title: string; body: string } {
+export function discordOnboardingSlide(
+  discordPaid: boolean,
+  joinSeen = false,
+): { title: string; body: string } {
   return {
     title: 'The subscriber Discord',
-    body: discordPaid
-      ? 'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join after this intro — or anytime in Settings.'
-      : 'Paid plans include a private community, plus extra bets shared beyond the models. It unlocks when a paid plan is active, after any free trial.',
+    body: !discordPaid
+      ? 'Paid plans include a private community, plus extra bets shared beyond the models. It unlocks when a paid plan is active, after any free trial.'
+      : joinSeen
+        ? 'Your plan includes a private community, plus extra bets shared beyond the models. Join anytime in Settings → Community.'
+        : 'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join after this intro — or anytime in Settings.',
   };
+}
+
+/** A failed storage read must not show the screen or write over other accounts. */
+export function discordJoinVisible(input: {
+  ready: boolean;
+  loadFailed: boolean;
+  offerShow: boolean;
+}): boolean {
+  return input.ready && !input.loadFailed && input.offerShow;
 }
 
 export const DISCORD_CARD_TITLE = 'Discord for members';

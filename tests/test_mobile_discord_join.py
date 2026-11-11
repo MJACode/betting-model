@@ -32,7 +32,7 @@ def test_discord_join_stays_behind_the_paid_gate():
     assert "discord.gg" not in modal
     onboarding = _read(MOBILE / "src/components/OnboardingModal.tsx")
     assert "Join Discord" not in onboarding
-    assert "discordOnboardingSlide(discordPaid)" in onboarding
+    assert "discordOnboardingSlide(discordPaid, joinSeen)" in onboarding
     hook = _read(MOBILE / "src/hooks/useDiscordJoin.ts")
     assert "markDiscordJoinChosen" in hook
     assert "discord.join.v1" in _read(MOBILE / "src/lib/discordJoin.ts")

@@ -94,6 +94,16 @@ eq(
   paidSlide.body,
   'Your plan includes a private community, plus extra bets shared beyond the models. You’ll be able to join after this intro — or anytime in Settings.',
 );
+eq(
+  'replay after join points at settings',
+  perk.discordOnboardingSlide(true, true).body,
+  'Your plan includes a private community, plus extra bets shared beyond the models. Join anytime in Settings → Community.',
+);
+eq(
+  'a free replay does not use the paid sentence',
+  perk.discordOnboardingSlide(false, true).body,
+  freeSlide.body,
+);
 check('neither slide offers a join button', !/join discord/i.test(freeSlide.body) && !/join discord/i.test(paidSlide.body));
 check('neither slide prints an invite', !freeSlide.body.includes('discord.gg') && !paidSlide.body.includes('discord.gg'));
 
@@ -219,6 +229,29 @@ eq('membership still loading holds the recap', discordJoinBlocksRecap({ storageR
 eq('the join screen holds the recap', discordJoinBlocksRecap({ storageReady: true, membershipHold: false, show: true }), true);
 eq('a decided non-show releases the recap', discordJoinBlocksRecap({ storageReady: true, membershipHold: false, show: false }), false);
 
+eq('a loaded trialing row is a trial', perk.confirmedTrial({ subLoading: false, status: 'trialing', periodEntitled: true }), true);
+eq('a row still loading is not a trial', perk.confirmedTrial({ subLoading: true, status: 'trialing', periodEntitled: true }), false);
+eq('entitled with no row is not a trial', perk.confirmedTrial({ subLoading: false, status: null, periodEntitled: true }), false);
+eq('an active row is not a trial', perk.confirmedTrial({ subLoading: false, status: 'active', periodEntitled: true }), false);
+eq('an expired trial row is not a trial', perk.confirmedTrial({ subLoading: false, status: 'trialing', periodEntitled: false }), false);
+{
+  const untouched = observeDiscordTier(EMPTY_DISCORD_JOIN_RECORD, 'paid');
+  eq('a paid observation does not remember a trial', untouched.sawTrial, false);
+  eq('only a confirmed trial sticks', observeDiscordTier(untouched, 'trial').sawTrial, true);
+}
+eq('a failed read stays hidden', perk.discordJoinVisible({ ready: true, loadFailed: true, offerShow: true }), false);
+eq('a good read can show', perk.discordJoinVisible({ ready: true, loadFailed: false, offerShow: true }), true);
+{
+  const store = withUserDiscordJoinRecord(
+    withUserDiscordJoinRecord({ users: {} }, 'keep', { seen: true, sawTrial: false }),
+    'gone',
+    { seen: true, sawTrial: true },
+  );
+  const left = perk.withoutUserDiscordJoinRecord(store, 'gone');
+  eq('deletion drops only that account', userDiscordJoinRecord(left, 'gone').seen, false);
+  eq('deletion keeps the other account', userDiscordJoinRecord(left, 'keep').seen, true);
+}
+
 const helpers = read('src/lib/discordHelpers.ts');
 check('unpaid invite is still withheld', helpers.includes('if (!paid) return null;'));
 check('paid invite is still the apple link', helpers.includes('https://discord.gg/JWMUzK9Da'));
@@ -249,7 +282,7 @@ const story = onboarding.split('const STORY_SLIDES')[1]?.split('];')[0] ?? '';
 const titles = [...story.matchAll(/title: '([^']+)'/g)].map((m) => m[1]);
 eq('four story slides before discord', titles.length, 4);
 eq('discord follows bet to stay in the game', titles[3], 'Bet to stay in the game');
-check('slide body comes from the paid flag', onboarding.includes('discordOnboardingSlide(discordPaid)'));
+check('slide body comes from the paid flag and the join flag', onboarding.includes('discordOnboardingSlide(discordPaid, joinSeen)'));
 check('books step is still after the slides', onboarding.includes("const BOOKS_TITLE = 'Where do you bet?'"));
 check('pagination is slides plus the books step', /const total = SLIDES\.length \+ 1;/.test(onboarding));
 check('onboarding has no join button', !onboarding.includes('Join Discord') && !onboarding.includes('discord.gg'));
@@ -301,10 +334,16 @@ check(
 );
 
 check(
-  'account deletion clears the flag',
-  read('src/lib/deleteAccountHelpers.ts').includes('DISCORD_JOIN_STORAGE_KEY') &&
+  'account deletion drops one user, not the whole map',
+  !read('src/lib/deleteAccountHelpers.ts').includes('DISCORD_JOIN_STORAGE_KEY') &&
+    read('src/lib/deleteAccount.ts').includes('withoutUserDiscordJoinRecord') &&
+    read('src/lib/deleteAccount.ts').includes('notifyDiscordJoinUserForgotten') &&
     perk.DISCORD_JOIN_STORAGE_KEY === 'discord.join.v1',
 );
+const membership = read('src/hooks/useMembership.ts');
+check('a trial is confirmed from the loaded row', membership.includes('confirmedTrial({'));
+check('the join hook does not watch the fallback tier', hook.includes('trialConfirmed') && !hook.includes('input.tier'));
+check('a failed read does not show or save', hook.includes('setLoadFailed(true)') && hook.includes('if (!ready || loadFailed) return'));
 
 if (failures === 0) console.log('ALL PASS');
 else {

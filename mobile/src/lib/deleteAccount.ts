@@ -34,6 +34,13 @@ import { clearTrackedBetsForAccountDeletion } from '@/hooks/useTrackedBets';
 import { AUTH_ENABLED } from './authConfig';
 import { assertAuthEnabled } from './authHelpers';
 import { ACCOUNT_WIPE_KEYS, QUERY_CACHE_KEYS, isStaleSessionError } from './deleteAccountHelpers';
+import {
+  DISCORD_JOIN_STORAGE_KEY,
+  notifyDiscordJoinUserForgotten,
+  parseDiscordJoinStore,
+  serializeDiscordJoinStore,
+  withoutUserDiscordJoinRecord,
+} from './discordJoin';
 import { discordLinkReady } from './discordConfig';
 import { unlinkDiscord } from './discord';
 import { setModelClv } from './sharpScore';
@@ -70,9 +77,25 @@ export async function clearQueryCache(): Promise<void> {
  * failed (that one is surfaced on its own). Returns 'wipe' for any other
  * failure. Does not sign out and does not rewrite the device books row.
  */
+/**
+ * Drop this account from the Join-screen map. Other accounts on the phone
+ * keep their own records. The hook drops the same id from memory so a later
+ * write cannot put it back.
+ */
+async function forgetDiscordJoinForCurrentUser(): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user.id;
+  if (!userId) return;
+  const raw = await AsyncStorage.getItem(DISCORD_JOIN_STORAGE_KEY);
+  const next = withoutUserDiscordJoinRecord(parseDiscordJoinStore(raw), userId);
+  await AsyncStorage.setItem(DISCORD_JOIN_STORAGE_KEY, serializeDiscordJoinStore(next));
+  notifyDiscordJoinUserForgotten(userId);
+}
+
 export async function wipeLocalAccountData(deviceId: string | null): Promise<LocalFailure | null> {
   let failure: LocalFailure | null = null;
   try {
+    await forgetDiscordJoinForCurrentUser();
     await Promise.all([
       clearCustomModelsForAccountDeletion(),
       clearTrackedBetsForAccountDeletion(),

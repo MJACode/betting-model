@@ -13,7 +13,6 @@
 
 import { isAppReviewDemoEmail } from './appReview';
 import { EMAIL_OTP_LENGTH } from './authConfig';
-import { DISCORD_JOIN_STORAGE_KEY } from './discordJoin';
 import { errorText } from './errors';
 
 /** Must match interval '10 minutes' in delete_my_account() and delete_my_login(). */
@@ -219,7 +218,6 @@ export const ACCOUNT_WIPE_KEYS = [
   'preferredBooks.promptDue',
   'preferredBook.selected',
   'push.optIn.v1',
-  DISCORD_JOIN_STORAGE_KEY,
 ] as const;
 
 /**

@@ -287,7 +287,7 @@ else void sentryStarting.then(startOtherLoggers);
 function App() {
   const { seen, ready, markSeen } = useOnboarding();
   const { ready: authReady, signedIn, user } = useAuth();
-  const { tier, discordPaid, hold: membershipHold, access } = useMembership();
+  const { discordPaid, trialConfirmed, hold: membershipHold, access } = useMembership();
   // A member who saw the intro before the sportsbook step existed gets that
   // step on its own, once (OnboardingModal booksOnly).
   const { needsChoice: needsBooks, ready: booksReady } = usePreferredBooks();
@@ -343,7 +343,7 @@ function App() {
   const surfaceClear = (!AUTH_ENABLED || signedIn) && !holdIntro;
   const join = useDiscordJoin({
     userId: user?.id ?? null,
-    tier,
+    trialConfirmed,
     discordPaid,
     comped: access.source === 'comped',
     onboardingFinished,
@@ -371,6 +371,7 @@ function App() {
         visible={ready && (!seen || needsBooks) && (!AUTH_ENABLED || signedIn) && !holdIntro}
         booksOnly={seen && needsBooks}
         discordPaid={discordPaid}
+        joinSeen={join.joinSeen}
         onDone={markSeen}
       />
       <DiscordJoinModal

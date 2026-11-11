@@ -124,7 +124,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     color: colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 24,
   },
   bullets: {
     marginTop: spacing.lg,
@@ -140,7 +139,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
-    lineHeight: 22,
   },
   footer: {
     paddingHorizontal: spacing.xl,
@@ -174,6 +172,5 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textTertiary,
     textAlign: 'center',
-    lineHeight: 18,
   },
 });

@@ -67,6 +67,7 @@ export function OnboardingModal({
   onDone,
   booksOnly = false,
   discordPaid = false,
+  joinSeen = false,
 }: {
   visible: boolean;
   onDone: () => void;
@@ -74,10 +75,12 @@ export function OnboardingModal({
   booksOnly?: boolean;
   /** Active paid plan or comped. Trial and free get the preview copy. */
   discordPaid?: boolean;
+  /** Join was already dismissed, so the slide points at Settings. */
+  joinSeen?: boolean;
 }) {
   const { books, chosen, setBooks } = usePreferredBooks();
   const [step, setStep] = useState(0);
-  const discord = discordOnboardingSlide(discordPaid);
+  const discord = discordOnboardingSlide(discordPaid, joinSeen);
   const SLIDES = useMemo<Slide[]>(
     () => [
       ...STORY_SLIDES,
