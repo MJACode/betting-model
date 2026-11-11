@@ -525,6 +525,24 @@ bets reached 0.48). And a bet that cannot win together with the game's
 standing pre-game total bet (mike, 2026-10-17: *"It can't be both"*): in the
 replay that is 24 of the 967 bets, and those 24 lost 5.75 units.
 
+### In the app (2026-11-11)
+
+- **Its name is "NCAABW Live Totals", badge "LIVE O/U".** Not "Halftime
+  Totals": to a bettor a halftime bet is a bet on the second half, and this
+  one is on the full game (UX review, 2026-11-11). The open-picks view uses
+  the same name.
+- Its bets are on the Live Signals board only. The lock row reads "Locked
+  8:42 PM ET · halftime", and Pick Detail says the bet is on the full-game
+  total, settles on the final score, and was priced during the break shortly
+  before the time shown.
+- The card shows the locked price and opens the book without a live number:
+  the loop reads prices only during the break.
+- The empty Live board says the model checks each game during its halftime
+  break and bets it at most once. The sport's empty Today board says halftime
+  bets post on Live Signals.
+- The sentence that lists the sports with an in-play model ends "NCAAB and
+  NCAABW", and VoiceOver reads the sports by name.
+
 **Not measured.** How late ESPN publishes a women's play. The two waits are
 the ones measured on the men's game on 2026-11-07 (scoring plays a median 37
 seconds after their wallclock, 58 at the longest). The ledger stores the

@@ -69,6 +69,7 @@ import {
   showLivePricesBanner,
   sportChipsAvailable,
   todayHeaderCounts,
+  sportSpokenName,
 } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { InfoTooltip } from '@/components/InfoTooltip';
@@ -141,7 +142,12 @@ const SUBTAB_REACH_BELOW = 6;
 const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { hasLiveModel, liveEmptySubtitle, liveModelSportsSentence } from '@/lib/liveSports';
+import {
+  hasLiveModel,
+  liveEmptySubtitle,
+  liveModelSportsSentence,
+  liveModelSportsSpoken,
+} from '@/lib/liveSports';
 import { errorText, friendlyCause } from '@/lib/errors';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { ScoreboardBoard } from '@/components/ScoreboardBoard';
@@ -847,7 +853,7 @@ export function PicksHomeScreen() {
           <InfoTooltip
             title="Live pricing"
             body={
-              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books once an hour and the NCAAB in-play models twice an hour, so their cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
+              'Each live pick is priced and placed at the sportsbook named on its card, the book where the model found the bet. If that book is not one of the books you chose in Settings, the card says so and offers no link.\n\nOur feed serves one cached in-play snapshot for about 45 seconds, so a live price here can be up to ~45s behind the book’s own app. Polling faster would not change that. The NBA in-play model reads the books once an hour, the NCAAB in-play models twice an hour, and the NCAABW in-play model only during a game’s halftime break, so their cards show the locked price and open the book without a live number.\n\nBet the number the book shows, and skip it if it has moved past the edge.'
             }
             accessibilityLabel="About live pricing"
           />
@@ -1110,7 +1116,7 @@ function EmptyForView({
           // total, not on the refresh cadence, so the refresh times would
           // send a member back at the wrong hour (UX review, 2026-11-10).
           sport === 'NCAABW'
-            ? `No NCAABW picks have posted for ${date} yet. Picks post as DraftKings opens each game’s total, mostly on game day.`
+            ? `No NCAABW picks have posted for ${date} yet. Pre-game picks post as DraftKings opens each game’s total, mostly on game day. Bets made at halftime post on Live Signals.`
             : `No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`
         }
       />
@@ -1137,6 +1143,7 @@ function EmptyForView({
         <EmptyState
           title={`No live model for ${sport} yet`}
           subtitle={`In-play models run on ${liveModelSportsSentence()}, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
+          subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSpoken()}, so this board stays empty for ${sportSpokenName(sport)}. The All and Signals boards carry its pre-game picks.`}
         />
       );
     }

@@ -2083,6 +2083,10 @@ export function ncaabLivePeriod(period: number, modelId: string | null | undefin
   return (modelId ?? '').endsWith('_h2') ? 'halftime' : '1st half';
 }
 
+// The women's in-play model: the full-game total, bet during the halftime
+// break (models/ncaabw_live_ht.py).
+const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+
 export function pickTimingInfo(pick: Pick): PickTiming | null {
   if (!pick.created_at) return null;
   if (pick.signal_type !== 'BET') return null;
@@ -2107,9 +2111,9 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
           ? ` · inning ${pick.inning_at_pick}`
           : pick.sport === 'NCAAB'
             ? ` · ${ncaabLivePeriod(pick.inning_at_pick, pick.model_id)}`
-            : pick.sport === 'NCAABW'
-              ? // The women's one in-play model bets during the halftime break
-                // only (models/ncaabw_live_loop.build_pick stores quarter 2).
+            : pick.model_id === NCAABW_HALFTIME_MODEL
+              ? // Bet during the halftime break only
+                // (models/ncaabw_live_loop.build_pick stores quarter 2).
                 ' · halftime'
               : ` · Q${pick.inning_at_pick}`
         : '';
@@ -2118,9 +2122,17 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
       verb: 'Locked',
       label: `Locked ${stamp}${period} — bet of record`,
       note:
-        'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
-        'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
-        'before betting.',
+        pick.model_id === NCAABW_HALFTIME_MODEL
+          ? // The loop reads the price, waits for ESPN's play list twice, then
+            // writes the bet (models/ncaabw_live_loop.py), so the stamp is
+            // minutes after the price.
+            'Decided once, during the halftime break, on the full-game total: it settles on the ' +
+            'final score, overtime included. Never re-priced: this is the line and price read ' +
+            'during the break, shortly before the time above, not the current ones. The total ' +
+            'moves once play resumes, so check the book before betting.'
+          : 'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
+            'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
+            'before betting.',
     };
   }
 

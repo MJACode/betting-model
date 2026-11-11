@@ -750,11 +750,14 @@ export const MODEL_META: Record<string, ModelMeta> = {
   },
   // Women's college basketball in play (models/ncaabw_live_ht.py, 2026-11-11):
   // the full-game total, bet once a game during the halftime break. It
-  // SETTLES ON THE FULL GAME, so the name says when the bet is placed, never
-  // a period it is "on". Its picks appear on the Live segment only.
+  // SETTLES ON THE FULL GAME. Named like the other one-model live total
+  // ('NCAAF Live Totals', LIVE O/U), not "Halftime": a "halftime bet" is a
+  // bet on the second half in every betting glossary, and this is not one
+  // (UX review, 2026-11-11). The lock row, the model's page and the Live
+  // board say when it bets. Its picks appear on the Live segment only.
   ncaabw_live_total_ht: {
-    shortLabel: 'Halftime O/U',
-    longLabel: 'NCAABW Halftime Totals',
+    shortLabel: 'LIVE O/U',
+    longLabel: 'NCAABW Live Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -1202,7 +1205,7 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
           'sportsbook with the best offer. The bet is on the full-game total: it settles on the final ' +
           `score, overtime included, not on a half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
         empty: `This model checks each NCAABW game during its halftime break. ${LIVE_NOT_IN_LIST}`,
-        note: 'Halftime bets appear on Live Signals, not in this list.',
+        note: 'In-play bets appear on Live Signals, not in this list.',
       };
     }
     const nba = NBA_LIVE_TIMING[modelId];

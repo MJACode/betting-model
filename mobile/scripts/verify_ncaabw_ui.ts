@@ -194,8 +194,8 @@ check('the empty Live board says the model bets at halftime',
   && liveEmptySubtitle('NCAABW').includes('at most once'), liveEmptySubtitle('NCAABW'));
 check('the halftime model belongs to NCAABW, not NCAAB', sportOfModel('ncaabw_live_total_ht') === 'NCAABW');
 check('the halftime model has its own name',
-  MODEL_META.ncaabw_live_total_ht?.longLabel === 'NCAABW Halftime Totals'
-  && MODEL_META.ncaabw_live_total_ht?.shortLabel === 'Halftime O/U');
+  MODEL_META.ncaabw_live_total_ht?.longLabel === 'NCAABW Live Totals'
+  && MODEL_META.ncaabw_live_total_ht?.shortLabel === 'LIVE O/U');
 check('an NCAABW form strip reads PTS', teamScoreUnit('NCAABW') === 'PTS');
 // ESPN labels the women's season by its ending year: 2026-27 is 2027.
 check('an NCAABW season is labelled by its ending year',

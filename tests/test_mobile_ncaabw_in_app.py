@@ -212,7 +212,9 @@ def test_the_totals_model_has_a_label_under_the_id_it_writes():
     labelled = set(re.findall(r"\n  (ncaabw_[a-z0-9_]+): \{", src))
     assert labelled == {NCAABW_TOTALS_ID, NCAABW_HALFTIME_ID}, labelled
     h = re.search(rf"\n  {NCAABW_HALFTIME_ID}: \{{(.*?)\n  \}},", src, re.S).group(1)
-    assert "longLabel: 'NCAABW Halftime Totals'" in h and "shortLabel: 'Halftime O/U'" in h
+    # "Live", not "Halftime": a halftime bet is a second-half bet to a bettor
+    assert "longLabel: 'NCAABW Live Totals'" in h and "shortLabel: 'LIVE O/U'" in h
+    assert "Halftime" not in h
     assert "type: 'game'" in h
     scored = {m for m in config.ACTION_THRESHOLDS if m.startswith("ncaabw_")}
     assert scored <= labelled, f"config scores {sorted(scored - labelled)} with no label in the app"
@@ -416,6 +418,8 @@ def test_ncaabw_has_no_stats_and_asks_the_server_for_none():
     live_src = _read(LIVE_SPORTS)
     live = re.search(r"export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set\(\[(.*?)\]\);", live_src)
     assert live and "'NCAABW'" in live.group(1)
+    # the two college basketball codes close the list, never sit mid-sentence
+    assert live.group(1).endswith("'NCAAB', 'NCAABW'")
     assert ("'The NCAABW in-play model checks each game during its halftime break and bets it at most once, ' +"
             in live_src)
 
@@ -510,10 +514,17 @@ def test_the_empty_boards_say_where_the_womens_picks_are():
     picks = _read(SRC / "screens" / "PicksHomeScreen.tsx")
     # Today: the women's model posts when DraftKings opens a total, not on the
     # refresh cadence the other sports' copy names.
-    assert ("Picks post as DraftKings opens each game’s total, mostly on game day." in picks)
+    assert ("Pre-game picks post as DraftKings opens each game’s total, mostly on game day. "
+            "Bets made at halftime post on Live Signals.") in picks
     # Live: the women's sport has an in-play model now, so no "there is no
     # in-play model" sentence is left for it.
     assert "There is no in-play model for women" not in picks
+    # the sports list is spoken by name for VoiceOver, and the live-pricing note names the sport
+    assert "subtitleAccessibilityLabel={`In-play models run on ${liveModelSportsSpoken()}" in picks
+    assert "the NCAABW in-play model only during a game’s halftime break" in picks
+    markets = _read(SRC / "lib" / "markets.ts")
+    assert "pick.model_id === NCAABW_HALFTIME_MODEL" in markets and "pick.sport === 'NCAABW'" not in markets
+    assert "'Decided once, during the halftime break, on the full-game total: it settles on the ' +" in markets
     stats = _read(SRC / "screens" / "StatsScreen.tsx")
     assert ("'There are no player or team stats for women’s college basketball. Its totals "
             "picks are on the Picks tab.'") in stats

@@ -269,6 +269,12 @@ function mkPick(over: Partial<Pick>): Pick {
   );
   check('an NCAABW live bet says halftime, not a quarter',
     Boolean(ncaabwHalf?.label.includes('· halftime')) && !ncaabwHalf?.label.includes('Q2'), ncaabwHalf?.label);
+  check('its note says the bet is on the full game and when the price was read',
+    Boolean(ncaabwHalf?.note.includes('on the full-game total'))
+    && Boolean(ncaabwHalf?.note.includes('read during the break, shortly before the time above'))
+    && !ncaabwHalf?.note.includes('Locked the moment this crossed'), ncaabwHalf?.note);
+  check('every other live pick keeps the general note',
+    Boolean(nbaLive?.note.includes('Locked the moment this crossed')), nbaLive?.note);
 
   const noPeriod = pickTimingInfo(mkPick({ is_live: true, inning_at_pick: null }));
   check(
