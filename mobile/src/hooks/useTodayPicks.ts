@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import {
   fetchPicksForDate,
   fetchUpcomingUfcPicks,
@@ -215,7 +216,12 @@ export async function readTodayBoard(target: string): Promise<TodayBoardRead<Enr
 setTodayBoardReader(readTodayBoard);
 
 export function useTodayPicks(date?: string) {
-  const target = date ?? todayET();
+  // The default day is state so a foreground after midnight ET switches the
+  // board. todayET() read once at mount would keep yesterday until the
+  // component happened to re-render. An explicit `date` argument is left
+  // alone: the caller asked for that day.
+  const [liveDay, setLiveDay] = useState(() => todayET());
+  const target = date ?? liveDay;
   const [board, setBoard] = useState<TodayBoardSnapshot<EnrichedPick>>(() => todayBoardSnapshot<EnrichedPick>(target));
   // The rows are shared. The spinner is not. A pull on Picks must not turn the
   // betslip's resolving state back on, or replace a model screen's known empty
@@ -239,6 +245,20 @@ export function useTodayPicks(date?: string) {
       stop();
     };
   }, [target]);
+
+  // Coming back to the app: re-read only when the shared board is stale, and
+  // switch to the new Eastern date after midnight. Same AppState hook as
+  // useLinesBoard. A focus hook is off limits here: the betslip bar is
+  // mounted outside the navigator.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const day = todayET();
+      if (date == null) setLiveDay((prev) => (prev === day ? prev : day));
+      void loadTodayBoard(date ?? day, false);
+    });
+    return () => sub.remove();
+  }, [date]);
 
   // Pull-to-refresh, and any other caller of `refresh`, skips the finished
   // read. A refresh during an in-flight read waits for one follow-up.

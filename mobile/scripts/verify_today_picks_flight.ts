@@ -13,8 +13,10 @@
 import {
   loadTodayBoard,
   resetTodayBoardForTests,
+  setTodayBoardClockForTests,
   setTodayBoardReader,
   subscribeTodayBoard,
+  TODAY_BOARD_MAX_AGE_MS,
   todayBoardSnapshot,
   type TodayBoardRead,
 } from '../src/lib/todayPicksFlight';
@@ -151,6 +153,57 @@ async function datesDoNotShare(): Promise<void> {
     && todayBoardSnapshot<Row>('2026-11-12').data[0]?.id === 2);
 }
 
+async function ageWindow(): Promise<void> {
+  resetTodayBoardForTests();
+  let t = 1_000_000;
+  setTodayBoardClockForTests(() => t);
+  let calls = 0;
+  setTodayBoardReader(async () => {
+    calls += 1;
+    return ok(calls);
+  });
+  await loadTodayBoard(DATE, false);
+  t += TODAY_BOARD_MAX_AGE_MS - 1;
+  await loadTodayBoard(DATE, false);
+  check('a fresh mount does not re-read', calls === 1, `calls=${calls}`);
+  t += 1;
+  await loadTodayBoard(DATE, false);
+  check('a stale mount re-reads once', calls === 2, `calls=${calls}`);
+
+  t += TODAY_BOARD_MAX_AGE_MS;
+  const hold = gate();
+  setTodayBoardReader(async () => {
+    calls += 1;
+    await hold.opened;
+    return ok(calls);
+  });
+  const pending = [0, 1, 2, 3].map(() => loadTodayBoard(DATE, false));
+  check('four stale callers start one read', calls === 3, `calls=${calls}`);
+  hold.release();
+  await Promise.all(pending);
+  check('four stale callers still made one read', calls === 3, `calls=${calls}`);
+}
+
+async function aQuietDateIsDropped(): Promise<void> {
+  resetTodayBoardForTests();
+  let calls = 0;
+  setTodayBoardReader(async () => {
+    calls += 1;
+    return ok(calls);
+  });
+  const stop = subscribeTodayBoard<Row>('2026-11-10', () => {});
+  await loadTodayBoard('2026-11-10', false);
+  await loadTodayBoard('2026-11-11', false);
+  const kept = calls;
+  await loadTodayBoard('2026-11-10', false);
+  check('a date with a listener is kept', calls === kept, `calls=${calls}`);
+  stop();
+  await loadTodayBoard('2026-11-12', false);
+  const dropped = calls;
+  await loadTodayBoard('2026-11-10', false);
+  check('a date nobody is watching is dropped', calls === dropped + 1, `calls=${calls} dropped=${dropped}`);
+}
+
 async function listenersSeeTheRead(): Promise<void> {
   resetTodayBoardForTests();
   const hold = gate();
@@ -192,6 +245,10 @@ async function countLaunchRequests(): Promise<void> {
     hook = await import('../src/hooks/useTodayPicks');
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
+    if (process.env.CI) {
+      check('launch request count runs in CI', false, message);
+      return;
+    }
     console.log(`[SKIP] launch request count (needs tsx and the app graph) — ${message}`);
     return;
   }
@@ -265,6 +322,8 @@ async function main(): Promise<void> {
   await refreshDuringFlightIsOneFollowUp();
   await failedRefreshKeepsRows();
   await datesDoNotShare();
+  await ageWindow();
+  await aQuietDateIsDropped();
   await listenersSeeTheRead();
   await countLaunchRequests();
   if (failures) {

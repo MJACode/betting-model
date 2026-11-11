@@ -40,6 +40,11 @@ def test_the_hook_reads_through_the_shared_flight():
     assert "loadTodayBoard(target, false)" in src
     assert "loadTodayBoard(target, true)" in src
     assert "setTodayBoardReader(readTodayBoard)" in src
+    # Foreground re-reads a stale board and picks up the next Eastern date.
+    # AppState, not useFocusEffect: the betslip bar is outside the navigator.
+    assert "AppState.addEventListener" in src
+    assert "useFocusEffect" not in src
+    assert "TODAY_BOARD_MAX_AGE_MS" in (MOBILE / "src" / "lib" / "todayPicksFlight.ts").read_text(encoding="utf-8")
     # The paused split stays at the source. All reads pausedData; everyone
     # else reads data. Refresh still goes through the same reader.
     assert "setData(all.filter((d) => !isPausedForDisplay(d.pick)))" in src

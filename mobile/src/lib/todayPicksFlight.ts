@@ -10,8 +10,19 @@
  * A refresh that arrives while a read is running does not start a second
  * one; it asks for exactly one follow-up when the current read settles.
  *
+ * A finished read is reused for TODAY_BOARD_MAX_AGE_MS. A model page or
+ * Player Stats opened later than that starts one new read, and every other
+ * mount of the same date hears it. Inside the window, hopping screens does
+ * not start another seven-sport read. 5 minutes is the review's pick
+ * (2026-11-11): long enough that a launch burst stays one read, short enough
+ * that an evening visit is not still showing noon. Change the constant to
+ * move that line.
+ *
  * No React and no native module, so the dedupe can be run under node.
  */
+
+/** How long a finished read satisfies a mount that did not ask to refresh. */
+export const TODAY_BOARD_MAX_AGE_MS = 5 * 60 * 1000;
 
 export interface TodayBoardPartial {
   whats: string[];
@@ -43,11 +54,14 @@ interface Slot<Row> {
   inFlight: Promise<void> | null;
   /** A refresh landed during the current read. One follow-up, not one per caller. */
   again: boolean;
+  /** When the last successful read finished. 0 until then. */
+  fetchedAt: number;
 }
 
 const slots = new Map<string, Slot<unknown>>();
 
 let reader: ((date: string) => Promise<TodayBoardRead<unknown>>) | null = null;
+let nowMs: () => number = () => Date.now();
 
 export function emptyTodayBoard<Row>(): TodayBoardSnapshot<Row> {
   return {
@@ -63,8 +77,20 @@ export function emptyTodayBoard<Row>(): TodayBoardSnapshot<Row> {
 function slotFor<Row>(date: string): Slot<Row> {
   let slot = slots.get(date) as Slot<Row> | undefined;
   if (!slot) {
-    slot = { value: emptyTodayBoard<Row>(), listeners: new Set(), inFlight: null, again: false };
+    slot = {
+      value: emptyTodayBoard<Row>(),
+      listeners: new Set(),
+      inFlight: null,
+      again: false,
+      fetchedAt: 0,
+    };
     slots.set(date, slot as Slot<unknown>);
+    // A phone left open across midnight was keeping every earlier board.
+    // Drop a date nobody is looking at. The slot just created has no
+    // listeners yet, so it is excluded. An in-flight read is kept.
+    for (const [key, other] of slots) {
+      if (key !== date && other.listeners.size === 0 && other.inFlight == null) slots.delete(key);
+    }
   }
   return slot;
 }
@@ -77,6 +103,11 @@ function publish<Row>(slot: Slot<Row>): void {
 /** The hook installs the real reader. Tests install a fake. */
 export function setTodayBoardReader<Row>(fn: (date: string) => Promise<TodayBoardRead<Row>>): void {
   reader = fn as (date: string) => Promise<TodayBoardRead<unknown>>;
+}
+
+/** Tests move the clock instead of waiting out TODAY_BOARD_MAX_AGE_MS. */
+export function setTodayBoardClockForTests(fn: () => number): void {
+  nowMs = fn;
 }
 
 export function todayBoardSnapshot<Row>(date: string): TodayBoardSnapshot<Row> {
@@ -105,7 +136,8 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
     if (force) slot.again = true;
     return slot.inFlight;
   }
-  if (!force && slot.value.loaded) return;
+  const fresh = slot.value.loaded && nowMs() - slot.fetchedAt < TODAY_BOARD_MAX_AGE_MS;
+  if (!force && fresh) return;
   if (!reader) throw new Error('today board reader is not installed');
 
   const read = reader;
@@ -134,6 +166,7 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
         };
       }
       if (result.loaded) {
+        slot.fetchedAt = nowMs();
         slot.value = {
           data: result.data,
           pausedData: result.pausedData,
@@ -152,15 +185,14 @@ export async function loadTodayBoard(date: string, force = false): Promise<void>
     // off this update has to start a new read, not set `again` on a flight
     // that is already leaving.
     slot.inFlight = null;
-    slot.value = { ...slot.value, loading: false };
-    const followUp = slot.again;
     slot.again = false;
+    slot.value = { ...slot.value, loading: false };
     publish(slot);
     resolveFlight();
-    if (followUp) void loadTodayBoard(date, true);
   }
 }
 
 export function resetTodayBoardForTests(): void {
   slots.clear();
+  nowMs = () => Date.now();
 }
