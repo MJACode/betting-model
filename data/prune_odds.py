@@ -309,7 +309,14 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      # snapshot the feed holds, pre-game (change-only) and in
                      # play. Paid rows on past games.
                      "odds_api_ncaabw_history",
-                     "odds_api_ncaabw_inplay_history")
+                     "odds_api_ncaabw_inplay_history",
+                     # College football first-half lines and team totals,
+                     # 2023-2025, at the two times the full-game history is
+                     # stored at (2026-11-10,
+                     # data/ingestors/ncaaf_derivative_history.SOURCES): paid
+                     # rows on past games, several team-total lines a book.
+                     "odds_api_ncaaf_derivative_am",
+                     "odds_api_ncaaf_derivative_pm")
 
 # Sports whose `odds` rows keep their whole PRICE PATH (2026-10-17, mike: "We
 # need nba spread / ml / totals models ... find edge"; docs/nba_models_2026.md

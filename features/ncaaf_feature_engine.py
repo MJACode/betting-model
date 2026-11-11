@@ -701,6 +701,16 @@ def _hfa_live(conn: DBConnection, team: str, season: int) -> float:
     return shrink_hfa(row[0], row[1], row[2]) if row else LEAGUE_HFA_POINTS
 
 
+# What the three weather inputs hold for a DOME game. scripts/ncaaf_weather_
+# backfill writes exactly this for a dome, both in the historical backfill
+# that made the training rows and in the daily forecast step, so a dome game
+# reads the same in training and at serve time: 312 of the 328 dome games in
+# the totals training frame of 2026-11-10 hold these values. The scorer serves
+# them to a dome game that has no weather row (models.scorer, the weather
+# hold): a dome has no forecast to wait for.
+DOME_WEATHER = {"wx_temp_f": 72.0, "wx_wind_mph": 0.0, "wx_precip_mm": 0.0}
+
+
 # ── Bulk training/backtest path ───────────────────────────────────────────────
 
 def margin_cover_prob(residuals, disagreement: float) -> float:
