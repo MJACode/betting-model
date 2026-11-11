@@ -1080,6 +1080,8 @@ const MAIN_GAME_ODDS_MARKETS = [
   'spreads_h1',
   // The NBA first quarter's spread (nba_q1_trend).
   'spreads_q1',
+  // The NBA first quarter's moneyline (nba_q1_trend_ml).
+  'h2h_q1',
 ] as const;
 
 /**

@@ -778,6 +778,12 @@ ACTION_THRESHOLDS: dict = {
     # 58-29-1, +26.33 units, +27.4%, interval +8.85% to +44.79%, every season positive. prob / edge are 0.0
     # for the same reason as nba_total_luck's.
     "nba_q1_trend":             {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-QUARTER MONEYLINE, the same hot team (mike, 2026-11-07: "Build it anyway"): written by the
+    # nba_q1_trend_ml card. nba_q1_trend's rule exactly, bet on the first-quarter moneyline
+    # (docs/nba_search_q1mt.md, family Q1M). THE CUT IS THE RULE, in the card; the offer the best EV under the
+    # moneyline's no-vig fair price. It did NOT pass the house standard (the 200-bet bar): 87 bets, 46-35-6,
+    # +17.78 units, +25.8%, interval +1.7% to +50.0%. It bets the same team in the same games as nba_q1_trend.
+    "nba_q1_trend_ml":          {"min_prob": 0.0, "min_edge": 0.0},
     # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
     # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
     # Team ratings refit as of DraftKings' total, a residual on as-of shooting
@@ -2242,6 +2248,9 @@ MODEL_MIN_ODDS: dict = {
     # NBA first-quarter spreads, the hot team: it laid -125 to +118 on its 88 graded bets (median -110), so -200 admits prices
     # it was never graded at. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
     "nba_q1_trend":              -200,
+    # NBA first-quarter moneylines, the hot team: it laid -192 to +360 on its 87 graded bets (median +130), so -200
+    # is the floor it was graded at. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "nba_q1_trend_ml":           -200,
     # NCAAB totals (2026-10-30, mike): it laid -120 to +102 on its 1,094
     # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
     # override cannot move it.
@@ -2571,6 +2580,11 @@ MODEL_OWN_EV_FLOOR: dict = {
     # market-fair P(win) plus the cell's uplift (+0.1526 for 2026-27, fitted on all 88 graded bets), so every
     # graded bet sits far above 0.00 and this floor removes none of them.
     "nba_q1_trend": 0.00,
+    # NBA first-quarter moneylines (mike, 2026-11-07). The cut is the rule, in the card; its probability is the
+    # market-fair P(win | not level) plus the cell's uplift (+0.1416 for 2026-27, fitted on the 81 decided graded
+    # bets). Swept on its own 87: every floor from 0.00 to 0.15 keeps all 87 (the lowest EV is +0.182), 0.20 drops
+    # 7. So 0.00, as its spread sibling, removes none of them.
+    "nba_q1_trend_ml": 0.00,
     # NCAAB totals (2026-10-30, mike). The cut is the edge (0.04, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
@@ -2784,6 +2798,8 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     "nba_first_half_total_luck",
     # The NBA first-quarter spreads: the market's fair P(win) plus the walk-forward uplift of the graded cell.
     "nba_q1_trend",
+    # The NBA first-quarter moneylines: the market's no-vig P(win | not level) plus the graded cell's uplift.
+    "nba_q1_trend_ml",
     # 2026-10-30 (mike, "Yes to the totals model"). NCAAB totals: its number
     # is the blend's P(win | no push) at DraftKings' line, which its 0.04 cut
     # was measured on. It has no record, so its map would be the offset
@@ -2981,6 +2997,8 @@ SCORING_METHODS: dict = {
     "nba_first_half_total_luck": "rule",
     # The same shape: its artifact holds the first-quarter pricing rows and the graded cell's uplift buckets.
     "nba_q1_trend":        "rule",
+    # The same shape: its artifact holds the graded cell's uplift buckets (the moneyline needs no pricing rows).
+    "nba_q1_trend_ml":     "rule",
     # A rule with a parameter artifact committed under models/saved/ (last
     # season's ratings, the residual and blend coefficients,
     # models/ncaab_total_blend.py), never registered: the card loads it by
@@ -3043,6 +3061,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "nba_q1_trend":             0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend_ml":          0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.05,   # 2026-10-30 mike, raised 2026-11-07 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
@@ -3146,6 +3165,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "nba_q1_trend":             0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend_ml":          0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.0,  # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS

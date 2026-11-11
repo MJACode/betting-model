@@ -44,6 +44,7 @@ models/saved/mlb_prop_pitcher_walks_20260620_164336.pkl
 models/saved/mlb_runline_20260823_105841.pkl
 models/saved/nba_first_half_total_luck_20261031_095356.pkl
 models/saved/nba_q1_trend_20261107.pkl
+models/saved/nba_q1_trend_ml_20261107.pkl
 models/saved/nba_prop_projection_20261016_091702.pkl
 models/saved/nba_team_total_luck_20261031_095356.pkl
 models/saved/nba_total_luck_20261031_095356.pkl
@@ -132,6 +133,11 @@ models/saved/wnba_spread_20260719_113238.pkl
   graded cell's per-season bet counts and the 88 graded bets' keys and prices (`models/nba_q1_trend.py`, built by
   `scripts/nba_q1_trend_build.py`). Read by the model's own `load_artifact`, not `model_registry`; committed
   with the code that reads it. A new model id: no older file to drop.
+- `nba_q1_trend_ml_20261107.pkl` — the NBA first-quarter moneyline rule's graded cell: per-season bet, win, push
+  and decided counts with the decided bets' summed fair probability (its uplift), and the 87 graded bets' keys
+  and prices (`models/nba_q1_trend_ml.py`, built by `scripts/nba_q1_trend_ml_build.py`). Read by the model's own
+  `load_artifact`, not `model_registry`; committed with the code that reads it. A new model id: no older file to
+  drop.
 
 - `nba_total_luck_`, `nba_team_total_luck_` and `nba_first_half_total_luck_` of
   2026-10-31 are the files of 2026-10-17, 10-18 and 10-30 with one key added, the

@@ -50,6 +50,10 @@ export function gameMarketForModel(modelId: string): string | null {
   // so without this every price, movement and line-shop lookup would read the
   // moneyline rows.
   if (modelId === 'nba_q1_trend') return 'spreads_q1';
+  // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): stored
+  // under its own market, never the game's 'h2h' rows, which price the whole
+  // game's winner.
+  if (modelId === 'nba_q1_trend_ml') return 'h2h_q1';
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -291,6 +295,8 @@ export function marketClassForModel(modelId: string): MarketClass {
   if (modelId === 'ncaab_moneyline_own_spread') return 'game_ml';
   // A spread, though its id has no 'spread' in it: the first quarter's.
   if (modelId === 'nba_q1_trend') return 'game_spread';
+  // A moneyline, though its id has no 'moneyline' in it: the first quarter's.
+  if (modelId === 'nba_q1_trend_ml') return 'game_ml';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'game_spread';
   }
@@ -2063,11 +2069,13 @@ const NBA_POSTED_PROP_MODELS: readonly string[] = ['nba_prop_market', 'nba_prop_
  *   - unlocked look-ahead previews (future UFC/golf), which re-price until
  *     game day.
  */
-// The two NCAAB full-game moneyline models: a moneyline has no line, so their
-// Pick Detail note names only the price.
-const NCAAB_MONEYLINE_MODELS: readonly string[] = [
+// The posted-once moneyline models: the two NCAAB full-game moneylines and the
+// NBA first quarter's (models/nba_q1_trend_ml.py). A moneyline has no line, so
+// their Pick Detail note names only the price.
+const POSTED_MONEYLINE_MODELS: readonly string[] = [
   'ncaab_moneyline_own_spread',
   'ncaab_moneyline_first_post',
+  'nba_q1_trend_ml',
 ];
 
 /**
@@ -2165,6 +2173,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     pick.model_id === 'nba_team_total_luck' ||
     pick.model_id === 'nba_first_half_total_luck' ||
     pick.model_id === 'nba_q1_trend' ||
+    pick.model_id === 'nba_q1_trend_ml' ||
     pick.model_id === 'ncaab_total_blend' ||
     pick.model_id === 'ncaabw_total_blend' ||
     pick.model_id === 'ncaab_spread_market' ||
@@ -2182,7 +2191,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         // A moneyline has no line (UX review, 2026-11-03), and an opening
         // price moves fast: the opening-moneyline model says so where the
         // member places the bet.
-        (NCAAB_MONEYLINE_MODELS.includes(pick.model_id)
+        (POSTED_MONEYLINE_MODELS.includes(pick.model_id)
           ? 'Posted once and never re-priced. This is when the bet posted, at the price shown.'
           : 'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
             'shown.') +

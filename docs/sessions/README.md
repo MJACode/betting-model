@@ -19,7 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, app book list brought up to date after #1218: session entries kept; the fetch list stays config's ten and the first-quarter moneyline is on the posted-once list |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, app book list brought up to date with master: the fetch list stays config's ten and the checks still read config.py; the women's extra books stay off the picker and keep their short labels |
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, nba_q1_trend_ml branch brought up to date with master: CLV and open_picks keep both the first-quarter moneyline and master's NCAABW / NCAAB live names; the applied-migration stamps move so the next pass recreates them |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, X pick posts and the daily, weekly, and monthly recaps carry no hashtags; the tag budget goes back to the text, still within 280 weighted characters |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player Stats Back is a JS pill (system pill still dead after Compare odds on the 2026-11-07 bundle; empty stack replaces to Stats) |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player detail minutes for NBA, WNBA, and NCAAB: Avg MIN, under-bar labels, Low MIN at 70% of the window average, a context-only Minutes chip after PRA, DNP when the log row has no minutes and no stat |
@@ -38,6 +40,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, NBA Stats tab: the 1st Basket board (tip, scored first, likely first scorers; free throws count; stats only) |
 | 2026-11-08 | [2026-11](./2026-11.md) | 2026-11-08, Back button: iOS arrow only, no custom label (third "Back does nothing" report, iOS 27.2, after a pop-up; first one caught by the freeze trail) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB in-play models live (early live spread, late live spread, late live total), the best few a night: 2,533 bets +290.4u +10.1% walk-forward 2022-23..2025-26; ESPN play-by-play and 17,117 in-play snapshots stored |
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, nba_q1_trend_ml live on mike's instruction ("Build it anyway"): the first-quarter moneyline on the spread model's rule (87 bets, +25.8%, failed the 200-bet bar); one call now fetches both first-quarter markets; replay 87 of 87 |
+| 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA first-quarter moneyline and total search: 0 of 12 pass; the total closed (+0.9% where the first half made +8.0%); the step on the moneyline is 87 bets +25.8% [+1.7, +50.0], fails the bet count, same games as nba_q1_trend |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, Player page: filter the chart by opponent defense toughness (Tough / Average / Soft over the last 3 seasons played, next opponent tagged; NBA, WNBA, NFL) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NBA in-play loop: the 15%-of-plan credit floor removed (only the 1,000-credit line stops it; mike: balance is not a reason to stop) |
 | 2026-11-07 | [2026-11](./2026-11.md) | 2026-11-07, NCAAB spread and moneyline re-graded without betPARX: a tie goes to the bettable book (spread 405 bets +10.09%, moneyline 836 +4.27% on 2021-2025); a strictly-best betPARX quote is a no-bet that no longer fails the card |
