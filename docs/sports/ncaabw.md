@@ -525,6 +525,33 @@ bets reached 0.48). And a bet that cannot win together with the game's
 standing pre-game total bet (mike, 2026-10-17: *"It can't be both"*): in the
 replay that is 24 of the 967 bets, and those 24 lost 5.75 units.
 
+### An under beside a big favourite (2026-11-11, mike)
+
+mike asked that an under never sits beside a big favourite's spread bet, in
+the men's and the women's models (`docs/sports/ncaab.md`, the section of the
+same name, has what he saw and the measurement). For the women's models:
+
+- **The check is in both writers** (`models/cbb_pairs.py`): the totals card
+  and the halftime loop each ask whether the game holds a spread bet on a
+  favourite laying 20 or more (12 or more on a first-half spread) before
+  they bet an under. There is no women's spread model, so nothing can trip
+  it today.
+- **No rule by the size of the favourite was added**, because the women's
+  halftime unders are at their best there. The replayed halftime bets of
+  both seasons by the points the pre-game favourite lays:
+
+| Pre-game favourite lays | Unders | Overs |
+|---|---|---|
+| under 10 | 197 bets, -13.96 units | 247, +32.35 |
+| 10 to 20 | 123, +6.60 | 154, +42.75 |
+| 20 or more | 101, 70-31, +35.23, +30.88% [+13.2, +47.9] | 145, +29.09, +17.66% |
+
+  Unders with the favourite laying 20 or more made +20.44 units in 2024-25
+  and +14.79 in 2025-26. With no model, the full-game relation on the
+  women's closing lines is the men's: the favourite's cover and the under
+  come in together in 22.9% of games where it lays 30 or more, against
+  25.5% if unrelated (341 games).
+
 ### In the app (2026-11-11)
 
 - **Its name is "NCAABW Live Totals", badge "LIVE O/U".** Not "Halftime

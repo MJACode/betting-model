@@ -39,14 +39,24 @@ them an input, each loop's own decision needs a bar it reads before it writes
 (the women's and men's college loops already rank candidates a night; the
 bar would sit beside that). Nine models (`config.LIVE_MODELS`).
 
-## [ ] Volume settings: an unposted bet still counts in two checks (2026-11-11)
+## [ ] Volume settings: an unposted bet still counts in three checks (2026-11-11)
 
-A bet held back by a setting is still a BET row. The scorer's check that one
-game never carries two bets that cannot both win, and NCAAB agreement sizing,
-both read BET rows and do not ask whether the row was posted. With no setting
-made, nothing changes. Before a setting is used on a model that shares games
-with another (the college basketball cards do), decide whether those two
-readers should look at posted bets only.
+A bet held back by a setting is still a BET row. Three readers take BET rows
+and do not ask whether the row was posted: the scorer's check that one game
+never carries two bets that cannot both win (`models/scorer.
+_apply_side_conflicts`), the college basketball check that an under is not
+held beside a big favourite's spread bet (`models/cbb_pairs.clash`), and
+NCAAB agreement sizing (`models/ncaab_stake.py`). So a held-back under would
+still stop the favourite's spread bet on its game, and nothing would be
+posted there. With no setting made, nothing changes.
+
+Do this before the dashboard panel is published. The test for "standing" is
+not "passes the cut in force": measured 2026-11-11, 7 of 31
+`ncaab_first_half_spread` bets and 3 of 67 `ncaab_first_half_total` bets sit
+under today's cut because they were posted when the cut was 0.02, and a
+posted bet keeps the cut it was written under. The predicate is the app's:
+posted already, or passes the cut in force (`open_picks` has it in SQL).
+One shared fragment, three readers.
 
 ## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
 
@@ -145,6 +155,28 @@ page the read. Found by the same review; it predates the women's sport.
 The checks were run and the halftime total was built (`ncaabw_live_total_ht`,
 `docs/sports/ncaabw.md` "In play: the halftime total"). The halftime spread
 does not clear.
+
+## [ ] NCAAB first-half spread model bets big favourites far more than its replay did (2026-11-11)
+
+Where the favourite lays 12 or more in the half, the replay of 2023-24 to
+2025-26 bet the favourite 37 times and the underdog 485 times; from
+2026-11-03 to 11-10 the live model bet the favourite 15 times (11-4) and the
+underdog 10 (4-6). The books' first-half number for a favourite of 25 or more
+is 0.55 to 0.56 of the full-game number this season against a median 0.59 in
+the replay seasons, so the model's number is at or above the book's where it
+used to sit below. Find out which moved: the books' first-half numbers, the
+full-game consensus the model reads at tip minus 10, or the model's map for
+spreads this large (the fit has few of them). Until then its record on these
+bets is a population the replay barely holds. Queries: `docs/sports/ncaab.md`,
+"An under beside a big favourite".
+
+## [ ] NCAAB first-half unders: the 6 to 12 band is flat too (2026-11-11)
+
+The rule stops unders at 12 or more points (mike's "big favourite"). Unders
+with the favourite laying 6 to 12 in the half went 198-180, -5.64 units on
+379 replayed bets (-7.20, -3.12, +4.67 by season). Moving the bar to 6 is
+mike's call; it was put to him on 2026-11-11. The NONE rows the rule writes
+(`big_favourite`) let the 12-and-up unders be graded live: read them at 100.
 
 ## [ ] NCAABW halftime total: measure ESPN's publishing lag on the women's game (2026-11-11)
 

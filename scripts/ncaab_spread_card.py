@@ -77,6 +77,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import cbb_pairs  # noqa: E402
 from models import ncaab_stake  # noqa: E402
 import models.ncaab_book_quotes as bq  # noqa: E402
 import models.ncaab_spread_market as sm  # noqa: E402
@@ -496,6 +497,9 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             prows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
+            # An under beside a big favourite's spread bet on the same game is not bet
+            # (models/cbb_pairs.py; mike, 2026-11-11): the later of the two becomes a NONE row.
+            cbb_pairs.hold_back(conn, prows, refused)
             published, n_decided = publish(conn, prows, decisions, hour, games, refused)
         logger.info("\n" + render(decisions, diag, published if do_publish else None,
                                   n_decided if do_publish else None))

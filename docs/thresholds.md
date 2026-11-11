@@ -84,11 +84,15 @@ out of force until the next pass.
 sweep views `v_model_full_record` and `v_model_full_outcome_*`; the ops
 roster. The published record does not move: it counts what was posted.
 
-**Two side effects, known and left.** An unposted bet still counts for the
-checks that stop two bets on one game that cannot both win, and for NCAAB
-agreement sizing. A sync run from a checkout older than this change writes
-config's cut without the settings; the worker's next pass, and its sync before
-every Discord post, put them back.
+**Two side effects, known and left.** An unposted bet still counts for three
+readers of BET rows: the check that stops two bets on one game that cannot
+both win, the college basketball check that an under is not held beside a big
+favourite's spread bet, and NCAAB agreement sizing. So a held-back bet can
+still stop its game's other bet. That is to be fixed before a setting is used
+on a model that shares games with another (`docs/followups.md`). And a sync
+run from a checkout older than this change writes config's cut without the
+settings; the worker's next pass, and its sync before every Discord post, put
+them back.
 
 **Measured 2026-11-11** on the stored picks (`python -m
 scripts.model_volume_rehearsal --out DIR`, which runs the migration, the input
@@ -1582,6 +1586,7 @@ It cleared the research bar, narrowly: the pooled lower bound is +0.57%.
 | EV floor | 0.037 (0.03 until 2026-11-06), on its own probability. An edge above 0.025 at -200 or longer is EV above 0.0375, so the floor removes nothing the cut takes; the smallest EV the 0.025 cut admitted in the replay with the -200 limit was +0.0426 (median +0.068, 1,887 bets) | `MODEL_OWN_EV_FLOOR`, `MODELS_ON_OWN_PROBABILITY` |
 | price limit | -200, applied before the best book is chosen (2,527 of the research's 2,529 bets; prices -160 to +155), and pinned | `models/ncaab_first_half_total.best_offer`, `MODEL_MIN_ODDS` |
 | early season | no wait (mike, 2026-11-02). November alone made +35.91 units on 690 bets | the card |
+| big favourite | no UNDER when the favourite lays 12 or more in the first half (mike, 2026-11-11): 331 replayed bets, 171-159, -8.50 units; the game is recorded `big_favourite` and written as a NONE row. `docs/sports/ncaab.md`, "An under beside a big favourite" | `models/ncaab_first_half_total.UNDER_BIG_FAVOURITE` |
 | decided once | on the tip-minus-60 first-half fetch (or its retries, 55 to 60.5 minutes before tip); a row in `ncaab_first_half_total_decisions`, bet or not | `scripts/ncaab_first_half_total_card.py`, `scheduler.run_ncaab_first_half_window` |
 
 **The neighbourhood** (the research's round 5 grid, every game, 2023-24..2025-26,
