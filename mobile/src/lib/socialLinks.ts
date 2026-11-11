@@ -46,13 +46,19 @@ export const APP_VERSION = appConfig.expo.version;
  * scheme, and `openURL` itself rejects if the OS refuses. Either way the user
  * gets the address rather than a dead tap.
  */
-export async function openLink(url: string, label: string): Promise<void> {
+export async function openLink(
+  url: string,
+  label: string,
+  opts?: { revealUrl?: boolean },
+): Promise<void> {
   try {
     const canOpen = await Linking.canOpenURL(url);
     if (!canOpen) throw new Error('cannot open');
     await Linking.openURL(url);
   } catch {
-    Alert.alert(`Couldn't open ${label}`, url);
+    // Discord invites stay off the screen, including the failure alert.
+    // Terms, Privacy and X still show the address, because that is the point.
+    Alert.alert(`Couldn't open ${label}`, opts?.revealUrl === false ? undefined : url);
   }
 }
 

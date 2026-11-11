@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Modal } from '@/components/TrackedModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +8,7 @@ import { BrandMark } from '@/components/BrandMark';
 import { BOOKS, usePreferredBooks, type BookKey } from '@/hooks/usePreferredBooks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { pageLabel } from '@/lib/a11y';
+import { discordOnboardingSlide } from '@/lib/discordJoin';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -18,7 +19,12 @@ interface Slide {
   bullets?: string[];
 }
 
-const SLIDES: Slide[] = [
+/**
+ * Story slides, then the sportsbook step. Discord is slide 5 of 6: after
+ * "Bet to stay in the game" and before "Where do you bet?". The body depends
+ * on whether the plan is already paid. There is no Join button on the slide.
+ */
+const STORY_SLIDES: Slide[] = [
   {
     icon: 'shield-checkmark-outline',
     title: 'Graded in public, not hype',
@@ -60,14 +66,25 @@ export function OnboardingModal({
   visible,
   onDone,
   booksOnly = false,
+  discordPaid = false,
 }: {
   visible: boolean;
   onDone: () => void;
   /** Show only the sportsbook step (a member who has seen the slides). */
   booksOnly?: boolean;
+  /** Active paid plan or comped. Trial and free get the preview copy. */
+  discordPaid?: boolean;
 }) {
   const { books, chosen, setBooks } = usePreferredBooks();
   const [step, setStep] = useState(0);
+  const discord = discordOnboardingSlide(discordPaid);
+  const SLIDES = useMemo<Slide[]>(
+    () => [
+      ...STORY_SLIDES,
+      { icon: 'chatbubble-outline', title: discord.title, body: discord.body },
+    ],
+    [discord.title, discord.body],
+  );
   // A first choice starts with every book checked, so it is an uncheck and
   // never a hunt. A replay from Settings starts from the member's own set.
   const [selected, setSelected] = useState<BookKey[]>([...BOOKS]);
