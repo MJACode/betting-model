@@ -19,8 +19,13 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+<<<<<<< HEAD
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NHL schedule branch brought up to date after #1218: session entries kept; the schedule step still follows NHL finals and the game-log step still precedes settlement |
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NHL schedule branch brought up to date with master: the daily run still refreshes the NHL API schedule after finals, and still pulls NHL game logs before settlement |
+=======
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAF moneyline branch brought up to date after #1218: CLV and open_picks keep the moneyline and the first-quarter moneyline; the applied-migration stamps move again so the next pass recreates them |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAF totals: #1238 merged and the eleven-fit file switched on at 14:25 UTC (mike: "merge 1238"); the worker opened it (health check OK, 43 files) and its first pass re-scored 48 games with no new bet; why the 11-11 backup to mike's PC did not run |
+>>>>>>> origin/master
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, nba_q1_trend_ml branch brought up to date with master: CLV and open_picks keep both the first-quarter moneyline and master's NCAABW / NCAAB live names; the applied-migration stamps move so the next pass recreates them |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, X pick posts and the daily, weekly, and monthly recaps carry no hashtags; the tag budget goes back to the text, still within 280 weighted characters |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player Stats Back is a JS pill (system pill still dead after Compare odds on the 2026-11-07 bundle; empty stack replaces to Stats) |
@@ -236,6 +241,8 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM game-facts job: a queued row with no sport builds NFL; apply still defaults false |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1 review: spread and total prices come from the line's own DraftKings quote; non-American prices are stored null and skipped; primetime is NFL-only; migration drop guard reads prosrc |
 | 2026-10-23 | [2026-10](./2026-10.md) | 2026-10-23, BYOM phase 1: DraftKings game-start prices on byom_game_facts for every sport, byom_backtest units and skipped, unknown filter keys rejected; migration not registered; refresh stays off; not applied |
+| 2026-10-22 | [2026-10](./2026-10.md) | 2026-10-22, NHL schedule refresh review round: a row for a game that did not happen is removed the morning after (each run rereads the week before), a postponed game's row is removed whatever the number, and the refresh's row gives way to a book's row of the same two teams that day; corrected the lead-time, NHL-input and app claims |
+| 2026-10-22 | [2026-10](./2026-10.md) | 2026-10-22, the NHL season stored ahead in `games` from the NHL API (daily `nhl-schedule` step, odds-feed ids matched on every scored game of two seasons and 167 of 167 this season); the readers that bet or buy skip a row no book has listed; health check `nhl_schedule_refresh` |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, NBA game markets: model picks lose value by the close, lines absorb injury news within 30 minutes and already price who plays; alternate lines purchase, lab and rules written, priced by line size, piloted on 11 games |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, repo cleanup: 180 dead branches deleted, 11 stale drafts closed; #785 and #808 UX-reviewed, fixed and merged (Under picks keep their betslip card and are labelled with their side); NHL shot-events opened as #1036, rest-candidate superseded; CIN @ BAL opener pick confirmed against FanDuel; the five full-suite failures all pre-exist on 897c5763 |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM mobile data: master 0aee0c5c merged; base is master; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; no migration file; unapplied |
