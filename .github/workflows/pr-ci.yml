@@ -99,8 +99,19 @@ jobs:
       # Scratch-cluster tests (tests/byom_scratch.py and the discord void
       # notice) shell out to initdb. The runner has no Postgres until this
       # step; without it those tests skip and CI never applies the SQL.
+      # Hosted runners lose azure.archive.ubuntu.com for a few minutes. One
+      # failed apt then fails the job before pytest starts, so retry.
       - name: Install Postgres for scratch-cluster tests
-        run: sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql
+        run: |
+          for attempt in 1 2 3; do
+            if sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+              && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql; then
+              exit 0
+            fi
+            echo "apt attempt ${attempt} failed; retrying"
+            sleep 20
+          done
+          exit 1
 
       - name: Install minimal test deps
         run: |
