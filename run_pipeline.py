@@ -1940,6 +1940,25 @@ def step_nba_q1_trend(dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_q1_trend_ml(dry_run: bool = False) -> bool:
+    """NBA first-quarter moneyline, the hot team (`nba_q1_trend_ml`): nba_q1_trend's rule, bet on the first-quarter
+    moneyline.
+
+    Decides each regular-season game once, on the same first-quarter fetch as the spread card, right after it
+    (scripts/nba_q1_trend_ml_card.py). LIVE, no write switch (mike, 2026-11-07, "Build it anyway"). Runs only in the
+    NBA pre-game window job, under a time limit there (scheduler.run_nba_total_luck_window).
+    """
+    try:
+        from scripts.nba_q1_trend_ml_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NBA first-quarter moneyline card: "
+                       f"{ {k: v for k, v in result.items() if k not in ('timing', 'diag')} }")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA first-quarter moneyline card failed: {exc}")
+        return False
+
+
 def step_nba_prop_project() -> bool:
     """Project the NBA games about an hour from tip (scripts/nba_prop_projection_card.py
     --project): the frame over every box line since 2018-19, the newest ESPN injury
@@ -3020,6 +3039,7 @@ Examples:
                                  "nba-props", "nba-prop-market", "nba-prop-close",
                                  "nba-prop-projection", "nba-prop-project",
                                  "nba-total-luck", "nba-team-total-luck", "nba-first-half-total-luck", "nba-q1-trend",
+                                 "nba-q1-trend-ml",
                                  "nhl-over-under", "nhl-odds",
                                  "nhl-goalie-designations", "nhl-goalie-designations-today",
                                  "ufc-results", "ufc-results-poll",
@@ -3124,6 +3144,7 @@ Examples:
             "nba-team-total-luck": lambda: step_nba_team_total_luck(dry_run=args.dry_run),
             "nba-first-half-total-luck": lambda: step_nba_first_half_total_luck(dry_run=args.dry_run),
             "nba-q1-trend": lambda: step_nba_q1_trend(dry_run=args.dry_run),
+            "nba-q1-trend-ml": lambda: step_nba_q1_trend_ml(dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),

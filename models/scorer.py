@@ -266,6 +266,12 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         spread = line if pick_side == "home" else -line
         sign = "+" if spread > 0 else ""
         return f"{away_team} @ {home_team} — First Quarter {team} {sign}{spread:.1f}"
+    elif market == "h2h_q1":
+        # The first quarter's moneyline: "DEN @ LAC — First Quarter DEN ML" (models/nba_q1_trend_ml.py). The matchup
+        # leads, as the first-quarter spread's does, so the label cannot be read as the full-game moneyline.
+        # tracking/pick_integrity refuses a first-quarter label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        return f"{away_team} @ {home_team} — First Quarter {team} ML"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -3624,6 +3630,8 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
               -- The first quarter's spread, not the game's.
               WHEN p.model_id = 'nba_q1_trend' THEN 'spreads_q1'
+              -- The first quarter's moneyline, not the game's.
+              WHEN p.model_id = 'nba_q1_trend_ml' THEN 'h2h_q1'
               -- The NCAAB first half's points, not the game total.
               WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'

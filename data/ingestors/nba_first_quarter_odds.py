@@ -1,5 +1,5 @@
-"""Live NBA first-quarter spreads: one per-event Odds API call per game, stored before anything is decided on it
-(`nba_q1_trend`, models/nba_q1_trend.py).
+"""Live NBA first-quarter spreads and moneylines: one per-event Odds API call per game, stored before anything is
+decided on it (`nba_q1_trend`, models/nba_q1_trend.py, and `nba_q1_trend_ml`, models/nba_q1_trend_ml.py).
 
 WHY A FETCH OF ITS OWN. Nothing stores first-quarter spreads live: the bulk odds endpoint never returns them and the
 refresh pass has no first-quarter branch. It is its own call, not one more market on another model's, for the reason
@@ -7,11 +7,19 @@ data/ingestors/nba_first_half_odds.py gives: each model's decision stays its own
 market cannot refuse the other. The per-event endpoint bills per market returned, so one market costs at most one
 credit a call (the regions are one, the bookmakers parameter counting as a region).
 
-WHAT ONE CALL STORES. One game, markets=spreads_q1, every line-shop book and Pinnacle (_get_event_odds' own
+ONE CALL FOR BOTH FIRST-QUARTER MODELS (2026-11-07). The moneyline model bets the spread model's own signal, and
+the graded bets of both were decided on ONE per-game purchase holding both markets. So the moneyline rides on this
+call (markets=spreads_q1,h2h_q1) rather than a call of its own: both models decide on the same fetch instant, as
+graded. Measured before it shipped: the two-market call answered 200 with both markets (docs/sports/nba.md). The
+per-event endpoint bills per market returned, so a call costs at most two credits.
+
+WHAT ONE CALL STORES. One game, markets=spreads_q1,h2h_q1, every line-shop book and Pinnacle (_get_event_odds' own
 parameters):
   * each book's MAIN number (models/nba_book_numbers.split_main_rungs: coherent first, prices closest to even, ties
     to the lower number) under spreads_q1, keyed on the HOME number (CLAUDE.md section 4: the home outcome at point p
     and the away outcome at -p are one pair), and any other rung under spreads_q1_alternate;
+  * each book's first-quarter moneyline under h2h_q1: one pair a book, home_price / away_price, no number and no
+    ladder, so it never goes through the main-rung splitter;
   * snapshot_type 'open' for a decision fetch, 'close' for the closing snapshot; snapshot_at = the market's own
     last_update (else the book's, else the fetch time); created_at = the fetch instant; source = SOURCE.
 The event's own team names orient the pair: the feed's home team is the game id's home team (event_ids builds the id
@@ -44,6 +52,9 @@ from models.nba_book_numbers import split_main_rungs
 from models.nba_q1_trend import LIVE_SOURCE
 
 API_MARKET = "spreads_q1"
+ML_MARKET = "h2h_q1"
+# The markets one call asks for: the spread model's and the moneyline model's.
+API_MARKETS = (API_MARKET, ML_MARKET)
 # The marker on every row this feed writes. Never the purchase's (odds_api_nba_derivative_history).
 SOURCE = LIVE_SOURCE
 # Pinnacle is read for the game's number and the market's fair line, never bet.
@@ -152,36 +163,62 @@ def parse_first_quarter(book_markets: list[dict], home_name: str, away_name: str
     return [{"market": API_MARKET, "spread_home": pt, **s} for pt, s in slots.items()]
 
 
+def parse_first_quarter_ml(book_markets: list[dict], home_name: str, away_name: str) -> list[dict]:
+    """One book's markets -> its first-quarter moneyline as one odds-row dict (market h2h_q1, home_price /
+    away_price), or nothing. Oriented by the event's own team names, as the spread is. A one-sided quote is kept;
+    the readers drop a quote without both prices (scripts.nba_game_harness.frame_quotes)."""
+    out: dict = {}
+    for m in book_markets:
+        if m.get("key") != ML_MARKET:
+            continue
+        for o in m.get("outcomes") or []:
+            name = o.get("name") or ""
+            if name == home_name:
+                out.update(home_price=o.get("price"), home_link=o.get("link"), home_sid=o.get("sid"))
+            elif name == away_name:
+                out.update(away_price=o.get("price"), away_link=o.get("link"), away_sid=o.get("sid"))
+    return [{"market": ML_MARKET, **out}] if out else []
+
+
 def event_rows(body: dict | None, game_id: str, snapshot_type: str, fetched_at: datetime
                ) -> tuple[list[dict], list[dict], dict[str, float]]:
-    """One event response -> (main rows, alternate rows, {book: minutes from its first-quarter last_update to the
-    fetch}). The line-shop books and Pinnacle. Every row carries every odds column."""
+    """One event response -> (main rows, alternate rows, {book: minutes from its first-quarter spread's
+    last_update, else its moneyline's, to the fetch}). The line-shop books and Pinnacle. Every row carries every
+    odds column. The spreads go through the main-rung splitter; each book's one moneyline pair is a main row."""
     body = body or {}
     home_name, away_name = body.get("home_team") or "", body.get("away_team") or ""
     rows: list[dict] = []
+    ml_rows: list[dict] = []
     ages: dict[str, float] = {}
+
+    def stamp_of(markets, market, book):
+        return (next((m.get("last_update") for m in markets
+                      if m.get("key") == market and m.get("last_update")), None)
+                or book.get("last_update") or _z(fetched_at))
+
     for book in body.get("bookmakers") or []:
         key = book.get("key")
         if key not in READ_BOOKS:
             continue
         markets = book.get("markets") or []
-        parsed = parse_first_quarter(markets, home_name, away_name)
-        if not parsed:
-            continue
-        stamp = (next((m.get("last_update") for m in markets
-                       if m.get("key") == API_MARKET and m.get("last_update")), None)
-                 or book.get("last_update") or _z(fetched_at))
-        for p in parsed:
-            row = dict.fromkeys(_ODDS_KEYS)
-            row.update(p)
-            row.update({"game_id": game_id, "sport": SPORT, "bookmaker": key,
-                        "snapshot_type": snapshot_type, "snapshot_at": stamp, "source": SOURCE})
-            rows.append(row)
-        t = _when(stamp)
+        age_stamp = None
+        for market, parsed, into in ((API_MARKET, parse_first_quarter(markets, home_name, away_name), rows),
+                                     (ML_MARKET, parse_first_quarter_ml(markets, home_name, away_name), ml_rows)):
+            if not parsed:
+                continue
+            stamp = stamp_of(markets, market, book)
+            age_stamp = age_stamp or stamp
+            for p in parsed:
+                row = dict.fromkeys(_ODDS_KEYS)
+                row.update(p)
+                row.update({"game_id": game_id, "sport": SPORT, "bookmaker": key,
+                            "snapshot_type": snapshot_type, "snapshot_at": stamp, "source": SOURCE})
+                into.append(row)
+        t = _when(age_stamp) if age_stamp else None
         if t is not None:
             ages[key] = round((fetched_at - t).total_seconds() / 60.0, 1)
-    main, alt = split_main_rungs(rows)
-    return main, alt, ages
+    main, alt = split_main_rungs(rows) if rows else ([], [])
+    return main + ml_rows, alt, ages
 
 
 # ── the fetch ────────────────────────────────────────────────────────────────
@@ -247,7 +284,7 @@ def fetch_first_quarter(game_ids, snapshot_type: str = "open", conn=None) -> dic
                 continue
             before = odds_quota.latest()
             try:
-                body = _get_event_odds(SPORT_KEY, ev, [API_MARKET])
+                body = _get_event_odds(SPORT_KEY, ev, list(API_MARKETS))
             except Exception as exc:  # noqa: BLE001 - one game's failure is its own
                 credits = _billed(before)
                 _ledger_row(conn, asked, EVENT_ODDS, snapshot_type, game_id=gid, event_id=ev, ok=False,

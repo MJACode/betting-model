@@ -321,10 +321,10 @@ def test_an_ncaab_first_half_close_is_a_later_pre_tip_row():
     assert sql.count(
         "s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')") == 3
     assert sql.count("o.snapshot_at::timestamptz > s.created_at") == 3
-    # The NBA close-only rule also names the first-quarter spread (models/nba_q1_trend.py); the NCAAB rule above
-    # is unchanged.
+    # The NBA close-only rule also names the first-quarter spread and moneyline (models/nba_q1_trend.py,
+    # models/nba_q1_trend_ml.py); the NCAAB rule above is unchanged.
     assert sql.count(
-        "s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1')") == 3
+        "s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')") == 3
 
 
 # ── the card's rows ──────────────────────────────────────────────────────────
