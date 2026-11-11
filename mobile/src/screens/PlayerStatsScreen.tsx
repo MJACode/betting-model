@@ -32,6 +32,7 @@ import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { useNcaafAbbrevs } from '@/hooks/useNcaafAbbrevs';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
+import { fetchPlayerMinutes } from '@/lib/queries';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -48,8 +49,10 @@ import {
   groupsOfChips,
   lineStepFor,
   logStatValue,
+  attachMinuteRows,
   averageAndMedian,
   chartGames,
+  minutesStillNeeded,
   isMinutesContextStat,
   lookupLogMinutes,
   minutesPlayed,
@@ -496,7 +499,7 @@ export function PlayerStatsScreen() {
   // rows the head-to-head card lists. That row has a date and a value and no
   // venue, so the label is the bare opponent name: opponentLabel will not
   // print "vs" without a home game it can vouch for.
-  const builtGames = useMemo(() => {
+  const baseGames = useMemo(() => {
     // A toughness tier charts the player's games against that tier over his
     // last three seasons played, newest first, cut to the same span chips.
     // Those rows carry no minutes; the loaded log fills them when it has the day.
@@ -523,10 +526,41 @@ export function PlayerStatsScreen() {
     );
     return range === 'all' ? all : all.slice(0, range);
   }, [range, detail.h2hMeetings, h2hOpponent, games, stat, ncaafAbbrevs, defenseFilter, defenseGames, sport]);
+  // H2H and defense-tier games older than the loaded log. Asked by game_id
+  // when the row has one, otherwise by date. Not a wider "last N".
+  const missingMinutes = useMemo(
+    () => (showAvgMin ? minutesStillNeeded(baseGames) : { gameIds: [] as string[], dates: [] as string[] }),
+    [showAvgMin, baseGames],
+  );
+  const [fetchedMinutes, setFetchedMinutes] = useState<Awaited<ReturnType<typeof fetchPlayerMinutes>>>([]);
+  const minuteIdKey = missingMinutes.gameIds.join('|');
+  const minuteDateKey = missingMinutes.dates.join('|');
+  useEffect(() => {
+    setFetchedMinutes([]);
+  }, [sport, pageId]);
+  useEffect(() => {
+    if (!pageId || (missingMinutes.gameIds.length === 0 && missingMinutes.dates.length === 0)) return;
+    let cancelled = false;
+    fetchPlayerMinutes(sport, pageId, missingMinutes)
+      .then((rows) => {
+        if (!cancelled) setFetchedMinutes(rows);
+      })
+      .catch((err) => {
+        console.warn('[playerLog] minutes lookup failed', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport, pageId, minuteIdKey, minuteDateKey, missingMinutes]);
+  const builtGames = useMemo(
+    () => attachMinuteRows(baseGames, fetchedMinutes),
+    [baseGames, fetchedMinutes],
+  );
   const scored = useMemo(() => scoredChartValues(builtGames), [builtGames]);
   const { avg, median } = useMemo(() => averageAndMedian(scored), [scored]);
-  // Avg MIN only when every played game in the window has minutes. A partial
-  // join (H2H or a defense tier beyond the loaded log) stays blank.
+  // Avg MIN only when every played game in the window has minutes. Games
+  // outside the loaded log are filled by fetchPlayerMinutes; a game that
+  // read does not return stays blank.
   const avgMin = useMemo(
     () => (showAvgMin ? windowAverageMinutes(builtGames) : null),
     [showAvgMin, builtGames],

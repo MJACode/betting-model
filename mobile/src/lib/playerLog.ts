@@ -182,9 +182,10 @@ export function minutesPlayed(row: { minutes?: unknown }): number | null {
 
 /**
  * A basketball log row with no minutes. Did-not-play players are not in the
- * game log the screen loads: NBA writes them to `nba_player_dnp`, and the
- * WNBA and NCAAB ingestors leave a didNotPlay athlete out. This is the row
- * shape if one is present, not a guess at games the log does not have.
+ * game log. NBA stores them in `nba_player_dnp` and the page merges those
+ * rows. WNBA and NCAAB drop a didNotPlay athlete and keep no table, so those
+ * games are not invented here. A row that has a stat and no minutes is a
+ * missing number, not a did-not-play.
  */
 export function isDidNotPlay(sport: Sport, row: { minutes?: unknown }): boolean {
   return sportTracksMinutes(sport) && minutesPlayed(row) == null;
@@ -960,6 +961,110 @@ export function lookupLogMinutes(
     const row = matchLogRow(candidates, g);
     if (!row) return { ...g };
     return { ...g, minutes: minutesPlayed(row), gameId: g.gameId ?? row.game_id };
+  });
+}
+
+/** One did-not-play row from nba_player_dnp, before it is merged into the log. */
+export interface DnpSourceRow {
+  player_id?: string | null;
+  player_name?: string | null;
+  team?: string | null;
+  game_id: string;
+  game_date: string;
+  season?: number | null;
+}
+
+/** A log entry with no stat line and no minutes. chartGames draws it as DNP. */
+export function dnpEntries(rows: readonly DnpSourceRow[]): PlayerLogEntry[] {
+  const out: PlayerLogEntry[] = [];
+  for (const r of rows) {
+    if (!r.game_id || !r.game_date) continue;
+    out.push({
+      player_id: r.player_id ?? '',
+      player_name: r.player_name ?? '',
+      team: r.team ?? null,
+      game_id: r.game_id,
+      game_date: r.game_date,
+      season: Number(r.season ?? 0),
+      minutes: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Played games plus did-not-play games, newest first. A game_id that is in
+ * both keeps the played row: a stat line is not a DNP.
+ */
+export function mergePlayedAndDnp(played: readonly PlayerLogEntry[], dnp: readonly PlayerLogEntry[]): PlayerLogEntry[] {
+  const seen = new Set(played.map((r) => r.game_id));
+  const extra = dnp.filter((r) => r.game_id && !seen.has(r.game_id));
+  return [...played, ...extra].sort((a, b) => {
+    if (a.game_date !== b.game_date) return a.game_date < b.game_date ? 1 : -1;
+    if (a.game_id === b.game_id) return 0;
+    return a.game_id < b.game_id ? 1 : -1;
+  });
+}
+
+/** Minutes read for games the loaded window does not already cover. */
+export interface LoggedMinute {
+  game_id: string;
+  game_date: string;
+  minutes: number | null;
+}
+
+/**
+ * Chart games that still have no minutes. Games with a number, a known null,
+ * or a DNP are not asked for again. Defense rows are asked by game_id. A
+ * head-to-head row has a date and no game_id, so it is asked by date.
+ */
+export function minutesStillNeeded(chart: readonly ChartGame[]): { gameIds: string[]; dates: string[] } {
+  const gameIds: string[] = [];
+  const dates: string[] = [];
+  const seenId = new Set<string>();
+  const seenDate = new Set<string>();
+  for (const g of chart) {
+    if (g.dnp || g.minutes !== undefined) continue;
+    if (g.gameId) {
+      if (!seenId.has(g.gameId)) {
+        seenId.add(g.gameId);
+        gameIds.push(g.gameId);
+      }
+      continue;
+    }
+    const day = isoDay(g.iso);
+    if (day && !seenDate.has(day)) {
+      seenDate.add(day);
+      dates.push(day);
+    }
+  }
+  return { gameIds, dates };
+}
+
+/**
+ * Writes fetched minutes onto chart games the loaded log did not cover.
+ * A game_id match wins. A date match is used only when that day has one
+ * fetched row. A stat that comes back with null minutes stays a stat.
+ */
+export function attachMinuteRows(chart: readonly ChartGame[], rows: readonly LoggedMinute[]): ChartGame[] {
+  if (rows.length === 0) return chart.map((g) => ({ ...g }));
+  const byId = new Map<string, number | null>();
+  const byDate = new Map<string, number | null | 'many'>();
+  for (const r of rows) {
+    byId.set(r.game_id, r.minutes);
+    const day = isoDay(r.game_date);
+    if (!day) continue;
+    if (byDate.has(day)) byDate.set(day, 'many');
+    else byDate.set(day, r.minutes);
+  }
+  return chart.map((g) => {
+    if (g.dnp || typeof g.minutes === 'number') return g;
+    if (g.gameId && byId.has(g.gameId)) {
+      return { ...g, minutes: byId.get(g.gameId) ?? null };
+    }
+    const hit = byDate.get(isoDay(g.iso));
+    if (hit === undefined || hit === 'many') return g;
+    return { ...g, minutes: hit };
   });
 }
 

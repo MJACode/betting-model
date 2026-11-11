@@ -33,7 +33,11 @@ import {
   detailStatForPropModel,
   filledChipCounts,
   gameContextLine,
+  attachMinuteRows,
   attachGameSides,
+  dnpEntries,
+  mergePlayedAndDnp,
+  minutesStillNeeded,
   opponentLabel,
   shortGameDate,
   averageAndMedian,
@@ -890,6 +894,46 @@ check('the Minutes tab is context only on the player page',
   && playerScreen.includes('showMinuteLabels={showAvgMin}')
   && playerScreen.includes('minutesMode={minutesContext}')
   && playerScreen.includes('accessibilityLabel={isMinutesContextStat(c) ? c.label : `${c.label} bets`}'));
+{
+  const withStat = chartGames(
+    [{ ...minuteRows[0]!, game_id: 'gx', minutes: null, points: 22 }],
+    (r) => (r.points == null ? null : Number(r.points)),
+    undefined,
+    false,
+    'NBA',
+  );
+  check('a stat line with no minutes is not drawn as DNP',
+    withStat.length === 1 && withStat[0]!.dnp !== true && withStat[0]!.minutes === null && withStat[0]!.value === 22);
+  const played = minuteRows[0]!;
+  const merged = mergePlayedAndDnp(
+    [played],
+    dnpEntries([
+      { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'g3', game_date: '2026-11-08', season: 2026 },
+      { player_id: 'p', player_name: 'A', team: 'NYK', game_id: 'd1', game_date: '2026-11-07', season: 2026 },
+    ]),
+  );
+  check('a DNP row joins the log, and the played row wins when the game_id is in both',
+    merged.map((r) => r.game_id).join() === 'g3,d1'
+    && merged[0]!.points === 28
+    && merged[1]!.minutes === null
+    && merged[1]!.points == null);
+  const outside = [{ value: 19, date: '10/2/26', iso: '2026-10-02', opp: '@BOS', oppFull: '@ BOS', gameId: 'old' }];
+  check('a chart game outside the loaded log is asked for by its game id',
+    minutesStillNeeded(outside).gameIds.join() === 'old' && minutesStillNeeded(outside).dates.length === 0);
+  check('a head-to-head game with only a date is asked for by that date',
+    minutesStillNeeded([{ value: 19, date: '10/2', iso: '2026-10-02', opp: null, oppFull: null }]).dates.join() === '2026-10-02');
+  check('a game that already has minutes is not fetched again',
+    minutesStillNeeded([{ value: 19, date: '11/8', iso: '2026-11-08', opp: null, oppFull: null, minutes: 34, gameId: 'g3' }])
+      .gameIds.length === 0);
+  const filled = attachMinuteRows(outside, [{ game_id: 'old', game_date: '2026-10-02', minutes: 31 }]);
+  check('fetched minutes land on the game id, and the bar stays a stat',
+    filled[0]!.minutes === 31 && filled[0]!.dnp !== true && filled[0]!.value === 19);
+  const byDate = attachMinuteRows(
+    [{ value: 11, date: '9/1', iso: '2026-09-01', opp: null, oppFull: null }],
+    [{ game_id: 'h', game_date: '2026-09-01', minutes: 28 }],
+  );
+  check('a head-to-head date with one fetched row gets those minutes', byDate[0]!.minutes === 28);
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

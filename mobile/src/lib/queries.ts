@@ -11,10 +11,15 @@ import { byTime, HISTORY_ROWS, utcSecond } from './lineHistory';
 import {
   LOG_COLUMNS,
   LOG_TABLE,
+  dnpEntries,
   logFetchLimit,
+  mergePlayedAndDnp,
+  minutesPlayed,
   normalizeLogRow,
+  sportTracksMinutes,
   attachGameSides,
   type GameSidesRow,
+  type LoggedMinute,
   type PlayerLogEntry,
   type PlayerLogSport,
 } from './playerLog';
@@ -2760,12 +2765,27 @@ export async function fetchPlayerGameLog(
   q = playerId ? q.eq('player_id', playerId) : q.ilike('player_name', playerName!);
   const { data, error } = await q;
   if (error) throw error;
-  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
+  let rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
     normalizeLogRow(sport, r),
   );
+  // NBA did-not-play rows live in nba_player_dnp, not the game log. Merged
+  // here so the chart and the recent-games list can draw them. A failure
+  // (the read grant is a migration that is not applied until Matt says so)
+  // leaves the played log on screen. WNBA and NCAAB have no such table.
+  if (sport === 'NBA') {
+    const id = playerId || rows[0]?.player_id;
+    if (id) {
+      try {
+        const oldest = rows.length ? rows[rows.length - 1]!.game_date : null;
+        const dnp = await fetchNbaDnp(id, beforeDate, oldest);
+        rows = mergePlayedAndDnp(rows, dnp);
+      } catch (err) {
+        console.warn('[playerLog] DNP lookup failed', err);
+      }
+    }
+  }
   // Opponent and home/away for every sport (the chart labels "@CHI · 10/26").
-  // At most logFetchLimit ids (50), so one bounded read. A failure costs the
-  // labels, never the log.
+  // The id list is the loaded log plus any DNP rows inside that date span.
   const ids = [...new Set(rows.map((r) => r.game_id).filter(Boolean))];
   if (ids.length === 0) return rows;
   try {
@@ -2779,6 +2799,58 @@ export async function fetchPlayerGameLog(
     console.warn('[playerLog] opponent lookup failed', err);
     return rows;
   }
+}
+
+/** NBA did-not-play rows inside the loaded log's date span. */
+async function fetchNbaDnp(
+  playerId: string,
+  beforeDate: string,
+  oldest: string | null,
+): Promise<PlayerLogEntry[]> {
+  let q = supabase
+    .from('nba_player_dnp')
+    .select('game_id, player_id, player_name, team, game_date, season')
+    .eq('player_id', playerId)
+    .lt('game_date', beforeDate)
+    .order('game_date', { ascending: false })
+    .limit(logFetchLimit('NBA'));
+  if (oldest) q = q.gte('game_date', oldest);
+  const { data, error } = await q;
+  if (error) throw error;
+  return dnpEntries((data ?? []) as unknown as Parameters<typeof dnpEntries>[0]);
+}
+
+/**
+ * Minutes for chart games outside the loaded window. Defense rows are asked
+ * by game_id. Head-to-head rows have a date and no game_id, so those are
+ * asked by date. Both read the sport's own game log, not a wider "last N".
+ */
+export async function fetchPlayerMinutes(
+  sport: PlayerLogSport,
+  playerId: string,
+  spec: { gameIds: readonly string[]; dates: readonly string[] },
+): Promise<LoggedMinute[]> {
+  if (!sportTracksMinutes(sport) || !playerId) return [];
+  const out: LoggedMinute[] = [];
+  const take = async (column: 'game_id' | 'game_date', values: readonly string[]) => {
+    if (values.length === 0) return;
+    const { data, error } = await supabase
+      .from(LOG_TABLE[sport])
+      .select('game_id, game_date, minutes')
+      .eq('player_id', playerId)
+      .in(column, [...values]);
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as { game_id: string; game_date: string; minutes: unknown }[]) {
+      out.push({
+        game_id: String(row.game_id),
+        game_date: String(row.game_date),
+        minutes: minutesPlayed(row),
+      });
+    }
+  };
+  await take('game_id', spec.gameIds);
+  await take('game_date', spec.dates);
+  return out;
 }
 
 export async function fetchPlayerByName(

@@ -79,6 +79,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_nba_first_basket.ts
 
+      # Player page minutes: Low MIN threshold, DNP versus a stat line, and
+      # minutes joined onto games outside the loaded window.
+      - name: Player log
+        working-directory: mobile
+        run: npx tsx scripts/verify_player_log.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
