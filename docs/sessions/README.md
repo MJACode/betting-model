@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAABW research after the totals model went live (PR #1236, 2026-11-10): spread and moneyline off the team ratings clear nothing (the first spread already holds what the ratings know); the in-play second-half total is a halftime total and passes its four checks (689 bets, +8.50% walk-forward); the halftime spread does not clear |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, X pick posts and the daily, weekly, and monthly recaps carry no hashtags; the tag budget goes back to the text, still within 280 weighted characters |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player Stats Back is a JS pill (system pill still dead after Compare odds on the 2026-11-07 bundle; empty stack replaces to Stats) |
 | 2026-11-10 | [2026-11](./2026-11.md) | 2026-11-10, Player detail minutes for NBA, WNBA, and NCAAB: Avg MIN, under-bar labels, Low MIN at 70% of the window average, a context-only Minutes chip after PRA, DNP when the log row has no minutes and no stat |

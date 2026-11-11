@@ -17,6 +17,8 @@ Run from the repo root, in this order:
 | 6 | `python -m scripts.ncaabw_research.totals_b`, then `totals_c` | The totals model at DraftKings' first posted total: the replay, then the cut, calibration and splits |
 | 7 | `python -m scripts.ncaabw_research.market` | The men's spread and moneyline market rules on the women's boards |
 | 8 | `python -m scripts.ncaabw_research.inplay` | The in-play game-state model against every snapshot's in-play quotes (needs `pbp_<season>.parquet` in the cache: sportsdataverse's `espn_womens_college_basketball_pbp/play_by_play_<season>.parquet`) |
+| 9 | `python -m scripts.ncaabw_research.inplay_checks` | The halftime total's and halftime spread's four checks (blind sides, claimed-EV bands, a placebo, stale prices), on the priced quotes step 8 leaves in the cache |
+| 10 | `python -m scripts.ncaabw_research.sides`, then `sides grid` | Spread and moneyline off the totals model's team ratings at DraftKings' first posted line; the same with the ratings' settings moved |
 
 Two more read production through the totals card's own reads (they need
 production settings, and write nothing). `box_coverage` prints this season's
