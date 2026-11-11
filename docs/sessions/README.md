@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, Build Your Own Model bet list shows the game date ("Sun, 11/8") instead of the official lock time; the 8/31 locks were the season's first DraftKings snapshot |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NHL schedule branch brought up to date after #1218: session entries kept; the schedule step still follows NHL finals and the game-log step still precedes settlement |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NHL schedule branch brought up to date with master: the daily run still refreshes the NHL API schedule after finals, and still pulls NHL game logs before settlement |
 | 2026-11-11 | [2026-11](./2026-11.md) | 2026-11-11, NCAAF moneyline branch brought up to date after #1218: CLV and open_picks keep the moneyline and the first-quarter moneyline; the applied-migration stamps move again so the next pass recreates them |
