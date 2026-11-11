@@ -2559,6 +2559,12 @@ _RULE_MODEL_MARKETS = {
     # overtime. NEVER "totals": that sums the two finals and grades every
     # under a loss.
     "ncaab_first_half_total": "totals_h1",
+    # NCAAF full-game moneylines against the books' consensus spread
+    # (models/ncaaf_moneyline_market.py): a MONEYLINE, settled on
+    # games.home_win (overtime included, as books settle it), scored_line
+    # NULL. The pick sits on the odds feed's row of the game, which takes its
+    # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
+    "ncaaf_moneyline_market": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

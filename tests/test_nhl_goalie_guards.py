@@ -574,6 +574,7 @@ ALLOWED = {
     "scripts/ncaabw_total_card.py": "NCAABW (women's college basketball) full-game totals only",
     "scripts/ncaab_spread_card.py": "NCAAB full-game spreads only",
     "scripts/ncaab_moneyline_card.py": "NCAAB full-game moneylines only",
+    "scripts/ncaaf_moneyline_card.py": "NCAAF full-game moneylines only",
     "scripts/ncaab_first_half_spread_card.py": "NCAAB first-half spreads only",
     "scripts/ncaab_first_half_total_card.py": "NCAAB first-half totals only",
     "scripts/nfl_prop_market_card.py": "NFL player props only",
