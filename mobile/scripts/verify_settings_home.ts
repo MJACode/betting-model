@@ -193,12 +193,18 @@ for (const label of labels) {
   const asJsx = label.split('&').join('&amp;');
   check(`still has ${label}`, settings.includes(label) || settings.includes(asJsx));
 }
-check(
-  'leaving the bankroll screen saves the same way blur does',
-  /return \(\) => \{\s*const c = commitBankrollText\(latest\.current\.text, latest\.current\.amount\);\s*if \(c\.save !== undefined\) setAmountRef\.current\(c\.save\);/.test(
-    settings,
-  ),
-);
+check('leaving the bankroll screen saves through saveBankrollOnLeave', settings.includes('saveBankrollOnLeave('));
+
+const bankroll = await import(pathToFileURL(join(ROOT, 'src/lib/bankroll.ts')).href);
+{
+  const writes: Array<number | null> = [];
+  const save = (amount: number | null) => writes.push(amount);
+  bankroll.saveBankrollOnLeave('25', 25, save);
+  bankroll.saveBankrollOnLeave('', null, save);
+  bankroll.saveBankrollOnLeave('nope', null, save);
+  bankroll.saveBankrollOnLeave('40', 25, save);
+  eq('unmount writes only a changed valid amount', JSON.stringify(writes), JSON.stringify([40]));
+}
 
 const fetchRules = await import(pathToFileURL(join(ROOT, 'src/lib/subscriptionFetch.ts')).href);
 const same = { generation: 1, userId: 'user-a' };
@@ -217,6 +223,30 @@ eq(
   fetchRules.subscriptionFetchStillCurrent(same, { generation: 3, userId: 'user-b' }),
   false,
 );
+
+const { createSubscriptionStore } = fetchRules;
+{
+  const pending: Array<(row: { who: string }) => void> = [];
+  const store = createSubscriptionStore({
+    billingOn: () => true,
+    fetchRow: () => new Promise((resolve) => pending.push(resolve)),
+  });
+  const first = store.load('user-a');
+  await store.load(null);
+  const second = store.load('user-b');
+  eq('sign-in during the old fetch has not started its own read yet', pending.length, 1);
+  pending[0]!({ who: 'a' });
+  await first;
+  for (let i = 0; i < 8 && pending.length < 2; i++) await Promise.resolve();
+  eq('the new account starts its own read after the stale one is dropped', pending.length, 2);
+  eq('the dropped row is not stored', store.get().subscription, null);
+  pending[1]!({ who: 'b' });
+  await second;
+  eq('the new account’s subscription is what loads', store.get().subscription?.who, 'b');
+  const before = pending.length;
+  await store.load('user-b');
+  eq('a repeat read for the loaded account does not fetch again', pending.length, before);
+}
 
 const paywall = read('src/screens/PaywallScreen.tsx');
 check('paywall still says 8 sports', paywall.includes('all 8 sports') && !paywall.includes('all 7 sports'));

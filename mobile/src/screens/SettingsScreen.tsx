@@ -38,6 +38,7 @@ import {
   editBankrollInput,
   formatDollars,
   formatPct,
+  saveBankrollOnLeave,
   unitDollars,
   unitRowSubtitle,
   unitRowTitle,
@@ -1129,8 +1130,11 @@ function BankrollCard() {
   setAmountRef.current = setAmount;
   useEffect(() => {
     return () => {
-      const c = commitBankrollText(latest.current.text, latest.current.amount);
-      if (c.save !== undefined) setAmountRef.current(c.save);
+      saveBankrollOnLeave(
+        latest.current.text,
+        latest.current.amount,
+        (amount) => setAmountRef.current(amount),
+      );
     };
   }, []);
 

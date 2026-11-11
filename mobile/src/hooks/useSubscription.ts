@@ -5,10 +5,7 @@ import { fetchSubscription } from '@/lib/billing';
 import { isEntitled, type SubscriptionRow } from '@/lib/billingHelpers';
 import { billingReady } from '@/lib/billingConfig';
 import { errorText, isAbortError } from '@/lib/errors';
-import {
-  subscriptionFetchStillCurrent,
-  type SubscriptionFetchTicket,
-} from '@/lib/subscriptionFetch';
+import { createSubscriptionStore, type SubscriptionSnapshot } from '@/lib/subscriptionFetch';
 import { useAuth } from './useAuth';
 
 /**
@@ -16,103 +13,30 @@ import { useAuth } from './useAuth';
  *
  * Settings home and a Settings section are both mounted, and each used to
  * keep its own copy. A refresh in the section (Unlock Discord early) then
- * left the home tile on the old plan. The row lives here, like useAccess,
+ * left the home tile on the old plan. The row lives in lib/subscriptionStore,
  * so one fetch serves every reader and a refresh updates all of them.
  *
  * The cache is the user id, not "signed in". A fetch that finishes after
- * sign-out is dropped, so the next account is not served the previous row.
+ * sign-out is dropped, and the next account still loads its own row.
  */
-interface SubscriptionSnapshot {
-  subscription: SubscriptionRow | null;
-  loading: boolean;
-  error: string | null;
-}
-
-const listeners = new Set<(s: SubscriptionSnapshot) => void>();
-let snapshot: SubscriptionSnapshot = {
-  subscription: null,
-  loading: billingReady(),
-  error: null,
-};
-/** User id of the last successful read. undefined = never read. */
-let loadedFor: string | null | undefined;
-let currentUserId: string | null = null;
-let generation = 0;
-let inFlight: Promise<void> | null = null;
+const listeners = new Set<(s: SubscriptionSnapshot<SubscriptionRow>) => void>();
 let foregroundBound = false;
 
-function publish(next: Partial<SubscriptionSnapshot>) {
-  snapshot = { ...snapshot, ...next };
-  listeners.forEach((fn) => fn(snapshot));
-}
-
-function ticketNow(): SubscriptionFetchTicket {
-  return { generation, userId: currentUserId };
-}
-
-/** Bump the generation when the account changes, before any await. */
-function noteUser(userId: string | null) {
-  if (userId === currentUserId) return;
-  generation += 1;
-  currentUserId = userId;
-  loadedFor = undefined;
-}
-
-async function loadSubscription(userId: string | null, force = false): Promise<void> {
-  noteUser(userId);
-  if (!billingReady() || !userId) {
-    loadedFor = null;
-    publish({ subscription: null, loading: false, error: null });
-    return;
-  }
-  const asked = ticketNow();
-  if (inFlight) {
-    await inFlight;
-    if (!subscriptionFetchStillCurrent(asked, ticketNow())) return;
-    if (!force) return;
-  }
-  if (!subscriptionFetchStillCurrent(asked, ticketNow())) return;
-  if (!force && loadedFor === userId) return;
-  // Claim the slot before the first await so a second reader joins this read.
-  let finish!: () => void;
-  const run = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
-  inFlight = run;
-  const started = ticketNow();
-  publish({ loading: true });
-  try {
-    const row = await fetchSubscription();
-    if (!subscriptionFetchStillCurrent(started, ticketNow())) {
-      publish({ loading: false });
-      return;
-    }
-    loadedFor = userId;
-    publish({
-      subscription: (row as SubscriptionRow | null) ?? null,
-      error: null,
-      loading: false,
-    });
-  } catch (e) {
-    if (!subscriptionFetchStillCurrent(started, ticketNow())) {
-      publish({ loading: false });
-      return;
-    }
-    // Keep the previous row — a blip must not drop a paying member.
-    if (!isAbortError(e)) publish({ error: errorText(e), loading: false });
-    else publish({ loading: false });
-  } finally {
-    if (inFlight === run) inFlight = null;
-    finish();
-  }
-}
+const store = createSubscriptionStore<SubscriptionRow>({
+  fetchRow: () => fetchSubscription() as Promise<SubscriptionRow | null>,
+  billingOn: billingReady,
+  isAbort: isAbortError,
+  errorText,
+  onChange: (next) => listeners.forEach((fn) => fn(next)),
+});
 
 function bindForegroundRefresh() {
   if (foregroundBound) return;
   foregroundBound = true;
   AppState.addEventListener('change', (next) => {
-    if (next !== 'active' || !currentUserId) return;
-    void loadSubscription(currentUserId, true);
+    const id = store.currentUserId();
+    if (next !== 'active' || !id) return;
+    void store.load(id, true);
   });
 }
 
@@ -143,25 +67,28 @@ export interface UseSubscription {
 export function useSubscription(): UseSubscription {
   const { signedIn, status: authStatus, user } = useAuth();
   const enabled = billingReady();
-  const userId = signedIn ? (user?.id ?? null) : null;
-  const [snap, setSnap] = useState<SubscriptionSnapshot>(snapshot);
+  // A signed-in session can render one frame before `user` is on it. Treating
+  // that as signed-out would clear the row and bump the generation.
+  const userPending = signedIn && !user?.id;
+  const userId = userPending ? null : signedIn ? (user?.id ?? null) : null;
+  const [snap, setSnap] = useState<SubscriptionSnapshot<SubscriptionRow>>(store.get());
 
   useEffect(() => {
     bindForegroundRefresh();
-    const listener = (next: SubscriptionSnapshot) => setSnap(next);
+    const listener = (next: SubscriptionSnapshot<SubscriptionRow>) => setSnap(next);
     listeners.add(listener);
-    setSnap(snapshot);
+    setSnap(store.get());
     return () => {
       listeners.delete(listener);
     };
   }, []);
 
   useEffect(() => {
-    if (authStatus === 'loading') return;
-    void loadSubscription(userId);
-  }, [authStatus, userId]);
+    if (authStatus === 'loading' || userPending) return;
+    void store.load(userId);
+  }, [authStatus, userId, userPending]);
 
-  const refresh = useCallback(() => loadSubscription(userId, true), [userId]);
+  const refresh = useCallback(() => store.load(userId, true), [userId]);
   const entitled = !enabled ? true : isEntitled(snap.subscription);
 
   return {
