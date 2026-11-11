@@ -61,18 +61,34 @@ def _run(clock, after_s=30):
     return card.run_card(do_publish=True, now=clock() + timedelta(seconds=after_s))
 
 
+
+def _one_none_row(db, model_id):
+    """Scored and not bet: exactly one NONE row, no stake (Matt, 2026-11-10:
+    the All tab shows every scored game; scripts/nba_none_rows.py)."""
+    rows = [r for r in db.rows["picks"] if r["model_id"] == model_id]
+    assert [r["signal_type"] for r in rows] == ["NONE"], rows
+    assert rows[0]["kelly_fraction"] == 0.0 and rows[0]["recommended_bet"] == 0.0
+    return rows[0]
+
 def test_a_game_the_full_game_model_already_bet_gets_no_team_total_bet(monkeypatch):
     """RULE (mike, 2026-11-04): one NBA game-total bet a game across the three NBA
     game-total models (scripts/nba_game_totals_door.py). The full-game over decides
     first (60-66 minutes before tip); this card still decides the game and records
-    why, and writes no pick."""
+    why, and writes no BET. Since 2026-11-10 (Matt: the All tab shows every scored
+    game) the dropped bet is a NONE row, no stake, at the bet's own number and
+    probability (scripts/nba_none_rows.py)."""
     clock, db, f, _ = card_world(monkeypatch)
     db.rows["picks"].append({"game_id": GID, "model_id": "nba_total_luck",
                              "signal_type": "BET", "condition_status": None})
     feed.fetch_team_totals([GID], "open", conn=db)
     out = _run(clock)
     assert out["published"] == 0 and out["decided"] == 1
-    assert [r["model_id"] for r in db.rows["picks"]] == ["nba_total_luck"]
+    assert [(r["model_id"], r["signal_type"]) for r in db.rows["picks"]] == [
+        ("nba_total_luck", "BET"), ("nba_team_total_luck", "NONE")]
+    none = db.rows["picks"][1]
+    assert none["kelly_fraction"] == 0.0 and none["recommended_bet"] == 0.0
+    assert none["pick_side"] == "under" and none["scored_line"] == 113.5
+    assert none["model_probability"] > 0.6     # the bet's own claim, uplift included
     [d] = db.rows["nba_team_total_luck_decisions"]
     assert d["n_bets"] == 0
     assert d["detail"].endswith("; one_total_a_game:nba_total_luck_already_bet")
@@ -191,7 +207,8 @@ def test_a_bet_under_the_model_s_ev_floor_is_refused_and_the_game_still_decided(
     monkeypatch.setattr(tt, "uplift", lambda art, season: -0.30)
     feed.fetch_team_totals([GID], "open", conn=db)
     out = _run(clock)
-    assert out["published"] == 0 and out["decided"] == 1 and db.rows["picks"] == []
+    assert out["published"] == 0 and out["decided"] == 1
+    _one_none_row(db, "nba_team_total_luck")
     [d] = db.rows["nba_team_total_luck_decisions"]
     assert d["n_bets"] == 0 and "refused ev_below_floor" in d["detail"]
 

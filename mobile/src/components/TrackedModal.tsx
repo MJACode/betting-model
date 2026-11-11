@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Modal as RNModal, Platform, type ModalProps } from 'react-native';
+import { Modal as RNModal, Platform, StyleSheet, View, type ModalProps } from 'react-native';
 
 import { noteModalDismissed, noteModalShown, noteModalVisible } from '@/lib/freezeLog';
 
@@ -17,7 +17,7 @@ export interface TrackedModalProps extends ModalProps {
   trackName: string;
 }
 
-export function Modal({ trackName, visible = true, onShow, onDismiss, ...rest }: TrackedModalProps) {
+export function Modal({ trackName, visible = true, onShow, onDismiss, children, ...rest }: TrackedModalProps) {
   const prev = useRef<boolean | null>(null);
 
   useEffect(() => {
@@ -50,6 +50,18 @@ export function Modal({ trackName, visible = true, onShow, onDismiss, ...rest }:
         noteModalDismissed(trackName);
         onDismiss?.();
       }}
-    />
+    >
+      {/* While the pop-up is open, this wrapper does not take taps (the
+          sheet's own backdrop does). Once it is told to close, pointerEvents
+          none: a modal iOS has not finished tearing down must not keep
+          swallowing taps on the screen underneath, including Back. */}
+      <View style={styles.fill} pointerEvents={visible ? 'box-none' : 'none'} collapsable={false}>
+        {children}
+      </View>
+    </RNModal>
   );
 }
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+});

@@ -66,6 +66,11 @@ ANON_READABLE: tuple[str, ...] = (
     "parlay_track_record",
     "picks",
     "player_game_log",
+    # ESPN did-not-play list for the NBA player page. RLS stays on; the
+    # SELECT policy is data/migrations/anon_read_nba_player_dnp_2026_11_11.sql,
+    # which is not applied until Matt says so. The results ingestor must not
+    # lock_down this table or the next run revokes the grant.
+    "nba_player_dnp",
     "player_handedness",
     # Each player's current injury tag on the Stats board (2026-10-23).
     # data/migrations/add_injury_status_current_2026_10_23.sql.
@@ -409,13 +414,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
     # research control input, never read by the app.
     "nba_public_splits",
-    # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
-    # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
+    # NBA quarter scores (data/ingestors/nba_period_scores.py) and the
     # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
     # on demand by their writers; model and settlement input, never read by the
-    # app.
+    # app. nba_player_dnp left this list when the player page started reading
+    # it (anon_read_nba_player_dnp_2026_11_11.sql).
     "nba_period_scores",
-    "nba_player_dnp",
     "nba_schedule",
     # Free ESPN play-by-play (sportsdataverse release), its box scores, the
     # ESPN -> NBA.com player id map and the lineup segments derived from them.
