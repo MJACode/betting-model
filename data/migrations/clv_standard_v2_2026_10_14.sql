@@ -28,7 +28,7 @@
 
 DO $mig$
 DECLARE
-  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaabw-total-blend';
+  fn_comment text := 'clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market';
   work_left boolean;
   def text;
   new_def text;
@@ -213,6 +213,7 @@ BEGIN
         WHEN 'nba_team_total_luck' THEN 'team_totals_home'
         WHEN 'nba_first_half_total_luck' THEN 'totals_h1'
         WHEN 'nba_q1_trend' THEN 'spreads_q1'
+        WHEN 'nba_q1_trend_ml' THEN 'h2h_q1'
         WHEN 'ncaab_total_blend' THEN 'totals'
         WHEN 'ncaab_spread_market' THEN 'spreads'
         WHEN 'ncaab_moneyline_own_spread' THEN 'h2h'
@@ -220,6 +221,7 @@ BEGIN
         WHEN 'ncaab_first_half_spread' THEN 'spreads_h1'
         WHEN 'ncaab_first_half_total' THEN 'totals_h1'
         WHEN 'ncaabw_total_blend' THEN 'totals'
+        WHEN 'ncaaf_moneyline_market' THEN 'h2h'
         ELSE 'h2h'
       END
     $body$;
@@ -371,7 +373,7 @@ BEGIN
     $body$;
 
     COMMENT ON FUNCTION public.clv_power_fair(double precision[]) IS
-      'clv-standard-v2-power-80-0.05-12-ncaabw-total-blend';
+      'clv-standard-v2-power-80-0.05-12-ncaaf-moneyline-market';
   END IF;
 
   SELECT EXISTS (
@@ -547,13 +549,13 @@ BEGIN
           AND o.bookmaker = s.bet_book
           AND (
             ((s.game_market LIKE 'team_totals%'
-              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1')))
+              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')))
              AND o.snapshot_type = 'close')
             OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'
                 AND o.snapshot_at::timestamptz > s.created_at)
             OR (s.game_market NOT LIKE 'team_totals%'
-                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1')
+                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
@@ -577,13 +579,13 @@ BEGIN
           AND o.bookmaker = s.bet_book
           AND (
             ((s.game_market LIKE 'team_totals%'
-              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1')))
+              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')))
              AND o.snapshot_type = 'close')
             OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'
                 AND o.snapshot_at::timestamptz > s.created_at)
             OR (s.game_market NOT LIKE 'team_totals%'
-                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1')
+                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
@@ -619,13 +621,13 @@ BEGIN
           AND o.bookmaker = 'pinnacle'
           AND (
             ((s.game_market LIKE 'team_totals%'
-              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1')))
+              OR (s.sport_prefix = 'NBA' AND s.game_market IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')))
              AND o.snapshot_type = 'close')
             OR (s.sport_prefix = 'NCAAB' AND s.game_market IN ('totals_h1', 'spreads_h1')
                 AND o.snapshot_type <> 'in_play'
                 AND o.snapshot_at::timestamptz > s.created_at)
             OR (s.game_market NOT LIKE 'team_totals%'
-                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1')
+                AND s.game_market NOT IN ('totals_h1', 'spreads_h1', 'spreads_q1', 'h2h_q1')
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound

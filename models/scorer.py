@@ -266,6 +266,12 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
         spread = line if pick_side == "home" else -line
         sign = "+" if spread > 0 else ""
         return f"{away_team} @ {home_team} — First Quarter {team} {sign}{spread:.1f}"
+    elif market == "h2h_q1":
+        # The first quarter's moneyline: "DEN @ LAC — First Quarter DEN ML" (models/nba_q1_trend_ml.py). The matchup
+        # leads, as the first-quarter spread's does, so the label cannot be read as the full-game moneyline.
+        # tracking/pick_integrity refuses a first-quarter label that does not say so.
+        team = home_team if pick_side == "home" else away_team
+        return f"{away_team} @ {home_team} — First Quarter {team} ML"
     elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
@@ -3169,6 +3175,36 @@ def _get_public_betting(conn: DBConnection, game_id: str,
     return {"public_bet_pct": None, "public_money_pct": None}
 
 
+def _game_board(conn: DBConnection, target_date: str, ufc_horizon: str,
+                ncaaf_horizon: str, game_horizon: str) -> list[tuple]:
+    """run_scorer's game list: every unscored game dated `target_date`, and the
+    look-ahead sports' games inside their horizons, as (game_id, sport, season,
+    game_date, home_team, away_team, commence_time).
+
+    An NHL row only the schedule refresh has written is a game no book has
+    listed (data/ingestors/nhl_schedule_refresh.py stores the season ahead).
+    Before that refresh it had no row, so it is not on the list now. Without
+    this the look-ahead price filter would still drop the future ones, but a
+    filter that failed open would hand the models every one of them, and a
+    game no book listed by its own day would be scored with no price."""
+    from data.ingestors.nhl_schedule_refresh import DATA_SOURCE as nhl_schedule_only
+    _ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
+    return conn.execute(f"""
+        SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
+        FROM games
+        WHERE home_score IS NULL
+          AND NOT (sport = 'NHL' AND COALESCE(data_source, '') = '{nhl_schedule_only}')
+          AND (game_date = ?
+               OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
+               OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?)
+               OR (sport IN ({_ahead_marks})
+                   AND game_date > ? AND game_date <= ?))
+        ORDER BY sport, game_date
+    """, (target_date, target_date, ufc_horizon,
+          target_date, ncaaf_horizon,
+          *GAME_SCORE_AHEAD_SPORTS, target_date, game_horizon)).fetchall()
+
+
 def _commence_time_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     """
     {game_id: commence_time} for a sport+date, so prop scorers can stamp each
@@ -3594,6 +3630,8 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
               WHEN p.model_id = 'ncaab_first_half_spread' THEN 'spreads_h1'
               -- The first quarter's spread, not the game's.
               WHEN p.model_id = 'nba_q1_trend' THEN 'spreads_q1'
+              -- The first quarter's moneyline, not the game's.
+              WHEN p.model_id = 'nba_q1_trend_ml' THEN 'h2h_q1'
               -- The NCAAB first half's points, not the game total.
               WHEN p.model_id = 'ncaab_first_half_total' THEN 'totals_h1'
               WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%'
@@ -3937,20 +3975,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         game_horizon = (
             date.fromisoformat(target_date) + timedelta(days=GAME_SCORE_AHEAD_DAYS)
         ).isoformat()
-        _ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
-        games = conn.execute(f"""
-            SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
-            FROM games
-            WHERE home_score IS NULL
-              AND (game_date = ?
-                   OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
-                   OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?)
-                   OR (sport IN ({_ahead_marks})
-                       AND game_date > ? AND game_date <= ?))
-            ORDER BY sport, game_date
-        """, (target_date, target_date, ufc_horizon,
-              target_date, ncaaf_horizon,
-              *GAME_SCORE_AHEAD_SPORTS, target_date, game_horizon)).fetchall()
+        games = _game_board(conn, target_date, ufc_horizon, ncaaf_horizon, game_horizon)
 
         # Narrow to the caller's subset BEFORE the price prefilter and the
         # feature build, or the restriction saves nothing.

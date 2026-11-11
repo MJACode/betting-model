@@ -469,7 +469,9 @@ def test_the_womens_extra_books_are_named_and_never_a_book_a_member_is_sent_to()
         "  (b) => !REFERENCE_ONLY_BOOKS.includes(b),\n);"
     ) in src, "the bettable list is derived another way now: re-read this test"
     line_shop = _string_list(src, "export const LINE_SHOP_BOOKS: BookKey[] = [")
-    reference = _string_list(src, "export const REFERENCE_ONLY_BOOKS: BookKey[] = [")
+    # the reference list became a readonly string list on 2026-11-11 (it names
+    # ESPN BET, which is no longer a fetched book key)
+    reference = _string_list(src, "export const REFERENCE_ONLY_BOOKS: readonly string[] = [")
     bettable = [b for b in line_shop if b not in reference]
     names = _string_record(src, "BOOK_NAMES")
     labels = _string_record(src, "BOOK_LABELS")
@@ -478,7 +480,7 @@ def test_the_womens_extra_books_are_named_and_never_a_book_a_member_is_sent_to()
         assert book not in bettable, f"{book} is offered as a book to bet at"
         assert names.get(book) and names[book] != book, f"{book} would print as its raw key"
         assert labels.get(book) and len(labels[book]) <= 5, f"{book} has no short label"
-    # DraftKings, the only book the women's model names, is still bettable.
+    # DraftKings, the book the women's pre-game model names, is still bettable.
     assert "draftkings" in bettable
     # The pill clips a label to three letters: none of the seven may read as
     # another book.

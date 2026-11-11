@@ -781,6 +781,12 @@ ACTION_THRESHOLDS: dict = {
     # 58-29-1, +26.33 units, +27.4%, interval +8.85% to +44.79%, every season positive. prob / edge are 0.0
     # for the same reason as nba_total_luck's.
     "nba_q1_trend":             {"min_prob": 0.0, "min_edge": 0.0},
+    # NBA FIRST-QUARTER MONEYLINE, the same hot team (mike, 2026-11-07: "Build it anyway"): written by the
+    # nba_q1_trend_ml card. nba_q1_trend's rule exactly, bet on the first-quarter moneyline
+    # (docs/nba_search_q1mt.md, family Q1M). THE CUT IS THE RULE, in the card; the offer the best EV under the
+    # moneyline's no-vig fair price. It did NOT pass the house standard (the 200-bet bar): 87 bets, 46-35-6,
+    # +17.78 units, +25.8%, interval +1.7% to +50.0%. It bets the same team in the same games as nba_q1_trend.
+    "nba_q1_trend_ml":          {"min_prob": 0.0, "min_edge": 0.0},
     # NCAAB full-game totals (2026-10-30, mike: "Yes to the totals model"):
     # models/ncaab_total_blend.py, written by scripts/ncaab_total_card.py.
     # Team ratings refit as of DraftKings' total, a residual on as-of shooting
@@ -984,6 +990,29 @@ ACTION_THRESHOLDS: dict = {
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
+    # NCAAF full-game moneylines against the books' consensus spread
+    # (2026-11-10, mike, asked after the market audit whether he wanted a
+    # moneyline model live although nothing measured clears: "ML model yes"):
+    # models/ncaaf_moneyline_market.py, written by
+    # scripts/ncaaf_moneyline_card.py. At 14:00 UTC on the game's Eastern
+    # date, the best deciding-book moneyline against the win chance the ten
+    # books' median spread implies through the final-margin distribution;
+    # sides shorter than -200 are removed before the pick; the largest edge
+    # of the game is bet when above 0.02 with 3+ other books in the consensus.
+    # The classifier above (ncaaf_moneyline) stays paused and is a different
+    # model. The build's replay of the card's own path matched all 311
+    # research bets (scripts/ncaaf_moneyline_market_build.py). 2023-2025:
+    # 311 bets, 122-189, +14.70 units, +7.8%, 95% interval -4.7% to +21.6%;
+    # by season -2.8, +16.7, +0.8 units. IT DID NOT CLEAR: the interval
+    # reaches below zero, the profit is one season, 294 of the 311 are road
+    # teams (the fitted home/away offset at work), and without its 10 best
+    # dates it is -9.3 units. Neighbour cuts: 0.01 601 bets +13.78 units,
+    # 0.03 136 bets +10.27, 0.04 43 bets +5.45. Prices laid on the replay:
+    # +110 to +430 (median +146), no favourites. docs/sports/ncaaf.md.
+    # model_probability is the bet side's fair chance and decision_edge that
+    # minus the bet price's implied, so every publisher agrees with the card.
+    # min_prob 0.0: the edge is the cut.
+    "ncaaf_moneyline_market": {"min_prob": 0.0, "min_edge": 0.02},
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -2236,6 +2265,13 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NCAAF moneylines against the consensus spread (2026-11-10, mike). The
+    # card removes every side shorter than -200 BEFORE it picks
+    # (models/ncaaf_moneyline_market step 5, the research's rule), so this is
+    # the second guard, pinned so a Railway DEFAULT_MIN_ODDS override cannot
+    # move it. It laid +110 to +430 on its 311 replayed bets (median +146);
+    # the rule itself has no upper price limit.
+    "ncaaf_moneyline_market":    -200,
     # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
@@ -2263,6 +2299,9 @@ MODEL_MIN_ODDS: dict = {
     # NBA first-quarter spreads, the hot team: it laid -125 to +118 on its 88 graded bets (median -110), so -200 admits prices
     # it was never graded at. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
     "nba_q1_trend":              -200,
+    # NBA first-quarter moneylines, the hot team: it laid -192 to +360 on its 87 graded bets (median +130), so -200
+    # is the floor it was graded at. Pinned so a Railway DEFAULT_MIN_ODDS override cannot move it.
+    "nba_q1_trend_ml":           -200,
     # NCAAB totals (2026-10-30, mike): it laid -120 to +102 on its 1,094
     # graded 2021-2025 bets (median -110). Pinned so a Railway DEFAULT_MIN_ODDS
     # override cannot move it.
@@ -2602,6 +2641,11 @@ MODEL_OWN_EV_FLOOR: dict = {
     # market-fair P(win) plus the cell's uplift (+0.1526 for 2026-27, fitted on all 88 graded bets), so every
     # graded bet sits far above 0.00 and this floor removes none of them.
     "nba_q1_trend": 0.00,
+    # NBA first-quarter moneylines (mike, 2026-11-07). The cut is the rule, in the card; its probability is the
+    # market-fair P(win | not level) plus the cell's uplift (+0.1416 for 2026-27, fitted on the 81 decided graded
+    # bets). Swept on its own 87: every floor from 0.00 to 0.15 keeps all 87 (the lowest EV is +0.182), 0.20 drops
+    # 7. So 0.00, as its spread sibling, removes none of them.
+    "nba_q1_trend_ml": 0.00,
     # NCAAB totals (2026-10-30, mike). The cut is the edge (0.04, in
     # MODEL_EDGE_THRESHOLDS), so this floor sits just under the smallest EV
     # that cut admitted on 2021-2025: P(win | no push) x decimal - 1 = +0.0743
@@ -2663,6 +2707,15 @@ MODEL_OWN_EV_FLOOR: dict = {
     # +0.0956 (374 bets, the blend it runs on; median +0.137). 0.07 never
     # removes a bet the cut takes.
     "ncaabw_total_blend":       0.07,
+    # NCAAF moneylines against the consensus spread (2026-11-10, mike). The
+    # cut is the edge (0.02, in MODEL_EDGE_THRESHOLDS), so this floor sits
+    # just under the smallest EV that cut admitted in the replay of
+    # 2023-2025: fair chance x decimal - 1 = +0.0437 (311 bets; median
+    # +0.0816). EV is edge x decimal, so an edge above 0.02 at -200 or longer
+    # is EV above 0.03: at 0.04 this floor can remove a bet the cut takes at
+    # a price shorter than +100, and the replay laid none (its shortest price
+    # was +110).
+    "ncaaf_moneyline_market":   0.04,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2820,6 +2873,8 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     "nba_first_half_total_luck",
     # The NBA first-quarter spreads: the market's fair P(win) plus the walk-forward uplift of the graded cell.
     "nba_q1_trend",
+    # The NBA first-quarter moneylines: the market's no-vig P(win | not level) plus the graded cell's uplift.
+    "nba_q1_trend_ml",
     # 2026-10-30 (mike, "Yes to the totals model"). NCAAB totals: its number
     # is the blend's P(win | no push) at DraftKings' line, which its 0.04 cut
     # was measured on. It has no record, so its map would be the offset
@@ -2849,6 +2904,11 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # push) at DraftKings' line, which its 0.05 cut was measured on. It has no
     # record, so its map would be the offset borrowed from other models.
     "ncaabw_total_blend",
+    # 2026-11-10 (mike). NCAAF moneylines: its number is the bet side's fair
+    # chance from the books' consensus spread through the final-margin
+    # distribution, which its 0.02 cut was measured on. It has no record, so
+    # its map would be the offset borrowed from other models.
+    "ncaaf_moneyline_market",
 })
 
 
@@ -3022,6 +3082,8 @@ SCORING_METHODS: dict = {
     "nba_first_half_total_luck": "rule",
     # The same shape: its artifact holds the first-quarter pricing rows and the graded cell's uplift buckets.
     "nba_q1_trend":        "rule",
+    # The same shape: its artifact holds the graded cell's uplift buckets (the moneyline needs no pricing rows).
+    "nba_q1_trend_ml":     "rule",
     # A rule with a parameter artifact committed under models/saved/ (last
     # season's ratings, the residual and blend coefficients,
     # models/ncaab_total_blend.py), never registered: the card loads it by
@@ -3053,6 +3115,11 @@ SCORING_METHODS: dict = {
     # committed under models/saved/ (models/ncaabw_total_blend.py), loaded by
     # scripts/ncaabw_total_card.py by its pinned path, never registered.
     "ncaabw_total_blend":  "rule",
+    # The same shape: the NCAAF moneyline rule's artifact holds the fitted
+    # offset and the final-margin table (models/ncaaf_moneyline_market.py),
+    # loaded by scripts/ncaaf_moneyline_card.py by its pinned path, never
+    # registered. Not in MODELS, which the scorer and the trainer iterate.
+    "ncaaf_moneyline_market": "rule",
 }
 
 
@@ -3084,6 +3151,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "nba_q1_trend":             0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend_ml":          0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.05,   # 2026-10-30 mike, raised 2026-11-07 mike: THE cut, P(win | no push) minus DraftKings' implied; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.03,   # 2026-11-02 mike: THE cut, P(win | no push) minus the bet price's implied; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.01,  # 2026-11-02 mike: THE cut, P(side wins) minus the bet price's implied; see ACTION_THRESHOLDS
@@ -3137,6 +3205,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
+    "ncaaf_moneyline_market": 0.02,  # 2026-11-10 mike: THE cut, the bet side's fair chance minus the bet price's implied; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -3188,6 +3257,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nba_team_total_luck":      0.0,    # cut is the home team's part of the gap, in the card; see ACTION_THRESHOLDS
     "nba_first_half_total_luck": 0.0,   # 2026-10-30 mike: cut is the full-game gap, in the card; see ACTION_THRESHOLDS
     "nba_q1_trend":             0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
+    "nba_q1_trend_ml":          0.0,    # 2026-11-07 mike: cut is the trend rule, in the card; see ACTION_THRESHOLDS
     "ncaab_total_blend":        0.0,    # 2026-10-30 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_spread_market":      0.0,    # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
     "ncaab_moneyline_own_spread": 0.0,  # 2026-11-02 mike: the cut is the edge; see ACTION_THRESHOLDS
@@ -3256,6 +3326,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # and is unchanged. docs/sports/ncaaf.md, the 2026-11-10 section.
     "ncaaf_over_under": 0.65,
     "ncaaf_moneyline":  0.62,
+    "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
