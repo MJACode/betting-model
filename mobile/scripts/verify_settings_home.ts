@@ -188,12 +188,35 @@ const labels = [
   'Connect Discord',
   'Disconnect Discord',
   'Gambling help & resources',
-  'Gambling help &amp; resources',
 ];
 for (const label of labels) {
-  const needle = label.includes('&amp;') ? label : label;
-  check(`still has ${label}`, settings.includes(needle) || settings.includes(label.replace('&', '&amp;')));
+  const asJsx = label.split('&').join('&amp;');
+  check(`still has ${label}`, settings.includes(label) || settings.includes(asJsx));
 }
+check(
+  'leaving the bankroll screen saves the same way blur does',
+  /return \(\) => \{\s*const c = commitBankrollText\(latest\.current\.text, latest\.current\.amount\);\s*if \(c\.save !== undefined\) setAmountRef\.current\(c\.save\);/.test(
+    settings,
+  ),
+);
+
+const fetchRules = await import(pathToFileURL(join(ROOT, 'src/lib/subscriptionFetch.ts')).href);
+const same = { generation: 1, userId: 'user-a' };
+eq(
+  'a fetch for the same account is kept',
+  fetchRules.subscriptionFetchStillCurrent(same, same),
+  true,
+);
+eq(
+  'a fetch that finishes after sign-out is dropped',
+  fetchRules.subscriptionFetchStillCurrent(same, { generation: 2, userId: null }),
+  false,
+);
+eq(
+  'a fetch for the previous account is dropped after a switch',
+  fetchRules.subscriptionFetchStillCurrent(same, { generation: 3, userId: 'user-b' }),
+  false,
+);
 
 const paywall = read('src/screens/PaywallScreen.tsx');
 check('paywall still says 8 sports', paywall.includes('all 8 sports') && !paywall.includes('all 7 sports'));
