@@ -315,7 +315,7 @@ export function formatGameTimeET(iso: string | null | undefined): string {
   }
 }
 
-/** "Tue 8/18, 9:31 AM ET" — full day+time stamp (NFL pick-timing display). */
+/** "Tue, 8/18, 9:31 AM ET" — full day+time stamp (NFL pick-timing display). The day half carries its own comma. */
 export function formatDayTimeET(iso: string | null | undefined): string {
   if (!iso) return '';
   try {
@@ -385,7 +385,7 @@ export function etDate(d: Date): string {
   }).format(d);
 }
 
-/** "Sat 6/14" for a commence time on a future ET day; null when it's today. */
+/** "Sat, 6/14" for a commence time on a future ET day; null when it's today. */
 export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;
   try {
@@ -404,7 +404,8 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
 
 /**
  * "Sun, 11/8": the ET date a game was played, on any day, today included.
- * The same text `gameDayLabelET` prints. `withYear` adds the year
+ * The same text `gameDayLabelET` prints for a day that is not today (that one
+ * returns null for today). `withYear` adds the year
  * ("Sun, 11/10/24"), for a list that spans seasons.
  *
  * Built from the parts, not by cutting a formatted string at a comma: the
