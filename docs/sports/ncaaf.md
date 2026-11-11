@@ -14,7 +14,7 @@ nothing over the closing line in this market.
 
 | Model ID | Kind | Rule | Status |
 |---|---|---|---|
-| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF. Refit 2026-11-10 (mike) as the **mean of eleven fits** (seeds 42 and 0-9, `models/seed_average.py`): fitted and committed, NOT yet registered, because a game with no weather forecast moves it past the gate (the 2026-11-10 section at the end of this file). The single fit of 2026-08-25 is still the one scoring | LIVE on the single fit. The mean of eleven, walk-forward 2022-2025 at the stored close: 235-191, 55.2%, +24.9 units (interval 50.4% to 59.9%, does not clear breakeven); seed 42 alone on the same games 244-230, 51.5%, -9.0 units. Sized small |
+| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF. Refit 2026-11-10 (mike) as the **mean of eleven fits** (seeds 42 and 0-9, `models/seed_average.py`): the active file since 2026-11-11 14:25 UTC, switched on once the weather hold was deployed, because a game with no weather forecast moves it past the gate (the 2026-11-10 section at the end of this file). The single fit of 2026-08-25 is the file to switch back to | LIVE on the mean of eleven. Walk-forward 2022-2025 at the stored close: 235-191, 55.2%, +24.9 units (interval 50.4% to 59.9%, does not clear breakeven); seed 42 alone on the same games 244-230, 51.5%, -9.0 units. Sized small |
 | `ncaaf_spread` | `cross_book_opener` | Back the side Bovada's OPENER favours, at DraftKings' stale OPENING number. Three preconditions in the scorer, each `return []`: (1) both openers captured within 90 min (`OPENER_MAX_SKEW_MIN`), (2) DK still ON its opener, (3) \|dev\| ≥ gate | LIVE but STRUCTURALLY DORMANT on this feed (measured 2026-09-07, session 252). Backtest 1,050 bets 58.1% +10.9%, CLV 0.694 — but CFBD's `spreadOpen` carries no timestamp, so the +10.9% was never measured under precondition 1. In production the Odds API lists next week's games from Tuesday with DraftKings and FanDuel priced and NO sharp book: a paid historical snapshot at 2026-09-03T17:55Z (requesting only DK, Bovada and Pinnacle) showed 16 events for 09-12/13 with DK priced and Bovada and Pinnacle absent, while both sharp books covered that week's own slate. Bovada's first stored number lands the Sunday before, by which time DK has moved off its opener on 40 of 49 games. The only firing condition observed is a game that ENTERS the feed with both books already priced (FAU@Florida 2026-09-05, 1-minute skew — the one spread BET this season). Two pre-game BETs all season, both lost |
 | `ncaaf_spread_premium` | `cross_book_opener` | The SAME rule, band **[2.5, inf)** — the scorer's `d_threshold_max` on `ncaaf_spread` caps it at 2.5 so the two tiers are MUTUALLY EXCLUSIVE and a game fires exactly one | LIVE — 344 bets 60.5% +15.4%, positive all 3 seasons, CI [0.552,0.655] |
 | `ncaaf_moneyline` | — | — | PAUSED — classifier held out at AUC ~0.50 |
@@ -955,7 +955,7 @@ snapshots with `refresh_ncaaf_stats`. If the API returns the low number,
 the live scale has left the scale the artifact was fit on, and the prior
 should be pinned to the 2025-12-12 snapshot before anyone refits.
 
-### 2026-11-10 — the totals fit is the mean of eleven seeds; fitted, not yet registered
+### 2026-11-10 — the totals fit is the mean of eleven seeds; registered 2026-11-11
 
 mike was asked "Refit the totals model as an average of 11 fits?" and answered
 "yes" (2026-11-10, after `docs/ncaaf_market_audit.md` section 4).
@@ -1177,3 +1177,13 @@ To go back after a registration: set the 2026-08-25 row active again in
 `model_registry` and the new one inactive. The old file stays in the repo
 for that reason. `--register-totals` cannot do it, because the old file
 carries no registry row of its own.
+
+**2026-11-11: registered.** #1238 merged at 14:17 UTC, both services
+deployed by 14:24, and the steps above were run at 14:25:35 UTC
+(`Updated-By: mike`, "merge 1238"). `model_registry` holds
+20261110_161059 active and 20260825_204305 inactive. The worker opened the
+file: its health check at 14:30 UTC read `model_artifacts_load` OK across
+all 43 active files, and its first scoring pass re-scored 48 games with no
+new bet and none waiting for a forecast. The August file's bytes are in
+`model_artifacts` too, so going back works even after that file leaves git.
+Detail: `docs/sessions/2026-11.md`, the 2026-11-11 entry.

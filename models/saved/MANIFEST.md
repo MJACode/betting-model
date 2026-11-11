@@ -102,13 +102,16 @@ models/saved/wnba_spread_20260719_113238.pkl
 - `ncaaf_over_under_20261110_161059.pkl` — the NCAAF totals regression as the
   mean of eleven fits (`models/seed_average.py`, fitted by
   `python -m scripts.ncaaf_margin_eval --fit-totals`; mike, 2026-11-10),
-  committed with the class its pickle names. NOT registered, and
-  `--register-totals 20261110_161059` refuses it unless the scorer holds a
-  game whose weather is missing: such a game moves its prediction 11.7 points
-  (`docs/sports/ncaaf.md`, the 2026-11-10 section). Until a version is
-  registered `ncaaf_over_under_20260825_204305.pkl` is the active row and
-  stays on this list. Drop the old one (steps 3-4 below) once a new row is
-  active; drop this one if it is replaced before it is ever registered.
+  committed with the class its pickle names. REGISTERED 2026-11-11 14:25 UTC
+  (`--register-totals 20261110_161059`, after the scorer's weather hold
+  deployed: a game with no forecast moves its prediction 11.7 points,
+  `docs/sports/ncaaf.md`, the 2026-11-10 section). It is the active row.
+  `ncaaf_over_under_20260825_204305.pkl` is now the inactive one and stays on
+  this list as the file to switch back to; its bytes are in `model_artifacts`
+  too (stored 2026-11-11), so the switch back survives the file leaving git.
+  Drop the old one (steps 3-4 below) once the new fit has scored a full
+  Saturday; `tests/test_ncaaf_totals_seed_fit.py` expects both files until
+  then.
 
 - `nba_prop_projection_20261016_091702.pkl` — the NBA projection model
   (`models/nba_prop_projection.py`, fitted by `scripts/nba_prop_projection_train.py`
