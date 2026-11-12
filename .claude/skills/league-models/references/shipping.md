@@ -163,7 +163,10 @@ A new writer that skips one of these bets something it should not:
 
 1. **Timing.** Not over the 6am ET pipeline (about 10:00 to 10:45 UTC), not
    over a live slate, not over a card's only deciding run. A merge redeploys
-   both services; docs-only merges skip the deploy.
+   both services. A docs-only merge usually skips the deploy, but not always:
+   on 2026-11-12 a markdown-only merge redeployed the in-play service during
+   live games, landing while another merge's deploy was still running. So
+   first check that neither service has a deploy building or deploying.
 2. **A table the app reads exists before the merge**, because app changes ship
    over the air on push.
 3. **Both deploys show SUCCESS** on the merge commit.
