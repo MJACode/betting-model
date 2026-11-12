@@ -31,6 +31,12 @@ ncaabw_player_season    one row per (season, team, player name): games,
                        ids change every season (measured: 0 of 1,573 returning
                        players kept their id from 2024-25 to 2025-26), so the
                        key is the normalised name within a team.
+ncaabw_player_game_log one row per player per game for the Stats tab. The
+                       table is created by
+                       add_ncaabw_player_game_log_2026_11_12.sql, which is not
+                       on the worker's migration list. This module writes it
+                       only when that table already exists, and never creates
+                       it. ESPN's women's player box is not a source.
 
 Everything in Supabase first (CLAUDE.md §1b): the parquet is read into memory
 and written to the database; nothing is kept on disk. A re-run skips seasons
@@ -272,6 +278,159 @@ def schedule_dates(df: pd.DataFrame) -> dict:
     return out
 
 
+# Stats-tab log (add_ncaabw_player_game_log_2026_11_12.sql). Same columns as
+# the men's ncaab_player_game_log, minus loaded_at. position and is_starter
+# stay null: the player box file has neither.
+LOG_TABLE = "ncaabw_player_game_log"
+LOG_COLS = ("game_id", "player_id", "player_name", "team", "team_espn_id",
+            "espn_event_id", "season", "game_date", "position", "is_starter",
+            "minutes", "points", "rebounds", "offensive_reb", "defensive_reb",
+            "assists", "steals", "blocks", "turnovers", "fouls", "fg_made",
+            "fg_att", "fg3_made", "fg3_att", "ft_made", "ft_att", "source")
+_LOG_INSERT = (
+    "INSERT INTO ncaabw_player_game_log (" + ", ".join(LOG_COLS)
+    + ") VALUES (" + ", ".join(f"%({c})s" for c in LOG_COLS)
+    + ") ON CONFLICT (game_id, player_id) DO NOTHING")
+
+
+def _count(v):
+    n = _num(v)
+    return None if n is None else int(round(n))
+
+
+def _played(rec: dict) -> bool:
+    """A box row that is a game, not an empty did-not-play line.
+
+    The file has no didNotPlay flag. Minutes above zero is a game. A row with
+    no minutes and every count zero is left out, the same cut the men's ESPN
+    parser makes. A count with no minutes is kept: that is a missing number,
+    not a player who did not play.
+    """
+    mins = _num(rec.get("mins"))
+    if mins is not None and mins > 0:
+        return True
+    for col in ("pts", "orb", "drb", "ast", "stl", "blk", "tov", "fgm", "tpm", "ftm"):
+        n = _count(rec.get(col))
+        if n:
+            return True
+    return False
+
+
+def game_log_rows(df: pd.DataFrame, games: dict) -> list[dict]:
+    """One dict per player per stored game, in LOG_COLS order's keys.
+
+    `games` maps an ESPN event id to the stored game: game_id, game_date,
+    season, home_espn_id, away_espn_id, home_team, away_team. `team` on the
+    row is that stored school, never the file's own team string (the file
+    says "Colorado St."; games says "Colorado State"). A row with no ESPN
+    game id, or whose id is not one of ours, is left out: the board joins on
+    our game_id.
+
+    player_id is "{team espn id}:{folded name}". The file's player_id is
+    NCAA's, and that id changes every season (see the module docstring), so
+    using it would split one player into a new board row each year.
+    """
+    best: dict[tuple, dict] = {}
+    for rec in df.to_dict("records"):
+        if not _played(rec):
+            continue
+        espn = _int_or_none(rec.get("espn_game_id"))
+        team_id = _int_or_none(rec.get("team_espn_team_id"))
+        game = games.get(espn) if espn is not None else None
+        name = _s(rec.get("clean_name"))
+        key_name = player_key(name or "")
+        if game is None or team_id is None or not key_name:
+            continue
+        if team_id == game["home_espn_id"]:
+            school = game["home_team"]
+        elif team_id == game["away_espn_id"]:
+            school = game["away_team"]
+        else:
+            continue
+        orb, drb = _count(rec.get("orb")), _count(rec.get("drb"))
+        rebounds = None if orb is None and drb is None else (orb or 0) + (drb or 0)
+        row = {
+            "game_id": game["game_id"],
+            "player_id": f"{team_id}:{key_name}",
+            "player_name": name,
+            "team": school,
+            "team_espn_id": team_id,
+            "espn_event_id": espn,
+            "season": int(game["season"]),
+            "game_date": game["game_date"],
+            "position": None,
+            "is_starter": None,
+            "minutes": _num(rec.get("mins")),
+            "points": _count(rec.get("pts")),
+            "rebounds": rebounds,
+            "offensive_reb": orb,
+            "defensive_reb": drb,
+            "assists": _count(rec.get("ast")),
+            "steals": _count(rec.get("stl")),
+            "blocks": _count(rec.get("blk")),
+            "turnovers": _count(rec.get("tov")),
+            "fouls": _count(rec.get("pf")),
+            "fg_made": _count(rec.get("fgm")),
+            "fg_att": _count(rec.get("fga")),
+            "fg3_made": _count(rec.get("tpm")),
+            "fg3_att": _count(rec.get("tpa")),
+            "ft_made": _count(rec.get("ftm")),
+            "ft_att": _count(rec.get("fta")),
+            "source": SOURCE,
+        }
+        slot = (row["game_id"], row["player_id"])
+        prev = best.get(slot)
+        if prev is None or (row["minutes"] or 0) > (prev["minutes"] or 0):
+            best[slot] = row
+    return list(best.values())
+
+
+def _log_table_ready(conn) -> bool:
+    """True only when the hand-applied migration has created the log.
+
+    A missing table is not an error and is not created here. The daily box
+    step keeps running on a database that has not had the migration yet.
+    """
+    row = conn.execute(
+        "SELECT to_regclass(%s)", ("public.ncaabw_player_game_log",)).fetchone()
+    return bool(row and row[0])
+
+
+def _stored_games(conn, season: int) -> dict:
+    rows = conn.execute(
+        "SELECT e.espn_event_id, e.game_id, e.game_date, e.season, "
+        "e.home_espn_id, e.away_espn_id, g.home_team, g.away_team "
+        "FROM ncaabw_events e "
+        "JOIN games g ON g.game_id = e.game_id AND g.sport = 'NCAABW' "
+        "WHERE e.season = %s",
+        (int(season),)).fetchall()
+    return {int(r[0]): {"game_id": r[1], "game_date": r[2], "season": int(r[3]),
+                        "home_espn_id": int(r[4]), "away_espn_id": int(r[5]),
+                        "home_team": r[6], "away_team": r[7]}
+            for r in rows}
+
+
+def _write_game_log(conn, season: int, df: pd.DataFrame) -> int | None:
+    """Insert log rows for games not stored yet. None when the table is absent.
+
+    A stored game is left alone (the team-box daily read's rule): a corrected
+    box is a --force concern, and this path does not rewrite one.
+    """
+    if not _log_table_ready(conn):
+        return None
+    rows = game_log_rows(df, _stored_games(conn, season))
+    have = {r[0] for r in conn.execute(
+        "SELECT game_id FROM ncaabw_player_game_log "
+        "WHERE season = %s AND source = %s",
+        (int(season), SOURCE)).fetchall()}
+    new = [r for r in rows if r["game_id"] not in have]
+    for i in range(0, len(new), 2000):
+        conn.executemany(_LOG_INSERT, new[i:i + 2000])
+    if new:
+        conn.commit()
+    return len(new)
+
+
 def player_rows(df: pd.DataFrame, season: int) -> list[dict]:
     """Season totals per (team, player name)."""
     df = df.copy()
@@ -342,6 +501,9 @@ def import_season(conn, season: int, *, team: bool = True, players: bool = True)
                 conn.executemany(_PLAYER_UPSERT, rows[i:i + 2000])
             conn.commit()
             out["player_rows"] = len(rows)
+            logged = _write_game_log(conn, season, df)
+            if logged is not None:
+                out["log_rows"] = logged
     return out
 
 
@@ -379,6 +541,12 @@ def refresh_season(conn, season: int) -> dict:
         conn.executemany(_TEAM_INSERT_NEW, new[i:i + 2000])
     conn.commit()
     out["new_rows"] = len(new)
+    # The Stats log, only after the migration has created the table. A missing
+    # table adds nothing to the result, so a database that has not been
+    # migrated keeps this step's old shape.
+    if _log_table_ready(conn):
+        df = _fetch_parquet(PLAYER_BOX_URL.format(season=int(season)))
+        out["log_rows"] = 0 if df is None else (_write_game_log(conn, int(season), df) or 0)
     return out
 
 

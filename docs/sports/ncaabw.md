@@ -322,11 +322,24 @@ those games is 15.95 points and the model's 15.95.
 NCAABW is a sport chip right after NCAAB on the Picks, Models and Stats tabs,
 and the model is "NCAABW Totals" (badge O/U). The Today board reads its picks
 7 days ahead, because DraftKings' first total came up to 6 dates before the
-game. There are no women's stats and no in-play model; the Stats, Live and
-Today boards each say so in words and point at where the picks are. VoiceOver
-says "Women's college basketball" wherever a control speaks the sport, so the
-men's and women's chips do not sound alike.
+game. The Stats tab has a Players board (the same chips as the men's, no
+props and no Teams board). The in-play model is in its own section below.
+VoiceOver says "Women's college basketball" wherever a control speaks the sport,
+so the men's and women's chips do not sound alike.
 
+- **Stats tab, Players board.** Points, Rebounds, Assists, 3PM, PRA, Steals,
+  Blocks, Minutes, with Hit Rates and Averages, the men's set. Source
+  `ncaabw_player_game_log`, one row per player per game from sportsdataverse's
+  `ncaa_wbb_player_box` (`data/ingestors/ncaabw_sdv_import.py`). ESPN's women's
+  player box is not ingested. The school name is the one on the games row.
+  The player id is the team ESPN id plus the folded name, because NCAA's own
+  player id changes every season. Reads: `v_player_season_totals_ncaabw`,
+  `player_window_totals_ncaabw`, `player_recent_games_ncaabw`,
+  `player_season_stat_values_ncaabw`, `player_h2h_stat_values_ncaabw`
+  (`add_ncaabw_player_game_log_2026_11_12.sql`). That file is not in
+  `ACTIVE_MIGRATIONS`; apply it by hand after the worker deploy, once Matt
+  says so. No player-prop line. No Teams board. No starter flag: the file
+  does not carry one, so the player page has no Starting / Off bench split.
 - **The prefix trap.** `modelId.startsWith('ncaab')` is true for
   `ncaabw_total_blend`, so both places that file a model under a sport test
   the women's prefix first (`modelMeta.sportOfModel`, `ModelsScreen.sportOf`).

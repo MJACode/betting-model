@@ -395,53 +395,86 @@ def test_the_season_label_is_the_ending_year():
         assert "sport === 'NCAABW'" in _fn(team, name), name
 
 
-def test_ncaabw_has_no_stats_and_asks_the_server_for_none():
-    """No women's player stats, Teams board or player page.
+def _before(body: str, women: str, men: str) -> None:
+    """The women's token is in the function, and it is not the men's token.
 
-    Each takes the app's existing empty state, and every Stats read returns
-    nothing for NCAABW before it can fall through to another league's view
-    (fetchSeasonTotals and fetchWindowTotals end on the MLB read).
+    A search for the men's name matches the start of the women's name, so the
+    women's token is the quoted form that ends on its own quote.
+    """
+    assert women in body, women
+    assert body.index(women) < body.index(men), (women, men)
+
+
+def test_ncaabw_stats_are_wired_like_ncaab():
+    """Women's college basketball has the men's Players board (Matt, 2026-11-03,
+    women's half). Same chips, own views, hit rate, player page. No props, no
+    Teams board. Every women's check is named before the men's one it would
+    otherwise be swallowed by.
     """
     cat = _read(STAT_CATALOG)
     groups = re.search(r"export const GROUP_ORDER: Record<Sport, StatGroup\[\]> = \{(.*?)\n\};", cat, re.S)
-    assert groups and "\n  NCAABW: []," in groups.group(1)
-    assert "sport: 'NCAABW'" not in cat, "a stat row for a sport with no player data behind it"
+    assert groups and "\n  NCAABW: ['NCAABW']," in groups.group(1)
+    for key in ("points", "rebounds", "assists", "threes", "pra", "steals", "blocks", "minutes"):
+        assert re.search(rf"key: '{key}', label: '[^']+', sport: 'NCAABW'", cat), key
+    default = _fn(cat, "defaultStatFor")
+    _before(default, "'NCAABW'", "'NCAAB'")
+    assert "'points'" in default
     hit = re.search(r"const HIT_RATE_SPORTS = new Set<Sport>\(\[(.*?)\]\);", cat)
-    assert hit and "'NCAABW'" not in hit.group(1)
+    assert hit and "'NCAABW'" in hit.group(1)
+    _before(hit.group(1), "'NCAABW'", "'NCAAB'")
+    market = _fn(cat, "propMarketForStat")
+    assert "def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;" in market
+    # Not exported: the model map bails on both college sports, women's first.
+    raw = cat[cat.index("function rawPropModelForStat"):]
+    assert "def.sport === 'NCAAF' || def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;" in raw
     team = _read(TEAM_STAT_CATALOG)
     ball = re.search(r"const BALL: Sport\[\] = \[(.*?)\];", team)
     assert ball and "'NCAABW'" not in ball.group(1), "an NCAABW Teams board has no rows behind it"
-    log = re.search(r"const LOG_SPORTS = new Set<Sport>\(\[(.*?)\]\);", _read(PLAYER_LOG))
-    assert log and "'NCAABW'" not in log.group(1), "an NCAABW player page has no log behind it"
-    # It does have an in-play model (the halftime total, 2026-11-11), so the
-    # Live board says when it bets instead of "no live model".
+    assert "'NCAAB'" not in ball.group(1)
+    log_src = _read(PLAYER_LOG)
+    log = re.search(r"const LOG_SPORTS = new Set<Sport>\(\[(.*?)\]\);", log_src)
+    assert log and "'NCAABW'" in log.group(1)
+    _before(log.group(1), "'NCAABW'", "'NCAAB'")
+    assert "NCAABW: 'ncaabw_player_game_log'" in log_src
+    assert "if (sport === 'NCAABW' || sport === 'NCAAB')" in log_src
+    # The in-play model is unchanged: the Live board still says when it bets.
     live_src = _read(LIVE_SPORTS)
     live = re.search(r"export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set\(\[(.*?)\]\);", live_src)
     assert live and "'NCAABW'" in live.group(1)
-    # the two college basketball codes close the list, never sit mid-sentence
     assert live.group(1).endswith("'NCAAB', 'NCAABW'")
     assert ("'The NCAABW in-play model checks each game during its halftime break and bets it at most once, ' +"
             in live_src)
 
     q = _read(QUERIES)
     season = _fn(q, "fetchSeasonTotals")
-    assert season.index("sport === 'NCAABW') return [];") < season.index("'v_player_season_totals_mlb'")
-    assert season.index("sport === 'NCAABW') return [];") < season.index("supabase")
+    assert "sport === 'NCAABW') return [];" not in season
+    _before(season, "supabase.from('v_player_season_totals_ncaabw')",
+            "supabase.from('v_player_season_totals_ncaab')")
     window = _fn(q, "fetchWindowTotals")
-    assert window.index("sport === 'NCAABW') return [];") < window.index("'player_window_totals_mlb'")
+    assert "sport === 'NCAABW') return [];" not in window
+    _before(window, "sport === 'NCAABW' ? 'player_window_totals_ncaabw'",
+            "sport === 'NCAAB' ? 'player_window_totals_ncaab'")
+    for name, rpc in (("fetchRecentGames", "player_recent_games_ncaabw"),
+                      ("fetchSeasonStatValues", "player_season_stat_values_ncaabw"),
+                      ("fetchH2HStatValues", "player_h2h_stat_values_ncaabw")):
+        body = _fn(q, name)
+        mens = rpc.replace("_ncaabw", "_ncaab")
+        _before(body, f"'{rpc}'", f"'{mens}'")
+        assert body.index("=== 'NCAABW'") < body.index("=== 'NCAAB'"), name
     teams = _fn(q, "fetchTeamStats")
-    assert teams.index("sport === 'NCAABW') return { season: null, rows: [] };") < teams.index("'team_stats_board'")
+    assert "sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };" in teams
     for name in ("fetchRecentGames", "fetchSeasonStatValues", "fetchPositionVsOpponent", "fetchPlayerVsDefense"):
         body = _fn(q, name).rstrip()
         assert re.search(r"return \[\];(?: //[^\n]*)?\n\}$", body), f"{name} no longer ends on return []"
-        assert "NCAABW" not in body.split("): Promise<")[1], f"{name} has a read for NCAABW"
-    # No women's relation is read anywhere: there is none to read.
-    assert not re.search(r"['`][a-z_]*ncaabw[a-z_]*['`]", q), "queries.ts names a women's relation"
+    # Position-vs-opponent and player-vs-defense stay empty: no college card.
+    for name in ("fetchPositionVsOpponent", "fetchPlayerVsDefense"):
+        assert "ncaabw" not in _fn(q, name)
 
-    # The empty Stats tab names no sportsbook: it has no line to show.
     stats = _read(STATS_SCREEN)
     m = re.search(r"const showHeaderBookLine =(.*?);\n", stats, re.S)
-    assert m and "sport !== 'NCAABW'" in m.group(1)
+    assert m and "sport !== 'NCAABW' && sport !== 'NCAAB'" in m.group(1)
+    assert "There are no player or team stats for women’s college basketball" not in stats
+    assert "sport === 'NCAABW' || sport === 'NCAAB'" in stats
 
 
 # -- the women's extra books --------------------------------------------------
@@ -528,9 +561,11 @@ def test_the_empty_boards_say_where_the_womens_picks_are():
     markets = _read(SRC / "lib" / "markets.ts")
     assert "pick.model_id === NCAABW_HALFTIME_MODEL" in markets and "pick.sport === 'NCAABW'" not in markets
     assert "'Decided once, during the halftime break, on the full-game total: it settles on the ' +" in markets
+    # Stats is a Players board now. The empty-catalog sentence is gone; the
+    # board still names no sportsbook, because college props stay off.
     stats = _read(SRC / "screens" / "StatsScreen.tsx")
-    assert ("'There are no player or team stats for women’s college basketball. Its totals "
-            "picks are on the Picks tab.'") in stats
+    assert "There are no player or team stats for women’s college basketball" not in stats
+    assert "sport !== 'NCAABW'" in stats
 
 
 def test_the_copy_says_a_pick_is_for_the_total_shown_not_a_later_one():

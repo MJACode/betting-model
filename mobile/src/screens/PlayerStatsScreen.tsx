@@ -512,7 +512,7 @@ export function PlayerStatsScreen() {
         value: m.value,
         date: shortGameDate(m.date),
         iso: m.date,
-        opp: opponentLabel(row, true, ncaafAbbrevs, sport === 'NCAAB'),
+        opp: opponentLabel(row, true, ncaafAbbrevs, sport === 'NCAABW' || sport === 'NCAAB'),
         oppFull: opponentLabel(row, false),
       }));
       return lookupLogMinutes(meetings, games, sport);
@@ -521,7 +521,7 @@ export function PlayerStatsScreen() {
       games,
       (r) => logStatValue(r, stat),
       ncaafAbbrevs,
-      sport === 'NCAAB',
+      sport === 'NCAABW' || sport === 'NCAAB',
       sport,
     );
     return range === 'all' ? all : all.slice(0, range);
@@ -1787,7 +1787,7 @@ function TonightLineCard({
   // College basketball shows no player-prop lines (Matt, 2026-11-03), so the
   // card is the fixture only: no line copy, no tooltip about prices it can
   // never show, and no claim that books do not price the stat.
-  if (sport === 'NCAAB') {
+  if (sport === 'NCAABW' || sport === 'NCAAB') {
     return (
       <>
         <SectionTitle title="Next game" />
