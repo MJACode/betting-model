@@ -127,6 +127,6 @@ def test_the_same_game_estimate_is_per_extra_leg_after_the_correlation_lift():
     assert "greatest(o.corr_lift, 1)" in mig, "the server fit uses the price's own formula"
     corr = _read("lib/parlayCorrelation.ts")
     # Every surface prices with the bundled table only, so they agree.
-    assert "correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, SGP_LIFT_DRAWS)" in corr
+    assert "correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, draws)" in corr
     parlay = _read("lib/parlay.ts")
     assert parlay.count("sgpShapeFor(legs)") >= 2
