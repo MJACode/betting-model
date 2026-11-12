@@ -45,6 +45,9 @@ the work, not a courtesy after it:
   failed. A null is never deleted: it is what stops a rerun. Every claim that
   can change (a file path, a config name, a model's status, a number) is a
   memory, not a measurement: re-check it before relying on it.
+  `tests/test_league_models_skill.py` corrects the skill when nobody is using
+  it: it fails the suite when a file, module or setting the skill cites no
+  longer exists, so whoever moved it updates the skill in the same change.
 - **Evolve the framework itself.** A step that was wrong, missing or in the
   wrong order is changed here, with the reason in the log. A trap or failure
   that appears in two log entries is promoted to a rule in the step it belongs
@@ -136,6 +139,9 @@ was written down. Do not relitigate them; the evidence is in
 
 - Read `references/learning-log.md`: what earlier uses learned, what they
   corrected, and the open items they left.
+- Run the skill's self-check, `python -m pytest -q
+  tests/test_league_models_skill.py`. A failure means a file or setting this
+  skill cites has moved: fixing the skill is the first correction of the build.
 - Read the rules from `git show origin/master:CLAUDE.md` if the checkout is
   behind; a stale branch has hidden newer standing rules three times.
 - Read the league's own doc if it exists (`docs/sports/<league>.md`) and any
