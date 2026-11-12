@@ -840,6 +840,22 @@ def _job_splits_source_probe(**kw):
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
 
 
+def _job_book_app_links_probe(**kw):
+    """Each sportsbook's apple-app-site-association file, and whether the
+    betslip links we store are claimed by its app. Writes nothing, no Odds API
+    call (scripts/book_app_links_probe.py)."""
+    from scripts.book_app_links_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.book_app_links_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_book_app_links_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
+
+
 def _validate_splits_source_probe(args: dict) -> dict:
     if args:
         raise ValueError(f"unknown args {sorted(args)}; this job takes none")
@@ -2884,6 +2900,7 @@ JOBS = {
     "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),

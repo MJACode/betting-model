@@ -1680,5 +1680,12 @@
     "args": {
       "script": "nhl_derivative_totals_backtest"
     }
+  },
+  {
+    "key": "book-app-links-probe-2026-11-12",
+    "job_type": "book_app_links_probe",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-12: 'it should pull up the app not the website ... MGM link took me to the website', then 'Yes continue' to the worker probe. Fetches each sportsbook host's apple-app-site-association file (Apple CDN first, then the host) and reports whether the stored betslip links are claimed by the book's app. Writes nothing, no Odds API credits.",
+    "args": {}
   }
 ]

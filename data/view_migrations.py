@@ -607,6 +607,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # authenticated revoked; touches no view, pick or function. Returns on a
     # catalog read once it exists. The loop refuses to decide until it does.
     "ncaabw_live_decisions_2026_11_11.sql",
+    # 2026-11-11 (mike): a volume setting per pre-game model, set by one
+    # input (set_model_volume) and shown with its bands (model_volume_bands).
+    # Adds base_min_edge / base_min_prob to model_action_thresholds (config's
+    # own cut, which data.threshold_sync writes), two worker-only tables, a
+    # log trigger, apply_model_volume_settings() and the view. With no
+    # setting made it changes no cut: min_edge and min_prob stay config's.
+    # Returns on a catalog read once the view's comment matches the hash of
+    # this file. The view calls the three-argument posted-unit functions, so
+    # on a fresh database it waits (a NOTICE, not an error) until the pair
+    # below has run. Does not write picks, push_sent or the record.
+    "model_volume_settings_2026_11_11.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

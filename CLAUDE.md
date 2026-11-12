@@ -473,9 +473,10 @@ silently fails to reach production.
   the source of truth for the variable list.
 - **Thresholds → canonical in `config.py`, mirrored to Supabase** by
   `data.threshold_sync` (every refresh + daily after migrations). The scorer reads
-  `config.py`, so the BET decision is config-canonical wherever it runs. **A hand
-  edit to `model_action_thresholds` is temporary** — the next sync overwrites
-  it from `config.py` on master.
+  `config.py`, so the BET decision is config-canonical. **A hand edit to
+  `model_action_thresholds` is temporary.** A volume setting
+  (`set_model_volume`) lifts `min_*` over config's cut, kept in
+  `base_min_*` (`docs/thresholds.md`).
 - **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` is what
   gets fetched; `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED at.
   **betPARX is fetched, and never the book a pick names** (few states; mike 11-06).

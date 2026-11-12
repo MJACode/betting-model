@@ -84,6 +84,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from models import cbb_pairs  # noqa: E402
 from models import ncaab_stake  # noqa: E402
 import data.ingestors.ncaab_first_half_odds as feed  # noqa: E402
 import models.ncaab_first_half_spread as fh  # noqa: E402
@@ -690,6 +691,9 @@ def run_card(do_publish: bool = False, now: datetime | None = None) -> dict:
         if do_publish and decisions:
             from models.scorer import _get_current_bankroll
             rows, refused = pick_rows(decisions, games, _get_current_bankroll(conn))
+            # An under beside a big favourite's spread bet on the same game is not bet
+            # (models/cbb_pairs.py; mike, 2026-11-11): the later of the two becomes a NONE row.
+            cbb_pairs.hold_back(conn, rows, refused)
             bet_ids = {r["game_id"] for r in rows if r["signal_type"] == "BET"}
             decided = [decision_row(d, fa, lead, ages, miss, d.game_id in bet_ids,
                                     refused.get(d.game_id))
