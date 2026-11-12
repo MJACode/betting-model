@@ -19,10 +19,37 @@ that needs it starts:
 | `references/kill-tests.md` | step 6: the tests that killed false edges here, and how to run each |
 | `references/porting-traps.md` | steps 2–3: what a copy of existing code got wrong on a new league's data |
 | `references/shipping.md` | step 7: every file, table, test and production step a new model or sport touches |
+| `references/learning-log.md` | step 0 (read) and step 9 (append): what every use of this skill taught it |
 
 **The catalog is a starting set, not a boundary.** Step 5 ends with inventing
 methods, and step 9 writes every new method, trap and null back into these
 files, so the next league starts from more than this one did.
+
+---
+
+## How this skill learns, corrects and evolves
+
+It does not change by itself. It changes only when a session using it writes
+back, and only once that write-back is merged. So the write-back is part of
+the work, not a courtesy after it:
+
+- **Learn, on every use.** Step 0 reads `references/learning-log.md`. Step 9
+  appends an entry (what was tried, what was new, what was corrected, what in
+  the framework changed) and writes each new method, trap, price route or kill
+  test into its reference file. **A build is not done until those changes are
+  in the same branch as the work**, and the reply carries one line: *"What this
+  build taught the skill: …"*.
+- **Correct, the moment a measurement contradicts it.** Fix the claim in place
+  the same day — the new number, the date, the doc — and log "was X, now Y,
+  because Z". A method listed as working that fails on re-measure moves to
+  failed. A null is never deleted: it is what stops a rerun. Every claim that
+  can change (a file path, a config name, a model's status, a number) is a
+  memory, not a measurement: re-check it before relying on it.
+- **Evolve the framework itself.** A step that was wrong, missing or in the
+  wrong order is changed here, with the reason in the log. A trap or failure
+  that appears in two log entries is promoted to a rule in the step it belongs
+  to. A league that fits no sport shape adds one to `references/market-grid.md`.
+  Every fifth entry, read the whole log for patterns and revise this file.
 
 ---
 
@@ -107,6 +134,8 @@ was written down. Do not relitigate them; the evidence is in
 
 ### 0. Orient — timeboxed, and it produces facts, not prose
 
+- Read `references/learning-log.md`: what earlier uses learned, what they
+  corrected, and the open items they left.
 - Read the rules from `git show origin/master:CLAUDE.md` if the checkout is
   behind; a stale branch has hidden newer standing rules three times.
 - Read the league's own doc if it exists (`docs/sports/<league>.md`) and any
@@ -277,6 +306,53 @@ defining a new shape, and for adding it to `references/market-grid.md`.
 When there are many, give each to a subagent with its grid row, the kill
 tests, the decision time and the rules above in writing, and merge the tables.
 
+#### When stuck — go outside the box before calling anything null
+
+**You are stuck when any one of these is true:**
+
+- two rounds on one market and nothing has survived the kill tests;
+- every variant of a method fails the same way;
+- a result does not fit what the mechanism predicts;
+- a blocker: no data, no price, no access;
+- you notice you are sweeping cuts or adding features on the same data.
+
+**Then climb this ladder. Every rung is done before a market is called null.**
+
+1. **Stop tuning.** Another cut, seed or feature on the same data is not a
+   new idea. The searches here that kept re-mining the same data found
+   nothing that held (`docs/sports/ncaaf.md`, "The model search is CLOSED").
+2. **Back to the mechanism.** Write out who sets this line, from what, when it
+   moves and what it cannot know. Ask what a professional bettor and a
+   bookmaker in this sport each do.
+3. **Change the information.** What does the book lack, or get late? A
+   forecast, a lineup, tracking data, officials, travel, the timing of news.
+   Look for sources outside the odds feed.
+4. **Change the market or the moment.** An adjacent market, a derivative, an
+   alternate line, the first post rather than the close, a break between
+   periods, another book, a prediction market.
+5. **Invert the question.** Which side does the book make its money on? Why
+   do the losing bets lose? Why are the biggest claimed edges wrong? What would
+   a perfect predictor of the line's move have earned?
+6. **Look outside.** Search for papers, practitioners' write-ups and methods
+   from other fields: stale quotes and lead-lag from market microstructure;
+   ensembles, shrinkage and calibration from forecasting; the sport's own
+   science. Timeboxed, and every idea comes back as an experiment, not a
+   paragraph.
+7. **Get a read that is not anchored on yours.** Give a fresh subagent the
+   grid, the data and the question — not your hypothesis or your conclusions
+   — and ask what is missing. Or call the advisor.
+8. **Re-check the plumbing.** Is the target what the book grades? Is the
+   grading right? Is the price one we could bet? Is the data what we think it
+   is? Several findings here were reversed by data quality or sampling, not by
+   modelling (`references/kill-tests.md`, "Is the data right?").
+
+Only then: "no version clears; here is what was tried at each rung; here is
+what would have to change". Every untried idea from the ladder goes into the
+frontier list in `references/methods.md`, and the ladder's outcome goes in the
+log. **Never hand being stuck back to mike as a question.** Ask him only for
+what only he can do: a purchase with its measured cost, an account, a call
+that is his to make.
+
 ### 6. The kill tests
 
 Every result that looks positive goes through `references/kill-tests.md`
@@ -338,17 +414,18 @@ live slate, or a card's only deciding run.
 - Proactively check adjacent markets, lead times and execution details
   around a live model, and say what the next measured step would be.
 
-### 9. Write it down, and teach this skill
+### 9. Write it down, and teach this skill — the build is not done without it
 
 - The league doc: the source inventory, the grid, each model's evidence, what
   a copy of existing code got wrong, open items.
 - A study doc per large search (`docs/<league>_market_audit.md` is the shape),
   with each table naming the script that printed it.
 - The session log (`docs/sessions/<YYYY-MM>.md` and its README row).
-- **This skill's references**: a new method, a new kill test, a new trap or a
-  new price route goes into the matching file under `references/`, with the
-  league, the date and the doc that holds the evidence. If the framework
-  itself was wrong somewhere, fix this file.
+- **This skill**, in the same branch: an entry in
+  `references/learning-log.md`; each new method, kill test, trap or price
+  route in its reference file, with the league, the date and the doc that
+  holds the evidence; each contradicted claim corrected in place; and any
+  change to the steps here. "How this skill learns" above says how.
 
 ---
 
@@ -357,6 +434,7 @@ live slate, or a card's only deciding run.
 CLAUDE.md §0 governs: the four headings, nothing above them, each fact once.
 For this work, **"Quick summary of what was done" leads with the grid and the
 results table** (bets, units, return with interval, CLV, early/late), then the
-approach. Every model that is about to ship states its price range there.
-Decisions are written so mike can answer without opening a file: what he gets
-or loses, one idea per sentence, a recommendation.
+approach. Every model that is about to ship states its price range there. It
+ends with the line *"What this build taught the skill: …"*, naming what was
+added or corrected. Decisions are written so mike can answer without opening a
+file: what he gets or loses, one idea per sentence, a recommendation.
