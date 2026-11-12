@@ -9,7 +9,8 @@
 --   2. NFL had no leg correlations, so Daniels 2+ pass TDs, Diggs 4+ catches
 --      and a Diggs TD were priced as unrelated.
 -- The estimate is now
---   (legs multiplied) / lift x (1 - cut) ^ extra_legs
+--   fair = (legs multiplied) / greatest(lift, 1)
+--   1 + (fair - 1) x (1 - cut) ^ extra_legs
 -- where lift is the correlation's effect on the joint chance and extra_legs
 -- the legs past the first in each same-game group. This migration:
 --   a. stores extra_legs and corr_lift with every entered price,
@@ -101,7 +102,8 @@ BEGIN
 END;
 $$;
 
--- Each book's cut per EXTRA same-game leg, after the correlation lift, over the
+-- Each book's cut per EXTRA same-game leg, off the profit, after the
+-- correlation lift (never below 1 for price), over the
 -- last 120 days. One vote per device, as before. Rows from app builds that sent
 -- no extra_legs / corr_lift are left out: their cut is per game and on the raw
 -- multiplied price, a different quantity.
@@ -116,13 +118,15 @@ AS $$
         SELECT o.book,
                o.device_id,
                percentile_cont(0.5) WITHIN GROUP (
-                   ORDER BY 1 - power(o.book_decimal * o.corr_lift / o.multiplied_decimal,
+                   ORDER BY 1 - power((o.book_decimal - 1)
+                                      / (o.multiplied_decimal / greatest(o.corr_lift, 1) - 1),
                                       1.0 / o.extra_legs)
                ) AS cut
           FROM sgp_price_observations o
          WHERE o.received_at > now() - interval '120 days'
            AND o.extra_legs IS NOT NULL
            AND o.corr_lift IS NOT NULL
+           AND o.multiplied_decimal / greatest(o.corr_lift, 1) > 1
          GROUP BY o.book, o.device_id
     )
     SELECT d.book,

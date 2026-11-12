@@ -188,9 +188,12 @@ function legAttrs(leg: ParlayLeg, resolveTeam?: TeamResolver): LegAttrs {
 function propPairRho(a: LegAttrs, b: LegAttrs): number | null {
   if (!a.prop || !b.prop || a.prop.sport !== 'NFL' || b.prop.sport !== 'NFL') return null;
   let rel: PropRel;
+  // A pick leg carries no team; the screen's resolver (LegAttrs.team) may.
+  const ta = a.prop.team ?? a.team;
+  const tb = b.prop.team ?? b.team;
   if (a.prop.player === b.prop.player) rel = 'same_player';
-  else if (a.prop.team == null || b.prop.team == null) return 0; // teammate or opponent: unknown
-  else rel = a.prop.team === b.prop.team ? 'same_team' : 'opp';
+  else if (ta == null || tb == null) return 0; // teammate or opponent: unknown
+  else rel = ta === tb ? 'same_team' : 'opp';
   const ma = baseMarket(a.prop.market);
   const mb = baseMarket(b.prop.market);
   if (rel === 'same_player' && ma === mb) return 0; // one bet at two numbers; not a parlay we price
@@ -383,7 +386,8 @@ export const SGP_LIFT_DRAWS = 60000;
 
 /**
  * How much more often the legs all hit than their multiplied-out chance says,
- * at the BOOK's own leg prices (1 / decimal), on the bundled correlations only
+ * at the slip's own leg prices (1 / decimal, DraftKings' where it lists the
+ * leg; one lift serves every book's tile), on the bundled correlations only
  * — never the fetched table, so the bar, the tiles and the headline, which do
  * not all hold it, show one price. 1 when no pair is correlated.
  *
@@ -397,17 +401,23 @@ export function sgpCorrelationLift(legs: readonly ParlayLeg[]): number {
     .map((l) => {
       const p = l.prop;
       const who = p ? `${p.sport}:${p.market}:${p.player}:${p.team ?? ''}:${p.side}` : '';
-      return `${l.slipKey}@${l.decimalOdds.toFixed(4)}@${l.gameId}@${l.modelId}@${l.pick?.pick_side ?? ''}@${who}`;
+      // Price to the nearest half point of implied chance: a tick that small
+      // does not move the lift, and keying on the exact odds re-ran the
+      // simulation on every refresh (UX review, 2026-11-12).
+      const q = Math.round(clampProb(l.modelProb) * 200) / 200;
+      return `${l.slipKey}@${q}@${l.gameId}@${l.modelId}@${l.pick?.pick_side ?? ''}@${who}`;
     })
     .sort()
     .join('|');
   const hit = liftCache.get(key);
   if (hit != null) return hit;
-  const { jointProb, hasCorrelation } = correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, SGP_LIFT_DRAWS);
+  const draws = priced.length >= 6 ? SGP_LIFT_DRAWS / 2 : SGP_LIFT_DRAWS;
+  const { jointProb, hasCorrelation } = correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, draws);
   let lift = 1;
   if (hasCorrelation) {
     const independent = priced.reduce((a, l) => a * clampProb(l.modelProb), 1);
-    // A joint the draws never hit (or a degenerate one) is no information.
+    // A joint the draws never hit (or a degenerate one) is no information, so
+    // such a slip (around 1 in 10,000 or longer) is priced with no lift.
     if (jointProb > 0 && independent > 0) lift = Math.max(0.25, Math.min(8, jointProb / independent));
   }
   if (liftCache.size > 50) liftCache.clear();

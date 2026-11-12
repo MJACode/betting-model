@@ -70,6 +70,7 @@ export function SgpPriceEntry({
       AccessibilityInfo.announceForAccessibility(`Price looks off. Check the number on ${name}’s slip.`);
       return;
     }
+    const shape = sgpShapeFor(legs);
     setSaving(true);
     setRangeNote(null);
     // The price shows on this slip whether or not the save reaches the server.
@@ -84,10 +85,8 @@ export function SgpPriceEntry({
         sgpGroups,
         // The same shape the tile was estimated with, so the server fits the
         // cut per extra leg after the correlation lift (lib/sgpPricing.ts).
-        ...(() => {
-          const shape = sgpShapeFor(legs);
-          return { extraLegs: shape.extraLegs, corrLift: shape.lift };
-        })(),
+        extraLegs: shape.extraLegs,
+        corrLift: shape.lift,
         legCount: legs.length,
         legs: legs.map((l) => ({ label: l.label, gameId: l.gameId ?? null })),
         appVersion: APP_VERSION ?? null,
@@ -111,7 +110,7 @@ export function SgpPriceEntry({
         </Text>
         <InfoTooltip
           title="Same-game price"
-          body={`Two or more legs share a game. Books price those legs together, usually for less than the legs multiplied out, so the ${name} tile shows our estimate.\n\nEnter the price ${name}’s slip shows and this slip uses it. It also helps us price same-game slips at ${name} for everyone.`}
+          body={`Two or more legs share a game. Books price those legs together, and legs that tend to hit together pay less than the legs multiplied out, so the ${name} tile shows our estimate.\n\nEnter the price ${name}’s slip shows and this slip uses it. It also helps us price same-game slips at ${name} for everyone.`}
           accessibilityLabel="About same-game prices"
         />
       </View>

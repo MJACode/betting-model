@@ -131,7 +131,8 @@ check('FD tile is no longer +6040', fd.americanOdds != null && fd.americanOdds <
 // consistency check, not an out-of-sample test.
 check('FD tile within 6% of FanDuel’s own +4254', near(fd.decimalPayout, toDec(4254), toDec(4254) * 0.06), `FD ${fd.americanOdds?.toFixed(0)}`);
 check('FD tile is marked an estimate', fd.sgpEstimated && !fd.entered);
-check('DK tile is cut by the same default, per extra leg', near(dk.decimalPayout, dk.multipliedDecimal! * (1 - DEFAULT_SGP_HAIRCUT) ** 2, 1e-9));
+check('DK tile is cut by the same default, per extra leg, off the profit',
+  near(dk.decimalPayout, 1 + (dk.multipliedDecimal! - 1) * (1 - DEFAULT_SGP_HAIRCUT) ** 2, 1e-9));
 check('two 2-leg games = 2 extra legs, lift 1 for line legs', (() => {
   const sh = sgpShapeFor(slip);
   return sh.groups === 2 && sh.extraLegs === 2 && sh.lift === 1;
@@ -159,7 +160,7 @@ check('an out-of-band fit is ignored',
   const fits = { fanduel: { haircut: 0.3, n: 10 } };
   const q = priceBooksForParlay(slip, 1, ['draftkings', 'fanduel'], fits);
   check('fit applies to its own book only',
-    near(q.find((x) => x.book === 'fanduel')!.decimalPayout, 61.4 * 0.7 ** 2, 1e-9) &&
+    near(q.find((x) => x.book === 'fanduel')!.decimalPayout, 1 + 60.4 * 0.7 ** 2, 1e-9) &&
     near(q.find((x) => x.book === 'draftkings')!.decimalPayout, dk.decimalPayout!, 1e-9));
 }
 {
@@ -224,6 +225,34 @@ check('an out-of-band fit is ignored',
   check('the lift is stable (seeded)', sgpCorrelationLift([...nfl].reverse()) === sh.lift);
   check('sgpShape alone carries no lift', sgpShape(nfl).lift === 1);
   const headline = computeCorrelatedMetrics(nfl, PARLAY_CORRELATION_PRIORS, undefined, 20000);
+  // UX review, 2026-11-12: three shapes that read wrong.
+  const diggs = (id: number, price: number, market: string, side: 'over' | 'under') => ({
+    ...leg(200 + id, G, price, price, `Diggs ${side} ${market}`),
+    prop: { sport: 'NFL', market, player: 'stefon diggs', team: 'WAS', side },
+  });
+  {
+    const opposite = [diggs(1, -115, 'player_receptions', 'over'), diggs(2, -115, 'player_reception_yds', 'under')];
+    const m = computeParlayMetrics(opposite);
+    check('legs that pull apart never price above the legs multiplied out',
+      sgpCorrelationLift(opposite) < 1 && m.decimalPayout <= m.multipliedDecimal, `${m.americanOdds.toFixed(0)} vs multiplied ${((m.multipliedDecimal - 1) * 100).toFixed(0)}`);
+  }
+  {
+    const favs = [diggs(3, -500, 'player_receptions', 'over'), diggs(4, -500, 'player_reception_yds', 'over'), diggs(5, -500, 'player_rush_reception_yds', 'over')];
+    const m = computeParlayMetrics(favs);
+    check('short-priced correlated legs do not collapse to -10000', m.decimalPayout > 1.15, `${m.americanOdds.toFixed(0)}`);
+  }
+  {
+    // A pick leg has no team; the screen's resolver supplies it.
+    const noTeam = nfl.map((l) => ({ ...l, prop: { ...l.prop!, team: null } }));
+    const teams: Record<number, string> = { 101: 'WAS', 102: 'NYG', 103: 'NYG', 104: 'WAS', 105: 'WAS' };
+    const viaResolver = computeCorrelatedMetrics(
+      noTeam.map((l) => ({ ...l, pick: { player_id: String(l.pickId), pick_side: 'over', sport: 'NFL' } as never })),
+      PARLAY_CORRELATION_PRIORS, (pid) => teams[Number(pid)] ?? null, 20000);
+    const withTeams = computeCorrelatedMetrics(nfl, PARLAY_CORRELATION_PRIORS, undefined, 20000);
+    check('a leg with no team gets it from the screen\'s resolver',
+      near(viaResolver.jointProb, withTeams.jointProb, 0.002), `${viaResolver.jointProb.toFixed(4)} vs ${withTeams.jointProb.toFixed(4)}`);
+  }
+
   check('NFL win % is no longer the naive product', headline.hasCorrelation && headline.jointProb > headline.independentProb * 1.4,
     `${(headline.jointProb * 100).toFixed(2)}% vs ${(headline.independentProb * 100).toFixed(2)}%`);
 }
