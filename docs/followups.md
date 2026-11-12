@@ -21,7 +21,12 @@
 
 ---
 
-## [ ] Volume settings: the dashboard panel, once the branch is merged (2026-11-11)
+## [x] Volume settings: the dashboard panel, once the branch is merged (2026-11-11, done 2026-11-12)
+
+Done: merged in #1251, published 2026-11-11 23:56Z, moved to its own
+"Volume" tab 2026-11-12 (`docs/monitoring.md`). The text below is the plan as
+it stood.
+
 
 Branch `claude/model-volume-dial` builds the database side and the sync. The
 panel on the dashboard's Models tab cannot be built before the merge: it reads
