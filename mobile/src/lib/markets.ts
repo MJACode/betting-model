@@ -1445,6 +1445,96 @@ export function currentLineQuotes(
 }
 
 /**
+ * A pick's game-market rows: every book's main line, then, for a book whose
+ * main line is at another number, its alternate-ladder rung AT THE PICK'S
+ * NUMBER (queries.addSameLineLadder). Main rows come first, so a reader that takes a
+ * book's first row (currentAtBook, snapshotSideLink) still gets its main line.
+ * A rung at any other number is dropped: it is a sister pick's line, not this
+ * one's.
+ *
+ * Why (Matt, 2026-11-12): "Coppin State +10.5" was found at Hard Rock +120 and
+ * the card said "Not offered at your books", while BetMGM (+115) and
+ * DraftKings (+111) had +10.5 on their ladders. Their MAIN lines were +12.5.
+ */
+export function gameRowsForPick<R extends BookPricedRow & { market?: string | null }>(
+  pick: Pick,
+  market: string,
+  rows: readonly R[],
+): R[] {
+  const main = rows.filter((r) => !(r.market ?? '').startsWith('alternate_'));
+  const ladder = rows.filter((r) => (r.market ?? '').startsWith('alternate_'));
+  if (ladder.length === 0) return main;
+  const haveSameBet = new Set(
+    main.filter((r) => rowIsSameBet(pick, r, market)).map((r) => r.bookmaker),
+  );
+  const out = [...main];
+  for (const r of ladder) {
+    if (haveSameBet.has(r.bookmaker)) continue;
+    if (!rowIsSameBet(pick, r, market)) continue;
+    haveSameBet.add(r.bookmaker);
+    out.push(r);
+  }
+  return out;
+}
+
+/** A member's book that prices this side at a DIFFERENT number. */
+export interface OtherLineQuote {
+  bookmaker: string;
+  price: number;
+  link: string | null;
+  /** The book's number, stored the pick's way (spreads: the HOME number). */
+  line: number;
+}
+
+/**
+ * The member's books that do not have the pick's bet at its number but price
+ * the same side at another one — what each book's line is (Matt, 2026-11-12:
+ * "if there is no line to get because we don't have that book, we still want
+ * to allow them to bet it even if it's slightly different. Everything goes
+ * off the main model for tracking").
+ *
+ * DISPLAY AND HAND-OFF ONLY. A different number is a different bet: the pick,
+ * its line, price, edge, stake, record and every published surface stay at
+ * the model's number (§1c, §6). No edge is worked out here: the model gave a
+ * probability for its number only.
+ *
+ * One quote per book: the number nearest the pick's. Pre-game only (a live
+ * pick hands off to its deciding book alone), bettable books only, and the
+ * price-age rule drops a book whose rows have all gone stale.
+ */
+export function otherLineQuotesForPick(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  allowedBooks: readonly string[],
+  priceAge?: PriceAgeContext,
+): OtherLineQuote[] {
+  if (pick.is_live === true) return [];
+  const market = marketForPick(pick);
+  const scored = numOrNull(pick.scored_line);
+  if (market == null || market.startsWith('h2h') || scored == null) return [];
+  const allowed = new Set(allowedBooks);
+  const rows = freshBookRows(pick, bookRows, priceAge);
+  const sameLine = new Set(
+    rows.filter((r) => rowIsSameBet(pick, r, market) && priceForSide(r, pick.pick_side) != null)
+      .map((r) => r.bookmaker),
+  );
+  // The record book is a same-line quote by construction (pickLineQuotes).
+  sameLine.add(storedQuoteBook(pick));
+  const byBook = new Map<string, OtherLineQuote>();
+  for (const r of rows) {
+    if (!allowed.has(r.bookmaker) || sameLine.has(r.bookmaker)) continue;
+    if (!isBettableBook(r.bookmaker)) continue;
+    const line = lineFromSnapshot(r, market);
+    const price = priceForSide(r, pick.pick_side);
+    if (line == null || price == null || line === scored) continue;
+    const held = byBook.get(r.bookmaker);
+    if (held && Math.abs(held.line - scored) <= Math.abs(line - scored)) continue;
+    byBook.set(r.bookmaker, { bookmaker: r.bookmaker, price, link: linkForSide(r, pick.pick_side), line });
+  }
+  return Array.from(byBook.values());
+}
+
+/**
  * Side link on the book's current row. Not `dk_bet_link`: that link was
  * stamped with the lock, so it still opens the old line after the number moves.
  */
