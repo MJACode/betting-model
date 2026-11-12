@@ -1,6 +1,6 @@
 ---
 name: league-models
-description: Build, audit or extend the betting models for EVERY market in one league — a league we have never bet, new markets in a league we already bet, or a full audit of one league's markets. Use when asked to "build models for <league>", "add <league>", "audit all <league> markets", "why is nothing firing in <league>", "what else can we bet in <league>", or to port what was learned in one sport to another. It is the framework for that work: the market grid, prices before models, the market as the baseline, a method search per market, the kill tests, ship what passes live, keep improving on live data — and invent new methods when the known ones run out.
+description: "Build, audit or extend the betting models for EVERY market in one league — a league we have never bet, new markets in a league we already bet, or a full audit of one league's markets. Use when asked to build models for a league, add a league or sport, audit all of a league's markets, explain why nothing is firing in a league, find what else can be bet in a league, or port what was learned in one sport to another. It is the framework for that work — the market grid, prices before models, the market as the baseline, a method search per market, the kill tests, ship what passes live, keep improving on live data — and for inventing new methods when the known ones run out."
 ---
 
 # /league-models <league> [market … | audit]
@@ -46,7 +46,9 @@ In order of priority:
    first signal, never deleted or overwritten, graded at its own price.
 5. **Volume a person can bet.** mike, 2026-11-10: *"maximize units but also
    not too much crazy volume."* A cut that doubles the bets for a sliver more
-   units is a worse model; report units and bets together, always.
+   units is a worse model; report units and bets together, always. The cut is
+   set for edge; volume after shipping is a per-night cap set from the record,
+   or the volume dial (`set_model_volume`), never a moved cut.
 
 **A league is done when** every grid row has a verdict backed by a results
 table; every model that cleared is live with its own cut, EV floor and price
@@ -61,7 +63,7 @@ universe. Then it moves to step 8, which never ends.
 
 These are standing instructions. Each one was broken at least once before it
 was written down. Do not relitigate them; the evidence is in
-`docs/rules_evidence.md` and the memory files named in `references/`.
+`docs/rules_evidence.md` and the docs each reference file cites.
 
 - **No guessing (CLAUDE.md §00).** Every number in the grid and in a reply
   names the script or query that produced it. "Not measured, here is the
@@ -109,11 +111,31 @@ was written down. Do not relitigate them; the evidence is in
 - Read the league's own doc if it exists (`docs/sports/<league>.md`) and any
   build-state memory. In an audit, read what every live and paused model in the
   league actually did: settled bets, units, the cut in force, and why the
-  quiet ones are quiet (the reasons column on non-bet rows).
+  quiet ones are quiet (the reasons column on non-bet rows). Check that the
+  graded-universe view holds the league's rows at all (it held none for one
+  league, so its non-bets had to be graded from the local copy).
 - Inventory what is stored, by query: games and scores (and how far ahead the
   schedule is stored), period scores, box scores, play-by-play, player logs,
   odds rows by season, book and market, pulls a day. Do not report "we have no
   X" until the source has been asked what it offers (CLAUDE.md §1b).
+
+**A new league, in the order that has worked.** The last one went from the
+brief to its first live model in a day (2026-11-09 to 11-10,
+`docs/sports/ncaabw.md`):
+
+1. Measure every source on the day: the feed's history start, books and
+   markets for the sport key; the free score, box and play-by-play sources.
+2. Write down what differs from the closest league we already bet (periods,
+   overtime, ids, team names, books, markets).
+3. Identity: a per-league team table and a feed-name census.
+4. Buy and store the price history; start the forward collection the same day
+   (the whole season's schedule, odds pulls at the decision times, the price
+   path kept, box scores).
+5. Run the closest league's working methods **unchanged** as the first
+   candidates, then work the rest of the grid. Unchanged first, so a pass or a
+   fail means something.
+6. Ship what passes, through a card that replays the research bet for bet.
+7. Then in play, then the app's stats pages.
 
 ### 1. The market grid — before any model
 
@@ -193,15 +215,19 @@ features on the same data rarely helps; a new edge needs new information or a
 new mechanism. So **ask why the book would be wrong here before writing a
 model.** The methods that worked each had a mechanism:
 
+- the market's own number is the anchor, and the model may only move it;
+- the books disagree with each other, with a sharp book, or with their own
+  other markets, at a fixed moment (the first post is often the best one);
 - the book re-hangs a line mechanically (off its opener and the clock, off
   the full-game number for a derivative market) and misses something the
   state shows;
-- the books disagree with each other, or with their own other markets, at a
-  fixed time of day;
 - a regressing quantity (shooting luck, finishing luck) is priced as if it
   persists;
-- an input the market under-weights at the moment of decision (weather,
-  confirmed starters, a schedule spot known weeks ahead).
+- an input the market under-weights at the moment of decision (a weather
+  forecast, a confirmed starter, a schedule spot known weeks ahead);
+- the margin sits on one side (count-prop overs), so a model that picks which
+  unders has something to work with;
+- the book settles a different number than our data counts.
 
 A stat model with no such mechanism usually measures what the line already
 knows (`references/kill-tests.md`, the information test).
@@ -270,24 +296,39 @@ clear to ship, in one place:
 "No version clears, here is the grid, here is what would have to change" is a
 finished result. It goes in the grid and in the doc.
 
+A model mike asks for that misses the bar still ships live ("build it
+anyway"). The reply and the doc then say plainly which part of the bar it
+missed and by how much; it is never presented as a pass, and the gap is never
+a reason to hold it back.
+
 ### 7. Ship — the passing model goes live now
 
-Mechanics in `references/shipping.md`. In outline: config entries with the
-model's own cut, EV floor and price floor; the scorer or in-play loop; the
-pick writer through the shared lock and integrity checks; the artifact
-committed and registered; thresholds synced; the app name and the Discord
+Mechanics in `references/shipping.md`. In outline: decide whether it is a rule
+card (a committed JSON artifact, the recent pattern), a trained model (a
+committed and registered `.pkl`) or an in-play loop; config entries with the
+model's own cut, EV floor and price floor; the writer through the shared gates
+(the EV gate, the schedule gate, the lock, pick integrity, side conflicts,
+quote bounds); the app name, CLV market and settlement entries; the Discord
 route; tests that fail without the change; the league doc and the session log.
-The commit carries `Updated-By:`. The branch waits for mike's "merge"; after
-it, finish the production steps yourself (migrations through
-`data.view_migrations`, `data.threshold_sync`, the artifact `--store`, a
-health check), and watch the model's first decision on the worker and its
-first bet reach every surface. Avoid merging over the 6am ET pipeline or a
-model's only deciding run.
+
+**The card replays the research bet for bet before it ships.** That replay is
+what found every copy error in the last new league.
+
+The commit carries `Updated-By:`. The reply that ships it states the price
+range, the bar it cleared (or plainly that it did not), the expected volume,
+and the go-live gate standing as a fact. The branch waits for mike's "merge";
+after it, finish the production steps yourself (migrations through
+`data.view_migrations`, `data.threshold_sync`, a trained artifact's `--store`
+and a health check), and watch the model's first decision on the worker and
+its first bet reach every surface. Avoid merging over the 6am ET pipeline, a
+live slate, or a card's only deciding run.
 
 ### 8. Live: improve, never re-gate
 
 - Grade the live record on every scored pick (BET, AVOID and the dead zone),
-  on the artifact that is actually live, in units, early/late.
+  on the artifact that is actually live, in units, early/late. Report the
+  go-live gate standing (≥ 50 settled, positive flat-bet return, calibration
+  error ≤ 5%) as a fact; it is a report, never a hold.
 - A live cut decays as polling and markets change; re-derive it.
 - When the record or new data suggests a better version, it is a new
   experiment through steps 5–7, and it ships the same way.
