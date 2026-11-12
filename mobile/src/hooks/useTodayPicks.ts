@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchPicksForDate,
   fetchUpcomingUfcPicks,
@@ -78,6 +78,13 @@ const NCAAB_AHEAD_DAYS = 7;
  */
 const NCAABW_AHEAD_DAYS = 7;
 
+/** How often the Picks tab reloads today's boards while it is open. The app's
+ *  own help text says lines refresh every 10 minutes at the busiest; a reload
+ *  more often than the data changes buys nothing (Matt, 2026-11-12). */
+export const TODAY_POLL_MS = 10 * 60_000;
+/** Returning to the app or the tab reloads only when the last load is older. */
+export const TODAY_RESUME_MIN_AGE_MS = 60_000;
+
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
   const [data, setData] = useState<EnrichedPick[]>([]);
@@ -106,9 +113,17 @@ export function useTodayPicks(date?: string) {
   // show an empty pill (Matt, 2026-09-05: "fix it").
   const [partial, setPartial] = useState<{ whats: string[]; reason: string } | null>(null);
 
+  // The Picks tab reloads in the background (PicksHomeScreen), so loads can
+  // overlap: a pull during a poll, or a resume past midnight ET where the old
+  // day's load and the new day's both run. Only the newest one writes state.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
+    const current = () => mine === seq.current;
     setLoading(true);
-    setError(null);
+    // `error` is NOT cleared here: a failing background reload would unmount
+    // the error banner and mount it again, read out each time by VoiceOver.
+    // It clears when a load succeeds (UX review, 2026-11-12).
     const whats: string[] = [];
     let reason: string | null = null;
     const note = (what: string) => (e: unknown) => {
@@ -172,14 +187,16 @@ export function useTodayPicks(date?: string) {
           && !isModelRetired(d.pick.model_id)
           && !voidHiddenFromBoard(d.pick),
       );
+      if (!current()) return;
+      setError(null);
       setData(all.filter((d) => !isPausedForDisplay(d.pick)));
       setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
       setLoaded(true);
     } catch (e: unknown) {
-      if (!isAbortError(e)) setError(errorText(e));
+      if (current() && !isAbortError(e)) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [target]);
 
