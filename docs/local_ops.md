@@ -377,17 +377,30 @@ window, which the run waits through if it is still going. It ran every night
 from 2026-11-04 to 2026-11-10, about 75 minutes a night
 (`logs\supabase_*.log`).
 
-**It runs only while mike is signed in to Windows, and nothing starts a
-night it missed.** On 2026-11-10 Windows Update restarted the PC at 10:29pm
-and again at 10:35pm ET; nobody was signed in from 10:29pm until 8:17am
-(System log, Winlogon events 7002 and 7001), so the 00:30 run of 2026-11-11
-never started, and signing in did not start it either. It was started by
-hand at 8:39am (`schtasks /Run`). The task has no sign-in trigger and does
-not wake the PC. Adding a sign-in trigger is mike's call (asked 2026-11-11).
+**It runs only while mike is signed in to Windows.** On 2026-11-10 Windows
+Update restarted the PC at 10:29pm and again at 10:35pm ET; nobody was
+signed in from 10:29pm until 8:17am (System log, Winlogon events 7002 and
+7001), so the 00:30 run of 2026-11-11 never started, and signing in did not
+start it either. It was started by hand at 8:39am (`schtasks /Run`) and
+finished at 11:41am ET with no table failed.
+
+**Since 2026-11-11 it also starts two minutes after mike signs in** (mike:
+"yes on backup"). The task holds two triggers, the daily one and a sign-in
+one for `MAHOME\micha`; a start while a run is going is ignored
+(`MultipleInstances = IgnoreNew`), and a second run would exit on the lock
+file anyway. The sign-in trigger had not fired yet when this was written:
+the first sign-in after a restart is where to look for a new
+`logs\supabase_*.log`. It still does not wake a sleeping PC, and a restart
+with nobody signing in for days still skips those nights.
 
 ```bat
 :: Register (runs as you, only while you are logged on):
 schtasks /Create /TN "BettingModel\LocalMirror" /SC DAILY /ST 00:30 /RL LIMITED /F /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\micha\Documents\betting_local_copies\bin\local_mirror_run.ps1"
+
+:: The sign-in trigger was added in PowerShell, not by the line above:
+:: New-ScheduledTaskTrigger -AtLogOn -User MAHOME\micha, Delay PT2M, then
+:: Set-ScheduledTask -Trigger with both triggers. Running the /Create line
+:: again with /F replaces the task, so add the sign-in trigger again after it.
 
 :: View it, and when it last ran:
 schtasks /Query /TN "BettingModel\LocalMirror" /V /FO LIST

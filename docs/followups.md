@@ -58,6 +58,19 @@ posted bet keeps the cut it was written under. The predicate is the app's:
 posted already, or passes the cut in force (`open_picks` has it in SQL).
 One shared fragment, three readers.
 
+## [ ] NCAAF has no stored half-time or quarter scores (2026-11-11)
+
+Found grading the bought first-half prices (`docs/ncaaf_first_half_team_totals.md`).
+The research read half-time scores out of `ncaaf_plays`, which is right for
+99.1% of games against ESPN and cannot settle a bet. Two things wait on a
+real table (`ncaaf_period_scores`, the shape of `ncaab_period_scores`):
+any first-half model that ships, and the Eggz first-half legs, which stay
+`needs_review` for NCAAF today (#1243). Sources, both free: ESPN's
+scoreboard carries quarter scores for every game and answers from mike's
+PC (the check script reads it); CFBD's `/games` carries line scores and
+needs the key the worker holds, and `parse_games` drops them today.
+`ncaaf_plays` now holds 2015-2025 (pulled 2026-11-11 by `ncaaf_pbp_pull`).
+
 ## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
 
 Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
