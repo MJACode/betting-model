@@ -139,7 +139,11 @@ def test_unapplied_facts_tables_are_not_granted_until_they_exist():
     the migration has created them."""
     from scripts.apply_anon_grants import MAY_BE_UNAPPLIED, _anon_can_read
 
-    assert MAY_BE_UNAPPLIED == ("byom_game_facts", "byom_prop_facts")
+    assert MAY_BE_UNAPPLIED == (
+        "byom_game_facts",
+        "byom_prop_facts",
+        "v_player_season_totals_ncaabw",
+    )
     dry = " | ".join(_plan())
     for rel in MAY_BE_UNAPPLIED:
         assert f'ON public."{rel}"' in dry

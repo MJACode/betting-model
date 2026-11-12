@@ -224,9 +224,8 @@ export async function fetchSeasonTotals(
   playerType?: 'batter' | 'pitcher',
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
-  // No golf leaderboard (v1), and no NCAABW (women's college basketball)
-  // player stats in the app. Named, or the sport falls to the MLB read below.
-  if (sport === 'GOLF' || sport === 'NCAABW') return [];
+  // No golf leaderboard (v1). Named, or the sport falls to the MLB read below.
+  if (sport === 'GOLF') return [];
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, null, teams);
   if (sport === 'NFL' || sport === 'NCAAF') {
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
@@ -260,16 +259,20 @@ export async function fetchSeasonTotals(
       totalsRowKey,
     );
   }
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  // NCAABW before NCAAB: the women's name starts with the men's.
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     return fetchAllPages<SeasonTotalsRow>((from, to) => {
-      // Literal, for the same reason as the football pair above. NCAAB's view
-      // carries WNBA's columns (add_ncaab_player_game_log_2026_11_03.sql).
+      // Literal, for the same reason as the football pair above. Both college
+      // views carry WNBA's columns (add_ncaab_player_game_log_2026_11_03.sql,
+      // add_ncaabw_player_game_log_2026_11_12.sql).
       let q =
         sport === 'WNBA'
           ? supabase.from('v_player_season_totals_wnba').select(WNBA_TOTALS_COLUMNS).eq('season', season)
-          : sport === 'NCAAB'
-            ? supabase.from('v_player_season_totals_ncaab').select(WNBA_TOTALS_COLUMNS).eq('season', season)
-            : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
+          : sport === 'NCAABW'
+            ? supabase.from('v_player_season_totals_ncaabw').select(WNBA_TOTALS_COLUMNS).eq('season', season)
+            : sport === 'NCAAB'
+              ? supabase.from('v_player_season_totals_ncaab').select(WNBA_TOTALS_COLUMNS).eq('season', season)
+              : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
       if (hasTeams(teams)) q = q.in('team', teams as string[]);
       return q.order('player_id').range(from, to);
     }, totalsRowKey);
@@ -318,9 +321,8 @@ export async function fetchWindowTotals(
   teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') return fetchNhlSkaterBoard(season, window, teams);
-  // No golf leaderboard (v1), and no NCAABW player stats in the app. Named,
-  // or the sport falls to the MLB read below.
-  if (sport === 'GOLF' || sport === 'NCAABW') return [];
+  // No golf leaderboard (v1). Named, or the sport falls to the MLB read below.
+  if (sport === 'GOLF') return [];
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
@@ -345,9 +347,10 @@ export async function fetchWindowTotals(
       totalsRowKey,
     );
   }
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     const fn =
       sport === 'WNBA' ? 'player_window_totals_wnba'
+      : sport === 'NCAABW' ? 'player_window_totals_ncaabw'
       : sport === 'NCAAB' ? 'player_window_totals_ncaab'
       : 'player_window_totals_nba';
     return pageRpc<SeasonTotalsRow>(fn, { p_season: season, p_window: window }, teams, totalsRowKey);
@@ -430,9 +433,10 @@ export async function fetchRecentGames(
   // what an app build older than the migration sends.
   const withTeams = (args: Record<string, unknown>) =>
     hasTeams(teams) ? { ...args, p_teams: teams } : args;
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     const fn =
       sport === 'WNBA' ? 'player_recent_games_wnba'
+      : sport === 'NCAABW' ? 'player_recent_games_ncaabw'
       : sport === 'NCAAB' ? 'player_recent_games_ncaab'
       : 'player_recent_games_nba';
     return pageRpc<RecentGameRow>(
@@ -494,9 +498,10 @@ export async function fetchSeasonStatValues(
   // big: 1,798 NFL players on a season stat, 12,204 NCAAF.
   const key = (r: SeasonStatValuesRow) =>
     `${r.player_id}:${(r as { player_type?: string }).player_type ?? ''}`;
-  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAAB') {
+  if (sport === 'WNBA' || sport === 'NBA' || sport === 'NCAABW' || sport === 'NCAAB') {
     const fn =
       sport === 'WNBA' ? 'player_season_stat_values_wnba'
+      : sport === 'NCAABW' ? 'player_season_stat_values_ncaabw'
       : sport === 'NCAAB' ? 'player_season_stat_values_ncaab'
       : 'player_season_stat_values_nba';
     return pageRpc<SeasonStatValuesRow>(fn, { p_season: season, p_stat: statKey }, teams, key);
@@ -617,7 +622,8 @@ export async function fetchH2HStatValues(
   // the key must not collapse two different ones if that ever changes.
   const key = (r: H2HStatValuesRow) => `${r.player_id}:${r.opponent}:${r.player_type ?? ''}`;
   const fn =
-    sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
+    sport === 'NCAABW' ? 'player_h2h_stat_values_ncaabw'
+    : sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
     : sport === 'NBA' ? 'player_h2h_stat_values_nba'
     : sport === 'MLB' ? 'player_h2h_stat_values_mlb'
     : sport === 'NFL' ? 'player_h2h_stat_values_nfl'
@@ -650,7 +656,7 @@ export async function fetchH2HStatValues(
  * `games` is already on the anon read surface.
  */
 export async function fetchSeasonStarted(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAABW' | 'NCAAB',
   season: number,
 ): Promise<boolean> {
   const { data, error } = await supabase
@@ -2773,7 +2779,7 @@ export async function fetchPlayerGameLog(
   // NBA did-not-play rows live in nba_player_dnp, not the game log. Merged
   // here so the chart and the recent-games list can draw them. A failure
   // (the read grant is a migration that is not applied until Matt says so)
-  // leaves the played log on screen. WNBA and NCAAB have no such table.
+  // leaves the played log on screen. WNBA, NCAAB and NCAABW have no such table.
   if (sport === 'NBA') {
     const id = playerId || rows[0]?.player_id;
     if (id) {
@@ -3344,9 +3350,9 @@ export async function fetchTeamStats(
   sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
 ): Promise<TeamSeasonStats> {
-  // NCAAB has no Teams board yet (teamStatCatalog BALL), and NCAABW has no
-  // team stats in the app at all.
-  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAAB' || sport === 'NCAABW') return { season: null, rows: [] };
+  // Neither college basketball sport has a Teams board (teamStatCatalog BALL).
+  // NCAABW is named before NCAAB.
+  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without

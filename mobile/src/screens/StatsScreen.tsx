@@ -2217,12 +2217,11 @@ export function StatsScreen() {
     (timeWindow === 'h2h' && slateChecking) ||
     (touchView === 'loading' && !error);
   const oddsHeaderSlot = boardChrome.showHeader && (showOdds || !booksReady);
-  // A Players board that can never carry a line (NCAAB: no college props,
-  // Matt 2026-11-03) does not name a book whose lines it will not show.
-  // Neither does NCAABW, which has no board at all (2026-11-10).
+  // A Players board that can never carry a line (NCAAB and NCAABW: no college
+  // props, Matt 2026-11-03) does not name a book whose lines it will not show.
   const showHeaderBookLine =
     (boardMode === 'teams' && supportsTeamBoard(sport)) ||
-    (sport !== 'NCAAB' && sport !== 'NCAABW' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
+    (sport !== 'NCAABW' && sport !== 'NCAAB' && (!stat || (!oddsHeaderSlot && !playersBoardSettling)));
   // Resting ruler is 28pt. The marker's hit box is 44pt, so the pad and the
   // stack grow by the overhang and pull the same amount back with a negative
   // margin. The typing field reports overhang 0 and the pad matches it.
@@ -2572,7 +2571,7 @@ export function StatsScreen() {
     // Men's college basketball's first weeks: the board is empty because the
     // season is new, not because a feed broke, and the reader is told when it
     // fills (UX review, 2026-11-03). November only, on the ET clock.
-    if (sport === 'NCAAB' && rows.length === 0 && monthET() === 11) {
+    if ((sport === 'NCAABW' || sport === 'NCAAB') && rows.length === 0 && monthET() === 11) {
       const s = boardSeasonET(sport);
       return `The ${s - 1}\u2013${String(s).slice(2)} season has just tipped off. Player stats appear as each game goes final.`;
     }
@@ -2671,15 +2670,8 @@ export function StatsScreen() {
         </View>
         <StatSegmentRow sport={sport} active={activeSegment} segment={segment} onChange={pickSegment} />
         <EmptyState
-          title={sport === 'NCAABW' ? 'No stats for NCAABW' : 'No player leaderboard'}
-          subtitle={
-            // The women's sport has one model and no stats board planned, so
-            // it says where its picks are instead of "yet" (UX review,
-            // 2026-11-10).
-            sport === 'NCAABW'
-              ? 'There are no player or team stats for women’s college basketball. Its totals picks are on the Picks tab.'
-              : `Player stat leaderboards aren't available for ${sport} yet.`
-          }
+          title="No player leaderboard"
+          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
         />
       </SafeAreaView>
     );

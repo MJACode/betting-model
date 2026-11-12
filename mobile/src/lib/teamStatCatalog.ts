@@ -630,8 +630,8 @@ export function teamBoardSeason(sport: Sport, now: Date = new Date()): number {
   }).formatToParts(now);
   const year = Number(parts.find((p) => p.type === 'year')?.value);
   const month = Number(parts.find((p) => p.type === 'month')?.value);
-  // NCAABW labels by the ending year like NCAAB (docs/sports/ncaabw.md). It
-  // has no Teams board; this keeps the answer right for every sport.
+  // NCAABW labels by the ending year like NCAAB (docs/sports/ncaabw.md).
+  // Neither college sport is on the Teams board; this keeps the label right.
   if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB' || sport === 'NCAABW') {
     return month >= 10 ? year + 1 : year;
   }
