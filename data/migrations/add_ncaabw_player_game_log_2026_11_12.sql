@@ -11,10 +11,13 @@
 -- Display only: no model reads it, and there is no player-prop market
 -- (Matt, 2026-11-03: college hoops has no props).
 --
--- NOT in data/view_migrations.ACTIVE_MIGRATIONS. Apply by hand after the
--- worker that can write the log is deployed, and only once Matt says so.
--- The grants in this file (SELECT on the table and the view, EXECUTE on the
--- four functions) are what the app needs; nothing here runs on its own.
+-- NOT in data/view_migrations.ACTIVE_MIGRATIONS. Apply by hand once Matt
+-- says so, and before this app build reaches users. A merge to master ships
+-- the Stats tab over the air, and from then the board reads this view. An
+-- empty table in November shows the tip-off sentence. The worker does not
+-- have to be this build first: a worker that does not know the table never
+-- writes it. The grants in this file (SELECT on the table and the view,
+-- EXECUTE on the four functions) are what the app needs.
 --
 -- The view and the four functions are the men's set with the table swapped
 -- and the same column names, so the app's basketball stat keys read one

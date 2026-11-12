@@ -380,6 +380,9 @@ def game_log_rows(df: pd.DataFrame, games: dict) -> list[dict]:
         }
         slot = (row["game_id"], row["player_id"])
         prev = best.get(slot)
+        if prev is not None:
+            logger.info("ncaabw player log: {} {} is in the file twice; "
+                        "keeping the longer minutes", row["game_id"], row["player_id"])
         if prev is None or (row["minutes"] or 0) > (prev["minutes"] or 0):
             best[slot] = row
     return list(best.values())
@@ -411,19 +414,20 @@ def _stored_games(conn, season: int) -> dict:
 
 
 def _write_game_log(conn, season: int, df: pd.DataFrame) -> int | None:
-    """Insert log rows for games not stored yet. None when the table is absent.
+    """Insert log rows for sides not stored yet. None when the table is absent.
 
-    A stored game is left alone (the team-box daily read's rule): a corrected
-    box is a --force concern, and this path does not rewrite one.
+    A stored (game, team) is left alone: a corrected box is a --force concern.
+    The skip is the side, not the whole game, so a day when only one school's
+    ESPN id matched still picks up the other school on the next read.
     """
     if not _log_table_ready(conn):
         return None
     rows = game_log_rows(df, _stored_games(conn, season))
-    have = {r[0] for r in conn.execute(
-        "SELECT game_id FROM ncaabw_player_game_log "
+    have = {(r[0], int(r[1])) for r in conn.execute(
+        "SELECT game_id, team_espn_id FROM ncaabw_player_game_log "
         "WHERE season = %s AND source = %s",
         (int(season), SOURCE)).fetchall()}
-    new = [r for r in rows if r["game_id"] not in have]
+    new = [r for r in rows if (r["game_id"], int(r["team_espn_id"])) not in have]
     for i in range(0, len(new), 2000):
         conn.executemany(_LOG_INSERT, new[i:i + 2000])
     if new:
@@ -566,16 +570,45 @@ def run_refresh(run_date: str | None = None, *, connect=None) -> dict:
         conn.close()
 
 
+def import_game_logs(conn, first: int, last: int) -> list[dict]:
+    """Fill the player log for a season range. Empty when the table is absent.
+
+    Does not rewrite team boxes or season totals. A season whose totals are
+    already stored is still read: `main` skips those seasons, and head-to-head
+    looks at this season and the one before it.
+    """
+    if not _log_table_ready(conn):
+        return []
+    out = []
+    for season in range(int(first), int(last) + 1):
+        df = _fetch_parquet(PLAYER_BOX_URL.format(season=season))
+        if df is None:
+            out.append({"season": season, "log_rows": 0, "player_missing": True})
+            continue
+        out.append({"season": season, "log_rows": _write_game_log(conn, season, df) or 0})
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"),
                     default=(2011, 2026), help="ending-year seasons (2026 = 2025-26)")
     ap.add_argument("--force", action="store_true", help="re-import stored seasons")
+    ap.add_argument("--log", action="store_true",
+                    help="fill ncaabw_player_game_log only; do not rewrite stored rows")
     args = ap.parse_args(argv)
 
     from data.db import get_connection
     conn = get_connection()
     try:
+        if args.log:
+            res = import_game_logs(conn, args.seasons[0], args.seasons[1])
+            if not res and not _log_table_ready(conn):
+                print("ncaabw_player_game_log is not created yet")
+                return 1
+            for row in res:
+                print(row)
+            return 0
         ensure_tables(conn)
         have_t = stored_seasons(conn, TEAM_TABLE)
         have_p = stored_seasons(conn, PLAYER_TABLE)

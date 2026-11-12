@@ -337,8 +337,14 @@ so the men's and women's chips do not sound alike.
   `player_window_totals_ncaabw`, `player_recent_games_ncaabw`,
   `player_season_stat_values_ncaabw`, `player_h2h_stat_values_ncaabw`
   (`add_ncaabw_player_game_log_2026_11_12.sql`). That file is not in
-  `ACTIVE_MIGRATIONS`; apply it by hand after the worker deploy, once Matt
-  says so. No player-prop line. No Teams board. No starter flag: the file
+  `ACTIVE_MIGRATIONS`. Apply it by hand once Matt says so, and before the
+  app build reaches users: a master merge ships the Stats tab, and an empty
+  table in November shows the tip-off sentence. The worker does not have to
+  be updated first. The daily box step then fills the current season. Earlier
+  seasons (the second year head-to-head reads) stay empty until
+  `python -m data.ingestors.ncaabw_sdv_import --log --seasons 2026 2027`,
+  which writes the log only and does not rewrite stored team rows.
+  No player-prop line. No Teams board. No starter flag: the file
   does not carry one, so the player page has no Starting / Off bench split.
 - **The prefix trap.** `modelId.startsWith('ncaab')` is true for
   `ncaabw_total_blend`, so both places that file a model under a sport test

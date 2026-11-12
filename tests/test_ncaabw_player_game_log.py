@@ -166,9 +166,45 @@ def test_the_daily_read_writes_the_log_only_when_the_table_exists():
     assert si._write_game_log(ready, 2027, frame) == 1
     assert ready.inserted[0]["team"] == "Colorado State"
     assert any("g.sport = 'NCAABW'" in q for q in ready.sql)
-    again = _LogConn(ready=True, games=[(GAME["game_id"],)])
+    again = _LogConn(ready=True, games=[(GAME["game_id"], 36)])
     assert si._write_game_log(again, 2027, frame) == 0
     assert again.inserted == []
+
+
+def test_a_stored_side_does_not_block_the_other_side():
+    """A game that landed with only the home school still picks up the away
+    school on the next read. Skipping the whole game_id would leave that
+    side out for good."""
+    away = _box(team_espn_team_id="2815", team="Lindenwood", clean_name="Allie Roden",
+                mins=20, pts=11)
+    conn = _LogConn(ready=True, games=[(GAME["game_id"], 36)])
+    assert si._write_game_log(conn, 2027, pd.DataFrame([_box(), away])) == 1
+    assert conn.inserted[0]["team"] == "Lindenwood"
+    assert conn.inserted[0]["player_id"] == "2815:allie roden"
+
+
+def test_two_rows_for_one_player_in_one_game_are_logged():
+    from loguru import logger
+    seen = []
+    sink = logger.add(lambda m: seen.append(str(m)), level="INFO")
+    try:
+        rows = si.game_log_rows(pd.DataFrame([_box(mins=4, pts=1), _box(mins=30, pts=18)]),
+                                {401927946: GAME})
+    finally:
+        logger.remove(sink)
+    assert len(rows) == 1 and rows[0]["minutes"] == 30
+    assert any("is in the file twice" in m for m in seen)
+
+
+def test_log_only_fills_a_stored_season_without_rewriting_it(monkeypatch):
+    monkeypatch.setattr(si, "_fetch_parquet", lambda url: pd.DataFrame([_box()]))
+    missing = _LogConn(ready=False)
+    assert si.import_game_logs(missing, 2027, 2027) == []
+    assert missing.inserted == []
+    ready = _LogConn(ready=True)
+    assert si.import_game_logs(ready, 2027, 2027) == [{"season": 2027, "log_rows": 1}]
+    assert ready.inserted[0]["team"] == "Colorado State"
+    assert not any("ncaabw_team_game_stats" in q for q in ready.sql)
 
 
 # ── Postgres ─────────────────────────────────────────────────────────────────
