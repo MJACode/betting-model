@@ -14,6 +14,10 @@ import { bookLabel, bookName, LINE_SHOP_BOOKS, type LineQuote } from './markets'
 export const PICK_BOOKS_NOTE =
   'Only books you selected. Best pays most. “—” = no price. Row or Bet opens that book.';
 
+/** Added under the note when a row is at a different number (Matt, 2026-11-12). */
+export const PICK_BOOKS_OTHER_LINE_NOTE =
+  'A different line is a different bet. The model’s pick, edge and record stay at its line.';
+
 export interface PickSportsbookRow {
   bookmaker: string;
   /** Full name, the row. */
@@ -26,6 +30,19 @@ export interface PickSportsbookRow {
   link: string | null;
   /** Wins the comparison. False when fewer than two books have a price. */
   isBest: boolean;
+  /** The book prices this side at a DIFFERENT number than the pick's
+   *  (markets.otherLineQuotesForPick). Never Best, never the sheet's Bet. */
+  otherLine: boolean;
+  /** "Coppin State +11.5" on an otherLine row. Null otherwise. */
+  lineText: string | null;
+}
+
+/** A book at another number, with its bet already written out. */
+export interface OtherLineRowInput {
+  bookmaker: string;
+  price: number;
+  link: string | null;
+  lineText: string;
 }
 
 function shopOrder(book: string): number {
@@ -42,6 +59,10 @@ function shopOrder(book: string): number {
 export function pickSportsbookRows(
   quotes: readonly Pick<LineQuote, 'bookmaker' | 'price' | 'link' | 'isBest'>[],
   selected: readonly string[] | null,
+  /** Selected books with no quote at the pick's number but one at another
+   *  (markets.otherLineQuotesForPick). They take the place of the dash rows,
+   *  after every same-line row, in the order given. */
+  otherLines: readonly OtherLineRowInput[] = [],
 ): PickSportsbookRow[] {
   const priced = [...quotes].sort((a, b) => {
     const byPrice = americanToDecimal(b.price) - americanToDecimal(a.price);
@@ -61,8 +82,30 @@ export function pickSportsbookRows(
     priceText: linesPriceText(q.price),
     link: q.link,
     isBest: bestDecimal != null && americanToDecimal(q.price) === bestDecimal,
+    otherLine: false,
+    lineText: null,
   }));
+  // In the caller's order (nearest number to the pick's first). Prices at
+  // different numbers are not comparable, so there is no Best among them.
+  const other = otherLines.filter(
+    (o) => !seen.has(o.bookmaker) && (selected == null || selected.includes(o.bookmaker)),
+  );
+  for (const o of other) {
+    seen.add(o.bookmaker);
+    rows.push({
+      bookmaker: o.bookmaker,
+      name: bookName(o.bookmaker),
+      short: bookLabel(o.bookmaker),
+      price: o.price,
+      priceText: linesPriceText(o.price),
+      link: o.link,
+      isBest: false,
+      otherLine: true,
+      lineText: o.lineText,
+    });
+  }
   for (const book of missing) {
+    if (seen.has(book)) continue;
     rows.push({
       bookmaker: book,
       name: bookName(book),
@@ -71,6 +114,8 @@ export function pickSportsbookRows(
       priceText: LINES_NO_PRICE,
       link: null,
       isBest: false,
+      otherLine: false,
+      lineText: null,
     });
   }
   return rows;

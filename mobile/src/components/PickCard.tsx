@@ -20,6 +20,7 @@ import {
   marketForPick,
   movementFromLatest,
   numOrNull,
+  otherLineQuotesForPick,
   pickTimingInfo,
   playerNameFromPickLabel,
   priceAgeFor,
@@ -46,6 +47,7 @@ import {
   liveNotAtMyBooksText,
   myBooksView,
   NOT_AT_MY_BOOKS,
+  NOT_AT_MY_BOOKS_AT_THIS_LINE,
   recordNoteShortFor,
 } from '@/lib/myBooks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -241,6 +243,11 @@ export function PickCard({
   // and that the record is kept there. The longer sentence is on Pick Detail.
   // The caption is not a pill slot, so it takes the full short label (PARX,
   // not the pill's clipped PAR), and the spoken copy takes the book's name.
+  // Whether one of their books has this side at another number. Decides the
+  // 'none' wording; the rows themselves are built with the sheet below.
+  const otherLinesAtMine =
+    notAtMyBooks && pick.is_live !== true &&
+    otherLineQuotesForPick(pick, item.bookRows, myBooks, priceAge).length > 0;
   const myBooksNoteWith = (book: string) =>
     myQuote && modelPrice != null
       ? `${foundAtText(book, formatAmerican(modelPrice))}${
@@ -249,7 +256,9 @@ export function PickCard({
       : notAtMyBooks
         ? pick.is_live === true && modelPrice != null
           ? liveNotAtMyBooksText(book, formatAmerican(modelPrice))
-          : NOT_AT_MY_BOOKS
+          : otherLinesAtMine
+            ? NOT_AT_MY_BOOKS_AT_THIS_LINE
+            : NOT_AT_MY_BOOKS
         : null;
   const myBooksNote = myBooksNoteWith(bookLabel(storedQuoteBook(pick)));
   const myBooksNoteSpoken = myBooksNoteWith(bookName(storedQuoteBook(pick)));
@@ -365,11 +374,51 @@ export function PickCard({
     : [];
   // Live offers only the book that decided it. A dash on another book would
   // pretend we shopped it.
+  const signalsGameMarket = gameMarketForModel(pick.model_id);
+  const signalsPropMarket = signalsGameMarket ? null : propMarketForPick(pick);
+  // The bet written out at a given number. At the pick's own number it is
+  // the headline; at another book's number it names that book's bet.
+  const betHeadlineAt = (line: number | string | null) =>
+    signalsBetHeadline({
+      side: pick.pick_side,
+      line,
+      market: signalsGameMarket ?? signalsPropMarket,
+      homeTeam: game?.home_team ?? '',
+      awayTeam: game?.away_team ?? '',
+      player: signalsPropMarket && isPropModel(pick.model_id)
+        ? playerNameFromPickLabel(pick.pick_label)
+        : null,
+      stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
+      label: pick.pick_label,
+    });
+  const betHeadline = betHeadlineAt(pick.scored_line);
+  // Their books at a DIFFERENT number (Matt, 2026-11-12): each one's line is
+  // shown and can be opened, also when none of their books has the pick's
+  // number. Hand-off only; the pick, its edge and its record stay at the
+  // model's line. A row is only offered when its bet can be written out with
+  // that number (a stored-label headline cannot), and never on a live,
+  // paused, preview, muted or started card.
+  const otherLinesOffered =
+    pick.is_live !== true && !preview && !paused && pick.signal_type === 'BET' &&
+    !signalsMuted && openForAction(pick) && myBooksReady && cta.handoff &&
+    (Boolean(handoff) || notAtMyBooks);
+  const otherLineRows = otherLinesOffered
+    ? otherLineQuotesForPick(pick, item.bookRows, myBooks, priceAge)
+        .sort((a, b) => {
+          const scored = numOrNull(pick.scored_line) ?? 0;
+          return Math.abs(a.line - scored) - Math.abs(b.line - scored);
+        })
+        .map((q) => ({ ...q, lineText: betHeadlineAt(q.line) }))
+        .filter((q) => q.lineText !== betHeadline)
+    : [];
   const sheetRows = pickSportsbookRows(
     shopQuotes,
     pick.is_live === true || !myBooksReady ? null : myBooks,
+    otherLineRows,
   );
-  const pricedRows = sheetRows.filter((row) => row.price != null);
+  // Best, Bet and the lead are same-line rows only: a price at another
+  // number is a different bet.
+  const pricedRows = sheetRows.filter((row) => row.price != null && !row.otherLine);
   const leadRow = pricedRows[0] ?? null;
   const sheetBetLabel = leadRow?.price != null
     ? signalsCtaLabel(leadRow.short, formatAmerican(leadRow.price))
@@ -506,6 +555,12 @@ export function PickCard({
       sheet: true,
     };
   };
+  // None of their books has the pick's number, but some have another one:
+  // the control opens the sheet, where each row shows that book's line.
+  const otherLinesControl =
+    notAtMyBooks && otherLineRows.length > 0
+      ? { label: 'Other lines', speech: 'Other lines at your books', sheet: true }
+      : null;
   const signalsControl = bookControlFor(handoff);
   const boardControl = bookControlFor(boardHandoff);
   const signalsCta = signalsControl?.label ?? null;
@@ -519,20 +574,6 @@ export function PickCard({
   // The player name has no column (player_key is a slug on some models), so
   // a prop passes that one token from the label. The headline is still not
   // the label: the "· 0.77u" suffix and the wind parenthetical stay out.
-  const signalsGameMarket = gameMarketForModel(pick.model_id);
-  const signalsPropMarket = signalsGameMarket ? null : propMarketForPick(pick);
-  const betHeadline = signalsBetHeadline({
-    side: pick.pick_side,
-    line: pick.scored_line,
-    market: signalsGameMarket ?? signalsPropMarket,
-    homeTeam: game?.home_team ?? '',
-    awayTeam: game?.away_team ?? '',
-    player: signalsPropMarket && isPropModel(pick.model_id)
-      ? playerNameFromPickLabel(pick.pick_label)
-      : null,
-    stat: pick.model_id === 'ufc_total_rounds' ? 'Rounds' : null,
-    label: pick.pick_label,
-  });
   const reasonLine = signalsReasonLine({
     modelId: pick.model_id,
     windMph: weather?.wind_mph,
@@ -613,6 +654,7 @@ export function PickCard({
   // Today uses boardHandoff, which is Open when the slip would be a
   // different line from the lock the button would otherwise quote.
   const actionHandoff = signals ? handoff : boardHandoff;
+  const actionOtherLines = !actionHandoff && !startedText ? otherLinesControl : null;
   const actionControl = signals ? signalsControl : boardControl;
   const a11yActions = [
     ...(actionHandoff && actionControl
@@ -622,7 +664,9 @@ export function PickCard({
             ? `${actionControl.speech}. Opens your sportsbooks`
             : actionControl.speech,
         }]
-      : []),
+      : actionOtherLines
+        ? [{ name: 'book', label: `${actionOtherLines.speech}. Opens your sportsbooks` }]
+        : []),
     ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
     ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
   ];
@@ -643,6 +687,7 @@ export function PickCard({
           if (actionControl?.sheet) setBooksOpen(true);
           else void openBookBetslip(actionHandoff.bookmaker, actionHandoff.link);
         }
+        else if (name === 'book' && actionOtherLines) setBooksOpen(true);
         else if (name === 'slip' && canSlip) onToggleSlip!();
         else if (name === 'track' && canTrack) onToggleTrack!();
       }}
@@ -908,7 +953,7 @@ export function PickCard({
         </View>
       ) : null}
 
-      {boardHandoff || startedText || canTrack || canSlip ? (
+      {boardHandoff || startedText || canTrack || canSlip || otherLinesControl ? (
         <View style={styles.actionsRow}>
           {startedText ? (
             // Not a button: the pick was made at this price, before the start.
@@ -940,6 +985,13 @@ export function PickCard({
                 if (boardControl.sheet) setBooksOpen(true);
                 else void openBookBetslip(boardHandoff.bookmaker, boardHandoff.link);
               }}
+            />
+          ) : otherLinesControl ? (
+            <BookControl
+              label={otherLinesControl.label}
+              speech={otherLinesControl.speech}
+              sheet
+              onPress={() => setBooksOpen(true)}
             />
           ) : (
             <View />
@@ -1219,7 +1271,7 @@ export function PickCard({
         </View>
       ) : null}
 
-      {handoff || startedText || canTrack || canSlip ? (
+      {handoff || startedText || canTrack || canSlip || otherLinesControl ? (
         <View style={styles.signalsActions}>
           {startedText ? (
             <View
@@ -1248,6 +1300,13 @@ export function PickCard({
                 if (signalsControl.sheet) setBooksOpen(true);
                 else void openBookBetslip(handoff.bookmaker, handoff.link);
               }}
+            />
+          ) : otherLinesControl ? (
+            <BookControl
+              label={otherLinesControl.label}
+              speech={otherLinesControl.speech}
+              sheet
+              onPress={() => setBooksOpen(true)}
             />
           ) : (
             <View />
@@ -1285,13 +1344,13 @@ export function PickCard({
       <Text style={styles.modelCaption}>{modelCaption}</Text>
       </>
       )}
-      {leadRow && sheetBetLabel ? (
+      {(leadRow && sheetBetLabel) || otherLinesControl ? (
         <PickBooksSheet
           visible={booksOpen}
           title={betHeadline}
           subtitle={contextLine}
           lineNote={
-            heroPrice?.movedLine != null && leadRow.bookmaker === heroPrice.book
+            heroPrice?.movedLine != null && leadRow?.bookmaker === heroPrice.book
               ? signalsNow
               : null
           }
@@ -1300,7 +1359,7 @@ export function PickCard({
           betSpeech={sheetBetSpeech}
           onBet={() => {
             setBooksOpen(false);
-            void openBookBetslip(leadRow.bookmaker, leadRow.link, { sameBookOnly: true });
+            if (leadRow) void openBookBetslip(leadRow.bookmaker, leadRow.link, { sameBookOnly: true });
           }}
           onRow={(row) => {
             setBooksOpen(false);

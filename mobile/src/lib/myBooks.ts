@@ -131,6 +131,10 @@ export function recordNoteShortFor(_modelId: string): string {
 
 export const NOT_AT_MY_BOOKS = 'Not offered at your books';
 
+/** 'none', when one of their books has the same side at another number
+ *  (markets.otherLineQuotesForPick). The card's "Other lines" opens them. */
+export const NOT_AT_MY_BOOKS_AT_THIS_LINE = 'This line is not offered at your books';
+
 /**
  * 'none' on an IN-PLAY pick. Its only quote is the deciding book's (a live
  * card carries no other book's price), so 'none' there means that book is not

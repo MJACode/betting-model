@@ -32,6 +32,7 @@ import {
 } from './scoreboard';
 import {
   gameMarketForModel,
+  gameRowsForPick,
   lineShopForPick,
   liveBookRowsForPick,
   numOrNull,
@@ -905,12 +906,75 @@ function bookEnrichment(
 ): { bookRows: BookPricedRow[]; bestOdds: BookPrice | null } {
   const market = gameMarketForModel(pick.model_id);
   const bookRows: BookPricedRow[] = market
-    ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
+    ? gameRowsForPick(pick, market, booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
     : [];
   return {
     bookRows,
     bestOdds: bookRows.length ? lineShopForPick(pick, bookRows) : null,
   };
+}
+
+/**
+ * Adds each spread/total pick's alternate-ladder rungs at the pick's own
+ * number into `booksByGameMarket`, under the MAIN market's key, so
+ * gameRowsForPick can offer a book whose main line sits at another number.
+ *
+ * Narrow on purpose: alt_game_lines held 26,527 rows for 2026-11-14 alone
+ * (measured 2026-11-12), so this asks only for the picks' games and numbers.
+ * The same read for every 2026-11-12 spread/total pick returned 242 rows.
+ * Paged anyway (1,000-row cap). A failure keeps the main lines and says so.
+ */
+async function addSameLineLadder(
+  booksByGameMarket: Map<string, OddsByBookRow[]>,
+  picks: readonly Pick[],
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<void> {
+  const games = new Set<string>();
+  const points = new Set<number>();
+  const altMarkets = new Set<string>();
+  for (const p of picks) {
+    if (p.is_live === true) continue;
+    const market = gameMarketForModel(p.model_id);
+    const alt = market ? ALT_GAME_MARKET[market as GameLineMarket] : undefined;
+    const line = p.scored_line == null ? NaN : Number(p.scored_line);
+    if (!alt || !Number.isFinite(line)) continue;
+    games.add(p.game_id);
+    points.add(line);
+    altMarkets.add(alt);
+  }
+  if (games.size === 0) return;
+  let rows: OddsByBookRow[];
+  try {
+    rows = await fetchAllPages<OddsByBookRow>(
+      (from, to) =>
+        supabase
+          .from('alt_game_lines')
+          .select(ODDS_BY_BOOK_COLUMNS)
+          .in('game_id', Array.from(games))
+          .in('market', Array.from(altMarkets))
+          .in('point', Array.from(points))
+          .order('game_id')
+          .order('market')
+          .order('bookmaker')
+          .order('point')
+          .range(from, to),
+      (r) => `${r.game_id}|${r.market}|${r.bookmaker}|${r.spread_home ?? r.total_line}`,
+    );
+  } catch (e: unknown) {
+    if (onEnrichmentError) onEnrichmentError('the alternate lines', e);
+    else console.warn('[picks] alternate lines unavailable', e);
+    return;
+  }
+  const mainOf: Record<string, string> = {};
+  for (const [main, alt] of Object.entries(ALT_GAME_MARKET)) if (alt) mainOf[alt] = main;
+  for (const r of rows) {
+    const main = mainOf[r.market];
+    if (!main) continue;
+    const key = `${r.game_id}|${main}`;
+    const list = booksByGameMarket.get(key) ?? [];
+    list.push(r);
+    booksByGameMarket.set(key, list);
+  }
 }
 
 const LIVE_STATE_COLUMNS =
@@ -1466,11 +1530,12 @@ export async function fetchPicksForDate(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()), onEnrichmentError);
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     // A pick is priced either as a game market or as a prop, never both.
     let bookRows: BookPricedRow[] = market
-      ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
+      ? gameRowsForPick(pick, market, booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
       : [];
     if (bookRows.length === 0) {
       // The row's prop_market for a multi-market rule (propMarketForPick).
@@ -1720,6 +1785,7 @@ export async function fetchUpcomingNflPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()));
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -1828,6 +1894,7 @@ export async function fetchUpcomingNcaafPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()));
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -1963,6 +2030,7 @@ export async function fetchUpcomingCollegeBasketballPicks(
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
   const booksByGameMarket = groupBooksByGameMarket(allBooks);
 
+  await addSameLineLadder(booksByGameMarket, picks, onEnrichmentError);
   return picks.map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {
@@ -2074,6 +2142,7 @@ export async function fetchUpcomingNhlPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
+  await addSameLineLadder(booksByGameMarket, Array.from(seen.values()));
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
     return {

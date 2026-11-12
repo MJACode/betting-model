@@ -4,7 +4,8 @@ import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PICK_BOOKS_NOTE, type PickSportsbookRow } from '@/lib/pickBooks';
+import { PICK_BOOKS_NOTE, PICK_BOOKS_OTHER_LINE_NOTE, type PickSportsbookRow } from '@/lib/pickBooks';
+import { trueMinus } from '@/lib/signalsCard';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -12,6 +13,11 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * the Lines all-books sheet. The Best row is a green wash, a Best pill and a
  * green price. A book with no price is an em dash. The bottom button and a
  * row both open that book.
+ *
+ * A book at a DIFFERENT number than the pick's (Matt, 2026-11-12) prints its
+ * bet under the book's name ("Coppin State +11.5 · different line"). It is
+ * never Best and never the bottom button, and the note says the model's pick
+ * and record stay at its own line.
  */
 export function PickBooksSheet({
   visible,
@@ -80,7 +86,9 @@ export function PickBooksSheet({
               {rows.map((row, i) => {
                 const spoken = row.price == null
                   ? `${row.name}, no price`
-                  : `${row.name}, ${row.priceText}${row.isBest ? ', best price' : ''}`;
+                  : row.otherLine && row.lineText
+                    ? `${row.name}, ${trueMinus(row.lineText)}, different line, ${row.priceText}`
+                    : `${row.name}, ${row.priceText}${row.isBest ? ', best price' : ''}`;
                 return (
                   <Pressable
                     key={row.bookmaker}
@@ -95,9 +103,16 @@ export function PickBooksSheet({
                       pressed && styles.pressed,
                     ]}
                   >
-                    <Text style={styles.book} numberOfLines={1}>
-                      {row.name}
-                    </Text>
+                    <View style={styles.bookSide}>
+                      <Text style={styles.book} numberOfLines={1}>
+                        {row.name}
+                      </Text>
+                      {row.otherLine && row.lineText ? (
+                        <Text style={styles.otherLine}>
+                          {`${trueMinus(row.lineText)} · different line`}
+                        </Text>
+                      ) : null}
+                    </View>
                     <View style={styles.priceSide}>
                       {row.isBest ? (
                         <View
@@ -133,7 +148,11 @@ export function PickBooksSheet({
               <Text style={styles.betText}>{betLabel}</Text>
             </Pressable>
           ) : null}
-          <Text style={styles.note}>{PICK_BOOKS_NOTE}</Text>
+          <Text style={styles.note}>
+            {rows.some((r) => r.otherLine)
+              ? `${PICK_BOOKS_NOTE} ${PICK_BOOKS_OTHER_LINE_NOTE}`
+              : PICK_BOOKS_NOTE}
+          </Text>
         </Pressable>
       </View>
     </Modal>
@@ -214,6 +233,15 @@ const styles = StyleSheet.create({
   },
   rowBest: {
     backgroundColor: colors.betSoft,
+  },
+  bookSide: {
+    flexShrink: 1,
+  },
+  otherLine: {
+    marginTop: 2,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   book: {
     flexShrink: 1,

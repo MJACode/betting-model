@@ -1434,7 +1434,7 @@ check(
       /bookControl: \{[\s\S]*?minHeight: 44/.test(card) &&
       !card.includes('handoffNavy') &&
       !card.includes('bestNow') &&
-      /movedLine != null && leadRow\.bookmaker === heroPrice\.book/.test(card) &&
+      /movedLine != null && leadRow\??\.bookmaker === heroPrice\.book/.test(card) &&
       card.includes('lineNote=') &&
       card.includes('betSpeech={sheetBetSpeech}') &&
       card.includes('myBooksReady || pick.is_live === true') &&
