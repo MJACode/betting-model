@@ -157,12 +157,21 @@ excluded, a missing feature never filled as 0.
 
 ### 4. Baselines
 
-On the same games, every candidate is scored against:
+Run these first, on every market in the grid, before any model. They are the
+floor any model must beat, and they often answer a row on their own:
 
-- **The market**: the no-vig probability of the price it would bet into.
-- **The dumb rules**: home side, favourite, under, season average, last-N.
-- **Betting every quote both ways.** That loses the margin, and it is the
-  floor. A rule that only matches it has found nothing.
+- **The blind bets**: always home, away, favourite, underdog, over, under, each
+  side of a spread, at the first and the last stored number, by price band.
+- **Betting every quote both ways.** That loses the margin. A rule that only
+  matches it has found nothing.
+- **The market's own accuracy**: log loss of the open and the close on the
+  target. A model whose log loss is worse than the open's has "edges" that are
+  its own error.
+- **State what the sample can resolve** (about 2,700 games resolves a return
+  to roughly ±4 points).
+
+Then every candidate is scored against the no-vig probability of the price it
+would bet into, on the same games.
 
 ### 5. The method search, one market at a time
 
@@ -172,8 +181,17 @@ hypothesis, a decision time fixed before looking at results, a walk-forward fit
 on every earlier season, graded at the quoted price of the book the live path
 would use. Record every run in the league's results table, nulls included.
 
-**Ask why the book would be wrong here before writing a model.** The methods
-that worked in this repo each had a mechanism:
+Each experiment reports the same columns, so tables can be compared: bets,
+units, return, interval, CLV, beat-the-close share, early, late, by season.
+Inputs are tested by **removing one group at a time** against a control row
+that is the market's own number alone.
+
+**The finding that has held in every league here:** models that predict the
+game from statistics and compare with the line mostly add nothing over the
+closing line. The edges that held came from market structure. Re-mining
+features on the same data rarely helps; a new edge needs new information or a
+new mechanism. So **ask why the book would be wrong here before writing a
+model.** The methods that worked each had a mechanism:
 
 - the book re-hangs a line mechanically (off its opener and the clock, off
   the full-game number for a derivative market) and misses something the
@@ -187,6 +205,25 @@ that worked in this repo each had a mechanism:
 
 A stat model with no such mechanism usually measures what the line already
 knows (`references/kill-tests.md`, the information test).
+
+**Player props** start with a decision, not code: one model across markets,
+one per market, or a shared usage core feeding per-market heads, decided from
+each market's response shape. Then: measure which side the margin sits on per
+market, check the target counts what the book grades, run the information test
+and a retail-book placebo (`references/methods.md` §6–8).
+
+**In-play models** need their own price log and score feed from day one; only
+fresh quotes (re-hung since the last score) count; the first qualifying quote
+locks the pick, so replay the live loop's real fetch cadence; a between-period
+break is often the best decision point; and the live cut is re-derived as the
+markets and polling change (`references/methods.md` §3).
+
+**Run the market-structure round on a market that stays null**: blind results
+by line and price band at the first and last number, sharp against soft within
+one snapshot, "other number" rules, and the hindsight ceiling. It says whether
+the market has a cheap side at all, and after four rounds of fitted models
+found nothing on hockey totals it produced the rule now live there (shipped on
+mike's call; its interval still reaches below zero).
 
 #### When the catalog runs out — invent
 
