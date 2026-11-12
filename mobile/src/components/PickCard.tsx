@@ -243,11 +243,6 @@ export function PickCard({
   // and that the record is kept there. The longer sentence is on Pick Detail.
   // The caption is not a pill slot, so it takes the full short label (PARX,
   // not the pill's clipped PAR), and the spoken copy takes the book's name.
-  // Whether one of their books has this side at another number. Decides the
-  // 'none' wording; the rows themselves are built with the sheet below.
-  const otherLinesAtMine =
-    notAtMyBooks && pick.is_live !== true &&
-    otherLineQuotesForPick(pick, item.bookRows, myBooks, priceAge).length > 0;
   const myBooksNoteWith = (book: string) =>
     myQuote && modelPrice != null
       ? `${foundAtText(book, formatAmerican(modelPrice))}${
@@ -256,12 +251,10 @@ export function PickCard({
       : notAtMyBooks
         ? pick.is_live === true && modelPrice != null
           ? liveNotAtMyBooksText(book, formatAmerican(modelPrice))
-          : otherLinesAtMine
+          : otherLinesControl != null
             ? NOT_AT_MY_BOOKS_AT_THIS_LINE
             : NOT_AT_MY_BOOKS
         : null;
-  const myBooksNote = myBooksNoteWith(bookLabel(storedQuoteBook(pick)));
-  const myBooksNoteSpoken = myBooksNoteWith(bookName(storedQuoteBook(pick)));
   // Green only when the edge on screen is one they can take: at their price
   // it may be gone, and off their books there is nothing to take.
   const myEdgeGone = (myView?.status === 'mine' && (myView.edge ?? 0) <= 0) || notAtMyBooks;
@@ -561,6 +554,11 @@ export function PickCard({
     notAtMyBooks && otherLineRows.length > 0
       ? { label: 'Other lines', speech: 'Other lines at your books', sheet: true }
       : null;
+  // Built here, after otherLinesControl: the 'none' wording follows the
+  // control, so "This line is not offered…" shows only where "Other lines"
+  // is there to open (UX review).
+  const myBooksNote = myBooksNoteWith(bookLabel(storedQuoteBook(pick)));
+  const myBooksNoteSpoken = myBooksNoteWith(bookName(storedQuoteBook(pick)));
   const signalsControl = bookControlFor(handoff);
   const boardControl = bookControlFor(boardHandoff);
   const signalsCta = signalsControl?.label ?? null;

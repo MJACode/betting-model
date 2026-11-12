@@ -48,6 +48,7 @@ import {
   bookLabel,
   bookName,
   currentLineQuotes,
+  otherLineQuotesForPick,
   displayQuoteForPick,
   formatSideLine,
   freshBookRows,
@@ -63,7 +64,13 @@ import {
 import { stalePriceNote } from '@/lib/heroPriceText';
 import { teamScoreUnit } from '@/lib/teamForm';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { liveNotAtMyBooksText, myBooksView, NOT_AT_MY_BOOKS, recordNoteFor } from '@/lib/myBooks';
+import {
+  liveNotAtMyBooksText,
+  myBooksView,
+  NOT_AT_MY_BOOKS,
+  NOT_AT_MY_BOOKS_AT_THIS_LINE,
+  recordNoteFor,
+} from '@/lib/myBooks';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
@@ -262,6 +269,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const lineQuotes = currentLineQuotes(pick, bookRows, hero, priceAge, allowedBooks);
   // Their number on its own line at secondary weight (UX review); the record
   // note is a separate caption under it.
+  // Same wording as the card (PickCard): one of their books has this side at
+  // another number, and the "Your books" table below lists it.
+  const otherLinesBelow =
+    myView?.status === 'none' && pick.is_live !== true && cta.handoff &&
+    otherLineQuotesForPick(pick, bookRows, myBooks, priceAge).length > 0;
   const myBooksLine =
     myView?.status === 'mine' && myView.best && myView.edge != null && myView.ev != null
       ? `At your books: ${bookName(myView.best.bookmaker)} ${formatAmerican(myView.best.price)} · edge ${formatPctSigned(myView.edge)} · return ${formatPctSigned(myView.ev)}`
@@ -269,7 +281,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         ? `${
             pick.is_live === true && decisionOdds(pick) != null
               ? liveNotAtMyBooksText(bookName(storedQuoteBook(pick)), formatAmerican(Number(decisionOdds(pick))))
-              : NOT_AT_MY_BOOKS
+              : otherLinesBelow
+                ? `${NOT_AT_MY_BOOKS_AT_THIS_LINE}. Their other lines are under Your books`
+                : NOT_AT_MY_BOOKS
           }. Change your books in Settings.`
         : null;
   const myBooksRecordNote = myView?.status === 'mine' ? recordNoteFor(pick.model_id) : null;

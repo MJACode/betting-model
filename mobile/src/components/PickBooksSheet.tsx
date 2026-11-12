@@ -4,7 +4,12 @@ import { Modal } from '@/components/TrackedModal';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PICK_BOOKS_NOTE, PICK_BOOKS_OTHER_LINE_NOTE, type PickSportsbookRow } from '@/lib/pickBooks';
+import {
+  PICK_BOOKS_NOTE,
+  PICK_BOOKS_OTHER_LINE_NOTE,
+  PICK_BOOKS_OTHER_LINES_ONLY_NOTE,
+  type PickSportsbookRow,
+} from '@/lib/pickBooks';
 import { trueMinus } from '@/lib/signalsCard';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -128,6 +133,9 @@ export function PickBooksSheet({
                           styles.price,
                           row.isBest && styles.priceBest,
                           row.price == null && styles.priceMissing,
+                          // Another number's price is not comparable to the
+                          // pick's: drawn quieter (UX review).
+                          row.otherLine && styles.priceMissing,
                         ]}
                       >
                         {row.priceText}
@@ -149,9 +157,11 @@ export function PickBooksSheet({
             </Pressable>
           ) : null}
           <Text style={styles.note}>
-            {rows.some((r) => r.otherLine)
-              ? `${PICK_BOOKS_NOTE} ${PICK_BOOKS_OTHER_LINE_NOTE}`
-              : PICK_BOOKS_NOTE}
+            {!rows.some((r) => r.otherLine)
+              ? PICK_BOOKS_NOTE
+              : rows.some((r) => r.price != null && !r.otherLine)
+                ? `${PICK_BOOKS_NOTE} ${PICK_BOOKS_OTHER_LINE_NOTE}`
+                : PICK_BOOKS_OTHER_LINES_ONLY_NOTE}
           </Text>
         </Pressable>
       </View>

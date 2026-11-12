@@ -2428,12 +2428,21 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
         : Promise.resolve({ data: [], error: null }),
   ]);
 
+  // Enrichment only — never let a line-shop failure break the detail screen.
+  let bookRows = (bookRes.error ? [] : (bookRes.data ?? [])) as unknown as OddsByBookRow[];
+  // The same ladder rung the card reads (addSameLineLadder), so the detail
+  // screen never says "Not offered" one tap after the card showed a price.
+  if (market && pick.is_live !== true) {
+    const byMarket = new Map<string, OddsByBookRow[]>([[`${pick.game_id}|${market}`, bookRows]]);
+    await addSameLineLadder(byMarket, [pick]);
+    bookRows = gameRowsForPick(pick, market, byMarket.get(`${pick.game_id}|${market}`) ?? []);
+  }
+
   return {
     pick,
     game: (gameRes.data as GameRow | null) ?? null,
     weather: (weatherRes.data as GameWeather | null) ?? null,
-    // Enrichment only — never let a line-shop failure break the detail screen.
-    bookRows: (bookRes.error ? [] : (bookRes.data ?? [])) as unknown as BookPricedRow[],
+    bookRows: bookRows as unknown as BookPricedRow[],
   };
 }
 

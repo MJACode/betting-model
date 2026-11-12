@@ -18,6 +18,10 @@ export const PICK_BOOKS_NOTE =
 export const PICK_BOOKS_OTHER_LINE_NOTE =
   'A different line is a different bet. The model’s pick, edge and record stay at its line.';
 
+/** The note when every priced row is at a different number: no Best, no Bet. */
+export const PICK_BOOKS_OTHER_LINES_ONLY_NOTE =
+  'Only books you selected. A different line is a different bet; the model’s pick, edge and record stay at its line. Tap a book to open it.';
+
 export interface PickSportsbookRow {
   bookmaker: string;
   /** Full name, the row. */
