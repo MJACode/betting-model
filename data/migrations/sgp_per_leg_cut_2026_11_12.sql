@@ -57,6 +57,8 @@ DECLARE
     v_recent   INT;
     v_decimal  NUMERIC;
     v_ratio    NUMERIC;
+    v_fair     NUMERIC;
+    v_est      NUMERIC;
 BEGIN
     IF p_device_id IS NULL OR length(btrim(p_device_id)) < 8 OR length(p_device_id) > 64 THEN
         RAISE EXCEPTION 'invalid device';
@@ -81,7 +83,18 @@ BEGIN
                       THEN 1 + p_book_american / 100.0
                       ELSE 1 + 100.0 / abs(p_book_american) END;
     v_ratio := v_decimal / p_multiplied_decimal;
-    IF v_ratio < 0.2 OR v_ratio > 1.2 THEN
+    IF p_extra_legs IS NOT NULL AND p_corr_lift IS NOT NULL THEN
+        -- Checked against the app's estimate at the reference cut 0.14, 4x
+        -- either way (mobile/src/lib/sgpPricing.enteredPriceIsPlausible). A
+        -- correlated 7-leg NFL stack is paid ~1/6 of its legs multiplied out,
+        -- which the raw 0.2 floor refused (PR #1261 review M2).
+        v_fair := p_multiplied_decimal / greatest(p_corr_lift, 1);
+        v_est  := 1 + (v_fair - 1) * power(0.86, p_extra_legs);
+        IF v_decimal / v_est < 0.25 OR v_decimal / v_est > 4 OR v_ratio > 1.2 THEN
+            RAISE EXCEPTION 'price out of range';
+        END IF;
+    ELSIF v_ratio < 0.2 OR v_ratio > 1.2 THEN
+        -- An app build that sends no shape: the original check.
         RAISE EXCEPTION 'price out of range';
     END IF;
 
@@ -298,3 +311,10 @@ VALUES
 ON CONFLICT (sport, market_class_a, market_class_b, relationship)
 DO UPDATE SET rho = EXCLUDED.rho, source = 'empirical',
               n_pairs = EXCLUDED.n_pairs, updated_at = now()::text;
+
+-- The NFL rows above are MARKET rows, not class rows: the two class columns
+-- hold prop market keys and the relationship is same_player / same_team / opp.
+COMMENT ON COLUMN public.parlay_correlations.market_class_a IS
+    'A market class (game_ml, game_total, off_prop, ...) or, on NFL market rows, a prop market key (player_receptions, ...). Ordered a <= b.';
+COMMENT ON COLUMN public.parlay_correlations.relationship IS
+    'Class rows: same | opp | na (team relationship). NFL market rows: same_player | same_team | opp. Read by mobile/src/lib/propCorrelation.ts.';

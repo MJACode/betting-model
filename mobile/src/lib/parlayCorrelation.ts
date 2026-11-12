@@ -179,6 +179,9 @@ function legAttrs(leg: ParlayLeg, resolveTeam?: TeamResolver): LegAttrs {
   };
 }
 
+/** One player's one stat at two numbers: the two results move almost together. */
+const SAME_STAT_RHO = 0.95;
+
 /**
  * Market-level correlation for two prop legs in one game, where we have it
  * (NFL today, lib/propCorrelation.ts). Null means "no market-level number":
@@ -196,8 +199,12 @@ function propPairRho(a: LegAttrs, b: LegAttrs): number | null {
   else rel = ta === tb ? 'same_team' : 'opp';
   const ma = baseMarket(a.prop.market);
   const mb = baseMarket(b.prop.market);
-  if (rel === 'same_player' && ma === mb) return 0; // one bet at two numbers; not a parlay we price
-  const base = NFL_PROP_CORRELATIONS[propPairKey('NFL', ma, mb, rel)] ?? 0;
+  // One player's one stat at two numbers (Over 3.5 and Over 5.5 catches) is
+  // nearly the same bet: priced as independent it would be far too long.
+  const base =
+    rel === 'same_player' && ma === mb
+      ? SAME_STAT_RHO
+      : NFL_PROP_CORRELATIONS[propPairKey('NFL', ma, mb, rel)] ?? 0;
   const sa = a.prop.side === 'under' ? -1 : 1;
   const sb = b.prop.side === 'under' ? -1 : 1;
   return Math.max(-0.95, Math.min(0.95, base * sa * sb));
@@ -387,7 +394,8 @@ export const SGP_LIFT_DRAWS = 60000;
 /**
  * How much more often the legs all hit than their multiplied-out chance says,
  * at the slip's own leg prices (1 / decimal, DraftKings' where it lists the
- * leg; one lift serves every book's tile), on the bundled correlations only
+ * leg; one lift serves every book's tile), on the bundled MARKET-LEVEL
+ * correlations only (lib/propCorrelation.ts; NFL today)
  * — never the fetched table, so the bar, the tiles and the headline, which do
  * not all hold it, show one price. 1 when no pair is correlated.
  *
@@ -412,7 +420,10 @@ export function sgpCorrelationLift(legs: readonly ParlayLeg[]): number {
   const hit = liftCache.get(key);
   if (hit != null) return hit;
   const draws = priced.length >= 6 ? SGP_LIFT_DRAWS / 2 : SGP_LIFT_DRAWS;
-  const { jointProb, hasCorrelation } = correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, draws);
+  // Market-level pairs only (NO_CLASS_RHO): the class priors move the win %,
+  // but no book price was ever checked against them, so they do not move the
+  // price of an MLB / NBA / WNBA / NHL slip (PR #1261 review M1).
+  const { jointProb, hasCorrelation } = correlatedJointProb(priced, NO_CLASS_RHO, undefined, draws);
   let lift = 1;
   if (hasCorrelation) {
     const independent = priced.reduce((a, l) => a * clampProb(l.modelProb), 1);
@@ -426,6 +437,9 @@ export function sgpCorrelationLift(legs: readonly ParlayLeg[]): number {
 }
 
 const liftCache = new Map<string, number>();
+
+/** No class-level coefficients: only market-level pairs (propPairRho) count. */
+const NO_CLASS_RHO: RhoTable = Object.freeze({}) as RhoTable;
 
 /** The slip's same-game shape: games with 2+ legs, the legs past the first in
  *  each, and the correlation lift. What every surface prices a slip with. */

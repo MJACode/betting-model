@@ -27,6 +27,7 @@ import type { EnrichedPick, GameRow, Pick } from '@/types';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
 import { applySgpHaircut, sameGameGroupCount, NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
 import { sgpShapeFor } from '@/lib/parlayCorrelation';
+import { normalizePlayerName } from '@/lib/playerNews';
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -252,7 +253,9 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
  *  other legs; a teammate or an opponent reads as independent. */
 function propForPick(p: Pick): { prop?: LegProp } {
   const market = p.prop_market ?? null;
-  const player = p.player_key ?? p.player_id ?? null;
+  // NFL picks store the key upper-cased ("JONATHAN TAYLOR", measured
+  // 2026-11-12); a line leg carries the normalized name. One form for both.
+  const player = normalizePlayerName(p.player_key ?? p.player_id ?? null);
   if (!market || !player) return {};
   if (p.pick_side !== 'over' && p.pick_side !== 'under') return {};
   return { prop: { sport: p.sport, market, player, team: null, side: p.pick_side } };

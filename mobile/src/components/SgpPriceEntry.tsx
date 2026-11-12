@@ -62,7 +62,8 @@ export function SgpPriceEntry({
   const save = async () => {
     if (american == null) return;
     Keyboard.dismiss();
-    if (!enteredPriceIsPlausible(americanToDecimal(american), multipliedDecimal)) {
+    const shape = sgpShapeFor(legs);
+    if (!enteredPriceIsPlausible(americanToDecimal(american), multipliedDecimal, shape)) {
       // The check compares against the legs multiplied out, so the message
       // names that number (PR #1198 review L3).
       const multipliedAmerican = decimalToAmerican(multipliedDecimal);
@@ -70,7 +71,6 @@ export function SgpPriceEntry({
       AccessibilityInfo.announceForAccessibility(`Price looks off. Check the number on ${name}’s slip.`);
       return;
     }
-    const shape = sgpShapeFor(legs);
     setSaving(true);
     setRangeNote(null);
     // The price shows on this slip whether or not the save reaches the server.

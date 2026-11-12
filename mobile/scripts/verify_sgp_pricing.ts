@@ -29,6 +29,7 @@
 import {
   betslipSummary,
   computeParlayMetrics,
+  legFromPick,
   lineShopParlay,
   makeCustomLeg,
   priceBooksForParlay,
@@ -251,6 +252,42 @@ check('an out-of-band fit is ignored',
     const withTeams = computeCorrelatedMetrics(nfl, PARLAY_CORRELATION_PRIORS, undefined, 20000);
     check('a leg with no team gets it from the screen\'s resolver',
       near(viaResolver.jointProb, withTeams.jointProb, 0.002), `${viaResolver.jointProb.toFixed(4)} vs ${withTeams.jointProb.toFixed(4)}`);
+  }
+
+  // PR #1261 review.
+  {
+    // M1: a same-game MLB slip of model picks (class priors only) keeps lift 1.
+    const mlbPick = (id: number, model: string, side: string): ParlayLeg => ({
+      ...leg(300 + id, 'MLB_2026-07-01_NYY_BOS', 150, 150, `${model} ${side}`),
+      modelId: model,
+      pick: { pick_side: side, sport: 'MLB', player_id: `p${id}`, model_id: model } as never,
+    });
+    const mlb = [mlbPick(1, 'mlb_prop_batter_hits', 'over'), mlbPick(2, 'mlb_total_market', 'over')];
+    check('M1: class priors move no price (MLB pick slip lift 1)', sgpCorrelationLift(mlb) === 1);
+  }
+  {
+    // M2: a correlated 7-leg stack paid ~1/6 of its legs multiplied out is a price, not a typo.
+    const sh7 = { groups: 1, extraLegs: 6, lift: 2.5 };
+    const mult = 500;
+    const est = applySgpHaircut(mult, sh7, 'fanduel');
+    check('M2: an entered price near the estimate is plausible even at 1/6 of multiplied',
+      est / mult < 0.2 && enteredPriceIsPlausible(est, mult, sh7), `est/mult ${(est / mult).toFixed(3)}`);
+    check('M2: a 10x typo is still refused', !enteredPriceIsPlausible(est / 10, mult, sh7) && !enteredPriceIsPlausible(est * 10, mult, sh7));
+  }
+  {
+    // L1: one player's one stat at two numbers is nearly one bet.
+    const ladder = [diggs(6, 120, 'player_receptions', 'over'), diggs(7, 250, 'player_receptions_alternate', 'over')];
+    check('L1: same stat at two numbers is strongly correlated', sgpCorrelationLift(ladder) > 1.5, `${sgpCorrelationLift(ladder).toFixed(2)}`);
+  }
+  {
+    // L2: a pick leg's upper-cased player_key matches a line leg's normalized name.
+    const pickTd: ParlayLeg = {
+      ...leg(400, G, 240, 240, 'Stefon Diggs Anytime TD'),
+      pick: { pick_side: 'over', sport: 'NFL', player_key: 'STEFON DIGGS', prop_market: 'player_anytime_td', model_id: 'nfl_prop_market' } as never,
+      prop: { sport: 'NFL', market: 'player_anytime_td', player: 'stefon diggs', team: null, side: 'over' },
+    };
+    const fromPick = legFromPick({ pick: { ...(pickTd.pick as object), pick_id: 400, game_id: G, dk_odds: 240, model_probability: 0.3, pick_label: 'x', edge: 0, model_id: 'nfl_prop_market' } as never, game: null } as never);
+    check('L2: a pick leg normalizes its player key', fromPick?.prop?.player === 'stefon diggs', `${fromPick?.prop?.player}`);
   }
 
   check('NFL win % is no longer the naive product', headline.hasCorrelation && headline.jointProb > headline.independentProb * 1.4,

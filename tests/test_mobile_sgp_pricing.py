@@ -126,7 +126,12 @@ def test_the_same_game_estimate_is_per_extra_leg_after_the_correlation_lift():
     mig = (ROOT / "data" / "migrations" / "sgp_per_leg_cut_2026_11_12.sql").read_text(encoding="utf-8")
     assert "greatest(o.corr_lift, 1)" in mig, "the server fit uses the price's own formula"
     corr = _read("lib/parlayCorrelation.ts")
-    # Every surface prices with the bundled table only, so they agree.
-    assert "correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, draws)" in corr
+    # Every surface prices with the bundled MARKET-LEVEL table only, so they
+    # agree, and class priors (never checked against a book) move no price.
+    assert "correlatedJointProb(priced, NO_CLASS_RHO, undefined, draws)" in corr
+    # The server's typo check is relative to the estimate, like the app's.
+    mig = (ROOT / "data" / "migrations" / "sgp_per_leg_cut_2026_11_12.sql").read_text(encoding="utf-8")
+    assert "v_est  := 1 + (v_fair - 1) * power(0.86, p_extra_legs);" in mig
+    assert "const PLAUSIBLE_REF_CUT = 0.14;" in pricing
     parlay = _read("lib/parlay.ts")
     assert parlay.count("sgpShapeFor(legs)") >= 2

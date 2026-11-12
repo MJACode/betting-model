@@ -163,10 +163,26 @@ export function impliedHaircut(bookDecimal: number, multipliedDecimal: number, s
   return 1 - Math.pow((bookDecimal - 1) / (fair - 1), 1 / shape.extraLegs);
 }
 
-/** The ratio the server accepts (log_sgp_price), so the app can say "check
- *  that number" instead of sending one the server will refuse. */
-export function enteredPriceIsPlausible(bookDecimal: number, multipliedDecimal: number): boolean {
+/** The cut the server's typo check measures against: the default, fixed, so
+ *  the app and log_sgp_price agree whatever a book's own fit says. */
+const PLAUSIBLE_REF_CUT = 0.14;
+
+/**
+ * The range the server accepts (log_sgp_price), so the app can say "check
+ * that number" instead of sending one the server will refuse. With a shape,
+ * the entered price is checked against the estimate at the reference cut,
+ * within 4x either way: a correlated 7-leg NFL stack is paid about a sixth of
+ * its legs multiplied out, which the old 0.2 floor on the raw ratio refused
+ * (PR #1261 review M2). Without one, the old raw-ratio check.
+ */
+export function enteredPriceIsPlausible(bookDecimal: number, multipliedDecimal: number, shape?: SgpShape): boolean {
   if (!(bookDecimal > 1) || !(multipliedDecimal > 1)) return false;
+  if (shape && shape.extraLegs > 0) {
+    const fair = multipliedDecimal / priceLift(shape.lift);
+    const est = 1 + (fair - 1) * Math.pow(1 - PLAUSIBLE_REF_CUT, shape.extraLegs);
+    const r = bookDecimal / est;
+    return r >= 0.25 && r <= 4 && bookDecimal <= multipliedDecimal * 1.2;
+  }
   const r = bookDecimal / multipliedDecimal;
   return r >= 0.2 && r <= 1.2;
 }
