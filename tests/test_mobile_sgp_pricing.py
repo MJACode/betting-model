@@ -119,7 +119,12 @@ def test_nfl_correlations_bundled_in_the_app_match_the_stored_rows():
 
 def test_the_same_game_estimate_is_per_extra_leg_after_the_correlation_lift():
     pricing = _read("lib/sgpPricing.ts")
-    assert "(multipliedDecimal / lift) * Math.pow(1 - haircutFor(book, fits), shape.extraLegs)" in pricing
+    assert "const fair = multipliedDecimal / priceLift(shape.lift);" in pricing
+    assert "return 1 + (fair - 1) * Math.pow(1 - haircutFor(book, fits), shape.extraLegs);" in pricing
+    # A lift below 1 never raises the price above the legs multiplied out.
+    assert "return lift > 1 && Number.isFinite(lift) ? lift : 1;" in pricing
+    mig = (ROOT / "data" / "migrations" / "sgp_per_leg_cut_2026_11_12.sql").read_text(encoding="utf-8")
+    assert "greatest(o.corr_lift, 1)" in mig, "the server fit uses the price's own formula"
     corr = _read("lib/parlayCorrelation.ts")
     # Every surface prices with the bundled table only, so they agree.
     assert "correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, SGP_LIFT_DRAWS)" in corr
