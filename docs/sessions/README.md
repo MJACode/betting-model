@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the league skill scouts outside the repo on every build (papers, forums, GitHub, data and price sources; Reddit refused a plain fetch) and invents three mechanisms of its own before calling a market null |
+| 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the pre-game boards reload while open: "FD line now 41.5" was a board loaded before FanDuel moved to 40.5 at 18:18Z; All/Signals now reload every 10 minutes while focused and on resume, overlapping loads are ordered, and a failing poll no longer re-announces its banner |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the league skill learns from every use (a learning log read first and appended last, write-back as a gate, contradicted claims fixed in place) and climbs an eight-rung ladder when stuck; its stale-citation test waits on its own branch for a merge outside live games |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, a skill for building every market in one league (`/league-models`): the goals, the steps from the market grid to the live loop, the method catalog by mechanism, the kill tests, the porting traps and the shipping checklist, each written back to by every future league build |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, ops dashboard: the volume control moved to its own "Volume" tab (it sat under the Model Roster, where mike could not find it); `model_display_names` (the app's 104 model names, generated from modelMeta.ts) and `dashboard_layouts` (saved tile layouts per person and tab) for the redesign; rehearsed on production and rolled back, 13 checks |

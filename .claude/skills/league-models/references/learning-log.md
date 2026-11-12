@@ -30,6 +30,27 @@ review as its own entry.
 
 ---
 
+## 2026-11-12 — Scouting outside the repo, and inventing before a null
+
+1. **Scope.** mike: *"will it hunt for new appraches, data sources, sleuth
+   online forums and repos anything it can find, OR invest new approaches if
+   it cant find edge in a market?"*
+2. **Tried.** It looked outside only from inside the stuck ladder, with no
+   routes, no way to judge a lead and nothing written back. Probed the routes
+   from mike's PC: web search, GitHub repository and code search, two betting
+   forums, arXiv, Kaggle and Pinnacle's articles answered; Reddit refused a
+   plain fetch (403 on reddit.com and old.reddit.com). One web search for
+   women's college basketball totals models returned mostly picks sites.
+3. **New.** `references/scouting.md` (when, where, the measured routes, search
+   terms, the leads table, how to judge a lead, the rules for code, data,
+   terms, sign-ups and paid sources, and the write-back). Step 2b in
+   `SKILL.md`: a scout on every build. Rung 6 of the ladder points at it. An
+   invention floor: three mechanisms of the session's own before any market is
+   called null, the cheapest one run, the rest written into the frontier.
+4. **Corrected.** Nothing measured was contradicted.
+5. **The framework.** A scout now sits between the price inventory and the
+   method search, and is repeated each season and when a live model decays.
+
 ## 2026-11-12 — How the skill learns, and what to do when stuck
 
 1. **Scope.** mike: *"I want this skill to be self learning and self evolving

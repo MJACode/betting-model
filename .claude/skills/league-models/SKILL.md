@@ -1,6 +1,6 @@
 ---
 name: league-models
-description: "Build, audit or extend the betting models for EVERY market in one league — a league we have never bet, new markets in a league we already bet, or a full audit of one league's markets. Use when asked to build models for a league, add a league or sport, audit all of a league's markets, explain why nothing is firing in a league, find what else can be bet in a league, or port what was learned in one sport to another. It is the framework for that work — the market grid, prices before models, the market as the baseline, a method search per market, the kill tests, ship what passes live, keep improving on live data — and for inventing new methods when the known ones run out."
+description: "Build, audit or extend the betting models for EVERY market in one league — a league we have never bet, new markets in a league we already bet, or a full audit of one league's markets. Use when asked to build models for a league, add a league or sport, audit all of a league's markets, explain why nothing is firing in a league, find what else can be bet in a league, or port what was learned in one sport to another. It is the framework for that work — the market grid, prices before models, the market as the baseline, a method search per market, the kill tests, ship what passes live, keep improving on live data — for hunting outside the repo (papers, forums, open-source code, data and price sources), and for inventing new methods when nothing found clears."
 ---
 
 # /league-models <league> [market … | audit]
@@ -19,11 +19,13 @@ that needs it starts:
 | `references/kill-tests.md` | step 6: the tests that killed false edges here, and how to run each |
 | `references/porting-traps.md` | steps 2–3: what a copy of existing code got wrong on a new league's data |
 | `references/shipping.md` | step 7: every file, table, test and production step a new model or sport touches |
+| `references/scouting.md` | step 2b and the stuck ladder: hunting outside the repo for methods, data and prices, and judging what is found |
 | `references/learning-log.md` | step 0 (read) and step 9 (append): what every use of this skill taught it |
 
-**The catalog is a starting set, not a boundary.** Step 5 ends with inventing
-methods, and step 9 writes every new method, trap and null back into these
-files, so the next league starts from more than this one did.
+**The catalog is a starting set, not a boundary.** Step 2b goes outside the
+repo for what others have found, step 5 ends with inventing methods nobody
+has tried, and step 9 writes every new method, trap, source and null back into
+these files, so the next league starts from more than this one did.
 
 ---
 
@@ -33,10 +35,12 @@ It does not change by itself. It changes only when a session using it writes
 back, and only once that write-back is merged. So the write-back is part of
 the work, not a courtesy after it:
 
-- **Learn, on every use.** Step 0 reads `references/learning-log.md`. Step 9
-  appends an entry (what was tried, what was new, what was corrected, what in
-  the framework changed) and writes each new method, trap, price route or kill
-  test into its reference file. **A build is not done until those changes are
+- **Learn, on every use, from inside and outside.** Step 0 reads
+  `references/learning-log.md`. Step 2b brings in what others have published
+  or built. Step 9 appends an entry (what was tried, what was new, what was
+  searched and where, what was corrected, what in the framework changed) and
+  writes each new method, trap, source, price route or kill test into its
+  reference file. **A build is not done until those changes are
   in the same branch as the work**, and the reply carries one line: *"What this
   build taught the skill: …"*.
 - **Correct, the moment a measurement contradicts it.** Fix the claim in place
@@ -167,11 +171,12 @@ brief to its first live model in a day (2026-11-09 to 11-10,
 4. Buy and store the price history; start the forward collection the same day
    (the whole season's schedule, odds pulls at the decision times, the price
    path kept, box scores).
-5. Run the closest league's working methods **unchanged** as the first
-   candidates, then work the rest of the grid. Unchanged first, so a pass or a
-   fail means something.
-6. Ship what passes, through a card that replays the research bet for bet.
-7. Then in play, then the app's stats pages.
+5. Scout outside the repo for this league (step 2b).
+6. Run the closest league's working methods **unchanged** as the first
+   candidates, then the scouted leads and the rest of the grid. Unchanged
+   first, so a pass or a fail means something.
+7. Ship what passes, through a card that replays the research bet for bet.
+8. Then in play, then the app's stats pages.
 
 ### 1. The market grid — before any model
 
@@ -201,6 +206,18 @@ Start the forward collection at the same time. A market with no history still
 gets its prices stored from today, at the pull times the model would decide
 at, so next season's research has data. Every model that will run in play
 needs its own price log from its first day.
+
+### 2b. Scout outside the repo — every build, not only when stuck
+
+Before the method search, go and find what others know about this league's
+markets: papers, professional bettors' write-ups, forums, open-source models
+and scrapers on GitHub, data and price sources we do not hold. Routes, search
+terms, how to judge a lead and how to bring it back are in
+`references/scouting.md`. The output is a leads table: each lead with its
+source, its claim, its mechanism, what it needs, and the experiment that would
+test it. Leads join the grid as experiments; data and prices found join step
+2's routes. A claim found online is a hypothesis until it passes the kill
+tests on our prices.
 
 ### 3. Settlement and inputs
 
@@ -302,6 +319,12 @@ a new one:
 5. **Write it into `references/methods.md`** with its result, whatever it is.
    A null that is written down is never paid for twice.
 
+**Before any market is called null, invent at least three mechanisms of your
+own** — not from the catalog and not from the scout — each with its
+falsifiable prediction and its cheapest experiment. Run the cheapest. The rest
+go into the frontier list in `references/methods.md` with the experiment
+written out, so the next session can run them without re-deriving them.
+
 Sources of new ideas worth searching (WebSearch, papers, practitioners'
 write-ups — orientation, timeboxed): how professionals price this sport, how
 its markets are known to be set, which derivative markets are priced off
@@ -339,11 +362,12 @@ tests, the decision time and the rules above in writing, and merge the tables.
 5. **Invert the question.** Which side does the book make its money on? Why
    do the losing bets lose? Why are the biggest claimed edges wrong? What would
    a perfect predictor of the line's move have earned?
-6. **Look outside.** Search for papers, practitioners' write-ups and methods
-   from other fields: stale quotes and lead-lag from market microstructure;
-   ensembles, shrinkage and calibration from forecasting; the sport's own
-   science. Timeboxed, and every idea comes back as an experiment, not a
-   paragraph.
+6. **Look outside, deeper.** A second scout aimed at this one market
+   (`references/scouting.md`): papers, practitioners' write-ups, forum
+   threads, open-source code, and methods from other fields — stale quotes and
+   lead-lag from market microstructure; ensembles, shrinkage and calibration
+   from forecasting; the sport's own science. Timeboxed, and every idea comes
+   back as an experiment, not a paragraph.
 7. **Get a read that is not anchored on yours.** Give a fresh subagent the
    grid, the data and the question — not your hypothesis or your conclusions
    — and ask what is missing. Or call the advisor.
@@ -419,6 +443,8 @@ live slate, or a card's only deciding run.
   `scripts/paused_model_assessment.py`).
 - Proactively check adjacent markets, lead times and execution details
   around a live model, and say what the next measured step would be.
+- Re-scout (step 2b) at the start of each season, and whenever a live model's
+  record decays: new data sources, new books, new published methods.
 
 ### 9. Write it down, and teach this skill — the build is not done without it
 
