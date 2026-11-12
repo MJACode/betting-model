@@ -267,7 +267,9 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
     teamsSrc.includes('onAdded={onAdded}') && teamsChunk.includes("navigation.navigate('Betslip')") && teamsChunk.includes('fromParlay'));
   check('VoiceOver hears the side of a total, not "o8.5"', teamsSrc.includes('`total over ${quote.line}`'));
   const picks = read('src/screens/PicksHomeScreen.tsx');
-  check('the partial banner is one sentence with one reason and hides while reloading', picks.includes('{!error && !loading && partial ? (') && picks.includes('numberOfLines={3}') && picks.includes('accessibilityHint="Reloads today’s picks"'));
+  // Hides for its own Retry tap or a pull, not for the 10-minute background
+  // reload, which made it blink and the list jump (UX review 2026-11-12).
+  check('the partial banner is one sentence with one reason and hides while its retry runs', picks.includes('{!error && !partialRetrying && !pulling && partial ? (') && !picks.includes('{!error && !loading && partial ? (') && picks.includes('numberOfLines={3}') && picks.includes('accessibilityHint="Reloads today’s picks"'));
   const hook = read('src/hooks/useTodayPicks.ts');
   check('a look-ahead failure is named for what it is', hook.includes("swallow('the upcoming UFC card')") && !hook.includes("'UFC picks'"));
 }
