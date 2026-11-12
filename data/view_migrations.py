@@ -618,6 +618,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # on a fresh database it waits (a NOTICE, not an error) until the pair
     # below has run. Does not write picks, push_sent or the record.
     "model_volume_settings_2026_11_11.sql",
+    # 2026-11-12 (mike): what the ops dashboard reads for its redesign. The
+    # view model_display_names (every model's name as the mobile app shows
+    # it, written from modelMeta.ts by scripts/model_display_names.py) and
+    # the worker-only table dashboard_layouts (a person's saved tile
+    # arrangement). Touches no pick, cut or record. Returns on a catalog
+    # read once the view's comment matches the hash of this file.
+    "dashboard_support_2026_11_12.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
