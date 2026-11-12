@@ -94,9 +94,10 @@ was written down. Do not relitigate them; the evidence is in
 - **One league asked, one league in the reply.** Describe a method by what it
   does ("a line-shopping rule", "a halftime state model"), never by the sport
   it was first built for. Provenance stays in the repo docs.
-- **Heavy research reads come off the local mirror**, never production
-  (`docs/local_ops.md`). Production has one database for analysis and live
-  scoring.
+- **Bulk history reads come off the local mirror** (`docs/local_ops.md`):
+  production is one database for analysis and live scoring. The mirror lags
+  by up to a day, so today's rows are a small read on production by indexed
+  key.
 - **Subagents get the same rules.** Tell every subagent in writing: no paid
   API call, no production write, run `graphify query` before grepping code.
 
