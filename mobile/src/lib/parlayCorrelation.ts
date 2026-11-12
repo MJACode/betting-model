@@ -199,12 +199,16 @@ function propPairRho(a: LegAttrs, b: LegAttrs): number | null {
   else rel = ta === tb ? 'same_team' : 'opp';
   const ma = baseMarket(a.prop.market);
   const mb = baseMarket(b.prop.market);
-  // One player's one stat at two numbers (Over 3.5 and Over 5.5 catches) is
-  // nearly the same bet: priced as independent it would be far too long.
-  const base =
-    rel === 'same_player' && ma === mb
-      ? SAME_STAT_RHO
-      : NFL_PROP_CORRELATIONS[propPairKey('NFL', ma, mb, rel)] ?? 0;
+  // One player's one stat at two numbers. Same side (Over 3.5 and Over 5.5
+  // catches) is nearly the same bet: priced as independent it would be far too
+  // long. Opposite sides are a band (Over 3.5 + Under 5.5, which can both hit)
+  // or an impossible pair (Over 5.5 + Under 3.5); the leg carries no line to
+  // tell them apart, so they read independent rather than -0.95, which would
+  // put a band's win % near zero (PR #1261 review L7).
+  if (rel === 'same_player' && ma === mb) {
+    return a.prop.side === b.prop.side ? SAME_STAT_RHO : 0;
+  }
+  const base = NFL_PROP_CORRELATIONS[propPairKey('NFL', ma, mb, rel)] ?? 0;
   const sa = a.prop.side === 'under' ? -1 : 1;
   const sb = b.prop.side === 'under' ? -1 : 1;
   return Math.max(-0.95, Math.min(0.95, base * sa * sb));

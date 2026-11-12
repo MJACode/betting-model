@@ -278,6 +278,10 @@ check('an out-of-band fit is ignored',
     // L1: one player's one stat at two numbers is nearly one bet.
     const ladder = [diggs(6, 120, 'player_receptions', 'over'), diggs(7, 250, 'player_receptions_alternate', 'over')];
     check('L1: same stat at two numbers is strongly correlated', sgpCorrelationLift(ladder) > 1.5, `${sgpCorrelationLift(ladder).toFixed(2)}`);
+    // L7: a band (Over 3.5 + Under 5.5) is not priced as nearly impossible.
+    const band = [diggs(8, -150, 'player_receptions', 'over'), diggs(9, -150, 'player_receptions_alternate', 'under')];
+    const m = computeCorrelatedMetrics(band, PARLAY_CORRELATION_PRIORS, undefined, 20000);
+    check('L7: a band keeps its win % (sides differ, rho 0)', near(m.jointProb, m.independentProb, 1e-9), `${m.jointProb.toFixed(3)} vs ${m.independentProb.toFixed(3)}`);
   }
   {
     // L2: a pick leg's upper-cased player_key matches a line leg's normalized name.
