@@ -384,4 +384,7 @@ jobs:
             tests/test_web_site.py \
             tests/test_app_review_sign_in.py \
             tests/test_deploy_drain.py \
-            tests/test_scoring_lease.py
+            tests/test_scoring_lease.py \
+            tests/test_morning_disk.py \
+            tests/test_overnight_polling.py \
+            tests/test_api_call_rollup.py

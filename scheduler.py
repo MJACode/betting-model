@@ -427,6 +427,18 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         log.info("daily-pipeline already running in this process — skip")
         return "skipped"
     try:
+        # The 05:17 overnight pass and this 06:00 run used to overlap: two
+        # full writers, two locks. Wait for the refresh to let go, then run.
+        # A stuck pass must not eat the morning, so the wait is bounded and
+        # the daily starts anyway.
+        if not _REFRESH_LOCK.acquire(timeout=DAILY_REFRESH_WAIT_S):
+            log.warning(
+                "daily-pipeline: a refresh pass still holds its lock after %ss"
+                " — starting anyway",
+                DAILY_REFRESH_WAIT_S,
+            )
+        else:
+            _REFRESH_LOCK.release()
         if retry_reason:
             log.info("daily-pipeline retry (%s/%s) start %s: %s",
                      retry_source or "catch-up",
@@ -457,6 +469,9 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
 # each other or with the boot catch-up below; a :17 cron landing on a catch-up
 # that started at :10 would run the chain twice at once and buy odds twice.
 _REFRESH_LOCK = threading.Lock()
+# How long the 06:00 daily waits for a refresh already inside its chain.
+# 15 minutes, then it starts anyway: a stuck pass must not eat the morning.
+DAILY_REFRESH_WAIT_S = 15 * 60
 
 # Held by an NHL goalie window tick for its whole run: the goalie poll and the
 # deciders (run_nhl_goalie_window). A refresh pass or the daily run that starts
@@ -505,6 +520,13 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     if not _REFRESH_LOCK.acquire(blocking=False):
         log.info("refresh-pass[%s]: a pass is already running in this process — skip",
                  mode)
+        return
+    # Checked AFTER the lock, so a daily that is waiting on this lock cannot
+    # lose the race to a refresh that looked at the daily lock a moment earlier.
+    # The pass that already holds the lock runs to the end; the daily waits.
+    if _DAILY_LOCK.locked():
+        _REFRESH_LOCK.release()
+        log.info("refresh-pass[%s]: daily pipeline is running — skip", mode)
         return
     try:
         _wait_for_nhl_window(f"refresh-pass[{mode}]")
@@ -926,6 +948,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "calibration_watch",
                   "model_quality",
                   "kalshi_ladders", "kalshi_game_markets",
+                  # The 07:20 / 07:25 catch-up for the ticks the morning
+                  # disk window does not run. Same recorders, later minute.
+                  "kalshi_ladders_morning", "kalshi_game_markets_morning",
                   # Writes picks through the same card as the refresh pass,
                   # so it lives beside the passes, not with the loops.
                   "nba_prop_window",
@@ -2630,7 +2655,17 @@ def build_scheduler() -> BlockingScheduler:
         @functools.wraps(func)
         def _wrapped(*a, **kw):
             status, detail = "ok", ""
+            release = None
             try:
+                # One place, for the same reason the heartbeat is here: a
+                # per-job check is a check that gets forgotten, and the
+                # forgotten job is the one that joins the morning pile.
+                from tracking.morning_disk import admit
+                decision = admit(jid, daily_busy=_DAILY_LOCK.locked())
+                if not decision.admitted:
+                    detail = decision.reason
+                    return None
+                release = decision.release
                 return func(*a, **kw)
             except Exception as exc:                          # noqa: BLE001
                 # Beat anyway, marked failed. A job that raises every tick is
@@ -2639,6 +2674,8 @@ def build_scheduler() -> BlockingScheduler:
                 status, detail = "error", repr(exc)
                 raise
             finally:
+                if release is not None:
+                    release()
                 from tracking.job_heartbeat import beat
                 beat(jid, status, detail)
         return _wrapped
@@ -2886,7 +2923,7 @@ def build_scheduler() -> BlockingScheduler:
         name="Hourly refresh (7am-5pm ET, :17)",
     )
 
-    # Overnight refresh — :17, midnight-6am ET.
+    # Overnight refresh — :17, midnight through 4am ET.
     #
     # Nothing ran in this window at all. A line that opened at 2am was not seen
     # until the 6am pipeline, which is when the board was ALSO frozen for the
@@ -2902,11 +2939,17 @@ def build_scheduler() -> BlockingScheduler:
     #
     # The 6am daily pipeline is unchanged and still does the day's heavy work:
     # settle, stats, backfills, results. This only adds market polling.
+    #
+    # Hour 5 is not in this cron. On 2026-11-12 the 05:17 pass was still a
+    # candidate to be running at 05:50, when disk IO was already saturated,
+    # and the 06:00 daily then started a second full writer beside it. The
+    # pregame poller still watches lines that hour. The 04:17 pass is the
+    # last full refresh before the daily.
     sched.add_job(
         run_refresh_pass,
-        CronTrigger(hour="0-5", minute=17, timezone=TIMEZONE),
+        CronTrigger(hour="0-4", minute=17, timezone=TIMEZONE),
         id="overnight_refresh",
-        name="Overnight refresh (12-6am ET, :17)",
+        name="Overnight refresh (12-4am ET, :17)",
     )
 
     # Evening fast lines — every 10 minutes, 6pm-11pm ET (was evening_lines.yml's
@@ -3343,21 +3386,37 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=30,
     )
 
-    # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow
-    # Kalshi response cannot delay anything that places a bet.
+    # Minute 32, away from the prop card at :25, the hourly refresh at :17,
+    # and the five-minute odds jobs at :30 and :35. A slow Kalshi response
+    # cannot delay anything that places a bet. Inside 05:40–07:15 ET the
+    # morning disk gate does not insert (that pile stalled Picks on
+    # 2026-11-12); the 07:20 job below records the hour instead.
     sched.add_job(
         run_kalshi_ladder_record,
-        CronTrigger(minute=40, timezone=TIMEZONE),
+        CronTrigger(minute=32, timezone=TIMEZONE),
         id="kalshi_ladders",
         name="Kalshi NFL prop ladders (quotes stored, not bet)",
     )
-    # Minute 45, same reasoning: the NCAAF game markets (winner / total /
+    sched.add_job(
+        run_kalshi_ladder_record,
+        CronTrigger(hour=7, minute=20, timezone=TIMEZONE),
+        id="kalshi_ladders_morning",
+        name="Kalshi NFL prop ladders (07:20 ET catch-up after the morning disk window)",
+    )
+    # Minute 37, same reasoning: the NCAAF game markets (winner / total /
     # spread ladders) are a research record, never on the betting path.
+    # 07:25 is the catch-up for the tick the morning window does not run.
     sched.add_job(
         run_kalshi_game_record,
-        CronTrigger(minute=45, timezone=TIMEZONE),
+        CronTrigger(minute=37, timezone=TIMEZONE),
         id="kalshi_game_markets",
         name="Kalshi NCAAF game markets (quotes stored, not bet)",
+    )
+    sched.add_job(
+        run_kalshi_game_record,
+        CronTrigger(hour=7, minute=25, timezone=TIMEZONE),
+        id="kalshi_game_markets_morning",
+        name="Kalshi NCAAF game markets (07:25 ET catch-up after the morning disk window)",
     )
 
     if RUN_NCAAF_PROP_ODDS:

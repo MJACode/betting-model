@@ -449,14 +449,28 @@ def _writer_loop() -> None:
                 _inflight = None
             # Separate from the insert, so a prune that fails can never send a
             # batch already committed round again.
+            # The morning window leaves last_prune where it is, so the next
+            # flush retries the moment 07:15 ET passes. Another session already
+            # holding the lock advances the clock: both would delete the same
+            # rows, and on 2026-11-12 that second delete was part of the pile.
             now = time.time()
             if (conn is not None and not stopping and not failures
                     and now - last_prune > _PRUNE_EVERY_SEC):
-                last_prune = now
-                try:
-                    store.prune(conn)
-                except Exception:
+                from tracking.morning_disk import (
+                    begin_api_log_prune, end_api_log_prune,
+                )
+                action = begin_api_log_prune(conn)
+                if action == "wait":
                     pass
+                else:
+                    last_prune = now
+                    if action == "run":
+                        try:
+                            store.prune(conn)
+                        except Exception:
+                            pass
+                        finally:
+                            end_api_log_prune(conn)
         if stopping:
             break
     if pending:
