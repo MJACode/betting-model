@@ -368,8 +368,10 @@ export function TeamsBoard({
       }),
     [gameLines, slate.games, lineMarket, books, unstarted],
   );
-  // Gated on the DAY and the BOOKS, never on which stat is selected — the
-  // column must not come and go as the user taps through chips.
+  // Gated on the DAY and the BOOKS, never on which stat is selected and
+  // never on the sport — the column must not come and go as the user taps
+  // through chips. College basketball shows the same moneyline, spread and
+  // total pills on a game day as NBA (Matt, 2026-11-12).
   const mine = useMemo(() => new Set<string>(books), [books]);
   const showLines =
     booksReady &&
@@ -819,7 +821,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.separator,
   },
   colHeaderRank: {
-    width: 20,
+    width: 28,
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
@@ -858,7 +860,7 @@ const styles = StyleSheet.create({
   rowWithGame: { minHeight: 54 },
   rowMain: { flex: 1, minWidth: 0 },
   rank: {
-    width: 20,
+    width: 28,
     textAlign: 'center',
     fontSize: font.size.caption,
     fontWeight: font.weight.bold,

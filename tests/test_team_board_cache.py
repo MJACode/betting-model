@@ -146,9 +146,9 @@ def test_every_team_sport_gets_last_this_and_next_year():
     the season in progress each autumn carries next year's label."""
     from data.team_board_cache import TEAM_BOARD_SPORTS, team_board_pairs
 
-    assert set(TEAM_BOARD_SPORTS) == {"MLB", "WNBA", "NBA", "NHL", "NFL", "NCAAF"}
+    assert set(TEAM_BOARD_SPORTS) == {"MLB", "WNBA", "NBA", "NHL", "NFL", "NCAAF", "NCAABW", "NCAAB"}
     pairs = team_board_pairs(date(2026, 9, 4))
-    assert len(pairs) == 18
+    assert len(pairs) == 24
     for sport in TEAM_BOARD_SPORTS:
         assert [yr for s, yr in pairs if s == sport] == [2025, 2026, 2027]
 

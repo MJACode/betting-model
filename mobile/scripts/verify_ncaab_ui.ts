@@ -208,8 +208,9 @@ check('the custom-model picker has one NCAAB row: ML (both moneyline models) and
 check('NCAAB has leaderboard stats, Points first', GROUP_ORDER.NCAAB.length > 0 && defaultStatFor(NCAAB)?.key === 'points',
   String(defaultStatFor(NCAAB)?.key));
 check('NCAAB has a hit-rate view', supportsHitRate(NCAAB));
-check('NCAAB has no Teams board', !supportsTeamBoard(NCAAB));
-check('NCAAB draws no segment row', segmentsForSport(NCAAB).length < 2, segmentsForSport(NCAAB).join(','));
+check('NCAAB has a Teams board', supportsTeamBoard(NCAAB));
+check('NCAAB draws a Players | Teams row', segmentsForSport(NCAAB).join() === 'players,teams',
+  segmentsForSport(NCAAB).join(','));
 check('an NCAAB form strip reads PTS', teamScoreUnit('NCAAB') === 'PTS');
 
 // ── When a game leaves the board ─────────────────────────────────────────────

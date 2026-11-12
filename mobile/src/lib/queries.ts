@@ -3350,9 +3350,10 @@ export async function fetchTeamStats(
   sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
 ): Promise<TeamSeasonStats> {
-  // Neither college basketball sport has a Teams board (teamStatCatalog BALL).
-  // NCAABW is named before NCAAB.
-  if (sport === 'UFC' || sport === 'GOLF' || sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };
+  // UFC and golf have no teams. College basketball is on the board
+  // (teamStatCatalog BALL). An empty asked season falls through to the
+  // previous ending-year label below, the same loop NBA uses.
+  if (sport === 'UFC' || sport === 'GOLF') return { season: null, rows: [] };
   // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
   // board prints "TEAM · {season}" over these numbers and used to run the
   // fallback itself, one call per candidate; moving the loop in here without

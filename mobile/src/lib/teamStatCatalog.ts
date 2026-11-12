@@ -110,9 +110,11 @@ export interface TeamStatDef {
   bySport?: Partial<Record<Sport, SportCopy>>;
 }
 
-const BALL: Sport[] = ['MLB', 'NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF'];
-const HOOPS: Sport[] = ['NBA', 'WNBA'];
-/** Sports where a rest-day split is meaningful (MLB plays daily). */
+const BALL: Sport[] = ['MLB', 'NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF', 'NCAABW', 'NCAAB'];
+const HOOPS: Sport[] = ['NBA', 'WNBA', 'NCAABW', 'NCAAB'];
+/** Sports where a rest-day split is meaningful (MLB plays daily).
+ *  College basketball is not here (Matt, 2026-11-12): no ATS% Rest Edge
+ *  and no ATS% Short Rest. NCAABW is named before NCAAB. */
 const RESTFUL: Sport[] = ['NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF'];
 
 const ATS_SAMPLE: (keyof TeamStatsRow)[] = ['ats_w', 'ats_l', 'ats_p'];
@@ -214,6 +216,9 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
     },
   },
   {
+    // dec1 prints the number as stored (55.8, not 55.8%). College rows are
+    // points: team_stats_board_college_hoops_2026_11_12.sql multiplies the
+    // 0-1 box rate by 100. NBA and WNBA cache rows are still a 0-1 rate.
     key: 'efg_pct', label: 'eFG%', group: 'Efficiency', sports: HOOPS, format: 'dec1', better: 'high',
     hint: 'Shooting accuracy, with a made 3 counted as worth more than a 2.',
     explain: {
@@ -599,6 +604,9 @@ export function defaultTeamStatFor(sport: Sport): TeamStatDef | null {
     NHL: 'corsi_for_pct',
     NFL: 'yards_per_play',
     NCAAF: 'sp_overall',
+    // Women's key first: 'NCAAB' is a prefix of 'NCAABW'.
+    NCAABW: 'net_rating',
+    NCAAB: 'net_rating',
   };
   const list = teamStatsForSport(sport);
   const key = wantKey[sport];
@@ -631,8 +639,8 @@ export function teamBoardSeason(sport: Sport, now: Date = new Date()): number {
   const year = Number(parts.find((p) => p.type === 'year')?.value);
   const month = Number(parts.find((p) => p.type === 'month')?.value);
   // NCAABW labels by the ending year like NCAAB (docs/sports/ncaabw.md).
-  // Neither college sport is on the Teams board; this keeps the label right.
-  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB' || sport === 'NCAABW') {
+  // Women's check first: 'NCAAB' is a prefix of 'NCAABW'.
+  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAABW' || sport === 'NCAAB') {
     return month >= 10 ? year + 1 : year;
   }
   return year;
@@ -641,7 +649,7 @@ export function teamBoardSeason(sport: Sport, now: Date = new Date()): number {
 /** How the board names a season: "2026-27" for the leagues that straddle
  *  two years, else the year. */
 export function teamSeasonLabel(sport: Sport, season: number): string {
-  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAAB' || sport === 'NCAABW') {
+  if (sport === 'NBA' || sport === 'NHL' || sport === 'NCAABW' || sport === 'NCAAB') {
     return `${season - 1}-${String(season).slice(2)}`;
   }
   return String(season);

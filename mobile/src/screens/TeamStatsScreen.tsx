@@ -13,8 +13,9 @@
  *     any weight to; the descriptive splits come after.
  *  2. FORM — last ten, from the team's side, with cover / over marks where
  *     the sport stores a closing number per game (NFL today).
- *  3. SPLITS — home / away, favourite / dog, rest, over rate, from the board's
- *     row, captioned as description rather than edge, as the board does.
+ *  3. SPLITS — home / away, favourite / dog, and rest where this sport shows
+ *     it, plus the over rate, from the board's row, captioned as description
+ *     rather than edge, as the board does.
  *     NBA adds a FIRST-QUARTER card here: last 5 / 10 / season, home and away,
  *     and points per 100 possessions (components/NbaFirstQuarterCard).
  *  4. HEAD-TO-HEAD with the next opponent.
@@ -137,7 +138,7 @@ export function TeamStatsScreen() {
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <Text style={styles.teamName} numberOfLines={1}>
+          <Text style={styles.teamName} numberOfLines={2}>
             {team}
           </Text>
           <Text style={styles.meta}>
@@ -193,8 +194,10 @@ export function TeamStatsScreen() {
           <>
             <Card>
               {/* College names do not fit a 10-cell strip ("Northwestern State"
-                  at 32pt a cell is "Nor…"), so NCAAF gets one row per game. */}
-              {sport === 'NCAAF' ? (
+                  at 32pt a cell is "Nor…"). NCAAF, NCAAB and NCAABW get one
+                  row per game (Matt, 2026-11-12, for the two basketball
+                  sports). NCAABW is named before NCAAB. */}
+              {sport === 'NCAABW' || sport === 'NCAAB' || sport === 'NCAAF' ? (
                 form.map((g) => <MeetingRow key={g.gameId} game={g} team={team} />)
               ) : (
                 <FormStrip games={form} />
@@ -242,10 +245,13 @@ export function TeamStatsScreen() {
           title="Situational splits"
           tooltip={{
             title: 'Description, not edge',
-            body:
-              'Home/away, favourite/dog and rest splits describe what already happened this season. ' +
-              'They regress toward .500 once the market prices a trend in — read them as context for the ' +
-              'number, not as a reason to bet against it. Rest is the one split with a documented, repeatable effect.',
+            body: teamStatFor(sport, 'rest_adv_ats_pct')
+              ? 'Home/away, favourite/dog and rest splits describe what already happened this season. ' +
+                'They regress toward .500 once the market prices a trend in — read them as context for the ' +
+                'number, not as a reason to bet against it. Rest is the one split with a documented, repeatable effect.'
+              : 'Home/away and favourite/dog splits describe what already happened this season. ' +
+                'They regress toward .500 once the market prices a trend in — read them as context for the ' +
+                'number, not as a reason to bet against it.',
           }}
         />
         {row ? <SplitsTiles row={row} sport={sport} /> : boardEmpty ? (
@@ -464,12 +470,26 @@ function NextGameCard({
           one — the title and the status pill say which (UX review). */}
       <SectionTitle title={unstarted ? 'Next game' : 'Today’s game'} />
       <Card>
-        <View style={styles.fixtureRow}>
+        <View
+          style={styles.fixtureRow}
+          accessible={unstarted}
+          accessibilityLabel={
+            unstarted
+              ? `${side}${day || time ? `, ${[day, time].filter(Boolean).join(' ')}` : ''}`
+              : undefined
+          }
+        >
           <Text style={styles.fixture} numberOfLines={1}>
             {side}
-            {unstarted ? <Text style={styles.fixtureWhen}>  {day ? `${day} ` : ''}{time}</Text> : null}
           </Text>
-          {unstarted ? null : <GameStatusPill game={entry.game} />}
+          {unstarted ? (
+            <Text style={styles.fixtureWhen}>
+              {day ? `${day} ` : ''}
+              {time}
+            </Text>
+          ) : (
+            <GameStatusPill game={entry.game} />
+          )}
         </View>
 
         {/* The member's own line for each market, from the team's side. The
@@ -910,7 +930,12 @@ const styles = StyleSheet.create({
 
   fixtureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   fixture: { flexShrink: 1, fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
-  fixtureWhen: { fontSize: font.size.footnote, fontWeight: font.weight.regular, color: colors.textSecondary },
+  fixtureWhen: {
+    flexShrink: 0,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.regular,
+    color: colors.textSecondary,
+  },
   pillRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md, gap: spacing.sm },
   pillCol: { flex: 1, alignItems: 'flex-end' },
   pillLabel: {

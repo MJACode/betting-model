@@ -26,10 +26,9 @@ Measured on 93b032e3 (2026-11-10), before this change:
   app printed four of them as raw keys (``betonlineag``) and treated two
   (Bally Bet, Fliff) as books a member is sent to.
 
-Women's college basketball has TWO models (full-game totals before the game,
-and the full-game total at halftime, from 2026-11-11) and nothing else in the
-app: no player stats, no Teams board. Where the men's sport has those, the
-women's takes the app's existing empty state.
+Women's college basketball has two models (full-game totals before the game,
+and the full-game total at halftime, from 2026-11-11), a Players board, and
+a Teams board. No player props.
 
 These are text checks, like the rest of the mobile tests: node is not on the
 machine that runs this suite (CLAUDE.md section 1b), so the TypeScript is read,
@@ -387,8 +386,8 @@ def test_the_daily_recap_and_form_strip_name_ncaabw():
 
 def test_the_season_label_is_the_ending_year():
     """ESPN labels the women's season by its ending year, as the men's
-    (docs/sports/ncaabw.md: 2026-27 is 2027). No women's board reads a season
-    today; the helpers answer for every sport on the list."""
+    (docs/sports/ncaabw.md: 2026-27 is 2027). The Teams board uses the same
+    helpers."""
     assert "sport === 'NCAABW'" in _fn(_read(FORMAT), "boardSeasonET")
     team = _read(TEAM_STAT_CATALOG)
     for name in ("teamBoardSeason", "teamSeasonLabel"):
@@ -407,9 +406,10 @@ def _before(body: str, women: str, men: str) -> None:
 
 def test_ncaabw_stats_are_wired_like_ncaab():
     """Women's college basketball has the men's Players board (Matt, 2026-11-03,
-    women's half). Same chips, own views, hit rate, player page. No props, no
-    Teams board. Every women's check is named before the men's one it would
-    otherwise be swallowed by.
+    women's half). Same chips, own views, hit rate, player page. No props.
+    The Teams board is the NBA set (tests/test_college_team_board.py). Every
+    women's check is named before the men's one it would otherwise be
+    swallowed by.
     """
     cat = _read(STAT_CATALOG)
     groups = re.search(r"export const GROUP_ORDER: Record<Sport, StatGroup\[\]> = \{(.*?)\n\};", cat, re.S)
@@ -429,8 +429,8 @@ def test_ncaabw_stats_are_wired_like_ncaab():
     assert "def.sport === 'NCAAF' || def.sport === 'NCAABW' || def.sport === 'NCAAB') return null;" in raw
     team = _read(TEAM_STAT_CATALOG)
     ball = re.search(r"const BALL: Sport\[\] = \[(.*?)\];", team)
-    assert ball and "'NCAABW'" not in ball.group(1), "an NCAABW Teams board has no rows behind it"
-    assert "'NCAAB'" not in ball.group(1)
+    assert ball and "'NCAABW'" in ball.group(1)
+    assert ball.group(1).index("'NCAABW'") < ball.group(1).index("'NCAAB'")
     log_src = _read(PLAYER_LOG)
     log = re.search(r"const LOG_SPORTS = new Set<Sport>\(\[(.*?)\]\);", log_src)
     assert log and "'NCAABW'" in log.group(1)
@@ -462,7 +462,8 @@ def test_ncaabw_stats_are_wired_like_ncaab():
         _before(body, f"'{rpc}'", f"'{mens}'")
         assert body.index("=== 'NCAABW'") < body.index("=== 'NCAAB'"), name
     teams = _fn(q, "fetchTeamStats")
-    assert "sport === 'NCAABW' || sport === 'NCAAB') return { season: null, rows: [] };" in teams
+    assert "if (sport === 'UFC' || sport === 'GOLF') return { season: null, rows: [] };" in teams
+    assert "sport === 'NCAABW' || sport === 'NCAAB') return" not in teams
     for name in ("fetchRecentGames", "fetchSeasonStatValues", "fetchPositionVsOpponent", "fetchPlayerVsDefense"):
         body = _fn(q, name).rstrip()
         assert re.search(r"return \[\];(?: //[^\n]*)?\n\}$", body), f"{name} no longer ends on return []"
