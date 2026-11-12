@@ -49,6 +49,11 @@ review as its own entry.
 4. **Corrected.** Nothing measured was contradicted.
 5. **The framework.** Step 0 now starts with this log; step 9 is a gate, not
    a suggestion; a "when stuck" section sits between steps 5 and 6.
+6. **Found while landing it.** The skill's own markdown-only merge (#1262,
+   22:39:57 UTC) redeployed the in-play service (pollers BUILDING 22:40:00,
+   DEPLOYING 22:44:05) with college basketball games live, because another
+   session's code merge was still deploying there. The worker skipped it.
+   Written into `shipping.md`, "After mike's merge", step 1.
 
 ## 2026-11-12 — The skill is written
 
