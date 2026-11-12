@@ -26,6 +26,7 @@ import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
 import { applySgpHaircut, sameGameGroupCount, NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
+import { sgpShapeFor } from '@/lib/parlayCorrelation';
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -115,6 +116,22 @@ export interface ParlayLeg {
    * and its hand-off collapsed to "DraftKings, add every leg by hand".
    */
   saved?: SavedParlayLeg;
+  /**
+   * The player prop this leg is, when we know it: what the same-game
+   * correlation (lib/propCorrelation.ts) is looked up by. `player` only has to
+   * match another leg's `player` for the same person (a normalized name on a
+   * line leg, the player id on a pick leg); `team` null means unknown.
+   */
+  prop?: LegProp;
+}
+
+export interface LegProp {
+  /** The leg's own sport, so the lookup never depends on the game row loading. */
+  sport: string;
+  market: string;
+  player: string;
+  team: string | null;
+  side: 'over' | 'under';
 }
 
 export interface ParlayMetrics {
@@ -126,6 +143,10 @@ export interface ParlayMetrics {
   multipliedDecimal: number;
   /** Games with 2+ legs. > 0 means decimalPayout is an ESTIMATE. */
   sgpGroups: number;
+  /** Legs past the first in each of those games (lib/sgpPricing.ts). */
+  sgpExtraLegs?: number;
+  /** The leg-correlation lift the estimate divided by; 1 when none. */
+  sgpLift?: number;
   americanOdds: number; // combined, converted back to American
   ev: number; // parlayProb × decimalPayout − 1
   dkImpliedProb: number; // 1 / decimalPayout
@@ -222,7 +243,19 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     ...(offDk
       ? { dkPriced: false as const, pricedAt: lineBook(p) ?? storedQuoteBook(p) }
       : {}),
+    ...propForPick(p),
   };
+}
+
+/** A prop pick's market-level identity (lib/propCorrelation.ts). The pick
+ *  carries no team, so a pick leg only correlates with the same player's
+ *  other legs; a teammate or an opponent reads as independent. */
+function propForPick(p: Pick): { prop?: LegProp } {
+  const market = p.prop_market ?? null;
+  const player = p.player_key ?? p.player_id ?? null;
+  if (!market || !player) return {};
+  if (p.pick_side !== 'over' && p.pick_side !== 'under') return {};
+  return { prop: { sport: p.sport, market, player, team: null, side: p.pick_side } };
 }
 
 /**
@@ -268,8 +301,9 @@ export function computeParlayMetrics(
     parlayProb *= l.modelProb;
     multipliedDecimal *= l.decimalOdds;
   }
-  const sgpGroups = sameGameGroupCount(legs);
-  const decimalPayout = applySgpHaircut(multipliedDecimal, sgpGroups, MODEL_BOOK, sgpFits);
+  const shape = sgpShapeFor(legs);
+  const sgpGroups = shape.groups;
+  const decimalPayout = applySgpHaircut(multipliedDecimal, shape, MODEL_BOOK, sgpFits);
   const dkImpliedProb = decimalPayout > 0 ? 1 / decimalPayout : 0;
   const b = decimalPayout - 1;
   const p = parlayProb;
@@ -280,6 +314,8 @@ export function computeParlayMetrics(
     decimalPayout,
     multipliedDecimal,
     sgpGroups,
+    sgpExtraLegs: shape.extraLegs,
+    sgpLift: shape.lift,
     americanOdds: decimalToAmerican(decimalPayout),
     ev: parlayProb * decimalPayout - 1,
     dkImpliedProb,
@@ -615,7 +651,8 @@ export function priceBooksForParlay(
   enteredPrices: Readonly<Record<string, number>> = {},
 ): BetslipBookQuote[] {
   if (legs.length === 0) return [];
-  const sgpGroups = sameGameGroupCount(legs);
+  const shape = sgpShapeFor(legs);
+  const sgpGroups = shape.groups;
   const quotes: BetslipBookQuote[] = [];
   for (const book of books) {
     let priced = 0;
@@ -636,7 +673,7 @@ export function priceBooksForParlay(
       ? null
       : useEntered
         ? enteredDecimal
-        : applySgpHaircut(decimalPayout, sgpGroups, book, sgpFits);
+        : applySgpHaircut(decimalPayout, shape, book, sgpFits);
     quotes.push({
       book,
       priced,

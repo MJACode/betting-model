@@ -9,6 +9,7 @@ import { americanToDecimal, formatAmerican } from '@/lib/format';
 import { bookName } from '@/lib/markets';
 import { decimalToAmerican, type ParlayLeg } from '@/lib/parlay';
 import { logSgpPrice } from '@/lib/queries';
+import { sgpShapeFor } from '@/lib/parlayCorrelation';
 import { enteredPriceIsPlausible, parseEnteredAmerican } from '@/lib/sgpPricing';
 import { APP_VERSION } from '@/lib/socialLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -81,6 +82,12 @@ export function SgpPriceEntry({
         bookAmerican: american,
         multipliedDecimal,
         sgpGroups,
+        // The same shape the tile was estimated with, so the server fits the
+        // cut per extra leg after the correlation lift (lib/sgpPricing.ts).
+        ...(() => {
+          const shape = sgpShapeFor(legs);
+          return { extraLegs: shape.extraLegs, corrLift: shape.lift };
+        })(),
         legCount: legs.length,
         legs: legs.map((l) => ({ label: l.label, gameId: l.gameId ?? null })),
         appVersion: APP_VERSION ?? null,

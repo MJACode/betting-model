@@ -38,7 +38,8 @@
 import { marketClassForModel, type MarketClass } from '@/lib/markets';
 import type { ParlayLeg, ParlayMetrics } from '@/lib/parlay';
 import { MODEL_BOOK } from '@/lib/markets';
-import { applySgpHaircut, sameGameGroupCount, NO_SGP_FITS, type SgpHaircuts } from '@/lib/sgpPricing';
+import { applySgpHaircut, sgpShape, NO_SGP_FITS, type SgpHaircuts, type SgpShape } from '@/lib/sgpPricing';
+import { baseMarket, NFL_PROP_CORRELATIONS, propPairKey, type PropRel } from '@/lib/propCorrelation';
 
 /** Number of Monte-Carlo draws per joint-probability estimate (±~1pp SE). */
 export const MC_DRAWS = 10000;
@@ -135,6 +136,8 @@ interface LegAttrs {
   polarity: -1 | 0 | 1;
   /** Player's team abbrev for a prop leg (else null) — drives same/opp. */
   team: string | null;
+  /** The leg's market-level prop identity, when known (lib/propCorrelation.ts). */
+  prop: ParlayLeg['prop'] | null;
 }
 
 const PROP_CLASSES: ReadonlySet<MarketClass> = new Set<MarketClass>(['off_prop', 'pitching_prop']);
@@ -172,13 +175,37 @@ function legAttrs(leg: ParlayLeg, resolveTeam?: TeamResolver): LegAttrs {
     marketClass: cls,
     polarity: offensePolarity(leg, cls),
     team,
+    prop: leg.prop ?? null,
   };
+}
+
+/**
+ * Market-level correlation for two prop legs in one game, where we have it
+ * (NFL today, lib/propCorrelation.ts). Null means "no market-level number":
+ * the class-level table then decides. A pair it covers but did not measure
+ * reads 0, not the class prior.
+ */
+function propPairRho(a: LegAttrs, b: LegAttrs): number | null {
+  if (!a.prop || !b.prop || a.prop.sport !== 'NFL' || b.prop.sport !== 'NFL') return null;
+  let rel: PropRel;
+  if (a.prop.player === b.prop.player) rel = 'same_player';
+  else if (a.prop.team == null || b.prop.team == null) return 0; // teammate or opponent: unknown
+  else rel = a.prop.team === b.prop.team ? 'same_team' : 'opp';
+  const ma = baseMarket(a.prop.market);
+  const mb = baseMarket(b.prop.market);
+  if (rel === 'same_player' && ma === mb) return 0; // one bet at two numbers; not a parlay we price
+  const base = NFL_PROP_CORRELATIONS[propPairKey('NFL', ma, mb, rel)] ?? 0;
+  const sa = a.prop.side === 'under' ? -1 : 1;
+  const sb = b.prop.side === 'under' ? -1 : 1;
+  return Math.max(-0.95, Math.min(0.95, base * sa * sb));
 }
 
 /** Pairwise correlation between two legs (0 when independent). */
 function pairRho(a: LegAttrs, b: LegAttrs, table: RhoTable): number {
   if (a.pickId === b.pickId) return 0;
   if (a.gameId !== b.gameId) return 0; // different game / sport → independent
+  const byMarket = propPairRho(a, b);
+  if (byMarket != null) return byMarket;
   if (a.polarity === 0 || b.polarity === 0) return 0; // an offense-neutral leg
   const rel = teamRelFor(a, b);
   // Prefer the specific team-relationship bucket; fall back to 'na' when missing.
@@ -348,6 +375,55 @@ export function correlatedJointProb(
   return { jointProb: hits / draws, hasCorrelation: true };
 }
 
+// ── The same-game price ──────────────────────────────────────────────────────
+
+/** Draws for the price lift. More than MC_DRAWS: the lift divides the price, so
+ *  its noise is the price's noise (±~3% at a 2% joint, seeded so it is stable). */
+export const SGP_LIFT_DRAWS = 60000;
+
+/**
+ * How much more often the legs all hit than their multiplied-out chance says,
+ * at the BOOK's own leg prices (1 / decimal), on the bundled correlations only
+ * — never the fetched table, so the bar, the tiles and the headline, which do
+ * not all hold it, show one price. 1 when no pair is correlated.
+ *
+ * A book prices a same-game slip on this joint chance: legs that move together
+ * hit together more often, so it pays less than the legs multiplied out.
+ */
+export function sgpCorrelationLift(legs: readonly ParlayLeg[]): number {
+  const priced = legs.map((l) => ({ ...l, modelProb: l.decimalOdds > 1 ? 1 / l.decimalOdds : 0.5 }));
+  // Everything the lift reads: the leg, its price, its game and its prop identity.
+  const key = priced
+    .map((l) => {
+      const p = l.prop;
+      const who = p ? `${p.sport}:${p.market}:${p.player}:${p.team ?? ''}:${p.side}` : '';
+      return `${l.slipKey}@${l.decimalOdds.toFixed(4)}@${l.gameId}@${l.modelId}@${l.pick?.pick_side ?? ''}@${who}`;
+    })
+    .sort()
+    .join('|');
+  const hit = liftCache.get(key);
+  if (hit != null) return hit;
+  const { jointProb, hasCorrelation } = correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, SGP_LIFT_DRAWS);
+  let lift = 1;
+  if (hasCorrelation) {
+    const independent = priced.reduce((a, l) => a * clampProb(l.modelProb), 1);
+    // A joint the draws never hit (or a degenerate one) is no information.
+    if (jointProb > 0 && independent > 0) lift = Math.max(0.25, Math.min(8, jointProb / independent));
+  }
+  if (liftCache.size > 50) liftCache.clear();
+  liftCache.set(key, lift);
+  return lift;
+}
+
+const liftCache = new Map<string, number>();
+
+/** The slip's same-game shape: games with 2+ legs, the legs past the first in
+ *  each, and the correlation lift. What every surface prices a slip with. */
+export function sgpShapeFor(legs: readonly ParlayLeg[]): SgpShape {
+  const base = sgpShape(legs);
+  return base.groups > 0 ? { ...base, lift: sgpCorrelationLift(legs) } : base;
+}
+
 // ── Correlated metrics ───────────────────────────────────────────────────────
 
 export interface CorrelatedMetrics extends ParlayMetrics {
@@ -389,8 +465,9 @@ export function computeCorrelatedMetrics(
   // DraftKings' price. Legs sharing a game are a same-game parlay there, paid
   // below the legs multiplied out — so the payout, EV and grade use the
   // estimated same-game price (lib/sgpPricing.ts).
-  const sgpGroups = sameGameGroupCount(legs);
-  const decimalPayout = applySgpHaircut(multipliedDecimal, sgpGroups, MODEL_BOOK, sgpFits);
+  const shape = sgpShapeFor(legs);
+  const sgpGroups = shape.groups;
+  const decimalPayout = applySgpHaircut(multipliedDecimal, shape, MODEL_BOOK, sgpFits);
   const { jointProb, hasCorrelation } = correlatedJointProb(legs, table, resolveTeam, draws);
   const independentProb = legs.reduce((a, l) => a * clampProb(l.modelProb), 1);
 
@@ -406,6 +483,8 @@ export function computeCorrelatedMetrics(
     decimalPayout,
     multipliedDecimal,
     sgpGroups,
+    sgpExtraLegs: shape.extraLegs,
+    sgpLift: shape.lift,
     americanOdds: decimalToAmericanLocal(decimalPayout),
     ev,
     dkImpliedProb,

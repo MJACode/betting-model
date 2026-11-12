@@ -87,3 +87,41 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_nfl_correlations_bundled_in_the_app_match_the_stored_rows():
+    """mobile/src/lib/propCorrelation.ts and the parlay_correlations rows in
+    sgp_per_leg_cut_2026_11_12.sql are one table in two places (Matt,
+    2026-11-12: the app priced NFL same-game legs as unrelated). They must not
+    drift."""
+    import re
+
+    ts = _read("lib/propCorrelation.ts")
+    app = {
+        k: float(v)
+        for k, v in re.findall(r"'(NFL\|[a-z_]+\|[a-z_]+\|[a-z_]+)':\s*(-?\d+\.\d+)", ts)
+    }
+    mig = (ROOT / "data" / "migrations" / "sgp_per_leg_cut_2026_11_12.sql").read_text(encoding="utf-8")
+    db = {
+        f"NFL|{a}|{b}|{rel}": float(rho)
+        for a, b, rel, rho in re.findall(
+            r"\('NFL','([a-z_]+)','([a-z_]+)','([a-z_]+)',(-?\d+\.\d+),'empirical',\d+\)", mig
+        )
+    }
+    assert len(app) >= 100 and app == db
+    # The pair behind the 2026-11-12 slip: a receiver's catches and his own TD.
+    assert app["NFL|player_anytime_td|player_receptions|same_player"] > 0.25
+    # Keys are ordered the way propPairKey orders them.
+    for k in app:
+        _, a, b, _ = k.split("|")
+        assert a <= b, k
+
+
+def test_the_same_game_estimate_is_per_extra_leg_after_the_correlation_lift():
+    pricing = _read("lib/sgpPricing.ts")
+    assert "(multipliedDecimal / lift) * Math.pow(1 - haircutFor(book, fits), shape.extraLegs)" in pricing
+    corr = _read("lib/parlayCorrelation.ts")
+    # Every surface prices with the bundled table only, so they agree.
+    assert "correlatedJointProb(priced, PARLAY_CORRELATION_PRIORS, undefined, SGP_LIFT_DRAWS)" in corr
+    parlay = _read("lib/parlay.ts")
+    assert parlay.count("sgpShapeFor(legs)") >= 2
