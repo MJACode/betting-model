@@ -1138,6 +1138,10 @@ def _settle_ufc_picks(
     """
     from data.ingestors.ufc_stats_ingestor import rounds_completed, slugify_fighter
 
+    # A bet on a fight that was not fought settles first: its games row has no
+    # score, so the read below never selects it.
+    unfought = _settle_unfought_ufc_picks(conn, game_date, settled_at)
+
     picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
                COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet, p.scored_line,
@@ -1152,7 +1156,7 @@ def _settle_ufc_picks(
     """, (game_date,)).fetchall()
 
     if not picks:
-        return 0, 0, 0, 0, 0.0, 0.0
+        return 0, 0, 0, unfought, 0.0, 0.0
 
     logger.info(f"Found {len(picks)} unsettled UFC picks (through {game_date})")
 
@@ -1221,7 +1225,8 @@ def _settle_ufc_picks(
             return anchored[0]
         return None
 
-    wins = losses = pushes = no_actions = 0
+    wins = losses = pushes = 0
+    no_actions = unfought
     total_flat = total_kelly = 0.0
 
     for (pick_id, game_id, model_id, pick_side, pick_label,
@@ -3323,7 +3328,6 @@ def settle_picks(game_date: str = None) -> dict:
         u_wins, u_losses, u_pushes, u_no_actions, u_flat, u_kelly = (
             _settle_ufc_picks(conn, game_date, settled_at)
         )
-        u_no_actions += _settle_unfought_ufc_picks(conn, game_date, settled_at)
         wins       += u_wins
         losses     += u_losses
         pushes     += u_pushes
