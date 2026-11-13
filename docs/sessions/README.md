@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, test it now (a global rule and a CLAUDE.md line) and one list of everything still open: open pull requests, pushed branches with no pull request, and issues labelled outstanding (`python -m scripts.outstanding`, counts at session start); the weekly league-skill review moved to mike's PC with a cloud fallback |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, league skill weekly review (first run): no model added or re-cut since 2026-11-12; cloud column added to the scouting routes (only api.github.com answered); live records not measured because the Supabase connector failed to connect |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, the league skill's write-back is enforced: a Stop hook stops a session that used the skill and changed files without writing the learning log (once, fails open), the suite fails on a new model or sport the log does not name, and a review mode for a scheduled self-check |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, EuroLeague groundwork: every game and quarter score 2020-21 on stored from EuroLeague's open API; the full-game and first-half/quarter history purchases built and trialled (about 9.2M and 1.1M credits), waiting on the merge and mike's yes |
