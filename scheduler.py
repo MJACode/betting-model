@@ -563,8 +563,11 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     #
     # The wait does not hold ``_REFRESH_LOCK``. The daily holds its lock
     # while it waits for this one. Holding both directions deadlocks.
-    # A second refresh still skips immediately: the acquire below fails
-    # and returns, and does not sit behind the daily.
+    # A second refresh skips at once while the first is scoring: the
+    # acquire below fails and returns. A refresh that is still waiting
+    # behind the daily does not hold the lock, so a second one waits too.
+    # When the daily lets go, one of them takes the lock and the other's
+    # acquire fails, so one pass runs.
     deadline = time.monotonic() + _refresh_wait_for_daily_s()
     announced = False
     while True:

@@ -897,6 +897,51 @@ def test_a_second_refresh_skips_without_waiting_out_the_daily(sched, monkeypatch
     assert ran == []
 
 
+def test_two_refreshes_waiting_behind_a_daily_run_one_pass(sched, monkeypatch):
+    """A refresh waiting behind the daily does not hold its lock, so a
+    second one (the boot catch-up beside a :17 cron) waits too. When the
+    daily lets go, exactly one of them runs refresh_pass.sh."""
+    _quiet_passes(sched, monkeypatch, refresh_wait=30)
+    waiting = set()
+    both = threading.Event()
+    original = time.sleep
+
+    def spy(seconds):
+        if seconds == 0.01:
+            waiting.add(threading.current_thread().name)
+            if len(waiting) >= 2:
+                both.set()
+        original(seconds)
+
+    monkeypatch.setattr(time, "sleep", spy)
+    gate = threading.Lock()
+    ran = []
+
+    def fake_run(*a, **k):
+        with gate:
+            ran.append(a[0])
+        original(0.12)
+        return "ok"
+
+    monkeypatch.setattr(sched, "_run", fake_run)
+    assert sched._DAILY_LOCK.acquire(blocking=False)
+    first = threading.Thread(target=sched.run_refresh_pass, name="cron")
+    second = threading.Thread(target=sched.run_refresh_pass, name="catch-up")
+    first.start()
+    second.start()
+    try:
+        assert both.wait(2), "both refreshes should be waiting on the daily"
+        assert ran == []
+    finally:
+        sched._DAILY_LOCK.release()
+    first.join(5)
+    second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert len(ran) == 1
+    assert ran[0][1] == "scripts/refresh_pass.sh"
+    assert not sched._REFRESH_LOCK.locked()
+
+
 def test_a_refresh_scores_if_the_daily_lock_never_clears(sched, monkeypatch):
     """A stuck daily must not silence every later hour. Past the wait the
     refresh scores anyway."""
