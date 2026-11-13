@@ -422,6 +422,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "euroleague_inplay_quotes",
     "euroleague_odds_unmatched",
     "euroleague_period_fetches",
+    # UFC price history from two free public archives (2026-11-13), created
+    # on demand by data/ingestors/ufc_price_archive.ensure_tables. Research
+    # input, never read by the app.
+    "ufc_price_archive",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

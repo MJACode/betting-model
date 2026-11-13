@@ -21,6 +21,18 @@
 
 ---
 
+## [ ] [needs-decision] UFC: buy the fight-winner and round-total history (2026-11-13)
+No UFC model is live; the 2026-11-13 search (`docs/ufc_market_audit.md`)
+found one real mechanism, a rating model anchored on the first posted price,
+that is not yet shown at a book a pick may name. The purchase that tests it,
+and that makes round totals researchable: one pull a day 2020-06-06 to
+2026-06-13 plus six on each card day, fight winner and round totals, 150,360
+credits measured at 40 a pull (audit §6). It needs a raw table keyed on the
+feed's event id first. Then: the open-anchored model at DraftKings',
+FanDuel's and Pinnacle's first daily price; DraftKings' totals against
+Pinnacle's; the three inventions in audit §9. Any new UFC card must also
+clear the two twin-id items below.
+
 ## [ ] EuroLeague: finish the two history purchases (2026-11-12)
 mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
 "The purchase"): no 2020-21, the full game every snapshot near and during games

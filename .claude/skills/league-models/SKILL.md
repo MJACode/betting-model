@@ -198,7 +198,8 @@ free; one historical call shows the depth and the cost); free archives (ESPN's
 odds, closing lines in a stats API, exchange or prediction-market history);
 the prior season's close. **A price source found here is an input to use
 today, not a finding to report.** Buy history once approved, store it the same
-run, mirror it, and verify both copies by row count.
+run, mirror it, and verify both copies by row count. A free archive is stored the
+same way, before the first table is read from it.
 
 Start the forward collection at the same time. A market with no history still
 gets its prices stored from today, at the pull times the model would decide

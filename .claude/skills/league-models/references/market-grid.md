@@ -74,6 +74,13 @@ after all of them (CLAUDE.md §1b).
    (the college football stats API carries closes), sportsdataverse season
    files, a prediction market's history.
 4. **The prior season's close**, as a last resort for a baseline.
+   Before it: **free public archives** a sport's own community keeps.
+   UFC has two (2026-11-13): fight-canon-db (GitHub releases, MIT;
+   BestFightOdds open and closing range, 2007+) and the Ultimate UFC
+   Dataset (CC BY 4.0; a near-close fight price and method prices by
+   fighter, 2012+). Store one in Supabase like a bought one, keyed on
+   `source`, before the first table is read from it
+   (`data/ingestors/ufc_price_archive.py`).
 5. **Paid providers** other than the feed: `docs/odds_sources.md` prices them.
    More thin books add rejections, not edge; the case for a new provider is a
    book or market we cannot get (a sharp prop book, for example).
@@ -144,6 +151,11 @@ define it here when it is built.
 - **Starter-dominated (baseball).** The starting pitcher is a gate; first-five
   markets isolate the starters; weather and park move totals; the stored team
   and pitcher stats leaked season-final numbers until rebuilt.
-- **One against one (fighting, tennis, golf).** Ratings per competitor; method
-  and duration props, often with no price history at all (the fighting models
-  were backtested on probability alone); thin history per competitor.
+- **One against one (fighting, tennis, golf).** Ratings per competitor; thin
+  history per competitor. In UFC the close is efficient, the first posted
+  price is not, and duration and method props are priced with heavy margin
+  (method: free near-close history 2012+, every blind bet negative; round
+  totals: no free history, the feed's from 2021). The odds feed's MMA key
+  serves fight winner, round totals, a points spread and Pinnacle's
+  alternate totals; it rejects every method, distance and round key
+  (`docs/ufc_market_audit.md` §2).

@@ -36,6 +36,11 @@ not a refusal forever, and a route that failed one way may answer another
 | euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports |
 | University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
 | OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+| GitHub release assets and raw files (fight-canon-db, ultimate_ufc_dataset, nlbair/ufc-data) | a plain download | yes (200, 2026-11-13, UFC scout) |
+| bestfightodds.com robots.txt | a plain fetch | **allows everything but `/cnadm/`** (2026-11-13); its per-book prop pages not yet read |
+| tapology.com robots.txt | a plain fetch | **disallows Claude's crawlers by name** (2026-11-13). Not fetched. |
+| Springer article pages (J. Econ. Finance) | a plain fetch | **redirects to a login**; Crossref gives the title and date |
+| biblos.hec.ca, statds.org, thescholarship.ecu.edu (thesis and poster PDFs) | a plain fetch | yes (200, 2026-11-13) |
 
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,

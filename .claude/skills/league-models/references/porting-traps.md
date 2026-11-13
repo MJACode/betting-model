@@ -84,6 +84,10 @@ down this list.
   rule.
 - **Markets the feed serves differ by league** even within one sport: probe
   them (`references/market-grid.md`).
+- **A store that keeps an event only once one book lists it** holds no
+  other book's opener. UFC's ingest keeps a fight once DraftKings lists it
+  (every book's first stored row equals DraftKings' on all 345 fights of
+  2026), so an opener study needs the feed's history, not our store.
 - **The in-play snapshot is served minutes before the asked instant** (261 to
   300 seconds, men's college).
 

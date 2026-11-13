@@ -61,6 +61,12 @@ finding either way.
   (the halftime-total model was checked this way before it shipped).
 - **Grade at the quoted price**, never at -110. Props in particular are
   priced well past -110.
+- **An archive's "opening line" is not a book we can bet.** An archive's
+  open is the first book to post, often offshore and weeks ahead. Grade the
+  same frozen model at each decidable book's own first price, with
+  closing-line value against the sharp close. A UFC moneyline model read
+  +7.8% on 1,531 archive opens and negative closing-line value at
+  DraftKings' first price (`docs/ufc_market_audit.md` §3c).
 - **Quotes from one moment.** A rule comparing two books needs both quotes
   from the same snapshot. Comparing quotes from different moments manufactured
   edges three times: a best-price-against-the-sharp-book grid, a sharp-against-
