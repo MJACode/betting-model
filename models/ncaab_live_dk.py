@@ -34,6 +34,7 @@ FEED_MAX_AGE_SEC = 8.0
 LOOKBACK_MIN = 60
 SPREAD_KEY = ("spread_home", "spread_home_price", "spread_away_price")
 TOTAL_KEY = ("total_line", "over_price", "under_price")
+ML_KEY = ("home_ml", "away_ml")
 QS_COLS = ["game_id", "market", "book", "stamp", "fetch_at", "home_price", "away_price", "spread_home",
            "total_line", "over_price", "under_price", "period", "clock_s", "game_s", "type_text", "h_pts",
            "a_pts", "h_tf", "a_tf", "h_fetch", "a_fetch", "pts_since", "held"]
@@ -59,7 +60,9 @@ def feed_is_live(last, now) -> bool:
 
 
 READ_COLS = ("game_id", "read_at", "period_label", "period", "clock_s", "home_score", "away_score",
-             "spread_home", "spread_home_price", "spread_away_price", "total_line", "over_price", "under_price")
+             "spread_home", "spread_home_price", "spread_away_price", "total_line", "over_price", "under_price",
+             "home_ml", "away_ml")
+# (home_ml / away_ml: data/migrations/dk_live_reads_all_sports_2026_11_13.sql)
 
 
 def recent_reads(conn, game_ids, sport: str = SPORT, lookback_min: int = LOOKBACK_MIN) -> pd.DataFrame:
@@ -78,7 +81,8 @@ def recent_reads(conn, game_ids, sport: str = SPORT, lookback_min: int = LOOKBAC
     if len(df):
         df["read_at"] = pd.to_datetime(df["read_at"], utc=True)
         for c in READ_COLS[3:]:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
+            if c != "period_label":
+                df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 
@@ -147,14 +151,53 @@ def quote_states_dk(reads: pd.DataFrame, fetch_at, plays_by_game: dict) -> pd.Da
 
 
 class DbSource:
-    """The loop's DraftKings source on the worker: the two tables, read on the
-    loop's own connection."""
+    """A loop's DraftKings source on the worker: the two tables, read on the
+    loop's own connection, for one sport."""
 
-    def __init__(self, conn_fn):
-        self.c = conn_fn
+    def __init__(self, conn_fn, sport: str = SPORT):
+        self.c, self.sport = conn_fn, sport
 
     def last_read(self):
-        return feed_last_read(self.c())
+        return feed_last_read(self.c(), self.sport)
 
     def reads(self, game_ids) -> pd.DataFrame:
-        return recent_reads(self.c(), game_ids)
+        return recent_reads(self.c(), game_ids, sport=self.sport)
+
+
+def current_quotes(reads: pd.DataFrame, fetch_at, markets=("spreads", "totals")) -> pd.DataFrame:
+    """DraftKings' current number and prices per (game, market) at `fetch_at`,
+    each stamped with the read where DraftKings FIRST showed it (the
+    provider's last_update meant the same), in the `odds` row vocabulary the
+    loops' quote frames use: game_id, market, book, stamp, spread_home,
+    home_price, away_price, total_line, over_price, under_price. A game whose
+    newest row carries no line for a market has no quote for it."""
+    fetch_at = pd.Timestamp(fetch_at)
+    keys = {"spreads": SPREAD_KEY, "totals": TOTAL_KEY, "h2h": ML_KEY}
+    out = []
+    for gid, g in reads.groupby("game_id", sort=True):
+        g = g[g["read_at"] <= fetch_at].sort_values("read_at").reset_index(drop=True)
+        if not len(g):
+            continue
+        last = g.iloc[-1]
+        for market in markets:
+            key = keys[market]
+            if any(k not in g.columns for k in key):
+                continue
+            cur = tuple(last[k] for k in key)
+            if any(pd.isna(x) for x in cur):
+                continue
+            i = len(g) - 1
+            while i > 0 and _same(tuple(g.iloc[i - 1][k] for k in key), cur):
+                i -= 1
+            row = {"game_id": gid, "market": market, "book": BOOK, "stamp": g.iloc[i]["read_at"],
+                   "spread_home": np.nan, "home_price": np.nan, "away_price": np.nan,
+                   "total_line": np.nan, "over_price": np.nan, "under_price": np.nan}
+            if market == "spreads":
+                row.update(spread_home=cur[0], home_price=cur[1], away_price=cur[2])
+            elif market == "h2h":
+                row.update(home_price=cur[0], away_price=cur[1])
+            else:
+                row.update(total_line=cur[0], over_price=cur[1], under_price=cur[2])
+            out.append(row)
+    return pd.DataFrame(out, columns=["game_id", "market", "book", "stamp", "spread_home", "home_price",
+                                      "away_price", "total_line", "over_price", "under_price"])

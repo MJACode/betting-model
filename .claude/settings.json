@@ -52,6 +52,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/league_models_writeback.py\" 2>/dev/null || true",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }

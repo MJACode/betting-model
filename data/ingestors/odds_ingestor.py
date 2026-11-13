@@ -143,7 +143,8 @@ SCHEDULE_RESOLVED_SPORTS = ("NFL", "NCAAB", "NCAABW", "EUROLEAGUE")
 # DraftKings row reaches the models, and an NCAAB model must refuse to decide
 # without the reference price.
 # EuroLeague too (2026-11-12): DraftKings priced 3 of the 10 games listed that
-# day and posts nearest the tip, and it priced no game at all in 2020-21.
+# day (it first posts a median 45-73 hours before the tip, while other books
+# list a round five days out), and it priced no sampled game in 2020-21.
 DK_GATE_EXEMPT_SPORTS = frozenset({"NCAAB", "NCAABW", "EUROLEAGUE"})
 
 # Books stored for ONE sport on top of LINE_SHOP_BOOKMAKERS, and asked for in

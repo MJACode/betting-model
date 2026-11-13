@@ -42,6 +42,12 @@ not a refusal forever, and a route that failed one way may answer another
 | Springer article pages (J. Econ. Finance) | a plain fetch | **redirects to a login**; Crossref gives the title and date |
 | biblos.hec.ca, statds.org, thescholarship.ecu.edu (thesis and poster PDFs) | a plain fetch | yes (200, 2026-11-13) |
 
+**The weekly cloud review cannot re-probe this table.** Its network refused
+17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress
+proxy returned 403 for the rest, including every site above that answered
+from mike's PC). Those refusals describe the cloud sandbox, not the sites, so
+they are not recorded here: re-probe from mike's PC, during a build.
+
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,
 Journal of Sports Analytics, International Journal of Forecasting), sharp

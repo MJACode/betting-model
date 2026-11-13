@@ -76,15 +76,20 @@ error.
   on the game." *Worked*: men's college spreads, 409 bets +9.97% [0.8, 18.4]
   (the doc's own estimate of the true edge: about +2% a bet). *Failed*: college
   football (337 of 338 bets were road teams: a tilt in the fitted table); the
-  women's college game (the book standing apart was more often right).
+  women's college game (the book standing apart was more often right);
+  EuroLeague spreads (99.6% of 538 bets were home teams, closing value
+  negative: a home lean, not shopping; `docs/euroleague_market_audit.md`).
 - **A book's moneyline against the same book's spread.** De-vig the spread,
   invert the margin table, take the win probability. *Shipped without
   clearing*: men's college, 838 bets +4.22% [-1.2, 9.3], chosen from 162
   versions after the fact. *Failed*: college football, women's college, pro
-  basketball (-25.0% in 2025-26).
+  basketball (-25.0% in 2025-26), EuroLeague (-11.00% on 86).
 - **The first post.** Decide at the moment a book first posts, with enough
   other books up to form a reference. *Worked*: men's college opening
-  moneyline, 297 bets +15.15% [7.34, 23.37].
+  moneyline, 297 bets +15.15% [7.34, 23.37]. *Could not run*: EuroLeague,
+  where the sharp book was up at only 103 of DraftKings' first posts in three
+  seasons; check that the reference is up at the soft book's first post
+  before planning this rule.
 - **A rating model anchored on the first posted price.** The open is one
   book's first guess; ratings built before the fight say which way it will
   be corrected. *Mechanism measured, not yet bettable*: UFC fight winner at
@@ -116,7 +121,11 @@ edge is where the rule misses something the state shows.
   outcome table. *Worked*: men's college first-half total (1,887 bets +5.98%)
   and spread (845 bets +6.13%). *Failed*: hockey team, alternate and period
   totals ("the books price these markets off the main line, correctly"); college
-  football first halves and team totals (every quote loses -3.7% to -6.6%).
+  football first halves and team totals (every quote loses -3.7% to -6.6%);
+  EuroLeague first halves and quarters, round 1 (the books set the half at
+  50.05-50.29% of the full-game total and stray 0.23-0.55 points from it; the
+  one positive version was a slope that held only in 2025-26:
+  `docs/euroleague_market_audit.md`).
 - **In-play game-state model.** Points still to come from the pre-game prior,
   the current margin, pace and late-game terms; the first fresh eligible quote
   decides. *Worked*: men's college in-play (three markets, the best 5 a night,

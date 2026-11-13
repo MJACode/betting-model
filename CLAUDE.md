@@ -578,8 +578,7 @@ to be known BEFORE deciding which file to open.
 
 - **Live sports:** MLB, WNBA, NBA, NHL, NFL, NCAAF, NCAAB, NCAABW. 79
   models carry their own prob/edge cut in `config.ACTION_THRESHOLDS`; 28 are
-  paused. **UFC has no live model** since 2026-11-13 (mike: the old three
-  retired for a rebuild; `docs/ufc_market_audit.md`).
+  paused.
 - **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline

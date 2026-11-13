@@ -15,7 +15,7 @@
 | Its snapshots | One every **5 minutes** on a game day from 2022-23 on (288 on 2022-12-08 and 2025-12-11), every **10 minutes** before that (144 on 2021-03-11; 10 minutes apart on 2021-12-09 and 2022-03-10, 5 minutes on 2022-10-13). A day with nothing moving holds none (2025-12-13). Asked at 05:59, 11:59, 17:59 and 23:59 UTC of every day, a snapshot dated that day answered on 242, 209, 194, 209, 209 and 232 days of the six finished seasons, and 80 of 2026-27's first 104 (8,964 credits, `el_probe7`). |
 | Its books (five history snapshots, every region) | 20 books on 2021-03-11, 26 on 2022-12-08, 37 on 2023-12-07, 32 on 2024-12-12, 51 on 2025-12-11. DraftKings priced 8 of 9, 8 of 9, 9 of 9 and 10 of 10 games from 2022-23 on and none in 2020-21; Pinnacle 7, 4, 8, 9 and 10; Bovada on most; FanDuel, BetMGM, BetRivers and Fanatics only in 2025-26. Marathonbet, Unibet and Paddy Power priced every sampled game of every season. **Caesars, Hard Rock and betPARX priced none.** On 12 game days a season read at noon UTC: DraftKings held a moneyline, spread and total on 42 of 42, 49 of 51, 47 of 47, 46 of 46, 61 of 61 and 52 of 52 same-day games, 2021-22 to 2026-27. |
 | Its other markets | Only through the per-event endpoint, and only from 2023: a 2022-12 game answered HTTP 422. First half (moneyline, spread, total) at two offshore books in 2024-12; at FanDuel, BetMGM, BetRivers, Fanatics, GTbets, BetUS and MyBookie from 2025-26. First quarter at FanDuel, BetMGM, BetRivers (Fanatics too on one game). FanDuel also posts second-quarter spreads and totals. Team totals (full game and first half), alternate spreads and totals (Pinnacle among them), alternate team totals. **DraftKings priced no period, team-total or alternate market in any sample.** No player prop key answered. |
-| Today's board (2026-11-12) | 10 games listed 11-13 to 11-17; 49 books priced at least one. DraftKings, BetMGM and Pinnacle each priced 3 of the 10 (the nearest games): **DraftKings posts late**. |
+| Today's board (2026-11-12) | 10 games listed 11-13 to 11-17; 49 books priced at least one. DraftKings, BetMGM and Pinnacle each priced 3 of the 10 (the nearest games). **Corrected 2026-11-13:** in the stored history DraftKings first posts a median 45-73 hours before the tip (Pinnacle 28-43), so it posts later than the books that list a round five days out, not near the tip. |
 | EuroLeague's own API (`api-live.euroleague.net`, no key) | `v2/competitions/E/seasons/<code>/games`: a season's every game in one call, with the UTC start, both clubs, the score, the four quarter scores and each overtime, the referees, the venue and a neutral-venue flag. `live.euroleague.net/api` Header, Boxscore (quarter scores, referees, attendance) and PlayByPlay (from 2007-08, per the scout). The whole 2026-27 regular season (380 games) is published. |
 
 ### The market grid
@@ -27,11 +27,11 @@ on (2,398 games); referees, venue and attendance per game.
 
 | Market | Settles on | Prices | Status |
 |---|---|---|---|
-| Full-game moneyline | final, overtime included | the feed's full path, 10 books, 2020-21 on | to do (needs the purchase) |
-| Full-game spread | final margin, overtime included | the same | to do |
-| Full-game total | both scores, overtime included | the same | to do |
-| First-half moneyline, spread, total | quarters 1-2 | bought: every game 2023-24 to 2025-26 at eight times before tip, 6 books (fewer before 2025-26) | to do: research |
-| First-quarter moneyline, spread, total | quarter 1 | bought with the first half: from 2023-24 (2,050 of 2,648 pairs that season) | to do: research |
+| Full-game moneyline | final, overtime included | bought: 2021-22 on, 10 books | **round 1: nothing clears**; favourites at -500 or shorter are a lead whose price range is mike's call (`docs/euroleague_market_audit.md`) |
+| Full-game spread | final margin, overtime included | the same | **round 1: nothing clears**; home underdogs a lead that fails three kill tests |
+| Full-game total | both scores, overtime included | the same | **round 1: nothing clears**; referee crews and the opening total queued |
+| First-half moneyline, spread, total | quarters 1-2; a tied half pushes the two-way moneyline | bought, 2023-24 on; a book a pick may name only from 2025-26 (2023-24 BetUS alone, 2024-25 BetUS and GTbets) | **round 1: nothing clears** (`docs/euroleague_market_audit.md`, round 1); next round queued |
+| First-quarter moneyline, spread, total | quarter 1; a tied quarter (6.31% of games) pushes the two-way moneyline | bought with the first half | **round 1: nothing clears**; one lead (unders off a full-game anchor) fails three kill tests |
 | Second-quarter spread and total | quarter 2 | FanDuel only | to do; likely parked (one book) |
 | Team totals, full game and first half | one club's points | BetMGM, BetRivers, Fanatics (first half: BetRivers) | to do |
 | Alternate spreads and totals | final | BetMGM, BetRivers, Fanatics, Pinnacle | to do |
@@ -66,7 +66,8 @@ on (2,398 games); referees, venue and attendance per game.
   without crowds (Maccabi's home average that season: 624), so a home-edge
   baseline reads it separately.
 - **No sharp book problem**: Pinnacle prices most games every season.
-- **DraftKings posts nearest the tip and prices no period market**, so a
+- **DraftKings prices no period market** (and posts its full-game lines a
+  median 45-73 hours before the tip, later than FanDuel), so a
   first-half or quarter pick names FanDuel, BetMGM, BetRivers or Fanatics, a
   population reported separately (CLAUDE.md §6).
 - **The 28 cancelled 2021-22 games** (the Russian clubs' after 2022-02) have an

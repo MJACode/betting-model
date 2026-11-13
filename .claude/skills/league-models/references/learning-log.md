@@ -68,6 +68,110 @@ review as its own entry.
    the importer came after; step 2 now says to store a free archive the same
    way as a bought one, before the first table is read from it.
 
+## 2026-11-13 — EuroLeague full game, round 1
+
+1. **Scope.** The EuroLeague build: moneyline, spread and total, 2021-22 on.
+2. **Tried.** The data check, baselines at the first post and the close, the
+   four catalogued basketball methods unchanged, the scout's relocation and
+   club-home-edge leads, 283 cells with a false-discovery correction
+   (`docs/euroleague_market_audit.md`, full game round 1). Nothing clears.
+3. **New.** Three method results in `methods.md` (line shopping and a
+   book's moneyline against its own spread both fail here; the first post
+   could not run because the sharp book was rarely up). A lead that is a
+   decision, not a pass: favourites at -500 or shorter win 93.1% against an
+   84.1% price, on a price band whose neighbour loses -7.11%.
+4. **Corrected.** "DraftKings posts nearest the tip" (the league doc and an
+   `odds_ingestor` comment) came from one day's board; the history says a
+   median 45-73 hours before the tip. The research brief's "DraftKings
+   priced nothing in 2021-22" was a misreading of the 2020-21 census.
+5. **The framework.** Nothing changed in `SKILL.md`.
+
+## 2026-11-13 — EuroLeague first half and first quarter, round 1
+
+1. **Scope.** The EuroLeague build (mike, 2026-11-12, "all markets including
+   1h and 1q"), the first research round on its first-half and first-quarter
+   markets, once their history was bought (mike, 2026-11-13: "Do the 4.4m").
+2. **Tried.** Settlement, bettable coverage by season, 556 blind cells, the
+   close's accuracy, the catalogued half-from-the-full-game method unchanged,
+   cross-book disagreement, and the kill tests on every positive cell
+   (`docs/euroleague_market_audit.md`, round 1). Nothing clears; one
+   first-quarter under lead is frozen.
+3. **New.** In `methods.md`, the half-from-the-full-game method's EuroLeague
+   failure (the books hold the half at 50.05-50.29% of the full-game total).
+   In `porting-traps.md`, a book's main key can hold only an alternate rung.
+   And a practice: a whole-history purchase sized for one cycle can be cut to
+   about 40% by asking every snapshot only from 30 minutes before each tip to
+   2.5 hours after it, and one every 15 minutes otherwise
+   (`euroleague_odds_history --pregame-step-min`), keeping the close and the
+   in-play path whole.
+4. **Corrected.** The league doc's claim that first-quarter lines exist only
+   from 2025-26 came from a three-game sample: the bought history holds them
+   from 2023-24 (`docs/sports/euroleague.md`, corrected in place). Nothing in
+   the skill's own files was contradicted.
+5. **The framework.** Nothing changed in `SKILL.md`. Not called null: the
+   invention floor (three mechanisms of our own) and the stuck ladder are the
+   next round.
+
+## 2026-11-13 — Review
+
+1. **Scope.** The first weekly self-review (mike, 2026-11-13: *"the skill
+   should review itself every week"*), run from the cloud. Since: the start,
+   2026-11-12, because no earlier Review entry exists.
+2. **Tried.** `git log` on master since 2026-11-12: 68 commits. `config.py`
+   changed once (c5da32f3, the EuroLeague groundwork) and only the book lists
+   in it; no model id was added to `ACTION_THRESHOLDS`, none retired or paused.
+   New docs: `docs/sports/euroleague.md` (already in the log, 2026-11-12). The
+   NCAAB in-play fast path, the NBA Betting tab and the same-game parlay price
+   are not league builds. **Live records: not measured.** The Supabase
+   connector failed to connect in this session (CONNECT_TIMEOUT, retried three
+   times), so the 94-bet / +9.76-unit college football totals claim and the
+   402-bet women's college totals claim in `methods.md` were neither confirmed
+   nor contradicted, and no verdict was touched. Next review: for each live
+   model, settled BETs in `picks` by `model_id` and date, units through
+   `published_pick_unit_profit` (columns looked up first).
+3. **New.** The cloud cannot re-probe the scouting routes: of 18 sites, only
+   `api.github.com` answered (200; `github.com` bare gave 400). Every other
+   site, including the ones that answered from the PC, returned code 0 with a
+   403 from the egress proxy. That is the sandbox allowlist, not the sites. The
+   review first added these answers as a column in `scouting.md`; the same day
+   that column was replaced by one note under the table, because 17 "blocked"
+   cells beside the PC's answers would read as the sites being down. The
+   routine no longer probes routes from the cloud.
+4. **Corrected.** Nothing measured was contradicted. Nothing was promoted:
+   no trap or failure appears in two entries yet (the clean-up-thins-the-purchase
+   and the curl-from-the-cloud limits each appear once).
+5. **The framework.** Review mode step 3 now says what to do when the database
+   connector is down: report the count as not measured, with the query, and
+   change no verdict.
+
+## 2026-11-13 — The write-back enforced: a Stop hook, a merge gate, review mode
+
+1. **Scope.** mike: *"for self improvement, how can we ensure the skill auto
+   updates itself ?"*
+2. **Tried.** Read the first real use (the EuroLeague groundwork, 2026-11-12):
+   it wrote an entry and three reference files and corrected the new-league
+   order, without being forced. It also showed the gap: that session started
+   in a checkout whose branch did not hold the skill, so the skill never
+   loaded; the session found it in git and read its files by path.
+3. **New.**
+   - A Stop hook (`.claude/hooks/league_models_writeback.py`, project
+     settings): a session that used the skill (the Skill tool, a typed
+     `/league-models`, or reading the skill's SKILL.md by path) and changed
+     files, but never touched this log, is stopped once and told what to
+     write. It fails open. Run on five of the 2026-11-12 transcripts it
+     blocks none: each one that used the skill had written the log.
+   - A merge gate in `tests/test_league_models_skill.py`: a model id in
+     `config.ACTION_THRESHOLDS` or a sport in the odds feed's `SPORT_KEYS` or
+     `config.DISCORD_SPORTS` that is not in the sets frozen on 2026-11-13 must
+     be named in this log.
+   - Review mode (`/league-models review`, `SKILL.md`): the skill checked
+     against the repo's changes and the live records since the last review,
+     ending in a pull request.
+4. **Corrected.** Nothing measured was contradicted.
+5. **The framework.** `SKILL.md` now names what enforces the write-back. The
+   Stop hook is in the project settings, so it runs in every session in this
+   repo, Matt's included.
+
 ## 2026-11-12 — EuroLeague, the first league built with the skill (groundwork)
 
 1. **Scope.** mike: *"invoke the new skill to build the euroleague model. all
