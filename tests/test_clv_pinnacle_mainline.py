@@ -525,6 +525,10 @@ def test_a_second_pass_does_not_write(pg):
     # that still rewrote would null it.
     _odds(pg, "MLB_2026-09-21_SEA_HOU", "totals", "2026-09-20T22:00:00Z",
           total_line=8.5, over_price=-120)
+    # Each worker pass is its own transaction, so the first pass's ON COMMIT
+    # DROP table is gone by the second. This test never commits; drop it by
+    # hand so a second pass without the marker reaches the rewrite.
+    _exec(pg, "DROP TABLE IF EXISTS _pin_mainline_affected")
     _run_file(pg, MAIN)
     assert _one_sql(pg, """
         SELECT market_clv_pct, pinnacle_close_odds FROM public.picks WHERE pick_id = 8
