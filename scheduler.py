@@ -86,6 +86,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         fetched books' moneylines and spreads as of 14:00Z; then publishes. A
         later run that finds a game undecided writes it as missed, never bets
         it, and fails. RUN_NCAAF_MONEYLINE_CARD=0 stops it.)
+  * UFC opening-price card  hourly at :25, 24x7, UTC -> run_ufc_open_moneyline_card
+        (scripts/ufc_open_moneyline_card.py: the UFC fight-winner model bets
+        a fight still a week or more out on the 12:25Z run, at the latest
+        pull where Pinnacle and a deciding book both quote it; every other
+        run closes the fights that reached the week-out mark. Then publishes.
+        RUN_UFC_OPEN_MONEYLINE=0 stops it.)
   * NCAAB first-post ML   every minute, 24x7    -> run_ncaab_moneyline_first_post
         (scripts/ncaab_moneyline_first_post_card.py: one keyed planning read
         for a bettable book's NEW moneyline on an NCAAB game, stored by the
@@ -1045,6 +1051,9 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes NCAAF moneyline picks through its own card, reading
                   # the NCAAF odds the hourly passes stored.
                   "ncaaf_moneyline_card",
+                  # Writes UFC fight-winner picks through its own card, reading
+                  # the UFC odds the refresh passes stored.
+                  "ufc_open_moneyline_card",
                   # Writes NCAAB first-post moneyline picks through its own
                   # card, reading the odds the capture and the passes store.
                   "ncaab_moneyline_first_post",
@@ -2137,6 +2146,31 @@ def run_ncaaf_moneyline_card() -> None:
     _publish_new_signals("ncaaf-moneyline-card")
     if outcome != "ok":
         raise RuntimeError(f"NCAAF moneyline card did not finish: {outcome}")
+
+
+# The UFC opening-price card reads the UFC slate, the fight log (one replay of
+# every logged fight) and three hours of stored moneylines; seconds.
+UFC_OPEN_MONEYLINE_CARD_TIMEOUT_S = 600
+
+
+def run_ufc_open_moneyline_card() -> None:
+    """One UFC opening-price card run (scripts/ufc_open_moneyline_card.py),
+    then publish.
+
+    Hourly at 25 past, UTC. Bets are decided only on the 12:25Z run (the
+    backtest bought one pull a day at noon UTC, and the refresh pass stores
+    the 12Z pull at about :16), on fights still at least a week out; every
+    other run closes the fights that reached the week-out mark without a bet
+    as NONE rows. The script returns at once when RUN_UFC_OPEN_MONEYLINE=0;
+    the job still beats. A run that fails or is killed raises AFTER
+    publishing, so the heartbeat records "error", while a bet that was
+    written still goes out.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ufc_open_moneyline_card", "--publish"],
+                   "ufc-open-moneyline-card", timeout=UFC_OPEN_MONEYLINE_CARD_TIMEOUT_S)
+    _publish_new_signals("ufc-open-moneyline-card")
+    if outcome != "ok":
+        raise RuntimeError(f"UFC opening-price card did not finish: {outcome}")
 
 
 # The NCAAB first-half window's steps, bounded so a stuck one cannot hold the
@@ -3395,6 +3429,19 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute=5, timezone="UTC"),
         id="ncaaf_moneyline_card",
         name="NCAAF moneyline card (hourly at :05 UTC: decide in the 14Z hour on the 14Z quotes)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
+    # UFC opening-price card -- hourly at 25 past, UTC
+    # (run_ufc_open_moneyline_card). Bets only on the 12:25Z run, on the pull
+    # the noon refresh pass stored at about :16; hourly so the week-out mark
+    # is closed within the hour and a stopped card shows in the heartbeat.
+    # Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_ufc_open_moneyline_card,
+        CronTrigger(minute=25, timezone="UTC"),
+        id="ufc_open_moneyline_card",
+        name="UFC opening-price card (hourly at :25 UTC: bet on the 12:25Z run, a week or more out)",
         max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 

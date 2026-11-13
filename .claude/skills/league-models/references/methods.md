@@ -90,6 +90,18 @@ error.
   where the sharp book was up at only 103 of DraftKings' first posts in three
   seasons; check that the reference is up at the soft book's first post
   before planning this rule.
+- **A rating model anchored on the first posted price.** The open is one
+  book's first guess; ratings built before the fight say which way it will
+  be corrected. *Worked*: UFC fight winner, anchored on Pinnacle's no-vig
+  price at least a week out and bet at the best deciding book, on the
+  bought 2020-2026 history: 846 bets +12.85% [+8.0, +17.5], every year
+  positive, +2.2% against Pinnacle's close, placebo -1.9%; live as
+  `ufc_open_moneyline`. The edge grows with the lead and is negative inside
+  a week. On an archive's open (whichever book posted first) it read +7.8%
+  on 1,531; on our 2026 store's 104 DraftKings openers it looked dead, which
+  the purchase overturned. At the close it finds nothing. *Failed* in the
+  same sport: betting the side the line moved toward, at the worst close,
+  lost in every band of move size (`docs/ufc_market_audit.md` §3, §8).
 - **A stale opener.** Bet the side the sharp book favours at a soft book's
   stale opening number. *Passed the placebos* (reversed books null, other
   opens null, CLV 0.694, every season positive) and *failed executability*:
@@ -233,6 +245,14 @@ edge is where the rule misses something the state shows.
 Each line is a hypothesis with its doc. Run it, then move it into the
 sections above with its result.
 
+- UFC: a Pinnacle-anchored finish model for round totals on the bought
+  history (every blind total loses; Pinnacle's over is near fair).
+- UFC: notice length from the feed's first listing of a pairing; a
+  DraftKings total left stale when its moneyline moves; the five-round
+  favourite at per-book prices (null at the worst close, fails the late
+  half); BestFightOdds'
+  per-book prop pages as a round-total price route
+  (`docs/ufc_market_audit.md` §8, §9).
 - A third live book for live props, turning them into the cross-book
   construction (`docs/nfl_live_prop_assessment.md` §7).
 - Live rushing overs at a low pace ratio; the rushing under out of sample on

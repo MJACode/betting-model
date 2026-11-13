@@ -133,9 +133,6 @@ models/saved/*_????????_??????.pkl
 !models/saved/nhl_prop_blocked_shots_20261001_171818.pkl
 !models/saved/nhl_prop_saves_20261001_193414.pkl
 !models/saved/nhl_prop_shots_on_goal_20261001_193426.pkl
-!models/saved/ufc_method_of_victory_20260619_211955.pkl
-!models/saved/ufc_moneyline_20260619_211307.pkl
-!models/saved/ufc_total_rounds_20260619_211436.pkl
 !models/saved/wnba_moneyline_20260531_120224.pkl
 !models/saved/wnba_over_under_20260719_113025.pkl
 !models/saved/wnba_prop_player_assists_20260531_125558.pkl

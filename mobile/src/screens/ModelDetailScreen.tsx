@@ -70,9 +70,9 @@ export function ModelDetailScreen() {
   );
   const filterChips = describeFilters(model?.filters);
 
-  // Live board: today's picks plus the UFC/golf events scored up to a week out,
-  // so a saved model surfaces its picks as they come up rather than only after
-  // they settle.
+  // Live board: today's picks plus the upcoming UFC card's (bet a week or more
+  // out, useTodayPicks UFC_AHEAD_DAYS), so a saved model surfaces its picks as
+  // they come up rather than only after they settle.
   const { data: todayPicks, loading: todayLoading } = useTodayPicks();
   const upcoming = useMemo(
     () => (model ? todayPicks.filter((ep) => pickMatchesModel(ep.pick, model)) : []),

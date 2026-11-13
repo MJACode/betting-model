@@ -567,21 +567,22 @@ check(
       isOutcomeGraded('wnba_prop_player_points'),
   );
   check(
-    // golf_top10 was the third id here until 2026-09-08; golf is retired, and a
-    // retired id proves nothing about the settled fallback.
-    'UFC / NHL are not (settled fallback)',
-    !isOutcomeGraded('ufc_moneyline') && !isOutcomeGraded('nhl_moneyline'),
+    // golf_top10 was the third id here until 2026-09-08 and ufc_moneyline the
+    // second until 2026-11-13; both are retired, and a retired id proves
+    // nothing about the settled fallback.
+    'NHL is not (settled fallback)',
+    !isOutcomeGraded('nhl_moneyline'),
   );
 
   const rules = [
     { model_id: 'mlb_moneyline', min_prob: 0.6, min_edge: 0.05 },
-    { model_id: 'ufc_moneyline', min_prob: 0.65, min_edge: 0.08 },
+    { model_id: 'nhl_moneyline', min_prob: 0, min_edge: 0 },
     { model_id: 'wnba_prop_player_assists', min_prob: 0.69, min_edge: 0.08 },
   ];
   const { covered, uncovered } = splitRulesByCoverage(rules);
   check(
     'rules split cleanly by coverage',
-    covered.length === 2 && uncovered.length === 1 && uncovered[0].model_id === 'ufc_moneyline',
+    covered.length === 2 && uncovered.length === 1 && uncovered[0].model_id === 'nhl_moneyline',
   );
 
   const server = summaryToStats({
