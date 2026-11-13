@@ -999,10 +999,6 @@ def test_a_failed_card_run_beats_error_and_the_alerter_reports_it(monkeypatch):
     from tracking import job_heartbeat as jh
     beats = []
     job = _jobs(monkeypatch)["ncaabw_total_card"]
-    # The scheduled wrapper asks the morning disk gate first. This test is
-    # about a failed card, at whatever hour CI runs, so the gate stays open.
-    monkeypatch.setattr(
-        "tracking.morning_disk.in_morning_window", lambda now=None: False)
     monkeypatch.setattr(jh, "beat", lambda jid, status, detail="": beats.append((jid, status, detail)))
     monkeypatch.setattr(scheduler, "_run", lambda cmd, label, **kw: "fail")
     monkeypatch.setattr(scheduler, "_publish_new_signals", lambda label: None)

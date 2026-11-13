@@ -20,6 +20,7 @@ crons had).
 | Job | When (ET) | Command |
 |---|---|---|
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
+| Overnight refresh | :17, midnight–4am | `bash scripts/refresh_pass.sh`. Hour 5 has no full refresh, on purpose: the 05:17 pass was the one that could still be writing when the 6:00am daily started. The pregame poller still scores a game whose DraftKings line moved and pushes a new BET. The card jobs keep their own clocks. Prop scoring for a sport without its own card, lineups, and the opening-signal lock wait for the 6:00am daily. No job here is keyed to a 05:xx tip; the earliest in-play window is 11:00am ET |
 | Morning disk window (a gate, not a job) | 5:40–7:15am | `tracking/morning_disk.py`, checked by the scheduler before every job. In this window only: a refresh pass does not start while the daily holds its lock, and the injury feed, the NCAAB spread and moneyline cards, the NCAAF moneyline card, the NFL schedule refresh and the NBA prop window run one at a time. A tick that loses its turn is skipped and beats `skipped`. The jobs that decide real-money picks in the window, or capture the prices they decide on, are exempt (`DECIDING_JOBS`: the NCAAB and NCAABW totals cards and odds captures, the NFL prop card, the NFL polls). Kalshi and the job queue wait out the window, and a running daily until noon. Added 2026-11-13 (#1255) |
 | Weekly and monthly results | Monday 7:30am (the month only on the first Monday) | `run_period_recaps()` — prior Mon–Sun, and the previous calendar month; Discord `#results` and X; ledgered. The same call also posts Eggz's windows to `#eggz-picks` when `DISCORD_WEBHOOK_EGGZ` is set, and ParlayMatt's windows when `DISCORD_WEBHOOK_PARLAYMATT` is set |
 | Eggz channel read | every 15 min | `run_eggz_ingest()` — `#eggz-picks`, author `DISCORD_EGGZ_AUTHOR_ID` only, then ParlayMatt's channel when `DISCORD_PARLAYMATT_CHANNEL_ID` and `DISCORD_PARLAYMATT_AUTHOR_ID` are set. No request for a capper whose token, channel id, or author id is unset |
@@ -377,7 +378,7 @@ with an unstarted game today or tomorrow, display only (never
 ### NCAAB box scores and period scores (added 2026-10-30)
 
 Refresh-pass step `ncaab-box` (`data/ingestors/ncaab_espn_box.py`), on the
-HOURLY passes only (midnight-5am and 7am-5pm ET; the evening passes have no
+HOURLY passes only (midnight-4am and 7am-5pm ET; the evening passes have no
 room in their 10-minute tick), after the results group, settle and
 refresh-outcomes: one ESPN game summary per NCAAB final of the last 3 ET
 dates with no box row yet, into `ncaab_team_game_stats` (source

@@ -180,6 +180,9 @@ def test_a_second_prune_skips_when_the_lock_is_held():
     conn = _Conn(got=False)
     assert begin_api_log_prune(conn, datetime(2026, 11, 12, 8, 0, tzinfo=ET)) == "skip"
     assert "pg_try_advisory_lock" in conn.sql[0]
+    # The try-lock SELECT opened a transaction. Skipping must close it, or
+    # the writer's connection sits idle in a transaction until its next insert.
+    assert conn.committed == 1
 
 
 def test_the_prune_fails_open_when_the_lock_cannot_be_asked():
@@ -351,6 +354,8 @@ def test_a_refresh_does_not_start_while_the_daily_holds_its_lock(monkeypatch):
 def test_the_daily_waits_for_an_in_flight_refresh_then_runs(monkeypatch):
     monkeypatch.setattr(scheduler, "DAILY_REFRESH_WAIT_S", 2)
     monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, 6, 0, tzinfo=ET))
     ran = []
     monkeypatch.setattr(scheduler, "_run", lambda *a, **k: ran.append(a) or "ok")
     assert scheduler._REFRESH_LOCK.acquire(blocking=False)
@@ -477,6 +482,65 @@ def test_a_morning_refresh_that_stands_down_beats_skipped(monkeypatch):
         scheduler._DAILY_LOCK.release()
     assert calls == []
     assert [b[:2] for b in beats] == [("hourly_refresh", "skipped")]
+
+
+def test_an_evening_daily_does_not_wait_for_a_refresh(monkeypatch):
+    """Outside the window the refresh does not stand down, so the daily must
+    not sit behind a pass it is allowed to overlap."""
+    monkeypatch.setattr(scheduler, "DAILY_REFRESH_WAIT_S", 2)
+    monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, 19, 0, tzinfo=ET))
+    ran = []
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: ran.append(a) or "ok")
+    assert scheduler._REFRESH_LOCK.acquire(blocking=False)
+    started = time.monotonic()
+    try:
+        assert scheduler.run_daily_pipeline() == "ok"
+        assert time.monotonic() - started < 0.5
+        assert ran
+        assert scheduler._REFRESH_LOCK.locked()
+    finally:
+        if scheduler._DAILY_LOCK.locked():
+            scheduler._DAILY_LOCK.release()
+        if scheduler._REFRESH_LOCK.locked():
+            scheduler._REFRESH_LOCK.release()
+
+
+def test_a_refresh_already_running_returns_skipped_and_beats_it(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
+    func, beats = _wrapped_job(monkeypatch, "hourly_refresh")
+    assert scheduler._REFRESH_LOCK.acquire(blocking=False)
+    try:
+        assert func() == "skipped"
+    finally:
+        scheduler._REFRESH_LOCK.release()
+    assert calls == []
+    assert [b[:2] for b in beats] == [("hourly_refresh", "skipped")]
+
+
+def test_the_refresh_catch_up_reports_a_stand_down(monkeypatch):
+    import data.db as db
+    import tracking.refresh_retry as rr
+    import tracking.scoring_lease as sl
+
+    class _Decision:
+        action = "run"
+        reason = "the 05:17 pass was killed"
+
+    class _Conn:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(scheduler, "owns", lambda jid: True)
+    monkeypatch.setattr(sl, "wait_for_scoring_lease", lambda kind, **k: True)
+    monkeypatch.setattr(db, "get_connection", lambda **k: _Conn())
+    monkeypatch.setattr(rr, "load_recent_refreshes", lambda conn, now: [])
+    monkeypatch.setattr(rr, "decide_refresh_retry", lambda **k: _Decision())
+    monkeypatch.setattr(scheduler, "run_refresh_pass", lambda mode="hourly": "skipped")
+    out = scheduler.catch_up_refresh_pass(source="boot")
+    assert out == {"status": "skipped", "reason": "the 05:17 pass was killed"}
 
 
 def test_a_tick_that_runs_still_beats_ok(monkeypatch):

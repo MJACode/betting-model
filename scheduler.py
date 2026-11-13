@@ -428,17 +428,24 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         return "skipped"
     try:
         # The 05:17 overnight pass and this 06:00 run used to overlap: two
-        # full writers, two locks. Wait for the refresh to let go, then run.
-        # A stuck pass must not eat the morning, so the wait is bounded and
-        # the daily starts anyway.
-        if not _REFRESH_LOCK.acquire(timeout=DAILY_REFRESH_WAIT_S):
-            log.warning(
-                "daily-pipeline: a refresh pass still holds its lock after %ss"
-                " — starting anyway",
-                DAILY_REFRESH_WAIT_S,
-            )
-        else:
-            _REFRESH_LOCK.release()
+        # full writers, two locks. Inside the morning window, wait for the
+        # refresh to let go, then run. A stuck pass must not eat the morning,
+        # so the wait is bounded and the daily starts anyway.
+        #
+        # Outside the window the wait does not apply. A refresh there does not
+        # stand down for the daily (a catch-up daily may run until 22:00 ET,
+        # beside the evening passes), so waiting would only delay that
+        # catch-up behind a pass it is allowed to overlap.
+        from tracking import morning_disk
+        if morning_disk.in_morning_window(morning_disk.now_et()):
+            if not _REFRESH_LOCK.acquire(timeout=DAILY_REFRESH_WAIT_S):
+                log.warning(
+                    "daily-pipeline: a refresh pass still holds its lock after %ss"
+                    " — starting anyway",
+                    DAILY_REFRESH_WAIT_S,
+                )
+            else:
+                _REFRESH_LOCK.release()
         if retry_reason:
             log.info("daily-pipeline retry (%s/%s) start %s: %s",
                      retry_source or "catch-up",
@@ -520,7 +527,9 @@ def run_refresh_pass(mode: str = "hourly") -> str | None:
     if not _REFRESH_LOCK.acquire(blocking=False):
         log.info("refresh-pass[%s]: a pass is already running in this process — skip",
                  mode)
-        return
+        # "skipped", not a bare return: the wrapper beats a bare return as
+        # "ok", which would say a pass that did nothing had run.
+        return "skipped"
     # Checked AFTER the lock, so a daily that is waiting on this lock cannot
     # lose the race to a refresh that looked at the daily lock a moment earlier.
     # The pass that already holds the lock runs to the end; the daily waits.
@@ -2627,7 +2636,14 @@ def catch_up_refresh_pass(*, source: str = "boot") -> dict:
             log.info("refresh catch-up [%s]: skip — %s", source, decision.reason)
             return {"status": "skipped", "reason": decision.reason}
         log.info("refresh catch-up [%s]: run — %s", source, decision.reason)
-        run_refresh_pass()
+        outcome = run_refresh_pass()
+        # A boot inside 05:40-07:15 ET can decide to re-run a killed pass and
+        # then have that pass stand down because the daily is in its chain.
+        # Logging "run" there would say the hour was recovered when it was not.
+        if outcome == "skipped":
+            log.info("refresh catch-up [%s]: the pass stood down — %s",
+                     source, decision.reason)
+            return {"status": "skipped", "reason": decision.reason}
         return {"status": "run", "reason": decision.reason}
     except Exception:  # noqa: BLE001 — never block the scheduler
         log.exception("refresh catch-up [%s] failed (scheduler continues)", source)
@@ -2956,11 +2972,24 @@ def build_scheduler() -> BlockingScheduler:
     # The 6am daily pipeline is unchanged and still does the day's heavy work:
     # settle, stats, backfills, results. This only adds market polling.
     #
-    # Hour 5 is not in this cron. On 2026-11-12 the 05:17 pass was still a
-    # candidate to be running at 05:50, when disk IO was already saturated,
-    # and the 06:00 daily then started a second full writer beside it. The
-    # pregame poller still watches lines that hour. The 04:17 pass is the
-    # last full refresh before the daily.
+    # Hour 5 is not in this cron, on purpose. On 2026-11-12 the 05:17 pass
+    # was still a candidate to be running at 05:50, when disk IO was already
+    # saturated, and the 06:00 daily then started a second full writer beside
+    # it. The 04:17 pass is the last full refresh before the daily, and the
+    # daily may wait up to 15 minutes for a refresh still running, only
+    # inside the morning window.
+    #
+    # What hour 5 still does. The pregame poller (24x7) scores a game whose
+    # DraftKings line moved and pushes a new BET itself. The card jobs keep
+    # their own clocks: NBA props, NCAAB and NCAABW totals, the NFL polls,
+    # the NFL prop card. What waits until the 06:00 daily is the rest of the
+    # refresh chain: prop odds and prop scoring for a sport without its own
+    # card, lineups, and the opening-signal lock.
+    #
+    # No job in this file is keyed to a 05:xx tip. The earliest in-play
+    # window is 11:00 ET (NHL goalies and the live loops). The live loop is
+    # built around an earliest MLB first pitch of about 12:05pm ET. London
+    # NFL is 9:30am, after the daily.
     sched.add_job(
         run_refresh_pass,
         CronTrigger(hour="0-4", minute=17, timezone=TIMEZONE),

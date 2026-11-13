@@ -220,16 +220,32 @@ def begin_api_log_prune(conn, now: datetime | None = None) -> str:
     asked (fail open, same as the publish lock: a prune that never runs lets
     the table grow). Call end_api_log_prune when the delete returns.
     """
-    if in_morning_window(now if now is not None else datetime.now(ET)):
+    if in_morning_window(now if now is not None else now_et()):
         return "wait"
     try:
         row = conn.execute(
             "SELECT pg_try_advisory_lock(?)", (API_LOG_PRUNE_LOCK,),
         ).fetchone()
     except Exception:                                          # noqa: BLE001
+        # The SELECT may have opened a transaction and then failed. Close it
+        # before the caller prunes on this same connection.
+        try:
+            conn.rollback()
+        except Exception:                                      # noqa: BLE001
+            pass
         return "run"
     if row and row[0]:
         return "run"
+    # Not acquired. The SELECT is still an open transaction on the writer's
+    # connection, which is reused for inserts and may not write again for an
+    # hour. Commit it so the connection is not left idle in a transaction.
+    try:
+        conn.commit()
+    except Exception:                                          # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                      # noqa: BLE001
+            pass
     return "skip"
 
 
