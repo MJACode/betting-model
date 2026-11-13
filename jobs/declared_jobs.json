@@ -1687,5 +1687,12 @@
     "requested_by": "matt",
     "note": "Matt 2026-11-12: 'it should pull up the app not the website ... MGM link took me to the website', then 'Yes continue' to the worker probe. Fetches each sportsbook host's apple-app-site-association file (Apple CDN first, then the host) and reports whether the stored betslip links are claimed by the book's app. Writes nothing, no Odds API credits.",
     "args": {}
+  },
+  {
+    "key": "nba-period-lines-and-results-2026-11-13",
+    "job_type": "nba_quarters",
+    "requested_by": "matt",
+    "note": "Matt 2026-11-13: half and quarter ATS / O-U on the Stats tab's Betting filters; '4. Yes' (backfill this season's period lines) and '5. Yes' (add them to the regular pull). Runs the daily nba_quarters step now instead of at 6am: buys the half and quarter closing lines (spreads and totals, H1 and Q1-Q4, tip minus 5 minutes) for every finished 2026-27 game that lacks them, under a ceiling equal to its own plan (10 credits a market a game, 101 a game, upper bound: the endpoint bills only markets it returns) and the measured reserve floor, then builds team_period_results. No model, pick, stake or threshold is touched.",
+    "args": {}
   }
 ]
