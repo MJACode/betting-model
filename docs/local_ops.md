@@ -538,6 +538,13 @@ launcher from its own worktree, `bm-live-feed\scripts\dk_live_board_run.ps1`,
 so the launcher and the feed always come from the same master. The feed's log
 is `betting_local_copies\logs\dk_live_board_feed_<date>.log` (UTF-8).
 
+**A merge reaches this machine by itself.** Every 5 minutes the feed fetches
+origin/master; when a merge changed one of its own files it exits (code 3) and
+the launcher checks the new master out and starts it again at once. A merge
+that does not touch the feed is ignored. The all-sports feed holds
+127.0.0.1:47232; the NCAAB-only feed it replaces held 47231, so on the day of
+the change the two can run side by side until the old one's last game ends.
+
 #### NCAAB, the first one (2026-11-12)
 
 mike, 2026-11-12: *"This is live betting ... This needs to be as close to Real

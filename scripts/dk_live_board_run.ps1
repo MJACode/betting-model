@@ -17,7 +17,7 @@ param(
     [string]$Root = "C:\Users\micha\Documents\betting_local_copies",
     [string]$Repo = "C:\Users\micha\documents\betting-model",
     [string]$Feed = "C:\Users\micha\Documents\bm-live-feed",
-    [int]$LockPort = 47231
+    [int]$LockPort = 47232
 )
 $ErrorActionPreference = "Continue"
 $logs = Join-Path $Root "logs"
@@ -49,8 +49,16 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONPATH = $Feed
 $python = (Get-Command python -ErrorAction Stop).Source
 # Every league with an in-play model, the feed's own UTF-8 log (PowerShell's
-# redirect wrote UTF-16 into this one and garbled it).
+# redirect wrote UTF-16 into this one and garbled it). Exit code 3 means a
+# merge changed the feed: the new master is checked out and started at once.
 $pylog = Join-Path $logs "dk_live_board_feed_$day.log"
-$p = Start-Process -FilePath $python -ArgumentList @("-m", "data.ingestors.dk_live_board", "--log", "`"$pylog`"") `
-    -WorkingDirectory $Feed -NoNewWindow -Wait -PassThru -RedirectStandardError (Join-Path $logs "dk_live_board_stderr_$day.log")
-Add-Content $log ("--- exit " + $p.ExitCode + " " + (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))
+while ($true) {
+    $p = Start-Process -FilePath $python -ArgumentList @("-m", "data.ingestors.dk_live_board", "--log", "`"$pylog`"",
+        "--exit-on-new-master") -WorkingDirectory $Feed -NoNewWindow -Wait -PassThru `
+        -RedirectStandardError (Join-Path $logs "dk_live_board_stderr_$day.log")
+    Add-Content $log ("--- exit " + $p.ExitCode + " " + (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))
+    if ($p.ExitCode -ne 3) { break }
+    & git -C $Feed fetch -q origin master 2>> $log
+    & git -C $Feed checkout -q --detach -f origin/master 2>> $log
+    Add-Content $log ("--- restarting on " + (& git -C $Feed rev-parse --short HEAD))
+}

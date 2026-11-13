@@ -92,7 +92,18 @@ POLL_SEC = float(os.environ.get("DK_LIVE_POLL_SEC", "1.0"))
 # one halves it back toward POLL_SEC (his home address is the one at stake).
 MAX_POLL_SEC = 5.0
 # One feed at a time on this machine: a second start finds the port taken and exits.
-LOCK_PORT = int(os.environ.get("DK_LIVE_LOCK_PORT", "47231"))
+# 47232 since the all-sports feed (2026-11-13): the NCAAB-only feed of #1268
+# holds 47231 until its last game ends, and the two may run side by side that day.
+LOCK_PORT = int(os.environ.get("DK_LIVE_LOCK_PORT", "47232"))
+# --exit-on-new-master (the scheduled task's launcher passes it): every
+# MASTER_CHECK_SEC the feed fetches origin/master, and when a merge changed one
+# of FEED_FILES it exits with NEW_MASTER_EXIT; the launcher checks the new
+# master out and starts it again at once. Any other merge is ignored, so the
+# feed is not down for a merge that does not touch it.
+MASTER_CHECK_SEC = 300.0
+NEW_MASTER_EXIT = 3
+FEED_FILES = ("data/ingestors/dk_live_board.py", "data/ingestors/ncaab_teams.py", "data/ingestors/ncaabw_teams.py",
+              "data/db.py", "scripts/dk_live_board_run.ps1")
 IDLE_POLL_SEC = float(os.environ.get("DK_LIVE_IDLE_POLL_SEC", "30"))
 RESOLVE_RETRY_SEC = 60.0
 RESOLVER_REFRESH_SEC = 600.0
@@ -465,6 +476,19 @@ def single_instance(port: int = LOCK_PORT):
     return s
 
 
+def feed_changed_on_master(root: Path = ROOT) -> bool:
+    """True when origin/master changes one of FEED_FILES against this
+    checkout's HEAD. Any git failure is False: never restart on a doubt."""
+    import subprocess
+    try:
+        subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "master"], capture_output=True, timeout=60)
+        out = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "HEAD", "origin/master", "--",
+                              *FEED_FILES], capture_output=True, text=True, timeout=30)
+        return out.returncode == 0 and bool(out.stdout.strip())
+    except Exception:                     # noqa: BLE001
+        return False
+
+
 def columns_ready(conn) -> bool:
     row = conn.execute("""SELECT COUNT(*) FROM information_schema.columns
                            WHERE table_schema = 'public' AND table_name = 'dk_live_reads'
@@ -640,6 +664,8 @@ def main(argv=None) -> int:
     ap.add_argument("--minutes", type=float, default=None, help="stop after this long (default: idle exit)")
     ap.add_argument("--idle-exit", type=float, default=45.0, help="minutes with no live event before exiting")
     ap.add_argument("--log", type=Path, default=None, help="log to this file (UTF-8) instead of the console")
+    ap.add_argument("--exit-on-new-master", action="store_true",
+                    help="exit with code 3 when a merge to master changes the feed's files")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     if a.log is not None:
@@ -670,7 +696,13 @@ def main(argv=None) -> int:
     end = None if a.minutes is None else time.monotonic() + a.minutes * 60
     idle_since = None
     n = 0
+    checked = time.monotonic()
     while end is None or time.monotonic() < end:
+        if a.exit_on_new_master and time.monotonic() - checked >= MASTER_CHECK_SEC:
+            checked = time.monotonic()
+            if feed_changed_on_master():
+                log.info("a merge to master changed the feed - exiting so the launcher starts the new one")
+                return NEW_MASTER_EXIT
         sp, wait = plan.next()
         if wait > 0:
             time.sleep(wait)

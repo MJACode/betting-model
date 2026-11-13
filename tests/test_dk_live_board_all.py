@@ -195,3 +195,34 @@ def test_a_refused_league_reads_slower_and_five_in_a_row_back_it_off():
     b.refusals = B.REFUSALS_BEFORE_BACKOFF
     p.done("NBA", {"ok": False, "live": 0, "detail": "HTTP 403"}, b)
     assert p.due["NBA"] == pytest.approx(clock.t + B.BACKOFF_SEC) and b.refusals == 0
+
+
+def _git(cwd, *args):
+    import subprocess
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd, check=True,
+                   capture_output=True)
+
+
+def test_a_merge_that_changes_the_feed_restarts_it_and_any_other_merge_does_not(tmp_path):
+    """The scheduled task's feed exits (code 3) when origin/master changes one
+    of its files, so a merge reaches mike's machine without anyone restarting it."""
+    origin, here, other = tmp_path / "origin.git", tmp_path / "here", tmp_path / "other"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "master", str(origin))
+    _git(tmp_path, "clone", "-q", str(origin), str(other))
+    (other / "data" / "ingestors").mkdir(parents=True)
+    (other / "data" / "ingestors" / "dk_live_board.py").write_text("v1\n", encoding="utf-8")
+    (other / "README.md").write_text("r1\n", encoding="utf-8")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", "one")
+    _git(other, "push", "-q", "origin", "HEAD:master")
+    _git(tmp_path, "clone", "-q", str(origin), str(here))
+    assert B.feed_changed_on_master(here) is False                    # nothing new
+    (other / "README.md").write_text("r2\n", encoding="utf-8")
+    _git(other, "commit", "-q", "-am", "docs")
+    _git(other, "push", "-q", "origin", "HEAD:master")
+    assert B.feed_changed_on_master(here) is False                    # a merge that does not touch the feed
+    (other / "data" / "ingestors" / "dk_live_board.py").write_text("v2\n", encoding="utf-8")
+    _git(other, "commit", "-q", "-am", "feed")
+    _git(other, "push", "-q", "origin", "HEAD:master")
+    assert B.feed_changed_on_master(here) is True
+    assert B.feed_changed_on_master(tmp_path / "not-a-repo") is False  # a doubt is never a restart
