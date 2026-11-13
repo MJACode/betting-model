@@ -102,7 +102,7 @@ def league_ids(page: str) -> dict[str, str]:
         out[lid] = name
     for name, lid, _slug in _NAV_B.findall(page):
         out.setdefault(lid, name)
-    # Singles only: 54 leagues on the 2026-11-13 page, 21 of them doubles.
+    # Singles only: 54 leagues on the 2026-11-13 page, 16 of them doubles (38 singles).
     return {k: v for k, v in out.items() if "doubles" not in v.lower()}
 
 
