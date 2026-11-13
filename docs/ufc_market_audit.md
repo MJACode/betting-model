@@ -30,8 +30,10 @@ method of victory had no market price at all. Their record, from `picks`
 on 2026-11-13: moneyline 5 settled BETs (3-2) plus one void, round totals 14
 (9-5), method 5 (3-2), none unsettled. One of those bets is in the published
 record (`v_public_track_record`): round totals 1-0, +1.0 units (Mario Pinto
-vs Ryan Spann Under 1.5, the 2026-09-05 card). Retiring takes it out of every
-published total, which needs mike's yes before the merge.
+vs Ryan Spann Under 1.5, the 2026-09-05 card), carried in every all-time
+line posted since. Retiring takes it out of every published total; mike
+approved that in chat on 2026-11-13. The three models' registry rows were
+switched off in production the same day, on his instruction.
 
 ## 2. What the sources hold (measured 2026-11-13)
 

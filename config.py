@@ -1284,9 +1284,11 @@ RETIRED_MODELS: frozenset = frozenset({
     # THE PUBLISHED RECORD. v_public_track_record holds ONE of their bets:
     # ufc_total_rounds 1-0, +1.0 units (Mario Pinto vs Ryan Spann Under 1.5,
     # the 2026-09-05 card). Retiring drops it from every published total once
-    # threshold_sync prunes the model's row, which is a restated record: this
-    # needs mike's yes in chat before it merges (CLAUDE.md §1b, NO RESTATED
-    # RECORDS). RECORD_EXCLUSIONS is NOT touched -- nothing is struck.
+    # threshold_sync prunes the model's row, which changes a posted record (the
+    # all-time UFC and overall lines carried it from 2026-09-05). mike approved
+    # that in chat, 2026-11-13: "yes" (CLAUDE.md §1b, NO RESTATED RECORDS). No
+    # earlier post is re-sent; the next all-time line counts one fewer win.
+    # RECORD_EXCLUSIONS is NOT touched -- nothing is struck.
     #
     # The sport plumbing stays for the models that replace them: the fight
     # results ingest (ufc_csv_loader -> ufc_fight_log, fighters), UFC odds
