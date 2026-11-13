@@ -129,6 +129,9 @@ const F = (o: Partial<PeriodFilter> = {}): PeriodFilter => ({ period: 'FG', game
   const fav = { key: 'fav_ats_pct', label: 'ATS% as Fav', group: 'Betting', sports: ['NBA'], format: 'pct3', better: 'high', hint: '', explain: { what: '', good: '', use: '', watch: '' } } as unknown as TeamStatDef;
   const d = periodStatDef(fav);
   check('fav split gains a record and a sample', String(d.record?.w) === 'fav_w' && (d.sample ?? []).length === 3, d);
+  const l5 = periodStatDef(fav, F({ games: 5 }));
+  check('a last-N window keeps the record and drops the small-sample rule',
+    String(l5.record?.w) === 'fav_w' && l5.sample === undefined, l5);
   const eff = { ...fav, key: 'net_rating' } as unknown as TeamStatDef;
   check('a non-betting stat is unchanged', periodStatDef(eff) === eff);
 }

@@ -116,6 +116,10 @@ const HOOPS: Sport[] = ['NBA', 'WNBA'];
 const RESTFUL: Sport[] = ['NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF'];
 
 const ATS_SAMPLE: (keyof TeamStatsRow)[] = ['ats_w', 'ats_l', 'ats_p'];
+/** NBA's Betting numbers are counted from team_period_results (lib/teamPeriodSplits):
+ *  which line each game is graded against, said once on the sheets that need it. */
+const NBA_GRADED_LINE = 'Each game is graded against DraftKings’ last line before tip, or the other books’ median when DraftKings had none. The Period, Games and Side filters re-count it.';
+const NBA_SPLIT_WATCH = 'A split of a split is a small sample. Under 10 games in a season view the board marks it “small sample” and does not colour it.';
 
 /** The spread's name in each sport, for the betting copy. */
 const RUN_LINE = 'the run line (±1.5 runs)';
@@ -457,6 +461,14 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
           watch: 'The line and price adjust as a team surprises people. Under 10 games the board marks it “small sample” and does not colour it.',
         },
       },
+      NBA: {
+        explain: {
+          what: `Against the spread: the share of games where the team beat the betting spread. Pushes are left out. ${NBA_GRADED_LINE}`,
+          good: 'Above 50% means the team has done better than the market expected. At standard -110 odds a bettor needs about 52.4% to profit.',
+          use: 'It tells you whether the market has been under- or overrating a team so far. Use it as a prompt to look closer, not a reason to bet.',
+          watch: 'The line adjusts as a team surprises people, so past covers say little about the next one. Under 10 games in a season view the board marks it “small sample” and does not colour it.',
+        },
+      },
     },
   },
   {
@@ -468,6 +480,16 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       good: 'Neither end is better. It is a tendency, not a grade, so it is not coloured.',
       use: 'Shows whether totals have been set too low or too high for this team. Check it with pace and both teams’ scoring before betting a total.',
       watch: 'Books move totals as trends appear, so an over streak does not mean the next total is too low. Under 10 games the board marks it “small sample” and does not colour it.',
+    },
+    bySport: {
+      NBA: {
+        explain: {
+          what: `The share of the team’s games where the combined score beat the sportsbook’s total. Pushes are left out. ${NBA_GRADED_LINE}`,
+          good: 'Neither end is better. It is a tendency, not a grade, so it is not coloured.',
+          use: 'Shows whether totals have been set too low or too high for this team. Check it with pace and both teams’ scoring before betting a total.',
+          watch: 'Books move totals as trends appear, so an over streak does not mean the next total is too low. Under 10 games in a season view the board marks it “small sample”.',
+        },
+      },
     },
   },
   {
@@ -512,6 +534,7 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
     bySport: {
       MLB: { label: 'RL% as Fav', hint: 'How often the team covered -1.5 runs as the favourite.', explain: { what: 'How often the team won by 2+ runs when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
       NHL: { label: 'PL% as Fav', hint: 'How often the team covered -1.5 goals as the favourite.', explain: { what: 'How often the team won by 2+ goals when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
+      NBA: { explain: { what: `ATS%, only in games where the team was the favourite. ${NBA_GRADED_LINE}`, good: 'Above 50% means the team has beaten the market’s expectations as a favourite.', use: 'Shows whether the market overrates or underrates the team when it is expected to win.', watch: NBA_SPLIT_WATCH } },
     },
   },
   {
@@ -526,6 +549,7 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
     bySport: {
       MLB: { label: 'RL% as Dog', hint: 'How often the team covered +1.5 runs as the underdog.', explain: { what: 'How often the team won or lost by 1 run when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
       NHL: { label: 'PL% as Dog', hint: 'How often the team covered +1.5 goals as the underdog.', explain: { what: 'How often the team won or lost by 1 goal when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
+      NBA: { explain: { what: `ATS%, only in games where the team was the underdog. ${NBA_GRADED_LINE}`, good: 'Above 50% means the team has beaten the market’s expectations as an underdog.', use: 'Shows whether the market has been selling the team short when it is not expected to win.', watch: NBA_SPLIT_WATCH } },
     },
   },
   {

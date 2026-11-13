@@ -303,7 +303,9 @@ export function TeamsBoard({
     setPeriodFailed(null);
     fetchTeamPeriodRows(sport, periodKey, season)
       .then((data) => {
-        if (!cancelled) setPeriodRows((m) => ({ ...m, [periodKey]: data }));
+        if (cancelled) return;
+        setPeriodRows((m) => ({ ...m, [periodKey]: data }));
+        setPeriodError(null);
       })
       .catch((e: unknown) => {
         if (cancelled || isAbortError(e)) return;
@@ -357,12 +359,13 @@ export function TeamsBoard({
   const periodWaiting = periodsOn && !periodData;
   const boardRows = useMemo<TeamStatsRow[]>(() => {
     if (!periodsOn) return rows;
-    if (!periodData || season == null) return [];
+    // An answered read with no rows is "no results yet", not 30 rows of dashes.
+    if (!periodData || periodData.length === 0 || season == null) return [];
     return applyPeriodSplits(rows, periodData, periodFilter, season);
   }, [periodsOn, rows, periodData, periodFilter, season]);
   const boardStat = useMemo(
-    () => (stat && periodsOn ? periodStatDef(stat) : stat),
-    [stat, periodsOn],
+    () => (stat && periodsOn ? periodStatDef(stat, periodFilter) : stat),
+    [stat, periodsOn, periodFilter],
   );
   const { rows: rankedAll, cuts } = useMemo(
     () => (boardStat ? rankTeams(boardRows, boardStat) : { rows: [], cuts: null }),
@@ -438,7 +441,10 @@ export function TeamsBoard({
   // Gated on the DAY and the BOOKS, never on which stat is selected — the
   // column must not come and go as the user taps through chips.
   const mine = useMemo(() => new Set<string>(books), [books]);
+  // The LINE pill is the full-game market; beside a 1Q or 1H record it would
+  // read as that period's line and add a full-game leg (UX review, 2026-11-13).
   const showLines =
+    !(periodsOn && periodFilter.period !== 'FG') &&
     booksReady &&
     unstarted.size > 0 &&
     gameLines.some((r) => mine.has(r.bookmaker) && unstarted.has(r.game_id));
@@ -510,25 +516,46 @@ export function TeamsBoard({
       </View>
 
       {periodsOn ? (
+        // Two rows, not three (UX review, 2026-11-13: three stacked chip rows
+        // left 3-4 teams on screen on a small phone): Period, then Games and
+        // Side side by side with a divider, as the Players window row does.
         <View style={styles.periodBlock}>
-          <FilterRow
-            title="Period"
-            options={PERIOD_OPTIONS}
-            value={periodFilter.period}
-            onChange={(period) => setPeriodFilter((f) => ({ ...f, period }))}
-          />
-          <FilterRow
-            title="Games"
-            options={GAMES_OPTIONS}
-            value={periodFilter.games}
-            onChange={(games) => setPeriodFilter((f) => ({ ...f, games }))}
-          />
-          <FilterRow
-            title="Side"
-            options={SIDE_OPTIONS}
-            value={periodFilter.side}
-            onChange={(side) => setPeriodFilter((f) => ({ ...f, side }))}
-          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.fixedRow}
+            contentContainerStyle={styles.filterChips}
+            keyboardShouldPersistTaps="handled"
+          >
+            <ChipGroup
+              title="Period"
+              options={PERIOD_OPTIONS}
+              value={periodFilter.period}
+              busy={periodWaiting && periodFailed !== periodKey}
+              onChange={(period) => setPeriodFilter((f) => ({ ...f, period }))}
+            />
+          </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.fixedRow}
+            contentContainerStyle={styles.filterChips}
+            keyboardShouldPersistTaps="handled"
+          >
+            <ChipGroup
+              title="Games"
+              options={GAMES_OPTIONS}
+              value={periodFilter.games}
+              onChange={(games) => setPeriodFilter((f) => ({ ...f, games }))}
+            />
+            <View style={styles.filterDivider} />
+            <ChipGroup
+              title="Side"
+              options={SIDE_OPTIONS}
+              value={periodFilter.side}
+              onChange={(side) => setPeriodFilter((f) => ({ ...f, side }))}
+            />
+          </ScrollView>
         </View>
       ) : null}
 
@@ -583,6 +610,7 @@ export function TeamsBoard({
           what={`the ${PERIOD_OPTIONS.find((o) => o.key === periodKey)?.spoken.toLowerCase()} results`}
           error={periodError ?? 'The results didn’t load.'}
           onRetry={() => setPeriodReload((n) => n + 1)}
+          retrying={periodWaiting && periodFailed !== periodKey}
         />
       ) : null}
 
@@ -604,23 +632,22 @@ export function TeamsBoard({
       {ranked.length > 0 ? (
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
-          <Text style={styles.colHeaderName}>
-            TEAM{season ? ` · ${teamSeasonLabel(sport, season)}` : ''}
+          {/* The filter summary lives in the wide TEAM column (UX review). A
+              last-N window can reach into last season, so it names no season. */}
+          <Text style={styles.colHeaderName} numberOfLines={1}>
+            TEAM
+            {season && !(periodsOn && periodFilter.games !== 'season') ? ` · ${teamSeasonLabel(sport, season)}` : ''}
+            {periodsOn && !isDefaultPeriodFilter(periodFilter) ? (
+              <Text style={styles.colHeaderFilter}>{` · ${periodFilterShort(periodFilter).toUpperCase()}`}</Text>
+            ) : null}
           </Text>
-          <View
-            style={styles.colHeaderStat}
-            accessible
+          <Text
+            style={styles.colHeaderRight}
+            numberOfLines={1}
             accessibilityLabel={periodsOn ? `${stat.label}, ${periodFilterSpoken(periodFilter)}` : stat.label}
           >
-            <Text style={styles.colHeaderRight} numberOfLines={1}>
-              {stat.label.toUpperCase()}
-            </Text>
-            {periodsOn && !isDefaultPeriodFilter(periodFilter) ? (
-              <Text style={[styles.colHeaderRight, styles.colHeaderFilter]} numberOfLines={1}>
-                {periodFilterShort(periodFilter).toUpperCase()}
-              </Text>
-            ) : null}
-          </View>
+            {stat.label.toUpperCase()}
+          </Text>
           {showLines ? (
             <Text style={[styles.colHeaderRight, styles.colHeaderLine]} numberOfLines={1}>
               {lineHeader}
@@ -663,7 +690,7 @@ export function TeamsBoard({
           );
         }}
         ListEmptyComponent={
-          loading || (periodWaiting && periodFailed !== periodKey) ? (
+          periodsOn && periodFailed === periodKey ? null : loading || periodWaiting ? (
             <ActivityIndicator style={styles.loading} />
           ) : (
             <EmptyState
@@ -814,14 +841,11 @@ function TeamRow({
         <Text style={[styles.value, color ? { color } : null, thin ? styles.thinValue : null]}>
           {shown}
         </Text>
+        {/* No line cap: at large text the record wraps rather than losing its
+            last part (UX review Blocker, 2026-11-13). */}
         {under ? (
-          <Text style={thin ? styles.thinLabel : styles.valueLabel} numberOfLines={1}>
-            {under}
-          </Text>
-        ) : null}
-        {thin && record && value != null ? (
-          <Text style={styles.thinLabel} numberOfLines={1}>
-            small sample
+          <Text style={thin ? styles.thinLabel : styles.valueLabel}>
+            {thin && record && value != null ? `${under} · small sample` : under}
           </Text>
         ) : null}
       </View>
@@ -830,42 +854,41 @@ function TeamRow({
   );
 }
 
-/** One labelled row of single-choice chips: Period, Games or Side. */
-function FilterRow<K extends string | number>({
+/** One titled group of single-choice chips (Period, Games or Side), laid
+ *  inline in a horizontal scroller. The spoken label starts with the visible
+ *  text, so Voice Control's "Tap 1Q" matches (WCAG 2.5.3). */
+function ChipGroup<K extends string | number>({
   title,
   options,
   value,
+  busy,
   onChange,
 }: {
   title: string;
   options: { key: K; label: string; spoken: string }[];
   value: K;
+  /** The selected chip's read is in flight. */
+  busy?: boolean;
   onChange: (k: K) => void;
 }) {
   return (
-    <View style={styles.filterRow} accessibilityRole="radiogroup" accessibilityLabel={title}>
-      <Text style={styles.filterTitle} numberOfLines={1}>
+    <>
+      <Text style={styles.filterTitle} accessibilityElementsHidden importantForAccessibility="no">
         {title}
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterChips}
-        keyboardShouldPersistTaps="handled"
-      >
-        {options.map((o) => (
-          <FilterChip
-            key={String(o.key)}
-            label={o.label}
-            active={o.key === value}
-            onPress={() => {
-              if (o.key !== value) onChange(o.key);
-            }}
-            accessibilityLabel={`${title}: ${o.spoken}`}
-          />
-        ))}
-      </ScrollView>
-    </View>
+      {options.map((o) => (
+        <FilterChip
+          key={String(o.key)}
+          label={o.label}
+          active={o.key === value}
+          busy={busy && o.key === value}
+          onPress={() => {
+            if (o.key !== value) onChange(o.key);
+          }}
+          accessibilityLabel={`${o.label}, ${o.spoken}, ${title}`}
+        />
+      ))}
+    </>
   );
 }
 
@@ -946,17 +969,28 @@ const styles = StyleSheet.create({
   list: { paddingBottom: spacing.xl },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
   hintRow: { paddingHorizontal: spacing.lg },
-  periodBlock: { paddingTop: spacing.xs, gap: spacing.xs },
-  filterRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.lg },
-  // Wide enough for "Period" at the default size; the chips scroll beside it.
+  periodBlock: { paddingTop: spacing.xs },
+  // paddingVertical 6 makes each scroller ~44pt, so the chips' hitSlop counts
+  // (FilterChip: only the part inside a horizontal ScrollView does).
+  filterChips: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 6,
+  },
+  // Inline before its chips, never truncated: it scrolls with them.
   filterTitle: {
-    width: 52,
+    flexShrink: 0,
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,
   },
-  filterChips: { gap: spacing.sm, paddingRight: spacing.lg, paddingVertical: 2 },
-  colHeaderStat: { width: 72, alignItems: 'flex-end' },
+  filterDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    marginVertical: 4,
+    backgroundColor: colors.separator,
+  },
   colHeaderFilter: { color: colors.tint },
   groupIntroRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs },
   groupIntroText: { fontSize: font.size.caption, color: colors.textSecondary, lineHeight: 16 },
@@ -1101,8 +1135,10 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  valueLabel: { fontSize: font.size.nano, color: colors.textTertiary },
-  thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
+  // textSecondary: the record is a required number now, not a footnote, and
+  // textTertiary at this size is under AA on the card (UX_REVIEW §5).
+  valueLabel: { fontSize: font.size.nano, color: colors.textSecondary, textAlign: 'right' },
+  thinLabel: { fontSize: font.size.nano, color: colors.textSecondary, fontStyle: 'italic', textAlign: 'right' },
   thinValue: { fontWeight: font.weight.regular, color: colors.textSecondary },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },

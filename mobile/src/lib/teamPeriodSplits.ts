@@ -107,14 +107,19 @@ const RECORD_KEYS: Record<string, { w: string; l: string; p: string }> = {
 };
 
 /** The stat as the filtered board reads it: its record and sample point at the
- *  columns `applyPeriodSplits` fills. Stats without one are returned unchanged. */
-export function periodStatDef(def: TeamStatDef): TeamStatDef {
+ *  columns `applyPeriodSplits` fills. Stats without one are returned unchanged.
+ *
+ *  The small-sample rule (under 10 games: untinted, ranked below, marked) is a
+ *  SEASON rule. Under Last 10/5/3 the member chose the window, every row would
+ *  carry the mark and none would be coloured (UX review, 2026-11-13), so the
+ *  def drops its sample there and the board ranks and colours the window as is. */
+export function periodStatDef(def: TeamStatDef, f: PeriodFilter = DEFAULT_PERIOD_FILTER): TeamStatDef {
   const k = RECORD_KEYS[String(def.key)];
   if (!k) return def;
   const w = k.w as keyof TeamStatsRow;
   const l = k.l as keyof TeamStatsRow;
   const p = k.p as keyof TeamStatsRow;
-  return { ...def, record: { w, l, p }, sample: [w, l, p] };
+  return { ...def, record: { w, l, p }, sample: f.games === 'season' ? [w, l, p] : undefined };
 }
 
 function num(v: number | string | null): number | null {
