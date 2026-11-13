@@ -1111,6 +1111,109 @@ def test_the_resolved_id_is_the_cfbd_texas_am_row(citadel_registry):
         "NCAAF_2026-10-17_the-citadel_texas-a-m"
 
 
+# ── William & Mary, LIU, Houston Christian (2026-09-22, finished 2026-11-13) ─
+#
+# Three FCS visitors on the 2026-09-26 slate, and eight earlier games back to
+# 2023, each got a second games row under the Odds API's nickname: "William
+# and Mary Tribe" (CFBD "William & Mary"), "LIU Sharks" (CFBD "Long Island
+# University") and "Houston Baptist Huskies" (CFBD "Houston Christian", a
+# rename). alt_names is NULL on all three. The map entries are the only
+# bridge; ncaaf_fcs_opponent_alias_2026_10_21.sql consolidates the rows
+# already stored. Registry rows as measured in ncaaf_teams on 2026-11-13.
+
+FCS_VISITOR_CASES = [
+    # (ET date, feed away, feed home, kickoff, the CFBD row's id)
+    ("2026-09-26", "William and Mary Tribe", "Duke Blue Devils",
+     "2026-09-26T19:32:00Z", "NCAAF_2026-09-26_william-mary_duke"),
+    ("2026-09-26", "LIU Sharks", "Florida International Panthers",
+     "2026-09-26T22:00:00Z",
+     "NCAAF_2026-09-26_long-island-university_florida-international"),
+    ("2026-09-26", "Houston Baptist Huskies", "North Texas Mean Green",
+     "2026-09-26T23:30:00Z", "NCAAF_2026-09-26_houston-christian_north-texas"),
+]
+
+
+@pytest.fixture
+def fcs_visitor_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "William & Mary", "mascot": "Tribe", "alt": []},
+        {"school": "Long Island University", "mascot": "Sharks", "alt": []},
+        {"school": "Houston Christian", "mascot": "Huskies", "alt": []},
+        {"school": "Houston", "mascot": "Cougars", "alt": []},
+        {"school": "Duke", "mascot": "Blue Devils", "alt": []},
+        {"school": "Florida International", "mascot": "Panthers", "alt": []},
+        {"school": "North Texas", "mascot": "Mean Green", "alt": []},
+    ])
+    return cf
+
+
+def test_no_resolver_rule_bridges_the_three_fcs_nicknames(
+        fcs_visitor_registry, monkeypatch):
+    """Watched failing shape: the school is in the registry, the map is
+    empty, and the resolver falls through to the feed's name. That is the
+    name that minted the nickname rows. "Houston Baptist Huskies" must not
+    land on "Houston" either (the mascot is not the Cougars)."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    for name in ("William and Mary Tribe", "William and Mary",
+                 "LIU Sharks", "LIU",
+                 "Houston Baptist Huskies", "Houston Baptist"):
+        assert fcs_visitor_registry.resolve_odds_api_school(name) == name
+
+
+def test_the_map_resolves_the_three_fcs_nicknames_to_the_cfbd_school(
+        fcs_visitor_registry):
+    """This assertion fails if any of the six map entries is removed."""
+    r = fcs_visitor_registry.resolve_odds_api_school
+    assert r("William and Mary Tribe") == "William & Mary"
+    assert r("William and Mary") == "William & Mary"
+    assert r("LIU Sharks") == "Long Island University"
+    assert r("LIU") == "Long Island University"
+    assert r("Houston Baptist Huskies") == "Houston Christian"
+    assert r("Houston Baptist") == "Houston Christian"
+
+
+@pytest.mark.parametrize("day,away,home,_kick,cfbd_id", FCS_VISITOR_CASES)
+def test_the_resolved_id_is_the_cfbd_row(fcs_visitor_registry,
+                                          day, away, home, _kick, cfbd_id):
+    r = fcs_visitor_registry.resolve_odds_api_school
+    assert build_ncaaf_game_id(day, r(away), r(home)) == cfbd_id
+
+
+def test_odds_ingest_writes_these_events_onto_the_cfbd_ids(
+        fcs_visitor_registry):
+    """The full odds path, unchanged from master: the map alone puts every
+    event's game row and odds rows on the CFBD id. The Duke event carries the
+    feed's 19:32Z kickoff (CFBD says 19:30Z); the id does not use the
+    kickoff, so the two minutes do not split the game."""
+    from data.ingestors.odds_ingestor import _process_events
+    events = []
+    for i, (_day, away, home, kick, _cfbd) in enumerate(FCS_VISITOR_CASES):
+        events.append({
+            "id": f"fcs-{i}",
+            "commence_time": kick,
+            "home_team": home,
+            "away_team": away,
+            "bookmakers": [{
+                "key": "draftkings",
+                "markets": [{"key": "spreads", "outcomes": [
+                    {"name": home, "price": -110, "point": -30.5},
+                    {"name": away, "price": -110, "point": 30.5},
+                ]}],
+            }],
+        })
+    games, odds = _process_events(events, "NCAAF", "open",
+                                  "2026-09-22T05:49:20Z")
+    want = [c[4] for c in FCS_VISITOR_CASES]
+    assert [g["game_id"] for g in games] == want
+    assert [g["away_team"] for g in games] == [
+        "William & Mary", "Long Island University", "Houston Christian"]
+    assert {o["game_id"] for o in odds} == set(want)
+    # The home price is still the home team's: the map rename did not
+    # unhook the outcome names from the feed's own team strings.
+    assert all(o["spread_home"] == -30.5 for o in odds)
+
+
 # ── 429 backoff (2026-11-04 daily, week 2 advanced stats) ────────────────────
 
 class _Resp:

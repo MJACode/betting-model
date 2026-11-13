@@ -8,7 +8,7 @@
 -- Beat = clv_pct > 0. No pre-start close at that book on that line → NULL.
 -- Another book is not a substitute.
 --
--- Secondary, only when Pinnacle has a pre-start close on that line:
+-- Secondary, only when Pinnacle's latest pre-start main line is that line:
 --   market_clv_pct = (taken_decimal * fair_close_prob - 1) * 100
 --   fair_close from power de-vig (3-way when the close has a draw).
 --
@@ -631,10 +631,15 @@ BEGIN
                 AND o.snapshot_type <> 'in_play')
           )
           AND o.snapshot_at::timestamptz <= s.close_bound
+          -- Pinnacle's latest main line, not its last quote on our number
+          -- (the same read as tracking/paper_tracker._capture_clv).
+          -- MLB and NHL spreads stay on the ±1.5 run/puck line. pin_moved
+          -- below leaves the market edge NULL when that close has left
+          -- scored_line.
           AND (
-            (s.game_market LIKE '%spreads%' AND o.spread_home = s.scored_line)
-            OR (s.game_market LIKE '%totals%' AND o.total_line = s.scored_line)
-            OR (s.game_market NOT LIKE '%spreads%' AND s.game_market NOT LIKE '%totals%')
+            s.game_market <> 'spreads'
+            OR s.sport_prefix NOT IN ('MLB', 'NHL')
+            OR ABS(o.spread_home) = 1.5
           )
         ORDER BY o.snapshot_at::timestamptz DESC
         LIMIT 1

@@ -109,6 +109,39 @@ review as its own entry.
    invention floor (three mechanisms of our own) and the stuck ladder are the
    next round.
 
+## 2026-11-13 — Review (second, from mike's PC)
+
+1. **Scope.** The weekly self-review run on mike's PC, after the cloud run
+   earlier the same day could not read the database or probe the routes. Since:
+   the 2026-11-13 Review entry below.
+2. **Tried.** `git log` on master since that entry: only the merge of that
+   review (#1271); `config.py` and `docs/sports` unchanged, so no model or
+   sport lacks a log entry. **Live records, read directly and read-only**
+   (settled BETs by `model_id`, units on the posted stake): `ncaaf_over_under`
+   94 bets 54-40, +9.76 units, +9.3% (matches the claim in `methods.md`);
+   `nhl_moneyline` since its rebuild (2026-10-15) 51 bets, +0.75 units, +1.4%
+   (all time 57 bets, -2.24, -3.7%, mostly the old model); `nba_prop_projection`
+   84 bets 36-48, -0.42 units, -0.6%; `ncaab_first_half_total` 72 bets +5.52
+   units, +6.3% (backtest +5.98%); `ncaaf_live_total` 98 bets -5.20 units, -4.4%
+   (consistent with "college football in-play failed"); `mlb_live_total_runs`
+   162 bets +18.90 units, +9.5%. Under 50 settled bets, nothing changed:
+   `nfl_wind_totals` 36 (+1.60, +4.2%), `ncaabw_total_blend` 4,
+   `ncaab_total_blend` 2, `ncaabw_live_total_ht` 7 (-3.55, -45.5%),
+   `nba_total_luck` 23 (-16.7%), `nba_team_total_luck` 29 (-15.0%),
+   `nba_first_half_total_luck` 14, `nfl_live_leader_ml` 5.
+3. **New.** Routes re-probed from this PC (`scouting.md`, dated): all answers
+   of 2026-11-12 held; `forum.sportsbookreview.com` gave no answer but
+   `sportsbookreview.com/forum/` gave 200; Pinnacle's old path now redirects
+   to `/en/betting-articles/` (200); centaur.reading.ac.uk now 200. Reddit, the
+   EuroLeague site, cris.unibo.it and iris.uniroma4.it still refuse.
+4. **Corrected.** One annotation, no verdict: the pro basketball
+   minutes x rate props line in `methods.md` quoted only the backtest (+3.60%);
+   it now carries the live 84-bet record (-0.6%), which is too few bets to
+   overturn it. The shooting-luck totals are live at 14 to 29 bets each with
+   negative returns; they stay unchanged until 50 settle.
+5. **The framework.** Nothing changed. Open: the cloud run and the PC run can
+   both fire on one day; this one used the `-2` branch name as instructed.
+
 ## 2026-11-13 — Review
 
 1. **Scope.** The first weekly self-review (mike, 2026-11-13: *"the skill

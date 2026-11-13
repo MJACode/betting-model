@@ -424,12 +424,22 @@ def test_a_game_with_no_commence_time_keeps_every_row():
     assert params == ("MLB_2009-04-05_ATL_PHI", "h2h", "draftkings")
 
 
-def test_the_cutoff_is_the_19_char_utc_prefix():
-    """Both columns are ISO/T-separated/UTC across all 4.5M rows, so prefixing
-    past the offset makes `Z` and `+00:00` directly comparable."""
-    conn = _OddsConn("2026-09-07T17:36:00+00:00")
-    assert _pregame_cutoff(conn, "g") == "2026-09-07T17:36:00"
-    assert len(_pregame_cutoff(conn, "g")) == 19
+def test_the_cutoff_keeps_its_offset_and_the_odds_bound_is_utc():
+    """`_pregame_cutoff` used to return the first 19 characters. A `-04:00`
+    value then parsed as UTC, and the started-game skip fired about four
+    hours early. The odds text comparison still uses the 19-character UTC
+    prefix: snapshot_at is ISO with a T and UTC, so the prefix drops the
+    offset only after the cutoff has been read as an instant."""
+    from datetime import datetime, timedelta, timezone
+
+    conn = _OddsConn("2026-09-07T17:36:00-04:00")
+    assert _pregame_cutoff(conn, "g") == "2026-09-07T17:36:00-04:00"
+    _get_dk_odds(conn, "MLB_2026-09-07_LAA_BOS", "h2h")
+    _, params = _odds_query(conn)
+    assert "2026-09-07T21:36:00" in params
+
+    stamped = datetime(2026, 9, 7, 17, 36, tzinfo=timezone(timedelta(hours=-4)))
+    assert _pregame_cutoff(_OddsConn(stamped), "g") == "2026-09-07T17:36:00-04:00"
 
 
 def test_the_ufc_sibling_lookup_is_bounded_too():

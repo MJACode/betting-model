@@ -141,11 +141,16 @@ unfinished) does not consume the failure cap. Those stop at
 first. A daily that finishes and fails before the MLB freshness steps for
 any other reason gets one retry (`MAX_NON_ABORTED_FAILURES`, 2), then
 stops, so an upstream outage does not buy odds on every boot. The ops note
-names which start this is and why it relaunched. A `worker_jobs` row of
-type `daily_pipeline` runs the full daily once under the same in-process
-lock; it is not declared, so a merge does not enqueue it. Kill switch:
-`RUN_DAILY_RETRY=0` (the manual job is not that switch). No model,
-threshold, pause or calibration change.
+names which start this is and why it relaunched. A fresh `worker_jobs` row
+of type `daily_pipeline` runs the full daily once under the same in-process
+lock; it is not declared, so a merge does not enqueue it. That run holds
+the queue lock until the daily finishes, so other queued jobs wait. A row
+left `running` by a deploy is reclaimed only when the catch-up would start
+one. Kill switch: `RUN_DAILY_RETRY=0` (the first claim of a pending manual
+row is not that switch; a reclaim of a killed one is). The daily and a
+refresh do not score together: the refresh waits on the daily lock, and
+the daily waits out a refresh already in progress. No model, threshold,
+pause or calibration change.
 
 ---
 
