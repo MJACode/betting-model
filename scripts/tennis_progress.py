@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 
 WINDOWS = r"C:\Users\micha\tennis_research\coverage_windows.json"
 PLAN_CREDITS = 2_292_240
-FLOOR = 2_687_424
+FLOOR = 2_099_550          # mike, 2026-11-13: "lower the floor" (no reserve days)
 
 
 def main() -> int:
