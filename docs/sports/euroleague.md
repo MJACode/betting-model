@@ -30,8 +30,8 @@ on (2,398 games); referees, venue and attendance per game.
 | Full-game moneyline | final, overtime included | the feed's full path, 10 books, 2020-21 on | to do (needs the purchase) |
 | Full-game spread | final margin, overtime included | the same | to do |
 | Full-game total | both scores, overtime included | the same | to do |
-| First-half moneyline, spread, total | quarters 1-2 | per-event, 6 books, 2023-24 on (2 offshore books before 2025-26) | to do; trial rows on 3 games stored |
-| First-quarter moneyline, spread, total | quarter 1 | per-event, 3 books, 2025-26 on | to do |
+| First-half moneyline, spread, total | quarters 1-2 | bought: every game 2023-24 to 2025-26 at eight times before tip, 6 books (fewer before 2025-26) | to do: research |
+| First-quarter moneyline, spread, total | quarter 1 | bought with the first half: from 2023-24 (2,050 of 2,648 pairs that season) | to do: research |
 | Second-quarter spread and total | quarter 2 | FanDuel only | to do; likely parked (one book) |
 | Team totals, full game and first half | one club's points | BetMGM, BetRivers, Fanatics (first half: BetRivers) | to do |
 | Alternate spreads and totals | final | BetMGM, BetRivers, Fanatics, Pinnacle | to do |
@@ -157,6 +157,17 @@ actually returns.
 - **The plan:** 9,360 (game, time) pairs on the 1,170 played games of 2023-24
   to date; at most 2,902,436 credits (every key at every time), **about 1.1M**
   at the trial's rate.
+- **Bought, 2023-24 to 2025-26 (2026-11-13 01:39Z to 03:03Z):** all 8,504
+  pairs asked, 478,983 rows, **801,918 credits**. Read back from the ledger:
+
+  | Season | Games | Pairs answered | No line at any book | Rows | Credits | Pairs with a first-half spread | with a first-quarter total |
+  |---|---|---|---|---|---|---|---|
+  | 2023-24 | 331 | 2,648 | 70 | 62,375 | 164,150 | 2,190 | 2,050 |
+  | 2024-25 | 330 | 2,640 | 6 | 72,770 | 159,280 | 2,492 | 1,437 |
+  | 2025-26 | 402 | 3,216 | 1 | 343,838 | 478,090 | 3,215 | 2,313 |
+
+  **Corrected:** first-quarter lines go back to 2023-24, not only 2025-26 as
+  the three sampled games suggested.
 
 **The floor.** The plan holds 15M credits a cycle; it refilled 2026-11-08 and
 11,605,707 were left after the trials. The platform's own burn measured
