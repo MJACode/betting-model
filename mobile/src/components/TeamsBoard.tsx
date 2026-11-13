@@ -445,6 +445,8 @@ export function TeamsBoard({
   const mine = useMemo(() => new Set<string>(books), [books]);
   // The LINE pill is the full-game market; beside a 1Q or 1H record it would
   // read as that period's line and add a full-game leg (UX review, 2026-11-13).
+  // Only NBA has period filters (lib/teamPeriodSplits), so on a college board
+  // this first condition is always true and the pills follow the day and books.
   const showLines =
     !(periodsOn && periodFilter.period !== 'FG') &&
     booksReady &&
