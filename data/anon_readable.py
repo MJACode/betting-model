@@ -426,6 +426,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # on demand by data/ingestors/ufc_price_archive.ensure_tables. Research
     # input, never read by the app.
     "ufc_price_archive",
+    # UFC odds history bought 2026-11-13 and its ledger, created on demand by
+    # data/ingestors/ufc_odds_history.ensure_tables. Research input.
+    "ufc_odds_history",
+    "ufc_odds_history_pulls",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
