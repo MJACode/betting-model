@@ -12,7 +12,6 @@
 
 import {
   loadTodayBoard,
-  loadTodayBoardOnForeground,
   resetTodayBoardForTests,
   setTodayBoardClockForTests,
   setTodayBoardReader,
@@ -171,15 +170,13 @@ async function ageWindow(): Promise<void> {
   t += TODAY_PICKS_STALE_MS - 1;
   await loadTodayBoard(DATE, false);
   check('a fresh mount does not re-read', calls === 1, `calls=${calls}`);
-  await loadTodayBoardOnForeground(DATE);
-  check('a fresh foreground does not re-read', calls === 1, `calls=${calls}`);
-  t += 1;
-  await loadTodayBoard(DATE, false);
-  check('a stale mount re-reads once', calls === 2, `calls=${calls}`);
-
+  // Picks' 10-minute timer and its resume reload call refresh, which always
+  // reads, fresh or not.
+  await loadTodayBoard(DATE, true);
+  check('a reload from Picks reads even inside the window', calls === 2, `calls=${calls}`);
   t += TODAY_PICKS_STALE_MS;
-  await loadTodayBoardOnForeground(DATE);
-  check('a stale foreground re-reads once', calls === 3, `calls=${calls}`);
+  await loadTodayBoard(DATE, false);
+  check('a stale mount re-reads once', calls === 3, `calls=${calls}`);
 
   t += TODAY_PICKS_STALE_MS;
   const hold = gate();
@@ -193,6 +190,70 @@ async function ageWindow(): Promise<void> {
   hold.release();
   await Promise.all(pending);
   check('four stale callers still made one read', calls === 4, `calls=${calls}`);
+}
+
+/**
+ * Picks reloads in the background every 10 minutes. A failing reload must not
+ * clear the error banner at its start and set it again at its end: that
+ * unmounts and remounts the banner, and VoiceOver reads it out each time
+ * (UX review, 2026-11-12). The error clears only when a read succeeds.
+ */
+async function aFailingReloadKeepsTheError(): Promise<void> {
+  resetTodayBoardForTests();
+  let calls = 0;
+  const holds = [gate(), gate(), gate(), gate()];
+  const results = [ok(1), fail('timed out'), fail('timed out'), ok(4)];
+  setTodayBoardReader(async () => {
+    const n = calls;
+    calls += 1;
+    await holds[n]?.opened;
+    return results[n] ?? ok(99);
+  });
+  const heard: Array<string | null> = [];
+  const stop = subscribeTodayBoard<Row>(DATE, (snap) => heard.push(snap.error));
+  holds[0]?.release();
+  await loadTodayBoard(DATE, false);
+  holds[1]?.release();
+  await loadTodayBoard(DATE, true);
+  check('a failed reload shows its error', todayBoardSnapshot<Row>(DATE).error === 'timed out');
+  heard.length = 0;
+  const again = loadTodayBoard(DATE, true);
+  check(
+    'a background reload does not clear the error when it starts',
+    todayBoardSnapshot<Row>(DATE).error === 'timed out' && heard.every((e) => e === 'timed out'),
+    JSON.stringify(heard),
+  );
+  holds[2]?.release();
+  await again;
+  check(
+    'a second failing reload never clears the error in between',
+    heard.length > 0 && heard.every((e) => e === 'timed out'),
+    JSON.stringify(heard),
+  );
+  holds[3]?.release();
+  await loadTodayBoard(DATE, true);
+  check('a read that succeeds clears the error', todayBoardSnapshot<Row>(DATE).error === null
+    && todayBoardSnapshot<Row>(DATE).data[0]?.id === 4);
+  stop();
+}
+
+/** A cancelled read returns no rows and no error. It must leave a shown error alone. */
+async function aCancelledReloadKeepsTheError(): Promise<void> {
+  resetTodayBoardForTests();
+  let calls = 0;
+  setTodayBoardReader(async () => {
+    calls += 1;
+    if (calls === 1) return ok(1);
+    if (calls === 2) return fail('timed out');
+    return { data: [], pausedData: [], loaded: false, error: null, partial: null };
+  });
+  await loadTodayBoard(DATE, false);
+  await loadTodayBoard(DATE, true);
+  await loadTodayBoard(DATE, true);
+  const snap = todayBoardSnapshot<Row>(DATE);
+  check('a cancelled reload leaves the shown error and the rows',
+    calls === 3 && snap.error === 'timed out' && snap.data[0]?.id === 1,
+    `calls=${calls} error=${snap.error}`);
 }
 
 function midnightEt(): void {
@@ -263,7 +324,7 @@ async function midnightEtWithAStaleRead(): Promise<void> {
   );
 }
 
-async function infinityIsForegroundOnly(): Promise<void> {
+async function infinityNeverExpiresAMount(): Promise<void> {
   resetTodayBoardForTests();
   setTodayPicksStaleMsForTests(Number.POSITIVE_INFINITY);
   let t = 1_000_000;
@@ -283,11 +344,11 @@ async function infinityIsForegroundOnly(): Promise<void> {
     await hold.opened;
     return ok(calls);
   });
-  const pending = [0, 1, 2, 3].map(() => loadTodayBoardOnForeground(DATE));
-  check('Infinity: four foregrounds start one read', calls === 2, `calls=${calls}`);
+  const pending = [0, 1, 2, 3].map(() => loadTodayBoard(DATE, true));
+  check('Infinity: four reloads from Picks start one read', calls === 2, `calls=${calls}`);
   hold.release();
   await Promise.all(pending);
-  check('Infinity: four foregrounds still made one read', calls === 2, `calls=${calls}`);
+  check('Infinity: those four reloads made one read and one follow-up', calls === 3, `calls=${calls}`);
 }
 
 async function aQuietDateIsDropped(): Promise<void> {
@@ -429,9 +490,11 @@ async function main(): Promise<void> {
   await failedRefreshKeepsRows();
   await datesDoNotShare();
   await ageWindow();
+  await aFailingReloadKeepsTheError();
+  await aCancelledReloadKeepsTheError();
   midnightEt();
   await midnightEtWithAStaleRead();
-  await infinityIsForegroundOnly();
+  await infinityNeverExpiresAMount();
   await aQuietDateIsDropped();
   await listenersSeeTheRead();
   await countLaunchRequests();

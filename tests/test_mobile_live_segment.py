@@ -550,12 +550,26 @@ def test_the_pregame_boards_reload_while_open():
     assert "setInterval(" in focus and "TODAY_POLL_MS" in focus, "no reload loop on the pre-game boards"
     assert "AppState.addEventListener('change'" in focus and "clearInterval(id)" in focus
     assert "loading && !loaded" in src, "a background reload would blank the board"
-    # Overlapping loads (pull during poll, a resume past midnight ET): newest wins.
-    load = hook[hook.index("const load = useCallback"):hook.index("}, [target]);")]
-    assert "const mine = ++seq.current" in load
+    # Since #1249 every mount of one date shares one read (lib/todayPicksFlight.ts),
+    # so the two load rules live there, not in a per-hook sequence counter.
+    flight = _read(MOBILE / "src" / "lib" / "todayPicksFlight.ts")
+    load = flight[flight.index("export async function loadTodayBoard"):flight.index("export function resetTodayBoardForTests")]
+    # Overlapping loads (pull during poll): newest wins. One read per date at a
+    # time; a refresh mid-read runs one follow-up instead of a parallel read,
+    # and the value published is the last read's.
+    assert "if (slot.inFlight) {" in load and "if (force) slot.again = true;" in load
+    assert "if (!slot.again) break;" in load
     # The error clears on success only, so a failing poll does not re-announce
-    # the banner every 10 minutes.
-    first_clear = load.index("setError(null)")
-    assert load.index("if (!current()) return;") < first_clear, "error is cleared before the load succeeds"
+    # the banner every 10 minutes: nothing before the read may clear it.
+    before_read = load[: load.index("await read(date)")]
+    assert "error: null" not in before_read, "error is cleared before the load succeeds"
+    ok_at = load.index("if (result.loaded) {")
+    success = load[ok_at:load.index("} else", ok_at)]
+    assert "error: null" in success, "a successful reload no longer clears the error"
+    # Picks' resume rule is the only resume reload: the hook's own return
+    # handler moves the date and does not read.
+    handler = hook[hook.index("AppState.addEventListener"):]
+    handler = handler[: handler.index("return () => sub.remove();")]
+    assert "loadTodayBoard" not in handler, "a second resume reload runs beside Picks' own"
     # The partial banner hides for a tap's retry, not for every background poll.
     assert "{!error && !loading && partial ?" not in src

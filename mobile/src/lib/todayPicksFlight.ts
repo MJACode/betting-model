@@ -5,29 +5,33 @@
  * navigator) and from Picks at the same time, and again from Stats and the
  * model screens. Each mount used to start the whole seven-sport read: picks,
  * games, DraftKings odds, and the all-books line shop. Callers of one date
- * share a single in-flight request. A finished read is reused until
- * `loadTodayBoard(date, true)` — pull-to-refresh and any other `refresh()`.
- * A refresh that arrives while a read is running does not start a second
- * one; it asks for exactly one follow-up when the current read settles.
+ * share a single in-flight request. A refresh that arrives while a read is
+ * running does not start a second one; it asks for exactly one follow-up when
+ * the current read settles, so the newest read is the one every caller
+ * settles on.
  *
- * A finished read is reused for TODAY_PICKS_STALE_MS. A model page or
- * Player Stats opened later than that starts one new read, and every other
- * mount of the same date hears it. Inside the window, hopping screens does
- * not start another seven-sport read. Returning to the app does the same
- * check. Set the constant to Infinity for foreground-only: a mount never
- * expires the read, and coming back to the app is what reads again.
+ * When the board reloads is not decided here. PicksHomeScreen reloads it
+ * (every 10 minutes while its tab is focused, on coming back to the app or
+ * the tab, and on pull-to-refresh) through `loadTodayBoard(date, true)`. This
+ * file only decides whether a MOUNT may reuse a finished read: it may while
+ * the read is younger than TODAY_PICKS_STALE_MS. A model page or Player Stats
+ * opened later than that starts one new read, and every other mount of the
+ * same date hears it.
+ *
+ * The error shown on the board is cleared only by a read that succeeds. A
+ * failing or cancelled background reload leaves it as it was, so the banner
+ * is not unmounted and mounted again every 10 minutes (UX review,
+ * 2026-11-12).
  *
  * No React and no native module, so the dedupe can be run under node.
  */
 
 /**
- * How old a finished read may be before the next mount, or the next return
- * to the app, starts another one.
+ * How old a finished read may be before the next MOUNT starts another one.
+ * Picks' timer, its resume reload and pull-to-refresh read whatever this is.
  *
- * 5 minutes for now. Matt is choosing among 5 minutes, 15 minutes, and
- * foreground-only. Set this to `Infinity` for foreground-only: a mount keeps
- * the read for the whole session, and AppState 'active' is what starts the
- * next read. Pull-to-refresh always reads, whatever this is.
+ * 5 minutes. `Infinity` means a mount never expires the read: only Picks'
+ * reloads (and a new Eastern date) read again.
  */
 export const TODAY_PICKS_STALE_MS = 5 * 60 * 1000;
 
@@ -161,19 +165,9 @@ export function setTodayBoardClockForTests(fn: () => number): void {
   nowMs = fn;
 }
 
-/** Tests the Infinity (foreground-only) switch. Pass null to use the constant. */
+/** Tests the Infinity (a mount never expires) setting. Pass null to use the constant. */
 export function setTodayPicksStaleMsForTests(ms: number | null): void {
   staleMsOverride = ms;
-}
-
-/**
- * AppState 'active'. A finite age re-reads only when the cached read is
- * older than TODAY_PICKS_STALE_MS. Infinity re-reads on every return: that
- * is the foreground-only setting, and concurrent callers still share one flight.
- */
-export function loadTodayBoardOnForeground(date: string): Promise<void> {
-  if (!Number.isFinite(staleMs())) return loadTodayBoard(date, false, true);
-  return loadTodayBoard(date, false, false);
 }
 
 export function todayBoardSnapshot<Row>(date: string): TodayBoardSnapshot<Row> {
@@ -196,13 +190,13 @@ export function subscribeTodayBoard<Row>(
  * not, await the same promise. A force that arrives mid-read schedules one
  * follow-up instead of a parallel read.
  */
-export async function loadTodayBoard(date: string, force = false, bypassAge = false): Promise<void> {
+export async function loadTodayBoard(date: string, force = false): Promise<void> {
   const slot = slotFor(date);
   if (slot.inFlight) {
     if (force) slot.again = true;
     return slot.inFlight;
   }
-  if (!force && !bypassAge && readIsFresh(slot)) return;
+  if (!force && readIsFresh(slot)) return;
   if (!reader) throw new Error('today board reader is not installed');
 
   const read = reader;
@@ -212,7 +206,10 @@ export async function loadTodayBoard(date: string, force = false, bypassAge = fa
   });
   slot.inFlight = flight;
   slot.again = false;
-  slot.value = { ...slot.value, loading: true, error: null };
+  // `error` is NOT cleared here. A failing background reload would unmount
+  // the error banner and mount it again, read out each time by VoiceOver.
+  // It clears when a read succeeds (UX review, 2026-11-12).
+  slot.value = { ...slot.value, loading: true };
   publish(slot);
 
   try {
@@ -240,7 +237,9 @@ export async function loadTodayBoard(date: string, force = false, bypassAge = fa
           error: null,
           loading: true,
         };
-      } else {
+      } else if (result.error != null) {
+        // A failed read keeps the rows. A cancelled one (error null) leaves
+        // the shown error as it was too.
         slot.value = { ...slot.value, error: result.error, loading: true };
       }
       if (!slot.again) break;
