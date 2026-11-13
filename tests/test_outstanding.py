@@ -34,6 +34,8 @@ def test_repo_slug(url):
     ([{"conclusion": "SUCCESS"}, {"state": "SUCCESS"}], "checks pass"),
     ([{"conclusion": "SUCCESS"}, {"conclusion": "FAILURE"}], "checks failing"),
     ([{"status": "IN_PROGRESS"}, {"conclusion": "SUCCESS"}], "checks running"),
+    ([{"name": "daily pipeline not running", "conclusion": "FAILURE"},
+      {"name": "pytest-subset", "conclusion": "SUCCESS"}], "checks pass"),
 ])
 def test_checks_state(rollup, expected):
     assert o.checks_state(rollup) == expected

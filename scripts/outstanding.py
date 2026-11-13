@@ -57,9 +57,17 @@ def _days(iso: str, now: dt.datetime) -> int:
     return max(0, (now - when).days)
 
 
+# A time-of-day gate, not a test of the code: `.github/workflows/daily-merge-gate.yml`
+# posts it red during the 6am ET daily and it stays red until its next scheduled
+# tick, which GitHub runs far less often than its cron asks. Reported apart.
+TIME_GATES = {"daily pipeline not running"}
+
+
 def checks_state(rollup) -> str:
     states = set()
     for c in rollup or []:
+        if (c.get("name") or c.get("context") or "") in TIME_GATES:
+            continue
         s = (c.get("conclusion") or c.get("state") or c.get("status") or "").upper()
         if s:
             states.add(s)
