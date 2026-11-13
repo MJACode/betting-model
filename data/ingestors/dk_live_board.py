@@ -38,11 +38,15 @@ WHAT IS WRITTEN (data/migrations/dk_live_reads_2026_11_12.sql):
                  reads: the read's time and whether it answered. A reader
                  trusts dk_live_reads only while this is seconds old.
 
-THE POLL. Every --poll seconds (default DK_LIVE_POLL_SEC, 2.5) while a game is
-live, every IDLE_POLL_SEC when none is; it exits after --idle-exit minutes with
-no live event. 2.5 s ran 2026-11-12 23:5x-03:xx UTC without one refusal;
-DraftKings' terms forbid automated access however a request is shaped, and
-mike has made that call (docs/live_odds_freshness.md).
+THE POLL. Every --poll seconds (default DK_LIVE_POLL_SEC, 1.0; mike, 2026-11-12:
+"can it run even faster") while a game is live, every IDLE_POLL_SEC when none
+is; a refusal doubles the gap (to 5 s) and a quiet minute halves it back. It
+exits after --idle-exit minutes with no live event, and at once when another
+feed holds the lock port or the tables do not exist yet. Measured from this
+machine: 2.5 s reads 2026-11-13 00:15-00:40 and 03:25-04:4x UTC and 1 s reads for two minutes
+at 04:4x, no refusal; a request takes a median 0.22 s. DraftKings' terms forbid
+automated access however a request is shaped, and mike has made that call
+(docs/live_odds_freshness.md).
 """
 from __future__ import annotations
 
@@ -64,7 +68,12 @@ log = logging.getLogger("data.ingestors.dk_live_board")
 LEAGUES = {"NCAAB": "92483"}          # DraftKings' league ids, read off the board's own `leagues`
 BOARD_URL = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/{league}"
 BOOT_URL = {"NCAAB": "https://sportsbook.draftkings.com/leagues/basketball/ncaab"}
-POLL_SEC = float(os.environ.get("DK_LIVE_POLL_SEC", "2.5"))
+POLL_SEC = float(os.environ.get("DK_LIVE_POLL_SEC", "1.0"))
+# A refusal doubles the gap between reads, up to MAX_POLL_SEC; a minute without
+# one halves it back toward POLL_SEC (his home address is the one at stake).
+MAX_POLL_SEC = 5.0
+# One feed at a time on this machine: a second start finds the port taken and exits.
+LOCK_PORT = int(os.environ.get("DK_LIVE_LOCK_PORT", "47231"))
 IDLE_POLL_SEC = float(os.environ.get("DK_LIVE_IDLE_POLL_SEC", "30"))
 RESOLVE_RETRY_SEC = 60.0
 RESOLVER_REFRESH_SEC = 600.0
@@ -367,6 +376,36 @@ class Board:
             self.last[d["game_id"]] = d
 
 
+def next_gap(gap: float, refused: bool, quiet_s: float, base: float = POLL_SEC) -> float:
+    """The gap before the next read: doubled after a refusal (to MAX_POLL_SEC),
+    halved back toward `base` after a quiet minute."""
+    if refused:
+        return min(MAX_POLL_SEC, max(gap, base) * 2.0)
+    if quiet_s >= 60.0 and gap > base:
+        return max(base, gap / 2.0)
+    return gap
+
+
+def single_instance(port: int = LOCK_PORT):
+    """A socket bound to a localhost port, held for the process's life, or
+    None when another feed holds it. Windows frees it when the process dies."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        s.close()
+        return None
+    return s
+
+
+def tables_ready(conn) -> bool:
+    row = conn.execute("SELECT to_regclass('public.dk_live_reads') IS NOT NULL "
+                       "AND to_regclass('public.dk_live_feed') IS NOT NULL").fetchone()
+    conn.commit()
+    return bool(row and row[0])
+
+
 def dk_session(sport: str):
     from curl_cffi import requests as cr
     s = cr.Session(impersonate="chrome124")
@@ -392,8 +431,17 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from data.db import get_connection
+    lock = single_instance()
+    if lock is None:
+        log.info("a DraftKings board feed is already running on this machine - exiting")
+        return 0
     board = Board(a.sport, get_connection, dk_session, ncaab_resolver, dry_run=a.dry_run)
+    if not a.dry_run and not tables_ready(board.c()):
+        log.warning("dk_live_reads / dk_live_feed do not exist yet (data/migrations/dk_live_reads_2026_11_12.sql, "
+                    "applied by data.view_migrations) - exiting without reading DraftKings")
+        return 0
     board.load_last()
+    gap, last_refusal = a.poll, time.monotonic()
     end = None if a.minutes is None else time.monotonic() + a.minutes * 60
     idle_since = None
     n = 0
@@ -415,8 +463,17 @@ def main(argv=None) -> int:
             time.sleep(BACKOFF_SEC)
             board.refusals = 0
             continue
-        gap = a.poll if res.get("live") else IDLE_POLL_SEC
-        time.sleep(max(0.0, gap - (time.monotonic() - t0)))
+        refused = not res.get("ok") and "HTTP" in str(res.get("detail") or "")
+        if refused:
+            last_refusal = time.monotonic()
+        new_gap = next_gap(gap, refused, time.monotonic() - last_refusal, base=a.poll)
+        if new_gap != gap:
+            log.warning("%s: reading every %.1f s (was %.1f s)", a.sport, new_gap, gap)
+            if not refused:
+                last_refusal = time.monotonic()      # the next halving waits another quiet minute
+            gap = new_gap
+        wait = gap if res.get("live") else IDLE_POLL_SEC
+        time.sleep(max(0.0, wait - (time.monotonic() - t0)))
     return 0
 
 

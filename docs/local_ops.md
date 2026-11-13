@@ -531,7 +531,7 @@ assertion. The bovada feed does not have this caveat — it publishes
 
 mike, 2026-11-12: *"This is live betting ... This needs to be as close to Real
 time as possible."* The three NCAAB in-play models decide on DraftKings' own
-board, read from here every 2.5 s: the line, and DraftKings' score and clock
+board, read from here every second: the line, and DraftKings' score and clock
 from the same read. The worker's NCAAB loop reads what this writes and decides
 and posts within seconds; without it the loop falls back to the odds provider
 and ESPN (minutes).
@@ -553,8 +553,29 @@ SELECT sport, last_read_at, ok, live_events, matched, detail FROM dk_live_feed;
 ```
 
 `matched` below `live_events` means a DraftKings game did not resolve onto our
-schedule; the log names it. Five refusals in a row back the feed off two
-minutes (this address is the one DraftKings would block).
+schedule; the log names it. It reads every second while a game is live (mike:
+*"can it run even faster"*); a refusal doubles the gap, up to 5 s, and a quiet
+minute halves it back. Five refusals in a row back the feed off two minutes
+(this address is the one DraftKings would block).
+
+**The schedule: every minute 11am-3am ET, registered 2026-11-12** (mike:
+*"yes"*). The task `BettingModel\DkLiveBoard` runs
+`betting_local_copies\bin\dk_live_board_run.ps1` (in the repo as
+`scripts/dk_live_board_run.ps1`) every minute from 11:00 for 16 hours, and two
+minutes after sign-in. A start while a run is going is ignored
+(`MultipleInstances = IgnoreNew`), and a feed already running holds
+127.0.0.1:47231, so a second one exits at once. The launcher puts its own
+worktree, `C:\Users\micha\Documents\bm-live-feed`, on origin/master before
+each start, so what runs is always master and never another session's branch.
+Until the feed is merged and its tables exist it logs one line and exits. Like
+the backup task, it runs only while mike is signed in to Windows. Log:
+`betting_local_copies\logs\dk_live_board_<date>.log`.
+
+```bat
+schtasks /Query /TN "BettingModel\DkLiveBoard" /V /FO LIST
+schtasks /Run /TN "BettingModel\DkLiveBoard"
+schtasks /Delete /TN "BettingModel\DkLiveBoard" /F
+```
 
 ## Diagnosing a DATABASE_URL that will not authenticate
 

@@ -432,19 +432,42 @@ def unsettled_bet_dates(conn) -> set:
 
 
 def notify_live(target_date: str) -> None:
-    """Push, then #ncaab-live (tracking.discord_notifier: NCAAB is in
-    config.DISCORD_LIVE_CHANNEL_REQUIRED, so no other channel). Neither may
-    break the loop."""
-    try:
-        from tracking.push_notifier import notify_live_signals
-        notify_live_signals(target_date=target_date, dry_run=False)
-    except Exception as exc:                          # noqa: BLE001
-        log.error("live push failed (non-fatal): %s", exc)
-    try:
-        from tracking.discord_notifier import notify_discord_live
-        notify_discord_live(target_date=target_date, dry_run=False)
-    except Exception as exc:                          # noqa: BLE001
-        log.error("live Discord post failed (non-fatal): %s", exc)
+    """Push and #ncaab-live at the same time (tracking.discord_notifier: NCAAB
+    is in config.DISCORD_LIVE_CHANNEL_REQUIRED, so no other channel). Each
+    opens its own connection and claims its own push_sent key; neither may
+    break the loop. One after the other, the post waited on the push."""
+    import threading
+
+    def push():
+        try:
+            from tracking.push_notifier import notify_live_signals
+            notify_live_signals(target_date=target_date, dry_run=False)
+        except Exception as exc:                      # noqa: BLE001
+            log.error("live push failed (non-fatal): %s", exc)
+
+    def discord():
+        try:
+            from tracking.discord_notifier import notify_discord_live
+            notify_discord_live(target_date=target_date, dry_run=False)
+        except Exception as exc:                      # noqa: BLE001
+            log.error("live Discord post failed (non-fatal): %s", exc)
+
+    threads = [threading.Thread(target=f, daemon=True) for f in (push, discord)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+
+def seconds_to_next_window(slots: Slots, now: datetime) -> float:
+    """Seconds until the next window opens (0 inside one): the loop wakes at
+    the window's first second instead of on its next 20 s tick."""
+    if slots.instant(now) is not None:
+        return 0.0
+    base = now.astimezone(timezone.utc) + timedelta(seconds=slots.offset)
+    floored = base.replace(minute=base.minute - base.minute % slots.cadence, second=0, microsecond=0)
+    nxt = floored + timedelta(minutes=slots.cadence) - timedelta(seconds=slots.offset)
+    return max(0.0, (nxt - now).total_seconds())
 
 
 def record_credits(conn, credits: int | None) -> None:
@@ -1180,6 +1203,7 @@ def main(argv=None) -> int:
                          loop.bets_written, loop.espn.calls, loop.feed.calls, loop.feed.credits_used)
                 return 0
             gap = DK_TICK_SEC if res.get("fast") else a.interval
+            gap = min(gap, seconds_to_next_window(loop.slots, datetime.now(timezone.utc)) + 0.05)
             time.sleep(max(0.0, gap - (time.monotonic() - started)))
     finally:
         if loop.conn is not None:

@@ -1535,7 +1535,9 @@ and a basket since the stamp makes it ineligible. Team fouls come from ESPN's
 newest summary at or before the stamp (ESPN runs about 40 s behind, so a foul
 in the last minute can be missing from the bonus terms). Two waits of one read
 each: a quote first seen on the newest read, and a basket DraftKings has not
-repriced yet (at most 20 s, then the game is skipped for the window). The
+repriced yet (at most 20 s, then the game is skipped for the window). The feed
+reads every second; the loop wakes at the window's first second, and push and
+Discord go out together. The
 deciding book is DraftKings alone on this path (the graded selection at
 DraftKings alone: +9.0% on 658); games DraftKings does not list, and every game
 while the feed is off, go the slow way above. Ledger rows it decides read

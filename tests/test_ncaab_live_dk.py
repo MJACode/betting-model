@@ -299,3 +299,33 @@ def test_no_eligible_draftkings_quote_carries_the_game_and_the_slow_path_does_no
     loop.tick()
     assert db.ledger == {} and db.carried and "DraftKings" in db.carried[-1]["reason"]
     assert loop.feed.calls == 0
+
+
+# ─── as fast as it can safely go (mike, 2026-11-12: "can it run even faster") ─
+
+def test_the_feed_reads_every_second_and_backs_off_on_a_refusal_then_comes_back():
+    assert B.POLL_SEC == 1.0
+    g = B.next_gap(1.0, refused=True, quiet_s=0.0, base=1.0)
+    assert g == 2.0 and B.next_gap(4.0, True, 0.0, 1.0) == B.MAX_POLL_SEC
+    assert B.next_gap(2.0, refused=False, quiet_s=30.0, base=1.0) == 2.0     # not quiet long enough
+    assert B.next_gap(2.0, refused=False, quiet_s=61.0, base=1.0) == 1.0
+    assert B.next_gap(1.0, refused=False, quiet_s=600.0, base=1.0) == 1.0    # never under the base
+
+
+def test_a_second_feed_on_the_machine_finds_the_lock_and_exits():
+    first = B.single_instance(port=47299)
+    try:
+        assert first is not None and B.single_instance(port=47299) is None
+    finally:
+        first.close()
+    again = B.single_instance(port=47299)
+    assert again is not None
+    again.close()
+
+
+def test_the_loop_wakes_at_the_window_not_on_its_next_tick():
+    from datetime import datetime, timezone
+    s = LP.Slots()                                        # each :00 and :30 minus 262 s
+    at = datetime(2026, 11, 13, 3, 55, 0, tzinfo=timezone.utc)
+    assert LP.seconds_to_next_window(s, at) == pytest.approx(38.0)            # opens 03:55:38
+    assert LP.seconds_to_next_window(s, datetime(2026, 11, 13, 3, 56, 0, tzinfo=timezone.utc)) == 0.0
