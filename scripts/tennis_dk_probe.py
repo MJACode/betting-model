@@ -245,13 +245,63 @@ def one_pass(s, conn, last: dict, out_dir: Path | None) -> dict:
     return out
 
 
+def other_readers(me: int) -> list[int]:
+    """Process ids of any other running copy of this reader (not a --detach
+    launcher), so a second start never doubles the requests to DraftKings."""
+    import psutil
+    out = []
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info["cmdline"] or [])
+        except (psutil.Error, TypeError):
+            continue
+        if proc.info["pid"] != me and "tennis_dk_probe" in cmd and "--detach" not in cmd \
+                and "pytest" not in cmd:
+            out.append(proc.info["pid"])
+    return out
+
+
+def detach(argv: list[str], log_dir: Path) -> int:
+    """Start this reader as its own process, outside the caller's session, and
+    return at once. The child inherits this process's environment (the
+    database URL run_with_db.py set), runs from the repository root, and logs
+    to log_dir/dk_reader.out and .err."""
+    import os
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parent.parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    flags = 0
+    if os.name == "nt":
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    child = subprocess.Popen(
+        [sys.executable, "-m", "scripts.tennis_dk_probe", *argv], cwd=str(root),
+        stdout=open(log_dir / "dk_reader.out", "a", encoding="utf-8"),
+        stderr=open(log_dir / "dk_reader.err", "a", encoding="utf-8"),
+        stdin=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    print(json.dumps({"started": child.pid}), flush=True)
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="DraftKings tennis board -> Supabase")
     ap.add_argument("--out", type=Path, help="write the first pass's raw answers here")
     ap.add_argument("--log-until", help="repeat every --every-min until this UTC time")
     ap.add_argument("--every-min", type=float, default=30)
     ap.add_argument("--no-store", action="store_true", help="read and save raw only")
+    ap.add_argument("--detach", action="store_true",
+                    help="start the reader as its own process and return at once")
+    ap.add_argument("--log-dir", type=Path, default=Path(r"C:\Users\micha\tennis_research\logs"))
+    import os
+    import sys
+    raw_args = list(sys.argv[1:] if argv is None else argv)
     a = ap.parse_args(argv)
+    running = other_readers(os.getpid())
+    if running:
+        print(json.dumps({"already_running": running}), flush=True)
+        return 0
+    if a.detach:
+        return detach([x for x in raw_args if x != "--detach"], a.log_dir)
     if a.out:
         a.out.mkdir(parents=True, exist_ok=True)
     conn = None

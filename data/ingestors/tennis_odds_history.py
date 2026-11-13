@@ -501,6 +501,31 @@ def shard(windows: list[dict], spec: str | None) -> list[dict]:
     return windows[i::n]
 
 
+def spent_on(conn, windows: list[dict]) -> int:
+    """Credits the ledger shows this purchase spent inside `windows`."""
+    total = 0
+    for w in windows:
+        r = conn.execute(f"SELECT coalesce(sum(credits), 0) FROM {FETCHES} WHERE source = %s "
+                         f"AND sport_key = %s AND asked_ts BETWEEN %s AND %s",
+                         (SOURCE, w["key"], w["start"], w["end"])).fetchone()
+        total += int(r[0])
+    return total
+
+
+def wait_for_exit(pid: int, poll_s: float = 30.0) -> None:
+    """Block until process `pid` has exited (any reason: done, the floor, a
+    lost connection). A pid that is not running returns at once."""
+    import psutil
+    while True:
+        try:
+            proc = psutil.Process(pid)
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                return
+        except psutil.NoSuchProcess:
+            return
+        time.sleep(poll_s)
+
+
 def plan(windows: list[dict], step: timedelta) -> dict:
     """The most this purchase can bill: every step of every window, both book
     groups. Gaps the feed did not keep are jumped, so the real bill is lower."""
@@ -526,14 +551,23 @@ def main(argv=None) -> int:
     ap.add_argument("--plan", help="the sweep's JSON: print the purchase's ceiling")
     ap.add_argument("--buy", help="the sweep's JSON: walk every window, newest first")
     ap.add_argument("--shard", help="i/n: this process buys every n-th window from the i-th")
+    ap.add_argument("--after-pid", type=int,
+                    help="wait for this process to exit, then continue its shard")
+    ap.add_argument("--share", type=int,
+                    help="this shard's share of the plan: the ceiling becomes the share minus "
+                         "what the ledger shows already spent on the shard's windows")
     ap.add_argument("--out")
     a = ap.parse_args(argv)
     step = timedelta(minutes=a.step_min)
     if a.plan:
         print(json.dumps(plan(shard(load_windows(a.plan), a.shard), step)))
         return 0
-    if not a.max_credits:
-        raise SystemExit("--max-credits is required for any call that spends")
+    if not a.max_credits and not a.share:
+        raise SystemExit("--max-credits (or --share) is required for any call that spends")
+    if a.after_pid:
+        logger.info(f"waiting for process {a.after_pid} to exit")
+        wait_for_exit(a.after_pid)
+        logger.info(f"process {a.after_pid} has exited; continuing")
     import psycopg2
     from data.db import ConnectionLost, get_connection
     LOST = (ConnectionLost, psycopg2.OperationalError, psycopg2.InterfaceError)
@@ -542,6 +576,11 @@ def main(argv=None) -> int:
     floor = a.floor if a.floor is not None else credit_floor(
         conn, date.fromisoformat(a.reset_date), a.reserve_days)
     logger.info(f"credit floor {floor:,}")
+    if a.share:
+        if not a.buy:
+            raise SystemExit("--share needs --buy")
+        a.max_credits = max(a.share - spent_on(conn, shard(load_windows(a.buy), a.shard)), 0)
+        logger.info(f"ceiling {a.max_credits:,}: share {a.share:,} minus the ledger's spend")
     meter = Meter(a.max_credits, floor)
     result = []
     try:

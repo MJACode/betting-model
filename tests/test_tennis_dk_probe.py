@@ -137,3 +137,19 @@ def test_a_refusal_ends_the_pass(monkeypatch):
     page = '{"name":"Live","displayGroupId":"6","eventGroupId":"111","path":"/leagues/tennis/live"}'
     s = _session([("sports/tennis", (200, page)), ("leagues/111", (403,))])
     assert "refused" in dk.one_pass(s, None, {}, None)
+
+
+def test_a_second_copy_does_not_start(monkeypatch, capsys):
+    monkeypatch.setattr(dk, "other_readers", lambda me: [4242])
+    called = []
+    monkeypatch.setattr(dk, "detach", lambda argv, log_dir: called.append(argv) or 0)
+    assert dk.main(["--detach", "--no-store"]) == 0
+    assert called == [] and "already_running" in capsys.readouterr().out
+
+
+def test_detach_relaunches_without_the_flag(monkeypatch):
+    monkeypatch.setattr(dk, "other_readers", lambda me: [])
+    seen = []
+    monkeypatch.setattr(dk, "detach", lambda argv, log_dir: seen.append(argv) or 0)
+    assert dk.main(["--detach", "--out", "x", "--log-until", "2026-12-31T00:00:00"]) == 0
+    assert seen == [["--out", "x", "--log-until", "2026-12-31T00:00:00"]]

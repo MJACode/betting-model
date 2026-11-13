@@ -264,3 +264,21 @@ def test_a_resumed_walk_pays_for_nothing_already_bought(monkeypatch):
     assert n_first == first["asks"] > 0
     assert len(asked) == n_first and second["asks"] == 0     # nothing asked again
     assert second["replayed"] == n_first // 2                 # each hour once, both groups held
+
+
+def test_wait_for_exit_returns_for_a_process_that_is_gone():
+    import subprocess, sys as _sys, time as _t
+    p = subprocess.Popen([_sys.executable, "-c", "pass"])
+    p.wait()
+    t0 = _t.time()
+    toh.wait_for_exit(p.pid, poll_s=0.1)
+    assert _t.time() - t0 < 5
+
+
+def test_wait_for_exit_waits_while_the_process_runs():
+    import subprocess, sys as _sys, time as _t
+    p = subprocess.Popen([_sys.executable, "-c", "import time; time.sleep(2)"])
+    t0 = _t.time()
+    toh.wait_for_exit(p.pid, poll_s=0.2)
+    assert _t.time() - t0 >= 1.5
+    p.wait()
