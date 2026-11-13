@@ -166,7 +166,16 @@ reserve. At about 10.3M for both, about 9.7M fits above that floor this
 cycle; the oldest days (part of 2020-21) would wait for the refill and resume
 from the spool.
 
-**Not started at scale.** Both are waiting on (a) this branch's merge, because
+**What mike approved (2026-11-13: "Do the 4.4m").** No 2020-21 (no
+DraftKings, no crowds; its finals and quarter scores are stored free). The full
+game every snapshot from 30 minutes before each tip to 2.5 hours after it, and
+one every 15 minutes otherwise (`--pregame-step-min 15`): the trial day held 35
+snapshots with a game in play and 253 without. About 3.3M for the full game and
+1.1M for the period lines. 2021-22 to 2025-26 are bought first; 2026-27 waits
+for the merge, because the clean-up never visits a date before 2026-09-01
+(`data/prune_odds.BACKLOG_FLOOR`) but does visit this season's.
+
+**Before the approval.** Both are waiting on (a) this branch's merge, because
 until the clean-up protects these sources in production it would thin bought
 first-half rows to an opener and a close, and (b) mike's yes to the spend.
 

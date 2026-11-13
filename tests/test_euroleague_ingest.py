@@ -191,3 +191,71 @@ def test_the_chunked_history_runs_newest_season_first_and_newest_chunk_first():
     days = [d for _, c in plan for d in c]
     assert len(days) == len(set(days))                        # no day twice
     assert min(d for s, c in plan if s == 2027 for d in c) == date(2026, 9, 21)   # LEAD_DAYS before
+
+
+def test_the_15_minute_rule_keeps_every_snapshot_near_and_during_games():
+    from datetime import datetime, timedelta, timezone
+    from data.ingestors import euroleague_odds_history as eh
+    Z = timezone.utc
+    tips = [datetime(2025, 12, 11, 19, 5, tzinfo=Z), datetime(2025, 12, 11, 20, 0, tzinfo=Z)]
+    step = timedelta(minutes=15)
+    t = lambda h, m: datetime(2025, 12, 11, h, m, tzinfo=Z)
+    # the morning: one every 15 minutes
+    assert eh.next_ask(t(9, 0), t(9, 5), tips, step) == t(9, 15)
+    # never past the start of the window before the first tip (18:35)
+    assert eh.next_ask(t(18, 25), t(18, 30), tips, step) == t(18, 35)
+    # inside the window, and while games are in play: every snapshot
+    assert eh.next_ask(t(18, 40), t(18, 45), tips, step) == t(18, 45)
+    assert eh.next_ask(t(21, 0), t(21, 5), tips, step) == t(21, 5)
+    # after the last game's window (22:30): back to 15 minutes
+    assert eh.next_ask(t(22, 40), t(22, 45), tips, step) == t(22, 55)
+    # no step: every snapshot, as before
+    assert eh.next_ask(t(9, 0), t(9, 5), tips, None) == t(9, 5)
+    # the asks only move forward, even across a gap in the feed
+    assert eh.next_ask(t(9, 0), t(11, 0), tips, step) == t(11, 0)
+
+
+def test_a_walk_with_the_step_asks_fewer_times_and_keeps_the_close(tmp_path):
+    from datetime import date, datetime, timedelta, timezone
+    from data.ingestors import euroleague_odds_history as eh
+    Z = timezone.utc
+    day = date(2025, 12, 11)
+    tip = datetime(2025, 12, 11, 19, 5, tzinfo=Z)
+
+    class R:
+        status_code = 200
+        headers = {"x-requests-last": "30"}
+
+        def __init__(self, body):
+            self._b = body
+
+        def json(self):
+            return self._b
+
+    class F:
+        def __init__(self, r):
+            self.response, self.attempts = r, [r]
+
+    asked = []
+
+    def fetch(params):
+        a = datetime.fromisoformat(params["date"].replace("Z", "+00:00"))
+        asked.append(a)
+        ts = a - timedelta(minutes=a.minute % 5, seconds=a.second)      # a snapshot every 5 min
+        nxt = ts + timedelta(minutes=5)
+        return F(R({"timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "next_timestamp": nxt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "data": [{"id": "e", "commence_time": "2025-12-11T19:05:00Z"}]}))
+
+    eh.walk_day(fetch, tmp_path, day, datetime(2025, 12, 12, 1, tzinfo=Z), [tip],
+                timedelta(minutes=15))
+    kept = {datetime.fromisoformat(s["ts"].replace("Z", "+00:00"))
+            for s in eh.read_state(tmp_path, day)["snapshots"]}
+    assert eh.read_state(tmp_path, day)["done"]
+    assert len(asked) < 288 / 2
+    # every 5-minute snapshot from 30 minutes before the tip to 2.5 hours after
+    t = tip - timedelta(minutes=30)
+    while t <= tip + timedelta(hours=2, minutes=30):
+        if t.minute % 5 == 0:
+            assert t in kept, t
+        t += timedelta(minutes=5)

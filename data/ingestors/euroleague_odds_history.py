@@ -369,7 +369,35 @@ def _take_day(spool: Path, day: date) -> Path | None:
     return None
 
 
-def walk_day(fetch, spool: Path, day: date, stop_at: datetime) -> list:
+# mike, 2026-11-13: "Do the 4.4m" -- every snapshot while a game is near or in
+# play, one every PREGAME_STEP_MIN otherwise (docs/sports/euroleague.md).
+DENSE_BEFORE = timedelta(minutes=30)     # every snapshot from here before a tip (the close)
+DENSE_AFTER = timedelta(hours=2, minutes=30)   # ... to here after it (in play)
+
+
+def dense(t: datetime, tips: list[datetime]) -> bool:
+    """True while some game is within DENSE_BEFORE of its tip or in play. Pure."""
+    return any(tip - DENSE_BEFORE <= t <= tip + DENSE_AFTER for tip in tips)
+
+
+def next_ask(ts: datetime, nxt: datetime, tips: list[datetime],
+             step: timedelta | None) -> datetime:
+    """The next time to ask for, after an answer holding snapshot `ts` whose
+    successor is `nxt`. With no step, `nxt` (every snapshot). With a step: `nxt`
+    while a game is near or in play; otherwise `ts + step`, never later than the
+    start of the next dense window and never earlier than `nxt`, so the asks
+    only move forward. Pure."""
+    if step is None or dense(nxt, tips):
+        return nxt
+    starts = [tip - DENSE_BEFORE for tip in tips if tip - DENSE_BEFORE > ts]
+    target = ts + step
+    if starts:
+        target = min(target, min(starts))
+    return max(nxt, target)
+
+
+def walk_day(fetch, spool: Path, day: date, stop_at: datetime,
+             tips: list[datetime] | None = None, step: timedelta | None = None) -> list:
     """Fetch one UTC day's snapshots by walking the feed's own chain. Runs on
     a pool thread; touches no accounting. Returns every paid call's Fetched,
     for the main thread to bill.
@@ -391,7 +419,7 @@ def walk_day(fetch, spool: Path, day: date, stop_at: datetime) -> list:
     if lock is None:
         return paid                 # another process is walking this day
     try:
-        _walk(fetch, spool, day, stop_at, paid, lock)
+        _walk(fetch, spool, day, stop_at, paid, lock, tips or [], step)
     finally:
         try:
             lock.unlink()
@@ -400,7 +428,8 @@ def walk_day(fetch, spool: Path, day: date, stop_at: datetime) -> list:
     return paid
 
 
-def _walk(fetch, spool: Path, day: date, stop_at: datetime, paid: list, lock: Path) -> None:
+def _walk(fetch, spool: Path, day: date, stop_at: datetime, paid: list, lock: Path,
+          tips: list[datetime], step: timedelta | None) -> None:
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
     state = read_state(spool, day)          # read again, now that the day is ours
@@ -440,13 +469,14 @@ def _walk(fetch, spool: Path, day: date, stop_at: datetime, paid: list, lock: Pa
             state["next"] = _stamp((ts or ask) + timedelta(minutes=STEP_MIN))
             _write_state(spool, day, state)
             break
-        state["next"] = _stamp(nxt)
-        state["done"] = nxt >= end
+        ask = next_ask(ts, nxt, tips, step) if ts is not None else nxt
+        state["next"] = _stamp(ask)
+        state["done"] = ask >= end
         _write_state(spool, day, state)
-        ask = nxt
 
 
-def fetch_days(meter: PoolMeter, spool: Path, days: list[date], now: datetime) -> dict:
+def fetch_days(meter: PoolMeter, spool: Path, days: list[date], now: datetime,
+               tips_by_day: dict | None = None, step: timedelta | None = None) -> dict:
     """Walk every day not yet done, `meter.workers` at once. Before a day
     starts it is cleared against the ceiling and the floor at its most (every
     5-minute slot asked), with every day in flight counted the same way."""
@@ -458,7 +488,7 @@ def fetch_days(meter: PoolMeter, spool: Path, days: list[date], now: datetime) -
 
     def one(day):
         return day, walk_day(lambda params: meter.fetch(f"{BASE}/odds", params),
-                             spool, day, stop_at)
+                             spool, day, stop_at, (tips_by_day or {}).get(day, []), step)
 
     def settle(fut):
         meter.reserved -= DAY_MAX_COST
@@ -809,8 +839,19 @@ def chunk_plan(games: list[dict], now: datetime, first: int, last: int,
     return out
 
 
+def tips_by_utc_day(games: list[dict]) -> dict[date, list[datetime]]:
+    """{UTC day: the stored starts of that day's games}. Pure."""
+    out: dict[date, list[datetime]] = defaultdict(list)
+    for g in games:
+        t = _utc(g.get("commence_time"))
+        if t is not None:
+            out[t.date()].append(t)
+    return dict(out)
+
+
 def run_chunked(spool: Path, first: int, last: int, chunk_days: int, reserve_days: int,
-                concurrency: int, do_store: bool, now: datetime) -> int:
+                concurrency: int, do_store: bool, now: datetime,
+                step: timedelta | None = None) -> int:
     """The whole purchase, newest season first, a chunk at a time (module
     docstring, THE WHOLE HISTORY IN ONE COMMAND). 0 when every chunk was
     fetched, 1 when it stopped at the floor or a day stopped early, 2 refused."""
@@ -818,6 +859,7 @@ def run_chunked(spool: Path, first: int, last: int, chunk_days: int, reserve_day
         games = load_games(conn, first, last)
         conn.commit()
     plan = chunk_plan(games, now, first, last, chunk_days)
+    tips = tips_by_utc_day(games)
     code = 0
     stopped = False
     for season in sorted({s for s, _ in plan}, reverse=True):
@@ -839,7 +881,7 @@ def run_chunked(spool: Path, first: int, last: int, chunk_days: int, reserve_day
             meter = KeepAliveMeter(budget.ceiling, budget.floor, workers=concurrency)
             meter.remaining = budget.remaining_at_start
             try:
-                stats = fetch_days(meter, spool, todo, now)
+                stats = fetch_days(meter, spool, todo, now, tips, step)
             finally:
                 try:
                     with get_connection() as conn:
@@ -881,14 +923,17 @@ def main(argv=None) -> int:
                     help="fetch only these UTC days (YYYY-MM-DD), e.g. to try one day")
     ap.add_argument("--chunk-days", type=int, default=None,
                     help="run the whole history newest season first, this many days a chunk")
+    ap.add_argument("--pregame-step-min", type=int, default=None,
+                    help="away from tips, ask one snapshot every N minutes (default: every one)")
     a = ap.parse_args(argv)
     first, last = a.seasons
     now = datetime.now(timezone.utc)
     code = 0
     if a.chunk_days and a.fetch:
         a.spool.mkdir(parents=True, exist_ok=True)
+        step = timedelta(minutes=a.pregame_step_min) if a.pregame_step_min else None
         return run_chunked(a.spool, first, last, a.chunk_days, a.reserve_days,
-                           a.concurrency, a.store, now)
+                           a.concurrency, a.store, now, step)
     # Three short connections, not one held open: the fetch runs for hours and
     # touches the database only before it starts and after it ends.
     with get_connection() as conn:
