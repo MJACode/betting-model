@@ -282,3 +282,11 @@ def test_wait_for_exit_waits_while_the_process_runs():
     toh.wait_for_exit(p.pid, poll_s=0.2)
     assert _t.time() - t0 >= 1.5
     p.wait()
+
+
+def test_a_second_pinnacle_logger_does_not_start(monkeypatch, capsys):
+    from data.ingestors import tennis_pinnacle as tp
+    monkeypatch.setattr(tp, "other_loggers", lambda me: [4242])
+    monkeypatch.setattr(tp, "fetch", lambda: (_ for _ in ()).throw(AssertionError("must not poll")))
+    assert tp.main(["--once"]) == 0
+    assert "already_running" in capsys.readouterr().out

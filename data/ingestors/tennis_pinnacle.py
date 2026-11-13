@@ -193,12 +193,32 @@ def one_pass(conn) -> dict:
     return {"seen_at": seen_at, "matchups": len(mrows), "prices_seen": len(prows)}
 
 
+def other_loggers(me: int) -> list[int]:
+    """Process ids of any other running copy of this logger, so the scheduled
+    task's pass and a long-running loop never both poll Pinnacle."""
+    import psutil
+    out = []
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info["cmdline"] or [])
+        except (psutil.Error, TypeError):
+            continue
+        if proc.info["pid"] != me and "tennis_pinnacle" in cmd and "pytest" not in cmd:
+            out.append(proc.info["pid"])
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Pinnacle tennis prices -> Supabase")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--until", help="poll until this UTC time")
     ap.add_argument("--every-min", type=float, default=30)
     a = ap.parse_args(argv)
+    import os
+    running = other_loggers(os.getpid())
+    if running:
+        print(json.dumps({"already_running": running}))
+        return 0
     from data.db import get_connection
     conn = get_connection()
     try:
