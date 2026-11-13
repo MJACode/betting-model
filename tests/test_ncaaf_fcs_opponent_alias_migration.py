@@ -141,7 +141,7 @@ def test_the_guard_is_the_alias_still_existing_not_the_canon_being_unscored():
 
 def test_odds_move_as_a_whole():
     """cfbd_* history beside live-book rows is the normal state of a priced
-    CFBD game, and five of these canons hold cfbd_* rows, so odds are not
+    CFBD game, and four of these canons hold cfbd_* rows, so odds are not
     gated on the canon being empty."""
     assert "UPDATE odds SET game_id = canon WHERE game_id = alias" in CODE
     assert "IF NOT EXISTS (SELECT 1 FROM odds WHERE game_id = canon)" not in CODE

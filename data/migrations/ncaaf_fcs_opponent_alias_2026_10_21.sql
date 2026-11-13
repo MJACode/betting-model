@@ -29,7 +29,7 @@
 --
 -- Odds on the aliases are live-book rows, including bought history
 -- (source odds_api_historical, historical_inplay|..., and
--- odds_api_ncaaf_derivative_am). Odds on the five canons that have any are
+-- odds_api_ncaaf_derivative_am). Odds on the four canons that have any are
 -- cfbd_bovada / cfbd_draftkings rows. Both kinds side by side is the normal
 -- state of a priced CFBD game, so odds move as a whole. The odds update
 -- trigger recomputes latest_odds for the old and the new key of each moved
