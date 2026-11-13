@@ -205,6 +205,11 @@ def test_the_writer_does_not_advance_its_clock_while_the_window_is_closed():
     assert "begin_api_log_prune" in src
     assert src.index("begin_api_log_prune") < src.index("last_prune = now")
     assert 'action == "wait"' in src
+    # The skip path commits on this connection. That commit is safe only
+    # because the insert above has already committed: a failed insert sets
+    # failures and drops conn, and this block requires both to be clear.
+    assert src.index("conn.commit()") < src.index("begin_api_log_prune")
+    assert 'not failures' in src[src.index("conn.commit()"):src.index("begin_api_log_prune")]
 
 
 def test_prune_deletes_in_batches_and_stops_on_a_short_one(monkeypatch):

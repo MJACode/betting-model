@@ -455,6 +455,10 @@ def _writer_loop() -> None:
             # flush retries the moment 07:15 ET passes. Another session already
             # holding the lock advances the clock: both would delete the same
             # rows, and on 2026-11-12 that second delete was part of the pile.
+            # Prune only after this flush's insert has committed. failures
+            # is 0 and conn is still open only on that path; a failed insert
+            # closes conn and sets failures, so the prune lock's commit on
+            # the "skip" branch cannot land on an uncommitted batch.
             now = time.time()
             if (conn is not None and not stopping and not failures
                     and now - last_prune > _PRUNE_EVERY_SEC):
