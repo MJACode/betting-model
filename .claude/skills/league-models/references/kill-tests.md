@@ -66,7 +66,9 @@ finding either way.
   same frozen model at each decidable book's own first price, with
   closing-line value against the sharp close. A UFC moneyline model read
   +7.8% on 1,531 archive opens and negative closing-line value at
-  DraftKings' first price (`docs/ufc_market_audit.md` §3c).
+  DraftKings' first price on 104 bets of our own 2026 store; bought history
+  at the deciding books then read +12.85% on 846 (§3c, §3d). A small forward
+  sample is not the answer either way: buy the history.
 - **Quotes from one moment.** A rule comparing two books needs both quotes
   from the same snapshot. Comparing quotes from different moments manufactured
   edges three times: a best-price-against-the-sharp-book grid, a sharp-against-

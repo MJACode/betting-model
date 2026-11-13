@@ -92,16 +92,16 @@ error.
   before planning this rule.
 - **A rating model anchored on the first posted price.** The open is one
   book's first guess; ratings built before the fight say which way it will
-  be corrected. *Mechanism measured, not yet bettable*: UFC fight winner at
-  BestFightOdds' open, walk-forward 2014-2026, 1,531 bets +7.8% [+3.9,
-  +11.8], 11 of 13 years positive, EV against the no-vig close positive in
-  every year from 2018. The same frozen model at DraftKings' own first
-  price (2026, 104 bets) had negative closing-line value against
-  Pinnacle's close: the soft open lives at whichever book posts first.
-  At the close the same model finds nothing; a donor-opinion placebo at the
-  open returned -6.5% (median of 50). *Failed* in the same sport: betting
-  the side the line moved toward, at the worst close, lost in every band of
-  move size (`docs/ufc_market_audit.md` §3, §8).
+  be corrected. *Worked*: UFC fight winner, anchored on Pinnacle's no-vig
+  price at least a week out and bet at the best deciding book, on the
+  bought 2020-2026 history: 846 bets +12.85% [+8.0, +17.5], every year
+  positive, +2.2% against Pinnacle's close, placebo -1.9%; live as
+  `ufc_open_moneyline`. The edge grows with the lead and is negative inside
+  a week. On an archive's open (whichever book posted first) it read +7.8%
+  on 1,531; on our 2026 store's 104 DraftKings openers it looked dead, which
+  the purchase overturned. At the close it finds nothing. *Failed* in the
+  same sport: betting the side the line moved toward, at the worst close,
+  lost in every band of move size (`docs/ufc_market_audit.md` §3, §8).
 - **A stale opener.** Bet the side the sharp book favours at a soft book's
   stale opening number. *Passed the placebos* (reversed books null, other
   opens null, CLV 0.694, every season positive) and *failed executability*:
@@ -239,9 +239,8 @@ edge is where the rule misses something the state shows.
 Each line is a hypothesis with its doc. Run it, then move it into the
 sections above with its result.
 
-- UFC: DraftKings', FanDuel's and Pinnacle's first daily price on about
-  3,100 fights (2020-2026, the purchase in `docs/ufc_market_audit.md` §6):
-  does a decidable book's opener carry the open-anchored edge?
+- UFC: a Pinnacle-anchored finish model for round totals on the bought
+  history (every blind total loses; Pinnacle's over is near fair).
 - UFC: notice length from the feed's first listing of a pairing; a
   DraftKings total left stale when its moneyline moves; the five-round
   favourite at per-book prices (null at the worst close, fails the late

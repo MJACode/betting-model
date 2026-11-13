@@ -551,6 +551,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The live UFC fight-winner model (models/ufc_open_moneyline.py MODEL_ID),
+  // decided a week or more before the fight. It carries the retired
+  // ufc_moneyline's name above; modelLongWithMark marks the retired one.
+  ufc_open_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'UFC Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   nhl_moneyline: {
     shortLabel: 'ML',
     longLabel: 'NHL Moneyline',
@@ -1060,6 +1070,12 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaaf_moneyline_market:
     'The chance this side wins according to the middle point spread across the sportsbooks we check. ' +
     'Edge is how much higher that is than the chance the moneyline price implies.',
+  // Pinnacle's no-vig chance moved by the fighter ratings
+  // (models/ufc_open_moneyline.py), read a week or more before the fight.
+  ufc_open_moneyline:
+    'The chance this fighter wins: Pinnacle’s price with its margin removed, adjusted by our fighter ' +
+    'ratings, a week or more before the fight. Edge is how much higher that is than the chance the ' +
+    'price we bet implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:

@@ -21,7 +21,7 @@
 
 ---
 
-## [ ] [needs-decision] UFC: buy the fight-winner and round-total history (2026-11-13)
+## [x] UFC: buy the fight-winner and round-total history (2026-11-13; bought the same day, 150,240 credits)
 No UFC model is live; the 2026-11-13 search (`docs/ufc_market_audit.md`)
 found one real mechanism, a rating model anchored on the first posted price,
 that is not yet shown at a book a pick may name. The purchase that tests it,
@@ -32,6 +32,16 @@ feed's event id first. Then: the open-anchored model at DraftKings',
 FanDuel's and Pinnacle's first daily price; DraftKings' totals against
 Pinnacle's; the three inventions in audit §9. Any new UFC card must also
 clear the two twin-id items below.
+
+## [ ] UFC: next experiments on the bought history (2026-11-13)
+`ufc_open_moneyline` is live on merge (`docs/ufc_market_audit.md` §3d).
+Next, each on `ufc_odds_history`: a Pinnacle-anchored finish model for round
+totals (every blind total loses, Pinnacle's over is near fair); notice length
+from a pairing's first listing; a DraftKings total left stale when its
+moneyline moves; placing a debutant's fights (the card skips a fighter with
+no ufcstats record; 71 of the 846 backtest bets had one). Watch the live
+record against the backtest's +12.85% on the whole scored universe, and its
+closing-line value against Pinnacle's.
 
 ## [ ] EuroLeague: finish the two history purchases (2026-11-12)
 mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,

@@ -73,22 +73,6 @@ def test_sports_holds_the_nine_live_sports():
     ]
 
 
-# A sport whose MODELS were all retired for a rebuild, while the sport itself is
-# not: its chip still leads somewhere (UFC's fighter stats board). Each entry
-# names who asked; test_a_rebuild_exemption_lapses_once_a_model_is_live makes
-# the entry fail the moment the sport has a live model again, so it cannot
-# outlive the rebuild.
-REBUILDING = {
-    "UFC": "mike, 2026-11-13: the three old models retired for a rebuild "
-           "(docs/ufc_market_audit.md); the fighter stats board stays",
-}
-
-
-def _live_prefixes() -> set[str]:
-    import config
-    return {m.split("_")[0].upper() for m in config.ACTION_THRESHOLDS}
-
-
 def test_no_retired_sport_is_a_selectable_chip():
     """Derived from the retirement set, not from a second hand-written list.
 
@@ -100,16 +84,9 @@ def test_no_retired_sport_is_a_selectable_chip():
     retired_sports = {m.split("_")[0].upper() for m in config.RETIRED_MODELS}
     still_selectable = sorted(retired_sports & set(_sports()))
     # Only whole-sport retirements count: MLB has retired MODELS but is live.
-    live_prefixes = _live_prefixes()
-    gone = sorted(s for s in still_selectable
-                  if s not in live_prefixes and s not in REBUILDING)
+    live_prefixes = {m.split("_")[0].upper() for m in config.ACTION_THRESHOLDS}
+    gone = sorted(s for s in still_selectable if s not in live_prefixes)
     assert not gone, f"{gone} are fully retired but still a sport chip"
-
-
-def test_a_rebuild_exemption_lapses_once_a_model_is_live():
-    """An exemption is for the gap between models, never a standing exception."""
-    stale = sorted(set(REBUILDING) & _live_prefixes())
-    assert not stale, f"{stale} have a live model again: delete their REBUILDING entry"
 
 
 def test_every_sport_survives_a_cold_start():

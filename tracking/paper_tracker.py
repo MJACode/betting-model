@@ -2571,6 +2571,11 @@ _RULE_MODEL_MARKETS = {
     # NULL. The pick sits on the odds feed's row of the game, which takes its
     # final from CFBD's row (cfbd_ingestor.mirror_scores_to_alias_rows).
     "ncaaf_moneyline_market": "h2h",
+    # UFC fight winner a week out (models/ufc_open_moneyline.py, 2026-11-13,
+    # mike). Settled by _settle_ufc_picks like every ufc_* pick: home_win,
+    # a draw or no contest a push. Named here so its market is never the
+    # default's guess.
+    "ufc_open_moneyline": "h2h",
 }
 # 2026 live track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

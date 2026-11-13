@@ -6,12 +6,19 @@ Ignore and delete any existing models in the repo."* Built with
 league doc (`docs/sports/ufc.md`) holds the grid and points here for every
 number.
 
-**Verdict.** Nothing clears the bar today, so nothing ships. The three old
-models are retired. One mechanism is real and measured: a rating model
-anchored on the FIRST posted moneyline predicts where the line goes, every
-year since 2018. It does not yet exist at a price a pick here can take:
-DraftKings' own first price in 2026 was not soft. The purchase in §6 is what
-settles it, and what makes round totals researchable at all.
+**Verdict.** One model clears and ships: `ufc_open_moneyline`, the fight
+winner a week or more out, a rating model anchored on Pinnacle's no-vig price
+and bet at the best price a pick may name (§3d). On the bought feed history,
+2020-06 to 2026-06, decided as the live card decides: 846 bets, +136.9 units,
++12.85% [+8.0, +17.5], every year positive, EV against Pinnacle's closing
+price +2.2%, a donor-opinion placebo at -1.9%. The three old models are
+retired. Round totals and every method, distance and round market: nothing
+clears (§4, §5).
+
+How it got there: on a free archive the model beat the first posted price
+(§3b), but that price is whichever book posts first; on our own 2026 store
+DraftKings' first price did not look soft (§3c, 104 bets). The purchase
+(§6) priced the books a pick may name on 2,457 fights and answered it.
 
 Every table names the script that printed it. The scripts are in
 `scripts/ufc_study/` and read a research cache built from mike's local
@@ -139,14 +146,86 @@ decides at a fixed lead, on fresh quotes only); and every book's first stored
 row equals DraftKings' because our ingest only stores a fight once DraftKings
 lists it, so another book's true opener is not in our store.
 
-**What would have to change:** the history purchase (§6) prices DraftKings,
-FanDuel and Pinnacle at their first daily appearance on about 3,100 fights.
-If DraftKings' opener predicts the move there as BestFightOdds' did
-(positive EV against Pinnacle's close, by season), the open-anchored model
-ships at DraftKings' first price. If not, the mechanism lives only at books
-we cannot name.
+The purchase answered it (§3d): on 2,457 fights the same model at the
+deciding books' prices is positive in every year, and the 2026 store's 104
+bets were too few to say otherwise.
 
-## 4. Round totals (`totals_model.py`)
+### 3d. The bought history: the model at prices a pick may name (`feed_quotes.py`, `feed_open.py`, `feed_kill.py`, `card_replay.py`)
+
+The purchase (§6) gives every book's price at noon UTC each day, and six
+times on each card day, for 2,457 UFC fights from 2020-06 to 2026-06. The
+rating model is fitted walk-forward exactly as in §3b (on the archive's
+opens, each year only on the years before it) and applied unchanged.
+
+**Each book's own first daily price** (anchored on itself, at least an hour
+out, EV >= 0.06): DraftKings 632 bets +13.42% [+7.8, +18.7], FanDuel 531
++10.84%, BetMGM 494 +14.23%, Caesars 547 +12.63%, BetRivers 415 +10.64%,
+every year positive at each. Their first daily price came a median 10.6 to
+12.6 days before the fight.
+
+**The rule that ships: Pinnacle-anchored, best deciding price in the same
+pull.** At a pull where Pinnacle and a deciding book both quote the fight:
+the model's probability from Pinnacle's no-vig price, each book's better
+side by EV, prices shorter than -300 removed, the best EV across books bet
+when it clears; the first pull that clears locks the fight. Decided only on
+the noon pulls (the live card decides on its noon-UTC run, so it gets no
+more chances to fire than the backtest had), and only a week or more before
+the fight:
+
+| EV cut | Bets | Units | Return | 90% interval | Early / late | Years positive | EV vs Pinnacle's close |
+|---|---|---|---|---|---|---|---|
+| 0.03 | 1,199 | +121.1 | +7.56% | +3.5 to +11.6 | +7.6 / +7.5 | 5/7 | +1.22% |
+| **0.06** | **846** | **+136.9** | **+12.85%** | **+8.0 to +17.5** | **+11.4 / +14.3** | **7/7** | **+2.16%** |
+| 0.10 | 484 | +105.4 | +19.61% | +13.4 to +26.1 | +16.9 / +22.5 | 7/7 | +4.25% |
+
+The whole neighbourhood from EV 0.00 to 0.15 is positive with its interval
+above zero (`feed_kill.py 168`). By year at 0.06, noon pulls: 2020 +0.6%
+(67 bets), 2021 +19.3% (147), 2022 +6.5% (170), 2023 +13.4% (153), 2024
++16.7% (138), 2025 +15.1% (130), 2026 to June +15.3% (41). "Pinnacle's close" is its last quote before the start, from
+the card-day pull five minutes before the fight.
+
+**How far out.** The edge lives in early prices: locked 7-14 days out
++7.4%, 14-30 days +19.6%; inside a week it was negative (-6% to -10% in the
+one-hour version). The minimum lead is a plateau, not a peak (EV >= 0.06,
+daily pulls): 3 days 1,088 bets +8.98%, 5 days 985 +11.04%, 7 days 846
++12.85%, 10 days 668 +15.26%, 14 days 369 +18.27%, each interval above zero
+and each placebo's best below its result. 7 days is the middle of it.
+
+**Kill tests on the shipped version** (`feed_kill.py 168`):
+- Placebo: each fight given a donor fight's opinion within its year, 50
+  times: median -1.94%, best +3.88%, against the real +12.16% (all pulls).
+- Without the ten best dates: +8.31%.
+- Sides: 47% underdogs. Books named: DraftKings 236, FanDuel 219, Caesars
+  174, BetMGM 148, BetRivers 95.
+- Price bands: positive from -300 to +250 (+7% to +27%); +250 and longer
+  lost (49 bets, -7% and -15%).
+- Debuts: 71 of the 846 bets have a fighter making his UFC debut, whom the
+  live card cannot place on a ufcstats record and skips; without them 775
+  bets +13.21% (`feed_debut.py`).
+- The card's own code (`card_replay.py`): the production ratings, build and
+  decision reproduce the research's 846 bets fight for fight, side, pull and
+  price, opinions equal to 2.6e-12; 49 had two books at the same best price
+  and named a different one of them (the card now breaks a tie in the
+  deciding-book order, DraftKings first).
+- The live path can meet it: our store keeps a Pinnacle quote every pull
+  (about every ten minutes, 2026-11-13) on most fights since 2026-09
+  (Pinnacle on 78 of 102 October fights; before August our store kept
+  DraftKings only).
+
+**Price range of the shipped rule:** median -108, shortest -300 (risk 3
+units to win 1), 16.5% shorter than -200; 7 bets at +400 or longer.
+**Expected volume:** about 140 bets a year, two or three a card, decided on
+the noon run 7 to 30 days before the card.
+
+## 4. Round totals (`totals_model.py`, `feed_open.py`)
+
+**On the bought history (2020-2026)** the margin sits on the UNDER, the
+opposite of the 2026 pilot below: blind unders lost -10.8% at DraftKings
+(1,066 fights) and -6.8% at Pinnacle (2,403); blind overs -3.4% and -1.6%,
+Pinnacle's closing over -1.0% [-3.7, +1.8]. DraftKings' under against
+Pinnacle's no-vig price at the same line in the same pull: 22 bets (the bulk
+history carries DraftKings' totals only from 2025). Nothing clears. The
+pilot's lean was 187 fights of noise.
 
 Prediction written before running: the margin sits on the OVER, so a
 finish-time model should find its value on unders in lopsided fights and
@@ -189,18 +268,19 @@ direction: it is the cheapest method price by far. It is not a profit, and
 the market carries 20-40% margin on finishes. Parked until a live price
 exists.
 
-## 6. The purchase that would answer §3c and §4
+## 6. The purchase (mike, 2026-11-13: "yes")
 
-Fight-winner and round-total history from the odds feed, 2020-06-06 to
-2026-06-13 (where our own store starts): one pull a day at 12:00 UTC
-(2,199 pulls), plus six pulls on each of the 260 card days, timed from the
-fight start times the daily pulls return. 40 credits a pull (two markets,
-two regions): **150,360 credits**, covering 3,114 fights. The balance was
-5,845,058 at 13:51 UTC on 2026-11-13, after 5.77M spent since 23:56 UTC the
-day before. It needs a dedicated raw table keyed on the feed's event id (the
-MMA key carries every promotion; the generic range backfill mints a games
-row per event and ledgers the ones it drops), placed on `ufc_fight_log` at
-research time.
+`data/ingestors/ufc_odds_history.py`: fight winner and round totals from the
+odds feed, 2020-06-06 to 2026-06-13, one pull a day at 12:00 UTC (2,199) and
+six on each card day timed off its fights' start times (1,557), 40 credits a
+pull, quoted 150,360. **Spent 150,240** (a two-day trial of 80, then 87,880
+and 62,280; every answer billed as quoted, none failed); the balance read
+4,110,531 after it. Stored in `ufc_odds_history` (552,576 rows, change-only,
+every promotion, UFC fights placed on our fight ids) with one ledger row per
+pull in `ufc_odds_history_pulls` (3,755: one card-day ask fell on a daily
+noon); both read back, and the copy on mike's PC holds the same counts. The
+spool in `betting_local_copies\ufc_odds_history_2026_11_13` is a cache of
+the table.
 
 ## 7. Kill tests run
 
@@ -210,7 +290,11 @@ research time.
 - Placebo (donor opinions, 50 permutations): §3b, passed at the open.
 - Closing-line value as the second witness: it is what separates §3b
   (positive) from §3c (negative).
-- The executable book: §3c is the test; it failed.
+- The executable book: §3c on 2026 (104 bets, failed); §3d on the bought
+  history (2,457 fights, passed).
+- The live cadence: §3d decides on noon pulls only, as the card does.
+- The lead neighbourhood and its placebo: §3d.
+- The card's own code against the research, bet for bet: §3d.
 - Fresh quotes and a fixed lead: §3c, the 0-1 hour artefact.
 - Market alone as the control row: the blind tables and the market-only
   rule in §3c.

@@ -1006,6 +1006,23 @@ ACTION_THRESHOLDS: dict = {
     # minus the bet price's implied, so every publisher agrees with the card.
     # min_prob 0.0: the edge is the cut.
     "ncaaf_moneyline_market": {"min_prob": 0.0, "min_edge": 0.02},
+    # 2026-11-13 (mike: "build models for UFC", then "yes" to the history
+    # purchase). UFC fight winner, decided at least a week out on the noon-UTC
+    # pull: a rating model anchored on Pinnacle's no-vig price, bet at the
+    # best deciding book in the same pull (models/ufc_open_moneyline.py,
+    # scripts/ufc_open_moneyline_card.py). The cut is EV, in
+    # MODEL_OWN_EV_FLOOR (0.06); these two keep every bet the card writes.
+    # Bought feed history 2020-06 to 2026-06 (docs/ufc_market_audit.md 3d),
+    # first clearing pull at least 7 days out, -300 floor:
+    #     EV >=  0.00   1,545 bets  +5.25% [+1.6, +8.7]
+    #            0.04   1,075       +9.59% [+5.2, +13.7]
+    #            0.06     846      +12.85% [+8.0, +17.5]  <- live
+    #            0.08     661      +15.92% [+10.4, +21.3]
+    #            0.10     484      +19.61% [+13.4, +26.1]
+    # Both halves positive (+11.4 / +14.3), every year 2020-2026 positive,
+    # EV against Pinnacle's close +1.4%, donor-opinion placebo -1.9% (best
+    # of 50: +6.1%).
+    "ufc_open_moneyline":     {"min_prob": 0.0, "min_edge": 0.0},
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -2267,6 +2284,10 @@ MODEL_MIN_ODDS: dict = {
     # move it. It laid +110 to +430 on its 311 replayed bets (median +146);
     # the rule itself has no upper price limit.
     "ncaaf_moneyline_market":    -200,
+    # 2026-11-13 (mike): the research's floor. Median price -105; 15.4% of
+    # the 846 bets were shorter than -200, none shorter than -300 (risk 3u
+    # to win 1u there). docs/ufc_market_audit.md 3d.
+    "ufc_open_moneyline":        -300,
     # NHL totals rule (2026-10-08, mike): -200 is the price floor its evidence
     # was graded at (scripts/nhl_totals_lab.py, `price >= -200`). Pinned here
     # so a Railway DEFAULT_MIN_ODDS override cannot move it off its evidence.
@@ -2711,6 +2732,10 @@ MODEL_OWN_EV_FLOOR: dict = {
     # a price shorter than +100, and the replay laid none (its shortest price
     # was +110).
     "ncaaf_moneyline_market":   0.04,
+    # 2026-11-13 (mike): THE cut of the UFC opening-price model, the middle
+    # of a plateau from 0.00 to 0.15 (every cell's interval above zero);
+    # the table is beside its ACTION_THRESHOLDS entry.
+    "ufc_open_moneyline":       0.06,
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
@@ -2902,6 +2927,10 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # distribution, which its 0.02 cut was measured on. It has no record, so
     # its map would be the offset borrowed from other models.
     "ncaaf_moneyline_market",
+    # 2026-11-13 (mike): UFC fight winner; it decides on its own probability,
+    # the rating model on Pinnacle's no-vig price, which its EV cut was
+    # measured on. No record, so a promoted map would be borrowed.
+    "ufc_open_moneyline",
 })
 
 
@@ -3113,6 +3142,9 @@ SCORING_METHODS: dict = {
     # loaded by scripts/ncaaf_moneyline_card.py by its pinned path, never
     # registered. Not in MODELS, which the scorer and the trainer iterate.
     "ncaaf_moneyline_market": "rule",
+    # 2026-11-13 (mike): UFC fight winner a week out, Pinnacle-anchored rating
+    # model (models/ufc_open_moneyline.py); its artifact holds the ridge fit.
+    "ufc_open_moneyline":     "rule",
 }
 
 
@@ -3196,6 +3228,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     "ncaaf_moneyline_market": 0.02,  # 2026-11-10 mike: THE cut, the bet side's fair chance minus the bet price's implied; see ACTION_THRESHOLDS
+    "ufc_open_moneyline":     0.0,   # 2026-11-13 mike: the cut is EV (0.06), in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)
@@ -3314,6 +3347,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaaf_over_under": 0.65,
     "ncaaf_moneyline":  0.62,
     "ncaaf_moneyline_market": 0.0,  # 2026-11-10 mike: the cut is the edge; see ACTION_THRESHOLDS
+    "ufc_open_moneyline":     0.0,  # 2026-11-13 mike: the cut is EV; see ACTION_THRESHOLDS
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
     # and have never been swept; the family went live on 2026-09-06 (mike)

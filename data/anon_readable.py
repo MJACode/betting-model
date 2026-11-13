@@ -499,6 +499,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
     # demand). Read by the card, never by the app.
     "ncaaf_moneyline_decisions",
+    # The UFC opening-price card's decisions ledger: one row per fight it has
+    # decided, bet or not (scripts/ufc_open_moneyline_card.py, which creates
+    # it on demand). Read by the card, never by the app.
+    "ufc_open_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its

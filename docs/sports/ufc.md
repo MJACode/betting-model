@@ -8,8 +8,17 @@
 
 ### Models
 
-**None live.** mike, 2026-11-13: *"Use the model building skill to build
-models for UFC. Ignore and delete any existing models in the repo."*
+mike, 2026-11-13: *"Use the model building skill to build models for UFC.
+Ignore and delete any existing models in the repo."*
+
+| Model | Market | What it does | Status |
+|---|---|---|---|
+| `ufc_open_moneyline` | fight winner | A fight a week or more out, on the noon-UTC run: fighter ratings move Pinnacle's no-vig price, and the best price at a book a pick may name is bet when its EV is 0.06 or more (-300 floor). The first pull that clears locks the fight. `models/ufc_open_moneyline.py`, `scripts/ufc_open_moneyline_card.py`, artifact `models/saved/ufc_open_moneyline.json` (built by `scripts/ufc_open_moneyline_build.py`) | **live on merge** (2026-11-13). Backtest 846 bets +12.85% [+8.0, +17.5], every year 2020-2026 positive, +2.2% against Pinnacle's close (`docs/ufc_market_audit.md` §3d) |
+
+It holds a fight while either fighter has an earlier fight not yet logged,
+and skips a fighter it cannot place on his ufcstats record (debutants, until
+their first fight is logged). The card keys its decisions on the fight, not
+the stored id, because the feed stores each fight under two ids.
 
 The three models of 2026-06-11 (`ufc_moneyline`, `ufc_total_rounds`,
 `ufc_method_of_victory`) are in `config.RETIRED_MODELS`; their feature
@@ -18,15 +27,14 @@ graded on probability alone at a synthetic -110, because no UFC price
 history was ever stored, and method of victory never had a market price.
 Their picks stay in `picks`, graded.
 
-The search that replaced them (`/league-models`) found nothing that clears
-the bar yet. The grid below says what each market needs.
+The grid below says where every other market stands.
 
 ### The market grid
 
 | Market | Settles on | Inputs held | Prices | Baseline | Method tried | Result | Status |
 |---|---|---|---|---|---|---|---|
-| Fight winner | `games.home_win` (draw / no contest = push) | `ufc_fight_log` 2010-2026, `fighters`; ratings built strictly before each fight | Free archive: BestFightOdds open + closing range 2010-2026 (`ufc_price_archive`); feed history 2020-06+ (not bought); `odds` 2026-06+ every pull, 12 books | Blind favourite -0.8% to -3.9%, underdog -2.3% to -8.3% across the closing range, 7,541 fights | Market-anchored rating model at the close; at the first posted price; at each US book's first stored price; Pinnacle-anchored with US line shopping; five-round fights | At the close: nothing holds. At BestFightOdds' open: 1,531 bets +7.8% [+3.9, +11.8], positive against the close every year since 2018. At DraftKings' own first price, 2026: negative against Pinnacle's close (-2.1% to -2.5%) | **Nothing clears**; the purchase decides whether DraftKings' opener carries the edge (audit §3c, §6) |
-| Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `odds` 2026-06+ (DraftKings every pull; Pinnacle, Caesars a handful); feed history: Pinnacle 2021+, DraftKings 2025+ (not bought); no free archive | DraftKings blind under +1.9% / +4.1%, over -10% (187 fights) | Finish-time model (one logistic per line) | Log loss 0.684 against the price's 0.649: the model knows less than the line | **To do, needs prices** (audit §4) |
+| Fight winner | `games.home_win` (draw / no contest = push) | `ufc_fight_log` 2010-2026, `fighters`; ratings built strictly before each fight | Free archive: BestFightOdds open + closing range 2010-2026 (`ufc_price_archive`); feed history 2020-06+ (not bought); `odds` 2026-06+ every pull, 12 books | Blind favourite -0.8% to -3.9%, underdog -2.3% to -8.3% across the closing range, 7,541 fights | Market-anchored rating model at the close; at the first posted price; at each US book's first stored price; Pinnacle-anchored with US line shopping; five-round fights | At the close: nothing holds. At BestFightOdds' open: 1,531 bets +7.8% [+3.9, +11.8], positive against the close every year since 2018. At DraftKings' own first price, 2026: negative against Pinnacle's close (-2.1% to -2.5%); on the bought 2020-2026 history at the deciding books, Pinnacle-anchored: 846 bets +12.85%, 7/7 years | **Live**: `ufc_open_moneyline`, Pinnacle-anchored at a week out (audit §3d) |
+| Total rounds (0.5-4.5) | rounds completed from `ufc_fight_log` end round and time; five-round fights from `scheduled_rounds` | same | `ufc_odds_history` (bought): Pinnacle 2021+, DraftKings 2025+; `odds` 2026-06+; no free archive | 2020-2026: blind under -10.8% (DraftKings, 1,066) and -6.8% (Pinnacle, 2,403); blind over -3.4% and -1.6% | Finish-time model (one logistic per line) | Log loss 0.684 against the price's 0.649: the model knows less than the line | **Nothing clears** (audit §4); next: a Pinnacle-anchored finish model |
 | Points spread | not known: DraftKings and Bovada list one (Holland +7.5) | | feed, live, 2 books | | | | **Parked**: what it settles on is unknown |
 | Alternate round totals | as total rounds | | Pinnacle only on the feed | | | | **Parked**: no book a pick may name |
 | Method of victory (by fighter) | `ufc_fight_log.method` | same | **no live price**: the feed rejects every key (HTTP 422, 2026-11-13); free archive 2012-2026 near-close prices | Every blind method bet loses: favourite by decision -3.3% (5,821), finishes -20% to -41% | Blind by method and side | No profit anywhere | **Parked**: no live price |
@@ -49,7 +57,7 @@ the bar yet. The grid below says what each market needs.
 | UFC results (`ufc-results`) | daily pipeline (step 0a, **before settle**) | 6am | Loads completed events **from the CSV mirror** over a **self-healing window** — everything since MAX(`ufc_fight_log.game_date`), capped 365 days; writes `games` scores (ALL duplicate rows) + `ufc_fight_log` + fighter profiles |
 | Settlement | daily pipeline (`settle`) | 6am | `_settle_ufc_picks` settles any unsettled UFC BET pick whose fight has scores (incl. the slug-pair fallback for picks on duplicate/orientation-swapped games rows) |
 
-No UFC model scores today, so no step writes UFC picks.
+| UFC opening-price card (`ufc_open_moneyline_card`) | the worker (scheduler) | hourly at :25 UTC | Bets only on the 12:25Z run; other runs close fights that reached a week out as NONE rows; publishes. `RUN_UFC_OPEN_MONEYLINE=0` stops it |
 
 ### The schedule gate (2026-10-20)
 
@@ -76,9 +84,13 @@ cancelled bout never reaches the log. Any new UFC card must go through it.
   2010+). BestFightOdds' robots.txt allows everything but `/cnadm/`;
   OddsPortal disallows its dated archive; Tapology disallows Claude's
   crawlers by name.
-- **Price history, the feed:** fight winner from 2020-06-06, round totals
-  (Pinnacle) from 2021, 20 credits a market a snapshot. Not bought; the plan
-  and its cost are in the audit, §6.
+- **Price history, the feed (bought 2026-11-13, 150,240 credits):**
+  `data/ingestors/ufc_odds_history.py` stores fight winner and round totals
+  for every book, noon UTC each day 2020-06-06 to 2026-06-13 and six pulls
+  on each card day, in `ufc_odds_history` (552,576 rows, change-only, every
+  promotion, UFC fights placed on our fight ids) and its ledger
+  `ufc_odds_history_pulls`. The feed has nothing before 2020-06-06; round
+  totals come from Pinnacle from 2021 and DraftKings by 2025.
 
 ### Mobile
 

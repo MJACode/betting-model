@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, UFC rebuilt with the league skill: the three old models retired; nothing new clears (a rating model anchored on the first posted price is +7.8% on 1,531 archive opens and has negative closing-line value at DraftKings' own opener); two free price archives stored (65,450 rows); the 150,360-credit history purchase waits for mike |
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, UFC rebuilt with the league skill: the three old models retired; `ufc_open_moneyline` live on merge (fight winner a week out, Pinnacle-anchored ratings, 846 backtest bets +12.85% on the bought 2020-2026 history); the history bought for 150,240 credits; two free price archives stored |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, league skill weekly review (first run): no model added or re-cut since 2026-11-12; cloud column added to the scouting routes (only api.github.com answered); live records not measured because the Supabase connector failed to connect |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, the league skill's write-back is enforced: a Stop hook stops a session that used the skill and changed files without writing the learning log (once, fails open), the suite fails on a new model or sport the log does not name, and a review mode for a scheduled self-check |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, EuroLeague groundwork: every game and quarter score 2020-21 on stored from EuroLeague's open API; the full-game and first-half/quarter history purchases built and trialled (about 9.2M and 1.1M credits), waiting on the merge and mike's yes |

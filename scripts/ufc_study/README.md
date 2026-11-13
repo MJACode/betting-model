@@ -22,5 +22,13 @@ the working directory, and imports its siblings from this folder.
    first quotes, 2026), `ml_five_rounds.py` and `ml_five_dog.py`,
    `pilot_2026.py` and `totals_model.py` (round totals), `method_study.py`.
 
+5. On the bought history (the spool of `data/ingestors/ufc_odds_history.py`):
+   `feed_quotes.py <spool>` builds `feed_quotes.parquet`; then `feed_open.py`
+   (each book's first price, the Pinnacle-anchored rule, round totals),
+   `feed_kill.py <min lead hours>` (the shipped rule's kill tests),
+   `feed_debut.py`, and `card_replay.py` (the card's own code against the
+   research, bet for bet; needs DATABASE_URL). `live_replay.py` replays the
+   rule on our own 2026 store.
+
 `feed_probe.py` is PAID (2 credits a market live, 20 in history) and logs every
 call to `api_call_log` through `config`.

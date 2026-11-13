@@ -34,39 +34,42 @@ review as its own entry.
 
 1. **Scope.** mike: *"Use the model building skill to build models for UFC.
    Ignore and delete any existing models in the repo."* The three old models
-   retired; every market the feed and the free archives price, worked to a
+   retired; every market the feed and the free archives price worked to a
    verdict (`docs/ufc_market_audit.md`, `docs/sports/ufc.md` grid).
-2. **Tried.** Fight winner: blind bets by price band, the market-anchored
-   rating model walk-forward 2014-2026 at the close and at the first posted
-   price, the frozen model at each US book's first stored 2026 price,
-   Pinnacle-anchored line shopping, five-round fights. Round totals: blind
-   by book, a finish-time model. Method of victory: blind by method and
-   side. **Nothing clears.** The open-anchored model is +7.8% on 1,531 bets
-   at BestFightOdds' open with positive closing-line value every year since
-   2018, and has negative closing-line value at DraftKings' own opener.
+2. **Tried.** Fight winner: blind bets by band, a market-anchored rating
+   model walk-forward at the close and at the first posted price, the same
+   at each US book's first price, Pinnacle-anchored line shopping,
+   five-round fights, big line moves. Round totals: blind by book, a
+   finish-time model. Method of victory: blind by method and side. Then the
+   feed's history was bought (150,240 credits) and the open-anchored model
+   graded at the books a pick may name. **One model ships,
+   `ufc_open_moneyline`**: Pinnacle-anchored at a week out, 846 bets
+   +12.85% [+8.0, +17.5], every year positive, +2.2% against Pinnacle's
+   close. Totals and method: nothing clears.
 3. **New.**
-   - Method (`methods.md` §2): the first-posted price anchored model, with
-     the line it failed on: the soft open lives at whichever book posts
-     first, not at a book a pick may name.
-   - Kill test (`kill-tests.md`): a mechanism proven on an archive's
-     "opening line" is not proven at a decidable book until the same model
-     is graded at that book's own first price, with closing-line value
-     against the sharp close. Here the archive read +7.8% and DraftKings'
-     opener read negative closing-line value.
-   - Price routes (`market-grid.md`): the MMA feed key's coverage; two free
-     archives (fight-canon-db, the Ultimate UFC Dataset) and what each holds;
-     the feed's history starts 2020-06-06.
+   - Method (`methods.md` §1): a rating model anchored on the sharp book's
+     price a week or more out, bet at the best deciding book; the edge
+     grows with the lead (7-14 days +7%, 14-30 +20%, inside a week negative).
+   - Kill test (`kill-tests.md`): an archive's open is not a book we can
+     bet; and a small forward sample can say the opposite of the history
+     (104 bets with negative closing value, against 846 positive on 2,457
+     fights), so a purchase settles it, not the sample.
+   - Price routes (`market-grid.md`): the MMA key's coverage; two free
+     archives; the bulk history from 2020-06-06 at 20 credits a market.
    - Trap (`porting-traps.md`): our UFC ingest stores a fight only once
-     DraftKings lists it, so no other book's opener is ever in the store.
+     DraftKings lists it, and kept DraftKings alone before 2026-08.
    - Scout routes (`scouting.md`): six answers and refusals.
-4. **Corrected.** The open question in the first entry (is `ufc_total_rounds`
-   paused?) is closed: it was paused in `config.PAUSED_MODELS` and is now
-   retired. The fighting shape in `market-grid.md` said "method and duration
-   props, often with no price history at all": method props have a free
-   near-close history (2012+); duration props have none.
-5. **The framework.** A free archive was analysed before it was stored, and
-   the importer came after; step 2 now says to store a free archive the same
-   way as a bought one, before the first table is read from it.
+4. **Corrected.** The first entry's open question (is `ufc_total_rounds`
+   paused?) is closed: it was, and it is retired. The fighting shape in
+   `market-grid.md` said method and duration props have no price history:
+   method props have a free one (2012+), round totals the feed's (2021+).
+   A 2026 pilot said round totals carry their margin on the over; 2,403
+   fights say the under (-6.8% blind at Pinnacle).
+5. **The framework.** A free archive was analysed before it was stored;
+   step 2 now stores a free archive like a bought one, before the first
+   table is read from it. The card decides on the same cadence the history
+   was bought at (one noon pull a day), the first-come-lock trap avoided by
+   construction rather than by replay.
 
 ## 2026-11-13 — EuroLeague full game, round 1
 

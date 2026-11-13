@@ -84,6 +84,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nhl_prop_saves: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_prop_shots_on_goal: { min_prob: 0, min_edge: 0, min_odds: -200 },
   nhl_puckline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 },
+  ufc_open_moneyline: { min_prob: 0, min_edge: 0, min_odds: -300 },
   wnba_moneyline: { min_prob: 0.5, min_edge: 0.06, min_odds: -200 },
   wnba_over_under: { min_prob: 0.6, min_edge: 0.06, min_odds: -200 },
   wnba_prop_market: { min_prob: 0, min_edge: 0.05, min_odds: -140 },
