@@ -1130,6 +1130,26 @@ def step_ncaabw_schedule(run_date: str) -> bool:
         return False
 
 
+def step_euroleague_games(run_date: str) -> bool:
+    """
+    EuroLeague's schedule and finals for the season in progress, from
+    EuroLeague's own API (data/ingestors/euroleague_api.py): one keyless call
+    returns every game of the season, played or scheduled, and the store
+    upserts the events and games rows, fills each new final once, and adds its
+    quarter scores. EuroLeague owns every EUROLEAGUE games row; the odds feed
+    only resolves onto them, so this runs BEFORE the odds step. False on any
+    failure.
+    """
+    try:
+        from data.ingestors.euroleague_api import current_season_label, run
+        stats = run([current_season_label()], apply=True)
+        logger.success(f"✓ EuroLeague games: {stats}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ EuroLeague games failed: {exc}")
+        return False
+
+
 def step_ncaabw_results(run_date: str) -> bool:
     """
     NCAABW final scores from ESPN (data/ingestors/ncaabw_espn_ingestor.py).
@@ -2530,6 +2550,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         checkpoint("ncaabw_results")
         results["ncaabw_results"] = step_ncaabw_results(run_date)
         time.sleep(1)
+        # ── Step 0g4b: EuroLeague's schedule and finals, before the odds step,
+        # which resolves the feed onto these rows (data/ingestors/euroleague_api.py).
+        logger.info("Step 0g4b: Refreshing EuroLeague games and finals...")
+        checkpoint("euroleague_games")
+        results["euroleague_games"] = step_euroleague_games(run_date)
+        time.sleep(1)
         # ── Step 0g5: NCAA's box file for this NCAABW season, the totals
         # model's second box source (the ESPN feed runs on the hourly passes).
         logger.info("Step 0g5: Reading NCAA's NCAABW box score file...")
@@ -3075,7 +3101,7 @@ Examples:
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "ncaabw-results", "ncaabw-schedule", "ncaabw-box",
-                                 "ncaabw-ncaa-box",
+                                 "ncaabw-ncaa-box", "euroleague-games",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -3193,6 +3219,7 @@ Examples:
             "ncaabw-schedule": lambda: step_ncaabw_schedule(run_date),
             "ncaabw-box": lambda: step_ncaabw_box(run_date),
             "ncaabw-ncaa-box": lambda: step_ncaabw_ncaa_box(run_date),
+            "euroleague-games": lambda: step_euroleague_games(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),

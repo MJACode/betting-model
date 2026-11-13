@@ -30,6 +30,40 @@ review as its own entry.
 
 ---
 
+## 2026-11-12 — EuroLeague, the first league built with the skill (groundwork)
+
+1. **Scope.** mike: *"invoke the new skill to build the euroleague model. all
+   markets including 1h and 1q"*.
+2. **Tried.** Steps 0 to 2b only. Measured the odds feed (history from
+   2020-21, a snapshot every 5 minutes on game days from 2022-23 and every 10
+   before, books by season, period markets per event only and only from 2023)
+   and EuroLeague's own API (open: finals, quarter scores, referees, venue, the
+   whole season ahead). Built the identity, the results ingest, both history
+   purchases and the forward pull; trialled each purchase on one day; ran the
+   scout. **No grid row has a result yet**: the purchase waits for the merge
+   and for mike's yes to its cost (`docs/sports/euroleague.md`).
+3. **New.**
+   - Price route (`market-grid.md`): this league's per-event history serves
+     period markets only from 2023 (HTTP 422 on a 2022-12 game); it bills 10
+     credits per market returned; "ten named books are one region" holds on
+     the history endpoint too (30 credits for ten books, 60 for eleven).
+   - Traps (`porting-traps.md`): a bought history is thinned by the odds
+     clean-up until its source is protected IN PRODUCTION, so the groundwork
+     merges before the purchase runs at scale; the league's neutral-venue flag
+     was false on relocated "home" games; one long transaction of single-row
+     writes from mike's PC lost its connection mid-season (batched, all seven
+     seasons took 31 seconds); `odds` filtered on `source` alone scans 16 GB and
+     timed out, so read it by `game_id`; the credit planner refuses a
+     whole-history plan at its worst case when the measured cost would fit, so
+     it is fed 30-day chunks, newest season first.
+   - Scout routes (`scouting.md`): eight new answers and refusals.
+4. **Corrected.** Nothing measured contradicted the skill.
+5. **The framework.** The new-league order put "buy and store the price
+   history" before anything protected it from the clean-up. It now says to
+   protect the sources (merge the groundwork) first, and that a purchase of
+   this size is asked in chat with its measured cost: a detached launch of the
+   full purchase was refused by the permission check on 2026-11-12.
+
 ## 2026-11-12 — Scouting outside the repo, and inventing before a null
 
 1. **Scope.** mike: *"will it hunt for new appraches, data sources, sleuth

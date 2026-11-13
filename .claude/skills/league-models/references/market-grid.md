@@ -78,6 +78,13 @@ after all of them (CLAUDE.md §1b).
    More thin books add rejections, not edge; the case for a new provider is a
    book or market we cannot get (a sharp prop book, for example).
 
+**Period, team-total and alternate history** comes only from the per-event
+endpoint, one call per game per time, billed 10 credits per market a book
+actually returns (an empty answer is free). How far back it goes differs by
+league: EuroLeague's answers from 2023 (HTTP 422 on a 2022-12 game), with
+DraftKings in none of it (`docs/sports/euroleague.md`). Ask every market key
+the league has ever shown: one no book holds costs nothing.
+
 **Buying history.** Plan the credit budget from measured numbers
 (`data/ingestors/odds_quota.plan_credit_budget`, which refuses when it cannot
 measure), store each pull in Supabase in the same run with a `source` marker

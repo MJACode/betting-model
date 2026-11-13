@@ -407,6 +407,21 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/ncaabw_pbp.py; model input, never read by the app.
     "ncaabw_pbp",
     "ncaabw_pbp_games",
+    # EuroLeague (2026-11-12). Created on demand by
+    # data/ingestors/euroleague_teams.ensure_tables and
+    # data/ingestors/euroleague_api.ensure_tables (identity, schedule, quarter
+    # scores, the raw API answers); data/ingestors/euroleague_odds_history.py
+    # (the purchase ledger, in-play quotes, unplaced events); and
+    # data/ingestors/euroleague_period_history.py (its ledger). Never read by
+    # the app.
+    "euroleague_teams",
+    "euroleague_events",
+    "euroleague_api_raw",
+    "euroleague_period_scores",
+    "euroleague_odds_snapshots",
+    "euroleague_inplay_quotes",
+    "euroleague_odds_unmatched",
+    "euroleague_period_fetches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

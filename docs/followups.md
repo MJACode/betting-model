@@ -21,6 +21,20 @@
 
 ---
 
+## [ ] EuroLeague: finish the two history purchases (2026-11-12)
+mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
+"The purchase"): no 2020-21, the full game every snapshot near and during games
+and one every 15 minutes otherwise, plus first half, quarters, team totals and
+alternates. 2021-22 to 2025-26 started 2026-11-13 01:39Z; 2026-27 waits for the
+branch's merge (the clean-up visits this season's dates). Then the grid's
+baselines.
+
+## [ ] EuroLeague: a live first-half and quarter fetch, and relocated home games (2026-11-12)
+The forward pull covers the full game only. Period lines need a per-event
+fetch at the decision times (the shape of `data/ingestors/ncaab_first_half_odds.py`).
+Relocated "home" games (Maccabi in Belgrade, Hapoel in Sofia, Dubai in Bosnia)
+need a club-arena table before any model reads home advantage.
+
 ## [ ] Betting filters for NCAAB: halves (Matt, 2026-11-13: "Start with NBA then move to college basketball")
 
 `team_period_results` and `mobile/src/lib/teamPeriodSplits.ts` are NBA only.
