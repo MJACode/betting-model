@@ -19,6 +19,53 @@ No paid calls, no sign-ups. The only API calls were free, keyless GETs to the of
 
 Evidence grades: **Strong** = out-of-sample, real prices, bet count, interval or CLV, nothing to sell. **Weak** = win rate only, flat -110, in-sample, one season, or undated. **Noise** = pick sellers, tipsters.
 
+## Round 2: the home lean, market-anchored models, totals, and three mechanisms per period market (2026-11-13)
+
+Run by a read-only research agent on the local cache; every table, with the
+pre-registration written before any result was read:
+`docs/euroleague_round2.md`; the scripts are
+`scripts/euroleague_research/r3_*.py` (`r3_report.py` reruns them all).
+**Verdict: nothing clears the bar.** 109 cells; one survives a
+false-discovery correction at 10% (the first-quarter moneyline shrink at cut
+0.03), and it has 3 bets. Of the 91 cells with 25+ bets, none survives.
+
+- **No hold-out read yet.** The cache ends 2026-11-12, the same 107 games of
+  2026-27 round 1 read, so both frozen leads only reproduced (home underdogs
+  against the spread 30 bets -24.06%; first-quarter under 4 bets 3-1).
+- **The home lean, within a -200 floor:** the home moneyline at DraftKings'
+  close, 972 bets +59.64 units, +4.89% [-0.68, +10.39]; +0.29% without its 10
+  best dates, 2026-27 -18.50%. The away side under the same floor loses
+  -13.84% on 1,572. First halves, home side: spread -5.15% on 417, moneyline
+  -1.91% on 275.
+- **Market-anchored models** (the de-vigged close as an unpenalised offset;
+  home, home underdog, attendance, relocated venue, rest, double-round week):
+  the moneyline's cross-validation picked the largest penalty in 3 of 4
+  seasons and its log loss equals the market's (0.6075); the spread at cut
+  0.02, 428 bets +0.95%, dies on 2026-27 (-23.92%) and a placebo (27% of
+  shuffles matched it). Travel could not be built: no venue coordinates are
+  stored.
+- **Totals.** A referee crew's earlier residuals predicted the total only in
+  2022-23 (pooled slope +0.45, SE 0.47); its bet rule, 466 bets +1.31%, is
+  81.5% overs. DraftKings' first-post total: overs -1.38%, unders -7.69%.
+  Open-to-close movement predicts nothing (slope +0.020), and a perfect
+  predictor of the move would earn only +6.07% at the first post.
+- **Three mechanisms each for the first half and quarter** (the invention
+  floor): a club-pair first-half share (118 bets +7.77%, -12.44% without its
+  10 best dates); a club first-quarter share; a moneyline shrink toward 50%
+  (the fitted factor came out above 1 on the offshore-only seasons; the rule
+  bet favourites and lost -17.00% on 150). **The club first-quarter share at
+  margin 1.0** (the grid's top cell; the pre-registered margin 0.5 lost
+  -3.68%): 63 bets, 43-20, +17.71 units, +22.23% [+4.08, +39.66]; passed the
+  placebo (1% of shuffles at or above it), a 54/46 side split, both halves
+  and both seasons positive, +4.46% without its 10 best dates; failed the
+  200-bet bar, the false-discovery correction (p 0.0188) and the plateau.
+  Prices -122 median, -145 shortest. **Frozen as a lead.**
+- **Not yet null.** Still to run: the frozen leads on games after
+  2026-11-12 (the forward cache, below); halftime, now that the shot charts
+  place it on the wall clock (`data/ingestors/euroleague_shots.py`); new
+  information (domestic schedules, venue coordinates, fouls and free throws);
+  a fresh read not anchored on these rounds (the stuck ladder's rung 7).
+
 ## Full game, round 1 (2026-11-13)
 
 Moneyline, spread and total, 2021-22 to 2026-27 to date, run by a read-only

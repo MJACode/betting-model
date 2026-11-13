@@ -28,11 +28,11 @@ on (2,398 games); referees, venue and attendance per game.
 
 | Market | Settles on | Prices | Status |
 |---|---|---|---|
-| Full-game moneyline | final, overtime included | bought: 2021-22 on, 10 books | **round 1: nothing clears**; favourites at -500 or shorter are a lead whose price range is mike's call (`docs/euroleague_market_audit.md`) |
-| Full-game spread | final margin, overtime included | the same | **round 1: nothing clears**; home underdogs a lead that fails three kill tests |
-| Full-game total | both scores, overtime included | the same | **round 1: nothing clears**; referee crews and the opening total queued |
-| First-half moneyline, spread, total | quarters 1-2; a tied half pushes the two-way moneyline | bought, 2023-24 on; a book a pick may name only from 2025-26 (2023-24 BetUS alone, 2024-25 BetUS and GTbets) | **round 1: nothing clears** (`docs/euroleague_market_audit.md`, round 1); next round queued |
-| First-quarter moneyline, spread, total | quarter 1; a tied quarter (6.31% of games) pushes the two-way moneyline | bought with the first half | **round 1: nothing clears**; one lead (unders off a full-game anchor) fails three kill tests |
+| Full-game moneyline | final, overtime included | bought: 2021-22 on, 10 books | **rounds 1-2: nothing clears**; favourites at -500 or shorter are a lead whose price range is mike's call; the home moneyline within -200 fails its kill tests (`docs/euroleague_market_audit.md`) |
+| Full-game spread | final margin, overtime included | the same | **rounds 1-2: nothing clears**; home underdogs frozen; a market-anchored spread model dies on 2026-27 |
+| Full-game total | both scores, overtime included | the same | **rounds 1-2: nothing clears**; referee crews null, the opening total and its movement null |
+| First-half moneyline, spread, total | quarters 1-2; a tied half pushes the two-way moneyline | bought, 2023-24 on; a book a pick may name only from 2025-26 (2023-24 BetUS alone, 2024-25 BetUS and GTbets) | **rounds 1-2: nothing clears**, three mechanisms run (`docs/euroleague_market_audit.md`); halftime next |
+| First-quarter moneyline, spread, total | quarter 1; a tied quarter (6.31% of games) pushes the two-way moneyline | bought with the first half | **rounds 1-2: nothing clears**; two frozen leads (unders off a full-game anchor; a club first-quarter share, 63 bets +22.23%) await games after 2026-11-12 |
 | Second-quarter spread and total | quarter 2 | FanDuel only | to do; likely parked (one book) |
 | Team totals, full game and first half | one club's points | BetMGM, BetRivers, Fanatics (first half: BetRivers) | to do |
 | Alternate spreads and totals | final | BetMGM, BetRivers, Fanatics, Pinnacle | to do |
