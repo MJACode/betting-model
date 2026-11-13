@@ -14,8 +14,16 @@ import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
-/** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
-const UFC_AHEAD_DAYS = 7;
+/**
+ * How far ahead the UFC board looks. Mirrors the UFC opening-price card's
+ * reach (scripts/ufc_open_moneyline_card.HORIZON_DAYS, 120 days), plus one
+ * day of ET/UTC margin, the same rule NFL_AHEAD_DAYS follows below: that model
+ * bets a fight a week or more out (often two to four weeks), and Discord and
+ * push have no date horizon, so a shorter window is a bet a member gets in the
+ * channel and cannot find in the app (UX review, 2026-11-13). Raise this
+ * whenever the card's reach is raised.
+ */
+const UFC_AHEAD_DAYS = 121;
 /**
  * How far ahead the NFL board looks. Must cover the WIDEST window any NFL
  * producer can write a pick in, because Discord and push have NO date horizon
