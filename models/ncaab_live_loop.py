@@ -69,7 +69,7 @@ import math
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -96,6 +96,14 @@ RETRY_GAP_SEC = float(os.environ.get("NCAAB_LIVE_RETRY_GAP_SEC", "60"))
 HEADER_RECHECK_SEC = float(os.environ.get("NCAAB_LIVE_HEADER_RECHECK_SEC", "20"))
 # Summaries of a fetch's games are read at once on this many threads (Loop.summaries).
 SUMMARY_THREADS = int(os.environ.get("NCAAB_LIVE_SUMMARY_THREADS", "16"))
+# THE FAST PATH: DraftKings' own board (models/ncaab_live_dk.py), read every
+# DK_TICK_SEC while a window has a DraftKings game to settle. A game whose
+# DraftKings quote is not yet confirmed waits a read, at most DK_MAX_WAIT_SEC,
+# then is skipped for the window. NCAAB_LIVE_DK=0 turns the fast path off.
+DK_TICK_SEC = float(os.environ.get("NCAAB_LIVE_DK_TICK_SEC", "1.0"))
+DK_MAX_WAIT_SEC = float(os.environ.get("NCAAB_LIVE_DK_MAX_WAIT_SEC", "20"))
+DK_ON = os.environ.get("NCAAB_LIVE_DK", "1") != "0"
+BOARD_REUSE_SEC = 5.0
 # While ESPN's clock runs, a newest play older than this means its play list
 # has stopped: the scoring 99th-percentile lag (55 s) plus a minute between plays.
 PLAY_LAG_MAX_SEC = float(os.environ.get("NCAAB_LIVE_PLAY_LAG_MAX_SEC", "120"))
@@ -139,6 +147,9 @@ class SlotState:
     last_attempt: datetime | None = None
     attempts: int = 0
     closed: bool = False
+    dk_done: set = field(default_factory=set)      # games DraftKings' board decided or carried this window
+    dk_noted: set = field(default_factory=set)     # games whose DraftKings 'skipped' row is written this window
+    dk_first: datetime | None = None               # this window's first DraftKings attempt
 
 
 # ─── platform context ─────────────────────────────────────────────────────────
@@ -500,15 +511,21 @@ def evaluate_game(ctx: GameCtx, art: M.Artifact, q: pd.DataFrame, summary: dict,
     q = q[q["game_id"] == ctx.game_id]
     if q.empty:
         return [], {**notes, "carry": "no quote for this game in the fetch"}
-    qs = M.quote_states(q, plays)
-    el = M.eligible_quotes(qs, ctx.prior, deciding_books())
+    return evaluate_states(ctx, art, M.quote_states(q, plays), rules, deciding_books()), notes
+
+
+def evaluate_states(ctx: GameCtx, art: M.Artifact, qs: pd.DataFrame, rules: list, books: tuple) -> list:
+    """The grade's decision on quotes already carrying their state at the
+    stamp and the points since (M.quote_states' shape): ESPN's plays on the
+    provider's quotes, or DraftKings' own board (models/ncaab_live_dk.py)."""
+    el = M.eligible_quotes(qs, ctx.prior, books)
     out = []
     for rule in rules:
         er = el[el["rule"] == rule.key]
         if er.empty:
             continue
         off = M.decision_offers(er, art.models)
-        best = M.choose(off.assign(rule=rule.key), -math.inf, deciding_books())
+        best = M.choose(off.assign(rule=rule.key), -math.inf, books)
         if best.empty:
             continue
         b = best.iloc[0].to_dict()
@@ -518,7 +535,7 @@ def evaluate_game(ctx: GameCtx, art: M.Artifact, q: pd.DataFrame, summary: dict,
         st = {"period": int(b["period"]) if pd.notna(b.get("period")) else None, "clock_s": b.get("clock_s"),
               "h_pts": int(b["h_pts"]), "a_pts": int(b["a_pts"]), "diff": int(b["h_pts"] - b["a_pts"])}
         out.append((rule, b, off, st))
-    return out, notes
+    return out
 
 
 # ─── the loop ─────────────────────────────────────────────────────────────────
@@ -529,8 +546,14 @@ class Loop:
 
     def __init__(self, art: M.Artifact, espn, feed, connect, *, dry_run: bool = False,
                  wait: float = PBP_WAIT_SEC, recheck: float = PBP_RECHECK_SEC, sleep=time.sleep,
-                 clock=None, slate_dates=None, slots: Slots | None = None, resolver_factory=None):
+                 clock=None, slate_dates=None, slots: Slots | None = None, resolver_factory=None,
+                 dk=None):
         self.art, self.espn, self.feed, self.connect = art, espn, feed, connect
+        # DraftKings' own board (models/ncaab_live_dk.py): the fast path, tried
+        # first in every window; None turns it off.
+        self.dk = dk
+        self._boards = None
+        self._fast = False                     # the last tick asked for a fast next one
         self.dry_run, self.wait, self.recheck, self.sleep = dry_run, float(wait), float(recheck), sleep
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.slate_dates = slate_dates
@@ -561,6 +584,16 @@ class Loop:
         return list(self.slate_dates() if self.slate_dates else config.live_slate_dates())
 
     def scoreboards(self) -> list | None:
+        # Fast ticks (one a second while a DraftKings quote waits a read) reuse a
+        # scoreboard read for BOARD_REUSE_SEC: which games are in progress does
+        # not change that fast, and ESPN is read every tick otherwise.
+        if self._fast and self._boards is not None and time.monotonic() - self._boards[0] < BOARD_REUSE_SEC:
+            return self._boards[1]
+        got = self._scoreboards()
+        self._boards = None if got is None else (time.monotonic(), got)
+        return got
+
+    def _scoreboards(self) -> list | None:
         boards, answered = [], 0
         for d in self.dates():
             b = self.espn.scoreboard(d)
@@ -642,6 +675,11 @@ class Loop:
         return self.sizes[game_date]
 
     def tick(self) -> dict:
+        res = self._tick()
+        self._fast = bool(res.get("fast"))
+        return res
+
+    def _tick(self) -> dict:
         now = self.clock()
         boards = self.scoreboards()
         if boards is None:
@@ -654,6 +692,7 @@ class Loop:
         inst = self.slots.instant(now)
         res = {"live": len(live), "slot": inst, "decisions": 0}
         if inst is None:
+            self.warm(in_play)
             return res
         if live_destination() is None:
             self.blocked = ("neither DISCORD_WEBHOOK_LIVE_NCAAB nor DISCORD_CHANNEL_LIVE_NCAAB is set on this "
@@ -661,8 +700,8 @@ class Loop:
             res["blocked"] = self.blocked
             return res
         st = self.windows.setdefault(inst, SlotState())
-        if st.closed or (st.last_attempt is not None
-                         and (now - st.last_attempt).total_seconds() < RETRY_GAP_SEC):
+        slow_due = st.last_attempt is None or (now - st.last_attempt).total_seconds() >= RETRY_GAP_SEC
+        if st.closed or (self.dk is None and not slow_due):
             return res
         if not self.dry_run:
             try:
@@ -672,17 +711,144 @@ class Loop:
                 self.recycle()
                 return res
         todo = [(c, g) for c, g in in_play if c.refused is None and self.open_rules(c, g)
-                and (st.pending is None or c.game_id in st.pending)]
+                and c.game_id not in st.dk_done]
         if not todo:
             st.closed = True
+            return res
+        if self.dk is not None:
+            got = self.dk_slot(st, todo, now)
+            if got is not None:
+                n, done, waiting = got
+                res["decisions"] += n
+                if waiting:
+                    # a DraftKings quote waits one read for its confirmation: the
+                    # slow path (minutes of ESPN waits) does not run until it is settled
+                    res["fast"] = True
+                    return res
+                todo = [(c, g) for c, g in todo if c.game_id not in done]
+        todo = [(c, g) for c, g in todo if st.pending is None or c.game_id in st.pending]
+        if not todo:
+            st.closed = True
+            return res
+        if not slow_due:
             return res
         st.last_attempt = now
         st.attempts += 1
         n, outcomes = self.run_slot(inst, todo)
         st.pending = {gid for gid, o in outcomes.items() if o == "skipped"}
         st.closed = not st.pending
-        res["decisions"] = n
+        res["decisions"] += n
         return res
+
+    def warm(self, in_play: list) -> None:
+        """Between windows: each game's prior and its slate's size, so the
+        window's first DraftKings read is decided without those reads (they
+        were most of the 4.7 s from read to decision in the 2026-11-12 dry run)."""
+        for c, _g in in_play:
+            if c.prior is None and c.refused is None:
+                try:
+                    load_prior(self.c(), c)
+                except Exception as exc:              # noqa: BLE001
+                    log.warning("prior read failed for %s (retried at the window): %s", c.game_id, exc)
+                    self.recycle()
+            try:
+                self.size_of(c.game_date)
+            except Exception as exc:                  # noqa: BLE001
+                log.warning("slate size read failed for %s: %s", c.game_date, exc)
+                self.recycle()
+
+    def dk_slot(self, st: SlotState, todo: list, now: datetime):
+        """The window decided on DraftKings' own board (models/ncaab_live_dk.py):
+        (decisions, games done this window, games waiting a read), or None when
+        the feed is not live (mike's machine off) and the slow path decides."""
+        from models import ncaab_live_dk as DK
+        try:
+            last = self.dk.last_read()
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("DraftKings feed read failed (the slow path decides): %s", exc)
+            self.recycle()
+            return None
+        if not DK.feed_is_live(last, now):
+            return None
+        fetch_at = last[0]
+        try:
+            reads = self.dk.reads({c.game_id for c, _g in todo})
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("DraftKings reads failed (the slow path decides): %s", exc)
+            self.recycle()
+            return None
+        have = set(reads["game_id"]) if len(reads) else set()
+        mine = [(c, g) for c, g in todo if c.game_id in have]
+        if not mine:
+            return 0, set(), set()
+        if st.dk_first is None:
+            st.dk_first = now
+        give_up = (now - st.dk_first).total_seconds() > DK_MAX_WAIT_SEC
+        done, waiting, ready = set(), set(), []
+
+        def hold(c, g, why):
+            if give_up:
+                if c.game_id not in st.dk_noted:
+                    self.note(c, g, "skipped", f"DraftKings board: {why}, still after {DK_MAX_WAIT_SEC:.0f} s",
+                              fetch_at.to_pydatetime())
+                    st.dk_noted.add(c.game_id)
+                done.add(c.game_id)
+            else:
+                waiting.add(c.game_id)
+
+        for c, g in mine:
+            if c.prior is None and c.refused is None:
+                try:
+                    load_prior(self.c(), c)
+                except Exception as exc:              # noqa: BLE001
+                    self.recycle()
+                    hold(c, g, f"prior read failed: {type(exc).__name__}")
+                    continue
+            if c.refused is not None:
+                done.add(c.game_id)
+                continue
+            ready.append((c, g))
+        sums = self.summaries([c for c, _g in ready])
+        plays = {}
+        for c, _g in ready:
+            s = sums.get(c.game_id)
+            p = plays_frame(s, c) if s is not None else pd.DataFrame()
+            if len(p):
+                plays[c.game_id] = p
+        qs = DK.quote_states_dk(reads, fetch_at, plays)
+        decisions = []
+        for c, g in ready:
+            if c.game_id not in plays:
+                hold(c, g, "ESPN summary unreadable (team fouls)")
+                continue
+            rules = self.open_rules(c, g)
+            q = qs[(qs["game_id"] == c.game_id) & qs["market"].isin({r.market for r in rules})]
+            if len(q) and not q["held"].all():
+                hold(c, g, "a quote first seen on the feed's newest read")
+                continue
+            if len(q) and (q["pts_since"] > 0).any():
+                # DraftKings moved its score and not yet its line (41 of 180
+                # baskets on 2026-11-12, repriced a read or two later)
+                hold(c, g, "a basket DraftKings has not repriced yet")
+                continue
+            try:
+                decs = evaluate_states(c, self.art, q, rules, (DK.BOOK,)) if len(q) else []
+            except Exception as exc:                  # noqa: BLE001
+                log.exception("%s DraftKings evaluation failed: %s", c.game_id, exc)
+                hold(c, g, f"evaluation failed: {type(exc).__name__}")
+                continue
+            done.add(c.game_id)
+            if not decs:
+                self.note(c, g, "carried", "no eligible quote on DraftKings' board", fetch_at.to_pydatetime())
+                continue
+            newest = plays[c.game_id]["wallclock"].max()
+            notes = {"play_lag_s": (now - newest).total_seconds() if pd.notna(newest) else None, "links": {},
+                     "source": "DraftKings board"}
+            for rule, b, off, stt in decs:
+                decisions.append((c, g, rule, b, off, stt, notes))
+        n = self.decide(decisions, fetch_at.to_pydatetime()) if decisions else 0
+        st.dk_done |= done
+        return n, done, waiting
 
     def run_slot(self, slot: datetime, todo: list) -> tuple:
         out: dict = {}
@@ -895,6 +1061,8 @@ class Loop:
                         pick, why = None, f"the pick could not be built: {type(exc).__name__}: {exc}"
                     if why:
                         outcome, reason, pick = "declined", why, None
+            if notes.get("source"):
+                reason = f"{reason} ({notes['source']})"
             log.info("DECIDED %s %s %s @ %s H%s %s-%s cut=%.3f (%d games, %d bet before): %s %s", rule.model_id,
                      c.game_id, c.away, c.home, stt.get("period"), stt.get("h_pts"), stt.get("a_pts"), cut, n_games,
                      before, outcome.upper(),
@@ -957,6 +1125,11 @@ def main(argv=None) -> int:
     use_poller_session()
     loop = Loop(art, Espn(), odds_feed(CALL_CAP, CREDIT_CAP), get_connection,
                 dry_run=a.dry_run, wait=a.wait, recheck=a.recheck)
+    if DK_ON:
+        from models.ncaab_live_dk import DbSource
+        loop.dk = DbSource(loop.c)
+        log.info("fast path on: DraftKings' own board (dk_live_feed / dk_live_reads), read every %.1f s "
+                 "while a window waits on it", DK_TICK_SEC)
     if not a.dry_run:
         try:
             if not ledger_ready(loop.c()):
@@ -1006,7 +1179,8 @@ def main(argv=None) -> int:
                 log.info("--once: %s; %d BETs written; ESPN calls %d, odds calls %d, credits %d", res,
                          loop.bets_written, loop.espn.calls, loop.feed.calls, loop.feed.credits_used)
                 return 0
-            time.sleep(max(0.0, a.interval - (time.monotonic() - started)))
+            gap = DK_TICK_SEC if res.get("fast") else a.interval
+            time.sleep(max(0.0, gap - (time.monotonic() - started)))
     finally:
         if loop.conn is not None:
             try:

@@ -636,6 +636,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # A new table, RLS on, anon and authenticated revoked; touches no view,
     # pick, cut or record. Returns on a catalog read once it exists.
     "live_latency_probe_2026_11_12.sql",
+    # 2026-11-12 (mike: "as close to Real time as possible"): DraftKings' own
+    # in-play board, written from mike's machine (data/ingestors/dk_live_board.py)
+    # and read by the NCAAB in-play loop's fast path (models/ncaab_live_dk.py).
+    # Two new tables, RLS on, anon and authenticated revoked; touches no view,
+    # pick, cut or record. Returns on a catalog read once both exist.
+    "dk_live_reads_2026_11_12.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

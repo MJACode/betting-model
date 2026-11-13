@@ -527,6 +527,35 @@ clears the 30s freshness gate by observation rather than by the book's
 assertion. The bovada feed does not have this caveat — it publishes
 `lastModified` and uses it.
 
+### NCAAB in-play: DraftKings' own board (`dk_live_board`)
+
+mike, 2026-11-12: *"This is live betting ... This needs to be as close to Real
+time as possible."* The three NCAAB in-play models decide on DraftKings' own
+board, read from here every 2.5 s: the line, and DraftKings' score and clock
+from the same read. The worker's NCAAB loop reads what this writes and decides
+and posts within seconds; without it the loop falls back to the odds provider
+and ESPN (minutes).
+
+```bash
+# From the repo root, with .env present (it needs DATABASE_URL).
+python -m data.ingestors.dk_live_board            # runs while games are live, exits 45 min after the last
+python -m data.ingestors.dk_live_board --dry-run  # read and print, write nothing
+```
+
+It writes `dk_live_reads` (a row per game each time its score or a line
+changes) and `dk_live_feed` (every read). The worker trusts the rows only while
+`dk_live_feed.last_read_at` is under 8 s old, so this machine off, asleep or
+refused means the slow path, never a bet on an old line.
+
+```sql
+-- is it reading?
+SELECT sport, last_read_at, ok, live_events, matched, detail FROM dk_live_feed;
+```
+
+`matched` below `live_events` means a DraftKings game did not resolve onto our
+schedule; the log names it. Five refusals in a row back the feed off two
+minutes (this address is the one DraftKings would block).
+
 ## Diagnosing a DATABASE_URL that will not authenticate
 
 `python -m scripts.db_url_doctor` — reports the SHAPE of the string and never

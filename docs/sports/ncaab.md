@@ -1522,6 +1522,25 @@ live picks are announced only while the game is under way). A decision whose
 edge is above 0.50 is a data error and declined (`EDGE_CAP`; the largest graded
 edge was 0.453).
 
+**The fast path: DraftKings' own board** (mike, 2026-11-12: *"This is live
+betting ... as close to Real time as possible"*; `models/ncaab_live_dk.py`, the
+feed `data/ingestors/dk_live_board.py` on mike's machine, `docs/local_ops.md`).
+In every window the loop first reads `dk_live_feed` / `dk_live_reads`; while the
+feed's last read is under 8 s old, each game DraftKings lists is decided on
+DraftKings' board at once: no odds-provider call, no ESPN wait, and the loop
+ticks every second until the window's DraftKings games are settled. The grade's
+rule holds on the faster source: a quote's stamp is the read where DraftKings
+first showed the number, its state is DraftKings' score and clock in that read,
+and a basket since the stamp makes it ineligible. Team fouls come from ESPN's
+newest summary at or before the stamp (ESPN runs about 40 s behind, so a foul
+in the last minute can be missing from the bonus terms). Two waits of one read
+each: a quote first seen on the newest read, and a basket DraftKings has not
+repriced yet (at most 20 s, then the game is skipped for the window). The
+deciding book is DraftKings alone on this path (the graded selection at
+DraftKings alone: +9.0% on 658); games DraftKings does not list, and every game
+while the feed is off, go the slow way above. Ledger rows it decides read
+"(DraftKings board)".
+
 **Read before trusting it:**
 
 - **The price is the snapshot's, and it is gone by the post** (measured
