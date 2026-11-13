@@ -30,6 +30,38 @@ review as its own entry.
 
 ---
 
+## 2026-11-13 — Review
+
+1. **Scope.** The first weekly self-review (mike, 2026-11-13: *"the skill
+   should review itself every week"*), run from the cloud. Since: the start,
+   2026-11-12, because no earlier Review entry exists.
+2. **Tried.** `git log` on master since 2026-11-12: 68 commits. `config.py`
+   changed once (c5da32f3, the EuroLeague groundwork) and only the book lists
+   in it; no model id was added to `ACTION_THRESHOLDS`, none retired or paused.
+   New docs: `docs/sports/euroleague.md` (already in the log, 2026-11-12). The
+   NCAAB in-play fast path, the NBA Betting tab and the same-game parlay price
+   are not league builds. **Live records: not measured.** The Supabase
+   connector failed to connect in this session (CONNECT_TIMEOUT, retried three
+   times), so the 94-bet / +9.76-unit college football totals claim and the
+   402-bet women's college totals claim in `methods.md` were neither confirmed
+   nor contradicted, and no verdict was touched. Next review: for each live
+   model, settled BETs in `picks` by `model_id` and date, units through
+   `published_pick_unit_profit` (columns looked up first).
+3. **New.** The cloud cannot re-probe the scouting routes: of 18 sites, only
+   `api.github.com` answered (200; `github.com` bare gave 400). Every other
+   site, including the ones that answered from the PC, returned code 0 with a
+   403 from the egress proxy. That is the sandbox allowlist, not the sites. The
+   review first added these answers as a column in `scouting.md`; the same day
+   that column was replaced by one note under the table, because 17 "blocked"
+   cells beside the PC's answers would read as the sites being down. The
+   routine no longer probes routes from the cloud.
+4. **Corrected.** Nothing measured was contradicted. Nothing was promoted:
+   no trap or failure appears in two entries yet (the clean-up-thins-the-purchase
+   and the curl-from-the-cloud limits each appear once).
+5. **The framework.** Review mode step 3 now says what to do when the database
+   connector is down: report the count as not measured, with the query, and
+   change no verdict.
+
 ## 2026-11-13 — The write-back enforced: a Stop hook, a merge gate, review mode
 
 1. **Scope.** mike: *"for self improvement, how can we ensure the skill auto

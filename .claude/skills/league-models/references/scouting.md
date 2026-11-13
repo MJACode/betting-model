@@ -37,6 +37,12 @@ not a refusal forever, and a route that failed one way may answer another
 | University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
 | OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
 
+**The weekly cloud review cannot re-probe this table.** Its network refused
+17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress
+proxy returned 403 for the rest, including every site above that answered
+from mike's PC). Those refusals describe the cloud sandbox, not the sites, so
+they are not recorded here: re-probe from mike's PC, during a build.
+
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,
 Journal of Sports Analytics, International Journal of Forecasting), sharp

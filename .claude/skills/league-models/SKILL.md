@@ -88,7 +88,8 @@ a merge.
    lists as live, read its model's settled record since the claim was written
    (units on the posted stake, on the artifact that is live — read-only SQL).
    Where the record contradicts the claim, correct the entry in place and log
-   "was X, now Y".
+   "was X, now Y". If the database connector is down, say "not measured"
+   with the query that would measure it, and change no verdict.
 4. **Promote and prune.** A trap or failure in two or more entries becomes a
    rule in the step it belongs to. A frontier idea that a session has since run
    moves into its mechanism with the result.

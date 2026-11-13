@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, league skill weekly review (first run): no model added or re-cut since 2026-11-12; cloud column added to the scouting routes (only api.github.com answered); live records not measured because the Supabase connector failed to connect |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, the league skill's write-back is enforced: a Stop hook stops a session that used the skill and changed files without writing the learning log (once, fails open), the suite fails on a new model or sport the log does not name, and a review mode for a scheduled self-check |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, EuroLeague groundwork: every game and quarter score 2020-21 on stored from EuroLeague's open API; the full-game and first-half/quarter history purchases built and trialled (about 9.2M and 1.1M credits), waiting on the merge and mike's yes |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, NBA Betting tab: Period (Full/1H/1Q-4Q), Games (Season/L10/L5/L3) and Side filters, record and % on every Betting stat; `team_period_results` (DraftKings pre-tip line, consensus fallback; full game reconciles 30 of 30 teams with the board); half and quarter closing lines bought for the season and daily |
