@@ -1524,9 +1524,20 @@ edge was 0.453).
 
 **Read before trusting it:**
 
-- **The price is the snapshot's.** The loop posts about 2.5 minutes after the
-  snapshot (the ESPN waits); in-play lines move every possession. The record is
-  graded at the posted price, as the NBA in-play model's is.
+- **The price is the snapshot's, and it is gone by the post** (measured
+  2026-11-12, `scripts/ncaab_live_latency_probe.py`, run `2026-11-12-ncaab`).
+  Indiana -16.5 (live): DraftKings set -16.5 at 23:54:58Z, the provider served
+  it to our fetch at 23:55:54.8 (57 s later), the decision came at 23:59:07.9
+  (the 150 s of ESPN waits plus 43 s of other games' reads one after another,
+  fixed 2026-11-12) and Discord received it at 23:59:09.7. A DraftKings live
+  college spread is still up (number and price) 10 s later 77% of the time,
+  60 s 26%, 240 s 4%; the provider's DraftKings number differed from
+  DraftKings' own board at the moment it served it 28% of the time (792
+  pairs). ESPN's scoreboard showed a basket a median 20 s after it (max 33 s),
+  its play-by-play a median 42 s; DraftKings' own board showed the score a
+  median 3.7 s after it and moved its line in the same read or later in 177
+  of 180 baskets. The record is graded at the posted price, as the NBA
+  in-play model's is.
 - **The high-EV tail is where the selection lives, and it climbs**: +4% at EV
   0.08-0.10, +20% at 0.25-0.35, +28% above 0.35 (303 bets). That is the shape a
   real edge has, and it is also the shape of stale quotes. The checks against
