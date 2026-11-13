@@ -19,7 +19,9 @@
 -- WHY A PATCH. As the nfl_live_prop strike: the live view text has several
 -- owners, so this reads it and adds ONE clause before GROUP BY.
 -- The picks stay in `picks`, graded, and in the sweep views.
--- Guarded on the clause, so a re-run is a no-op.
+-- Guarded on the clause, so a re-run is a no-op. The replacement text is ONE
+-- escape string: Postgres does not join E'' literals placed on separate lines
+-- (the first version of this file failed on production, 2026-11-13).
 -- ROLLBACK: CREATE OR REPLACE each view with the clause removed.
 
 DO $mig$
@@ -40,9 +42,7 @@ BEGIN
     END IF;
 
     d := regexp_replace(rtrim(d, E'; \n'), '\s+GROUP BY ',
-                        E'\n    AND model_id <> ''ufc_moneyline''::text'
-                        E'\n    AND model_id <> ''ufc_total_rounds''::text'
-                        E'\n    AND model_id <> ''ufc_method_of_victory''::text\n  GROUP BY ');
+                        E'\n    AND model_id <> ''ufc_moneyline''::text\n    AND model_id <> ''ufc_total_rounds''::text\n    AND model_id <> ''ufc_method_of_victory''::text\n  GROUP BY ');
     EXECUTE format('CREATE OR REPLACE VIEW public.%I AS %s', v, d);
     EXECUTE format('ALTER VIEW public.%I SET (security_invoker = on)', v);
     EXECUTE format('GRANT SELECT ON public.%I TO anon, authenticated', v);
