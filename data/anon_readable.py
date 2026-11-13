@@ -160,6 +160,10 @@ ANON_READABLE: tuple[str, ...] = (
     # (add_nba_first_basket_2026_11_08.sql).
     "v_nba_first_basket_team_season",
     "v_nba_first_basket_player_season",
+    # Stats tab, Betting filters (Matt, 2026-11-13): one row per team, game
+    # and period, written by data/ingestors/team_period_results.py; RLS on
+    # with a SELECT policy (add_team_period_results_2026_11_13.sql).
+    "team_period_results",
     # Betslip game-line edit (Matt, 2026-10-29): the current alternate
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).

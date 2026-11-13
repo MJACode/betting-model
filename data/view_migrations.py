@@ -533,6 +533,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Does not rewrite picks, odds or the record. Sits before the
     # posted-stake pair so those two stay adjacent.
     "add_nba_first_basket_2026_11_08.sql",
+    # 2026-11-13 (Matt): the Stats tab's Betting filters (period, last N,
+    # home/away). One table written by data/ingestors/team_period_results.py,
+    # RLS on with a SELECT policy. Returns on a catalog read once the table,
+    # its index and the policy exist. Does not rewrite picks, odds or the
+    # record. Sits before the posted-stake pair so those two stay adjacent.
+    "add_team_period_results_2026_11_13.sql",
     # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
     # One table, written by data/ingestors/live_scoreboard.py, with a
     # SELECT policy and a SELECT-only grant. Returns on a catalog read once
@@ -625,6 +631,17 @@ ACTIVE_MIGRATIONS: list[str] = [
     # arrangement). Touches no pick, cut or record. Returns on a catalog
     # read once the view's comment matches the hash of this file.
     "dashboard_support_2026_11_12.sql",
+    # 2026-11-12 (mike: NCAAB live bets must fire in under 10 seconds): the
+    # in-play latency probe's raw reads (scripts/ncaab_live_latency_probe.py).
+    # A new table, RLS on, anon and authenticated revoked; touches no view,
+    # pick, cut or record. Returns on a catalog read once it exists.
+    "live_latency_probe_2026_11_12.sql",
+    # 2026-11-12 (mike: "as close to Real time as possible"): DraftKings' own
+    # in-play board, written from mike's machine (data/ingestors/dk_live_board.py)
+    # and read by the NCAAB in-play loop's fast path (models/ncaab_live_dk.py).
+    # Two new tables, RLS on, anon and authenticated revoked; touches no view,
+    # pick, cut or record. Returns on a catalog read once both exist.
+    "dk_live_reads_2026_11_12.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

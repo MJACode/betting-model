@@ -922,6 +922,11 @@ def step_nba_quarters(run_date: str) -> bool:
          (data/ingestors/nba_team_q1.py)
       4. nba_first_basket_games / _players rebuilt for the same two seasons,
          from the same play-by-play (data/ingestors/nba_first_basket.py)
+      5. half and quarter closing lines for every finished game that lacks them
+         (data/ingestors/nba_odds_history.buy_period_lines_daily, paid, its own
+         ceiling and floor), then team_period_results for this season (last
+         season once), the Betting tab's period / last-N / venue rows
+         (data/ingestors/team_period_results.py)
     Until 2026-10-28 nothing on the worker ran 1 or 2: the 2026-27 season had
     0 of 56 finished games with quarter scores. Runs after view migrations
     (which create the table) and after nba_results (which writes the finals).
@@ -970,6 +975,29 @@ def step_nba_quarters(run_date: str) -> bool:
         except Exception as exc:
             conn.rollback()
             logger.error(f"✗ NBA 1Q team stats failed: {exc}")
+            ok = False
+        try:
+            # The Stats tab's Betting filters (Matt, 2026-11-13): ATS and O/U
+            # by period (FG / H1 / Q1-Q4), from the quarter scores just
+            # fetched and the period lines in `odds`. One season per call so
+            # last season's one-time build cannot time out this one's.
+            from data.ingestors.team_period_results import rebuild as tpr_rebuild
+            from data.ingestors.team_period_results import seasons_to_build
+            try:
+                # Half and quarter lines for every finished game that lacks
+                # them (Matt, 2026-11-13). Its own ceiling and floor; a
+                # failure here still grades what is already stored.
+                from data.ingestors.nba_odds_history import buy_period_lines_daily
+                logger.success(f"✓ NBA period lines: {buy_period_lines_daily(conn, season)}")
+            except Exception as exc:
+                conn.rollback()
+                logger.error(f"✗ NBA period lines failed: {type(exc).__name__}: {exc}")
+                ok = False
+            for s in seasons_to_build(conn, "NBA", season):
+                logger.success(f"✓ NBA team period results: {tpr_rebuild(conn, 'NBA', [s])}")
+        except Exception as exc:
+            conn.rollback()
+            logger.error(f"✗ NBA team period results failed: {exc}")
             ok = False
         try:
             # The Stats tab's 1st Basket board (Matt, 2026-11-08), from the
