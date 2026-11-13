@@ -25,6 +25,15 @@
 -- Conference is left null. The board prints it beside the school name, and
 -- a conference label is what truncates a long college name.
 --
+-- The board row is Division I only. games carries the non-D1 opponent, and
+-- the box does too (measured 2026-11-13: 2026-27 men's games are 365 D1 and
+-- 164 not, and 160 of those non-D1 schools have a box row). Requiring an
+-- efficiency row, the NCAAF trick, would not drop them. Win% has no
+-- small-sample guard, so a 1-0 non-D1 school (Fort Valley State, Georgia
+-- Gwinnett, that date) ties every unbeaten D1 team at the top of Win%.
+-- The filter is on the OUTPUT row. The non-D1 game still counts in the D1
+-- team's record, because the aggregate is already built.
+--
 -- NOT in data/view_migrations.ACTIVE_MIGRATIONS. Apply by hand once Matt
 -- says so. A merge or an OTA does not query a relation this file creates:
 -- team_stats_board() is already there, and an unfilled cache returns no
@@ -34,8 +43,9 @@
 -- this, then refresh, before relying on the board. Do not apply it while
 -- opening the pull request.
 --
--- Marker: team_board_college_hoops. Re-running is a no-op. If the anchor
--- text is not in the live function exactly once, it changes nothing.
+-- Marker: team_board_college_hoops. Re-running is a no-op (NOTICE). If an
+-- anchor is not in the live function exactly once, the apply raises and
+-- changes nothing. A warning there would look like a successful apply.
 
 DO $mig$
 DECLARE
@@ -89,6 +99,21 @@ eff AS ($a$;
   UNION ALL SELECT * FROM eff_ncaabw
   UNION ALL SELECT * FROM eff_ncaab
 )$a$;
+  d1_anchor text := $a$WHERE p_sport <> 'NCAAF' OR e.t IS NOT NULL
+ORDER BY a.t$a$;
+  d1_replacement text := $a$WHERE (p_sport <> 'NCAAF' OR e.t IS NOT NULL)
+  AND (
+    p_sport NOT IN ('NCAABW', 'NCAAB')
+    OR EXISTS (
+      SELECT 1 FROM ncaabw_teams w
+      WHERE p_sport = 'NCAABW' AND w.school = a.t AND w.is_d1
+    )
+    OR EXISTS (
+      SELECT 1 FROM ncaab_teams m
+      WHERE p_sport = 'NCAAB' AND m.school = a.t AND m.is_d1
+    )
+  )
+ORDER BY a.t$a$;
   hits int;
 BEGIN
   SELECT pg_get_functiondef(p.oid) INTO def
@@ -107,17 +132,20 @@ BEGIN
 
   hits := (length(def) - length(replace(def, anchor, ''))) / length(anchor);
   IF hits <> 1 THEN
-    RAISE WARNING 'team_board_college_hoops: anchor found % times, expected 1; skipped', hits;
-    RETURN;
+    RAISE EXCEPTION 'team_board_college_hoops: anchor found % times, expected 1', hits;
   END IF;
   hits := (length(def) - length(replace(def, union_anchor, ''))) / length(union_anchor);
   IF hits <> 1 THEN
-    RAISE WARNING 'team_board_college_hoops: union anchor found % times, expected 1; skipped', hits;
-    RETURN;
+    RAISE EXCEPTION 'team_board_college_hoops: union anchor found % times, expected 1', hits;
+  END IF;
+  hits := (length(def) - length(replace(def, d1_anchor, ''))) / length(d1_anchor);
+  IF hits <> 1 THEN
+    RAISE EXCEPTION 'team_board_college_hoops: D1 anchor found % times, expected 1', hits;
   END IF;
 
   def := replace(def, anchor, replacement);
   def := replace(def, union_anchor, union_replacement);
+  def := replace(def, d1_anchor, d1_replacement);
   EXECUTE def;
 END
 $mig$;

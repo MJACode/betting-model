@@ -53,6 +53,18 @@ def test_the_migration_is_hand_applied_and_scales_efg():
     assert "JOIN ncaab_teams sch ON sch.espn_id = s.team_espn_id" in SQL
     _before(SQL, "p_sport = 'NCAABW'", "p_sport = 'NCAAB'")
     _before(SQL, "eff_ncaabw AS", "eff_ncaab AS")
+    # A missed anchor must fail the apply. A warning would look like success
+    # and leave Net Rtg blank.
+    assert "RAISE EXCEPTION 'team_board_college_hoops: anchor found" in SQL
+    assert "RAISE EXCEPTION 'team_board_college_hoops: union anchor found" in SQL
+    assert "RAISE EXCEPTION 'team_board_college_hoops: D1 anchor found" in SQL
+    assert "RAISE NOTICE 'team_stats_board_compute already has team_board_college_hoops'" in SQL
+    # Division I only, women's check first. The non-D1 game stays in the
+    # aggregate; this predicate is the output filter.
+    assert "p_sport NOT IN ('NCAABW', 'NCAAB')" in SQL
+    assert "w.school = a.t AND w.is_d1" in SQL
+    assert "m.school = a.t AND m.is_d1" in SQL
+    _before(SQL, "ncaabw_teams w", "ncaab_teams m")
     # Conference stays off the name row.
     assert "NULL::text" in SQL
     assert "sch.conference" not in SQL
