@@ -1074,6 +1074,12 @@ def _settle_ufc_picks(
       • Prob-only picks (totals/method) have dk_odds NULL → −110 flat P&L.
 
     Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+
+    The market comes from _market_for_pick, so a UFC model settles here only if
+    it resolves to "h2h", "totals" or "method" there: a trained model through
+    config.MODELS, a rule card through _RULE_MODEL_MARKETS, a retired one
+    through _RETIRED_MODEL_MARKETS. A new ufc_* id that is in none of them
+    would fall to "h2h" -- register it before its first BET.
     """
     from data.ingestors.ufc_stats_ingestor import rounds_completed, slugify_fighter
 
@@ -2579,6 +2585,13 @@ _RULE_MODEL_MARKETS = {
 _RETIRED_MODEL_MARKETS = {
     "mlb_live_win_prob": "h2h",
     "mlb_live_runline":  "spreads",
+    # The three UFC models retired 2026-11-13 (config.RETIRED_MODELS). Zero of
+    # their BETs were unsettled at retirement, but a re-settle or a CLV pass
+    # over their graded rows must still read round totals as totals and method
+    # as method, never fall to 'h2h'. _settle_ufc_picks reads these.
+    "ufc_moneyline":         "h2h",
+    "ufc_total_rounds":      "totals",
+    "ufc_method_of_victory": "method",
 }
 
 # A retired model's picks stay in the table and keep grading (§1c), but they are

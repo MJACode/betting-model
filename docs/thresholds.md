@@ -38,7 +38,8 @@ the dashboard or in SQL:
 | `custom` | bets at or above the number given |
 
 "Stronger" is the number the model's own cut is on: edge at the deciding price
-for every model except `ufc_method_of_victory`, which is cut on probability.
+for every model. (`ufc_method_of_victory`, cut on probability, was the one
+exception until it was retired on 2026-11-13.)
 
 **Where a band's number comes from.** The view `model_volume_bands` takes the
 model's own bets at config's cut over its last 120 days of betting. The days
@@ -284,9 +285,16 @@ The per-model OR-block is **generated from `config.py`**, never transcribed —
 with the scorer. The three hand-maintained copies this replaces had drifted by
 2026-08-30: The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making.
 
+> **All three UFC models below were RETIRED 2026-11-13** (mike: *"Ignore and
+> delete any existing models in the repo"*; `config.RETIRED_MODELS`). The
+> scripts these sections cite were deleted with them; their bytes are in git
+> history (`git show 7dbc0e4a:scripts/ufc_threshold_sweep.py`, and the same for
+> `ufc_model_compare.py` and `ufc_rounds_hazard.py`). The sections are kept as
+> the evidence of what was tried.
+
 ### UFC — the first every-pick evaluation (2026-09-05)
 
-Run it yourself: `python -m scripts.ufc_threshold_sweep`.
+Run it yourself (before 2026-11-13): `python -m scripts.ufc_threshold_sweep`.
 
 **Why it did not exist before.** `mv_scored_pick_outcomes` grades the whole
 scored universe for MLB and WNBA and **does not cover UFC**, and `picks.result`

@@ -941,14 +941,7 @@ ACTION_THRESHOLDS: dict = {
     # 21.6% of priced games, prices -115 to -105. November was flat in both
     # seasons; December on carried it. min_prob 0.0: the edge is the cut.
     "ncaabw_total_blend":       {"min_prob": 0.0, "min_edge": 0.05},
-    # UFC — placeholder thresholds; tune after 50+ settled picks.
-    # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
-    # round-total lines when the per-event endpoint carries them, else prob-only
-    # vs a synthetic line. ufc_method_of_victory is prob-only (no DK odds via
-    # The Odds API) — see PROB_ONLY_MODELS.
-    "ufc_moneyline":         {"min_prob": 0.65, "min_edge": 0.08},
-    "ufc_total_rounds":      {"min_prob": 0.62, "min_edge": 0.08},
-    "ufc_method_of_victory": {"min_prob": 0.65, "min_edge": 0.0},
+    # UFC: the three 2026-06-19 models RETIRED 2026-11-13 (mike). See RETIRED_MODELS.
     # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
@@ -1197,13 +1190,11 @@ ACTION_THRESHOLDS: dict = {
 # anchor a meaningful edge — e.g. HR Over 0.5 where DK juices the over heavily
 # and there is no real under market. Scorer skips the edge check; dashboard /
 # Claude mobile SQL filters drop the edge clause for these models.
-PROB_ONLY_MODELS: set = {
-    # mlb_prop_batter_hr was the founding member (HR Over 0.5, no real under
-    # market) until it was RETIRED 2026-09-02 -- see the block above PROP_MODELS.
-    # Method-of-victory odds are not carried by The Odds API — the model's
-    # 3-class probability alone decides the BET signal.
-    "ufc_method_of_victory",
-}
+# mlb_prop_batter_hr was the founding member (HR Over 0.5, no real under
+# market) until it was RETIRED 2026-09-02 -- see the block above PROP_MODELS.
+# ufc_method_of_victory was the last member until it was RETIRED 2026-11-13
+# (mike) -- see RETIRED_MODELS. Empty, and kept: every reader still consults it.
+PROB_ONLY_MODELS: set = set()
 
 # Models RETIRED — removed from their registry (MODELS / PROP_MODELS /
 # LIVE_MODELS) outright, so nothing scores, trains or syncs a threshold row for
@@ -1274,6 +1265,35 @@ RETIRED_MODELS: frozenset = frozenset({
     "nba_prop_player_steals",
     "nba_prop_player_turnovers",
     "nba_prop_player_dd",
+    # 2026-11-13 (mike): "Use the model building skill to build models for UFC.
+    # Ignore and delete any existing models in the repo." The three UFC models
+    # of 2026-06-19 (trained XGBoost + Platt on ufcstats fight history).
+    #
+    # Their record at retirement, from `picks` on 2026-11-13 (settled BETs):
+    #   ufc_moneyline          5 settled, 3-2, plus 1 NO_ACTION
+    #   ufc_total_rounds      14 settled, 9-5 (paused since 2026-09-07)
+    #   ufc_method_of_victory  5 settled, 3-2
+    # and zero unsettled BETs, so nothing is left for settlement to grade.
+    #
+    # Why they go rather than retrain: they were backtested on probability
+    # alone at a synthetic -110, because no historical UFC prices were ever
+    # stored; and method of victory never had a market price at all -- the
+    # odds feed rejects every method, goes-the-distance and round-betting
+    # market key for MMA (HTTP 422 INVALID_MARKET, measured 2026-11-13).
+    #
+    # THE PUBLISHED RECORD. v_public_track_record holds ONE of their bets:
+    # ufc_total_rounds 1-0, +1.0 units (Mario Pinto vs Ryan Spann Under 1.5,
+    # the 2026-09-05 card). Retiring drops it from every published total once
+    # threshold_sync prunes the model's row, which is a restated record: this
+    # needs mike's yes in chat before it merges (CLAUDE.md §1b, NO RESTATED
+    # RECORDS). RECORD_EXCLUSIONS is NOT touched -- nothing is struck.
+    #
+    # The sport plumbing stays for the models that replace them: the fight
+    # results ingest (ufc_csv_loader -> ufc_fight_log, fighters), UFC odds
+    # capture, the schedule gate and tracking/paper_tracker._settle_ufc_picks.
+    "ufc_moneyline",
+    "ufc_total_rounds",
+    "ufc_method_of_victory",
 })
 # Models temporarily PAUSED — never emit a BET signal. They are still scored and
 # written as NONE rows (so the website can still show the game), but with no
@@ -1936,36 +1956,10 @@ PAUSED_MODELS: set = {
     # there is nothing to map with, which is the honest reason this is a pause
     # rather than a correction.
     #
-    # 2026-09-07 (mike): PAUSED after three formulations measured the same way
-    # and all three lost. mike: "there are NO UFC picks in the channel" -> the
-    # delivery bug was real and is fixed (#505), and the channel is still quiet
-    # because this model produces ~3 bets on a 13-fight card and loses on them.
-    #
-    #     formulation                     cal error   at the live cut 0.62/0.08
-    #     live 20260619 (binary)             0.0368    -9.2% over 7
-    #     retrain 20260907 (binary, #539)    0.0548   -40.0% over 6
-    #     round-level hazard (#542)          0.0420   -38.3% over 21
-    #
-    # And #514's every-pick grid — the first one ever run for UFC, since
-    # mv_scored_pick_outcomes does not cover this sport — is negative in ALL 42
-    # cells, from -19% at the loosest cut to -100%. §7's rule for a grid with no
-    # positive cell is to say so rather than ship the least-bad one.
-    #
-    # THE DEFECT IS UPSTREAM OF THE MODEL, which is why the retrain and the
-    # rebuild could not fix it and a fourth attempt should not be started:
-    #   * Of 916 distinct fighters on 2026 cards, 315 have NO rows in
-    #     ufc_fight_log; only 12 of those are name-matching artifacts, 303 are
-    #     genuinely absent. A fight is skipped when either fighter has under
-    #     three prior bouts, so roughly a third of every card never reaches the
-    #     model at all — both formulations trained on the same 3,179 fights.
-    #   * DraftKings UFC totals have only been STORED since 2026-06-11, so the
-    #     evaluable population is 56 priced fights and a cut selects 3-21 bets.
-    #     At n=7 the noise band is about +/-40 ROI points, wider than every
-    #     difference in the table above.
-    #
-    # UNPAUSE when the history coverage is fixed and a fresh grid over a
-    # population that can actually discriminate comes back positive — not on a
-    # retrain of the same features, which has now been tried twice.
+    # ufc_total_rounds (paused 2026-09-07, mike: three formulations all
+    # measured losing) left this set 2026-11-13 when it was RETIRED with the
+    # other two UFC models -- see RETIRED_MODELS. Retired and paused are
+    # disjoint by construction.
 
     # ── NFL distributional props — PAUSED 2026-09-14 (eleven models) ─────
     # docs/nfl_props_model.md §5b: walk-forward at real DraftKings prices loses
@@ -1999,7 +1993,6 @@ PAUSED_MODELS: set = {
     "nfl_prop_rush_rec_yards",
     "nfl_prop_anytime_td",
     "nfl_prop_sacks",
-    "ufc_total_rounds",
     # 2026-09-11 (mike: "Still too many live ncaaf picks. Every game is getting
     # a live pick it seems. We need to only bet the absolute strongest picks
     # and proof of profitable backtested model"). Both NCAAF live lanes.
@@ -2736,8 +2729,6 @@ MODEL_OWN_EV_FLOOR: dict = {
     "nhl_prop_saves":            0.18,
     "nhl_prop_shots_on_goal":    0.18,
     "nhl_prop_assists":          0.18,
-    "ufc_moneyline":             0.13,   # n=5, min written EV +0.131
-    "ufc_total_rounds":          0.15,   # n=8, min written EV +0.150
     "wnba_moneyline":            0.06,   # n=31, min written EV +0.069
     "wnba_prop_market":          0.01,   # n=12, min written EV +0.013
     "wnba_prop_player_assists":  0.08,   # n=122, min written EV +0.087
@@ -3186,10 +3177,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.10,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.50/0.10 = 35-22 +23.1%
     "wnba_prop_player_threes":   0.026,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      0.16,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    # UFC — placeholder; tune after 50+ settled picks.
-    "ufc_moneyline":         0.08,
-    "ufc_total_rounds":      0.08,
-    "ufc_method_of_victory": 0.0,   # prob-only — edge ignored at runtime
+    # UFC: the three 2026-06-19 models RETIRED 2026-11-13 (mike). See RETIRED_MODELS.
     # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
     # edge floor starts higher than the pre-game equivalents.
@@ -3296,10 +3284,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.5,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.50/0.10 = 35-22 +23.1%
     "wnba_prop_player_threes":   0.706,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      0.68,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    # UFC — placeholder; tune after 50+ settled picks.
-    "ufc_moneyline":         0.65,
-    "ufc_total_rounds":      0.62,
-    "ufc_method_of_victory": 0.65,
+    # UFC: the three 2026-06-19 models RETIRED 2026-11-13 (mike). See RETIRED_MODELS.
     # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
@@ -3786,10 +3771,8 @@ MODELS = {
     "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
     "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
     "wnba_spread":              ("WNBA", "spreads", "Home team covers the spread"),
-    # UFC — fighter mapped to the Odds API "home_team" slot is our home side.
-    "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
-    "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
-    "ufc_method_of_victory":    ("UFC", "method", "Fight ends by Decision / KO-TKO / Submission (3-class)"),
+    # UFC: ufc_moneyline, ufc_total_rounds and ufc_method_of_victory RETIRED
+    # 2026-11-13 (mike). See RETIRED_MODELS.
     # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # NCAAF (FBS) — all three game markets score against real DK lines AND
     # backtest against real historical lines (CFBD /lines). The first new sport

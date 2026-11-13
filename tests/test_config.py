@@ -29,8 +29,8 @@ def test_models_include_expected_ids():
         # (mike: "build new nba models, remove any previous nba models") and
         # every NBA game market was closed for 2026-27 (docs/nba_models_2026.md
         # 4.1). The NBA model that ships is a prop rule, outside MODELS.
-        # UFC
-        "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
+        # UFC: none. The three 2026-06-19 models were RETIRED 2026-11-13
+        # (mike: "Ignore and delete any existing models in the repo").
         # GOLF
         # NCAAF (spread + spread_premium are DISJOINT bands of one opener rule)
         "ncaaf_moneyline", "ncaaf_over_under", "ncaaf_spread",

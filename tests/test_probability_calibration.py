@@ -140,16 +140,16 @@ def test_the_offset_shrinks_toward_the_prior_by_sample_size():
     assert pc.fit_offset([], [], prior_b=-0.3, k=pc.SHRINK_K) == pytest.approx(-0.3)
 
 
-def test_prob_only_models_are_never_fitted():
+def test_prob_only_models_are_never_fitted(monkeypatch):
     """Their probability is the whole signal and is never compared to a price."""
     conn = _FakeConn([(0.7, "WIN")] * 500)
-    # ufc_method_of_victory: the first fixture, mlb_prop_batter_hr, was RETIRED
-    # 2026-09-02 and the second, nba_prop_player_dd, 2026-10-15; each left
-    # config.PROB_ONLY_MODELS with it. Read from config so the fixture is
-    # always a model the set actually holds.
+    # A stand-in id. The three real fixtures each left config.PROB_ONLY_MODELS
+    # when they were retired -- mlb_prop_batter_hr 2026-09-02,
+    # nba_prop_player_dd 2026-10-15, ufc_method_of_victory 2026-11-13 -- and
+    # the set is empty since. The rule still has to hold for the next member.
     import config
-    assert "ufc_method_of_victory" in config.PROB_ONLY_MODELS
-    rep = pc.fit_model(conn, "ufc_method_of_victory", "2026-04-14")
+    monkeypatch.setattr(config, "PROB_ONLY_MODELS", {"x_prob_only_fixture"})
+    rep = pc.fit_model(conn, "x_prob_only_fixture", "2026-04-14")
     assert rep["method"] is None and "prob-only" in rep["note"]
 
 

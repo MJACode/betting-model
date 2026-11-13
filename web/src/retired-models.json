@@ -20,5 +20,8 @@
   "nba_prop_player_threes",
   "nba_prop_player_turnovers",
   "nba_spread",
-  "nfl_live_prop"
+  "nfl_live_prop",
+  "ufc_method_of_victory",
+  "ufc_moneyline",
+  "ufc_total_rounds"
 ]
