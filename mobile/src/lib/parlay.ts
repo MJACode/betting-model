@@ -431,14 +431,29 @@ export function betslipSummary(
  * finished, it did not error, and it came back with picks in it. Anything else
  * and the keys are held, because silently wiping a real slip is far worse than
  * carrying a stale one for another minute.
+ *
+ * Two more holds (design review, 2026-11-13). `partial`: the read finished
+ * but part of it failed, such as this week's NFL card. Every leg on the
+ * missing part looks gone, so nothing is removed until a clean read.
+ * `onToday`: the board is on today's Eastern date. Just after midnight a
+ * board can still be yesterday's, and today's legs are not on it.
  */
 export function canPruneSlip(board: {
   slipReady: boolean;
   loading: boolean;
   error: string | null;
+  partial: boolean;
+  onToday: boolean;
   boardSize: number;
 }): boolean {
-  return board.slipReady && !board.loading && board.error == null && board.boardSize > 0;
+  return (
+    board.slipReady &&
+    !board.loading &&
+    board.error == null &&
+    !board.partial &&
+    board.onToday &&
+    board.boardSize > 0
+  );
 }
 
 /**

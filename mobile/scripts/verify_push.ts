@@ -281,8 +281,12 @@ const registerBody = hookCode.slice(
 );
 check('registerForPush was located in the source', registerBody.length > 200);
 check(
-  'the registration upsert still reads its error',
-  /const \{ error \} = await supabase[\s\S]{0,80}\.upsert\(/.test(registerBody),
+  'the registration write still reads its error',
+  /const \{ error \} = await supabase[\s\S]{0,40}\.rpc\(\s*'save_device_push_token'/.test(registerBody),
+);
+check(
+  'registration does not upsert the token table',
+  !registerBody.includes('.upsert(') && !registerBody.includes(".from('device_push_tokens')"),
 );
 check(
   'the registration failure path acts on that error',

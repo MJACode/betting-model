@@ -38,7 +38,8 @@ _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 # Nothing here is user-scoped; anon is how the app reads before sign-in.
 ANON_READABLE: tuple[str, ...] = (
     # ── tables ──────────────────────────────────────────────────────────────
-    "device_push_tokens",
+    # device_push_tokens is not here. The app does not .from() it. The write
+    # is save_device_push_token(), and there is no SELECT policy on purpose.
     "fighters",
     "game_weather",
     "games",
@@ -222,11 +223,12 @@ AUTHENTICATED_ONLY: tuple[str, ...] = (
 # over. Revoked anyway, because a view that is later simplified can silently
 # become updatable and nothing would flag it.
 ANON_WRITABLE: dict[str, tuple[str, ...]] = {
-    # `.upsert(..., { onConflict: 'token' })` in
-    # mobile/src/hooks/usePushNotifications.ts. An upsert is INSERT ... ON
-    # CONFLICT DO UPDATE, so it needs both verbs and only those. Nothing deletes
-    # a push token -- that hook is the only reference to the table in the app.
-    "device_push_tokens": ("INSERT", "UPDATE"),
+    # device_push_tokens is DELIBERATELY ABSENT. The hook calls
+    # rpc('save_device_push_token') (mobile/src/hooks/usePushNotifications.ts).
+    # That function is SECURITY DEFINER, so it writes as the owner and needs
+    # no anon grant on the table. A direct upsert is INSERT ... ON CONFLICT
+    # DO UPDATE, which Postgres rejects under these RLS policies (no SELECT
+    # policy). Do not put the table back here to "match" the old policies.
     # `.insert()` and `.delete()` in mobile/src/lib/queries.ts. A tracked bet is
     # added and removed, never edited, so UPDATE is not needed.
     "tracked_bets": ("INSERT", "DELETE"),
@@ -240,9 +242,12 @@ ANON_WRITABLE: dict[str, tuple[str, ...]] = {
 
 # HOW THESE WERE DERIVED, because the difference is the whole point: each entry
 # is the set of verbs the APP DEMONSTRABLY USES, read off the call sites -- not
-# the set it happened to hold. The two agree with the RLS policies exactly:
+# the set it happened to hold. tracked_bets agrees with its policies. The other
+# two app writes do not go through the table:
 #
-#     device_push_tokens   policies a,w   ->  INSERT, UPDATE
+#     device_push_tokens   policies a,w   ->  nothing; save_device_push_token
+#                                            is SECURITY DEFINER. The policies
+#                                            do not make an upsert succeed.
 #     tracked_bets         policies a,d   ->  INSERT, DELETE
 #     feedback             policy   a     ->  nothing; the RPC is SECURITY DEFINER
 #
@@ -767,6 +772,11 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # carries its own GRANT). SECURITY INVOKER over the BYOM facts tables.
     "byom_record",
     "byom_bets",
+    # push registration -- SECURITY DEFINER, returns nothing. The migration
+    # (data/migrations/save_device_push_token_2026_11_11.sql) is hand-applied
+    # and not in ACTIVE_MIGRATIONS. apply_anon_grants skips the GRANT until
+    # pg_proc has the function; the migration grants EXECUTE itself.
+    "save_device_push_token",
     # in-app feedback -- SECURITY DEFINER, device-keyed, so callable pre-sign-in
     "feedback_mark_read",
     "feedback_messages_for_thread",

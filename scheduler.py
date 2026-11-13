@@ -157,6 +157,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor
@@ -323,6 +324,49 @@ log = logging.getLogger("scheduler")
 # tracking.daily_retry.MAX_DEPLOY_KILLED_STARTS_PER_ET_DAY.
 _DAILY_LOCK = threading.Lock()
 
+# How often a pass re-checks the other's lock, and how long the daily will
+# wait for a refresh that is already scoring. The refresh chain was cut
+# from about 12 minutes; 30 covers a slow pass. Past that, the daily scores
+# anyway — a stuck refresh must not skip the only writer of the MLB
+# freshness tables.
+_WRITER_POLL_S = 0.5
+_DAILY_WAIT_FOR_REFRESH_S = 30 * 60
+
+
+def _refresh_wait_for_daily_s() -> float:
+    """How long a refresh waits for a daily before scoring anyway.
+
+    ``MAX_DAILY_RUN`` is the longest a daily ledger row is treated as live.
+    One extra minute lets a daily that finishes on that boundary release
+    the lock before the refresh deletes and rewrites the same pick rows.
+    """
+    from tracking.daily_retry import MAX_DAILY_RUN
+    return MAX_DAILY_RUN.total_seconds() + 60
+
+
+def _wait_for_refresh_to_finish(label: str) -> bool:
+    """Block while a refresh holds ``_REFRESH_LOCK``. The caller holds
+    ``_DAILY_LOCK`` for the wait. True when the refresh lock cleared in time.
+
+    The refresh side does the opposite: it does not hold its lock while it
+    waits, or the two waits deadlock. A refresh that has not started work
+    sees this daily lock and waits. A refresh already inside its run keeps
+    going; this wait ends when that run releases the lock.
+    """
+    if not _REFRESH_LOCK.locked():
+        return True
+    log.info("%s: a refresh pass is running — waiting to score", label)
+    deadline = time.monotonic() + _DAILY_WAIT_FOR_REFRESH_S
+    while _REFRESH_LOCK.locked():
+        if time.monotonic() >= deadline:
+            log.warning(
+                "%s: a refresh still holds its lock after %ss — scoring anyway",
+                label, _DAILY_WAIT_FOR_REFRESH_S,
+            )
+            return False
+        time.sleep(_WRITER_POLL_S)
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Jobs — each just runs an existing entrypoint as a subprocess.
@@ -433,6 +477,10 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         log.info("daily-pipeline already running in this process — skip")
         return "skipped"
     try:
+        # A refresh already scoring deletes and rewrites the same pick rows
+        # this daily is about to. Wait, still holding this lock, so a refresh
+        # that has not started sees it and waits instead of starting.
+        _wait_for_refresh_to_finish("daily-pipeline")
         if retry_reason:
             log.info("daily-pipeline retry (%s/%s) start %s: %s",
                      retry_source or "catch-up",
@@ -508,10 +556,50 @@ def _wait_for_nhl_window(label: str) -> bool:
 def run_refresh_pass(mode: str = "hourly") -> None:
     # The single-source-of-truth refresh chain (odds + prop odds + lineups + scoring
     # for every sport, opening-signals, parlay record, push notifications).
-    if not _REFRESH_LOCK.acquire(blocking=False):
-        log.info("refresh-pass[%s]: a pass is already running in this process — skip",
-                 mode)
-        return
+    #
+    # A daily and this pass both DELETE unlocked pick rows across the
+    # look-ahead window and then insert (models/scorer.py). Inside one
+    # refresh those writers are sequential for that reason
+    # (scripts/refresh_pass.sh). The daily is a different process entry
+    # and used to run beside this one: boot catch-up at +5s, this catch-up
+    # at +60s, and the :17 cron while a relaunch is still going. The unique
+    # index drops a second INSERT of the same pick. It does not stop one
+    # pass deleting a row the other just wrote, including a pick that
+    # already posted. So this pass waits until the daily lock is free.
+    #
+    # The wait does not hold ``_REFRESH_LOCK``. The daily holds its lock
+    # while it waits for this one. Holding both directions deadlocks.
+    # A second refresh skips at once while the first is scoring: the
+    # acquire below fails and returns. A refresh that is still waiting
+    # behind the daily does not hold the lock, so a second one waits too.
+    # When the daily lets go, one of them takes the lock and the other's
+    # acquire fails, so one pass runs.
+    deadline = time.monotonic() + _refresh_wait_for_daily_s()
+    announced = False
+    while True:
+        if not _REFRESH_LOCK.acquire(blocking=False):
+            log.info("refresh-pass[%s]: a pass is already running in this process — skip",
+                     mode)
+            return
+        if not _DAILY_LOCK.locked():
+            break
+        _REFRESH_LOCK.release()
+        if not announced:
+            log.info("refresh-pass[%s]: a daily is running — waiting to score", mode)
+            announced = True
+        if time.monotonic() >= deadline:
+            log.warning(
+                "refresh-pass[%s]: a daily still holds its lock after %ss — scoring anyway",
+                mode, _refresh_wait_for_daily_s(),
+            )
+            if not _REFRESH_LOCK.acquire(blocking=False):
+                log.info(
+                    "refresh-pass[%s]: a pass is already running in this process — skip",
+                    mode,
+                )
+                return
+            break
+        time.sleep(_WRITER_POLL_S)
     try:
         _wait_for_nhl_window(f"refresh-pass[{mode}]")
         _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")

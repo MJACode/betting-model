@@ -85,6 +85,12 @@ jobs:
         working-directory: mobile
         run: npx tsx scripts/verify_player_log.ts
 
+      # Today's board: one in-flight read shared by every mount, and a
+      # refresh starts another. Also counts the picks/odds/games requests.
+      - name: Today picks flight
+        working-directory: mobile
+        run: npx tsx scripts/verify_today_picks_flight.ts
+
   pytest-subset:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -369,6 +375,7 @@ jobs:
             tests/test_mobile_nhl_skater_stats.py \
             tests/test_mobile_my_books.py \
             tests/test_member_sportsbooks_migration.py \
+            tests/test_save_device_push_token.py \
             tests/test_social_post_queue_migration.py \
             tests/test_ddl_guard.py \
             tests/test_nfl_wind_stability.py \
@@ -384,4 +391,18 @@ jobs:
             tests/test_web_site.py \
             tests/test_app_review_sign_in.py \
             tests/test_deploy_drain.py \
-            tests/test_scoring_lease.py
+            tests/test_scoring_lease.py \
+            tests/test_ncaaf_fcs_opponent_alias_migration.py \
+            tests/test_ncaaf_game_identity.py \
+            tests/test_cfbd_ingestor.py \
+            tests/test_clv_pinnacle_mainline.py
+          # -q does not name a passed test, and a skip exits 0. Re-run this
+          # file verbosely and refuse a skip so the scratch cluster is in
+          # the log. The file is also in the list above.
+          set -o pipefail
+          python -m pytest -v --tb=short tests/test_save_device_push_token.py | tee /tmp/push-token-pytest.txt
+          if grep -q SKIPPED /tmp/push-token-pytest.txt; then
+            echo "tests/test_save_device_push_token.py was skipped; the scratch cluster did not run"
+            exit 1
+          fi
+          grep -q 'test_direct_upsert_is_refused_and_the_function_is_not_a_read PASSED' /tmp/push-token-pytest.txt

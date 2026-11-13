@@ -2731,6 +2731,13 @@ def _job_daily_pipeline(**kw):
     skipped and a second pipeline is not started. That result is not a
     failure: raising would retry the job, up to MAX_ATTEMPTS, and could
     start the daily again after the first one ends.
+
+    The runner holds the queue's advisory lock for the whole daily (about
+    40 minutes). Other worker_jobs ticks in that window find the lock
+    taken and wait for a later tick. A row this job left ``running``
+    because a deploy killed it is not kicked again past the catch-up
+    bounds: ``_reclaim_stale`` refuses it. The first claim of a pending
+    row is still the kick, including after those bounds.
     """
     import scheduler
     from zoneinfo import ZoneInfo
@@ -2763,6 +2770,7 @@ def _job_daily_pipeline(**kw):
         return {
             "status": "skipped",
             "reason": "daily already running in this process",
+            "start_number": start_number,
         }
     return {"status": status or "unknown", "start_number": start_number}
 
@@ -3052,6 +3060,40 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
 
 # ── running ──────────────────────────────────────────────────────────────────
 
+def _refuse_stale_daily_pipeline(conn, now: datetime) -> bool:
+    """Fail a deploy-killed manual daily instead of queueing it again.
+
+    True when at least one ``running`` ``daily_pipeline`` row was refused.
+    Those rows are no longer ``running``, so the general reclaim below
+    does not give them their attempt back and ``claim_one`` cannot start
+    them. No such row: False, and the ledger is not read.
+
+    The bounds are ``decide_daily_retry``: ``RUN_DAILY_RETRY``, the
+    deploy-kill cap, and the 22:00 ET cutoff, plus every other reason
+    that function skips. A fresh pending row does not come through here.
+    """
+    rows = conn.execute(
+        "SELECT job_id FROM worker_jobs "
+        "WHERE status = 'running' AND job_type = 'daily_pipeline'"
+    ).fetchall()
+    if not rows:
+        return False
+    from tracking.daily_retry import daily_pipeline_reclaim_decision
+    decision = daily_pipeline_reclaim_decision(conn, now)
+    if decision.action == "run":
+        return False
+    conn.execute(
+        "UPDATE worker_jobs SET status = 'failed', finished_at = NOW(), "
+        "claimed_at = NULL, error = %s "
+        "WHERE status = 'running' AND job_type = 'daily_pipeline'",
+        (f"not reclaimed: {decision.reason}",),
+    )
+    logger.warning(
+        f"job queue: not reclaiming daily_pipeline ({decision.reason})"
+    )
+    return True
+
+
 def _reclaim_stale(conn, now: datetime) -> int:
     """Return orphaned jobs to the queue. MUST be called holding the lock.
 
@@ -3063,8 +3105,17 @@ def _reclaim_stale(conn, now: datetime) -> int:
 
     The attempt cap stays: without it a job that kills the container comes
     back, kills it again, and the queue never drains.
+
+    A ``daily_pipeline`` row is refused, not requeued, when the same-day
+    catch-up would not start another daily. Giving the attempt back with
+    no cap relaunched a full daily on every boot, including after 22:00 ET.
     """
-    cur = conn.execute("""
+    exclude_daily = ""
+    if _refuse_stale_daily_pipeline(conn, now):
+        # Already failed above. Keep the general update from flipping one
+        # back to pending if it is still visible as running.
+        exclude_daily = " AND job_type <> 'daily_pipeline'"
+    cur = conn.execute(f"""
         UPDATE worker_jobs SET status = CASE WHEN attempts >= %s THEN 'failed'
                                              ELSE 'pending' END,
                                error  = CASE WHEN attempts >= %s
@@ -3082,7 +3133,7 @@ def _reclaim_stale(conn, now: datetime) -> int:
                                -- death that was not the job's fault.
                                attempts = GREATEST(attempts - 1, 0),
                                claimed_at = NULL
-        WHERE status = 'running'
+        WHERE status = 'running'{exclude_daily}
         RETURNING job_id
     """, (MAX_ATTEMPTS, MAX_ATTEMPTS)).fetchall()
     conn.commit()

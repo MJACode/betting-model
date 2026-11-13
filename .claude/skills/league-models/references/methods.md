@@ -213,7 +213,7 @@ edge is where the rule misses something the state shows.
 - Pro football: 11 of 11 stat-projection props lost (2,133 bets -1.90%); the
   book prices its main line flat and the information test found nothing the
   line lacked. Pro basketball: a minutes × rate projection is live (66,588 bets
-  +3.60%). Hockey: count models on their own probability worked on unders.
+  +3.60% in the backtest; live `nba_prop_projection`, all settled to 2026-11-13: 84 bets 36-48, -0.42 units, -0.6%, too few to overturn the backtest, reviewed 2026-11-13). Hockey: count models on their own probability worked on unders.
 - **The architecture is a decision before code**
   (`docs/nfl_props_build_prompt.md`): one model across prop markets, one per
   market, or a shared usage core feeding per-market heads. Decide from the
