@@ -164,7 +164,11 @@ brief to its first live model in a day (2026-11-09 to 11-10,
 3. Identity: a per-league team table and a feed-name census.
 4. Buy and store the price history; start the forward collection the same day
    (the whole season's schedule, odds pulls at the decision times, the price
-   path kept, box scores).
+   path kept, box scores). **First merge the groundwork that protects the new
+   sources from the odds clean-up** (`data/prune_odds.PROTECTED_SOURCES`
+   lives in code, so until it merges, production thins what was bought), and
+   put the measured cost of a large purchase to mike in chat (EuroLeague,
+   2026-11-12, `references/learning-log.md`).
 5. Scout outside the repo for this league (step 2b).
 6. Run the closest league's working methods **unchanged** as the first
    candidates, then the scouted leads and the rest of the grid. Unchanged

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, EuroLeague groundwork: every game and quarter score 2020-21 on stored from EuroLeague's open API; the full-game and first-half/quarter history purchases built and trialled (about 9.2M and 1.1M credits), waiting on the merge and mike's yes |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the league skill scouts outside the repo on every build (papers, forums, GitHub, data and price sources; Reddit refused a plain fetch) and invents three mechanisms of its own before calling a market null |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the pre-game boards reload while open: "FD line now 41.5" was a board loaded before FanDuel moved to 40.5 at 18:18Z; All/Signals now reload every 10 minutes while focused and on resume, overlapping loads are ordered, and a failing poll no longer re-announces its banner |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the league skill learns from every use (a learning log read first and appended last, write-back as a gate, contradicted claims fixed in place) and climbs an eight-rung ladder when stuck; its stale-citation test waits on its own branch for a merge outside live games |

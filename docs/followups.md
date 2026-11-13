@@ -21,6 +21,19 @@
 
 ---
 
+## [needs-decision] EuroLeague: run the two history purchases (2026-11-12)
+Built and trialled on branch `claude/euroleague-models`
+(`docs/sports/euroleague.md`, "The purchase"): the full game at every snapshot
+(about 9.2M credits) and first half, quarters, team totals and alternates
+(about 1.1M). Waits on the branch's merge (the clean-up protects the sources
+only then) and mike's yes to the spend. Then the grid's baselines.
+
+## EuroLeague: a live first-half and quarter fetch, and relocated home games (2026-11-12)
+The forward pull covers the full game only. Period lines need a per-event
+fetch at the decision times (the shape of `data/ingestors/ncaab_first_half_odds.py`).
+Relocated "home" games (Maccabi in Belgrade, Hapoel in Sofia, Dubai in Bosnia)
+need a club-arena table before any model reads home advantage.
+
 ## [x] Volume settings: the dashboard panel, once the branch is merged (2026-11-11, done 2026-11-12)
 
 Done: merged in #1251, published 2026-11-11 23:56Z, moved to its own
