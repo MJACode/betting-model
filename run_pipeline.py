@@ -922,6 +922,11 @@ def step_nba_quarters(run_date: str) -> bool:
          (data/ingestors/nba_team_q1.py)
       4. nba_first_basket_games / _players rebuilt for the same two seasons,
          from the same play-by-play (data/ingestors/nba_first_basket.py)
+      5. half and quarter closing lines for every finished game that lacks them
+         (data/ingestors/nba_odds_history.buy_period_lines_daily, paid, its own
+         ceiling and floor), then team_period_results for this season (last
+         season once), the Betting tab's period / last-N / venue rows
+         (data/ingestors/team_period_results.py)
     Until 2026-10-28 nothing on the worker ran 1 or 2: the 2026-27 season had
     0 of 56 finished games with quarter scores. Runs after view migrations
     (which create the table) and after nba_results (which writes the finals).
@@ -970,6 +975,29 @@ def step_nba_quarters(run_date: str) -> bool:
         except Exception as exc:
             conn.rollback()
             logger.error(f"✗ NBA 1Q team stats failed: {exc}")
+            ok = False
+        try:
+            # The Stats tab's Betting filters (Matt, 2026-11-13): ATS and O/U
+            # by period (FG / H1 / Q1-Q4), from the quarter scores just
+            # fetched and the period lines in `odds`. One season per call so
+            # last season's one-time build cannot time out this one's.
+            from data.ingestors.team_period_results import rebuild as tpr_rebuild
+            from data.ingestors.team_period_results import seasons_to_build
+            try:
+                # Half and quarter lines for every finished game that lacks
+                # them (Matt, 2026-11-13). Its own ceiling and floor; a
+                # failure here still grades what is already stored.
+                from data.ingestors.nba_odds_history import buy_period_lines_daily
+                logger.success(f"✓ NBA period lines: {buy_period_lines_daily(conn, season)}")
+            except Exception as exc:
+                conn.rollback()
+                logger.error(f"✗ NBA period lines failed: {type(exc).__name__}: {exc}")
+                ok = False
+            for s in seasons_to_build(conn, "NBA", season):
+                logger.success(f"✓ NBA team period results: {tpr_rebuild(conn, 'NBA', [s])}")
+        except Exception as exc:
+            conn.rollback()
+            logger.error(f"✗ NBA team period results failed: {exc}")
             ok = False
         try:
             # The Stats tab's 1st Basket board (Matt, 2026-11-08), from the
@@ -1099,6 +1127,26 @@ def step_ncaabw_schedule(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ NCAABW schedule failed: {exc}")
+        return False
+
+
+def step_euroleague_games(run_date: str) -> bool:
+    """
+    EuroLeague's schedule and finals for the season in progress, from
+    EuroLeague's own API (data/ingestors/euroleague_api.py): one keyless call
+    returns every game of the season, played or scheduled, and the store
+    upserts the events and games rows, fills each new final once, and adds its
+    quarter scores. EuroLeague owns every EUROLEAGUE games row; the odds feed
+    only resolves onto them, so this runs BEFORE the odds step. False on any
+    failure.
+    """
+    try:
+        from data.ingestors.euroleague_api import current_season_label, run
+        stats = run([current_season_label()], apply=True)
+        logger.success(f"✓ EuroLeague games: {stats}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ EuroLeague games failed: {exc}")
         return False
 
 
@@ -2502,6 +2550,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         checkpoint("ncaabw_results")
         results["ncaabw_results"] = step_ncaabw_results(run_date)
         time.sleep(1)
+        # ── Step 0g4b: EuroLeague's schedule and finals, before the odds step,
+        # which resolves the feed onto these rows (data/ingestors/euroleague_api.py).
+        logger.info("Step 0g4b: Refreshing EuroLeague games and finals...")
+        checkpoint("euroleague_games")
+        results["euroleague_games"] = step_euroleague_games(run_date)
+        time.sleep(1)
         # ── Step 0g5: NCAA's box file for this NCAABW season, the totals
         # model's second box source (the ESPN feed runs on the hourly passes).
         logger.info("Step 0g5: Reading NCAA's NCAABW box score file...")
@@ -3047,7 +3101,7 @@ Examples:
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "ncaab-results", "ncaab-schedule", "ncaab-box",
                                  "ncaabw-results", "ncaabw-schedule", "ncaabw-box",
-                                 "ncaabw-ncaa-box",
+                                 "ncaabw-ncaa-box", "euroleague-games",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
@@ -3165,6 +3219,7 @@ Examples:
             "ncaabw-schedule": lambda: step_ncaabw_schedule(run_date),
             "ncaabw-box": lambda: step_ncaabw_box(run_date),
             "ncaabw-ncaa-box": lambda: step_ncaabw_ncaa_box(run_date),
+            "euroleague-games": lambda: step_euroleague_games(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),

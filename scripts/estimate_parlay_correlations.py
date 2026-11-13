@@ -23,6 +23,7 @@ totals are team-agnostic ('na').
 Usage:
     python -m scripts.estimate_parlay_correlations --sport MLB [--min-pairs 200]
     python -m scripts.estimate_parlay_correlations --sport NBA
+    python -m scripts.estimate_parlay_correlations --sport NFL
     python -m scripts.estimate_parlay_correlations --sport ALL
 
 MLB has the richest structure (pitching props + run environment). NBA / WNBA
@@ -191,7 +192,100 @@ def estimate_basketball(conn, sport: str, min_pairs: int) -> list[tuple]:
     return out
 
 
+# ── NFL: market by market (2026-11-12) ──────────────────────────────────────
+#
+# A same-game NFL slip moves on WHICH stats are paired and WHO they belong to
+# (a receiver's catches and his own TD; a QB's pass TDs and his receiver's TD),
+# so NFL gets one rho per (market pair, relationship) rather than a class
+# bucket. Each player-game is scored against a stand-in for his line, his
+# trailing 8-game average rounded to the next half point (4+ prior games), and
+# only players a book would list count: 3+ targets, 6+ carries or 20+ attempts
+# a game. rho is the Bonett-Price (2005) tetrachoric approximation from the 2x2
+# table, i.e. the LATENT correlation the app's Gaussian copula takes (phi would
+# understate it). Bundled in mobile/src/lib/propCorrelation.ts.
+
+NFL_MARKETS_SQL = """
+WITH base AS (
+  SELECT log_id, player_id, team, game_id, game_date,
+         receptions::float rec, receiving_yards::float recy, rushing_yards::float rushy,
+         carries::float car, passing_yards::float passy, passing_tds::float ptd,
+         attempts::float att, completions::float cmp,
+         (coalesce(rushing_tds,0)+coalesce(receiving_tds,0))::float atd,
+         (coalesce(rushing_yards,0)+coalesce(receiving_yards,0))::float rry,
+         targets::float tgt
+  FROM nfl_player_game_log WHERE season >= %(since)s
+),
+tr AS (
+  SELECT b.*, count(*) OVER w AS np,
+    avg(rec) OVER w a_rec, avg(recy) OVER w a_recy, avg(rushy) OVER w a_rushy,
+    avg(car) OVER w a_car, avg(passy) OVER w a_passy, avg(ptd) OVER w a_ptd,
+    avg(att) OVER w a_att, avg(cmp) OVER w a_cmp, avg(rry) OVER w a_rry, avg(tgt) OVER w a_tgt
+  FROM base b
+  WINDOW w AS (PARTITION BY player_id ORDER BY game_date ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING)
+),
+ind AS (
+  SELECT log_id, player_id, team, game_id, m, v FROM tr,
+  LATERAL (VALUES
+    ('player_receptions',      CASE WHEN coalesce(a_tgt,0)>=3 THEN (rec  > floor(a_rec)+0.5)::int END),
+    ('player_reception_yds',   CASE WHEN coalesce(a_tgt,0)>=3 THEN (recy > floor(a_recy)+0.5)::int END),
+    ('player_rush_yds',        CASE WHEN coalesce(a_car,0)>=6 THEN (rushy> floor(a_rushy)+0.5)::int END),
+    ('player_rush_attempts',   CASE WHEN coalesce(a_car,0)>=6 THEN (car  > floor(a_car)+0.5)::int END),
+    ('player_rush_reception_yds', CASE WHEN coalesce(a_car,0)>=6 OR coalesce(a_tgt,0)>=3 THEN (rry > floor(a_rry)+0.5)::int END),
+    ('player_pass_yds',        CASE WHEN coalesce(a_att,0)>=20 THEN (passy> floor(a_passy)+0.5)::int END),
+    ('player_pass_tds',        CASE WHEN coalesce(a_att,0)>=20 THEN (ptd  > floor(a_ptd)+0.5)::int END),
+    ('player_pass_attempts',   CASE WHEN coalesce(a_att,0)>=20 THEN (att  > floor(a_att)+0.5)::int END),
+    ('player_pass_completions',CASE WHEN coalesce(a_att,0)>=20 THEN (cmp  > floor(a_cmp)+0.5)::int END),
+    ('player_anytime_td',      CASE WHEN coalesce(a_tgt,0)>=3 OR coalesce(a_car,0)>=6 OR coalesce(a_att,0)>=20 THEN (atd >= 1)::int END)
+  ) AS x(m, v)
+  WHERE np >= 4 AND v IS NOT NULL
+)
+SELECT a.m, b.m,
+  CASE WHEN a.player_id=b.player_id THEN 'same_player'
+       WHEN a.team=b.team THEN 'same_team' ELSE 'opp' END AS rel,
+  count(*), sum(a.v), sum(b.v), sum(a.v*b.v)
+FROM ind a JOIN ind b
+  ON a.game_id=b.game_id AND a.m<=b.m AND NOT (a.m=b.m AND a.log_id>=b.log_id)
+GROUP BY 1,2,3
+"""
+
+NFL_RHO_CLAMP = 0.95
+
+
+def tetrachoric_bonett_price(n: float, na: float, nb: float, nab: float) -> float:
+    """Bonett & Price (2005) closed-form tetrachoric correlation for a 2x2 table
+    with marginals na, nb (count of 1s) and joint nab, with a 0.5 continuity
+    correction in every cell."""
+    import math
+
+    a = nab + 0.5
+    b = (na - nab) + 0.5
+    c = (nb - nab) + 0.5
+    d = (n - na - nb + nab) + 0.5
+    p1, p2 = na / n, nb / n
+    pmin = min(p1, p2, 1 - p1, 1 - p2)
+    w = (a * d) / (b * c)
+    exp = (1 - abs(p1 - p2) / 5 - (0.5 - pmin) ** 2) / 2
+    return math.cos(math.pi / (1 + w ** exp))
+
+
+def estimate_nfl(conn, min_pairs: int, since: int = 2022) -> list[tuple]:
+    """Rows (sport, market_a, market_b, rel, rho, n_pairs) for NFL props."""
+    rows = conn.execute(NFL_MARKETS_SQL, {"since": since}).fetchall()
+    out: list[tuple] = []
+    for ma, mb, rel, n, na, nb, nab in rows:
+        n, na, nb, nab = float(n), float(na), float(nb), float(nab)
+        if n < max(min_pairs, 500):
+            continue
+        rho = tetrachoric_bonett_price(n, na, nb, nab)
+        rho = max(-NFL_RHO_CLAMP, min(NFL_RHO_CLAMP, rho))
+        out.append(("NFL", ma, mb, rel, round(rho, 3), int(n)))
+        print(f"  {ma}|{mb}|{rel}: rho={rho:+.3f}  n_pairs={int(n)}")
+    return out
+
+
 def estimate(conn, sport: str, min_pairs: int) -> list[tuple]:
+    if sport == "NFL":
+        return estimate_nfl(conn, min_pairs)
     if sport == "MLB":
         return estimate_mlb(conn, min_pairs)
     return estimate_basketball(conn, sport, min_pairs)
@@ -209,11 +303,11 @@ DO UPDATE SET rho=EXCLUDED.rho, source='empirical',
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Estimate parlay leg correlations.")
-    ap.add_argument("--sport", default="MLB", choices=["MLB", "NBA", "WNBA", "ALL"])
+    ap.add_argument("--sport", default="MLB", choices=["MLB", "NBA", "WNBA", "NFL", "ALL"])
     ap.add_argument("--min-pairs", type=int, default=200)
     args = ap.parse_args()
 
-    sports = ["MLB", "NBA", "WNBA"] if args.sport == "ALL" else [args.sport]
+    sports = ["MLB", "NBA", "WNBA", "NFL"] if args.sport == "ALL" else [args.sport]
 
     conn = get_connection()
     try:

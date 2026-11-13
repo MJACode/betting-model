@@ -1522,11 +1522,44 @@ live picks are announced only while the game is under way). A decision whose
 edge is above 0.50 is a data error and declined (`EDGE_CAP`; the largest graded
 edge was 0.453).
 
+**The fast path: DraftKings' own board** (mike, 2026-11-12: *"This is live
+betting ... as close to Real time as possible"*; `models/ncaab_live_dk.py`, the
+feed `data/ingestors/dk_live_board.py` on mike's machine, `docs/local_ops.md`).
+In every window the loop first reads `dk_live_feed` / `dk_live_reads`; while the
+feed's last read is under 8 s old, each game DraftKings lists is decided on
+DraftKings' board at once: no odds-provider call, no ESPN wait, and the loop
+ticks every second until the window's DraftKings games are settled. The grade's
+rule holds on the faster source: a quote's stamp is the read where DraftKings
+first showed the number, its state is DraftKings' score and clock in that read,
+and a basket since the stamp makes it ineligible. Team fouls come from ESPN's
+newest summary at or before the stamp (ESPN runs about 40 s behind, so a foul
+in the last minute can be missing from the bonus terms). Two waits of one read
+each: a quote first seen on the newest read, and a basket DraftKings has not
+repriced yet (at most 20 s, then the game is skipped for the window). The feed
+reads every second; the loop wakes at the window's first second, and push and
+Discord go out together. The
+deciding book is DraftKings alone on this path (the graded selection at
+DraftKings alone: +9.0% on 658); games DraftKings does not list, and every game
+while the feed is off, go the slow way above. Ledger rows it decides read
+"(DraftKings board)".
+
 **Read before trusting it:**
 
-- **The price is the snapshot's.** The loop posts about 2.5 minutes after the
-  snapshot (the ESPN waits); in-play lines move every possession. The record is
-  graded at the posted price, as the NBA in-play model's is.
+- **The price is the snapshot's, and it is gone by the post** (measured
+  2026-11-12, `scripts/ncaab_live_latency_probe.py`, run `2026-11-12-ncaab`).
+  Indiana -16.5 (live): DraftKings set -16.5 at 23:54:58Z, the provider served
+  it to our fetch at 23:55:54.8 (57 s later), the decision came at 23:59:07.9
+  (the 150 s of ESPN waits, then two other games' 20 s header re-reads and
+  every game's reads one after another; from 2026-11-12 they run together,
+  about 22 s sooner) and Discord received it at 23:59:09.7. A DraftKings live
+  college spread is still up (number and price) 10 s later 77% of the time,
+  60 s 26%, 240 s 4%; the provider's DraftKings number differed from
+  DraftKings' own board at the moment it served it 28% of the time (792
+  pairs). ESPN's scoreboard showed a basket a median 20 s after it (max 33 s),
+  its play-by-play a median 42 s; DraftKings' own board showed the score a
+  median 3.7 s after it and moved its line in the same read or later in 177
+  of 180 baskets. The record is graded at the posted price, as the NBA
+  in-play model's is.
 - **The high-EV tail is where the selection lives, and it climbs**: +4% at EV
   0.08-0.10, +20% at 0.25-0.35, +28% above 0.35 (303 bets). That is the shape a
   real edge has, and it is also the shape of stale quotes. The checks against

@@ -118,6 +118,10 @@ const HOOPS: Sport[] = ['NBA', 'WNBA', 'NCAABW', 'NCAAB'];
 const RESTFUL: Sport[] = ['NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF'];
 
 const ATS_SAMPLE: (keyof TeamStatsRow)[] = ['ats_w', 'ats_l', 'ats_p'];
+/** NBA's Betting numbers are counted from team_period_results (lib/teamPeriodSplits):
+ *  which line each game is graded against, said once on the sheets that need it. */
+const NBA_GRADED_LINE = 'Each game is graded against DraftKings’ last line before tip, or the other books’ median when DraftKings had none. The Period, Games and Side filters re-count it.';
+const NBA_SPLIT_WATCH = 'A split of a split is a small sample. Under 10 games in a season view the board marks it “small sample” and does not colour it.';
 
 /** The spread's name in each sport, for the betting copy. */
 const RUN_LINE = 'the run line (±1.5 runs)';
@@ -441,7 +445,7 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'Against the spread: the share of games where the team beat the betting spread. Pushes are left out.',
       good: 'Above 50% means the team has done better than the market expected. At standard -110 odds a bettor needs about 52.4% to profit.',
       use: 'It tells you whether the market has been under- or overrating a team so far. Use it as a prompt to look closer, not a reason to bet.',
-      watch: 'The line adjusts as a team surprises people, so past covers say little about the next one. Under 10 games the board shows the record instead of a percentage.',
+      watch: 'The line adjusts as a team surprises people, so past covers say little about the next one. Under 10 games the board marks it “small sample” and does not colour it.',
     },
     bySport: {
       MLB: {
@@ -450,7 +454,7 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
           what: `How often the team covered ${RUN_LINE}: as the favourite it must win by 2 or more; as the underdog it covers by winning or losing by 1. Pushes cannot happen.`,
           good: PRICED_LINE_GOOD,
           use: 'Shows whether a team tends to win big or lose close. Read it with the prices on offer, not on its own.',
-          watch: 'The line and price adjust as a team surprises people. Under 10 games the board shows the record instead.',
+          watch: 'The line and price adjust as a team surprises people. Under 10 games the board marks it “small sample” and does not colour it.',
         },
       },
       NHL: {
@@ -459,7 +463,15 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
           what: `How often the team covered ${PUCK_LINE}: as the favourite it must win by 2 or more; as the underdog it covers by winning or losing by 1.`,
           good: PRICED_LINE_GOOD,
           use: 'Shows whether a team tends to win by multiple goals or keep games close. Read it with the prices on offer.',
-          watch: 'The line and price adjust as a team surprises people. Under 10 games the board shows the record instead.',
+          watch: 'The line and price adjust as a team surprises people. Under 10 games the board marks it “small sample” and does not colour it.',
+        },
+      },
+      NBA: {
+        explain: {
+          what: `Against the spread: the share of games where the team beat the betting spread. Pushes are left out. ${NBA_GRADED_LINE}`,
+          good: 'Above 50% means the team has done better than the market expected. At standard -110 odds a bettor needs about 52.4% to profit.',
+          use: 'It tells you whether the market has been under- or overrating a team so far. Use it as a prompt to look closer, not a reason to bet.',
+          watch: 'The line adjusts as a team surprises people, so past covers say little about the next one. Under 10 games in a season view the board marks it “small sample” and does not colour it.',
         },
       },
     },
@@ -472,7 +484,17 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'The share of the team’s games where the combined score beat the sportsbook’s total. Pushes are left out.',
       good: 'Neither end is better. It is a tendency, not a grade, so it is not coloured.',
       use: 'Shows whether totals have been set too low or too high for this team. Check it with pace and both teams’ scoring before betting a total.',
-      watch: 'Books move totals as trends appear, so an over streak does not mean the next total is too low. Under 10 games the board shows the record instead.',
+      watch: 'Books move totals as trends appear, so an over streak does not mean the next total is too low. Under 10 games the board marks it “small sample” and does not colour it.',
+    },
+    bySport: {
+      NBA: {
+        explain: {
+          what: `The share of the team’s games where the combined score beat the sportsbook’s total. Pushes are left out. ${NBA_GRADED_LINE}`,
+          good: 'Neither end is better. It is a tendency, not a grade, so it is not coloured.',
+          use: 'Shows whether totals have been set too low or too high for this team. Check it with pace and both teams’ scoring before betting a total.',
+          watch: 'Books move totals as trends appear, so an over streak does not mean the next total is too low. Under 10 games in a season view the board marks it “small sample”.',
+        },
+      },
     },
   },
   {
@@ -483,11 +505,11 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'ATS%, home games only.',
       good: 'Above 50% means the market has underrated the team at home.',
       use: 'Compare it with the team’s overall ATS%. A big home/away gap can show a team the market misjudges in one setting.',
-      watch: 'It is half a season’s games. A big gap on a small sample is usually noise. Under 10 home games the board shows the count instead.',
+      watch: 'It is half a season’s games. A big gap on a small sample is usually noise. Under 10 home games the board marks it “small sample”.',
     },
     bySport: {
-      MLB: { label: 'RL% Home', hint: 'How often the team covered the run line at home.', explain: { what: 'Run line cover rate, home games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Run Line%.', watch: 'Under 10 home games the board shows the count instead.' } },
-      NHL: { label: 'PL% Home', hint: 'How often the team covered the puck line at home.', explain: { what: 'Puck line cover rate, home games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Puck Line%.', watch: 'Under 10 home games the board shows the count instead.' } },
+      MLB: { label: 'RL% Home', hint: 'How often the team covered the run line at home.', explain: { what: 'Run line cover rate, home games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Run Line%.', watch: 'Under 10 home games the board marks it “small sample”.' } },
+      NHL: { label: 'PL% Home', hint: 'How often the team covered the puck line at home.', explain: { what: 'Puck line cover rate, home games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Puck Line%.', watch: 'Under 10 home games the board marks it “small sample”.' } },
     },
   },
   {
@@ -498,11 +520,11 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'ATS%, road games only.',
       good: 'Above 50% means the market has underrated the team on the road.',
       use: 'Compare it with the team’s overall and home ATS%.',
-      watch: 'It is half a season’s games. Under 10 road games the board shows the count instead.',
+      watch: 'It is half a season’s games. Under 10 road games the board marks it “small sample”.',
     },
     bySport: {
-      MLB: { label: 'RL% Away', hint: 'How often the team covered the run line on the road.', explain: { what: 'Run line cover rate, road games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Run Line%.', watch: 'Under 10 road games the board shows the count instead.' } },
-      NHL: { label: 'PL% Away', hint: 'How often the team covered the puck line on the road.', explain: { what: 'Puck line cover rate, road games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Puck Line%.', watch: 'Under 10 road games the board shows the count instead.' } },
+      MLB: { label: 'RL% Away', hint: 'How often the team covered the run line on the road.', explain: { what: 'Run line cover rate, road games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Run Line%.', watch: 'Under 10 road games the board marks it “small sample”.' } },
+      NHL: { label: 'PL% Away', hint: 'How often the team covered the puck line on the road.', explain: { what: 'Puck line cover rate, road games only.', good: PRICED_LINE_GOOD, use: 'Compare it with the team’s overall Puck Line%.', watch: 'Under 10 road games the board marks it “small sample”.' } },
     },
   },
   {
@@ -517,6 +539,7 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
     bySport: {
       MLB: { label: 'RL% as Fav', hint: 'How often the team covered -1.5 runs as the favourite.', explain: { what: 'How often the team won by 2+ runs when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
       NHL: { label: 'PL% as Fav', hint: 'How often the team covered -1.5 goals as the favourite.', explain: { what: 'How often the team won by 2+ goals when it was favoured.', good: PRICED_LINE_GOOD, use: 'Shows whether the team tends to win comfortably when expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
+      NBA: { explain: { what: `ATS%, only in games where the team was the favourite. ${NBA_GRADED_LINE}`, good: 'Above 50% means the team has beaten the market’s expectations as a favourite.', use: 'Shows whether the market overrates or underrates the team when it is expected to win.', watch: NBA_SPLIT_WATCH } },
     },
   },
   {
@@ -531,6 +554,7 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
     bySport: {
       MLB: { label: 'RL% as Dog', hint: 'How often the team covered +1.5 runs as the underdog.', explain: { what: 'How often the team won or lost by 1 run when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
       NHL: { label: 'PL% as Dog', hint: 'How often the team covered +1.5 goals as the underdog.', explain: { what: 'How often the team won or lost by 1 goal when it was the underdog.', good: PRICED_LINE_GOOD, use: 'Shows whether the team keeps games close when it is not expected to win.', watch: 'The board can’t show how many games this is built on yet, so a high number may rest on two or three games.' } },
+      NBA: { explain: { what: `ATS%, only in games where the team was the underdog. ${NBA_GRADED_LINE}`, good: 'Above 50% means the team has beaten the market’s expectations as an underdog.', use: 'Shows whether the market has been selling the team short when it is not expected to win.', watch: NBA_SPLIT_WATCH } },
     },
   },
   {
@@ -541,10 +565,10 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'ATS%, only in games where this team had more days off than the opponent.',
       good: 'Above 50% means the team has made the most of the extra rest.',
       use: 'Rest can affect how a team plays. When this team has the rest edge tonight, this shows how it has done in the same spot.',
-      watch: 'These spots are rare, so the sample is small. Under 10 games the board shows the count instead.',
+      watch: 'These spots are rare, so the sample is small. Under 10 games the board marks it “small sample”.',
     },
     bySport: {
-      NHL: { label: 'PL% Rest Edge', explain: { what: 'Puck line cover rate, only in games where this team had more days off than the opponent.', good: PRICED_LINE_GOOD, use: 'When this team has the rest edge tonight, this shows how it has done in the same spot.', watch: 'These spots are rare. Under 10 games the board shows the count instead.' } },
+      NHL: { label: 'PL% Rest Edge', explain: { what: 'Puck line cover rate, only in games where this team had more days off than the opponent.', good: PRICED_LINE_GOOD, use: 'When this team has the rest edge tonight, this shows how it has done in the same spot.', watch: 'These spots are rare. Under 10 games the board marks it “small sample”.' } },
     },
   },
   {
@@ -555,10 +579,10 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
       what: 'ATS% on little rest: the second night of a back-to-back in basketball and hockey, or a short week (6 days or fewer) in football.',
       good: 'Above 50% means the team has handled tired spots better than the market expected.',
       use: 'Check it when the team is on short rest tonight, together with the opponent’s rest.',
-      watch: 'Small sample. Under 10 games the board shows the count instead.',
+      watch: 'Small sample. Under 10 games the board marks it “small sample”.',
     },
     bySport: {
-      NHL: { label: 'PL% Short Rest', explain: { what: 'Puck line cover rate on the second night of a back-to-back.', good: PRICED_LINE_GOOD, use: 'Check it when the team is on a back-to-back tonight.', watch: 'Small sample. Under 10 games the board shows the count instead.' } },
+      NHL: { label: 'PL% Short Rest', explain: { what: 'Puck line cover rate on the second night of a back-to-back.', good: PRICED_LINE_GOOD, use: 'Check it when the team is on a back-to-back tonight.', watch: 'Small sample. Under 10 games the board marks it “small sample”.' } },
     },
   },
 ];
