@@ -527,6 +527,56 @@ clears the 30s freshness gate by observation rather than by the book's
 assertion. The bovada feed does not have this caveat — it publishes
 `lastModified` and uses it.
 
+### NCAAB in-play: DraftKings' own board (`dk_live_board`)
+
+mike, 2026-11-12: *"This is live betting ... This needs to be as close to Real
+time as possible."* The three NCAAB in-play models decide on DraftKings' own
+board, read from here every second: the line, and DraftKings' score and clock
+from the same read. The worker's NCAAB loop reads what this writes and decides
+and posts within seconds; without it the loop falls back to the odds provider
+and ESPN (minutes).
+
+```bash
+# From the repo root, with .env present (it needs DATABASE_URL).
+python -m data.ingestors.dk_live_board            # runs while games are live, exits 45 min after the last
+python -m data.ingestors.dk_live_board --dry-run  # read and print, write nothing
+```
+
+It writes `dk_live_reads` (a row per game each time its score or a line
+changes) and `dk_live_feed` (every read). The worker trusts the rows only while
+`dk_live_feed.last_read_at` is under 8 s old, so this machine off, asleep or
+refused means the slow path, never a bet on an old line.
+
+```sql
+-- is it reading?
+SELECT sport, last_read_at, ok, live_events, matched, detail FROM dk_live_feed;
+```
+
+`matched` below `live_events` means a DraftKings game did not resolve onto our
+schedule; the log names it. It reads every second while a game is live (mike:
+*"can it run even faster"*); a refusal doubles the gap, up to 5 s, and a quiet
+minute halves it back. Five refusals in a row back the feed off two minutes
+(this address is the one DraftKings would block).
+
+**The schedule: every minute 11am-3am ET, registered 2026-11-12** (mike:
+*"yes"*). The task `BettingModel\DkLiveBoard` runs
+`betting_local_copies\bin\dk_live_board_run.ps1` (in the repo as
+`scripts/dk_live_board_run.ps1`) every minute from 11:00 for 16 hours, and two
+minutes after sign-in. A start while a run is going is ignored
+(`MultipleInstances = IgnoreNew`), and a feed already running holds
+127.0.0.1:47231, so a second one exits at once. The launcher puts its own
+worktree, `C:\Users\micha\Documents\bm-live-feed`, on origin/master before
+each start, so what runs is always master and never another session's branch.
+Until the feed is merged and its tables exist it logs one line and exits. Like
+the backup task, it runs only while mike is signed in to Windows. Log:
+`betting_local_copies\logs\dk_live_board_<date>.log`.
+
+```bat
+schtasks /Query /TN "BettingModel\DkLiveBoard" /V /FO LIST
+schtasks /Run /TN "BettingModel\DkLiveBoard"
+schtasks /Delete /TN "BettingModel\DkLiveBoard" /F
+```
+
 ## Diagnosing a DATABASE_URL that will not authenticate
 
 `python -m scripts.db_url_doctor` — reports the SHAPE of the string and never
