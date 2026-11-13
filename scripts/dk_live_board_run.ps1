@@ -31,11 +31,27 @@ $day = (Get-Date).ToString("yyyyMMdd")
 $log = Join-Path $logs "dk_live_board_$day.log"
 Add-Content $log ("--- start " + (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))
 
-& git -C $Repo fetch -q origin master 2>> $log
+# git never waits on a sign-in prompt here (the task runs hidden, so a prompt
+# is a hang: on 2026-11-13 a fetch sat 2.5 min and held every start behind it),
+# and a fetch that does not answer in 60 s is abandoned: the feed then runs
+# from the checkout already on disk.
+$env:GIT_TERMINAL_PROMPT = "0"
+$env:GCM_INTERACTIVE = "never"
+function Invoke-Git([string[]]$GitArgs, [int]$TimeoutSec = 60) {
+    $p = Start-Process -FilePath "git" -ArgumentList $GitArgs -NoNewWindow -PassThru `
+        -RedirectStandardError (Join-Path $logs "dk_live_board_git_$day.log")
+    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+        try { $p.Kill() } catch { }
+        Add-Content $log ("git " + ($GitArgs -join " ") + " did not answer in $TimeoutSec s - abandoned")
+        return $false
+    }
+    return ($p.ExitCode -eq 0)
+}
+[void](Invoke-Git @("-C", $Repo, "fetch", "-q", "origin", "master"))
 if (-not (Test-Path (Join-Path $Feed ".git"))) {
-    & git -C $Repo worktree add --detach $Feed origin/master 2>> $log
+    [void](Invoke-Git @("-C", $Repo, "worktree", "add", "--detach", $Feed, "origin/master"))
 } else {
-    & git -C $Feed checkout -q --detach -f origin/master 2>> $log
+    [void](Invoke-Git @("-C", $Feed, "checkout", "-q", "--detach", "-f", "origin/master"))
 }
 if (-not (Test-Path (Join-Path $Feed "data\ingestors\dk_live_board.py"))) {
     Add-Content $log "origin/master has no data\ingestors\dk_live_board.py yet (not merged): nothing to run"
@@ -58,7 +74,7 @@ while ($true) {
         -RedirectStandardError (Join-Path $logs "dk_live_board_stderr_$day.log")
     Add-Content $log ("--- exit " + $p.ExitCode + " " + (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))
     if ($p.ExitCode -ne 3) { break }
-    & git -C $Feed fetch -q origin master 2>> $log
-    & git -C $Feed checkout -q --detach -f origin/master 2>> $log
+    [void](Invoke-Git @("-C", $Feed, "fetch", "-q", "origin", "master"))
+    [void](Invoke-Git @("-C", $Feed, "checkout", "-q", "--detach", "-f", "origin/master"))
     Add-Content $log ("--- restarting on " + (& git -C $Feed rev-parse --short HEAD))
 }

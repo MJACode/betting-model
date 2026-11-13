@@ -480,8 +480,10 @@ def feed_changed_on_master(root: Path = ROOT) -> bool:
     """True when origin/master changes one of FEED_FILES against this
     checkout's HEAD. Any git failure is False: never restart on a doubt."""
     import subprocess
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}   # never wait on a prompt
     try:
-        subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "master"], capture_output=True, timeout=60)
+        subprocess.run(["git", "-C", str(root), "fetch", "-q", "origin", "master"], capture_output=True, timeout=60,
+                       env=env)
         out = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "HEAD", "origin/master", "--",
                               *FEED_FILES], capture_output=True, text=True, timeout=30)
         return out.returncode == 0 and bool(out.stdout.strip())
