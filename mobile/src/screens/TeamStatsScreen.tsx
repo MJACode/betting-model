@@ -770,9 +770,10 @@ function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
   const def = (key: keyof TeamStatsRow): TeamStatDef | null => teamStatFor(sport, key);
   // "ATS", or the run line / puck line in MLB and NHL.
   const ats = spreadWord(sport);
-  // Under MIN_SPLIT_SAMPLE a split is never a percentage, the board's rule
-  // (Matt, 2026-11-03): the game count instead, so the board and this page
-  // never print two answers for one number.
+  // Record and percent, always, the board's rule (Matt, 2026-11-13, which
+  // replaced the 2026-11-03 rule that hid the percent under MIN_SPLIT_SAMPLE):
+  // a thin split still prints its percent and says "small sample", so the
+  // board and this page never print two answers for one number.
   const games = (n: number) => `${n} game${n === 1 ? '' : 's'}`;
   const isThin = (key: keyof TeamStatsRow): boolean => {
     const d = def(key);
@@ -783,7 +784,6 @@ function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
     return d ? sampleFor(row, d) : 0;
   };
   const pct = (key: keyof TeamStatsRow): string => {
-    if (isThin(key)) return games(count(key));
     const v = row[key];
     const n = typeof v === 'string' ? Number(v) : v;
     return n == null || !Number.isFinite(n as number) ? '—' : formatPct(n as number, 0);
@@ -791,20 +791,19 @@ function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
   const sampleCaption = (key: keyof TeamStatsRow): string | undefined => {
     const d = def(key);
     if (!d || !d.sample) return undefined;
-    return isThin(key) ? 'too few to rate' : games(count(key));
+    return isThin(key) ? `small sample · ${games(count(key))}` : games(count(key));
   };
-  const ou = `${row.ou_o}-${row.ou_u}${row.ou_p ? `-${row.ou_p}` : ''}`;
   const atsRec = `${row.ats_w}-${row.ats_l}${row.ats_p ? `-${row.ats_p}` : ''}`;
   const restful = def('rest_adv_ats_pct') != null;
   return (
     <>
       <View style={styles.tileRow}>
-        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={isThin('ats_home_pct') ? `${ats}: only ${games(count('ats_home_pct'))}` : `${ats} ${pct('ats_home_pct')}`} />
-        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={isThin('ats_away_pct') ? `${ats}: only ${games(count('ats_away_pct'))}` : `${ats} ${pct('ats_away_pct')}`} />
+        <StatTile label="Home" value={`${row.home_w}-${row.home_l}`} caption={`${ats} ${pct('ats_home_pct')}${isThin('ats_home_pct') ? ' · small sample' : ''}`} />
+        <StatTile label="Away" value={`${row.away_w}-${row.away_l}`} caption={`${ats} ${pct('ats_away_pct')}${isThin('ats_away_pct') ? ' · small sample' : ''}`} />
         <StatTile
           label="Over"
-          value={isThin('over_pct') ? `${row.ou_o}o-${row.ou_u}u` : pct('over_pct')}
-          caption={isThin('over_pct') ? games(count('over_pct')) : ou}
+          value={pct('over_pct')}
+          caption={`${row.ou_o}o-${row.ou_u}u${row.ou_p ? `-${row.ou_p}p` : ''}${isThin('over_pct') ? ' · small sample' : ''}`}
         />
       </View>
       <View style={styles.tileRow}>
@@ -812,8 +811,8 @@ function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
         <StatTile label={`${ats} as dog`} value={pct('dog_ats_pct')} />
         <StatTile
           label={`${ats} overall`}
-          value={isThin('ats_pct') ? atsRec : pct('ats_pct')}
-          caption={isThin('ats_pct') ? games(count('ats_pct')) : atsRec}
+          value={pct('ats_pct')}
+          caption={`${atsRec}${isThin('ats_pct') ? ' · small sample' : ''}`}
         />
       </View>
       {restful ? (

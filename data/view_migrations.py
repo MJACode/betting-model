@@ -533,6 +533,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Does not rewrite picks, odds or the record. Sits before the
     # posted-stake pair so those two stay adjacent.
     "add_nba_first_basket_2026_11_08.sql",
+    # 2026-11-13 (Matt): the Stats tab's Betting filters (period, last N,
+    # home/away). One table written by data/ingestors/team_period_results.py,
+    # RLS on with a SELECT policy. Returns on a catalog read once the table,
+    # its index and the policy exist. Does not rewrite picks, odds or the
+    # record. Sits before the posted-stake pair so those two stay adjacent.
+    "add_team_period_results_2026_11_13.sql",
     # 2026-10-29 (Matt): Scoreboard live scores for NFL, NBA and NHL.
     # One table, written by data/ingestors/live_scoreboard.py, with a
     # SELECT policy and a SELECT-only grant. Returns on a catalog read once

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, NBA Betting tab: Period (Full/1H/1Q-4Q), Games (Season/L10/L5/L3) and Side filters, record and % on every Betting stat; `team_period_results` (DraftKings pre-tip line, consensus fallback; full game reconciles 30 of 30 teams with the board); half and quarter closing lines bought for the season and daily |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the league skill scouts outside the repo on every build (papers, forums, GitHub, data and price sources; Reddit refused a plain fetch) and invents three mechanisms of its own before calling a market null |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the pre-game boards reload while open: "FD line now 41.5" was a board loaded before FanDuel moved to 40.5 at 18:18Z; All/Signals now reload every 10 minutes while focused and on resume, overlapping loads are ordered, and a failing poll no longer re-announces its banner |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, the league skill learns from every use (a learning log read first and appended last, write-back as a gate, contradicted claims fixed in place) and climbs an eight-rung ladder when stuck; its stale-citation test waits on its own branch for a merge outside live games |

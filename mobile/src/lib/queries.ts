@@ -2,6 +2,7 @@ import { nhlSkaterReadMissing } from '@/lib/nhlBoard';
 import { nhlSeasonCandidates } from '@/lib/nhlSkaterTotals';
 import { monthET } from '@/lib/format';
 import { fetchAllPages } from '@/lib/paging';
+import type { PeriodKey, TeamPeriodRow } from '@/lib/teamPeriodSplits';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -3460,6 +3461,33 @@ export async function fetchTeamStats(
     }
   }
   return { season: null, rows: [] };
+}
+
+/**
+ * The Betting tab's period rows (lib/teamPeriodSplits): one per team and game
+ * for ONE period, this season and last (last N reaches back early on).
+ * SIZED ON PRODUCTION 2026-11-13: 340 NBA rows per period for 2026-27 so far;
+ * a full season is 2,460 per period, so two seasons reach ~4,900 by April —
+ * past the 1,000-row cap, hence fetchAllPages with a deterministic order.
+ */
+export async function fetchTeamPeriodRows(
+  sport: string,
+  period: PeriodKey,
+  season: number,
+): Promise<TeamPeriodRow[]> {
+  return fetchAllPages<TeamPeriodRow>(
+    (from, to) =>
+      supabase
+        .from('team_period_results')
+        .select('team,season,game_id,game_date,is_home,spread,total_line,ats,ou,rest_days,opp_rest_days')
+        .eq('sport', sport)
+        .eq('period', period)
+        .in('season', [season - 1, season])
+        .order('game_id')
+        .order('team')
+        .range(from, to),
+    (r) => `${r.game_id}|${r.team}`,
+  );
 }
 
 // ── Team detail (screens/TeamStatsScreen) ───────────────────────────────────
