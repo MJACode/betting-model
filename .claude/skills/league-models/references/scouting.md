@@ -36,6 +36,10 @@ not a refusal forever, and a route that failed one way may answer another
 | euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports |
 | University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
 | OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
+| tennis-data.co.uk (one price per tennis match: Bet365, Pinnacle, best, average) | a plain fetch, and the web-fetch agent | **no (Cloudflare "Sorry, you have been blocked", 2026-11-13)**. Copies of its files on GitHub exist and are not used: the permission check refused fetching them as a way round the block |
+| Jeff Sackmann's tennis repositories (`JeffSackmann/tennis_atp`, `tennis_wta`) | `gh api repos/...` | **no (404, 2026-11-13)**; the public archive `Aneeshers/tennis-sackmann-archive` answered (June 2026 snapshot, CC BY-NC-SA 4.0) |
+| ESPN's tennis scoreboard (`site.api.espn.com/apis/site/v2/sports/tennis/{atp,wta}/scoreboard`) | a plain fetch | yes (200, 2026-11-13); its core odds endpoint holds nothing for tennis |
+| A book's house rules as a PDF (massgaming.com hosts DraftKings') | the web-fetch agent saves the PDF; WebFetch extracts no text, `pypdf` does | yes (2026-11-13) |
 
 **The weekly cloud review cannot re-probe this table.** Its network refused
 17 of 18 sites on 2026-11-13 (only `api.github.com` answered; the egress

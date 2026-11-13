@@ -60,11 +60,16 @@ BOOK_GROUPS = (
 )
 CREDITS_PER_SNAPSHOT = 10 * len(MARKETS) * len(BOOK_GROUPS)
 
+# Every paid call is a ledger row carrying the run that bought it, so a re-run
+# reads back what is already held (held_snapshots) and buys nothing twice.
+SOURCE = "odds_api_tennis_history"
+LIVE_SOURCE = "odds_api_tennis_live"
+SWEEP_SOURCE = "odds_api_tennis_sweep"
 FETCHES = "tennis_odds_fetches"
 FETCH_COLS = ("id", "asked_at", "endpoint", "sport_key", "asked_ts", "snapshot_ts",
-              "previous_ts", "next_ts", "events", "credits", "remaining", "body")
-FETCHES_DDL = f"""
-CREATE TABLE IF NOT EXISTS {FETCHES} (
+              "previous_ts", "next_ts", "events", "credits", "remaining", "body", "source")
+FETCHES_DDL = """
+CREATE TABLE IF NOT EXISTS tennis_odds_fetches (
     id           BIGSERIAL PRIMARY KEY,
     asked_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     endpoint     TEXT NOT NULL,
@@ -76,9 +81,13 @@ CREATE TABLE IF NOT EXISTS {FETCHES} (
     events       INTEGER,
     credits      INTEGER,
     remaining    BIGINT,
-    body         JSONB
+    body         JSONB,
+    source       TEXT
 )
 """
+# Added after the table's first rows (2026-11-13); the gate in ensure_tables
+# runs it once.
+FETCHES_SOURCE_DDL = "ALTER TABLE tennis_odds_fetches ADD COLUMN IF NOT EXISTS source TEXT"
 FETCHES_INDEX = "idx_tennis_odds_fetches_key_snap"
 FETCHES_INDEX_DDL = (f"CREATE INDEX IF NOT EXISTS {FETCHES_INDEX} "
                      f"ON {FETCHES} (sport_key, endpoint, snapshot_ts)")
@@ -88,8 +97,8 @@ QUOTE_COLS = ("sport_key", "event_id", "commence_time", "home_name", "away_name"
               "bookmaker", "market", "last_update", "snapshot_ts",
               "home_price", "away_price", "home_point", "away_point",
               "over_price", "under_price", "total_point")
-QUOTES_DDL = f"""
-CREATE TABLE IF NOT EXISTS {QUOTES} (
+QUOTES_DDL = """
+CREATE TABLE IF NOT EXISTS tennis_odds_quotes (
     sport_key      TEXT NOT NULL,
     event_id       TEXT NOT NULL,
     commence_time  TIMESTAMPTZ,
@@ -119,6 +128,7 @@ def ensure_tables(conn) -> None:
     if not schema_is_current(conn, FETCHES, columns=FETCH_COLS, indexes=(FETCHES_INDEX,),
                              rls=True, revoked_from=API_ROLES):
         conn.execute(FETCHES_DDL)
+        conn.execute(FETCHES_SOURCE_DDL)
         conn.execute(FETCHES_INDEX_DDL)
         lock_down(conn, FETCHES)
         changed = True
@@ -210,15 +220,16 @@ def _get(meter: Meter, url: str, params: dict, cost: int):
 
 
 _FETCH_INSERT = (f"INSERT INTO {FETCHES} (endpoint, sport_key, asked_ts, snapshot_ts, "
-                 "previous_ts, next_ts, events, credits, remaining, body) "
-                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+                 "previous_ts, next_ts, events, credits, remaining, body, source) "
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+_SOURCE_OF = {"odds": SOURCE, "live": LIVE_SOURCE, "events": SWEEP_SOURCE}
 
 
 def _ledger(conn, endpoint, sport_key, asked, j, credits, remaining, body) -> None:
     conn.execute(_FETCH_INSERT, (
         endpoint, sport_key, _iso(asked), j.get("timestamp"), j.get("previous_timestamp"),
         j.get("next_timestamp"), len(j.get("data") or []), credits, remaining,
-        json.dumps(body) if body is not None else None))
+        json.dumps(body) if body is not None else None, _SOURCE_OF[endpoint]))
 
 
 # ── the coverage sweep: where each key's yearly window is ────────────────────
@@ -324,8 +335,8 @@ def _last_values(conn, key: str) -> dict:
 
 
 def held_snapshots(conn, key: str) -> set:
-    rows = conn.execute(f"SELECT snapshot_ts FROM {FETCHES} WHERE endpoint = 'odds' "
-                        f"AND sport_key = %s AND snapshot_ts IS NOT NULL", (key,)).fetchall()
+    rows = conn.execute(f"SELECT snapshot_ts FROM {FETCHES} WHERE source = %s "
+                        f"AND sport_key = %s AND snapshot_ts IS NOT NULL", (SOURCE, key)).fetchall()
     return {r[0] for r in rows}
 
 

@@ -54,8 +54,8 @@ COLS = ("comp_id", "tour", "season", "event_id", "event_name", "is_major", "roun
         "p1_id", "p1_name", "p1_country", "p1_winner", "p1_games", "p1_tiebreaks",
         "p2_id", "p2_name", "p2_country", "p2_winner", "p2_games", "p2_tiebreaks",
         "note", "was_suspended", "updated_at")
-DDL = f"""
-CREATE TABLE IF NOT EXISTS {TABLE} (
+DDL = """
+CREATE TABLE IF NOT EXISTS tennis_espn_matches (
     comp_id        TEXT PRIMARY KEY,
     tour           TEXT NOT NULL,
     season         INTEGER NOT NULL,

@@ -97,7 +97,7 @@ def _col_type(c: str) -> str:
 
 
 MATCHES_DDL = (
-    f"CREATE TABLE IF NOT EXISTS {MATCHES} (\n"
+    "CREATE TABLE IF NOT EXISTS tennis_archive_matches (\n"
     + ",\n".join(f"    {c} {_col_type(c)}" for c in MATCH_COLS)
     + ",\n    imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
     + "\n    PRIMARY KEY (tour, tourney_id, match_num, winner_id, loser_id)\n)"

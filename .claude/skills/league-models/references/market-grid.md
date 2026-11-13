@@ -78,6 +78,16 @@ after all of them (CLAUDE.md §1b).
    More thin books add rejections, not edge; the case for a new provider is a
    book or market we cannot get (a sharp prop book, for example).
 
+**Finding a key's windows for a few credits.** When a sport key is only
+active part of the year (tennis: one key per tournament), three history event
+lists (1 credit each) find a year's window: ask at the end of the year (the
+feed answers with the key's last snapshot), then 40 days before that last
+snapshot (its `next_timestamp` is the window's first listing, because the
+pointer is per key), then at that first listing. When the snapshot before a
+window is in the same year, repeat from it: a key can hold two windows a
+year. The whole tennis sweep cost 337 credits for 129 windows
+(`data/ingestors/tennis_odds_history.sweep_key_year`, 2026-11-13).
+
 **Period, team-total and alternate history** comes only from the per-event
 endpoint, one call per game per time, billed 10 credits per market a book
 actually returns (an empty answer is free). How far back it goes differs by
@@ -147,3 +157,13 @@ define it here when it is built.
 - **One against one (fighting, tennis, golf).** Ratings per competitor; method
   and duration props, often with no price history at all (the fighting models
   were backtested on probability alone); thin history per competitor.
+  **Tennis** (`docs/sports/tennis.md`, 2026-11-13): the feed sells it as one
+  key per tournament (53 keys, top tiers only, each active only while its
+  event runs), so the key list is read from `/v4/sports?all=true` and a key's
+  history is a set of yearly windows; most keys enter the feed in 2024 or
+  later (the Grand Slams from 2020). The match winner is at every book;
+  games spread and total games only at a few (not DraftKings). A free archive
+  of results with serve and return counts exists for both tours, and a rating
+  model is easy to build and trails the market (Elo's Brier about 0.215
+  against Pinnacle's 0.196 in the published comparison). Settlement differs by
+  book on a retirement: grade each book at its own rule.

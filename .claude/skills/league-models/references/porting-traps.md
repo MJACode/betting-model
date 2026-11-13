@@ -48,6 +48,11 @@ down this list.
 
 ## The odds feed
 
+- **A sport the feed sells per tournament** (tennis) has no fixed key: read the
+  key list from the feed, and find each key's windows (`market-grid.md`, the
+  sweep). One key held a stray listing two months after its real event, so a
+  sweep that finds only a year's last window misses the real one.
+
 - **History depth per sport key.** The women's college key starts 2024-11-12:
   two seasons, so "walk-forward" means one season. Ask the feed at several
   early dates before planning.
@@ -93,6 +98,16 @@ down this list.
   300 seconds, men's college).
 
 ## Scores, periods and settlement
+
+- **Settlement differs by book, not only by sport** (tennis, 2026-11-13).
+  DraftKings voids a moneyline bet on a player who retires after the first
+  set; Pinnacle, FanDuel and BetMGM grade it a loss; Caesars voids any
+  retirement. Read each decidable book's own rules page before grading, and
+  grade each book's bets at its own rule (`models/tennis_common.py`).
+- **A source's format field can be wrong.** ESPN's tennis `format` says five
+  sets for best-of-three events (the women's US Open, Shanghai); best-of comes
+  from the tour and the event. ESPN's men's scoreboard also returns the
+  women's matches of a joint event, so key rows on ESPN's match id.
 
 - **Overtime.** The women's game has four quarters and overtime is ESPN's
   period 5 or later; the men's rule (period 3 or later) would have marked every
