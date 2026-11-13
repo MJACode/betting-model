@@ -66,6 +66,11 @@ ANON_READABLE: tuple[str, ...] = (
     "parlay_track_record",
     "picks",
     "player_game_log",
+    # ESPN did-not-play list for the NBA player page. RLS stays on; the
+    # SELECT policy is data/migrations/anon_read_nba_player_dnp_2026_11_11.sql,
+    # which is not applied until Matt says so. The results ingestor must not
+    # lock_down this table or the next run revokes the grant.
+    "nba_player_dnp",
     "player_handedness",
     # Each player's current injury tag on the Stats board (2026-10-23).
     # data/migrations/add_injury_status_current_2026_10_23.sql.
@@ -130,6 +135,14 @@ ANON_READABLE: tuple[str, ...] = (
     # through playerLog.LOG_TABLE, like the WNBA and NBA logs, so the log is
     # not a literal .from() and is not listed here.
     "v_player_season_totals_ncaab",
+    # Women's college basketball Stats tab. security_invoker over
+    # ncaabw_player_game_log. The table, the view and the four functions are
+    # created by add_ncaabw_player_game_log_2026_11_12.sql, which is NOT in
+    # ACTIVE_MIGRATIONS: apply it by hand. The player page reads the log
+    # through playerLog.LOG_TABLE, so the log is not a literal .from().
+    # MAY_BE_UNAPPLIED until that apply, so a grant sweep does not GRANT a
+    # view that is not in the catalog yet.
+    "v_player_season_totals_ncaabw",
     # NHL Stats tab, ahead of the screen (2026-10-16). The app does not
     # .from() these yet; tests/test_anon_readable.py keeps them on an
     # explicit ahead-of-the-app list so the stale-entry check stays strict
@@ -142,6 +155,15 @@ ANON_READABLE: tuple[str, ...] = (
     # view is security_invoker over it (add_nba_team_q1_2026_10_28.sql).
     "nba_team_q1_games",
     "v_nba_team_q1_season",
+    # NBA Stats tab, 1st Basket board (Matt, 2026-11-08): the two season
+    # views, security_invoker over the tables in VIEW_BASE_TABLES below
+    # (add_nba_first_basket_2026_11_08.sql).
+    "v_nba_first_basket_team_season",
+    "v_nba_first_basket_player_season",
+    # Stats tab, Betting filters (Matt, 2026-11-13): one row per team, game
+    # and period, written by data/ingestors/team_period_results.py; RLS on
+    # with a SELECT policy (add_team_period_results_2026_11_13.sql).
+    "team_period_results",
     # Betslip game-line edit (Matt, 2026-10-29): the current alternate
     # spread/total ladder per game, written by data/ingestors/alt_game_lines.py
     # (add_alt_game_lines_2026_10_29.sql: RLS on, SELECT policy).
@@ -270,6 +292,11 @@ VIEW_BASE_TABLES: tuple[str, ...] = (
     "nhl_goalie_game_log",
     "nhl_skater_game_log",
     "nhl_team_game_log",
+    # security_invoker bases of the NBA 1st Basket views, written by
+    # data/ingestors/nba_first_basket.py (RLS on, SELECT policy;
+    # add_nba_first_basket_2026_11_08.sql). The app reads only the views.
+    "nba_first_basket_games",
+    "nba_first_basket_players",
 )
 
 # ── worker-only tables: the second lock ──────────────────────────────────────
@@ -334,12 +361,67 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # tracking/threshold_review.ensure_schema, never read by the app -- the
     # pause is applied server-side by models/scorer.py through auto_paused().
     "model_auto_pauses",
+    # The NCAAF first-half and team-total history purchase's ledger: one row
+    # per game and read, with what was asked for, what the feed served, the
+    # credits billed and the rows stored, so nothing is bought twice. Created
+    # on demand by data/ingestors/ncaaf_derivative_history.py; never read by
+    # the app.
+    "ncaaf_derivative_fetches",
     # Men's college basketball identity: the ESPN team registry, the ESPN
     # event <-> game_id map the odds join reads, and the venues. Created on
     # demand by data/ingestors/ncaab_teams.ensure_tables; never read by the app.
     "ncaab_events",
     "ncaab_teams",
     "ncaab_venues",
+    # Women's college basketball (NCAABW) identity, the same three tables on
+    # their own names (ESPN gives a school's women's team the men's team id).
+    # Created on demand by data/ingestors/ncaabw_teams.ensure_tables; never
+    # read by the app.
+    "ncaabw_events",
+    "ncaabw_teams",
+    "ncaabw_venues",
+    # The NCAABW odds history purchase: its ledger of every snapshot stored,
+    # every in-play quote of every snapshot, and the events it paid for and
+    # could not place on an ESPN game, kept raw. Created on demand by
+    # data/ingestors/ncaabw_odds_history.py; never read by the app.
+    "ncaabw_odds_snapshots",
+    "ncaabw_inplay_quotes",
+    "ncaabw_odds_unmatched",
+    # NCAABW history: NCAA's per-game team box scores and season player
+    # minutes from sportsdataverse's season files. Created on demand by
+    # data/ingestors/ncaabw_sdv_import.py; model input, never read by the app.
+    "ncaabw_team_game_stats",
+    "ncaabw_player_season",
+    # NCAABW period scores (four quarters, then overtimes) and the ESPN
+    # box-score miss ledger. Created on demand by
+    # data/ingestors/ncaabw_espn_box.py; model input, never read by the app.
+    "ncaabw_period_scores",
+    "ncaabw_box_misses",
+    # The NCAABW totals card's decisions ledger: one row per game it has
+    # decided, bet or not, with the quote, the cutoff and the reason
+    # (scripts/ncaabw_total_card.py, which creates it on demand). Read by the
+    # card, never by the app.
+    "ncaabw_total_decisions",
+    # NCAABW play-by-play and its per-game load ledger: the game state the
+    # halftime total model is fitted on. Created on demand by
+    # data/ingestors/ncaabw_pbp.py; model input, never read by the app.
+    "ncaabw_pbp",
+    "ncaabw_pbp_games",
+    # EuroLeague (2026-11-12). Created on demand by
+    # data/ingestors/euroleague_teams.ensure_tables and
+    # data/ingestors/euroleague_api.ensure_tables (identity, schedule, quarter
+    # scores, the raw API answers); data/ingestors/euroleague_odds_history.py
+    # (the purchase ledger, in-play quotes, unplaced events); and
+    # data/ingestors/euroleague_period_history.py (its ledger). Never read by
+    # the app.
+    "euroleague_teams",
+    "euroleague_events",
+    "euroleague_api_raw",
+    "euroleague_period_scores",
+    "euroleague_odds_snapshots",
+    "euroleague_inplay_quotes",
+    "euroleague_odds_unmatched",
+    "euroleague_period_fetches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and
@@ -364,13 +446,12 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # Created on demand by data/ingestors/nba_public_splits_ingestor.py;
     # research control input, never read by the app.
     "nba_public_splits",
-    # NBA quarter scores (data/ingestors/nba_period_scores.py), the ESPN
-    # did-not-play reasons (data/ingestors/nba_results_ingestor.py) and the
+    # NBA quarter scores (data/ingestors/nba_period_scores.py) and the
     # stats.nba.com schedule (data/ingestors/nba_schedule_ingestor.py). Created
     # on demand by their writers; model and settlement input, never read by the
-    # app.
+    # app. nba_player_dnp left this list when the player page started reading
+    # it (anon_read_nba_player_dnp_2026_11_11.sql).
     "nba_period_scores",
-    "nba_player_dnp",
     "nba_schedule",
     # Free ESPN play-by-play (sportsdataverse release), its box scores, the
     # ESPN -> NBA.com player id map and the lineup segments derived from them.
@@ -405,6 +486,11 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # spread and their flags (scripts/ncaab_moneyline_card.py, which creates
     # it on demand). Read by the card, never by the app.
     "ncaab_moneyline_decisions",
+    # The NCAAF moneyline card's decisions ledger: one row per game it has
+    # decided at 14:00 UTC, bet or not, with every book's moneyline and spread
+    # and their flags (scripts/ncaaf_moneyline_card.py, which creates it on
+    # demand). Read by the card, never by the app.
+    "ncaaf_moneyline_decisions",
     # The NCAAB first-post moneyline card's ledger: one row per (game, book)
     # first moneyline post it has decided, bet or not, with every book's
     # moneyline and own spread, and the fill check the capture writes on its
@@ -429,6 +515,8 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # data/ingestors/nba_first_quarter_odds.py).
     "nba_q1_trend_decisions",
     "nba_first_quarter_fetches",
+    # The NBA first-quarter moneyline model's ledger (scripts/nba_q1_trend_ml_card.py); its fetch is the spread's.
+    "nba_q1_trend_ml_decisions",
     # The NCAAB first-half spread model's three
     # (scripts/ncaab_first_half_spread_card.py, data/ingestors/ncaab_first_half_odds.py):
     # its decisions ledger, its fetch ledger (one row per Odds API call with
@@ -597,12 +685,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_recent_games_mlb",
     "player_recent_games_nba",
     "player_recent_games_ncaaf",
+    "player_recent_games_ncaabw",
     "player_recent_games_ncaab",
     "player_recent_games_nfl",
     "player_recent_games_wnba",
     "player_season_stat_values_mlb",
     "player_season_stat_values_nba",
     "player_season_stat_values_ncaaf",
+    "player_season_stat_values_ncaabw",
     "player_season_stat_values_ncaab",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
@@ -615,6 +705,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_h2h_stat_values_mlb",
     "player_h2h_stat_values_nba",
     "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_ncaabw",
     "player_h2h_stat_values_ncaab",
     "player_h2h_stat_values_nfl",
     "player_h2h_stat_values_wnba",
@@ -636,6 +727,7 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",
+    "player_window_totals_ncaabw",
     "player_window_totals_ncaab",
     "player_window_totals_nfl",
     "player_window_totals_wnba",

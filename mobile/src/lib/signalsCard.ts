@@ -74,7 +74,7 @@ export interface SignalsBetFields {
    * name (golf `yes`, a UFC method class). Anything else uses `label`. */
   side: string;
   line: number | string | null;
-  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, `spreads_q1`, a prop key). */
+  /** Odds market (`totals`, `spreads`, `h2h`, `team_totals_home`, `totals_h1`, `spreads_q1`, `h2h_q1`, a prop key). */
   market: string | null;
   homeTeam?: string | null;
   awayTeam?: string | null;
@@ -173,8 +173,9 @@ function isPropMarket(market: string | null, player: string | null): boolean {
  * total names the club the market belongs to and the market ("Boston Bruins Team
  * Total Over 3.5"), as DraftKings names it. A first half's total says so
  * ("First Half Over 112.5"): a bare "Over 112.5" reads as the game total. So
- * does a first half's spread ("First Half Duke +3.5"), and a first quarter's
- * spread ("First Quarter DEN -1.5").
+ * does a first half's spread ("First Half Duke +3.5"), a first quarter's
+ * spread ("First Quarter DEN -1.5") and a first quarter's moneyline ("First
+ * Quarter DEN ML").
  * Regulation moneyline is "(Regulation)", not "ML" — it pays only on a
  * regulation win. Golf and UFC method of victory have no structured market,
  * so the stored label is the headline.
@@ -223,6 +224,10 @@ export function signalsBetHeadline(fields: SignalsBetFields): string {
     bet = [team, num].filter((part) => part.length > 0).join(' ');
   } else if (regulation) {
     bet = team ? `${team} (Regulation)` : 'Regulation';
+  } else if (market === 'h2h_q1') {
+    // A first quarter's moneyline says so (models/nba_q1_trend_ml.py): a bare
+    // "DEN ML" reads as the game's.
+    bet = team ? `First Quarter ${team} ML` : 'First Quarter ML';
   } else if (
     market != null && market.startsWith('h2h')
     || (market == null && (side === 'home' || side === 'away') && !player)

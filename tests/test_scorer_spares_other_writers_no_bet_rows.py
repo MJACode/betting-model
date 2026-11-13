@@ -51,8 +51,13 @@ from tests.test_prop_no_bet_rows_survive_to_tipoff import (  # noqa: E402
 
 NCAAB_CARDS = ("ncaab_total_blend", "ncaab_spread_market",
                "ncaab_moneyline_own_spread", "ncaab_first_half_spread",
-               "ncaab_first_half_total")
+               "ncaab_first_half_total",
+               # the women's totals card (2026-11-10): the same write-once NONE row
+               "ncaabw_total_blend")
 NFL_RULES = ("nfl_opener_spread", "nfl_wind_totals")
+# The NCAAF moneyline card (2026-11-10): a write-once NONE row on a sport the
+# scorer's own loop scores, beside models the pass does clear (ncaaf_spread).
+NCAAF_CARD = "ncaaf_moneyline_market"
 # A game-market card that writes on MLB games (scripts run by the
 # mlb-game-market step), so a foreign row on a game the loop DOES reach.
 MLB_CARD = "mlb_total_public_fade"
@@ -89,7 +94,9 @@ def board_and_ids(monkeypatch):
     nfl = f"NFL_{nfl_day}_PIT_CIN"
     mlb_scored = f"MLB_{TARGET}_CCC_DDD"
     mlb_unscored = f"MLB_{TARGET}_EEE_FFF"
+    ncaaf = f"NCAAF_{TARGET}_GGG_HHH"
     games = [_game(ncaab, "NCAAB", TARGET, later),
+             _game(ncaaf, "NCAAF", TARGET, later),
              _game(nfl, "NFL", nfl_day, T0 + timedelta(days=4)),
              _game(mlb_scored, "MLB", TARGET, later),
              _game(mlb_unscored, "MLB", TARGET, later)]
@@ -98,6 +105,9 @@ def board_and_ids(monkeypatch):
         _seed_none(board, ncaab, mid, TARGET)
     for mid in NFL_RULES:
         _seed_none(board, nfl, mid, nfl_day)
+    _seed_none(board, ncaaf, NCAAF_CARD, TARGET)
+    _seed_none(board, ncaaf, "ncaaf_spread", TARGET)
+    board.ncaaf = ncaaf
     for g in (mlb_scored, mlb_unscored):
         board.seed(g, "mlb_moneyline", "mlb_prop_batter_hits")
         _seed_none(board, g, MLB_CARD, TARGET)
@@ -122,6 +132,12 @@ def test_a_full_pass_leaves_every_other_writers_no_bet_rows(board_and_ids):
     # one it does not (only the sweep reaches it).
     assert _held(board, mlb_scored, MLB_CARD) == KEPT, "per-game clear"
     assert _held(board, mlb_unscored, MLB_CARD) == KEPT, "end-of-pass sweep"
+    # The NCAAF moneyline card's row stays; the scorer's own NCAAF model's
+    # stale row on the same game is the one the pass clears.
+    assert _held(board, board.ncaaf, NCAAF_CARD) == KEPT, (
+        "the scorer's sweep deleted the NCAAF moneyline card's NONE row; "
+        "the card decides a game once and never writes it again")
+    assert _held(board, board.ncaaf, "ncaaf_spread") != KEPT
 
 
 def test_a_full_pass_still_clears_what_it_rewrites(board_and_ids):
@@ -143,7 +159,7 @@ def test_the_poller_leaves_them_too(board_and_ids):
     board, ncaab, nfl, mlb_scored, mlb_unscored = board_and_ids
 
     scorer.run_scorer(target_date=TARGET,
-                      only_games={ncaab, nfl, mlb_scored, mlb_unscored},
+                      only_games={ncaab, nfl, mlb_scored, mlb_unscored, board.ncaaf},
                       game_models_only=True)
 
     for mid in NCAAB_CARDS:
@@ -152,6 +168,7 @@ def test_the_poller_leaves_them_too(board_and_ids):
         assert _held(board, nfl, mid) == KEPT, mid
     assert _held(board, mlb_scored, MLB_CARD) == KEPT
     assert _held(board, mlb_unscored, MLB_CARD) == KEPT
+    assert _held(board, board.ncaaf, NCAAF_CARD) == KEPT
 
 
 def test_every_prop_scorer_in_the_pass_is_in_the_cleared_set():
@@ -171,4 +188,5 @@ def test_every_prop_scorer_in_the_pass_is_in_the_cleared_set():
         assert not missing, f"{name}: {sorted(missing)} not cleared"
     assert set(scorer.MODELS) <= cleared
     assert not any(m.startswith(("ncaab_", "nfl_")) for m in cleared)
+    assert NCAAF_CARD not in cleared and "ncaaf_spread" in cleared
     assert scorer._pass_rewritten_models(game_models_only=True) == set(scorer.MODELS)

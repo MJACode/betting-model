@@ -6,7 +6,10 @@
  * Run: npx tsx scripts/verify_book_lines.ts
  *
  * Pins:
- *   - the book list mirrors config.py: 13 fetched, 10 bettable, 3 reference
+ *   - the book lists ARE config.py's: LINE_SHOP_BOOKS is config.LINE_SHOP_BOOKMAKERS,
+ *     BETTABLE_BOOKS is config.BEST_LINE_BOOKMAKERS (same books, same order), and
+ *     REFERENCE_ONLY_BOOKS is config.BEST_LINE_EXCLUDE_BOOKMAKERS — read from
+ *     config.py itself (scripts/config_books.ts), never a typed-in count
  *   - pickLineQuotes: same line only, bettable books only, the record chip is
  *     always present at the STORED price, the scorer's best-price stamp fills
  *     a missing book, best-first order with ties badged, live picks → DK only
@@ -26,6 +29,7 @@ import {
   MODEL_BOOK,
 } from '../src/lib/markets';
 import type { BookPricedRow, Pick } from '../src/types';
+import { readConfigBooks, sameList, sameSet } from './config_books';
 
 let passed = 0;
 let failed = 0;
@@ -40,20 +44,54 @@ function check(name: string, cond: boolean, detail = '') {
 }
 const books = (qs: { bookmaker: string }[]) => qs.map((q) => q.bookmaker).join(',');
 
-// ── Book list mirrors config.py ─────────────────────────────────────────────
-// Measured 2026-11-06: config fetches 10 books (LINE_SHOP_BOOKMAKERS) and decides
-// at 7 (BEST_LINE_BOOKMAKERS); BEST_LINE_EXCLUDE_BOOKMAKERS is 4 since betparx
-// joined (config.STATE_LIMITED_BOOKMAKERS). The app still lists 14 and 10:
-// ballybet, rebet, fliff (no price since 2026-09-20) and espnbet were never cut
-// here, so the fetched-count check below stays red until that list is.
-check('13 books fetched', LINE_SHOP_BOOKS.length === 13, `${LINE_SHOP_BOOKS.length}`);
-check('4 reference-only books', REFERENCE_ONLY_BOOKS.length === 4, `${REFERENCE_ONLY_BOOKS.length}`);
-check('10 bettable books', BETTABLE_BOOKS.length === 10, `${BETTABLE_BOOKS.length}`);
+// ── The book lists ARE config.py's ──────────────────────────────────────────
+// Read from config.py, not typed here. The counts this replaced (`=== 13`,
+// `=== 10`, and the 2026-11-10 `=== 13` / `=== 6` / `=== 8`) were a second
+// copy of the app's own list, so when the server cut fourteen fetched books
+// to ten on 2026-09-20 they kept agreeing with the app and the picker kept
+// offering books that never showed a price again. Women's college basketball
+// still stores seven reference books (config.NCAABW_EXTRA_BOOKMAKERS). Those
+// are checked below as not bettable; they are not part of the fetch list.
+const cfg = (() => {
+  try {
+    return readConfigBooks();
+  } catch (err) {
+    check("config.py's book lists can be read", false, (err as Error).message);
+    return null;
+  }
+})();
+if (cfg) {
+  check(
+    'no local override of the server book lists (compare against what production runs)',
+    cfg.overridden.length === 0,
+    cfg.overridden.join(','),
+  );
+  check(
+    'the app lists every book the server fetches, in config order (LINE_SHOP_BOOKMAKERS)',
+    sameList(LINE_SHOP_BOOKS, cfg.fetched),
+    `app ${LINE_SHOP_BOOKS.join(',')} | config ${cfg.fetched.join(',')}`,
+  );
+  check(
+    'the picker offers exactly the books a pick can be decided at, in config order (BEST_LINE_BOOKMAKERS)',
+    sameList(BETTABLE_BOOKS, cfg.decided),
+    `app ${BETTABLE_BOOKS.join(',')} | config ${cfg.decided.join(',')}`,
+  );
+  check(
+    "the reference-only books are config's (BEST_LINE_EXCLUDE_BOOKMAKERS)",
+    sameSet(REFERENCE_ONLY_BOOKS, cfg.excluded),
+    `app ${REFERENCE_ONLY_BOOKS.join(',')} | config ${cfg.excluded.join(',')}`,
+  );
+}
 check('DraftKings is bettable', isBettableBook(MODEL_BOOK));
 check('Pinnacle is not', !isBettableBook('pinnacle'));
 check('Bovada is not', !isBettableBook('bovada'));
 check('ESPN BET is not (mike, 2026-09-03)', !isBettableBook('espnbet'));
 check('betPARX is not: a few states only (mike, 2026-11-06)', !isBettableBook('betparx'));
+check('Bally Bet and Fliff are not: women\'s college basketball reference prices (2026-11-10)',
+  !isBettableBook('ballybet') && !isBettableBook('fliff'));
+check('the four women\'s-only reference books are named and not bettable',
+  ['betonlineag', 'lowvig', 'unibet', 'betwhale'].every((b) => !isBettableBook(b) && bookName(b) !== b),
+  ['betonlineag', 'lowvig', 'unibet', 'betwhale'].map((b) => bookName(b)).join(', '));
 check('an unknown key is not bettable', !isBettableBook('somebook'));
 check(
   'every book has a real name and a short label',
@@ -61,6 +99,22 @@ check(
   LINE_SHOP_BOOKS.map((b) => `${b}=${bookLabel(b)}`).join(' '),
 );
 check('the six new books are named', bookName('fanatics') === 'Fanatics' && bookName('hardrockbet') === 'Hard Rock Bet' && bookName('betparx') === 'betPARX');
+// The four books cut on 2026-09-20 (espnbet earlier) are no longer fetched or
+// offered, but settled picks and NFL card labels still name them, so each must
+// still render as its real name rather than its API key.
+for (const [key, name, label] of [
+  ['espnbet', 'ESPN BET', 'ESPN'],
+  ['ballybet', 'Bally Bet', 'BALLY'],
+  ['rebet', 'ReBet', 'REBET'],
+  ['fliff', 'Fliff', 'FLIFF'],
+] as const) {
+  check(
+    `${name}: not fetched, not offered, still named and labelled on an old pick`,
+    !(LINE_SHOP_BOOKS as string[]).includes(key) && !isBettableBook(key) &&
+      bookName(key) === name && bookLabel(key) === label,
+    `${key} -> ${bookName(key)} / ${bookLabel(key)}`,
+  );
+}
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 const totalsPick = (extra: Partial<Pick> = {}): Pick =>

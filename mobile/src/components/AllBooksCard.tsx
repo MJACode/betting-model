@@ -78,7 +78,7 @@ export function AllBooksCard({
         const reference = !isBettableBook(q.bookmaker);
         return (
           <Pressable
-            key={q.bookmaker}
+            key={`${q.bookmaker}|${q.line ?? ''}`}
             style={[styles.row, reference && styles.rowReference]}
             // ~38-46pt row (one or two lines); 3pt slop tops up the one-line case.
             hitSlop={{ top: 3, bottom: 3, left: 0, right: 0 }}

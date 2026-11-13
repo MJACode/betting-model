@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchPicksForDate,
   fetchUpcomingUfcPicks,
   fetchUpcomingNflPicks,
   fetchUpcomingNcaafPicks,
   fetchUpcomingNcaabPicks,
+  fetchUpcomingNcaabwPicks,
   fetchUpcomingNhlPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
@@ -65,6 +66,24 @@ const NHL_AHEAD_DAYS = 7;
  * (fetchUpcomingNcaabPicks), so a longer window costs little.
  */
 const NCAAB_AHEAD_DAYS = 7;
+/**
+ * How far ahead the NCAABW (women's college basketball) board looks. Its
+ * totals model decides at DraftKings' first posted total, which came 1 to 6
+ * Eastern dates before the game's date in 155 of 1,772 priced games and never
+ * more than 6, so a same-day read would hide those picks until game day. 7 is
+ * the card's own slate window (scripts/ncaabw_total_card.py SLATE_DAYS):
+ * raise this whenever that is raised, never lower it below it. Only the
+ * picks' own games are read (fetchUpcomingNcaabwPicks), so the window costs
+ * little.
+ */
+const NCAABW_AHEAD_DAYS = 7;
+
+/** How often the Picks tab reloads today's boards while it is open. The app's
+ *  own help text says lines refresh every 10 minutes at the busiest; a reload
+ *  more often than the data changes buys nothing (Matt, 2026-11-12). */
+export const TODAY_POLL_MS = 10 * 60_000;
+/** Returning to the app or the tab reloads only when the last load is older. */
+export const TODAY_RESUME_MIN_AGE_MS = 60_000;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
@@ -94,9 +113,17 @@ export function useTodayPicks(date?: string) {
   // show an empty pill (Matt, 2026-09-05: "fix it").
   const [partial, setPartial] = useState<{ whats: string[]; reason: string } | null>(null);
 
+  // The Picks tab reloads in the background (PicksHomeScreen), so loads can
+  // overlap: a pull during a poll, or a resume past midnight ET where the old
+  // day's load and the new day's both run. Only the newest one writes state.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
+    const current = () => mine === seq.current;
     setLoading(true);
-    setError(null);
+    // `error` is NOT cleared here: a failing background reload would unmount
+    // the error banner and mount it again, read out each time by VoiceOver.
+    // It clears when a load succeeds (UX review, 2026-11-12).
     const whats: string[] = [];
     let reason: string | null = null;
     const note = (what: string) => (e: unknown) => {
@@ -116,9 +143,10 @@ export function useTodayPicks(date?: string) {
       // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
       // slate dated inside that window never reached the chip or the board.
       // NCAAB joined with its totals model, which usually decides the day before.
+      // NCAABW joined with its own (2026-11-10), which decides up to six days before.
       // The look-ahead fetches are enrichment — don't fail the whole feed on
       // them, but record each failure in `partial`.
-      const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, nhlRows] = await Promise.all([
+      const [rows, ufcRows, nflRows, ncaafRows, ncaabRows, ncaabwRows, nhlRows] = await Promise.all([
         fetchPicksForDate(target, (what, e) => note(what)(e)),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
@@ -126,6 +154,9 @@ export function useTodayPicks(date?: string) {
         fetchUpcomingNcaabPicks(target, addDays(target, NCAAB_AHEAD_DAYS), (what, e) =>
           note(what)(e),
         ).catch(swallow('the upcoming NCAAB card')),
+        fetchUpcomingNcaabwPicks(target, addDays(target, NCAABW_AHEAD_DAYS), (what, e) =>
+          note(what)(e),
+        ).catch(swallow('the upcoming NCAABW card')),
         fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
@@ -145,7 +176,7 @@ export function useTodayPicks(date?: string) {
       // pill and the betslip hand-off. A VOID Discord already posted stays:
       // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
       // that split. passesActionFilter is the Signals / green-bet half.
-      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...nhlRows];
+      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...ncaabRows, ...ncaabwRows, ...nhlRows];
       const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
       const byId = new Map(stamped.map((p) => [p.pick_id, p]));
       const all = merged.map((d) => ({
@@ -156,14 +187,16 @@ export function useTodayPicks(date?: string) {
           && !isModelRetired(d.pick.model_id)
           && !voidHiddenFromBoard(d.pick),
       );
+      if (!current()) return;
+      setError(null);
       setData(all.filter((d) => !isPausedForDisplay(d.pick)));
       setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
       setLoaded(true);
     } catch (e: unknown) {
-      if (!isAbortError(e)) setError(errorText(e));
+      if (current() && !isAbortError(e)) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [target]);
 

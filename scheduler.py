@@ -47,6 +47,11 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         latest_odds, so the hour an opener appeared, and at which book, is
         known to five minutes. No call when no NCAAB game tips within 36
         hours; RUN_NCAAB_ODDS_CAPTURE=0 stops it. Writes no picks.)
+  * NCAABW odds capture   every 5 min, 24x7     -> run_ncaabw_odds_capture
+        (scripts/ncaabw_odds_capture.py: the same capture for women's college
+        basketball, a minute after the men's. No call when no NCAABW game
+        tips within 36 hours; RUN_NCAABW_ODDS_CAPTURE=0 stops it. Writes no
+        picks.)
   * NCAAB injury feed     every 5 min, 24x7     -> run_ncaab_injury_feed
         (scripts/ncaab_injury_feed.py: RotoWire's public injury JSON about
         every 10 minutes, every 5 while a game tips within three hours;
@@ -58,6 +63,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         capture stores it, and only while that number still stands; then
         publishes. Three minutes after each capture tick, which has 120
         seconds to finish. RUN_NCAAB_TOTAL_CARD=0 stops it.)
+  * NCAABW totals card    every 5 min at :04/:09/.., 24x7 -> run_ncaabw_total_card
+        (scripts/ncaabw_total_card.py: the women's twin of the NCAAB totals
+        card. Three minutes after each NCAABW capture tick.
+        RUN_NCAABW_TOTAL_CARD=0 stops it.)
   * NCAAB spread card     hourly at :05, 24x7, UTC -> run_ncaab_spread_card
         (scripts/ncaab_spread_card.py: the NCAAB spread model decides each
         game once, in the 15:00Z hour on its date, on every bettable book's
@@ -71,6 +80,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         job, so each model keeps its own kill switch and failure. A later run
         that finds a game undecided writes it as missed, never bets it, and
         fails. RUN_NCAAB_MONEYLINE_CARD=0 stops it.)
+  * NCAAF moneyline card  hourly at :05, 24x7, UTC -> run_ncaaf_moneyline_card
+        (scripts/ncaaf_moneyline_card.py: the NCAAF moneyline model decides
+        each game once, in the 14:00Z hour on its Eastern date, on the ten
+        fetched books' moneylines and spreads as of 14:00Z; then publishes. A
+        later run that finds a game undecided writes it as missed, never bets
+        it, and fails. RUN_NCAAF_MONEYLINE_CARD=0 stops it.)
   * NCAAB first-post ML   every minute, 24x7    -> run_ncaab_moneyline_first_post
         (scripts/ncaab_moneyline_first_post_card.py: one keyed planning read
         for a bettable book's NEW moneyline on an NCAAB game, stored by the
@@ -241,6 +256,18 @@ RUN_NFL_LIVE_LEADER = (os.environ.get("RUN_NFL_LIVE_LEADER", "1").strip().lower(
 # effect on the redeploy that applying it starts).
 RUN_NBA_LIVE = (os.environ.get("RUN_NBA_LIVE", "1").strip().lower()
                 not in ("0", "false", "off", "no"))
+
+# NCAAB in-play loop (models/ncaab_live_loop.py): the three game-state rules,
+# the best few a night, LIVE 2026-11-07 (mike: "3-5 best per night"), so ON by
+# default; RUN_NCAAB_LIVE=0 stops it without a code change.
+RUN_NCAAB_LIVE = (os.environ.get("RUN_NCAAB_LIVE", "1").strip().lower()
+                  not in ("0", "false", "off", "no"))
+
+# NCAABW halftime loop (models/ncaabw_live_loop.py): the full-game total, bet
+# during the halftime break, LIVE 2026-11-11 (mike), so ON by default;
+# RUN_NCAABW_LIVE=0 stops it without a code change.
+RUN_NCAABW_LIVE = (os.environ.get("RUN_NCAABW_LIVE", "1").strip().lower()
+                   not in ("0", "false", "off", "no"))
 
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
@@ -912,17 +939,24 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   # Writes odds, not picks: a paid fetch beside the refresh
                   # passes' own NCAAB fetch, not a loop.
                   "ncaab_odds_capture",
+                  # The same for women's college basketball.
+                  "ncaabw_odds_capture",
                   # Writes injury tags, not picks.
                   "ncaab_injury_feed",
                   # Writes NCAAB totals picks through its own card, reading
                   # the odds the passes and the capture stored.
                   "ncaab_total_card",
+                  # The same for women's college basketball.
+                  "ncaabw_total_card",
                   # Writes NCAAB spread picks through its own card, reading the
                   # same stored odds.
                   "ncaab_spread_card",
                   # Writes NCAAB moneyline picks through its own card, reading
                   # the same stored odds.
                   "ncaab_moneyline_card",
+                  # Writes NCAAF moneyline picks through its own card, reading
+                  # the NCAAF odds the hourly passes stored.
+                  "ncaaf_moneyline_card",
                   # Writes NCAAB first-post moneyline picks through its own
                   # card, reading the odds the capture and the passes store.
                   "ncaab_moneyline_first_post",
@@ -950,6 +984,11 @@ _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 # The NBA in-play loop: the same shape (free ESPN reads, one
                 # Odds API call per decision instant, writes Supabase only).
                 "nba_live",
+                # The NCAAB in-play loop: the same shape again.
+                "ncaab_live",
+                # The NCAABW halftime loop: the same shape, and pollers holds
+                # its live channel (DISCORD_CHANNEL_LIVE_NCAABW) and the bot token.
+                "ncaabw_live",
                 "dk_direct_feed", "bovada_feed"}
 
 # Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
@@ -1092,6 +1131,40 @@ def run_nba_live() -> None:
         # A loop that dies on every launch (a bad import, a missing artifact,
         # the decision table not yet created) must not read as healthy.
         raise RuntimeError(f"nba-live loop exited {outcome}")
+
+
+def run_ncaab_live() -> None:
+    # The NCAAB in-play loop (models/ncaab_live_loop.py), the run_nba_live
+    # shape: free ESPN reads every 20 s, exits after a few idle ticks with no
+    # NCAAB game in progress, relaunched by this */10 cron (max_instances=1).
+    # Odds API credits are spent ONLY at a fetch moment (each :00 and :30
+    # minus 262 s, retried to +240 s) while a game in progress has a rule not
+    # yet decided: one bulk spreads + totals call for every game, 2 credits,
+    # capped per process by NCAAB_LIVE_CALL_CAP / NCAAB_LIVE_CREDIT_CAP and by
+    # the shared LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.ncaab_live_loop"],
+        "ncaab-live",
+    )
+    if outcome != "ok":
+        raise RuntimeError(f"ncaab-live loop exited {outcome}")
+
+
+def run_ncaabw_live() -> None:
+    # The NCAABW halftime loop (models/ncaabw_live_loop.py), the run_ncaab_live
+    # shape: free ESPN reads every 15 s, exits after a few idle ticks with no
+    # women's game in progress, relaunched by this */10 cron (max_instances=1).
+    # Odds API credits are spent ONLY at a read instant (each five-minute mark
+    # plus 37 s) while an undecided game is around its halftime break: one bulk
+    # moneyline + spread + total call for every game, 6 credits, capped per
+    # process by NCAABW_LIVE_CALL_CAP / NCAABW_LIVE_CREDIT_CAP and by the
+    # shared LIVE_DAILY_CREDIT_CAP.
+    outcome = _run(
+        [sys.executable, "-m", "models.ncaabw_live_loop"],
+        "ncaabw-live",
+    )
+    if outcome != "ok":
+        raise RuntimeError(f"ncaabw-live loop exited {outcome}")
 
 
 def run_nfl_wind_card(days: int, regions: str = "us",
@@ -1725,9 +1798,11 @@ def run_nba_total_luck_window() -> None:
             ("nba-total-luck",
              [sys.executable, "run_pipeline.py", "--step", "nba-total-luck"], t["card"])]
 
-    def per_event_steps(name, module, step, due, t):
+    def per_event_steps(name, module, step, due, t, also=()):
         """A per-event model's steps: its own fetch of the due games, its card, its
-        closing snapshot of the bet games owed one."""
+        closing snapshot of the bet games owed one. `also`: further cards that decide
+        on the same fetch, run after the first in order (the first quarter's
+        moneyline after its spread)."""
         steps = []
         if due.decide:
             log.info("NBA totals window: %s deciding %s", name, due.decide)
@@ -1735,6 +1810,7 @@ def run_nba_total_luck_window() -> None:
                 (f"{step}-fetch", [sys.executable, "-m", module, "--fetch", *due.decide],
                  t["fetch"]),
                 (step, [sys.executable, "run_pipeline.py", "--step", step], t["card"])]
+            steps += [(s, [sys.executable, "run_pipeline.py", "--step", s], t["card"]) for s in also]
         if due.close:
             log.info("NBA totals window: %s closing snapshot for %s", name, due.close)
             steps.append((f"{step}-close", [sys.executable, "-m", module, "--close", *due.close],
@@ -1748,10 +1824,12 @@ def run_nba_total_luck_window() -> None:
         per_event_steps("first-half totals", "scripts.nba_first_half_total_luck_window",
                         "nba-first-half-total-luck", plan.first_half,
                         NBA_FIRST_HALF_WINDOW_TIMEOUT_S),
-        # nba_q1_trend, the first-quarter spread (mike, 2026-11-07): its own spreads_q1 fetch, its card, its
-        # closing snapshot, the first half's limits.
-        per_event_steps("first-quarter spreads", "scripts.nba_q1_trend_window", "nba-q1-trend",
-                        plan.first_quarter, NBA_Q1_TREND_WINDOW_TIMEOUT_S)])
+        # nba_q1_trend, the first-quarter spread (mike, 2026-11-07): its own first-quarter fetch, its card, its
+        # closing snapshot, the first half's limits. nba_q1_trend_ml, the first-quarter moneyline (mike,
+        # 2026-11-07, "Build it anyway"), decides on the SAME fetch right after it, as the graded bets of both were
+        # decided on one purchase.
+        per_event_steps("first quarter", "scripts.nba_q1_trend_window", "nba-q1-trend",
+                        plan.first_quarter, NBA_Q1_TREND_WINDOW_TIMEOUT_S, also=("nba-q1-trend-ml",))])
     if outcomes:
         _publish_new_signals("nba-total-luck-window")
     bad = {k: v for k, v in outcomes.items() if v != "ok"}
@@ -1786,6 +1864,27 @@ def run_ncaab_odds_capture() -> None:
                    "ncaab-odds-capture", timeout=NCAAB_ODDS_CAPTURE_TIMEOUT_S)
     if outcome != "ok":
         raise RuntimeError(f"NCAAB odds capture did not finish: {outcome}")
+
+
+NCAABW_ODDS_CAPTURE_TIMEOUT_S = 120
+
+
+def run_ncaabw_odds_capture() -> None:
+    """One NCAABW odds capture tick (scripts/ncaabw_odds_capture.py).
+
+    The women's twin of run_ncaab_odds_capture: the women's college basketball
+    board every five minutes, stored only where a price or line moved. It
+    writes no picks, so it publishes nothing. The script returns without an
+    API call when no NCAABW game tips within 36 hours, or when
+    RUN_NCAABW_ODDS_CAPTURE=0. A run that fails or is killed raises, so the
+    heartbeat records "error" and the failure alerter reports it. That
+    includes a run in which the feed listed games and none resolved onto
+    ESPN's schedule (the script exits 1).
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaabw_odds_capture"],
+                   "ncaabw-odds-capture", timeout=NCAABW_ODDS_CAPTURE_TIMEOUT_S)
+    if outcome != "ok":
+        raise RuntimeError(f"NCAABW odds capture did not finish: {outcome}")
 
 
 NCAAB_INJURY_FEED_TIMEOUT_S = 90
@@ -1852,6 +1951,32 @@ def run_ncaab_total_card() -> None:
         raise RuntimeError(f"NCAAB totals card did not finish: {outcome}")
 
 
+# The women's card: the same reads on a smaller board (the feed lists about
+# seven women's games a game day), so the men's bound holds.
+NCAABW_TOTAL_CARD_TIMEOUT_S = 600
+
+
+def run_ncaabw_total_card() -> None:
+    """One NCAABW totals card run (scripts/ncaabw_total_card.py), then publish.
+
+    The women's twin of run_ncaab_total_card: every five minutes, three after
+    each NCAABW odds capture tick. A game is decided at DraftKings' first
+    posted total, while that number still stands. The script returns at once
+    when RUN_NCAABW_TOTAL_CARD=0; the job still beats. A run that fails or is
+    killed raises AFTER publishing, so the heartbeat records "error" and the
+    failure alerter reports it, while a bet that was written still goes out.
+    The script exits 1 when a due game could not be decided for a reason that
+    will not clear by itself (an artifact for another season, a schedule not
+    stored whole, a season-long box hold, a missing blend), after writing
+    every game it could.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaabw_total_card", "--publish"],
+                   "ncaabw-total-card", timeout=NCAABW_TOTAL_CARD_TIMEOUT_S)
+    _publish_new_signals("ncaabw-total-card")
+    if outcome != "ok":
+        raise RuntimeError(f"NCAABW totals card did not finish: {outcome}")
+
+
 # The spread card reads the slate, the ledger and one hour of stored odds for
 # the day's games; seconds in practice.
 NCAAB_SPREAD_CARD_TIMEOUT_S = 600
@@ -1899,6 +2024,33 @@ def run_ncaab_moneyline_card() -> None:
     _publish_new_signals("ncaab-moneyline-card")
     if outcome != "ok":
         raise RuntimeError(f"NCAAB moneyline card did not finish: {outcome}")
+
+
+# The NCAAF moneyline card reads the slate, the ledger and one hour of stored
+# moneyline and spread odds for the day's games; seconds in practice.
+NCAAF_MONEYLINE_CARD_TIMEOUT_S = 600
+
+
+def run_ncaaf_moneyline_card() -> None:
+    """One NCAAF moneyline card run (scripts/ncaaf_moneyline_card.py), then
+    publish.
+
+    Hourly at five past, UTC. Games are decided only in the 14:00Z hour on
+    their Eastern date, on the ten fetched books' moneylines and spreads as of
+    14:00Z, so every other run reads the slate and the ledger and returns. A
+    later run that finds one of the day's games undecided writes it as missed
+    (no bet) and the script exits 1. The script returns at once when
+    RUN_NCAAF_MONEYLINE_CARD=0; the job still beats. A run that fails or is
+    killed raises AFTER publishing, so the heartbeat records "error" and the
+    failure alerter reports it, while a bet that was written still goes out.
+    """
+    outcome = _run([sys.executable, "-m", "scripts.ncaaf_moneyline_card", "--publish"],
+                   "ncaaf-moneyline-card", timeout=NCAAF_MONEYLINE_CARD_TIMEOUT_S)
+    _publish_new_signals("ncaaf-moneyline-card")
+    if outcome != "ok":
+        raise RuntimeError(f"NCAAF moneyline card did not finish: {outcome}")
+
+
 # The NCAAB first-half window's steps, bounded so a stuck one cannot hold the
 # job past the ticks that follow it (max_instances=1). The fetch is one event
 # list plus one event call per due game (15 s each at most,
@@ -2964,6 +3116,35 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_NBA_LIVE=0 — NBA in-play loop NOT scheduled.")
 
+    # NCAAB in-play loop. 11am to 2:50am ET: the earliest tips are around 11am
+    # ET on weekends and a late West tip ends after 1am; an idle launch reads
+    # ESPN's scoreboard and exits.
+    if RUN_NCAAB_LIVE:
+        sched.add_job(
+            run_ncaab_live,
+            CronTrigger(hour="0-2,11-23", minute="*/10", timezone=TIMEZONE),
+            id="ncaab_live",
+            name="NCAAB in-play loop supervisor (11am-2:50am ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NCAAB_LIVE=0 — NCAAB in-play loop NOT scheduled.")
+
+    # NCAABW halftime loop. The same hours: the earliest women's tips are
+    # around 11am ET and a late West tip's half comes after midnight; an idle
+    # launch reads ESPN's scoreboard and exits. Five minutes after the men's
+    # launch so the two loops do not start in the same second.
+    if RUN_NCAABW_LIVE:
+        sched.add_job(
+            run_ncaabw_live,
+            CronTrigger(hour="0-2,11-23", minute="5-59/10", timezone=TIMEZONE),
+            id="ncaabw_live",
+            name="NCAABW halftime loop supervisor (11am-2:55am ET, every 10 min)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NCAABW_LIVE=0 — NCAABW halftime loop NOT scheduled.")
+
     if RUN_NFL_PROP_CARD:
         sched.add_job(
             run_nfl_prop_card,
@@ -3032,6 +3213,18 @@ def build_scheduler() -> BlockingScheduler:
         max_instances=1, coalesce=True, misfire_grace_time=120,
     )
 
+    # NCAABW odds capture -- every five minutes, 24x7, a minute after the
+    # men's so the two paid calls do not land together
+    # (run_ncaabw_odds_capture). The kill switch is in the script
+    # (RUN_NCAABW_ODDS_CAPTURE), so the job keeps beating while it is off.
+    sched.add_job(
+        run_ncaabw_odds_capture,
+        CronTrigger(minute="1-59/5", timezone=TIMEZONE),
+        id="ncaabw_odds_capture",
+        name="NCAABW odds capture (every 5 min, 24x7: change-only, opener timing)",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+
     # NCAAB injury tags -- every five minutes, 24x7 (run_ncaab_injury_feed).
     # The script polls RotoWire about every 10 minutes and every 5 near a tip,
     # and Covers about every 30. An idle tick is one slate read and no request.
@@ -3055,6 +3248,20 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="3-59/5", timezone="UTC"),
         id="ncaab_total_card",
         name="NCAAB totals card (every 5 min, 3 after each odds capture: decide at "
+             "DraftKings' first posted total)",
+        max_instances=1, coalesce=True, misfire_grace_time=240,
+    )
+
+    # NCAABW totals card -- every five minutes (run_ncaabw_total_card), three
+    # minutes after each NCAABW odds capture tick (minute 1-59/5, 120 s
+    # timeout), so a DraftKings first total the capture stored is decided
+    # within about eight minutes of the poll that saw it. A minute after the
+    # men's card. Unconditional; the kill switch is in the script.
+    sched.add_job(
+        run_ncaabw_total_card,
+        CronTrigger(minute="4-59/5", timezone="UTC"),
+        id="ncaabw_total_card",
+        name="NCAABW totals card (every 5 min, 3 after each odds capture: decide at "
              "DraftKings' first posted total)",
         max_instances=1, coalesce=True, misfire_grace_time=240,
     )
@@ -3084,6 +3291,22 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute=5, timezone="UTC"),
         id="ncaab_moneyline_card",
         name="NCAAB moneyline card (hourly at :05 UTC: decide in the 15Z hour on the 15Z quotes)",
+        max_instances=1, coalesce=True, misfire_grace_time=600,
+    )
+
+    # NCAAF moneyline card -- hourly at five past, UTC
+    # (run_ncaaf_moneyline_card). It decides only in the 14:00Z hour on a
+    # game's Eastern date, on the quotes stamped 13:00-14:00Z (the hourly
+    # refresh stores them at :16-:17 past), the instant its evidence read; UTC
+    # so DST cannot move it. Hourly rather than one 14:05Z job so a stopped
+    # card shows in the heartbeat within hours, and so the run after a missed
+    # 14:05Z writes the miss and fails. Unconditional; the kill switch is in
+    # the script.
+    sched.add_job(
+        run_ncaaf_moneyline_card,
+        CronTrigger(minute=5, timezone="UTC"),
+        id="ncaaf_moneyline_card",
+        name="NCAAF moneyline card (hourly at :05 UTC: decide in the 14Z hour on the 14Z quotes)",
         max_instances=1, coalesce=True, misfire_grace_time=600,
     )
 

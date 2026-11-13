@@ -32,6 +32,7 @@ import {
 } from '../src/lib/markets';
 import { clvBetQuote } from '../src/lib/clvBet';
 import type { BookPricedRow, Pick } from '../src/types';
+import { readConfigBooks, sameList } from './config_books';
 
 let passed = 0;
 let failed = 0;
@@ -68,9 +69,17 @@ const pick = (side: string, dk: number | null): Pick =>
 
 check('DraftKings is the model book', MODEL_BOOK === 'draftkings');
 // Bovada and Pinnacle joined 2026-08-28 so the best-line stamp can quote them;
-// fanatics + the five us2 books joined 2026-09-03. A book that can win the best
-// price must also be labelled — this pin is the mirror of config.LINE_SHOP_BOOKMAKERS.
-check('every ingested book is carried', LINE_SHOP_BOOKS.length === 13);
+// fanatics + the five us2 books joined 2026-09-03; four were cut on 2026-09-20.
+// A book that can win the best price must also be labelled. The list is read
+// from config.LINE_SHOP_BOOKMAKERS itself: the `=== 13` this replaced pinned the
+// app's own length and stayed green while the two drifted apart.
+let fetched: string[] = [];
+try {
+  fetched = readConfigBooks().fetched;
+} catch (err) {
+  console.log(`  config.py could not be read: ${(err as Error).message}`);
+}
+check('every ingested book is carried', sameList(LINE_SHOP_BOOKS, fetched));
 check(
   'every book that can win a best price has a real name, not its API key',
   LINE_SHOP_BOOKS.every((b) => bookName(b) !== b),
@@ -448,6 +457,11 @@ check('nba_total_luck is a game_total for parlay correlation', marketClassForMod
 // ncaab_total_blend (NCAAB full-game totals) has neither 'over_under' nor 'spread' either.
 check('ncaab_total_blend resolves to totals (id has no over_under)', gameMarketForModel('ncaab_total_blend') === 'totals');
 check('ncaab_total_blend is a game_total for parlay correlation', marketClassForModel('ncaab_total_blend') === 'game_total');
+// ncaabw_total_blend (NCAABW full-game totals, the women's): the same id shape, the same trap.
+check('ncaabw_total_blend resolves to totals (id has no over_under)', gameMarketForModel('ncaabw_total_blend') === 'totals');
+check('ncaabw_live_total_ht resolves to totals (id has no over_under)', gameMarketForModel('ncaabw_live_total_ht') === 'totals');
+check('ncaabw_live_total_ht is a game_total for parlay correlation', marketClassForModel('ncaabw_live_total_ht') === 'game_total');
+check('ncaabw_total_blend is a game_total for parlay correlation', marketClassForModel('ncaabw_total_blend') === 'game_total');
 // ncaab_first_half_spread HAS 'spread' in it, and must still read the first half's rows, not the game's.
 check('ncaab_first_half_spread resolves to spreads_h1, not spreads', gameMarketForModel('ncaab_first_half_spread') === 'spreads_h1');
 check('ncaab_first_half_spread is a game_spread for parlay correlation', marketClassForModel('ncaab_first_half_spread') === 'game_spread');

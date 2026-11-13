@@ -2,7 +2,7 @@
  * WHICH SPORTS HAVE AN IN-PLAY MODEL AT ALL.
  *
  * Mirror of the in-play models in the Python registry: `config.LIVE_MODELS`
- * (MLB, NBA and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
+ * (MLB, NBA, NCAAB, NCAABW and NCAAF) and the separate NFL in-play worker (`nfl/live_model`, whose ids live
  * in `nfl/live_model/config.MODEL_IDS`). PINNED BY
  * tests/test_mobile_live_segment.py, which fails until this set equals those
  * two sources — the same mechanism lib/thresholds.ts uses, for the same reason:
@@ -19,16 +19,21 @@
  */
 
 /** Sports with at least one in-play model writing `is_live` picks. */
-export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NCAAF', 'NFL']);
+// Ordered so the two college basketball codes close the sentence ("... NCAAB
+// and NCAABW"): side by side in the middle of a list they read as one word
+// typed twice (UX review, 2026-11-11).
+export const LIVE_MODEL_SPORTS: ReadonlySet<string> = new Set(['MLB', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW']);
 
 /** Does this sport have an in-play model at all? */
 export function hasLiveModel(sport: string): boolean {
   return LIVE_MODEL_SPORTS.has(sport);
 }
 
-/** "MLB, NBA, NCAAF and NFL" — for copy that names the sports with an in-play model. */
-export function liveModelSportsSentence(): string {
-  const s = [...LIVE_MODEL_SPORTS];
+/** "MLB, NBA, NFL, NCAAF, NCAAB and NCAABW" — for copy that names the sports
+ *  with an in-play model. Pass `name` to say each sport another way: VoiceOver
+ *  reads them through sportSpokenName, so it never spells "NCAAB" then "NCAABW". */
+export function liveModelSportsSentence(name: (sport: string) => string = (sport) => sport): string {
+  const s = [...LIVE_MODEL_SPORTS].map(name);
   if (s.length <= 1) return s.join('');
   return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
 }
@@ -49,6 +54,26 @@ export function liveEmptySubtitle(sport: string): string {
     return (
       'The NBA in-play model checks games in progress once an hour, through the first and second quarters, and ' +
       'bets each game at most once. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  if (sport === 'NCAAB') {
+    // models/ncaab_live_loop.py: games in progress twice an hour, only the
+    // biggest edges, and no more than five bets a night (mike, 2026-11-07).
+    // tests/test_ncaab_live_config.py pins "twice an hour" and "five" to the
+    // loop's cadence and cap.
+    return (
+      'The NCAAB in-play models check games in progress twice an hour, bet only their biggest edges, ' +
+      'and stop after five bets a night. ' +
+      LIVE_EMPTY_VALID
+    );
+  }
+  if (sport === 'NCAABW') {
+    // models/ncaabw_live_loop.py: one decision a game, during the halftime
+    // break, on the full-game total.
+    return (
+      'The NCAABW in-play model checks each game during its halftime break and bets it at most once, ' +
+      'on the full-game total. ' +
       LIVE_EMPTY_VALID
     );
   }

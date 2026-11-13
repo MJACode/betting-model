@@ -27,7 +27,10 @@ export type StatSegment =
   | 'players'
   | 'qb' | 'rb' | 'wrte' | 'def'
   | 'hitters' | 'pitchers'
-  | 'teams';
+  | 'teams'
+  // NBA only: the 1st Basket board (Matt, 2026-11-08). Its own board, like
+  // Teams, with no catalog chips (components/NbaFirstBasketBoard.tsx).
+  | 'firstBasket';
 
 /** One chip in a segment: a catalog entry, by its group and column key. */
 interface ChipRef {
@@ -92,8 +95,20 @@ export function segmentsForSport(sport: Sport): StatSegment[] {
  * row under Players, shown only on the Players board. `segmentsForSport` stays
  * the one list; these two split it into the two rows.
  */
-export function boardSegmentsFor(sport: Sport): ('players' | 'teams')[] {
-  return supportsTeamBoard(sport) ? ['players', 'teams'] : ['players'];
+export function boardSegmentsFor(sport: Sport): BoardSegment[] {
+  const base: BoardSegment[] = supportsTeamBoard(sport) ? ['players', 'teams'] : ['players'];
+  // 1st Basket rides the top row on the NBA only (Matt, 2026-11-08: "only the
+  // stats tab", NBA). It is a board, not a stat chip: first basket is not an
+  // over/under game-log stat, so it has no Hit Rate or Averages view.
+  return supportsFirstBasketBoard(sport) ? [...base, 'firstBasket'] : base;
+}
+
+/** The top row's boards. */
+export type BoardSegment = 'players' | 'teams' | 'firstBasket';
+
+/** The 1st Basket board exists for the NBA and nowhere else. */
+export function supportsFirstBasketBoard(sport: Sport): boolean {
+  return sport === 'NBA';
 }
 
 /** The second row: the sport's position segments, or none (NBA, WNBA, NHL). */
@@ -122,6 +137,7 @@ export function segmentLabel(seg: StatSegment): string {
     case 'hitters': return 'Hitters';
     case 'pitchers': return 'Pitchers';
     case 'teams': return 'Teams';
+    case 'firstBasket': return '1st Basket';
   }
 }
 
@@ -132,6 +148,7 @@ export function segmentAccessibilityLabel(seg: StatSegment): string {
     case 'rb': return 'Running backs';
     case 'wrte': return 'Receivers and tight ends';
     case 'def': return 'Defense';
+    case 'firstBasket': return 'First basket';
     default: return segmentLabel(seg);
   }
 }
@@ -303,7 +320,7 @@ export function isPositionSegment(seg: StatSegment): seg is 'qb' | 'rb' | 'wrte'
 export function positionFallbackNote(
   sport: Sport,
   seg: StatSegment,
-  boardMode: 'players' | 'teams',
+  boardMode: BoardSegment,
   positions: ReadonlySet<string> | null,
 ): string | null {
   if (boardMode !== 'players' || positions !== null || !isPositionSegment(seg)) return null;

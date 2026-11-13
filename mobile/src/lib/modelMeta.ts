@@ -469,6 +469,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NBA first quarter's moneyline, the same hot team (models/nba_q1_trend_ml.py,
+  // mike, 2026-11-07): the first-quarter spread model's own rule, bet on that
+  // team's first-quarter moneyline, once, about an hour before tip, at the best
+  // price. It settles on the first quarter's score alone; a level quarter is a
+  // push. The label is "DEN @ LAC — First Quarter DEN ML". A game line, not a
+  // picker slot.
+  nba_q1_trend_ml: {
+    // 1Q ML, spelled like '1Q Spread'. The side is in the pick label.
+    shortLabel: '1Q ML',
+    longLabel: 'NBA First Quarter Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // NBA in-play (models/nba_live_ig2.py, 2026-11-04): the game-state model's
   // margin against the live line, one bet per game at the first fresh price,
   // during quarters 1-2. The quarter-3 moneyline and spread are held out
@@ -481,6 +495,35 @@ export const MODEL_META: Record<string, ModelMeta> = {
   nba_live_spread_q12: {
     shortLabel: 'Early Spread',
     longLabel: 'NBA Early Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // NCAAB in-play (models/ncaab_live_ig.py, 2026-11-07): the game-state
+  // model against the live spread or total, one bet per game and rule at the
+  // first fresh price, only its biggest edges, at most five a night across
+  // the three. Every bet SETTLES ON THE FULL GAME, so the names say when the
+  // bet is placed (Early: the first half; Late: halftime on), never a period.
+  // The chips follow the NBA in-play model's (Early Spread, mike 2026-11-05),
+  // and tell the two spread models apart. Their picks appear on the Live
+  // segment only.
+  ncaab_live_spread_h1: {
+    shortLabel: 'Early Spread',
+    longLabel: 'NCAAB Early Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaab_live_spread_h2: {
+    shortLabel: 'Late Spread',
+    longLabel: 'NCAAB Late Live Spreads',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaab_live_total_h2: {
+    shortLabel: 'Late O/U',
+    longLabel: 'NCAAB Late Live Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -617,6 +660,19 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The live NCAAF moneyline model (models/ncaaf_moneyline_market.py
+  // MODEL_ID): the best moneyline against the win chance the books' consensus
+  // spread implies. It carries the paused classifier's name above, as the live
+  // and paused MLB Totals models share theirs; modelLongWithMark marks the
+  // paused one. The id has no 'spread' in it, so markets.ts reads it as a
+  // moneyline without a named line.
+  ncaaf_moneyline_market: {
+    shortLabel: 'ML',
+    longLabel: 'NCAAF Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   ncaaf_over_under: {
     shortLabel: 'O/U',
     longLabel: 'NCAAF Totals',
@@ -699,6 +755,36 @@ export const MODEL_META: Record<string, ModelMeta> = {
     // 1H O/U, as the NBA first half's total. The side is in the pick label.
     shortLabel: '1H O/U',
     longLabel: 'NCAAB First Half Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // ── NCAABW ────────────────────────────────────────────────────────────────
+  // Women's college basketball, full-game totals: the one women's model
+  // (2026-11-10). Named like the other totals ("NCAABW Totals", badge O/U).
+  // The open-picks view names each model as this file does, in this order
+  // (tests/test_open_picks_view.py), so the string must not vary. The id is
+  // the one the model writes its picks under (models/ncaabw_total_blend.py
+  // MODEL_ID). It starts with 'ncaab', so sportOfModel tests the women's
+  // prefix first, and it has no 'over_under' in it, so markets.ts names it
+  // for the totals rows.
+  ncaabw_total_blend: {
+    shortLabel: 'O/U',
+    longLabel: 'NCAABW Totals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // Women's college basketball in play (models/ncaabw_live_ht.py, 2026-11-11):
+  // the full-game total, bet once a game during the halftime break. It
+  // SETTLES ON THE FULL GAME. Named like the other one-model live total
+  // ('NCAAF Live Totals', LIVE O/U), not "Halftime": a "halftime bet" is a
+  // bet on the second half in every betting glossary, and this is not one
+  // (UX review, 2026-11-11). The lock row, the model's page and the Live
+  // board say when it bets. Its picks appear on the Live segment only.
+  ncaabw_live_total_ht: {
+    shortLabel: 'LIVE O/U',
+    longLabel: 'NCAABW Live Totals',
     type: 'game',
     statKey: null,
     statLabel: '',
@@ -947,6 +1033,16 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
     'fair chance plus about 15 percentage points, the extra these bets won over the last three NBA ' +
     'seasons (66% won where the market’s fair chance averaged 51%). That is only 88 bets, so the real ' +
     'extra could be much smaller. Read it as an upper bound.',
+  // The market's no-vig chance plus the walk-forward uplift (+0.1416 for
+  // 2026-27): on the 81 graded bets whose first quarter was not level, 56.8%
+  // won where the market's fair chance averaged 42.6% (models/nba_q1_trend_ml.py).
+  // A level quarter is a push, left out of both.
+  nba_q1_trend_ml:
+    'What our model says is the chance this team wins the first quarter, leaving out a tied quarter, ' +
+    'which returns the stake. It is the market’s fair chance plus about 14 percentage points, the extra ' +
+    'these bets won over the last three NBA seasons (of the 81 that were not tied, 57% won where the market’s ' +
+    'fair chance averaged 43%). That is only 87 bets, 6 of them tied, so the real extra could be much smaller. ' +
+    'Read it as an upper bound.',
   // The win chance the bet book's own spread implies
   // (models/ncaab_moneyline_own_spread.py); the edge is that minus the same
   // book's moneyline price's implied chance (UX review, 2026-11-02).
@@ -958,6 +1054,12 @@ const PROBABILITY_NOTE: Readonly<Record<string, string>> = {
   ncaab_moneyline_first_post:
     'The chance this side wins according to the spread at the book we bet, when that book first posted ' +
     'its moneyline. Edge is how much higher that is than the chance the moneyline price implies.',
+  // The win chance the books' middle spread implies
+  // (models/ncaaf_moneyline_market.py); the edge is that minus the bet price's
+  // implied chance (UX review, 2026-11-10).
+  ncaaf_moneyline_market:
+    'The chance this side wins according to the middle point spread across the sportsbooks we check. ' +
+    'Edge is how much higher that is than the chance the moneyline price implies.',
   // P(cover | no push) at the bet's own number (models/ncaab_first_half_spread.py):
   // on a whole-number first-half line a push is possible and is left out.
   ncaab_first_half_spread:
@@ -989,6 +1091,8 @@ const HOUR_BEFORE_TIP_MODELS: readonly string[] = [
   'nba_first_half_total_luck',
   // The NBA first-quarter spreads (scripts/nba_q1_trend_card.py, 45-66).
   'nba_q1_trend',
+  // The NBA first-quarter moneylines, on the same fetch (scripts/nba_q1_trend_ml_card.py).
+  'nba_q1_trend_ml',
   'ncaab_first_half_total',
   'nba_prop_market',
   'nba_prop_projection',
@@ -1011,6 +1115,23 @@ const FIRST_POST_TOTAL_MODELS: readonly string[] = [
   'ncaab_total_blend',
 ];
 
+// The women's totals card (scripts/ncaabw_total_card.py, every five minutes,
+// three after each women's odds capture poll; from 2026-11-10) decides the
+// same way: once, minutes after DraftKings first posts a game's total, and
+// only while that first total and its prices are still DraftKings' number.
+// It is not in the list above because its timing is not the men's, and the
+// page says the timing. DraftKings posted its first women's total 1 to 6
+// Eastern dates before the game's date in 155 of 1,772 priced games, never
+// more (that card's SLATE_DAYS); a first post is a pre-game quote, so the
+// other 1,617 came on the game's own date. That first total stood a median
+// 136 minutes in 2024-25 and 85 in 2025-26 (docs/sports/ncaabw.md), and one
+// in ten changed within 10 minutes (the card's own header), so the page says
+// an opening total "can change within minutes", not the men's "often changes
+// within half an hour".
+const GAME_DAY_FIRST_POST_TOTAL_MODELS: readonly string[] = [
+  'ncaabw_total_blend',
+];
+
 // The models that decide each game once, on the morning of the game: the
 // NCAAB spread card (scripts/ncaab_spread_card.py) reads the spread at each
 // of the eight bettable books at 15:00 UTC on game day and posts its bets
@@ -1024,9 +1145,14 @@ const FIRST_POST_TOTAL_MODELS: readonly string[] = [
 // sportsbook picker lists more books than it (UX review, 2026-11-03).
 // The NCAAB moneyline card (scripts/ncaab_moneyline_card.py) decides at the
 // same instant and posts in the same batch; its body says what it compares.
+// The NCAAF moneyline card (scripts/ncaaf_moneyline_card.py) decides the same
+// way an hour earlier, at 14:00 UTC: 10am ET until the clocks go back in early
+// November, 9am ET after. Its body says its own times; the shared empty state
+// ("by noon ET") covers both.
 const GAME_MORNING_MODELS: readonly string[] = [
   'ncaab_moneyline_own_spread',
   'ncaab_spread_market',
+  'ncaaf_moneyline_market',
 ];
 
 // The moneyline model's page body (UX review, 2026-11-02): it bets the book
@@ -1040,6 +1166,15 @@ const GAME_MORNING_BODY: Readonly<Record<string, string>> = {
     'book’s spread implies. It bets only some games, each at the one book where that gap is largest, ' +
     'which may not be DraftKings. It never lays more than -200. It skips a game the NCAAB Opening ' +
     'Moneyline model has already bet. A posted bet is never re-priced: it stays at the price it posted at.',
+  // The NCAAF moneyline model (UX review, 2026-11-10): the best moneyline on
+  // offer against the win chance the books' middle spread implies
+  // (models/ncaaf_moneyline_market.py). Never shorter than -200.
+  ncaaf_moneyline_market:
+    'This model decides each game once, at 10am ET on game day (9am ET from early November). It bets a ' +
+    'moneyline only when the best price on offer beats the chance of winning implied by the middle point ' +
+    'spread across the sportsbooks we check. That book may not be DraftKings. It never lays more than ' +
+    '-200. It skips a game an NCAAF Spreads model has already bet. A posted bet is never re-priced: it ' +
+    'stays at the price it posted at.',
 };
 // The model that bets a book's moneyline minutes after the book first posts
 // it (scripts/ncaab_moneyline_first_post_card.py, every minute, on the
@@ -1083,6 +1218,20 @@ const NBA_LIVE_TIMING: Readonly<Record<string, { when: string; settles: string }
   },
 };
 
+// The NCAAB in-play models (models/ncaab_live_ig.py): when each bets. The loop
+// checks games in progress every half hour (models/ncaab_live_loop.py) and
+// posts only the night's strongest few. Each bet is on the FULL game.
+const NCAAB_LIVE_TIMING: Readonly<Record<string, { when: string; market: string }>> = {
+  ncaab_live_spread_h1: { when: 'during the first half', market: 'spread' },
+  ncaab_live_spread_h2: { when: 'from halftime until two minutes are left', market: 'spread' },
+  ncaab_live_total_h2: { when: 'from halftime until two minutes are left', market: 'total' },
+};
+
+// The women's in-play model (models/ncaabw_live_ht.py): one bet a game at most,
+// decided during the halftime break (models/ncaabw_live_loop.py reads the
+// books every five minutes while a game is at the half).
+const NCAABW_HALFTIME_MODEL = 'ncaabw_live_total_ht';
+
 const LIVE_NOT_IN_LIST = 'Its bets appear on the Live Signals board while the game is in play, not in this list.';
 const NEVER_REPRICED = 'A posted bet is never re-priced: it stays at the line and price it posted at.';
 
@@ -1093,6 +1242,31 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
   // their bets are never listed there: the copy says where they are instead
   // of promising a pipeline refresh that will never fill the list.
   if (isLiveModel(modelId)) {
+    const ncaab = NCAAB_LIVE_TIMING[modelId];
+    if (ncaab) {
+      return {
+        title: 'Bets during the game',
+        body:
+          `This model checks NCAAB games in progress twice an hour, ${ncaab.when}, and bets each game at ` +
+          `most once, at the sportsbook with the best offer. It bets only its biggest edges, and stops after ` +
+          `five bets a night across the NCAAB in-play models. The bet is on the full-game ${ncaab.market}: it ` +
+          `settles on the final score, overtime included, not on the half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty:
+          `This model checks NCAAB games in progress twice an hour, ${ncaab.when}. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
+    if (modelId === NCAABW_HALFTIME_MODEL) {
+      return {
+        title: 'Bets at halftime',
+        body:
+          'This model checks each NCAABW game during its halftime break and bets it at most once, at the ' +
+          'sportsbook with the best offer. The bet is on the full-game total: it settles on the final ' +
+          `score, overtime included, not on a half. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
+        empty: `This model checks each NCAABW game during its halftime break. ${LIVE_NOT_IN_LIST}`,
+        note: 'In-play bets appear on Live Signals, not in this list.',
+      };
+    }
     const nba = NBA_LIVE_TIMING[modelId];
     if (nba) {
       return {
@@ -1112,6 +1286,26 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         `finds one. ${LIVE_NOT_IN_LIST} ${NEVER_REPRICED}`,
       empty: `This model bets while games are being played. ${LIVE_NOT_IN_LIST}`,
       note: 'In-play bets appear on Live Signals, not in this list.',
+    };
+  }
+  // The NBA first quarter's moneyline (models/nba_q1_trend_ml.py): a moneyline
+  // has no line, so its page names only the price, as its Pick Detail note
+  // does. It says a tied quarter returns the stake (some books also sell a
+  // three-way first-quarter moneyline, where a tie loses), and that it bets the
+  // same team in the same games as the first-quarter spread model (UX review,
+  // 2026-11-07).
+  if (modelId === 'nba_q1_trend_ml') {
+    return {
+      title: 'Checked once per game',
+      body:
+        'This model checks each game once, about an hour before tip-off, and posts a bet only when it ' +
+        'finds one. It bets the same team, in the same games, as the NBA First Quarter Spreads model. ' +
+        'A tied first quarter returns the stake. A posted bet is never re-priced: it stays at the price it ' +
+        'posted at.',
+      empty:
+        'This model checks each game about an hour before tip-off and bets only some of them. ' +
+        'Nothing has posted today so far.',
+      note: 'Posted about an hour before tip-off and never re-priced.',
     };
   }
   if (HOUR_BEFORE_TIP_MODELS.includes(modelId)) {
@@ -1168,6 +1362,22 @@ export function modelPageTiming(modelId: string): ModelPageTiming {
         'at the line and price it posted at.',
       empty:
         'This model bets only some games, usually the day before each one, as DraftKings opens its totals. ' +
+        'Nothing has posted yet.',
+      note: 'Posted at DraftKings’ opening total and never re-priced.',
+    };
+  }
+  if (GAME_DAY_FIRST_POST_TOTAL_MODELS.includes(modelId)) {
+    return {
+      title: 'Decided when the total opens',
+      body:
+        'This model decides each game once, at DraftKings’ opening total, usually within minutes of it ' +
+        'posting. DraftKings opens most totals on the day of the game, some up to six days before. It bets ' +
+        'at DraftKings, and only if DraftKings still offers that opening total at the same prices. If the ' +
+        'total or a price has moved, it skips the game. An opening total can change within minutes: check ' +
+        'DraftKings’ total and price before you bet. The pick is for the total and price shown, not a ' +
+        'later one. A posted bet is never re-priced: it stays at the line and price it posted at.',
+      empty:
+        'This model bets only some games, usually on the day of each one, as DraftKings opens its totals. ' +
         'Nothing has posted yet.',
       note: 'Posted at DraftKings’ opening total and never re-priced.',
     };
@@ -1231,7 +1441,7 @@ export function isPropModel(modelId: string): boolean {
 // Bet-type catalog — what the custom-model builder offers
 // ---------------------------------------------------------------------------
 
-export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'NHL' | 'GOLF';
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'NHL' | 'GOLF';
 
 /**
  * The on-screen title. "Double-Double" is one word to the wrapper; a
@@ -1246,6 +1456,9 @@ export function sportOfModel(modelId: string): BetTypeSport {
   if (modelId.startsWith('wnba')) return 'WNBA';
   if (modelId.startsWith('nba')) return 'NBA';
   if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  // The women's prefix first: 'ncaabw_total_blend' starts with 'ncaab' too,
+  // so the men's test alone files every women's model under NCAAB.
+  if (modelId.startsWith('ncaabw')) return 'NCAABW';
   if (modelId.startsWith('ncaab')) return 'NCAAB';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('ufc')) return 'UFC';
@@ -1285,6 +1498,7 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
   'NFL',
   'NCAAF',
   'NCAAB',
+  'NCAABW',
   'UFC',
   'NHL',
   'GOLF',
@@ -1359,6 +1573,8 @@ export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | 
   if (id === 'ncaab_first_half_total') return null;
   // The NBA first quarter's spread, the same: not the game's spread line.
   if (id === 'nba_q1_trend') return null;
+  // The NBA first quarter's moneyline, the same: not the game's moneyline.
+  if (id === 'nba_q1_trend_ml') return null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
  * behavior is unchanged. Persisted to AsyncStorage and shared across screens via
  * a module-level store + listeners (same pattern as useOnboarding).
  */
-export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' | 'GOLF' | 'NHL';
+export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'NCAABW' | 'UFC' | 'GOLF' | 'NHL';
 
 // GOLF is deliberately ABSENT: the sport was retired 2026-09-08 (mike). It stays
 // in the `Sport` union above so existing signatures still compile and old rows
@@ -20,7 +20,10 @@ export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'NCAAB' | 'UFC' |
 // parked on the golf chip lands on MLB at next cold start with no migration.
 // NCAAB (men's college basketball) sits beside NCAAF. It joined 2026-10-30 for
 // its totals model; it has no player or team stats in the app yet.
-export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'UFC', 'NHL'];
+// NCAABW (women's college basketball) sits right after NCAAB. It joined
+// 2026-11-10 for its totals model. The Stats tab has the same Players board
+// as NCAAB (no props, no Teams board).
+export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'NCAAB', 'NCAABW', 'UFC', 'NHL'];
 
 const STORAGE_KEY = 'sportFilter.selected';
 const DEFAULT_SPORT: Sport = 'MLB';

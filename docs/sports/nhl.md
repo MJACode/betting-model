@@ -475,12 +475,88 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 
 | Step | Runs where | Frequency | What it does |
 |---|---|---|---|
+| NHL schedule (`nhl-schedule`) | Railway worker (6am run, step 0b1, right after `nhl-results`) | daily | `data/ingestors/nhl_schedule_refresh.py`: the rest of the season (and playoff games once listed) from `api-web.nhle.com/v1/schedule/{date}` into `games`, reading from 7 days before the run date: 26 free calls from 2026-10-22. See "The season stored ahead" below |
 | NHL results (`nhl-results`) | GitHub Actions (step 0b, **before settle**) and every refresh pass | daily 7am, hourly 7am–5pm ET, every 10 min 6–11pm ET | `ingest_nhl_scores_for_date` — trailing-3-day final scores + regulation outcomes into `games` (settlement reads `home_score`; the MLB statsapi fetch in paper_tracker doesn't cover NHL). Then `nhl_period_scores_api.top_up`: finals that have no `nhl_api_score` row, from the same `/v1/score` goals array, at most 40 dates a pass |
 | NHL odds (h2h/totals/spreads bulk + per-event 3-way) | GitHub Actions (`step_odds`) | 6am + hourly to 5pm + every 10 min 6pm–11pm | DK lines; 3-way attempted per-event (bulk 422s it), non-fatal when absent |
 | NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows (ESPN `probableStartingGoalie` overlay) |
 | NHL totals (`nhl-over-under`) | Railway worker (`step_nhl_over_under`) | 6am (right after the odds step) + every refresh pass (right after `par odds`) | `scripts/nhl_totals_card.py`: every unstarted NHL game, Pinnacle vs the bettable books in the newest fetch; writes at most one `nhl_over_under` BET a game, once, under the model's advisory lock. Logs a diagnostic line every pass (`no_sharp`, `pinnacle_withdrawn`, ...) so an empty card can be told from a broken one |
 | NHL scoring (`step_scoring`) | GitHub Actions | 6am + every refresh pass | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`); `nhl_over_under` is not in it |
 | Settlement | Railway worker (`settle`) | every refresh pass and the 6am run | Game lines grade off `games` once `nhl-results` has the final. Props grade in the same `settle_picks` once a final that is still missing its skater or goalie log has a box from `/gamecenter/{id}/boxscore`. The morning `top_up` still writes the full stats-API row; the box insert is `ON CONFLICT DO NOTHING`, so it does not blank that row. 3-way draw is handled in `_compute_result`. |
+
+### The season stored ahead (2026-10-22)
+
+Until 2026-10-22 an NHL game reached `games` only from the odds feed, so it
+existed once a book listed it. Of the 167 2026-27 rows stored by then, 134 were
+created 24.7 to 34.7 hours before puck drop; the other 33 were opening-week
+games the feed listed early (31 on 2026-07-19, one on 07-21, one on 09-14), and
+none was created on game day. The table held 2 future rows on 10-20. The daily
+`nhl-schedule` step now stores every remaining scheduled game.
+
+- **Same id as the odds feed, measured.** `NHL_{ET date of startTimeUTC}_{away}_{home}`,
+  built by `nhl_stats_ingestor.parse_nhl_game`. Checked read-only on
+  2026-10-22: every scored game of 2024-25 (1,398) and 2025-26 (1,394) is
+  stored under the id the API builds and carries odds rows under it, the ten
+  neutral-site and international games of those seasons included; this
+  season's 167 stored rows match 167 of 167. The gameWeek date equals the ET
+  date of the start for all 4,136 games of the three seasons.
+- **Two rows for one game.** If a book keys a game with home and away the
+  other way round from the league (the risk is a neutral site; it matched on
+  all ten of the last two seasons), the two ids cannot meet. Either order is
+  handled: a listed game that would sit beside a stored row of the same two
+  teams that day is not inserted (`conflicts`), and a row the refresh wrote
+  first is removed once a book's row for the same two teams that day appears
+  (`twins`), at the next 6am run. That step runs before the same run writes
+  the game-day goalie rows, and no NHL side model decides a game before its
+  game-day goalie row exists. The 2026-27 neutral-site games still ahead (NHL
+  API, 2026-10-22): 10-25 MTL @ WPG (Princess Auto Stadium), 11-12 CAR @ SEA
+  and 11-14 SEA @ CAR (Veikkaus Arena), 12-18 CHI @ OTT and 12-20 OTT @ CHI
+  (PSD Bank Dome), 12-31 COL @ UTA (Rice-Eccles Stadium), 2027-02-20
+  VGK @ DAL (AT&T Stadium).
+- **What it writes.** Inserts with `data_source = 'nhl_schedule'`: only
+  scheduled (state OK), not if-necessary, not started, both team codes known.
+  The odds feed's later upsert sets `data_source = 'live'` and the books'
+  start (about ten minutes after the league's); from then the row is the
+  feed's and the refresh never touches it. While a row is still its own
+  (unscored, still marked `nhl_schedule`), the refresh moves its start when the
+  league moves it (unplayed games only), and stamps `updated_at` when the API
+  confirms it. Never a score, never a row the feed or the results step wrote.
+- **What it removes.** Only its own rows with no odds, no pick and nothing
+  else referencing them, dated inside the days the run reads. Each run reads
+  from 7 days before its date, one extra call, so a game called off after one
+  run is still inside the next run's dates.
+  - The API lists the game that day as postponed or cancelled: removed.
+  - The start has passed and the API does not list the game that day: it did
+    not happen that day, removed. A game the league played is listed (state
+    OFF) and is left for the results step, which runs first.
+  - Still ahead and no longer listed, no reason given (a moved date is a new
+    id): removed, at most 8 a run. More than 8 is more likely a changed team
+    code or a broken answer, so none of those go and the step fails; any of
+    them whose start passes is removed by the next run.
+  - Why a past row is removed rather than left: a row on a date that has
+    passed is read by the last-night check as a missing game log (both teams'
+    side models hold for two days), turns the missing-finals check critical,
+    and holds the results recaps.
+- **Who sees the rows.** Everything that bets or buys skips a row only the
+  refresh wrote, so it keeps the set it had: the scorer's game list
+  (`models/scorer._game_board`), the shared NHL slate
+  (`scripts/nhl_prop_card.slate`: the goalie poll for today and tomorrow, the
+  goalie window and its odds fetch, both prop cards), the totals card's
+  slate, and the prop-odds purchase (`nhl_prop_odds_ingestor`). The SQL is
+  `nhl_schedule_refresh.listed_by_a_book()`. No NHL model input changes: the
+  only NHL reader of the shared schedule (`data/schedule_context`) is the
+  last-night check, which reads the two days before a game; the earlier-game
+  gate and rest at kickoff are not used by any NHL model. What does change is
+  display: the app's seven-day forward read (`fetchSlateGames`: the Teams
+  board's next-game chip, team and player detail, the player prop quote, the
+  games filter) now shows NHL games no book has listed, as it already does
+  for the NBA. Capper pick matching (`tracking/eggz_picks._candidate_games`,
+  seven days from the post) can now match a post with no date header to the
+  team's next game rather than finding none.
+- **Health.** `nhl_schedule_refresh` (WARN): STALE when no row only the
+  refresh holds has been confirmed for 36 hours while one is still ahead;
+  SKIPPED when none is (late season, summer; budget 120 days). The step
+  returns False on an API that stops answering, a write error, an empty answer
+  over stored games, or more than 8 rows ahead to remove with no reason given.
 
 NHL picks won't generate until the four models are trained and the `.pkl`
 artifacts are committed (like MLB/WNBA/UFC) — until then the NHL steps no-op

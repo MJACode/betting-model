@@ -726,6 +726,85 @@ def _validate_ncaab_odds_history(args: dict) -> dict:
     return {"mode": mode, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
 
 
+# The NCAAF first-half and team-total purchase mike approved on 2026-11-10
+# ("Buy all"; docs/ncaaf_market_audit.md section 7): the first-half moneyline,
+# spread and total and the team totals on every 2023-2025 game that holds
+# stored full-game prices, at the two times those are stored at (`am` 14:00
+# UTC on the game's Eastern date, `pm` 23:00 UTC the Eastern date before).
+# Each limit is the buyer's own plan at its most (40 credits a game, 1 a
+# date's event list), measured on the local copy of the database on
+# 2026-11-10: 2,510 games on 180 dates at `am` (100,580 credits) and 2,435 on
+# 186 at `pm` (97,586). THAT IS ABOVE THE 92,765 A READ THE AUDIT STATED, which
+# was 2,314 games on 205 dates: the count of games with any stored pull, not
+# of either read. At the morning read the audit's own extract holds 2,257
+# games with a final on 180 dates; the plan adds 210 whose final sits on
+# CFBD's row under another spelling of the school, and 43 with no final
+# stored. A job may ask for less. A test buy of N games a read
+# ({"sample": N}) is held to N games and N lists (50 at one read: 2,050). The
+# buyer cuts its own ceiling to its printed plan, raises the floor to the
+# measured reserve, and skips every game its ledger holds, so a re-queue
+# after a stop or a worker restart buys nothing twice.
+# {"read": ..., "dry_run": true} prints the plan against production and makes
+# no call. NOT A DECLARED JOB: nothing is bought until a row is queued.
+NCAAF_DERIVATIVE_HISTORY_CAPS = {"am": 100_580, "pm": 97_586, "both": 198_166}
+NCAAF_DERIVATIVE_HISTORY_SEASONS = (2023, 2025)
+NCAAF_DERIVATIVE_HISTORY_GAME_COST = 40 + 1      # a game's call and, at most, its own date's list
+
+
+def _job_ncaaf_derivative_history(**kw):
+    """The NCAAF first-half and team-total purchase, through
+    data.ingestors.ncaaf_derivative_history's own command line, credit meter
+    and ledger."""
+    first, last = NCAAF_DERIVATIVE_HISTORY_SEASONS
+    argv = ["--read", kw["read"], "--seasons", str(first), str(last)]
+    if kw.get("sample") is not None:
+        argv += ["--sample", str(kw["sample"])]
+    if kw.get("dry_run"):
+        return _run_script_main("data.ingestors.ncaaf_derivative_history",
+                                argv + ["--dry-run"])[-4000:]
+    argv += ["--concurrency",
+             str(kw.get("concurrency") or NCAAB_ODDS_HISTORY_DEFAULT_CONCURRENCY),
+             "--apply", "--max-credits", str(kw["max_credits"]), "--floor", str(kw["floor"])]
+    return _run_script_main("data.ingestors.ncaaf_derivative_history", argv)[-4000:]
+
+
+def _validate_ncaaf_derivative_history(args: dict) -> dict:
+    extra = sorted(set(args) - {"read", "sample", "dry_run", "max_credits", "floor",
+                                "concurrency"})
+    if extra:
+        raise ValueError(f"unknown args {extra}; this job takes read, sample, dry_run, "
+                         f"max_credits, floor and concurrency")
+    read = args.get("read")
+    if read not in NCAAF_DERIVATIVE_HISTORY_CAPS:
+        raise ValueError(f"read must be one of {sorted(NCAAF_DERIVATIVE_HISTORY_CAPS)}, "
+                         f"got {read!r}")
+    out: dict = {"read": read}
+    top = NCAAF_DERIVATIVE_HISTORY_CAPS[read]
+    if "sample" in args:
+        n = args["sample"]
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ValueError(f"sample must be a whole number of games, 1 or more, got {n!r}")
+        out["sample"] = n
+        reads = 2 if read == "both" else 1
+        top = min(top, n * NCAAF_DERIVATIVE_HISTORY_GAME_COST * reads)
+    dry = args.get("dry_run", False)
+    if not isinstance(dry, bool):
+        raise ValueError(f"dry_run must be true or false, got {dry!r}")
+    if dry:
+        spend = sorted(set(args) & {"max_credits", "floor", "concurrency"})
+        if spend:
+            raise ValueError(f"a dry run buys nothing; it takes read and sample only, "
+                             f"not {spend}")
+        return {**out, "dry_run": True}
+    cap = int(args.get("max_credits") or 0)
+    if not 0 < cap <= top:
+        raise ValueError(f"max_credits for read {read} must be 1..{top:,}, got {cap}")
+    floor = int(args.get("floor") or 0)
+    if floor < NCAAB_ODDS_HISTORY_MIN_FLOOR:
+        raise ValueError(f"floor must be at least {NCAAB_ODDS_HISTORY_MIN_FLOOR:,}, got {floor}")
+    return {**out, "max_credits": cap, "floor": floor, **_ncaab_concurrency(args)}
+
+
 # The free NCAAB feed check (scripts/ncaab_feed_probe.py). Its only paid calls
 # are the per-event market lists, 1 credit each, at most 10.
 _NCAAB_FEED_PROBE_MAX_EVENTS = 10
@@ -759,6 +838,22 @@ def _job_splits_source_probe(**kw):
     text = _run_script_main("scripts.splits_source_probe", []).strip()
     summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
     return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _job_book_app_links_probe(**kw):
+    """Each sportsbook's apple-app-site-association file, and whether the
+    betslip links we store are claimed by its app. Writes nothing, no Odds API
+    call (scripts/book_app_links_probe.py)."""
+    from scripts.book_app_links_probe import SUMMARY_MARK
+    text = _run_script_main("scripts.book_app_links_probe", []).strip()
+    summary = text.split(SUMMARY_MARK, 1)[1].strip() if SUMMARY_MARK in text else text[-800:]
+    return {"summary": summary[:1500] or "(no output)", "stdout": text[-50_000:]}
+
+
+def _validate_book_app_links_probe(args: dict) -> dict:
+    if args:
+        raise ValueError(f"unknown args {sorted(args)}; this job takes none")
+    return {}
 
 
 def _validate_splits_source_probe(args: dict) -> dict:
@@ -1851,9 +1946,13 @@ def _job_nba_quarters(**kw):
     """Run the daily nba_quarters step ON THE WORKER, on demand.
 
     mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
-    #1097 fixed fill_gaps. The step only reads free ESPN endpoints and writes
+    #1097 fixed fill_gaps. The step reads free ESPN endpoints and writes
     the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
-    nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
+    nba_team_q1_games, team_period_results): no model, pick, stake or
+    threshold is touched. Since 2026-11-13 it also buys the half and quarter
+    closing lines of finished games that lack them (Matt approved the
+    backfill and the daily buy), under nba_odds_history.buy_period_lines_daily's
+    own plan-derived ceiling and measured floor. It goes
     through run_pipeline._timed_step, the same dispatch the daily run uses, so
     pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
 
@@ -2794,12 +2893,18 @@ JOBS = {
     # NCAAB game lines, first-half and team-total history, and the probe
     # (mike, 2026-10-26). See NCAAB_ODDS_HISTORY_MODES.
     "ncaab_odds_history": (_job_ncaab_odds_history, _validate_ncaab_odds_history),
+    # NCAAF first-half and team-total history, 2023-2025, at the two times the
+    # full-game history is stored at (mike, 2026-11-10). Not declared: queued
+    # by hand. See NCAAF_DERIVATIVE_HISTORY_CAPS.
+    "ncaaf_derivative_history": (_job_ncaaf_derivative_history,
+                                 _validate_ncaaf_derivative_history),
     # Free NCAAB feed and College Basketball Data check (at most 10 credits).
     "ncaab_feed_probe": (_job_ncaab_feed_probe, _validate_ncaab_feed_probe),
     # Reachability of the two public NCAAB injury pages. Writes nothing.
     "ncaab_injury_probe": (_job_ncaab_injury_probe, _validate_ncaab_injury_probe),
     # Where the Scoreboard splits can come from: DK Network + AN book ids. Free, writes nothing.
     "splits_source_probe": (_job_splits_source_probe, _validate_splits_source_probe),
+    "book_app_links_probe": (_job_book_app_links_probe, _validate_book_app_links_probe),
     # ESPN NCAAB schedule and results backfill. Free, idempotent.
     "ncaab_history_import": (_job_ncaab_history_import,
                              _validate_ncaab_history_import),

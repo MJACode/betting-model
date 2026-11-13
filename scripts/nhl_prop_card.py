@@ -64,10 +64,18 @@ def _utc(v) -> datetime:
 
 
 def slate(conn, game_date: str, now: datetime) -> dict[str, dict]:
-    """Tonight's games that have not started."""
-    rows = conn.execute("""
+    """Tonight's games that have not started, and that a book has listed.
+
+    The schedule refresh (data/ingestors/nhl_schedule_refresh.py) stores the
+    season ahead; a row only it has written is a game no book prices yet.
+    This slate is the goalie poll's (today and tomorrow), the goalie window's
+    (which buys an NHL odds fetch for a game that becomes known) and both prop
+    cards', so it stays the set it was before those rows existed."""
+    from data.ingestors.nhl_schedule_refresh import listed_by_a_book
+    rows = conn.execute(f"""
         SELECT game_id, home_team, away_team, commence_time
         FROM games WHERE sport = 'NHL' AND game_date = %s AND commence_time IS NOT NULL
+          AND {listed_by_a_book()}
     """, (game_date,)).fetchall()
     return {r[0]: {"home": r[1], "away": r[2], "commence_time": r[3]}
             for r in rows if _utc(r[3]) > now}

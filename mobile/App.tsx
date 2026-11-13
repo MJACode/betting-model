@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   DefaultTheme,
+  getFocusedRouteNameFromRoute,
   NavigationContainer,
   useNavigation,
   useNavigationContainerRef,
@@ -12,7 +13,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ActivityIndicator, View } from 'react-native';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
@@ -34,7 +35,7 @@ import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
-import { SettingsScreen } from '@/screens/SettingsScreen';
+import { SettingsScreen, SettingsSectionScreen } from '@/screens/SettingsScreen';
 import { DeleteAccountScreen } from '@/screens/DeleteAccountScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
@@ -66,6 +67,12 @@ import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
 import { addDays, todayET } from '@/lib/format';
 import { ToastHost } from '@/components/Toast';
 import { BetslipBar } from '@/components/BetslipBar';
+import {
+  PlayerStatsBackButton,
+  SettingsSectionBackButton,
+  SettingsSectionHeaderTitle,
+} from '@/components/StackBackButton';
+import { SETTINGS_SECTION_TITLE } from '@/lib/settingsHome';
 import {
   FALLBACK_TAB_BAR_HEIGHT,
   setTabBarHeight,
@@ -341,7 +348,7 @@ function App() {
   return (
     // onTouchStart only records the tap (freezeLog); it never claims it.
     <GestureHandlerRootView style={{ flex: 1 }} onTouchStart={noteTouch}>
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
     <AppErrorBoundary onReset={resetNav}>
       <OnboardingModal
         visible={ready && (!seen || needsBooks) && (!AUTH_ENABLED || signedIn) && !holdIntro}
@@ -360,85 +367,141 @@ function App() {
         onReady={onNavReady}
         onStateChange={syncRoute}
       >
-        <Stack.Navigator initialRouteName={signedOut ? 'SignIn' : 'Tabs'}>
-          <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
+        <Stack.Navigator
+          initialRouteName={signedOut ? 'SignIn' : 'Tabs'}
+          // ARROW-ONLY BACK BUTTON, NO CUSTOM LABEL (Matt, 2026-11-08). On iOS
+          // 27.2 the native Back stopped responding after a pop-up had been
+          // opened on the screen: Settings twice, then Player Stats after
+          // Compare odds. The freeze trail showed no stuck pop-up and no JS
+          // stall, only taps that went nowhere. Apple's reported iOS 27 bug is a
+          // Back button carrying a custom title; its workaround is this mode.
+          // So no screen sets headerBackTitle (tests/test_mobile_back_button.py).
+          screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}
+        >
+          <Stack.Screen
+            name="Tabs"
+            component={TabsRoot}
+            // With the arrow-only Back, iOS's long-press Back menu lists the
+            // earlier screen by its title. Without one it would read "Tabs".
+            // It names the tab the reader came from (UX review, 2026-11-08).
+            options={({ route }) => {
+              const tab = getFocusedRouteNameFromRoute(route) ?? 'Picks';
+              return { headerShown: false, title: tab === 'TrackRecord' ? 'Record' : tab };
+            }}
+          />
           <Stack.Screen
             name="PickDetail"
             component={GatedPickDetail}
-            options={{ title: 'Pick Detail', headerBackTitle: 'Back' }}
+            options={{ title: 'Pick Detail' }}
           />
           <Stack.Screen
             name="ScoreboardGame"
             component={GatedScoreboardGame}
-            options={{ title: 'Game', headerBackTitle: 'Scoreboard' }}
+            options={{ title: 'Game' }}
           />
           <Stack.Screen
             name="ModelEdit"
             component={GatedModelEdit}
-            options={{ title: 'Model', headerBackTitle: 'Back' }}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
             name="ModelDetail"
             component={GatedModelDetail}
-            options={{ title: 'Model', headerBackTitle: 'Back' }}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
             name="BuiltInModelDetail"
             component={GatedBuiltInModel}
-            options={{ title: 'Model', headerBackTitle: 'Back' }}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
             name="ByomBuilder"
             component={GatedByomBuilder}
             options={({ route }) => ({
               title: route.params?.sport === 'NBA' ? 'New NBA model' : 'New NFL model',
-              headerBackTitle: 'Cancel',
             })}
           />
           <Stack.Screen
             name="ByomEdit"
             component={GatedByomEdit}
-            options={{ title: 'Edit model', headerBackTitle: 'Back' }}
+            options={{ title: 'Edit model' }}
           />
           <Stack.Screen
             name="ByomDetail"
             component={GatedByomDetail}
-            options={{ title: 'Model', headerBackTitle: 'My models' }}
+            options={{ title: 'Model' }}
           />
           <Stack.Screen
             name="ByomBets"
             component={GatedByomBets}
-            options={{ title: 'Bets', headerBackTitle: 'Back' }}
+            options={{ title: 'Bets' }}
           />
+          {/* JS Back pill, not UIKit's. On iOS 27 the system "< Back" pill
+              stops popping after a modal on this screen (Compare odds).
+              react-native-screens 4.16 also measures that pill from the
+              pre-iOS 26 button frame, so it sits under the status bar.
+              This screen's left slot is our pressable, in the header the
+              stack already insets (SafeAreaProvider is seeded with
+              initialWindowMetrics so that inset is not 0 on the first frame).
+              gestureEnabled is the edge swipe. Full-screen swipe stays off:
+              the stat and range rows are horizontal scrolls. */}
           <Stack.Screen
             name="PlayerStats"
             component={GatedPlayerStats}
-            options={{ title: 'Player Stats', headerBackTitle: 'Back' }}
+            options={{
+              title: 'Player Stats',
+              headerShown: true,
+              headerTransparent: false,
+              headerBackVisible: false,
+              gestureEnabled: true,
+              fullScreenGestureEnabled: false,
+              headerLeft: () => <PlayerStatsBackButton />,
+            }}
           />
           <Stack.Screen
             name="TeamStats"
             component={GatedTeamStats}
-            options={{ title: 'Team', headerBackTitle: 'Back' }}
+            options={{ title: 'Team' }}
           />
           <Stack.Screen
             name="Explainer"
             component={ExplainerScreen}
-            options={{ title: 'How this works', headerBackTitle: 'Back' }}
+            options={{ title: 'How this works' }}
           />
           <Stack.Screen
             name="ConnectSportsbook"
             component={ConnectSportsbookScreen}
-            options={{ title: 'Connect Sportsbook', headerBackTitle: 'Back' }}
+            options={{ title: 'Connect Sportsbook' }}
           />
           <Stack.Screen
             name="Settings"
             component={SettingsScreen}
-            options={{ title: 'Settings', headerBackTitle: 'Back' }}
+            options={{ title: 'Settings' }}
+          />
+          {/* Chevron + "Back" (#1239), same pill as Player Stats. Settings
+              itself keeps the arrow-only system back from screenOptions. */}
+          <Stack.Screen
+            name="SettingsSection"
+            component={SettingsSectionScreen}
+            options={({ route }) => {
+              const section = route.params?.section;
+              const title =
+                section && section in SETTINGS_SECTION_TITLE
+                  ? SETTINGS_SECTION_TITLE[section]
+                  : 'Settings';
+              return {
+                title,
+                headerBackVisible: false,
+                gestureEnabled: true,
+                headerTitle: (props) => <SettingsSectionHeaderTitle {...props} />,
+                headerLeft: () => <SettingsSectionBackButton />,
+              };
+            }}
           />
           <Stack.Screen
             name="DeleteAccount"
             component={DeleteAccountScreen}
-            options={{ title: 'Delete account', headerBackTitle: 'Settings' }}
+            options={{ title: 'Delete account' }}
           />
           {/* The betslip renders its own header (close chevron, saved parlays,
               settings) so it reads like the sheet it is — hence headerShown
@@ -451,7 +514,7 @@ function App() {
           <Stack.Screen
             name="SavedParlays"
             component={GatedSavedParlays}
-            options={{ title: 'Saved Parlays', headerBackTitle: 'Back' }}
+            options={{ title: 'Saved Parlays' }}
           />
           {/* No UI navigates here since the Track Record link was removed
               (2026-09-05). The opening-signal shadow track still runs
@@ -459,17 +522,17 @@ function App() {
           <Stack.Screen
             name="OpeningComparison"
             component={OpeningComparisonScreen}
-            options={{ title: 'Opening vs Live', headerBackTitle: 'Back' }}
+            options={{ title: 'Opening vs Live' }}
           />
           <Stack.Screen
             name="Feedback"
             component={FeedbackScreen}
-            options={{ title: 'Feedback', headerBackTitle: 'Back' }}
+            options={{ title: 'Feedback' }}
           />
           <Stack.Screen
             name="FeedbackThread"
             component={FeedbackThreadScreen}
-            options={{ title: 'Conversation', headerBackTitle: 'Back' }}
+            options={{ title: 'Conversation' }}
           />
           {/* Auth is behind AUTH_ENABLED (lib/authConfig.ts). Registering the
               route costs nothing while the flag is off — no UI navigates to it

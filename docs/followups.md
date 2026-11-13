@@ -21,6 +21,261 @@
 
 ---
 
+## [ ] EuroLeague: finish the two history purchases (2026-11-12)
+mike approved about 4.4M on 2026-11-13 ("Do the 4.4m"; `docs/sports/euroleague.md`,
+"The purchase"): no 2020-21, the full game every snapshot near and during games
+and one every 15 minutes otherwise, plus first half, quarters, team totals and
+alternates. 2021-22 to 2025-26 started 2026-11-13 01:39Z; 2026-27 waits for the
+branch's merge (the clean-up visits this season's dates). Then the grid's
+baselines.
+
+## [ ] EuroLeague: a live first-half and quarter fetch, and relocated home games (2026-11-12)
+The forward pull covers the full game only. Period lines need a per-event
+fetch at the decision times (the shape of `data/ingestors/ncaab_first_half_odds.py`).
+Relocated "home" games (Maccabi in Belgrade, Hapoel in Sofia, Dubai in Bosnia)
+need a club-arena table before any model reads home advantage.
+
+## [ ] Betting filters for NCAAB: halves (Matt, 2026-11-13: "Start with NBA then move to college basketball")
+
+`team_period_results` and `mobile/src/lib/teamPeriodSplits.ts` are NBA only.
+NCAAB needs: a period-score source in the writer (`ncaab_period_scores`,
+halves only: FG / H1 / H2), its own period markets (`spreads_h1` / `totals_h1`
+are already captured live by `ncaab_first_half_odds`; check H2), NCAAB's
+short-rest rule, and a Teams board, which NCAAB does not have
+(`teamStatCatalog` BALL excludes it). Row count first: ~360 teams.
+
+## [ ] Records on every Betting split for the other sports (2026-11-13)
+
+Matt asked for record AND percent on every Betting stat. NBA gets every record
+from `team_period_results`. For MLB, WNBA, NHL, NFL and NCAAF the season board
+(`team_stats_board_compute`) still returns no W-L for ATS Home / Away, as Fav /
+as Dog, Rest Edge or Short Rest, so those rows show the percent, and a game
+count only under 10 games. Fix: either return the counts from the function (a RETURNS TABLE change:
+DROP and recreate, plus `team_stats_board_cache`), or extend
+`team_period_results` to those sports' full game.
+
+---
+
+## [x] Volume settings: the dashboard panel, once the branch is merged (2026-11-11, done 2026-11-12)
+
+Done: merged in #1251, published 2026-11-11 23:56Z, moved to its own
+"Volume" tab 2026-11-12 (`docs/monitoring.md`). The text below is the plan as
+it stood.
+
+
+Branch `claude/model-volume-dial` builds the database side and the sync. The
+panel on the dashboard's Models tab cannot be built before the merge: it reads
+`model_volume_bands` and calls `set_model_volume`, and neither exists in
+production until `data.view_migrations` runs the migration. After the merge:
+run the migrations, run the threshold sync, read `get_advisors`, then build
+the panel (one row per model with its four bands, one dropdown, the name of
+the signed-in person passed as `who`), and add it to `docs/monitoring.md`.
+
+## [ ] Volume settings: in-play models are listed and not moved (2026-11-11)
+
+Their posting does not read the edge cut, and a loop's first bet locks its
+game, so a posting cut would hide a bet without freeing the game. To give
+them an input, each loop's own decision needs a bar it reads before it writes
+(the women's and men's college loops already rank candidates a night; the
+bar would sit beside that). Nine models (`config.LIVE_MODELS`).
+
+## [ ] Volume settings: an unposted bet still counts in three checks (2026-11-11)
+
+A bet held back by a setting is still a BET row. Three readers take BET rows
+and do not ask whether the row was posted: the scorer's check that one game
+never carries two bets that cannot both win (`models/scorer.
+_apply_side_conflicts`), the college basketball check that an under is not
+held beside a big favourite's spread bet (`models/cbb_pairs.clash`), and
+NCAAB agreement sizing (`models/ncaab_stake.py`). So a held-back under would
+still stop the favourite's spread bet on its game, and nothing would be
+posted there. With no setting made, nothing changes.
+
+Do this before the dashboard panel is published. The test for "standing" is
+not "passes the cut in force": measured 2026-11-11, 7 of 31
+`ncaab_first_half_spread` bets and 3 of 67 `ncaab_first_half_total` bets sit
+under today's cut because they were posted when the cut was 0.02, and a
+posted bet keeps the cut it was written under. The predicate is the app's:
+posted already, or passes the cut in force (`open_picks` has it in SQL).
+One shared fragment, three readers.
+
+## [ ] NCAAF has no stored half-time or quarter scores (2026-11-11)
+
+Found grading the bought first-half prices (`docs/ncaaf_first_half_team_totals.md`).
+The research read half-time scores out of `ncaaf_plays`, which is right for
+99.1% of games against ESPN and cannot settle a bet. Two things wait on a
+real table (`ncaaf_period_scores`, the shape of `ncaab_period_scores`):
+any first-half model that ships, and the Eggz first-half legs, which stay
+`needs_review` for NCAAF today (#1243). Sources, both free: ESPN's
+scoreboard carries quarter scores for every game and answers from mike's
+PC (the check script reads it); CFBD's `/games` carries line scores and
+needs the key the worker holds, and `parse_games` drops them today.
+`ncaaf_plays` now holds 2015-2025 (pulled 2026-11-11 by `ncaaf_pbp_pull`).
+
+## [x] NCAABW totals model: build it live (2026-11-09, done 2026-11-10)
+
+Live as `ncaabw_total_blend`: the box feed, the model, card and build, the
+cut at 0.05, settlement, the scheduler job, Discord and the app.
+`docs/sports/ncaabw.md` "The totals model".
+
+## [ ] NCAABW: load each season's schedule whole (every October)
+
+The totals model pools a team with fewer than 10 games on the stored
+schedule, and the daily step stores only 14 days ahead. 2026-27 was loaded
+by hand on 2026-11-10. Before the first game of 2027-28:
+`python -m data.ingestors.ncaabw_espn_ingestor --backfill 2027-11-01 2028-03-15`,
+then rebuild the artifact (`python -m scripts.ncaabw_total_blend_build
+--last-season 2027`, after the research cache is refreshed). The card fails
+its run and names the command if the schedule is short, so this cannot be
+missed silently; a step that loads it without a person would be better.
+
+## [ ] NCAABW: the build reads a cache on one PC
+<!-- the halftime total's build has the same item, further down -->
+
+`scripts/ncaabw_total_blend_build.py` reads the research cache
+(`~/ncaabw_research/cache`), which is a copy of what Supabase holds. Every row
+is in the database, but the build cannot run on the worker. Next season's
+rebuild should read the three tables directly.
+
+## [ ] Ten tests fail in the main checkout only because other checkouts sit inside it (2026-11-10)
+
+Full suite on `claude/ncaaf-market-audit` in the main checkout: 23 failed,
+11,521 passed, 107 skipped (1h19m, nothing else running). Thirteen are the
+fourteen listed below (the rules-split test passes where a `.env` exists).
+The other ten pass, or skip, on a clean copy of master and of that branch
+made outside the repo (`git worktree add --detach`, 153 and 154 passed).
+
+- Nine scan the repo and walk into `.claude/worktrees/` (two old checkouts
+  on this machine, `compassionate-galileo-faf01f` and `ncaabw`), then fail on
+  the old files there: `test_anon_readable` (two), `test_ddl_guard`,
+  the live-money wording scan (`tests/test_live_money_*.py`, one),
+  `test_nhl_goalie_guards` (two), `test_worker_deps` (three). The fix is for those scans to skip
+  `.claude/worktrees/`, or to remove the two checkouts once their branches
+  are merged.
+- `test_mobile_nhl_skater_stats::test_the_behavioural_checks_pass` fails in
+  the main checkout and is skipped on the clean copies. Not looked into.
+
+## [ ] Sixteen tests fail on master (measured 2026-11-11, master 553ce191)
+
+`python -m pytest -q tests/` on this machine, on a branch holding that master:
+17 failed, 11,906 passed. One was the branch's own and was fixed. The other
+sixteen were re-run on a clean copy of master, alone, and fail the same way.
+
+- Fail alone (14): `test_claude_rules_split` (`config-topology.md`; needs a
+  `.env`), `test_deploy_drain` (the forwarded SIGTERM),
+  `test_health_check_observe` and `test_model_quality` (both compare a line of
+  `run_pipeline.py` at four spaces of indent; master has eight),
+  `test_market_coverage_probe` (an all-line leg slip),
+  `test_mobile_board_season` (the grade legend),
+  `test_mobile_player_stat_groups` (the tab's opening stat),
+  `test_multi_book_odds` (the closing-line reads), `test_ncaab_first_half_odds`
+  (four: the purchase and its ledger), `test_picks_unique_row` (the card
+  insert), `test_web_site` (the record math against the node suite; no node on
+  PATH here).
+- Fail only in a full run (2): `test_social_posts` and `test_social_profile`
+  (one test each). They call `scheduler.build_scheduler()` after a test that
+  reloaded the scheduler has left it in the pollers role. Reproduce:
+  `python -m pytest -q tests/test_daily_retry.py tests/test_nba_live_config.py
+  tests/test_ncaab_live_config.py tests/test_nfl_live_leader_config.py
+  tests/test_pipeline_watch.py tests/test_savant_freshness.py
+  tests/test_service_role_split.py tests/test_social_posts.py
+  tests/test_social_profile.py`.
+- Since 2026-11-10: `test_nhl_totals_card` and `test_price_prefilter_rollback`
+  no longer fail; `test_mobile_player_stat_groups` and the four
+  `test_ncaab_first_half_odds` tests are new.
+
+## [ ] App: ReBet is still a selectable sportsbook with no prices (2026-11-10)
+
+The feed stopped fetching ReBet on 2026-09-20 (its newest row in
+`latest_odds` is 2026-09-20T19:17Z), but the app's sportsbook picker still
+offers it. Read 2026-11-10: 4 of 28 stored book sets hold ReBet and none
+holds only ReBet, so nobody is stranded today; a member who picked only ReBet
+would see "Not offered at your books" on every pick. The fix is the one made
+for Bally Bet and Fliff on 2026-11-10: add it to `REFERENCE_ONLY_BOOKS`
+(`mobile/src/lib/markets.ts`) and update the two counts in
+`mobile/scripts/verify_book_lines.ts`. Found by the UX review of the NCAABW
+app change; it predates it.
+
+## [ ] App: the college basketball look-ahead read sits 40 rows under the cap
+
+`fetchUpcomingCollegeBasketballPicks` (`mobile/src/lib/queries.ts`) reads
+DraftKings' lines for 80 games a request across 12 markets: 960 rows against
+a 1,000-row response cap. A thirteenth market in `MAIN_GAME_ODDS_MARKETS`
+would pass it silently for both college basketball sports. Chunk at 64 or
+page the read. Found by the same review; it predates the women's sport.
+
+## [x] NCAABW in play: finish the checks, then decide (2026-11-09, done 2026-11-11)
+
+The checks were run and the halftime total was built (`ncaabw_live_total_ht`,
+`docs/sports/ncaabw.md` "In play: the halftime total"). The halftime spread
+does not clear.
+
+## [ ] NCAAB first-half spread model bets big favourites far more than its replay did (2026-11-11)
+
+Where the favourite lays 12 or more in the half, the replay of 2023-24 to
+2025-26 bet the favourite 37 times and the underdog 485 times; from
+2026-11-03 to 11-10 the live model bet the favourite 15 times (11-4) and the
+underdog 10 (4-6). The books' first-half number for a favourite of 25 or more
+is 0.55 to 0.56 of the full-game number this season against a median 0.59 in
+the replay seasons, so the model's number is at or above the book's where it
+used to sit below. Find out which moved: the books' first-half numbers, the
+full-game consensus the model reads at tip minus 10, or the model's map for
+spreads this large (the fit has few of them). Until then its record on these
+bets is a population the replay barely holds. Queries: `docs/sports/ncaab.md`,
+"An under beside a big favourite".
+
+## [ ] NCAAB first-half unders: the 6 to 12 band is flat too (2026-11-11)
+
+The rule stops unders at 12 or more points (mike's "big favourite"). Unders
+with the favourite laying 6 to 12 in the half went 198-180, -5.64 units on
+379 replayed bets (-7.20, -3.12, +4.67 by season). Moving the bar to 6 is
+mike's call; it was put to him on 2026-11-11. The NONE rows the rule writes
+(`big_favourite`) let the 12-and-up unders be graded live: read them at 100.
+
+## [ ] NCAABW halftime total: measure ESPN's publishing lag on the women's game (2026-11-11)
+
+The loop waits 90 seconds after a price read and 60 more before it decides,
+the lag measured on the men's game. `ncaabw_live_decisions.play_lag_s` stores
+the seconds between ESPN's newest play and each read. After a week of slates,
+read it: if the women's plays arrive as fast, the bet can post sooner after
+its price was read (`NCAABW_LIVE_PBP_WAIT_SEC`, `NCAABW_LIVE_PBP_RECHECK_SEC`).
+
+## [ ] NCAABW halftime spread: re-test on this season's stored halftime prices (2026-11-11)
+
+On the corrected reading it is +8.48% [-1.9, +18.2] walk-forward and 11-17
+this season. The halftime loop stores every book's spread at every read in
+the break (source `ncaabw_live_loop`), so the third season builds itself.
+Re-run `NCAABW_INPLAY_STATE=max python -m scripts.ncaabw_research.inplay` on
+them in January.
+
+## [ ] NCAABW halftime total: the build reads a cache on one PC (2026-11-11)
+
+`scripts/build_ncaabw_live_ht_artifact.py` reads the research cache, like the
+totals build above. Every input is in Supabase (`games`, `odds`,
+`ncaabw_inplay_quotes`, `ncaabw_pbp`). Next season's rebuild should read them.
+
+## [ ] The app reads the moneyline market for one in-play total model (2026-11-11)
+
+`gameMarketForModel('ncaab_live_total_h2')` in `mobile/src/lib/markets.ts`
+falls through to `'h2h'`, and `marketClassForModel` to `'other'`: the id has
+neither `over_under` nor an explicit line. The women's halftime model has its
+own two lines. Check what the men's card and a parlay with it read.
+
+## [ ] NCAABW: ESPN's own odds are in a local cache only (2026-11-09)
+
+`scripts/ncaabw_research/espn_odds.py` read ESPN's stored odds for 2022-23 and
+2023-24 (11,694 games asked, a sportsbook line on 4,886 and 3,057) into a
+research cache. They are free and re-readable, but they took a run to fetch
+and they are evidence the totals model is cited on, so they belong in
+Supabase: an importer and a table, then the research reads the table.
+
+## [ ] NCAABW: the feed lists about one game in five (2026-11-09)
+
+The odds feed listed 2,293 women's games over two seasons against about
+12,000 played, and ESPN's stored odds show one sportsbook pricing 84% of
+2022-23's games. Whether books still price that many and the feed does not
+carry them, or the books stopped, is not known. `docs/odds_sources.md` lists
+the other providers; none has been asked about women's college basketball.
+
 ## [x] NBA first quarter: grade what was bought (2026-11-03) — DONE 2026-11-04
 
 Graded 2026-11-04, nothing built: first-quarter props 0 of 18 pass (run `2026-11-04-q1props`,
@@ -1144,14 +1399,32 @@ production backtests were fixed in #895 (`scripts/nhl_prop_backtest.namesakes`).
 The lab was not. Apply the same drop before its merge, then treat every lab
 table in `docs/nhl_market_lab.md` dated before 2026-10-08 as unconfirmed.
 
-## [ ] NHL derivative totals: the grade has two defects
+## [x] NHL derivative totals: the grade has two defects — fixed, re-graded 2026-11-09
 
 Found 2026-10-08. Team totals were graded on regulation goals, but every book
 prices full-game goals; on full-game goals the same unders lose (-1.78% at EV
-≥ 0.10). The alternate and first-period grades paid a push as an under win on
-whole-number lines. Fix both in `scripts/nhl_derivative_totals_backtest.py`
-and re-grade (it is on the `nhl_research` allowlist). The purchase itself is
-done: all 4,192 priced games.
+≥ 0.10). The second defect was in the model's chance, not the payout: on a
+whole-number line the under was given 1 minus the over's chance, so the
+chance of a push counted as an under win and inflated the under's expected
+value (`side_frame`; the payout already returned the stake). The purchase
+itself is done: all 4,192 priced games.
+
+2026-10-10 (mike, rebuilding PR #863): both fixed, on a branch that was never
+pushed; landed on master 2026-11-09 (mike: "rebuild NHL grading fix on current
+master"). Team totals settle on the
+full-game score only; the prices confirm it (no-vig over 0.5012 against 0.4948
+landed on the full game and 0.4612 on three periods, 39,515 quotes;
+`docs/nhl_derivative_totals.md`). The under's chance is P(goals < line) and
+expected value returns the stake on a push. The re-grade is the declared job
+`nhl-derivative-totals-regrade-2026-11-09`. Read 2026-11-09: nothing clears;
+the corrected tables are at the top of `docs/nhl_derivative_totals.md`.
+
+Also in that printout: PR #863's Pinnacle-against-a-bettable-book table. Its
+one cell clear of zero was first-period totals at 2% or more (+19.3% on 160
+bets, interval +1.9 to +37.4, unstable by half-season). Reading it on 2026-27
+needs the 2026-27 derivative prices (the `nhl_derivative_odds_history` job
+buys scored games not yet stored), the grader's seasons extended to 2027, and
+2026-27 period scores, which `step_nhl_results` now keeps current.
 
 ## [ ] A best-price quote far from every other book is taken as real
 
@@ -1400,6 +1673,35 @@ add it to `data/anon_readable.py`, and the page reads ~40 rows per team by
 `(sport, team)` and drops its NFL-only branch. One migration, one line in the
 daily refresh, first fill on the worker.
 
+## [ ] MLB pitcher prop models: re-run the pitcher-prop market check on 2027 prices before any unpause (added 2026-10-10)
+
+All five pitcher prop models are paused (strikeouts, outs and hits allowed
+since 2026-09-19, #764). The one market-price test of pitcher outs found
+August +2.0% on 52 bets and September 1-19 −9.7% on 28
+(`docs/mlb_prop_market_eval.md` §3). Before considering any unpause in
+2027, re-run that check on the new season's Pinnacle and DraftKings
+pitcher-prop prices; the commands are in §5 of the same file.
+
+## [ ] MLB first-five totals: re-check the Pinnacle-against-soft-book over side in May 2027 (added 2026-10-10)
+
+The 2026 search found no first-five card (`docs/mlb_f5_edge_search.md`).
+Its closest miss, Pinnacle no-vig against a bettable soft book's no-vig on
+first-five totals at 1.5 points, was 96 bets +9.92% from Sep 2 to 30, and
+all of it was on the over side: over picks 54 bets +30.1% against +4.8%
+for blind overs at the same book and line, under picks 42 bets −16.0%.
+Pinnacle first-five prices return with the 2027 season.
+
+- Re-check in May 2027, after one full regular-season month of Pinnacle
+  first-five totals.
+- Read over and under picks separately, and compare each with blind bets
+  at the same book and the same line.
+- The bettable books will be FanDuel, BetMGM and William Hill (Rebet was
+  dropped from the shopped books on 2026-09-20).
+- A rule built on the over side alone is the candidate, if it repeats.
+- If code is wanted, start from PR #762 (branch
+  `cursor/mlb-f5-edge-hunt-7ba7`, commit `b3a4aac`) and add a by-side
+  split; that sweep does not report one.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
@@ -1413,6 +1715,12 @@ After this merges: `mlb_runline_retrain_sweep` register=false. Worker job
 `mlb-over-under-retrain-sweep-2026-09-16`, #741) is the totals twin and
 consumes the same `FEATURE_MAP`. Do not flip `PAUSED_MODELS` or
 `MLB_*_MARKET_PUBLISH`.
+
+2026-10-10: the search for a run-line rule built on market data instead
+of a trained model (PR #757, 2026-09-19, never merged) found none: fading
+the public by tickets or money, the home underdog, reverse line movement,
+line moves and Pinnacle gaps. Every near miss lost in the 105 games played
+after it (`docs/mlb_runline_edge_hunt.md`).
 
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
 

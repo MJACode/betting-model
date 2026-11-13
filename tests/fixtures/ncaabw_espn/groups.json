@@ -1,0 +1,127 @@
+{
+ "_fixture": "ESPN groups, trimmed (fetched 2026-10-26: 25 conferences, 289 teams)",
+ "groups": [
+  {
+   "name": "NCAA Division I",
+   "abbreviation": "NCAA",
+   "children": [
+    {
+     "name": "American Conference",
+     "abbreviation": "American",
+     "teams": [
+      {
+       "id": "58",
+       "slug": "south-florida-bulls",
+       "name": "Bulls",
+       "abbreviation": "USF",
+       "displayName": "South Florida Bulls",
+       "shortDisplayName": "South Florida"
+      }
+     ]
+    },
+    {
+     "name": "Atlantic 10 Conference",
+     "abbreviation": "atl10",
+     "teams": [
+      {
+       "id": "257",
+       "slug": "richmond-spiders",
+       "name": "Spiders",
+       "abbreviation": "RICH",
+       "displayName": "Richmond Spiders",
+       "shortDisplayName": "Richmond"
+      }
+     ]
+    },
+    {
+     "name": "Atlantic Sun Conference",
+     "abbreviation": "ASUN",
+     "teams": [
+      {
+       "id": "2511",
+       "slug": "queens-university-royals",
+       "name": "Royals",
+       "abbreviation": "QUC",
+       "displayName": "Queens University Royals",
+       "shortDisplayName": "Queens"
+      }
+     ]
+    },
+    {
+     "name": "Big 12 Conference",
+     "abbreviation": "big12",
+     "teams": [
+      {
+       "id": "197",
+       "slug": "oklahoma-state-cowboys",
+       "name": "Cowboys",
+       "abbreviation": "OKST",
+       "displayName": "Oklahoma State Cowboys",
+       "shortDisplayName": "Oklahoma St"
+      }
+     ]
+    },
+    {
+     "name": "Big Ten Conference",
+     "abbreviation": "big10",
+     "teams": [
+      {
+       "id": "77",
+       "slug": "northwestern-wildcats",
+       "name": "Wildcats",
+       "abbreviation": "NU",
+       "displayName": "Northwestern Wildcats",
+       "shortDisplayName": "Northwestern"
+      }
+     ]
+    },
+    {
+     "name": "Conference USA",
+     "abbreviation": "usa",
+     "teams": [
+      {
+       "id": "98",
+       "slug": "western-kentucky-hilltoppers",
+       "name": "Hilltoppers",
+       "abbreviation": "WKU",
+       "displayName": "Western Kentucky Hilltoppers",
+       "shortDisplayName": "Western KY"
+      }
+     ]
+    },
+    {
+     "name": "Metro Conference",
+     "abbreviation": "Metro",
+     "teams": [
+      {
+       "id": "2363",
+       "slug": "manhattan-jaspers",
+       "name": "Jaspers",
+       "abbreviation": "MAN",
+       "displayName": "Manhattan Jaspers",
+       "shortDisplayName": "Manhattan"
+      }
+     ]
+    },
+    {
+     "name": "Southeastern Conference",
+     "abbreviation": "sec",
+     "teams": [
+      {
+       "id": "96",
+       "slug": "kentucky-wildcats",
+       "name": "Wildcats",
+       "abbreviation": "UK",
+       "displayName": "Kentucky Wildcats",
+       "shortDisplayName": "Kentucky"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Non-NCAA Division I",
+   "children": []
+  }
+ ]
+}

@@ -332,6 +332,7 @@ step push-notifications
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
 #   ncaab-results    no ESPN call unless a started NCAAB game in the last 14
 #                    days is unscored; then one scoreboard call per such date
+#   ncaabw-results   the same for women's college basketball (NCAABW)
 # GROUP 3 — results ingests. Independent of each other, each hitting a
 # different external service, and all of them must finish before settle.
 par game-log-today
@@ -340,6 +341,7 @@ par nhl-results
 par ufc-results-poll
 par nba-results
 par ncaab-results
+par ncaabw-results
 par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
@@ -349,6 +351,10 @@ par_wait
 if [ "$MODE" = "hourly" ]; then
   step wnba-results
   step golf-results
+  # EuroLeague's schedule and finals: one keyless call for the whole season
+  # (data/ingestors/euroleague_api.py). Hourly is enough: no EuroLeague model
+  # settles off it yet, and the 6am run stores the evening's finals too.
+  step euroleague-games
 fi
 
 # Settles TODAY. From 7am ET it also posts YESTERDAY's results recap if the
@@ -381,6 +387,9 @@ step refresh-outcomes
 # pass on, and nothing reads them sooner.
 if [ "$MODE" = "hourly" ]; then
   step ncaab-box
+  # The same for women's college basketball (NCAABW): the box scores the
+  # women's totals model's ratings are refit on. After ncaabw-results.
+  step ncaabw-box
 fi
 
 # Health check LAST, on every pass. It used to run only as the final step of the

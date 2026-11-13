@@ -504,17 +504,27 @@ def test_a_play_by_play_error_fails_the_step_rebuilds_and_reaches_pipeline_log(m
     import data.db as db
     import data.ingestors.nba_period_scores as ps
     import data.ingestors.nba_team_q1 as q1
+    import data.ingestors.nba_first_basket as fb
     import run_pipeline
     monkeypatch.setattr(db, "get_connection", lambda: conn)
     monkeypatch.setattr(ps, "run", lambda *a, **k: {"rows": 1})
     rebuilt = []
     monkeypatch.setattr(q1, "rebuild", lambda *a, **k: rebuilt.append(1) or {"rows": 4})
+    # The step's fourth part (2026-11-08) runs after the play-by-play fill too.
+    monkeypatch.setattr(fb, "rebuild", lambda *a, **k: rebuilt.append(2) or {"games": 2, "players": 20})
+    # The fifth part (2026-11-13): the period-line buy and team_period_results.
+    # Stubbed, never a paid call from a test.
+    import data.ingestors.nba_odds_history as noh
+    import data.ingestors.team_period_results as tpr
+    monkeypatch.setattr(noh, "buy_period_lines_daily", lambda *a, **k: rebuilt.append(3) or {"games": 0})
+    monkeypatch.setattr(tpr, "seasons_to_build", lambda conn, sport, season: [season])
+    monkeypatch.setattr(tpr, "rebuild", lambda *a, **k: rebuilt.append(4) or {"rows": 0})
     monkeypatch.setattr(nb, "fill_gaps", lambda *a, **k: {
         "errors": 1, "filled": 2,
         "first_error": "NBA_2026-10-20_BOS_DET: RuntimeError: 429 from summary"})
     ok = run_pipeline._timed_step(
         "nba-quarters", lambda: run_pipeline.step_nba_quarters("2026-10-30"), "2026-10-30")
-    assert ok is False and rebuilt == [1]
+    assert ok is False and rebuilt == [1, 3, 4, 2]
     sql, params = conn.sqls[-1]
     assert "INSERT INTO pipeline_log" in sql
     assert params[1] == "dispatch:nba-quarters" and "429 from summary" in params[-1]

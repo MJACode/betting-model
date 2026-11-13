@@ -212,8 +212,9 @@ export function yearET(): number {
 export function boardSeasonET(sport: string): number {
   const year = yearET();
   // NCAAB labels by the ending year too (ncaab_player_game_log.season): the
-  // 2026-27 season is 2027 from its November tip-off.
-  if (sport === 'NBA' || sport === 'NCAAB') return monthET() >= 10 ? year + 1 : year;
+  // 2026-27 season is 2027 from its November tip-off. NCAABW has the same
+  // label (docs/sports/ncaabw.md), and its Players board reads it.
+  if (sport === 'NBA' || sport === 'NCAAB' || sport === 'NCAABW') return monthET() >= 10 ? year + 1 : year;
   return year;
 }
 
@@ -314,7 +315,7 @@ export function formatGameTimeET(iso: string | null | undefined): string {
   }
 }
 
-/** "Tue 8/18, 9:31 AM ET" — full day+time stamp (NFL pick-timing display). */
+/** "Tue, 8/18, 9:31 AM ET" — full day+time stamp (NFL pick-timing display). The day half carries its own comma. */
 export function formatDayTimeET(iso: string | null | undefined): string {
   if (!iso) return '';
   try {
@@ -384,7 +385,7 @@ export function etDate(d: Date): string {
   }).format(d);
 }
 
-/** "Sat 6/14" for a commence time on a future ET day; null when it's today. */
+/** "Sat, 6/14" for a commence time on a future ET day; null when it's today. */
 export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;
   try {
@@ -398,6 +399,39 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
     }).format(d);
   } catch {
     return null;
+  }
+}
+
+/**
+ * "Sun, 11/8": the ET date a game was played, on any day, today included.
+ * The same text `gameDayLabelET` prints for a day that is not today (that one
+ * returns null for today). `withYear` adds the year
+ * ("Sun, 11/10/24"), for a list that spans seasons.
+ *
+ * Built from the parts, not by cutting a formatted string at a comma: the
+ * day label itself carries a comma, so a split on ',' kept only "Sun"
+ * (Matt, 2026-11-11, the Build Your Own Model bet list).
+ */
+export function formatGameDateET(
+  iso: string | null | undefined,
+  { withYear = false }: { withYear?: boolean } = {},
+): string {
+  if (!iso) return '';
+  try {
+    const d = parseStamp(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+      year: '2-digit',
+    }).formatToParts(d);
+    const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    const date = `${part('month')}/${part('day')}${withYear ? `/${part('year')}` : ''}`;
+    return `${part('weekday')}, ${date}`;
+  } catch {
+    return '';
   }
 }
 
@@ -460,6 +494,9 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   // tips start after 10pm ET with no live feed in the app, so this window is
   // all it has. 4h is twice the game.
   NCAAB: 4 * 3_600_000,
+  // Women's college basketball: four 10-minute quarters, about two hours on
+  // the clock like the men's, and no live feed in the app either.
+  NCAABW: 4 * 3_600_000,
   // Football, and the reason these two are named rather than left on the
   // default: they are the sports that play late and are NOT covered by the live
   // poller, so the blind window is all they have. Once the app's live board
@@ -746,6 +783,8 @@ const GAME_DURATION_HOURS: Record<string, number> = {
   // 40 minutes of play, about two hours on the clock. ESPN finals land on the
   // next refresh pass, which drops the game sooner when they do.
   NCAAB: 3,
+  // Women's: 40 minutes of play in four quarters, the same two hours.
+  NCAABW: 3,
   UFC: 6,
 };
 

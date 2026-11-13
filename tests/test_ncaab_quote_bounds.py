@@ -54,7 +54,11 @@ def test_each_market_has_its_measured_range():
                            "ncaab_first_half_total": 0.50,
                            # the opening moneyline model (models/ncaab_moneyline_first_post.py):
                            # its replay's bets reached 0.2416, so not 0.25
-                           "ncaab_moneyline_first_post": 0.40}
+                           "ncaab_moneyline_first_post": 0.40,
+                           # the in-play rules (models/ncaab_live_ig.py): the largest edge
+                           # over 61,019 graded decisions was 0.453
+                           "ncaab_live_spread_h1": 0.50, "ncaab_live_spread_h2": 0.50,
+                           "ncaab_live_total_h2": 0.50}
 
 
 def test_a_typo_is_a_data_error_and_the_extremes_history_holds_are_not():
@@ -318,6 +322,11 @@ def _fh_wire(monkeypatch, quotes, fetch_at, fg=None, total=False):
                         lambda conn, ids, now, **kw: {GID: (fetch_at, {})})
     monkeypatch.setattr(card, "decision_quotes", lambda conn, cuts: quotes)
     monkeypatch.setattr(card, "fg_consensus", lambda conn, cuts: {GID: fg})
+    # The pair rule's two reads (2026-11-11): no first-half spread was quoted,
+    # and the game holds no other bet. Neither is what these tests are about.
+    if total:
+        monkeypatch.setattr(card, "favourite_lays", lambda conn, cuts: {})
+    monkeypatch.setattr(card.cbb_pairs, "clash", lambda conn, game_id, model_id, side, line: None)
     monkeypatch.setattr(card, "artifact", lambda season: art)
     tg = pd.DataFrame(columns=list(spread_card.TEAM_COLS))
     sg = pd.DataFrame({"game_id": pd.Series(dtype=object), "home_team": pd.Series(dtype=object),
