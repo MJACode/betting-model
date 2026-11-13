@@ -631,6 +631,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # arrangement). Touches no pick, cut or record. Returns on a catalog
     # read once the view's comment matches the hash of this file.
     "dashboard_support_2026_11_12.sql",
+    # 2026-11-12 (mike: NCAAB live bets must fire in under 10 seconds): the
+    # in-play latency probe's raw reads (scripts/ncaab_live_latency_probe.py).
+    # A new table, RLS on, anon and authenticated revoked; touches no view,
+    # pick, cut or record. Returns on a catalog read once it exists.
+    "live_latency_probe_2026_11_12.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT
