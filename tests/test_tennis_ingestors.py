@@ -131,3 +131,69 @@ def test_the_meter_stops_at_the_ceiling_and_the_floor():
         raise AssertionError("floor not enforced")
     except toh.Floor:
         pass
+
+
+class _Rows:
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
+
+
+class _FakeConn:
+    """Enough of the database wrapper for walk_window: every read is empty."""
+    def __init__(self):
+        self.inserts = 0
+
+    def execute(self, sql, params=None):
+        return _Rows()
+
+    def executemany(self, sql, rows):
+        self.inserts += len(rows)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+class _Resp:
+    def __init__(self, body):
+        self.status_code, self._body = 200, body
+        self.headers = {"x-requests-last": "30", "x-requests-remaining": "5000000"}
+
+    def json(self):
+        return self._body
+
+
+def test_the_walk_jumps_a_gap_the_feed_kept_nothing_in(monkeypatch):
+    """Snapshots every 5 minutes, except none from 02:00 to 08:00. Asked hourly
+    from 00:00 to 10:00, the walk must ask at 00, 01, 02, then 08 (the feed's
+    next real snapshot), 09, 10 -- never paying for the 03:00-07:00 copies."""
+    t0 = datetime(2025, 8, 30, 0, 0, tzinfo=timezone.utc)
+    gap_start, gap_end = t0 + timedelta(hours=2), t0 + timedelta(hours=8)
+    asked = []
+
+    def fake_get(meter, url, params, cost):
+        when = datetime.fromisoformat(params["date"].replace("Z", "+00:00"))
+        asked.append(when)
+        snap = min(when, gap_start) if when < gap_end else when
+        nxt = gap_end if snap == gap_start else snap + timedelta(minutes=5)
+        body = {"timestamp": toh._iso(snap), "next_timestamp": toh._iso(nxt), "data": [{
+            "id": "e1", "commence_time": "2025-08-31T15:00:00Z", "home_team": "A B",
+            "away_team": "C D", "bookmakers": [{"key": "pinnacle", "markets": [
+                {"key": "h2h", "last_update": toh._iso(snap), "outcomes": [
+                    {"name": "A B", "price": -150 - len(asked)}, {"name": "C D", "price": 130}]}]}]}]}
+        r = _Resp(body)
+        return r, meter.after(r)
+
+    monkeypatch.setattr(toh, "_get", fake_get)
+    monkeypatch.setattr(toh, "_key", lambda: "k")
+    meter = toh.Meter(max_credits=10_000, floor=0)
+    out = toh.walk_window(_FakeConn(), meter, "tennis_atp_us_open", t0, t0 + timedelta(hours=10),
+                          timedelta(hours=1))
+    hours = sorted({a.hour for a in asked})
+    assert hours == [0, 1, 2, 8, 9, 10], hours
+    assert out["asks"] == 12                      # six snapshots, two book groups each

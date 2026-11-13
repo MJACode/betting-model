@@ -216,7 +216,7 @@ cover it on an average quote; any edge is in the quotes that stand apart.
 
 ## Open items
 
-- The purchase (above) waits on mike's yes. Then: the baselines on every
+- The purchase (above) waits on mike's yes (issue #1277). Then: the baselines on every
   grid row, mechanisms 1 to 6 in that order, the kill tests on anything
   positive.
 - The forward log runs on mike's PC until 2026-11-23; a worker job takes it
@@ -225,7 +225,8 @@ cover it on an average quote; any edge is in the quotes that stand apart.
   this build, before its merge.
 
 - Pinnacle's absence from the 2026-11-13 board: read the board again near a
-  match's start before any live model relies on Pinnacle as its reference.
+  match's start before any live model relies on Pinnacle as its reference
+  (issue #1278: the forward log answers it after the evening's matches).
 - DraftKings' rules are the Massachusetts edition of 2024-08-01; read the
   current rules page before the retirement option goes live.
 - The archive's licence is non-commercial (above).
