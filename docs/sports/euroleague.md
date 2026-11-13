@@ -117,6 +117,13 @@ Two purchases, both bought into Supabase in the same run, both protected from
 the odds clean-up (`data/prune_odds.PROTECTED_SOURCES`), and EuroLeague keeps
 its whole price path going forward (`PATH_KEPT_SPORTS`).
 
+The credit planner refuses a run whose worst case (every 5-minute slot of
+every day) would cross the floor, and seven seasons at their worst case are
+past any balance, so the full purchase runs with `--chunk-days 30`: seasons
+newest first, 30-day chunks newest first, each cleared by the planner, each
+season stored once fetched, stopping for good at the first refusal or floor
+stop.
+
 **1. The full game, every snapshot** (`data/ingestors/euroleague_odds_history.py`,
 a fork of the women's college purchase). Moneyline, spread and total at the ten
 books of `config.EUROLEAGUE_HISTORY_BOOKMAKERS`: the five a pick may name that
@@ -185,5 +192,5 @@ first-half and quarter fetch at the decision times.
 Commands (from a checkout with production settings):
 
     python -m data.ingestors.euroleague_api --seasons 2021 2027 --apply
-    python -m data.ingestors.euroleague_odds_history --seasons 2021 2027 --spool DIR --fetch --store --reserve-days 33
+    python -m data.ingestors.euroleague_odds_history --seasons 2021 2027 --spool DIR --fetch --store --chunk-days 30 --reserve-days 33
     python -m data.ingestors.euroleague_period_history --seasons 2024 2027 --apply --floor 1936000

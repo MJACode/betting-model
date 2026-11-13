@@ -48,8 +48,17 @@ the live feeds short before the refill (CLAUDE.md, the September 2026 outage).
 Seasons are bought newest first, so a stop at the floor leaves the oldest
 seasons for the next cycle, and a re-run resumes them.
 
+THE WHOLE HISTORY IN ONE COMMAND (--chunk-days N). plan_credit_budget
+refuses a plan whose worst case (every 5-minute slot of every day) would cross
+the floor, and the worst case of seven seasons is past any balance while the
+measured cost is not. With --chunk-days the run walks the seasons newest first,
+each season's days in chunks of N newest first, clears each chunk with the
+planner, stores each season once its chunks are fetched, and stops for good at
+the first refusal or floor stop. A re-run resumes from the spool.
+
     python -m data.ingestors.euroleague_odds_history --seasons 2021 2027 --spool DIR
     python -m data.ingestors.euroleague_odds_history --seasons 2021 2027 --spool DIR --fetch --store
+    python -m data.ingestors.euroleague_odds_history --seasons 2021 2027 --spool DIR --fetch --store --chunk-days 30 --reserve-days 33
 """
 from __future__ import annotations
 
@@ -786,6 +795,77 @@ def _dry_run(conn, spool: Path, first: int, last: int, now: datetime) -> None:
           f"({DAY_MAX_COST:,} a day if every 5-minute slot holds a snapshot). Nothing was spent.")
 
 
+def chunk_plan(games: list[dict], now: datetime, first: int, last: int,
+               chunk_days: int) -> list[tuple[int, list[date]]]:
+    """[(season, days)] in the order the chunked run fetches them: seasons
+    newest first, and inside a season chunks of `chunk_days` newest first, each
+    chunk's days oldest first. Pure."""
+    out = []
+    for season, days in sorted(season_days(games, now).items(), reverse=True):
+        if not first <= season <= last:
+            continue
+        for end in range(len(days), 0, -chunk_days):
+            out.append((season, days[max(0, end - chunk_days):end]))
+    return out
+
+
+def run_chunked(spool: Path, first: int, last: int, chunk_days: int, reserve_days: int,
+                concurrency: int, do_store: bool, now: datetime) -> int:
+    """The whole purchase, newest season first, a chunk at a time (module
+    docstring, THE WHOLE HISTORY IN ONE COMMAND). 0 when every chunk was
+    fetched, 1 when it stopped at the floor or a day stopped early, 2 refused."""
+    with get_connection() as conn:
+        games = load_games(conn, first, last)
+        conn.commit()
+    plan = chunk_plan(games, now, first, last, chunk_days)
+    code = 0
+    stopped = False
+    for season in sorted({s for s, _ in plan}, reverse=True):
+        for _, days in [c for c in plan if c[0] == season]:
+            todo = [d for d in days if not read_state(spool, d)["done"]]
+            if not todo:
+                continue
+            with get_connection() as conn:
+                budget, problems = plan_credit_budget(
+                    conn, shard_calls=len(todo) * (DAY_SLOTS + 1),
+                    total_calls=len(todo) * (DAY_SLOTS + 1),
+                    credits_per_call=SNAPSHOT_COST, reserve_days=reserve_days)
+                conn.commit()
+            if problems:
+                for problem in problems:
+                    print("REFUSED:", problem)
+                code, stopped = 2, True
+                break
+            meter = KeepAliveMeter(budget.ceiling, budget.floor, workers=concurrency)
+            meter.remaining = budget.remaining_at_start
+            try:
+                stats = fetch_days(meter, spool, todo, now)
+            finally:
+                try:
+                    with get_connection() as conn:
+                        persist_quota(conn)
+                        conn.commit()
+                except Exception as exc:                        # noqa: BLE001
+                    logger.warning(f"quota not persisted: {exc}")
+            print(f"EuroLeague odds fetch, season {season}, {todo[0]} to {todo[-1]}:",
+                  json.dumps(stats, default=str))
+            if stats.get("day_errors"):
+                code = max(code, 1)
+            if stats.get("stopped"):
+                code, stopped = max(code, 1), True
+                break
+        if do_store:
+            with get_connection() as conn:
+                st = store(conn, spool, season, season, now)
+            print(f"EuroLeague odds store, season {season}:", json.dumps(st, default=str))
+            if st.get("errors"):
+                code = max(code, 1)
+        if stopped:
+            print(f"EuroLeague odds history stopped in season {season}; a re-run resumes")
+            break
+    return code
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="EuroLeague odds history: every snapshot the feed holds")
     ap.add_argument("--seasons", nargs=2, type=int, metavar=("FIRST", "LAST"), required=True,
@@ -799,10 +879,16 @@ def main(argv=None) -> int:
                     help="stop before the balance falls under this many days of measured burn")
     ap.add_argument("--only-days", nargs=2, metavar=("FIRST", "LAST"),
                     help="fetch only these UTC days (YYYY-MM-DD), e.g. to try one day")
+    ap.add_argument("--chunk-days", type=int, default=None,
+                    help="run the whole history newest season first, this many days a chunk")
     a = ap.parse_args(argv)
     first, last = a.seasons
     now = datetime.now(timezone.utc)
     code = 0
+    if a.chunk_days and a.fetch:
+        a.spool.mkdir(parents=True, exist_ok=True)
+        return run_chunked(a.spool, first, last, a.chunk_days, a.reserve_days,
+                           a.concurrency, a.store, now)
     # Three short connections, not one held open: the fetch runs for hours and
     # touches the database only before it starts and after it ends.
     with get_connection() as conn:

@@ -65,6 +65,7 @@ from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 from data.db import get_connection
 from data.ingestors import euroleague_teams as et
+from data.ingestors.nba_odds_history import _write_with_retry
 from data.ingestors.odds_ingestor import _insert_odds
 
 SPORT = et.SPORT
@@ -479,7 +480,13 @@ def run(first: int, last: int, apply: bool, floor: int, max_credits: int | None,
                     if res["status"] in ("not_asked", "no_event_id"):
                         stats[res["status"]] += 1
                         continue
-                    store_result(conn, res)
+                    # A paid answer: a dropped connection replays the write
+                    # (rows and ledger row are one transaction, so a replay
+                    # stores nothing twice).
+                    what = f"{res['game']['game_id']} {res['mark']}"
+                    if not _write_with_retry(conn, lambda r=res: store_result(conn, r), what):
+                        stats["store_errors"] += 1
+                        continue
                     stats[res["status"]] += 1
                     stats["rows"] += len(res["rows"])
             stats["dates"] += 1

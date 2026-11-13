@@ -175,3 +175,19 @@ def test_period_purchase_asks_only_times_before_the_tip_and_skips_done_pairs():
     assert "T-1440" not in marks                 # done
     assert "T-60" in marks and "T-30" not in marks   # 18:30 is not past at 18:01
     assert all(t < now for _, _, t in todo)
+
+
+def test_the_chunked_history_runs_newest_season_first_and_newest_chunk_first():
+    from datetime import date, datetime, timezone
+    from data.ingestors import euroleague_odds_history as eh
+    games = [{"season": 2026, "game_date": "2025-10-01"}, {"season": 2026, "game_date": "2025-10-25"},
+             {"season": 2027, "game_date": "2026-10-01"}, {"season": 2027, "game_date": "2026-10-20"}]
+    now = datetime(2026, 11, 12, tzinfo=timezone.utc)
+    plan = eh.chunk_plan(games, now, 2026, 2027, chunk_days=10)
+    assert [s for s, _ in plan] == sorted([s for s, _ in plan], reverse=True)
+    first_season = [d for s, d in plan if s == 2027]
+    assert first_season[0][-1] == date(2026, 10, 21)          # the season's newest day leads
+    assert all(c == sorted(c) for _, c in plan)
+    days = [d for _, c in plan for d in c]
+    assert len(days) == len(set(days))                        # no day twice
+    assert min(d for s, c in plan if s == 2027 for d in c) == date(2026, 9, 21)   # LEAD_DAYS before
