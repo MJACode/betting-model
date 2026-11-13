@@ -71,6 +71,41 @@ review as its own entry.
    was bought at (one noon pull a day), the first-come-lock trap avoided by
    construction rather than by replay.
 
+## 2026-11-13 — EuroLeague halftime
+
+1. **Scope.** The EuroLeague build: the halftime break, now that the shot
+   chart places it on the wall clock.
+2. **Tried.** Fresh-quote coverage by book, blind bets at the break, the
+   women's halftime method ported unchanged for total, spread and moneyline,
+   a structural check of how the books re-hang the halftime line, 183 cells
+   with a false-discovery correction. Nothing clears.
+3. **New.** In `methods.md`, the halftime method's EuroLeague result and its
+   mechanism: a book that carries too much of the pre-game margin into the
+   second half. A check worth running in every league with in-play history:
+   measure the share of the pre-game margin and of the first-half surprise
+   the books carry into the halftime line, against what the games carried.
+4. **Corrected.** Nothing in the skill was contradicted.
+5. **The framework.** Nothing changed.
+
+## 2026-11-13 — EuroLeague round 2, and halftime placed on the wall clock
+
+1. **Scope.** The EuroLeague build, round 2 (`docs/euroleague_market_audit.md`).
+2. **Tried.** The home lean within a -200 floor, market-anchored models with
+   home, crowd, venue, rest and schedule inputs, referee crews and the opening
+   total, and the invention floor for the first half and quarter (three
+   mechanisms each, all run). 109 cells; nothing clears.
+3. **New.** A price route for in-play timing (`market-grid.md`): EuroLeague's
+   play-by-play has only the game clock, but its shot chart stamps every shot
+   in UTC, which brackets halftime. A trap (`porting-traps.md`): the shot
+   chart's host rate-limits through Cloudflare (HTTP 429, error 1015) after
+   about 60 calls four at a time; one call every 1.5 seconds holds. And a
+   research trap: a hold-out read needs a cache refreshed past the freeze
+   date, or the frozen rule only reproduces itself.
+4. **Corrected.** Nothing in the skill was contradicted.
+5. **The framework.** Nothing changed in `SKILL.md`; the stuck ladder's
+   remaining rungs (new information, the halftime moment, a fresh read) are
+   the next round.
+
 ## 2026-11-13 — EuroLeague full game, round 1
 
 1. **Scope.** The EuroLeague build: moneyline, spread and total, 2021-22 on.

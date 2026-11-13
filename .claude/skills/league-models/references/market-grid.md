@@ -92,6 +92,13 @@ league: EuroLeague's answers from 2023 (HTTP 422 on a 2022-12 game), with
 DraftKings in none of it (`docs/sports/euroleague.md`). Ask every market key
 the league has ever shown: one no book holds costs nothing.
 
+**When a game moment happened on the wall clock** (halftime, a quarter's
+end) is what an in-play model needs against timestamped prices. Play-by-play
+often carries only the game clock; look for a feed that stamps events in UTC.
+EuroLeague's shot chart (`live.euroleague.net/api/Points`) does: every shot
+carries `UTC`, so the last shot of the second quarter and the first of the
+third bracket halftime (`data/ingestors/euroleague_shots.py`).
+
 **Buying history.** Plan the credit budget from measured numbers
 (`data/ingestors/odds_quota.plan_credit_budget`, which refuses when it cannot
 measure), store each pull in Supabase in the same run with a `source` marker

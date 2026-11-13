@@ -19,6 +19,95 @@ No paid calls, no sign-ups. The only API calls were free, keyless GETs to the of
 
 Evidence grades: **Strong** = out-of-sample, real prices, bet count, interval or CLV, nothing to sell. **Weak** = win rate only, flat -110, in-sample, one season, or undated. **Noise** = pick sellers, tipsters.
 
+## Halftime (2026-11-13)
+
+Run by a read-only research agent on the local cache, with the decision time,
+inputs and cut grid written down before any result: every table in
+`docs/euroleague_halftime.md`; the scripts are
+`scripts/euroleague_research/r4_*.py` (`r4_report.py`, then `r4_verdict.py`).
+Halftime is placed by the shot chart: the break between the last
+second-quarter shot and the first third-quarter shot is a median 15.9
+minutes (games with a break outside 10-25 minutes are left out). A quote
+counts only if its snapshot falls inside the break and it was re-hung after
+the half's last shot. **Verdict: nothing clears the bar.** The numbers are
+the agent's.
+
+| Market | Rule | Bets | Units | Return [90%] | Verdict |
+|---|---|---|---|---|---|
+| Total | the women's halftime method, unchanged | 574 | -12.61 | -1.93% [-8.44, +4.23] | null (99% overs; the blind over loses -10.04%) |
+| Moneyline | the same margin model, priced as a moneyline | 164 | -0.51 | -0.24% [-13.25, +12.85] | null |
+| Spread | the women's method, unchanged | 312 | +29.80 | +8.37% [-0.06, +16.33] | lead, misses the bar |
+| Spread | the same, Pinnacle's close as the pre-game number | 364 | +45.34 | +10.93% [+3.40, +18.48] | **lead, misses the bar** |
+| Total | chosen after seeing results: against the book's departure from half-time points + half the pre-game total | 212 | +33.91 | +13.67% [+3.00, +24.57] | fails (2025-26 carries 85% of its units) |
+
+- **The mechanism, measured in the books' own lines.** At DraftKings the books
+  hand back the first half's surprise at about the right rate (27.5% against
+  25.7% in the games), but carry 50% of the pre-game margin into the second
+  half, where the games carried 40%. So the pre-game favourite covered only
+  42-48% of halftime spreads (51% when leading by 10+). Halftime totals sit on
+  the formula, with no miss after a high- or low-scoring half.
+- **The Pinnacle-anchored spread passed:** the placebo (0 of 200 shuffles of
+  the half-time state reached it), every cut from 0.02 to 0.12 positive, the
+  blind bets on the same sides losing (-2.0% to -8.6%), the other read, and
+  normal prices (median -115, -135 to +105). **It failed:** the
+  false-discovery correction across all 183 cells (best p 0.0096 against a
+  first-rank threshold of 0.00055); one season negative in each version
+  (2023-24); the 2021-22 second look negative; 72-78% of bets are halftime
+  underdogs; and 2026-27's 26-31 bets carry a large share of the units.
+- **What a live loop would need.** DraftKings posted a fresh halftime line in
+  92-100% of games every season; FanDuel, BetMGM, BetRivers and Fanatics from
+  2025-26 in 73-100%. The break is about 14 minutes and the first fresh line
+  comes a median 3.1 minutes after the half's last shot, so about 12 minutes
+  to decide; the 5-minute history gives about 3 reads a break. There is no
+  live EuroLeague score source and no live in-play price pull yet.
+
+## Round 2: the home lean, market-anchored models, totals, and three mechanisms per period market (2026-11-13)
+
+Run by a read-only research agent on the local cache; every table, with the
+pre-registration written before any result was read:
+`docs/euroleague_round2.md`; the scripts are
+`scripts/euroleague_research/r3_*.py` (`r3_report.py` reruns them all).
+**Verdict: nothing clears the bar.** 109 cells; one survives a
+false-discovery correction at 10% (the first-quarter moneyline shrink at cut
+0.03), and it has 3 bets. Of the 91 cells with 25+ bets, none survives.
+
+- **No hold-out read yet.** The cache ends 2026-11-12, the same 107 games of
+  2026-27 round 1 read, so both frozen leads only reproduced (home underdogs
+  against the spread 30 bets -24.06%; first-quarter under 4 bets 3-1).
+- **The home lean, within a -200 floor:** the home moneyline at DraftKings'
+  close, 972 bets +59.64 units, +4.89% [-0.68, +10.39]; +0.29% without its 10
+  best dates, 2026-27 -18.50%. The away side under the same floor loses
+  -13.84% on 1,572. First halves, home side: spread -5.15% on 417, moneyline
+  -1.91% on 275.
+- **Market-anchored models** (the de-vigged close as an unpenalised offset;
+  home, home underdog, attendance, relocated venue, rest, double-round week):
+  the moneyline's cross-validation picked the largest penalty in 3 of 4
+  seasons and its log loss equals the market's (0.6075); the spread at cut
+  0.02, 428 bets +0.95%, dies on 2026-27 (-23.92%) and a placebo (27% of
+  shuffles matched it). Travel could not be built: no venue coordinates are
+  stored.
+- **Totals.** A referee crew's earlier residuals predicted the total only in
+  2022-23 (pooled slope +0.45, SE 0.47); its bet rule, 466 bets +1.31%, is
+  81.5% overs. DraftKings' first-post total: overs -1.38%, unders -7.69%.
+  Open-to-close movement predicts nothing (slope +0.020), and a perfect
+  predictor of the move would earn only +6.07% at the first post.
+- **Three mechanisms each for the first half and quarter** (the invention
+  floor): a club-pair first-half share (118 bets +7.77%, -12.44% without its
+  10 best dates); a club first-quarter share; a moneyline shrink toward 50%
+  (the fitted factor came out above 1 on the offshore-only seasons; the rule
+  bet favourites and lost -17.00% on 150). **The club first-quarter share at
+  margin 1.0** (the grid's top cell; the pre-registered margin 0.5 lost
+  -3.68%): 63 bets, 43-20, +17.71 units, +22.23% [+4.08, +39.66]; passed the
+  placebo (1% of shuffles at or above it), a 54/46 side split, both halves
+  and both seasons positive, +4.46% without its 10 best dates; failed the
+  200-bet bar, the false-discovery correction (p 0.0188) and the plateau.
+  Prices -122 median, -145 shortest. **Frozen as a lead.**
+- **Not yet null.** Still to run: the frozen leads on games after
+  2026-11-12 (the forward cache, below); halftime, now that the shot charts
+  place it on the wall clock (`data/ingestors/euroleague_shots.py`); new
+  information (domestic schedules, venue coordinates, fouls and free throws);
+  a fresh read not anchored on these rounds (the stuck ladder's rung 7).
+
 ## Full game, round 1 (2026-11-13)
 
 Moneyline, spread and total, 2021-22 to 2026-27 to date, run by a read-only
