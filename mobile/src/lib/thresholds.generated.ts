@@ -166,6 +166,9 @@ export const RETIRED_MODELS = new Set<string>([
 
 export const RECORD_EXCLUDED_MODELS = new Set<string>([
   'nfl_live_prop',
+  'ufc_method_of_victory',
+  'ufc_moneyline',
+  'ufc_total_rounds',
 ]);
 
 export const DUPLICATE_STATUS = 'DUPLICATE';

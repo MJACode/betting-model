@@ -143,6 +143,42 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
             "the app via RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
         ),
     },
+    {
+        "model_id": "ufc_moneyline",
+        "asked_by": "mike, 2026-11-13",
+        "reason": (
+            "\"Ignore and delete any existing models\" for UFC, then \"yes\" to taking "
+            "the retired models' posted bet off the published record. Retired the same "
+            "day (RETIRED_MODELS, #1293); retiring alone left them in the record views, "
+            "which exclude only this list. Posted in the window: one NO_ACTION. The views drop it via "
+            "data/migrations/record_strikes_ufc_retired_2026_11_13.sql; the app via "
+            "RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
+        ),
+    },
+    {
+        "model_id": "ufc_total_rounds",
+        "asked_by": "mike, 2026-11-13",
+        "reason": (
+            "\"Ignore and delete any existing models\" for UFC, then \"yes\" to taking "
+            "the retired models' posted bet off the published record. Retired the same "
+            "day (RETIRED_MODELS, #1293); retiring alone left them in the record views, "
+            "which exclude only this list. Posted in the window: 1-0, +1.0 units (Mario Pinto vs Ryan Spann Under 1.5, the 2026-09-05 card). The views drop it via "
+            "data/migrations/record_strikes_ufc_retired_2026_11_13.sql; the app via "
+            "RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
+        ),
+    },
+    {
+        "model_id": "ufc_method_of_victory",
+        "asked_by": "mike, 2026-11-13",
+        "reason": (
+            "\"Ignore and delete any existing models\" for UFC, then \"yes\" to taking "
+            "the retired models' posted bet off the published record. Retired the same "
+            "day (RETIRED_MODELS, #1293); retiring alone left them in the record views, "
+            "which exclude only this list. Posted in the window: none. The views drop it via "
+            "data/migrations/record_strikes_ufc_retired_2026_11_13.sql; the app via "
+            "RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
+        ),
+    },
 )
 
 
@@ -1215,10 +1251,14 @@ PROB_ONLY_MODELS: set = set()
 
 # Models RETIRED — removed from their registry (MODELS / PROP_MODELS /
 # LIVE_MODELS) outright, so nothing scores, trains or syncs a threshold row for
-# them. Their picks stay in the DB and stay graded (§1c), but they are EXCLUDED
-# FROM EVERY PUBLISHED TOTAL: the track-record views drop them through the
-# model_action_thresholds join, and every Python or app aggregation that reads
-# raw picks consults this set. It mirrors mobile/src/lib/thresholds.ts
+# them. Their picks stay in the DB and stay graded (§1c). Retiring does NOT take
+# a model's posted bets out of the published record views or the Discord
+# recap: those count every posted BET and exclude only RECORD_EXCLUSIONS
+# (read on production 2026-11-13: v_public_track_record still held
+# ufc_total_rounds' posted win after its retirement merged). A retired model's
+# record leaves those surfaces only through a RECORD_EXCLUSIONS entry, on an
+# explicit instruction. Some app and Python aggregations that read raw picks
+# also skip this set. It mirrors mobile/src/lib/thresholds.ts
 # RETIRED_MODELS; keep the two in sync (tests/test_retired_models.py pins it).
 #
 # This is NOT PAUSED_MODELS: a paused model still scores NONE rows and keeps
@@ -1305,7 +1345,8 @@ RETIRED_MODELS: frozenset = frozenset({
     # all-time UFC and overall lines carried it from 2026-09-05). mike approved
     # that in chat, 2026-11-13: "yes" (CLAUDE.md §1b, NO RESTATED RECORDS). No
     # earlier post is re-sent; the next all-time line counts one fewer win.
-    # RECORD_EXCLUSIONS is NOT touched -- nothing is struck.
+    # The three are struck in RECORD_EXCLUSIONS (retiring alone left the win
+    # in the record views; see the note above this set).
     #
     # The sport plumbing stays for the models that replace them: the fight
     # results ingest (ufc_csv_loader -> ufc_fight_log, fighters), UFC odds
