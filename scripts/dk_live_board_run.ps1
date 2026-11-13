@@ -1,11 +1,11 @@
 <#
-  DraftKings' NCAAB in-play board onto Supabase, from this machine
+  DraftKings' in-play boards (every sport with an in-play model) onto Supabase, from this machine
   (data/ingestors/dk_live_board.py; docs/local_ops.md, "NCAAB in-play:
   DraftKings' own board"). DraftKings refuses the Railway worker, so the
   worker's NCAAB in-play model reads what this writes.
 
-  Run by the scheduled task BettingModel\DkLiveBoard every minute from 11am
-  to 3am, and two minutes after sign-in (mike, 2026-11-12: "yes"). A start
+  Run by the scheduled task BettingModel\DkLiveBoard every minute from 9am
+  to 3am (an NFL game can kick off at 9:30am ET), and two minutes after sign-in (mike, 2026-11-12: "yes"). A start
   while a feed is running exits at once (the feed holds 127.0.0.1:47231).
 
   The feed runs from its own worktree, C:\Users\micha\Documents\bm-live-feed,
@@ -48,9 +48,9 @@ $env:DATABASE_URL = $line.Substring(13).Trim('"')
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONPATH = $Feed
 $python = (Get-Command python -ErrorAction Stop).Source
-Push-Location $Feed
-try {
-    & $python -m data.ingestors.dk_live_board *>> $log
-} finally {
-    Pop-Location
-}
+# Every league with an in-play model, the feed's own UTF-8 log (PowerShell's
+# redirect wrote UTF-16 into this one and garbled it).
+$pylog = Join-Path $logs "dk_live_board_feed_$day.log"
+$p = Start-Process -FilePath $python -ArgumentList @("-m", "data.ingestors.dk_live_board", "--log", "`"$pylog`"") `
+    -WorkingDirectory $Feed -NoNewWindow -Wait -PassThru -RedirectStandardError (Join-Path $logs "dk_live_board_stderr_$day.log")
+Add-Content $log ("--- exit " + $p.ExitCode + " " + (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))

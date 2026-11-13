@@ -642,6 +642,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Two new tables, RLS on, anon and authenticated revoked; touches no view,
     # pick, cut or record. Returns on a catalog read once both exist.
     "dk_live_reads_2026_11_12.sql",
+    # 2026-11-13 (mike: "Move everything over to the fast way"): the moneyline
+    # and football columns of dk_live_reads, so the feed carries every sport
+    # with an in-play model. Adds columns only; touches no view, pick, cut or
+    # record. Returns on a catalog read once all six exist.
+    "dk_live_reads_all_sports_2026_11_13.sql",
     # 2026-11-04 (mike: no pasting anywhere, ever): public.open_picks, every
     # open pre-game BET the app, Discord and push show, for any Claude chat
     # with the Supabase connector. One security_invoker view and its SELECT

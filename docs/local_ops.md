@@ -527,7 +527,18 @@ clears the 30s freshness gate by observation rather than by the book's
 assertion. The bovada feed does not have this caveat — it publishes
 `lastModified` and uses it.
 
-### NCAAB in-play: DraftKings' own board (`dk_live_board`)
+### Every in-play model: DraftKings' own board (`dk_live_board`)
+
+**Since 2026-11-13 (mike: *"Move everything over to the fast way"*) the feed
+reads every league with an in-play model in one process**: NCAAB, women's
+college basketball, NBA, NCAAF and NFL, a live league every second, an idle one
+every 30 s, never two requests closer than half a second. The scheduled task
+runs from 9am (an NFL game can kick off at 9:30am ET) to 3am, and runs the
+launcher from its own worktree, `bm-live-feed\scripts\dk_live_board_run.ps1`,
+so the launcher and the feed always come from the same master. The feed's log
+is `betting_local_copies\logs\dk_live_board_feed_<date>.log` (UTF-8).
+
+#### NCAAB, the first one (2026-11-12)
 
 mike, 2026-11-12: *"This is live betting ... This needs to be as close to Real
 time as possible."* The three NCAAB in-play models decide on DraftKings' own
