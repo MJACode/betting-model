@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, #1034 brought up to date with master: a timed-out started-game lookup at insert no longer loses the batch of picks; master's test fixture kept; the offset half changes nothing today (0 of 19,166 games since 09-01 store a non-UTC start) |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, league skill weekly review (first run): no model added or re-cut since 2026-11-12; cloud column added to the scouting routes (only api.github.com answered); live records not measured because the Supabase connector failed to connect |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, the league skill's write-back is enforced: a Stop hook stops a session that used the skill and changed files without writing the learning log (once, fails open), the suite fails on a new model or sport the log does not name, and a review mode for a scheduled self-check |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, EuroLeague groundwork: every game and quarter score 2020-21 on stored from EuroLeague's open API; the full-game and first-half/quarter history purchases built and trialled (about 9.2M and 1.1M credits), waiting on the merge and mike's yes |
@@ -278,6 +279,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-10-16 | [2026-10](./2026-10.md) | 2026-10-16, BYOM saved models: auth.uid() tables, cap 25, snapshot of byom_backtest at save time, migration not registered, sign-in left off |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM refresh: master 06259b58 merged after cfe5dc1b; session logs keep both sides; ACTIVE_MIGRATIONS stays master's order; props_scanned_at unchanged; unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: a quote with no line is dropped before the capture rank; Anytime TD 0.5 is still a line; master cfe5dc1b merged, both session logs kept |
+| 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, #931 review: the scorer-insert cutoff read rolls back its savepoint, so a timed-out lookup does not drop the batch; the cutoff keeps its offset; scripts/*, the NFL live writer and first_signal_repair still bypass `_insert_picks` |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM backtest RPC: master 633be2b5 merged; master's ACTIVE_MIGRATIONS order, RPC row after it, units file still last; the in-function 3s timeout does not apply (anon 3s, authenticated 8s); unapplied |
 | 2026-10-21 | [2026-10](./2026-10.md) | 2026-10-21, BYOM prop facts: master 9ac39a4d merged, then e9b081ed; two lines on the last pre-kickoff snapshot become one fact (later created_at, then prop_id); job stays off |
 | 2026-10-20 | [2026-10](./2026-10.md) | 2026-10-20, BYOM prop facts: a player who did not play is ungraded and out of the record; a row with no posted line is skipped; master merged, job stays off |

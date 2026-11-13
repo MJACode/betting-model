@@ -102,9 +102,10 @@ class _PoisonConn:
 
 
 def _games():
-    # commence_time in the past so the loop skips them before any feature
-    # build. Both sports are present so a poisoned NCAAF pre-filter would
-    # take down the look-ahead pre-filter, which is the production chain.
+    # commence_time in the past, and fetchone returns that same cutoff, so
+    # the loop's re-read skips them before any feature build. Both sports
+    # are present so a poisoned NCAAF pre-filter would take down the
+    # look-ahead pre-filter, which is the production chain.
     started = "1999-01-01T00:00:00+00:00"
     return [
         ("NCAAF_2026-09-26_A_B", "NCAAF", 2026, "2026-09-26", "B", "A", started),
