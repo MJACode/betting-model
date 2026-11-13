@@ -6,6 +6,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { gameLineHold, isGameSpec, lineLegFromRows, lineLegKey, pregameUnpricedLeg, type LineLegSpec } from '@/lib/lineLegs';
 import { canPruneSlip, resolveSlipLegs, type ParlayLeg } from '@/lib/parlay';
+import { todayET } from '@/lib/format';
 import { fetchGameById, fetchGameLineRows, fetchPropLineRows } from '@/lib/queries';
 import type { EnrichedPick } from '@/types';
 
@@ -60,7 +61,7 @@ export function useResolvedSlip() {
   const slip = useParlaySlip();
   const lineLegs = useLineLegs();
   const picks = useTodayPicks();
-  const { data, loading, error } = picks;
+  const { data, loading, error, partial } = picks;
   const livePicks = useLivePicksUnfocused({ pollMs: LIVE_IDLE_POLL_MS });
 
   // Pre-game first: a key can only ever match one of the two (a pick is in-play
@@ -75,10 +76,18 @@ export function useResolvedSlip() {
   // A board we can trust to say a key is genuinely gone. Both halves have to be
   // settled and clean — the live half being mid-flight or errored is exactly
   // when a live key looks dead without being dead.
+  // Two more holds. A read that finished with part of it missing (this
+  // week's NFL card, one sport's look-ahead) looks like "every leg on that
+  // card is gone", so nothing is removed until a clean read; the unfound keys
+  // show as stale meanwhile, as on a failed read. And a board still on
+  // yesterday's Eastern date cannot hold today's legs (design review,
+  // 2026-11-13).
   const boardKnown = canPruneSlip({
     slipReady: slip.ready,
     loading: loading || livePicks.loading,
     error: error ?? livePicks.error,
+    partial: partial != null,
+    onToday: picks.date === todayET(),
     boardSize: board.length,
   });
 
