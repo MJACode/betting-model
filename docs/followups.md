@@ -21,6 +21,27 @@
 
 ---
 
+## [ ] Betting filters for NCAAB: halves (Matt, 2026-11-13: "Start with NBA then move to college basketball")
+
+`team_period_results` and `mobile/src/lib/teamPeriodSplits.ts` are NBA only.
+NCAAB needs: a period-score source in the writer (`ncaab_period_scores`,
+halves only: FG / H1 / H2), its own period markets (`spreads_h1` / `totals_h1`
+are already captured live by `ncaab_first_half_odds`; check H2), NCAAB's
+short-rest rule, and a Teams board, which NCAAB does not have
+(`teamStatCatalog` BALL excludes it). Row count first: ~360 teams.
+
+## [ ] Records on every Betting split for the other sports (2026-11-13)
+
+Matt asked for record AND percent on every Betting stat. NBA gets every record
+from `team_period_results`. For MLB, WNBA, NHL, NFL and NCAAF the season board
+(`team_stats_board_compute`) still returns no W-L for ATS Home / Away, as Fav /
+as Dog, Rest Edge or Short Rest, so those rows show the percent, and a game
+count only under 10 games. Fix: either return the counts from the function (a RETURNS TABLE change:
+DROP and recreate, plus `team_stats_board_cache`), or extend
+`team_period_results` to those sports' full game.
+
+---
+
 ## [x] Volume settings: the dashboard panel, once the branch is merged (2026-11-11, done 2026-11-12)
 
 Done: merged in #1251, published 2026-11-11 23:56Z, moved to its own

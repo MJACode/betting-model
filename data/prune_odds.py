@@ -283,6 +283,9 @@ PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,
                      "odds_api_nba_alt_history",
                      # First-quarter and first-half team totals, bought 2026-11-03.
                      "odds_api_nba_period_team_total_history",
+                     # Half and quarter closing lines (2026-11-13, Matt): the Stats
+                     # tab's Betting filters grade every team-game against them.
+                     "odds_api_nba_period_close_history",
                      "odds_api_nhl_totals_history",
                      "odds_api_nba_team_totals_live",
                      "odds_api_nba_first_half_live",
