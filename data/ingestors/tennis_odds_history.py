@@ -464,6 +464,17 @@ def load_windows(path: str, pad_before: timedelta = timedelta(0)) -> list[dict]:
     return sorted(out, key=lambda w: w["end"], reverse=True)
 
 
+def shard(windows: list[dict], spec: str | None) -> list[dict]:
+    """`i/n`: every n-th window from the i-th (0-based), so n processes split
+    the purchase and each one's ceiling is its own share of the plan."""
+    if not spec:
+        return windows
+    i, n = (int(x) for x in spec.split("/"))
+    if not 0 <= i < n:
+        raise SystemExit(f"--shard {spec}: need 0 <= i < n")
+    return windows[i::n]
+
+
 def plan(windows: list[dict], step: timedelta) -> dict:
     """The most this purchase can bill: every step of every window, both book
     groups. Gaps the feed did not keep are jumped, so the real bill is lower."""
@@ -488,11 +499,12 @@ def main(argv=None) -> int:
     ap.add_argument("--live-until", help="poll every active tennis key until this UTC time")
     ap.add_argument("--plan", help="the sweep's JSON: print the purchase's ceiling")
     ap.add_argument("--buy", help="the sweep's JSON: walk every window, newest first")
+    ap.add_argument("--shard", help="i/n: this process buys every n-th window from the i-th")
     ap.add_argument("--out")
     a = ap.parse_args(argv)
     step = timedelta(minutes=a.step_min)
     if a.plan:
-        print(json.dumps(plan(load_windows(a.plan), step)))
+        print(json.dumps(plan(shard(load_windows(a.plan), a.shard), step)))
         return 0
     if not a.max_credits:
         raise SystemExit("--max-credits is required for any call that spends")
@@ -513,7 +525,7 @@ def main(argv=None) -> int:
                         result.append(w)
                         logger.info(json.dumps(w))
         if a.buy:
-            for w in load_windows(a.buy):
+            for w in shard(load_windows(a.buy), a.shard):
                 result.append(walk_window(conn, meter, w["key"], w["start"], w["end"], step))
                 logger.info(json.dumps(result[-1]))
         if a.live_until:

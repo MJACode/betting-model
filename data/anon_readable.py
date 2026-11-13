@@ -431,6 +431,13 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "tennis_espn_matches",
     "tennis_odds_fetches",
     "tennis_odds_quotes",
+    # data/ingestors/tennis_pinnacle.ensure_tables: Pinnacle's own tennis
+    # prices at every level, from its public guest API.
+    "tennis_pinnacle_matchups",
+    "tennis_pinnacle_prices",
+    # data/ingestors/tennis_explorer.ensure_tables: every level's results and
+    # one price pair a match, from TennisExplorer's daily pages.
+    "tennis_te_matches",
     # NCAAB pre-tip injury change log, the open report it diffs against, the
     # poll backoff and the name misses. Created by
     # data/ingestors/ncaab_injury_feed.py and

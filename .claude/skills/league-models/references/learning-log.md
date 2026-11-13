@@ -30,11 +30,13 @@ review as its own entry.
 
 ---
 
-## 2026-11-13 — Tennis (TENNIS), groundwork, settlement and the purchase plan
+## 2026-11-13 — Tennis (ATP and WTA), groundwork, settlement and the purchase
 
 1. **Scope.** mike, 2026-11-13: *"Use the model building skill to build
-   professional tennis models"*. A new sport, `TENNIS` (men's and women's
-   singles, the tour in each model id). Steps 0 to 2b, the settlement rules,
+   professional tennis models"*, then *"mens and womans should be different
+   model groups / discord channels. But not just major tournaments, all pro
+   tennis matches"*. Two new sports: `ATP` (men's singles at every level) and
+   `WTA` (women's). Steps 0 to 2b, the settlement rules,
    a rating model and the purchase plan; no grid row has a priced result yet
    (`docs/sports/tennis.md`).
 2. **Tried.** Measured the feed (53 per-tournament keys, history from the 2020
@@ -53,7 +55,11 @@ review as its own entry.
    wrong, a per-tournament key can hold two windows a year, a listed start
    that moves and once came after the real start. `methods.md` §7: a
    settlement rule that hands the bettor an option, with its measured size;
-   three tennis lines in the frontier. `scouting.md`: four routes (two refused).
+   three tennis lines in the frontier. `scouting.md`: seven routes (three
+   refused). A league whose lower levels the feed does not sell: Pinnacle's
+   public site prices every level (collected from day one), and a results
+   site's one price per match measured to be an average near the close (a
+   baseline, never a decidable price).
 4. **Corrected.** Nothing in the skill was contradicted by a measurement.
    One claim of this build was corrected before it was written down: "the
    retiring player is almost always the one losing" was too strong (the

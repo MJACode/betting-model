@@ -1,16 +1,18 @@
 # TENNIS — data, odds capture, models
 
 > **Started 2026-11-13** (mike: *"Use the model building skill to build
-> professional tennis models"*), built with the league-models skill. The sport
-> code is `TENNIS`: one sport, with the tour (men's ATP, women's WTA) carried
-> in the model id, because men's Grand Slam matches are best of five and every
-> other singles match here is best of three. Season label: the year of play,
-> threaded from the tournament (the archive's tourney id, ESPN's event id),
-> never from a match date (an event starting 2023-12-31 is the 2024 season).
+> professional tennis models"*), built with the league-models skill.
+> **Two sports, not one** (mike, 2026-11-13: *"mens and womans should be
+> different model groups / discord channels. But not just major tournaments,
+> all pro tennis matches"*): `ATP` is men's professional singles at every level
+> (the tour, Challengers, ITF), `WTA` is women's (the tour, the 125 level,
+> ITF). Each has its own models, its own record and its own Discord channel.
+> Season label: the year of play, threaded from the tournament (the archive's
+> tourney id, ESPN's event id), never from a match date (an event starting
+> 2023-12-31 is the 2024 season).
 >
 > **No model is live yet.** This file holds the groundwork, what each source
-> holds, the settlement rules, the market grid and the purchase that the
-> research waits on.
+> holds, the settlement rules, the market grid and the purchases.
 
 ## What the sources hold (measured 2026-11-13)
 
@@ -23,8 +25,24 @@
 | Its bill | `x-requests-last`: 10 credits per market per region on the history endpoint; ten named books bill as one region (30 for three markets, 60 for twenty books); the history event list costs 1. |
 | ESPN's scoreboard (`site.api.espn.com/apis/site/v2/sports/tennis/{atp,wta}/scoreboard?dates=`) | Free. Every tour-level singles match, the 250 and WTA 125 levels included, from 2010 at least: round, court, start, both players' ESPN ids, games per set, tiebreak points, and a status naming a retirement (`STATUS_RETIRED`) or walkover. One call returns each tournament in play that day, whole (the 2025 US Open: 239 men's singles matches with qualifying). Its `format` field reads 5 sets for best-of-three events (the women's US Open, Shanghai), so best-of is set from the tour and the event. ESPN's core odds endpoint holds nothing for tennis (`count: 0`). |
 | The match archive | Jeff Sackmann's datasets via the public mirror `Aneeshers/tennis-sackmann-archive` (commit 83733587, an upstream snapshot of June 2026; the upstream repositories answer 404). Score, round, surface, ranks, minutes, and serve and return counts for both players. **Licence: CC BY-NC-SA 4.0, non-commercial**, as the mirror's README states. Stored: men's tour 2000-2026 and challengers/qualifying 2010-2026; women's tour 2000-2026 and qualifying/ITF 2010-2026 without the $10k-$25k levels. |
+| Pinnacle's own site (`guest.api.arcadia.pinnacle.com/0.1`, no key) | Every level: on 2026-11-13 its tennis board held 33 leagues (Challengers, ITF men's and women's, a WTA 125, a 250, the Davis Cup, both Finals). Two calls hold the whole sport: every matchup (a match is a Sets parent and a Games child), and every price with its version and stake limit. Logged every 30 minutes from 2026-11-13 into `tennis_pinnacle_matchups` and `tennis_pinnacle_prices` (`data/ingestors/tennis_pinnacle.py`); the first pass held 121 matchups and 1,079 prices. It priced both Finals while the odds feed showed no Pinnacle for them. |
+| TennisExplorer's results pages (`tennisexplorer.com/results/?type=atp-single` or `wta-single`) | Every level on one page a day per tour: both players (a stable profile link), sets, games with tiebreak points, two decimal prices. Robots allow the results pages; the terms page is closed to crawlers, so not read. 2025-08-31 men's: 417 matches, 290 ITF (23 priced), 75 Challenger (74 priced), 48 other (UTR series, a team league: dropped). Collecting 2020-01-01 to date into `tennis_te_matches`, one page every 2 seconds (`data/ingestors/tennis_explorer.py`). |
+| DraftKings' own site | Lists the lower levels, but reading it needs a browser-style session; the permission check refused that request on 2026-11-13. Not read. |
+| ESPN, Challengers and ITF | None: ESPN's 2025 men's results hold 61 events (the tour, every 250) and its women's 106 (the tour and the 125s); no Challenger or ITF event. |
 | tennis-data.co.uk (one price per match: Bet365, Pinnacle, best, average) | **Refused**: a Cloudflare block ("Sorry, you have been blocked") from mike's PC on 2026-11-13, its notes page too. Copies of its files on GitHub are not used. |
 | Betfair historical data | BASIC (one-minute last traded price) is free with an account, from 2016 (scout). Not used: no account. |
+
+## TennisExplorer's prices
+
+Measured on the 11 trial matches both sources hold (2025-08-29 to 31, the men's
+US Open), against the bought prices for the same matches. TennisExplorer's
+pair carries a median overround of 5.3% (3.6% to 5.8%): an average of books,
+not one sharp book (Pinnacle's runs near 3%) and not an exchange. It sits
+closest to the average of the seven decidable books' last prices before the
+start (mean gap 0.37 in decimal odds, equal on 3 of 11), further from
+Pinnacle's last (0.55, never equal), Pinnacle's first (0.81) and the Betfair
+exchange (2.30). So it is a consensus near the close: a baseline a model can
+be ranked against, and **not a price a pick could have been decided at**.
 
 ## The listed start is not the start
 
@@ -109,6 +127,7 @@ book's no-vig number (mechanism 1 below).
 | Games spread | games won by each player, completed matches | the same | BetRivers and Caesars (decidable); Pinnacle, Bovada, LowVig, BetOnline, Bally, betPARX | to do | a serve-and-return game model against the line; line shop | — | to do (needs the purchase) |
 | Total games | both players' games, a tiebreak one game | the same | the same books | to do | a serve-and-return game model (hold rates, tiebreak chance); line shop | — | to do (needs the purchase) |
 | First-set winner | set one | the same | BetMGM and LeoVegas only, per-event endpoint | | | | parked: one decidable book, history only by the per-event endpoint |
+| **Below the top tier** (men's 250s, Challengers and ITF; women's 125s and ITF), all three markets | as above; DraftKings voids an ITF moneyline on any retirement | results: ESPN for the 250s and 125s, TennisExplorer for every level from 2020 (collecting), the archive to June 2026 | the odds feed: none (it sells only its 53 keys). Pinnacle direct: every level, from 2026-11-13 (collecting). TennisExplorer: one price pair a match, an average of books near the close (below), from 2020 (collecting). **A book a pick could name: none yet** | to do | ratings, serve and return, fatigue and retirement models ranked against Pinnacle and the average close | — | **parked for betting**: research can rank models against Pinnacle and the average close, but nothing can be bet or graded in units until a bettable book's price is collected at these levels (DraftKings lists them) |
 | Alternate games spreads and totals | as above | | LeoVegas, Coral, Ladbrokes | | | | parked: no decidable book |
 | Player games, aces, double faults, set betting | | | none: the feed rejects or returns nothing for these keys | | | | parked: no price source |
 | In play | | | the feed serves in-play tennis prices | | | | parked: no point-by-point feed |

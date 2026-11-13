@@ -197,3 +197,17 @@ def test_the_walk_jumps_a_gap_the_feed_kept_nothing_in(monkeypatch):
     hours = sorted({a.hour for a in asked})
     assert hours == [0, 1, 2, 8, 9, 10], hours
     assert out["asks"] == 12                      # six snapshots, two book groups each
+
+
+def test_shards_split_the_windows_and_their_ceilings_sum_to_the_plan(tmp_path):
+    base = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    sweep = [{"key": f"k{i}", "year": 2025, "first": toh._iso(base + timedelta(days=10 * i)),
+              "last": toh._iso(base + timedelta(days=10 * i, hours=5 + i))} for i in range(7)]
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps(sweep), encoding="utf-8")
+    windows = toh.load_windows(str(f))
+    parts = [toh.shard(windows, f"{i}/3") for i in range(3)]
+    keys = sorted(w["key"] for part in parts for w in part)
+    assert keys == sorted(w["key"] for w in windows)            # every window once
+    step = timedelta(hours=1)
+    assert sum(toh.plan(p, step)["max_credits"] for p in parts) == toh.plan(windows, step)["max_credits"]
