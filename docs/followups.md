@@ -33,6 +33,26 @@ FanDuel's and Pinnacle's first daily price; DraftKings' totals against
 Pinnacle's; the three inventions in audit §9. Any new UFC card must also
 clear the two twin-id items below.
 
+## [ ] [needs-decision] Architecture: stop code merges restarting the in-play service (2026-11-13)
+mike, 2026-11-13, after merging #1293 during a live college basketball
+slate: *"do we need in-play only workers then? future consideration for
+architecture discussion"*. The in-play loops already run on their own
+service (`pollers`, `SERVICE_ROLE=poller`: 9 jobs) apart from the pipeline
+(`worker`: 39 jobs), measured by building each role's job list on
+8ea9f2cf. What couples them is the deploy trigger: both build from the one
+`railway.json`, whose `watchPatterns` include `**/*.py`, so every code
+merge rebuilds and restarts both. Railway starts the new container before
+stopping the old (`drainingSeconds` 600), so a working deploy leaves a short
+gap; a failed one leaves the old container running (2026-11-13: Railway's
+"Builds failing in US West" incident failed both services' deploys of
+8ea9f2cf and dc570704, and every in-play job kept beating on the old
+containers). Options to weigh: (1) a separate config for `pollers` with
+watch patterns limited to the in-play code and what it imports (most merges
+touch shared modules such as `config.py`, `data/`, `tracking/`, so the
+import surface would need narrowing first); (2) a merge gate that holds a
+code merge while in-play games are live, beside the daily-pipeline gate
+(`.github/workflows/daily-merge-gate.yml`).
+
 ## [ ] UFC: next experiments on the bought history (2026-11-13)
 `ufc_open_moneyline` is live on merge (`docs/ufc_market_audit.md` §3d).
 Next, each on `ufc_odds_history`: a Pinnacle-anchored finish model for round
