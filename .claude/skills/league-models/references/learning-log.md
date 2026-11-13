@@ -30,6 +30,22 @@ review as its own entry.
 
 ---
 
+## 2026-11-13 — EuroLeague halftime
+
+1. **Scope.** The EuroLeague build: the halftime break, now that the shot
+   chart places it on the wall clock.
+2. **Tried.** Fresh-quote coverage by book, blind bets at the break, the
+   women's halftime method ported unchanged for total, spread and moneyline,
+   a structural check of how the books re-hang the halftime line, 183 cells
+   with a false-discovery correction. Nothing clears.
+3. **New.** In `methods.md`, the halftime method's EuroLeague result and its
+   mechanism: a book that carries too much of the pre-game margin into the
+   second half. A check worth running in every league with in-play history:
+   measure the share of the pre-game margin and of the first-half surprise
+   the books carry into the halftime line, against what the games carried.
+4. **Corrected.** Nothing in the skill was contradicted.
+5. **The framework.** Nothing changed.
+
 ## 2026-11-13 — EuroLeague round 2, and halftime placed on the wall clock
 
 1. **Scope.** The EuroLeague build, round 2 (`docs/euroleague_market_audit.md`).

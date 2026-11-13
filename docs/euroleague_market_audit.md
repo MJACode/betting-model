@@ -19,6 +19,48 @@ No paid calls, no sign-ups. The only API calls were free, keyless GETs to the of
 
 Evidence grades: **Strong** = out-of-sample, real prices, bet count, interval or CLV, nothing to sell. **Weak** = win rate only, flat -110, in-sample, one season, or undated. **Noise** = pick sellers, tipsters.
 
+## Halftime (2026-11-13)
+
+Run by a read-only research agent on the local cache, with the decision time,
+inputs and cut grid written down before any result: every table in
+`docs/euroleague_halftime.md`; the scripts are
+`scripts/euroleague_research/r4_*.py` (`r4_report.py`, then `r4_verdict.py`).
+Halftime is placed by the shot chart: the break between the last
+second-quarter shot and the first third-quarter shot is a median 15.9
+minutes (games with a break outside 10-25 minutes are left out). A quote
+counts only if its snapshot falls inside the break and it was re-hung after
+the half's last shot. **Verdict: nothing clears the bar.** The numbers are
+the agent's.
+
+| Market | Rule | Bets | Units | Return [90%] | Verdict |
+|---|---|---|---|---|---|
+| Total | the women's halftime method, unchanged | 574 | -12.61 | -1.93% [-8.44, +4.23] | null (99% overs; the blind over loses -10.04%) |
+| Moneyline | the same margin model, priced as a moneyline | 164 | -0.51 | -0.24% [-13.25, +12.85] | null |
+| Spread | the women's method, unchanged | 312 | +29.80 | +8.37% [-0.06, +16.33] | lead, misses the bar |
+| Spread | the same, Pinnacle's close as the pre-game number | 364 | +45.34 | +10.93% [+3.40, +18.48] | **lead, misses the bar** |
+| Total | chosen after seeing results: against the book's departure from half-time points + half the pre-game total | 212 | +33.91 | +13.67% [+3.00, +24.57] | fails (2025-26 carries 85% of its units) |
+
+- **The mechanism, measured in the books' own lines.** At DraftKings the books
+  hand back the first half's surprise at about the right rate (27.5% against
+  25.7% in the games), but carry 50% of the pre-game margin into the second
+  half, where the games carried 40%. So the pre-game favourite covered only
+  42-48% of halftime spreads (51% when leading by 10+). Halftime totals sit on
+  the formula, with no miss after a high- or low-scoring half.
+- **The Pinnacle-anchored spread passed:** the placebo (0 of 200 shuffles of
+  the half-time state reached it), every cut from 0.02 to 0.12 positive, the
+  blind bets on the same sides losing (-2.0% to -8.6%), the other read, and
+  normal prices (median -115, -135 to +105). **It failed:** the
+  false-discovery correction across all 183 cells (best p 0.0096 against a
+  first-rank threshold of 0.00055); one season negative in each version
+  (2023-24); the 2021-22 second look negative; 72-78% of bets are halftime
+  underdogs; and 2026-27's 26-31 bets carry a large share of the units.
+- **What a live loop would need.** DraftKings posted a fresh halftime line in
+  92-100% of games every season; FanDuel, BetMGM, BetRivers and Fanatics from
+  2025-26 in 73-100%. The break is about 14 minutes and the first fresh line
+  comes a median 3.1 minutes after the half's last shot, so about 12 minutes
+  to decide; the 5-minute history gives about 3 reads a break. There is no
+  live EuroLeague score source and no live in-play price pull yet.
+
 ## Round 2: the home lean, market-anchored models, totals, and three mechanisms per period market (2026-11-13)
 
 Run by a read-only research agent on the local cache; every table, with the

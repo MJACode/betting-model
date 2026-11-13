@@ -125,6 +125,12 @@ edge is where the rule misses something the state shows.
 - **The halftime break as the decision point.** The state is fixed and "a
   bettor has minutes, not seconds". *Worked*: women's college halftime total,
   669 bets +11.84% [+5.1, +18.1], replayed on the loop's own code.
+  *EuroLeague*: the total, ported unchanged, failed (574 bets -1.93%: it
+  expected too many second-half points); the spread is a lead that misses the
+  bar (364 bets +10.93% [+3.40, +18.48], placebo passed, the false-discovery
+  correction failed), with a measured mechanism: the books carry 50% of the
+  pre-game margin into the second half where the games carried 40%
+  (`docs/euroleague_market_audit.md`, Halftime).
 - **Live re-anchoring off the pre-game number and the clock.** The book's live
   prop line is re-hung from the opener and time elapsed; it under-adjusts for
   the game script. *Measured, in sample*: pro football rushing-attempt unders
