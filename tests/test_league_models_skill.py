@@ -171,3 +171,89 @@ def test_the_learning_log_is_dated_and_newest_first():
     dates = re.findall(r"^## (\d{4}-\d{2}-\d{2}) — ", log, flags=re.M)
     assert dates, "the learning log has no dated entries"
     assert dates == sorted(dates, reverse=True), f"entries out of order: {dates}"
+
+
+# ── Every new model and every new sport teaches the skill ─────────────────────
+#
+# The skill learns only when a build writes back (SKILL.md, "How this skill
+# learns"). The Stop hook (.claude/hooks/league_models_writeback.py) reminds a
+# session that used the skill; this catches a build that never opened it. Any
+# model in config.ACTION_THRESHOLDS, or any sport the odds feed or Discord
+# knows, that is not in the frozen sets below must be named in the learning
+# log before it can merge.
+#
+# FROZEN 2026-11-13 (82 models, 11 sports). Never add to these sets: a new id
+# goes in a learning-log entry instead, which is the point.
+MODELS_BEFORE_THE_LOG = frozenset("""
+mlb_f5_moneyline mlb_f5_over_under mlb_f5_runline mlb_live_total_runs mlb_moneyline
+mlb_over_under mlb_prop_batter_hits mlb_prop_batter_runs mlb_prop_batter_sb
+mlb_prop_batter_tb mlb_prop_batter_walks mlb_prop_pitcher_er mlb_prop_pitcher_hits
+mlb_prop_pitcher_k mlb_prop_pitcher_outs mlb_prop_pitcher_walks mlb_runline
+mlb_spread_market mlb_total_market mlb_total_public_fade nba_first_half_total_luck
+nba_live_spread_q12 nba_prop_market nba_prop_projection nba_q1_trend nba_q1_trend_ml
+nba_team_total_luck nba_total_luck ncaab_first_half_spread ncaab_first_half_total
+ncaab_live_spread_h1 ncaab_live_spread_h2 ncaab_live_total_h2 ncaab_moneyline_first_post
+ncaab_moneyline_own_spread ncaab_spread_market ncaab_total_blend ncaabw_live_total_ht
+ncaabw_total_blend ncaaf_live_total ncaaf_live_win_prob ncaaf_moneyline
+ncaaf_moneyline_market ncaaf_over_under ncaaf_spread ncaaf_spread_premium
+nfl_live_leader_ml nfl_opener_spread nfl_prop_anytime_td nfl_prop_market
+nfl_prop_pass_attempts nfl_prop_pass_completions nfl_prop_pass_tds nfl_prop_pass_yards
+nfl_prop_rec_yards nfl_prop_receptions nfl_prop_rush_attempts nfl_prop_rush_rec_yards
+nfl_prop_rush_yards nfl_prop_sacks nfl_prop_tackles_assists nfl_wind_totals
+nhl_moneyline nhl_moneyline_regulation nhl_over_under nhl_prop_assists
+nhl_prop_blocked_shots nhl_prop_saves nhl_prop_shots_on_goal nhl_puckline
+ufc_method_of_victory ufc_moneyline ufc_total_rounds wnba_moneyline wnba_over_under
+wnba_prop_market wnba_prop_player_assists wnba_prop_player_points wnba_prop_player_pra
+wnba_prop_player_rebounds wnba_prop_player_threes wnba_spread
+""".split())
+SPORTS_BEFORE_THE_LOG = frozenset(
+    "EUROLEAGUE GOLF MLB NBA NCAAB NCAABW NCAAF NFL NHL UFC WNBA".split())
+
+
+def _odds_feed_sports() -> set[str]:
+    """SPORT_KEYS' keys, read from the source (importing the ingestor pulls in the database layer)."""
+    text = _read(os.path.join(ROOT, "data", "ingestors", "odds_ingestor.py"))
+    block = re.search(r"^SPORT_KEYS\s*(?::[^=]+)?=\s*\{(.*?)^\}", text, re.S | re.M)
+    assert block, "SPORT_KEYS not found in data/ingestors/odds_ingestor.py: update this test"
+    return set(re.findall(r'^\s*"([A-Z0-9_]+)"\s*:', block.group(1), re.M))
+
+
+def _unlogged(names, frozen, log_text, *, ignore_case=False):
+    hay = log_text.lower() if ignore_case else log_text
+    return sorted(n for n in set(names) - set(frozen)
+                  if not re.search(rf"\b{re.escape(n.lower() if ignore_case else n)}\b", hay))
+
+
+def _log_text() -> str:
+    return _read(os.path.join(REF_DIR, "learning-log.md"))
+
+
+def test_every_new_model_is_named_in_the_learning_log():
+    import config
+    missing = _unlogged(config.ACTION_THRESHOLDS, MODELS_BEFORE_THE_LOG, _log_text())
+    assert not missing, (
+        f"New model(s) {missing} are not named in "
+        ".claude/skills/league-models/references/learning-log.md. Every model "
+        "build teaches the skill: add a dated entry (newest first) naming each "
+        "id, with what was tried, what was new, what was corrected and what in "
+        "the framework changed, and write each new method, trap or source into "
+        "its reference file. See SKILL.md, step 9."
+    )
+
+
+def test_every_new_sport_is_named_in_the_learning_log():
+    import config
+    sports = _odds_feed_sports() | set(getattr(config, "DISCORD_SPORTS", ()))
+    missing = _unlogged(sports, SPORTS_BEFORE_THE_LOG, _log_text(), ignore_case=True)
+    assert not missing, (
+        f"New sport(s) {missing} are not named in the league-models learning "
+        "log. A new league is built with /league-models and logged there "
+        "(SKILL.md, step 9)."
+    )
+
+
+def test_the_rule_catches_an_unlogged_model_and_passes_a_logged_one():
+    log = "## 2026-12-01 — WNBA\n\n3. **New.** `wnba_total_pace` ..."
+    assert _unlogged({"wnba_total_pace", "wnba_q1_spread"}, set(), log) == ["wnba_q1_spread"]
+    assert _unlogged({"NCAAB_X"}, set(), "ncaab_x built", ignore_case=True) == []
+    assert _unlogged({"mlb_moneyline"}, MODELS_BEFORE_THE_LOG, "") == []

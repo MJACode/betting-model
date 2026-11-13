@@ -3,11 +3,12 @@ name: league-models
 description: "Build, audit or extend the betting models for EVERY market in one league — a league we have never bet, new markets in a league we already bet, or a full audit of one league's markets. Use when asked to build models for a league, add a league or sport, audit all of a league's markets, explain why nothing is firing in a league, find what else can be bet in a league, or port what was learned in one sport to another. It is the framework for that work — the market grid, prices before models, the market as the baseline, a method search per market, the kill tests, ship what passes live, keep improving on live data — for hunting outside the repo (papers, forums, open-source code, data and price sources), and for inventing new methods when nothing found clears."
 ---
 
-# /league-models <league> [market … | audit]
+# /league-models <league> [market … | audit] · /league-models review
 
 One league, every market the books offer, worked to a verdict. With no market
 named, the scope is the whole league. `audit` means the league already has
-models: start from what they did, not from zero.
+models: start from what they did, not from zero. `review` is the skill
+reviewing itself, with no league: "Review mode" below.
 
 This file is the method. The detail lives beside it and is read when the step
 that needs it starts:
@@ -57,6 +58,45 @@ the work, not a courtesy after it:
   that appears in two log entries is promoted to a rule in the step it belongs
   to. A league that fits no sport shape adds one to `references/market-grid.md`.
   Every fifth entry, read the whole log for patterns and revise this file.
+
+**What enforces it, so it does not depend on a session remembering:**
+
+- **At the end of a session**: a Stop hook
+  (`.claude/hooks/league_models_writeback.py`, wired in `.claude/settings.json`)
+  stops a session that used this skill and changed files without touching the
+  learning log, once, and tells it what to write.
+- **At merge**: `tests/test_league_models_skill.py` fails when a model or a
+  sport added after 2026-11-13 is not named in the learning log, whether or not
+  the session that built it ever opened this skill, and when a file, module or
+  setting the skill cites has moved.
+- **With nobody using it**: review mode, below, run on a schedule if mike has
+  set one, or by hand.
+
+### Review mode — `/league-models review`
+
+The skill checking itself against what has happened since it last looked. No
+league, no model work: the output is a pull request against these files, never
+a merge.
+
+1. **Since when.** The newest learning-log entry titled "Review"; if none, the
+   first entry.
+2. **What changed in the repo.** `git log` since then: models added, retired,
+   paused or re-cut (`config.py`), new league docs and study docs, session-log
+   entries. Each model or sport added without a log entry is a gap to fill now,
+   from its own doc.
+3. **What the live records say.** For every method `references/methods.md`
+   lists as live, read its model's settled record since the claim was written
+   (units on the posted stake, on the artifact that is live — read-only SQL).
+   Where the record contradicts the claim, correct the entry in place and log
+   "was X, now Y".
+4. **Promote and prune.** A trap or failure in two or more entries becomes a
+   rule in the step it belongs to. A frontier idea that a session has since run
+   moves into its mechanism with the result.
+5. **Re-measure the routes.** Re-probe the scouting routes table and the price
+   routes; date every answer and every refusal.
+6. **Write it back.** A "Review" entry in the learning log with what was read,
+   what changed and what is open; the edits; a branch and a pull request whose
+   body lists each change in plain words. mike merges it.
 
 ---
 

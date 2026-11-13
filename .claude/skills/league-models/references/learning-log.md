@@ -30,6 +30,34 @@ review as its own entry.
 
 ---
 
+## 2026-11-13 — The write-back enforced: a Stop hook, a merge gate, review mode
+
+1. **Scope.** mike: *"for self improvement, how can we ensure the skill auto
+   updates itself ?"*
+2. **Tried.** Read the first real use (the EuroLeague groundwork, 2026-11-12):
+   it wrote an entry and three reference files and corrected the new-league
+   order, without being forced. It also showed the gap: that session started
+   in a checkout whose branch did not hold the skill, so the skill never
+   loaded; the session found it in git and read its files by path.
+3. **New.**
+   - A Stop hook (`.claude/hooks/league_models_writeback.py`, project
+     settings): a session that used the skill (the Skill tool, a typed
+     `/league-models`, or reading the skill's SKILL.md by path) and changed
+     files, but never touched this log, is stopped once and told what to
+     write. It fails open. Run on five of the 2026-11-12 transcripts it
+     blocks none: each one that used the skill had written the log.
+   - A merge gate in `tests/test_league_models_skill.py`: a model id in
+     `config.ACTION_THRESHOLDS` or a sport in the odds feed's `SPORT_KEYS` or
+     `config.DISCORD_SPORTS` that is not in the sets frozen on 2026-11-13 must
+     be named in this log.
+   - Review mode (`/league-models review`, `SKILL.md`): the skill checked
+     against the repo's changes and the live records since the last review,
+     ending in a pull request.
+4. **Corrected.** Nothing measured was contradicted.
+5. **The framework.** `SKILL.md` now names what enforces the write-back. The
+   Stop hook is in the project settings, so it runs in every session in this
+   repo, Matt's included.
+
 ## 2026-11-12 — EuroLeague, the first league built with the skill (groundwork)
 
 1. **Scope.** mike: *"invoke the new skill to build the euroleague model. all
