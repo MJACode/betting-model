@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, #1255 finished: a refresh stands down for the daily only 05:40–07:15 ET (an evening catch-up daily no longer stops the live-game refreshes); the jobs that decide picks in that window, or capture their prices, run as before; a turned-away tick beats `skipped` |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, league skill weekly review (first run): no model added or re-cut since 2026-11-12; cloud column added to the scouting routes (only api.github.com answered); live records not measured because the Supabase connector failed to connect |
 | 2026-11-13 | [2026-11](./2026-11.md) | 2026-11-13, the league skill's write-back is enforced: a Stop hook stops a session that used the skill and changed files without writing the learning log (once, fails open), the suite fails on a new model or sport the log does not name, and a review mode for a scheduled self-check |
 | 2026-11-12 | [2026-11](./2026-11.md) | 2026-11-12, EuroLeague groundwork: every game and quarter score 2020-21 on stored from EuroLeague's open API; the full-game and first-half/quarter history purchases built and trialled (about 9.2M and 1.1M credits), waiting on the merge and mike's yes |

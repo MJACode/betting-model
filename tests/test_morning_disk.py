@@ -25,8 +25,10 @@ os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost/db")
 import scheduler  # noqa: E402
 from monitoring import store  # noqa: E402
 from tracking.job_queue import QUEUE_LOCK_KEY  # noqa: E402
+from tracking import morning_disk  # noqa: E402
 from tracking.morning_disk import (  # noqa: E402
     API_LOG_PRUNE_LOCK,
+    DECIDING_JOBS,
     DEFER_JOBS,
     ET,
     LANE_JOBS,
@@ -85,10 +87,16 @@ def test_the_nov12_pile_cannot_all_run():
         decision = disk.admit(job_id, now=_WHEN, daily_busy=True)
         if decision.admitted:
             admitted.append((job_id, decision))
-    assert len(admitted) == 1, [j for j, _ in admitted]
-    assert admitted[0][0] not in DEFER_JOBS
-    admitted[0][1].release()
-    nxt = disk.admit("ncaab_odds_capture", now=_WHEN, daily_busy=True)
+    # The jobs that decide real-money picks in the window run regardless
+    # (DECIDING_JOBS); of the rest, one.
+    in_lane = [(j, d) for j, d in admitted if j not in DECIDING_JOBS]
+    assert len(in_lane) == 1, [j for j, _ in admitted]
+    assert in_lane[0][0] not in DEFER_JOBS
+    assert ({j for j, _ in admitted} - {in_lane[0][0]}
+            == {j for j in _PILE if j in DECIDING_JOBS})
+    for _j, d in admitted:
+        d.release()
+    nxt = disk.admit("ncaab_injury_feed", now=_WHEN, daily_busy=True)
     assert nxt.admitted
     nxt.release()
 
@@ -111,14 +119,14 @@ def test_kalshi_runs_at_0532_and_not_at_0632_and_catches_up_at_0720():
 def test_the_lane_does_not_apply_outside_the_window():
     disk = MorningDisk()
     now = datetime(2026, 11, 12, 20, 0, tzinfo=ET)
-    first = disk.admit("ncaab_odds_capture", now=now)
-    second = disk.admit("nfl_poll_fast", now=now)
+    first = disk.admit("ncaab_injury_feed", now=now)
+    second = disk.admit("nba_prop_window", now=now)
     assert first.admitted and second.admitted
 
 
 def test_the_daily_is_not_gated_on_the_lane():
     disk = MorningDisk()
-    held = disk.admit("ncaab_odds_capture", now=_WHEN)
+    held = disk.admit("ncaab_injury_feed", now=_WHEN)
     assert held.admitted
     daily = disk.admit("daily_pipeline", now=_WHEN, daily_busy=True)
     assert daily.admitted
@@ -321,12 +329,15 @@ def test_the_schedule_moves_the_0517_refresh_and_the_kalshi_minutes():
 
 def test_the_wrapper_asks_the_gate_before_the_job():
     src = inspect.getsource(scheduler.build_scheduler)
-    assert src.index("admit(") < src.index("return func(")
+    assert src.index("admit(") < src.index("result = func(")
 
 
 def test_a_refresh_does_not_start_while_the_daily_holds_its_lock(monkeypatch):
+    """Inside the morning window only (the next test is the evening)."""
     calls = []
     monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, 6, 17, tzinfo=ET))
     assert scheduler._DAILY_LOCK.acquire(blocking=False)
     try:
         scheduler.run_refresh_pass()
@@ -357,3 +368,124 @@ def test_the_daily_waits_for_an_in_flight_refresh_then_runs(monkeypatch):
             scheduler._DAILY_LOCK.release()
         if scheduler._REFRESH_LOCK.locked():
             scheduler._REFRESH_LOCK.release()
+
+
+# ── finished 2026-11-13: the gate stays in the morning ───────────────────────
+
+
+@pytest.mark.parametrize("hh,mm", [(18, 17), (19, 17), (21, 47), (22, 7)])
+def test_an_evening_refresh_runs_while_a_catch_up_daily_holds_its_lock(
+        monkeypatch, hh, mm):
+    """A catch-up daily may run until 22:00 ET (DAILY_RETRY_CUTOFF_HOUR). The
+    18:00-23:00 refreshes carry odds, scoring and push during live games, so
+    a daily holding its lock in the evening must not stop them."""
+    calls = []
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
+    monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, hh, mm, tzinfo=ET))
+    assert scheduler._DAILY_LOCK.acquire(blocking=False)
+    try:
+        assert scheduler.run_refresh_pass("evening") != "skipped"
+        assert len(calls) == 1
+        assert calls[0][0][:2] == ["bash", "scripts/refresh_pass.sh"]
+        assert not scheduler._REFRESH_LOCK.locked()
+    finally:
+        scheduler._DAILY_LOCK.release()
+
+
+def test_the_refresh_skip_is_bounded_by_the_morning_window():
+    busy = True
+    assert morning_disk.refresh_yields_to_daily(
+        datetime(2026, 11, 12, 5, 40, tzinfo=ET), busy)
+    assert morning_disk.refresh_yields_to_daily(
+        datetime(2026, 11, 12, 7, 14, tzinfo=ET), busy)
+    assert not morning_disk.refresh_yields_to_daily(
+        datetime(2026, 11, 12, 7, 17, tzinfo=ET), busy)
+    assert not morning_disk.refresh_yields_to_daily(
+        datetime(2026, 11, 12, 5, 17, tzinfo=ET), busy)
+    assert not morning_disk.refresh_yields_to_daily(
+        datetime(2026, 11, 12, 6, 17, tzinfo=ET), False)
+
+
+def test_the_jobs_that_decided_in_the_window_are_not_in_the_lane():
+    """Measured 2026-11-13 on 21 days: the NCAAB totals card (06:18 ET), the
+    NFL prop card (06:27 ET) and the NFL polls (06:00 ET) each wrote a
+    decision inside 05:40-07:15 ET, and the NCAAB first-post moneyline wrote
+    44 on first posts the NCAAB capture stored in the window. A tick of
+    theirs that lost the lane would move when a game is decided. The capture
+    fires in the same minute as the injury feed, so it is checked while the
+    injury feed holds the lane."""
+    for job_id in ("ncaab_total_card", "ncaabw_total_card", "nfl_prop_card",
+                   "nfl_opener_poll", "nfl_poll_hourly", "nfl_poll_fast",
+                   "ncaab_odds_capture", "ncaabw_odds_capture"):
+        assert job_id in DECIDING_JOBS
+        assert job_id not in LANE_JOBS
+        assert job_id not in DEFER_JOBS
+    disk = MorningDisk()
+    when = datetime(2026, 11, 13, 6, 18, tzinfo=ET)
+    held = disk.admit("ncaab_injury_feed", now=when, daily_busy=True)
+    assert held.admitted
+    try:
+        assert not disk.admit("nba_prop_window", now=when).admitted
+        for job_id in DECIDING_JOBS:
+            assert disk.admit(job_id, now=when, daily_busy=True).admitted
+    finally:
+        held.release()
+
+
+def test_recorders_and_the_queue_wait_for_the_daily_only_in_the_morning():
+    disk = MorningDisk()
+    morning = datetime(2026, 11, 12, 7, 25, tzinfo=ET)
+    evening = datetime(2026, 11, 12, 19, 32, tzinfo=ET)
+    for job_id in ("kalshi_ladders", "kalshi_game_markets_morning", "job_queue"):
+        assert not disk.admit(job_id, now=morning, daily_busy=True).admitted
+        assert disk.admit(job_id, now=evening, daily_busy=True).admitted
+        assert disk.admit(job_id, now=morning, daily_busy=False).admitted
+
+
+def _wrapped_job(monkeypatch, job_id):
+    beats = []
+    from tracking import job_heartbeat
+    monkeypatch.setattr(job_heartbeat, "beat",
+                        lambda jid, status="ok", detail="": beats.append(
+                            (jid, status, detail)))
+    job = {j.id: j for j in scheduler.build_scheduler().get_jobs()}[job_id]
+    beats.clear()                       # registration seeds; not under test
+    return job.func, beats
+
+
+def test_a_tick_the_gate_turns_away_beats_skipped_not_ok(monkeypatch):
+    func, beats = _wrapped_job(monkeypatch, "kalshi_ladders")
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, 6, 32, tzinfo=ET))
+    assert func() is None
+    assert beats == [("kalshi_ladders", "skipped",
+                      "deferred — morning disk window")]
+
+
+def test_a_morning_refresh_that_stands_down_beats_skipped(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
+    func, beats = _wrapped_job(monkeypatch, "hourly_refresh")
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, 7, 10, tzinfo=ET))
+    assert scheduler._DAILY_LOCK.acquire(blocking=False)
+    try:
+        func()
+    finally:
+        scheduler._DAILY_LOCK.release()
+    assert calls == []
+    assert [b[:2] for b in beats] == [("hourly_refresh", "skipped")]
+
+
+def test_a_tick_that_runs_still_beats_ok(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scheduler, "_run", lambda *a, **k: calls.append(a) or "ok")
+    monkeypatch.setattr(scheduler, "_wait_for_nhl_window", lambda label: True)
+    func, beats = _wrapped_job(monkeypatch, "hourly_refresh")
+    monkeypatch.setattr(morning_disk, "now_et",
+                        lambda: datetime(2026, 11, 12, 12, 17, tzinfo=ET))
+    func()
+    assert len(calls) == 1
+    assert beats == [("hourly_refresh", "ok", "")]

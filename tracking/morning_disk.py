@@ -16,13 +16,16 @@ the pollers and prop-probe were up. The overlap on the pipeline scheduler:
 - NCAAB/NCAABW odds capture, the NCAAF and NCAAB cards, and the NFL polls
   that read `games` and write `nfl_odds_history`, all free to start together
 
-The daily still runs at 06:00. It is the morning's one full writer. A refresh
-does not start while it holds its lock, and the daily waits for a refresh
-already inside its chain. From 05:40 to 07:15 ET the other heavy ticks share
-one lane, so they run one at a time instead of as a pile. Kalshi snapshots
-and the api_call_log prune do not start in that window; Kalshi has a 07:20
-and 07:25 catch-up so the hour is still recorded, and the prune runs on the
-next flush after the window, one session at a time.
+The daily still runs at 06:00. It is the morning's one full writer. From
+05:40 to 07:15 ET a refresh does not start while it holds its lock (outside
+that window a refresh runs beside a daily as before), and the daily waits for
+a refresh already inside its chain. In the same window the other heavy ticks
+share one lane, so they run one at a time instead of as a pile; the jobs that
+decide real-money picks in that window (DECIDING_JOBS) are not in the lane.
+Kalshi snapshots and the api_call_log prune do not start in that window;
+Kalshi has a 07:20 and 07:25 catch-up so the hour is still recorded, and the
+prune runs on the next flush after the window, one session at a time. A tick
+the gate turns away beats its heartbeat as "skipped", not "ok".
 
 No migration. The lane is in-process. The prune lock is a session advisory
 lock, the same mechanism as the scoring lease, and it needs no new table.
@@ -60,26 +63,68 @@ MAINTENANCE_JOBS = frozenset({
 # backfill started at 06:00 would sit on the disk next to the daily.
 DEFER_JOBS = MAINTENANCE_JOBS | frozenset({"job_queue"})
 
-# Disk-heavy ticks that still have to run in the window (odds capture, the
-# cards, the NFL polls). One at a time. The every-minute planning reads are
-# not in this set: they are one indexed read when idle, and putting them
-# here would let them take the lane from the capture.
+# Disk-heavy ticks that still have to run in the window and neither decide a
+# real-money pick in it nor capture the prices one decides on. One at a time.
+# The every-minute planning reads are not in this set: they are one indexed
+# read when idle.
 LANE_JOBS = frozenset({
-    "ncaab_odds_capture",
-    "ncaabw_odds_capture",
     "ncaab_injury_feed",
-    "ncaab_total_card",
-    "ncaabw_total_card",
     "ncaab_spread_card",
     "ncaab_moneyline_card",
     "ncaaf_moneyline_card",
-    "nfl_poll_hourly",
-    "nfl_poll_fast",
-    "nfl_opener_poll",
     "nfl_schedule_refresh",
-    "nfl_prop_card",
     "nba_prop_window",
 })
+
+# Jobs that decide real-money picks inside 05:40-07:15 ET, or capture the
+# prices those decisions are made on. The lane is a non-blocking try, so a
+# tick that lost it was skipped, not queued, and the game would be decided
+# at a later look. They run as they did before the lane. Measured
+# 2026-11-13 on the last 21 days (decision ledgers and picks, read-only):
+#   ncaab_total_card     1 decision, 2026-11-13 06:18 ET (East Texas A&M at
+#                        Portland, below the cut), on a quote stored 06:14.
+#                        Decides at DraftKings' first posted total.
+#   ncaabw_total_card    the same first-posted-total rule; its ledger starts
+#                        2026-11-10, so 21 days cannot be measured yet.
+#   ncaab_odds_capture   stores the first posts both NCAAB first-post rules
+#                        decide on. The first-post moneyline (every minute,
+#                        never in the lane) wrote 44 decisions in the window
+#                        on 41 games, each on a first post stored in it. It
+#                        shared its minute with the injury feed and the NBA
+#                        prop window, so it competed for the lane every tick.
+#   ncaabw_odds_capture  the same, for the women's totals card.
+#   nfl_prop_card        1 decision, 2026-11-01 06:27 ET (nfl_prop_rec_yards,
+#                        written by the 06:25 tick's prop scoring step).
+#   nfl_opener_poll,     1 decision, 2026-11-13 06:00 ET (nfl_opener_spread,
+#   nfl_poll_hourly,     SF at DAL). The opener races Pinnacle's first post;
+#   nfl_poll_fast        the polls price the opener and wind cards.
+# The cards still in LANE_JOBS wrote no decision in the window in those 21
+# days: the NCAAB spread and moneyline cards decide only in the 15:00Z hour,
+# the NCAAF moneyline card in the 14:00Z hour, and the NBA prop window 45-57
+# minutes before a tip (158 decisions, none in the window).
+DECIDING_JOBS = frozenset({
+    "ncaab_total_card",
+    "ncaabw_total_card",
+    "ncaab_odds_capture",
+    "ncaabw_odds_capture",
+    "nfl_prop_card",
+    "nfl_opener_poll",
+    "nfl_poll_hourly",
+    "nfl_poll_fast",
+})
+
+# The 06:00 daily can outlast the window (finished dailies ran 23.8-47.5
+# minutes from 2026-10-15 to 11-03, and a retried one starts later), so the
+# research recorders and the job queue also wait while it holds its lock.
+# Only in the morning: a catch-up daily may run until 22:00 ET
+# (tracking/daily_retry.py), and one in the evening must not hold the job
+# queue or drop the Kalshi record of live games for its whole run.
+DAILY_BUSY_DEFER_END_MIN = 12 * 60
+
+
+def now_et() -> datetime:
+    """The scheduler's clock for this gate. A function so a test can move it."""
+    return datetime.now(ET)
 
 
 def in_morning_window(now: datetime) -> bool:
@@ -89,6 +134,27 @@ def in_morning_window(now: datetime) -> bool:
     local = now.astimezone(ET)
     minutes = local.hour * 60 + local.minute
     return WINDOW_START_MIN <= minutes < WINDOW_END_MIN
+
+
+def _minutes_et(now: datetime) -> int:
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=ET)
+    local = now.astimezone(ET)
+    return local.hour * 60 + local.minute
+
+
+def refresh_yields_to_daily(now: datetime, daily_busy: bool) -> bool:
+    """True when a refresh pass should stand down for the daily.
+
+    Only inside the morning window. Outside it a refresh runs beside a
+    daily as it always did: a catch-up daily can run until 22:00 ET, and the
+    18:00-23:00 passes carry the odds, scoring and push for live games.
+    """
+    return daily_busy and in_morning_window(now)
+
+
+def _defer_for_daily(now: datetime, daily_busy: bool) -> bool:
+    return daily_busy and _minutes_et(now) < DAILY_BUSY_DEFER_END_MIN
 
 
 class Decision:
@@ -117,7 +183,8 @@ class MorningDisk:
         self._lane = threading.BoundedSemaphore(1)
 
     def admit(self, job_id: str, *, now: datetime, daily_busy: bool = False) -> Decision:
-        if job_id in DEFER_JOBS and (in_morning_window(now) or daily_busy):
+        if job_id in DEFER_JOBS and (in_morning_window(now)
+                                     or _defer_for_daily(now, daily_busy)):
             why = ("morning disk window" if in_morning_window(now)
                    else "daily pipeline still running")
             return Decision(False, f"deferred — {why}", _noop)
@@ -136,7 +203,7 @@ def admit(job_id: str, *, now: datetime | None = None,
     """The scheduler's gate. `now` defaults to the current ET minute."""
     return GATE.admit(
         job_id,
-        now=now if now is not None else datetime.now(ET),
+        now=now if now is not None else now_et(),
         daily_busy=daily_busy,
     )
 

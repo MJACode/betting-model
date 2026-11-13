@@ -514,7 +514,7 @@ def _wait_for_nhl_window(label: str) -> bool:
     return False
 
 
-def run_refresh_pass(mode: str = "hourly") -> None:
+def run_refresh_pass(mode: str = "hourly") -> str | None:
     # The single-source-of-truth refresh chain (odds + prop odds + lineups + scoring
     # for every sport, opening-signals, parlay record, push notifications).
     if not _REFRESH_LOCK.acquire(blocking=False):
@@ -524,10 +524,17 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     # Checked AFTER the lock, so a daily that is waiting on this lock cannot
     # lose the race to a refresh that looked at the daily lock a moment earlier.
     # The pass that already holds the lock runs to the end; the daily waits.
-    if _DAILY_LOCK.locked():
+    # Only inside the 05:40-07:15 ET morning window: a catch-up daily can run
+    # until 22:00 ET, and the evening passes carry odds, scoring and push for
+    # live games, so outside the window a refresh runs beside a daily as it
+    # always did.
+    from tracking import morning_disk
+    if morning_disk.refresh_yields_to_daily(morning_disk.now_et(),
+                                            _DAILY_LOCK.locked()):
         _REFRESH_LOCK.release()
-        log.info("refresh-pass[%s]: daily pipeline is running — skip", mode)
-        return
+        log.info("refresh-pass[%s]: daily pipeline is running in the morning"
+                 " disk window — skip", mode)
+        return "skipped"
     try:
         _wait_for_nhl_window(f"refresh-pass[{mode}]")
         _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
@@ -2663,10 +2670,19 @@ def build_scheduler() -> BlockingScheduler:
                 from tracking.morning_disk import admit
                 decision = admit(jid, daily_busy=_DAILY_LOCK.locked())
                 if not decision.admitted:
-                    detail = decision.reason
+                    # "skipped", not "ok": the tick did not do its work. The
+                    # watchdog still counts it as a beat (stale_jobs skips
+                    # only "disabled") and the failure alerter still alerts
+                    # only on "error", so no alert changes.
+                    status, detail = "skipped", decision.reason
                     return None
                 release = decision.release
-                return func(*a, **kw)
+                result = func(*a, **kw)
+                if result == "skipped":
+                    # The job stood down on its own (a refresh in the morning
+                    # window while the daily runs, a daily already running).
+                    status, detail = "skipped", "stood down; see the job's log"
+                return result
             except Exception as exc:                          # noqa: BLE001
                 # Beat anyway, marked failed. A job that raises every tick is
                 # RUNNING, and calling that silence would point at the wrong
