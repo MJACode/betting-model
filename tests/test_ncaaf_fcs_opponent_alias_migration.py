@@ -79,9 +79,10 @@ def test_migration_is_registered_with_the_worker_runner():
     units = "published_record_units_2026_10_16.sql"
     assert ACTIVE_MIGRATIONS[-1] == units
     # The posted-stake functions and the view that reads them stay adjacent,
-    # with the view last. This file is the entry immediately before that pair.
+    # with the view last. This file sits before that pair (#952's market-edge
+    # fix sits there too, so "immediately before" cannot hold for both).
     assert ACTIVE_MIGRATIONS.index(pick_units) == ACTIVE_MIGRATIONS.index(units) - 1
-    assert ACTIVE_MIGRATIONS.index(MIG.name) == ACTIVE_MIGRATIONS.index(pick_units) - 1
+    assert ACTIVE_MIGRATIONS.index(MIG.name) < ACTIVE_MIGRATIONS.index(pick_units)
 
 
 def test_migration_is_one_statement():

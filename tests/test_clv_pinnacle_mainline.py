@@ -719,7 +719,8 @@ def test_both_migrations_are_on_the_worker_list_in_order():
     # The posted-stake functions and the view that reads them stay adjacent,
     # with the view last. This file is the entry immediately before that pair.
     assert ACTIVE_MIGRATIONS.index(pick_units) == ACTIVE_MIGRATIONS.index(units) - 1
-    assert ACTIVE_MIGRATIONS.index(MAIN.name) == ACTIVE_MIGRATIONS.index(pick_units) - 1
+    # Before the posted-stake pair; #818's NCAAF cleanup sits there too.
+    assert ACTIVE_MIGRATIONS.index(MAIN.name) < ACTIVE_MIGRATIONS.index(pick_units)
     body = MAIN.read_text(encoding="utf-8")
     assert "v_public_track_record" not in body
     assert "profit_flat" not in body
