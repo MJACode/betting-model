@@ -1946,9 +1946,13 @@ def _job_nba_quarters(**kw):
     """Run the daily nba_quarters step ON THE WORKER, on demand.
 
     mike, 2026-10-30: "Run it now instead of waiting for 6am tomorrow", after
-    #1097 fixed fill_gaps. The step only reads free ESPN endpoints and writes
+    #1097 fixed fill_gaps. The step reads free ESPN endpoints and writes
     the NBA stats tables (quarter scores, nba_pbp_games, nba_stints,
-    nba_team_q1_games): no model, pick, stake or threshold is touched. It goes
+    nba_team_q1_games, team_period_results): no model, pick, stake or
+    threshold is touched. Since 2026-11-13 it also buys the half and quarter
+    closing lines of finished games that lack them (Matt approved the
+    backfill and the daily buy), under nba_odds_history.buy_period_lines_daily's
+    own plan-derived ceiling and measured floor. It goes
     through run_pipeline._timed_step, the same dispatch the daily run uses, so
     pipeline_log gets the usual dispatch:nba-quarters row with its error_msg.
 

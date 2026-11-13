@@ -32,6 +32,10 @@ not a refusal forever, and a route that failed one way may answer another
 | arXiv | `https://export.arxiv.org/api/query?search_query=...` | yes (200; plain http redirects) |
 | Kaggle datasets | the dataset search page | yes (200) |
 | Pinnacle's betting articles | `pinnacle.com/betting-resources` | yes (200) |
+| eurohoops.net, basketnews.com, jhse.es, econpapers.repec.org, oddspapi.io | a plain fetch | yes (200, 2026-11-12, EuroLeague scout) |
+| euroleaguebasketball.net (injury reports) | a plain fetch, and curl | **no (429, a Vercel security checkpoint)**; Eurohoops reposts the reports |
+| University repositories (cris.unibo.it, iris.uniroma4.it), bettingexpert.com | a plain fetch | **no (403)**; centaur.reading.ac.uk serves a bot-check page; read abstracts through search results |
+| OddsPortal, BetExplorer, Flashscore odds archives | robots.txt | **read, and they disallow the archives**: OddsPortal bars every past-season path (`-1998` to `-2024`). Not scraped. |
 
 Not yet probed, worth trying: sports-analytics conference papers (the MIT
 Sloan conference), journals (Journal of Quantitative Analysis in Sports,

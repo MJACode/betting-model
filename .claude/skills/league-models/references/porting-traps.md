@@ -33,6 +33,10 @@ down this list.
   first pull, and a per-league identity table.
 - **Neutral sites.** The feed may call our away team home. Swap names first and
   store our home team's number. `scored_line` is always the home number.
+- **A league's own neutral flag can be wrong.** EuroLeague's is false on the
+  Israeli clubs' and Dubai's relocated "home" games (Belgrade, Sofia, Cyprus,
+  Sarajevo; attendances of 102 to 3,428 read by the scout). Tell a relocated
+  home game by its arena against the club's own (`docs/sports/euroleague.md`).
 - **Duplicate and orphan games.** Night games get Eastern/UTC twins; backfills
   mint ids with no score. Match an odds `game_id` to the scored row on both
   team names within a day (532 same-way and 26 home/away flipped in one
@@ -51,6 +55,18 @@ down this list.
   with none is answered, and billed, with the one before. Walk
   `next_timestamp`.
 - **Regions multiply the bill**: books spread over two regions bill twice.
+- **A purchase runs only once its source is protected in production.** The
+  odds clean-up thins every unprotected row to an opener and a close, and
+  `PROTECTED_SOURCES` is code, so merge the groundwork before buying at scale.
+- **The credit planner refuses a whole-history plan at its worst case** (every
+  5-minute slot of every day), even when the measured cost fits; feed it
+  chunks, newest season first, and let the live meter stop at the floor.
+- **One long transaction of single-row writes from mike's PC** lost its
+  connection in the fourth season of seven; `executemany` wrote all seven in
+  31 seconds.
+- **`odds` filtered on `source` alone scans the whole table** (16 GB; it
+  timed out on the read-only connector): read it through the league's game
+  ids.
 - **Change-only capture** keeps an old stamp on an unchanged quote; a
   fetch-name label can collide so a pull never decides; a purchase can keep
   the last listed pair per book rather than the main number (ladder rungs

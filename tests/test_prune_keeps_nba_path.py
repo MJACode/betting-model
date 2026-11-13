@@ -115,13 +115,14 @@ def test_the_two_prune_tiers_never_select_a_path_kept_sport():
     # NCAAB joined 2026-10-26, for its first season (first game 2026-11-01);
     # NCAABW (women's college basketball) 2026-11-09, for the same reason.
     # NCAAF 2026-11-10: its settled games held one or two rows a book.
+    # EUROLEAGUE 2026-11-12, from its first stored day.
     assert "path_kept_sports" in pred and params["path_kept_sports"] == (
-        "NBA", "NCAAB", "NCAABW", "NCAAF")
+        "NBA", "NCAAB", "NCAABW", "NCAAF", "EUROLEAGUE")
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE odds (bookmaker, source, sport)")
     db.executemany("INSERT INTO odds VALUES (?, NULL, ?)",
                    [("fanduel", "NBA"), ("fanduel", "NCAAB"), ("fanduel", "NCAABW"),
-                    ("fanduel", "NCAAF"), ("fanduel", "MLB")])
+                    ("fanduel", "NCAAF"), ("fanduel", "EUROLEAGUE"), ("fanduel", "MLB")])
     # the predicate's own SQL, run: only the MLB line-shop row is prunable
     sql = pred
     for k, v in params.items():

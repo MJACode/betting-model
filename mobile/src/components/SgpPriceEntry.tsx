@@ -9,6 +9,7 @@ import { americanToDecimal, formatAmerican } from '@/lib/format';
 import { bookName } from '@/lib/markets';
 import { decimalToAmerican, type ParlayLeg } from '@/lib/parlay';
 import { logSgpPrice } from '@/lib/queries';
+import { sgpShapeFor } from '@/lib/parlayCorrelation';
 import { enteredPriceIsPlausible, parseEnteredAmerican } from '@/lib/sgpPricing';
 import { APP_VERSION } from '@/lib/socialLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -61,7 +62,8 @@ export function SgpPriceEntry({
   const save = async () => {
     if (american == null) return;
     Keyboard.dismiss();
-    if (!enteredPriceIsPlausible(americanToDecimal(american), multipliedDecimal)) {
+    const shape = sgpShapeFor(legs);
+    if (!enteredPriceIsPlausible(americanToDecimal(american), multipliedDecimal, shape)) {
       // The check compares against the legs multiplied out, so the message
       // names that number (PR #1198 review L3).
       const multipliedAmerican = decimalToAmerican(multipliedDecimal);
@@ -81,6 +83,10 @@ export function SgpPriceEntry({
         bookAmerican: american,
         multipliedDecimal,
         sgpGroups,
+        // The same shape the tile was estimated with, so the server fits the
+        // cut per extra leg after the correlation lift (lib/sgpPricing.ts).
+        extraLegs: shape.extraLegs,
+        corrLift: shape.lift,
         legCount: legs.length,
         legs: legs.map((l) => ({ label: l.label, gameId: l.gameId ?? null })),
         appVersion: APP_VERSION ?? null,
@@ -104,7 +110,7 @@ export function SgpPriceEntry({
         </Text>
         <InfoTooltip
           title="Same-game price"
-          body={`Two or more legs share a game. Books price those legs together, usually for less than the legs multiplied out, so the ${name} tile shows our estimate.\n\nEnter the price ${name}’s slip shows and this slip uses it. It also helps us price same-game slips at ${name} for everyone.`}
+          body={`Two or more legs share a game. Books price those legs together, and legs that tend to hit together pay less than the legs multiplied out, so the ${name} tile shows our estimate.\n\nEnter the price ${name}’s slip shows and this slip uses it. It also helps us price same-game slips at ${name} for everyone.`}
           accessibilityLabel="About same-game prices"
         />
       </View>
