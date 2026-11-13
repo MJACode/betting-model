@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -245,6 +246,83 @@ def load_known_schools() -> set[str]:
         return set()
     finally:
         conn.close()
+
+
+# ── the fast way: DraftKings' own board (mike, 2026-11-13) ───────────────────
+#
+# "Move everything over to the fast way". DraftKings' moneyline and total are
+# DraftKings' own board's (data/ingestors/dk_live_board.py on mike's machine,
+# into dk_live_reads), each stamped where the board first showed it, while the
+# feed is seconds old; the provider's copy was a median 31 s old when an NCAAF
+# bet was written (19 bets, 2026-10-03 .. 11-07). DraftKings is then the only
+# book the engine may decide at. Because DraftKings shows a score in seconds
+# and our state (CFBD or ESPN) a little later, a game whose DraftKings score
+# differs from our state's is not priced that pass: its line already knows a
+# score our state does not. The feed off: the provider, as before.
+
+def dk_source(get_connection):
+    if os.environ.get("NCAAF_LIVE_DK", "1") == "0":
+        return None
+    from models.ncaab_live_dk import DbSource
+    box = {"conn": None}
+
+    def conn():
+        if box["conn"] is None:
+            box["conn"] = get_connection()
+        return box["conn"]
+
+    src = DbSource(conn, sport="NCAAF")
+    src.reset = lambda: box.update(conn=None)
+    return src
+
+
+def dk_board_now(src, game_ids) -> dict | None:
+    """{game_id: {"h2h", "total", "score"}} from DraftKings' board, or None
+    while the feed is not live."""
+    if src is None or not game_ids:
+        return None
+    import pandas as pd
+    from models import ncaab_live_dk as DK
+    try:
+        last = src.last_read()
+        if not DK.feed_is_live(last, datetime.now(timezone.utc)):
+            return None
+        reads = src.reads(set(game_ids))
+    except Exception as exc:                         # noqa: BLE001
+        log.warning("DraftKings board read failed (the provider's quote stands): %s", exc)
+        try:
+            src.reset()
+        except Exception:                            # noqa: BLE001
+            pass
+        return None
+    if not len(reads):
+        return {}
+    cur = DK.current_quotes(reads, last[0], markets=("h2h", "totals"))
+    out: dict = {}
+    for gid, g in reads.groupby("game_id"):
+        lr = g.sort_values("read_at").iloc[-1]
+        if pd.isna(lr["home_score"]) or pd.isna(lr["away_score"]):
+            continue
+        rec = {"score": (int(lr["home_score"]), int(lr["away_score"])), "h2h": None, "total": None}
+        for _i, q in cur[cur["game_id"] == gid].iterrows():
+            ts = pd.Timestamp(q["stamp"]).isoformat()
+            if q["market"] == "h2h":
+                rec["h2h"] = {"home": int(q["home_price"]), "away": int(q["away_price"]), "ts": ts}
+            else:
+                rec["total"] = {"line": float(q["total_line"]), "over": int(q["over_price"]),
+                                "under": int(q["under_price"]), "ts": ts}
+        out[gid] = rec
+    return out
+
+
+def with_dk(quote: dict | None, d: dict) -> dict:
+    """The game's quote with DraftKings' markets from the board and DraftKings
+    the only book: the engine decides at no stale copy of another book."""
+    q = dict(quote or {})
+    q["h2h"], q["total"] = d["h2h"], d["total"]
+    q["books"] = {SNAPSHOT_BOOK: {"h2h": d["h2h"], "total": d["total"]}}
+    q["source"] = "dk_live_board"
+    return q
 
 
 def resolve_odds_teams(odds_by_pair: dict) -> dict[tuple[str, str], dict]:
@@ -609,6 +687,7 @@ def main() -> int:
 
     engine = LiveEngine()
     odds_feed = LiveOddsFeed()
+    dk_src = dk_source(get_connection)
     ctx_map = load_context(date=a.date)
     feed_blessed = False
     last_live = datetime.now(timezone.utc)
@@ -696,6 +775,7 @@ def main() -> int:
                      interval)
         odds_raw = odds_feed.fetch(min_interval=interval) if live else None
         odds_map = resolve_odds_teams(parse_event_odds(odds_raw or []))
+        dk_now = dk_board_now(dk_src, [c.game_id for c in ctx_map.values()]) if live else None
         priced_at = now_iso()
 
         # ONE connection for the whole pass. write_picks used to open its own
@@ -739,6 +819,16 @@ def main() -> int:
                 if changed:
                     states_this_pass.append(changed)
                 quote = odds_map.get(key)
+                if dk_now is not None and ctx.game_id in dk_now:
+                    d = dk_now[ctx.game_id]
+                    seen = (state.get("home_score"), state.get("away_score"))
+                    if d["score"] != tuple(seen):
+                        # DraftKings has a score our state has not caught up
+                        # with: its line already knows it, our state does not
+                        log.info("%s: DraftKings shows %s-%s, our state %s-%s - not priced this pass",
+                                 ctx.game_id, d["score"][0], d["score"][1], seen[0], seen[1])
+                        continue
+                    quote = with_dk(quote, d)
                 # AUDIT THE PRICE WE PRICED ON. This loop read DraftKings'
                 # in-play feed, decided on it, and threw it away -- so a
                 # published live number could not be shown afterwards, which is
